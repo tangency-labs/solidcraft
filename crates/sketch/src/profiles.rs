@@ -272,11 +272,18 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
         let run: Vec<usize> = (i..j).map(|x| (r + x) % n).collect();
         let plain: Vec<Seg2> = run.iter().filter_map(|x| segs.get(*x).copied()).collect();
         let full = k0.and_then(|(ci, k, fwd)| exact.get(&ci).and_then(|e| e.get(k)).map(|s| if fwd { *s } else { s.reversed() }));
+        // A run over every piece in order is the whole segment only from end to end: one that
+        // starts or stops at a crossing inside its first or last piece (a split piece keeps its
+        // tag) has as many pieces but is a part of it (#17462).
         let whole = match (full, tags.get(run[0]).copied().flatten()) {
-            (Some(_), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
+            (Some(seg), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
                 let order: Vec<usize> = run.iter().filter_map(|x| tags.get(*x).copied().flatten().map(|((_, _, p, _), _)| p)).collect();
                 let want: Vec<usize> = if fwd { (0..cnt).collect() } else { (0..cnt).rev().collect() };
-                order == want
+                let ends = match (plain.first(), plain.last()) {
+                    (Some(a), Some(b)) => a.start().dist(seg.start()) < MERGE_TOL && b.end().dist(seg.end()) < MERGE_TOL,
+                    _ => false,
+                };
+                order == want && ends
             }
             _ => false,
         };
@@ -329,6 +336,19 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
         }
     }
     runs.into_iter().flat_map(Run::into_segs).collect()
+}
+
+/// How a cut of a curve merges with the cuts next to it.
+#[derive(Clone, Copy, PartialEq)]
+enum Cut {
+    /// An end lying on the curve, or a crossing: one cut with any other a few tolerances away.
+    Firm,
+    /// A crossing next to an end of one of the two curves that misses the other: it gives way to
+    /// any other cut it is merged with.
+    Weak,
+    /// A crossing next to another curve's end that lies on only one of the two: a point of its
+    /// own, one cut only with a cut within the tolerance of it.
+    Apart,
 }
 
 /// A stretch of a profile loop: plain segments, or (part of) an exact free-form segment.
@@ -1100,7 +1120,7 @@ fn seg_boxes(s: &Seg2, out: &mut Vec<solidcraft_geom::Aabb2>) {
 }
 
 /// A fingerprint of everything [`island_loops`] reads for a group of curves: their places in
-/// the sketch, ids, kinds, end points and geometry.
+/// the sketch, ids, kinds, whether they are linked, end points and geometry.
 fn fingerprint(sk: &Sketch, curves: &[usize], max_edges: usize) -> u128 {
     use std::hash::{Hash, Hasher};
     let mut h = [std::collections::hash_map::DefaultHasher::new(), std::collections::hash_map::DefaultHasher::new()];
@@ -1116,7 +1136,7 @@ fn fingerprint(sk: &Sketch, curves: &[usize], max_edges: usize) -> u128 {
             put(&|x| (ci, u8::MAX).hash(x));
             continue;
         };
-        put(&|x| (ci, &c.id, c.construction, c.centerline, c.infinite, std::mem::discriminant(&c.kind)).hash(x));
+        put(&|x| (ci, &c.id, c.construction, c.centerline, c.infinite, c.link.is_some(), std::mem::discriminant(&c.kind)).hash(x));
         if let Some((a, b)) = c.kind.ends() {
             put(&|x| {
                 (a, b).hash(x);
@@ -1395,9 +1415,8 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         _ => false,
     };
     let grid = Grid::new(&boxes);
-    // Each cut's parameter, and whether it is weak: a crossing next to an end that misses one of
-    // the two curves (below), which gives way to any other cut it is merged with.
-    let mut cuts: Vec<Vec<(f64, bool)>> = vec![Vec::new(); shapes.len()];
+    // Each cut's parameter, and how it merges with the cuts next to it ([`Cut`]).
+    let mut cuts: Vec<Vec<(f64, Cut)>> = vec![Vec::new(); shapes.len()];
     // End points of other curves lying on each shape.
     let mut end_cells: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
     for (k, p) in ends.iter().enumerate() {
@@ -1424,7 +1443,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 && let Some(t) = sh.param_on(*p, tol)
                 && let Some(cu) = cuts.get_mut(i)
             {
-                cu.push((t, false));
+                cu.push((t, Cut::Firm));
             }
         }
     }
@@ -1518,12 +1537,18 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 for p in pts {
                     let on_x = x.param_on(p, tol).or_else(|| end_param(x, p, tol));
                     let on_y = y.param_on(p, tol).or_else(|| end_param(y, p, tol));
-                    // Crossings at (or next to) curve ends are already cuts. Not next to an end of
-                    // one of the two curves that misses the other: nothing cut the other curve
-                    // there, and it would cross without meeting it (a line 3e-5 from the
-                    // junction of two curves of a loop, #755). Such a crossing is a weak cut.
+                    // Crossings at (or next to) curve ends lying on both curves are already cuts.
+                    // Not next to an end of one of the two curves that misses the other: nothing
+                    // cut the other curve there, and it would cross without meeting it (a line
+                    // 3e-5 from the junction of two curves of a loop, #755). Such a crossing is a
+                    // weak cut. An end of another curve cuts only the curves it lies on: next to
+                    // one lying on one of the two, the crossing is a point of its own on that one,
+                    // apart from the end's (a line crossing a circle 3e-5 from where a spline
+                    // ends on it meets the circle there, and the spline still does, #18208; a
+                    // line crossing a square's side next to its corner leaves the corner); next
+                    // to one lying on neither, the crossing is a plain cut.
                     let on = |sh: &Shape, e: Vec2| sh.param_on(e, tol).is_some() || end_param(sh, e, tol).is_some();
-                    let misses = |e: Vec2| (end_param(x, e, tol).is_some() && !on(y, e)) || (end_param(y, e, tol).is_some() && !on(x, e));
+                    let own = |e: Vec2| end_param(x, e, tol).is_some() || end_param(y, e, tol).is_some();
                     // Every end within reach, whatever the grid's cell size (so an island's
                     // smaller grid finds the same ends as the whole sketch's).
                     let near_ends = || {
@@ -1532,12 +1557,18 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                             Some(cs) => cs.iter().flat_map(|c| end_cells.get(c).map(Vec::as_slice).unwrap_or(&[])).copied().collect(),
                             None => all_ends.clone(),
                         };
-                        cand.into_iter()
-                            .filter_map(|k| ends.get(k).copied())
-                            .filter(|e| e.dist(p) < tol * 100.0)
-                            .fold((false, false), |(cut, weak), e| if misses(e) { (cut, true) } else { (true, weak) })
+                        cand.into_iter().filter_map(|k| ends.get(k).copied()).filter(|e| e.dist(p) < tol * 100.0).fold(
+                            (false, Cut::Firm),
+                            |(cut, kind), e| match (on(x, e), on(y, e)) {
+                                (true, true) => (true, kind),
+                                (false, false) => (cut, kind),
+                                _ if own(e) => (cut, Cut::Weak),
+                                _ if kind == Cut::Weak => (cut, kind),
+                                _ => (cut, Cut::Apart),
+                            },
+                        )
                     };
-                    let (already, weak) = near_ends();
+                    let (already, kind) = near_ends();
                     if on_x.is_none() || on_y.is_none() || already {
                         continue;
                     }
@@ -1545,12 +1576,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                         if x.param_on(p, tol).is_some()
                             && let Some(c) = cuts.get_mut(i)
                         {
-                            c.push((tx, weak));
+                            c.push((tx, kind));
                         }
                         if y.param_on(p, tol).is_some()
                             && let Some(c) = cuts.get_mut(j)
                         {
-                            c.push((ty, weak));
+                            c.push((ty, kind));
                         }
                         if (gi, gj) != (i, j) {
                             anchors.push(p);
@@ -1598,20 +1629,28 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         node(*a, None);
     }
     let mut loops: Vec<IslandLoop> = Vec::new();
+    // The whole circles that made loops of their own: centre, radius and whether the curve is
+    // linked (a projected edge, an included curve).
+    let mut whole_loops: Vec<(Vec2, f64, bool)> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     for (k, (ci, sh)) in shapes.iter().enumerate() {
         let mut ts = cuts.get(k).cloned().unwrap_or_default();
         ts.sort_by(|a, b| a.0.total_cmp(&b.0));
-        // Cuts closer than a few tolerances are one cut (tangent touches give near-double roots).
+        // Cuts closer than a few tolerances are one cut (tangent touches give near-double roots);
+        // a cut apart is one cut only with a cut within the tolerance of it.
         // A weak cut gives way to the other: it only adds a cut where there was none.
         let scale = match *sh {
             Shape::Line { a, b } => a.dist(b),
             Shape::Round { r, .. } => r,
         };
         let close = (tol * 100.0 / scale.max(1e-12)).max(1e-9);
+        let at_point = tol / scale.max(1e-12);
+        let same = |a: (f64, Cut), b: (f64, Cut), gap: f64| {
+            if a.1 == Cut::Apart || b.1 == Cut::Apart { gap <= at_point } else { gap < close }
+        };
         ts.dedup_by(|a, b| {
-            let same = (a.0 - b.0).abs() < close;
-            if same && b.1 && !a.1 {
+            let same = same(*a, *b, (a.0 - b.0).abs());
+            if same && b.1 == Cut::Weak && a.1 != Cut::Weak {
                 *b = *a;
             }
             same
@@ -1619,9 +1658,9 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         if let (Shape::Round { sweep, .. }, Some(&first), Some(&last)) = (*sh, ts.first(), ts.last())
             && sweep >= TAU - 1e-12
             && ts.len() > 1
-            && (first.0 + TAU - last.0).abs() < close
+            && same(first, last, (first.0 + TAU - last.0).abs())
         {
-            if first.1 && !last.1 {
+            if first.1 == Cut::Weak && last.1 != Cut::Weak {
                 ts.remove(0);
             } else {
                 ts.pop();
@@ -1643,8 +1682,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let mut ps = vec![a];
                 ps.extend(ts.iter().map(|t| sh.point(*t)));
                 ps.push(b);
-                // Pieces split by other curves no longer stand for their whole piece.
-                let tag = if ts.is_empty() { tags.get(k).copied().flatten() } else { None };
+                // Pieces split by other curves keep their free-form segment's tag, so a loop that
+                // turns at the crossing gets the exact sub-segment up to the true crossing
+                // ([`restore_exact`]) rather than the polyline chord to it (#17462). A run that
+                // starts or stops at such a crossing is never the whole segment there: it does not
+                // run from the segment's start to its end.
+                let tag = tags.get(k).copied().flatten();
                 for (piece, w) in ps.windows(2).enumerate() {
                     let (p, q) = (w[0], w[1]);
                     if p.dist(q) > MERGE_TOL {
@@ -1659,6 +1702,15 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             Shape::Round { c, r, start, sweep } => {
                 let full = sweep >= TAU - 1e-12;
                 if full && ts.is_empty() {
+                    // A circle drawn onto a linked circle (a hole's projected rim) bounds the same
+                    // region: the first of the two in sketch order makes the loop, as where the
+                    // pieces of curves lie on each other ([`without_overlaps`]). Two circles of the
+                    // sketch's own drawn on each other stay a profile each (#10521).
+                    let linked = sk.curves.get(*ci).is_some_and(|c| c.link.is_some());
+                    if whole_loops.iter().any(|&(c2, r2, l2)| (linked || l2) && same_circle(c, r, c2, r2, tol)) {
+                        continue;
+                    }
+                    whole_loops.push((c, r, linked));
                     loops.push(IslandLoop::new(
                         Loop2::circle(c, r),
                         vec![id.clone()],
@@ -2694,6 +2746,70 @@ mod tests {
         let inside = profiles.iter().find(|p| !p.outer_curves.contains(&bulge)).unwrap();
         assert!(lens.area > 0.1 && lens.area < inside.area * 0.2, "{} of {}", lens.area, inside.area);
         assert!(lens.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-6), "{:?}", lens.region.outer.segs);
+    }
+
+    /// #17462: a spline crossing a circle bounds both regions with its exact sub-curve up to the
+    /// true crossings. The polyline pieces the circle splits lost their spline's tag, so each
+    /// loop bridged from the last whole piece to the crossing with a straight chord, a sliver
+    /// face on the extruded wall that a fillet along the spline then ran into.
+    #[test]
+    fn a_spline_crossing_a_circle_keeps_its_exact_curve_to_the_crossings() {
+        let mut sk = Sketch::new();
+        let circle = sk.add_circle(Vec2::new(0.0, 0.0), 5.0, None, None).unwrap();
+        let controls = [(0.5, -8.0), (6.0, -3.0), (6.5, 3.5), (1.0, 8.0)];
+        let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        let spline =
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        let (circle, spline) = (sk.curves[circle].id.clone(), sk.curves[spline].id.clone());
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "the lens outside the spline and the rest of the disc: {profiles:?}");
+        // Together they are the disc: neither loop takes more or less of the spline.
+        let area: f64 = profiles.iter().map(|p| p.area).sum();
+        assert!((area - 25.0 * std::f64::consts::PI).abs() < 1e-6, "{area}");
+        for p in &profiles {
+            assert!(p.outer_curves.contains(&circle) && p.outer_curves.contains(&spline), "{:?}", p.outer_curves);
+            let segs = &p.region.outer.segs;
+            assert!(!segs.iter().any(|s| matches!(s, Seg2::Line { .. })), "no chord stands in for the spline: {segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "{segs:?}");
+            for s in segs.iter().filter(|s| matches!(s, Seg2::Cubic { .. })) {
+                for end in [s.start(), s.end()] {
+                    assert!((end.len() - 5.0).abs() < 1e-9, "the spline's ends in the loop are its crossings: {end:?}");
+                }
+            }
+        }
+    }
+
+    /// #17462: a split piece keeps its free-form tag, so a loop that enters a spline at a
+    /// crossing inside its first piece and leaves it at one inside its last has as many
+    /// pieces, in order, as the whole spline. It is still only the part between the crossings:
+    /// the regions either side of a line cut close to the spline's ends add up to the uncut
+    /// region.
+    #[test]
+    fn a_loop_between_crossings_in_a_splines_end_pieces_takes_only_the_part_between_them() {
+        let lens = |cut: bool| {
+            let mut sk = Sketch::new();
+            let (a, b) = (sk.add_point(Vec2::new(0.0, 0.0), None).unwrap(), sk.add_point(Vec2::new(10.0, 0.0), None).unwrap());
+            let (c, d) = (sk.add_point(Vec2::new(0.0, 6.0), None).unwrap(), sk.add_point(Vec2::new(10.0, 6.0), None).unwrap());
+            sk.add_curve(
+                CurveKind::Spline { pts: vec![a, c, d, b], control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() },
+                None,
+            )
+            .unwrap();
+            sk.add_line_pts(a, b, None).unwrap();
+            if cut {
+                // y = 0.1 meets the spline at t ~ 0.0056 and 0.9944, inside its first and last
+                // polyline pieces (about 0.011 of t each): the arch above it is the spline from
+                // the one crossing to the other, as many pieces in order as the whole spline.
+                sk.add_line(Vec2::new(-1.0, 0.1), Vec2::new(11.0, 0.1), None, None, None).unwrap();
+            }
+            find_profiles(&sk)
+        };
+        let whole = lens(false);
+        assert_eq!(whole.len(), 1, "{whole:?}");
+        let cut = lens(true);
+        assert_eq!(cut.len(), 2, "{cut:?}");
+        let sum: f64 = cut.iter().map(|p| p.area).sum();
+        assert!((sum - whole[0].area).abs() < 1e-9 * whole[0].area, "{sum} vs {}", whole[0].area);
     }
 
     /// #6896: past the edge limit, the old single search dropped profiles silently. The limit

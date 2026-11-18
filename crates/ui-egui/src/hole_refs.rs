@@ -397,7 +397,9 @@ pub(crate) fn params(d: &Dialog) -> Vec<Value> {
         .iter()
         .enumerate()
         .filter_map(|(k, e)| {
-            let distance = model_text(refs, k)?;
+            // An edge with no distance (a circular edge has no line to measure from) places
+            // nothing; sending its empty box would make the command refuse the whole hole.
+            let distance = model_text(refs, k).filter(|t| !t.trim().is_empty())?;
             e.map(|p| json!({"edge": [p.x, p.y, p.z], "distance": distance.trim()}))
         })
         .collect()

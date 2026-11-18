@@ -377,6 +377,16 @@ fn construction_rows_include_points_and_axes() {
     }
     h.app.session.visibility.hidden_origin.push("Point1".into());
     assert!(!super::entries(&h.app, 0, "construction")[0].visible);
+    // The cached rows outlive a visibility change (Show/Hide Reference Geometry, #18131): their
+    // eyes read the session, as a plane's does, not what the row held when it was built.
+    h.app.session.visibility.hidden_origin.push("Axis1".into());
+    for row in &rows {
+        assert!(!row.is_visible(&h.app), "{} still shows an open eye", row.label);
+    }
+    h.app.session.visibility.hidden_origin.clear();
+    for row in &rows {
+        assert!(row.is_visible(&h.app), "{} still shows a closed eye", row.label);
+    }
     h.app.run("selection.delete", json!({"items": rows.iter().map(|r| r.sel.clone().unwrap()).collect::<Vec<_>>()})).unwrap();
     super::prepare_model(&mut h.app);
     assert!(super::entries(&h.app, 0, "construction").is_empty());
@@ -424,11 +434,14 @@ fn body_names(app: &crate::SolveApp) -> Vec<String> {
 }
 
 /// The bodies the open Move/Copy would move, a picked component's bodies included.
+/// The bodies Move/Copy moves: those picked and those of the components picked (which move by
+/// their placement), as its preview draws them moved.
 fn move_bodies(app: &crate::SolveApp) -> Vec<String> {
     let Some(d) = app.dialog.as_ref() else { return Vec::new() };
-    crate::dialogs_move::params(app, d)
+    crate::dialogs::preview_commands(app, d)
         .ok()
-        .and_then(|p| p["bodies"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
+        .and_then(|cmds| cmds.into_iter().find(|(id, _)| id == "solid.move"))
+        .and_then(|(_, p)| p["bodies"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
         .unwrap_or_default()
 }
 
@@ -505,7 +518,7 @@ fn browser_move_copy_takes_a_component_clicked_in_the_tree() {
     h.frames(2);
     click(&mut h, &format!("row:occurrence:{occurrence}"));
     assert_eq!(move_bodies(&h.app), owned, "the component's bodies are the Move/Copy selection");
-    assert!(h.app.tree.occurrence_move.is_none(), "the open body dialog stays; this click does not switch to component Move");
+    assert!(crate::dialogs_move::moving(&h.app).is_some(), "the open dialog stays and moves the component by its placement");
 
     h.app.dialog = None;
     h.app.run("select.clear", json!({})).unwrap();
@@ -546,8 +559,7 @@ fn browser_move_copy_starts_from_the_selected_body_or_component() {
     let (mut placed, _, occurrence) = fixture();
     placed.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
     crate::keymap::press(&mut placed.app, "M", false);
-    assert!(placed.app.dialog.is_none(), "one selected component still moves as a component");
-    assert!(placed.app.tree.occurrence_move.is_some());
+    assert_eq!(crate::dialogs_move::moving(&placed.app), Some(vec![occurrence]), "one selected component moves by its placement");
 }
 
 /// Shift-click adds every body between the two rows.

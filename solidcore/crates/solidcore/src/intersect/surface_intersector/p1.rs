@@ -30,7 +30,7 @@
 //! | [`SurfaceIntersector::test_span_accuracy`], [`SpanAccuracy`] | `TestSpanAccuracy`                    |
 //! | [`SurfaceIntersector::add_point_to_curve`]        | `AddPointToCurve`                                |
 //! | [`SurfaceIntersector::add_start_point`]           | `AddStartPoint`                                  |
-//! | [`SurfaceIntersector::is_same_tangent_cluster`], [`IntersectionPointType::is_tangent_type`], `tangent_start_rank` (private) | the SolidCraft fork's `IsSameTangentCluster`, `sm_IsTangentType`, `sm_TangentStartRank` (opt-in, WR-76) |
+//! | [`SurfaceIntersector::is_same_tangent_cluster`], [`IntersectionPointType::is_tangent_type`], `tangent_start_rank` (private) | the SolidCraft fork's `IsSameTangentCluster`, `sm_IsTangentType`, `sm_TangentStartRank` (WR-76) |
 //! | [`SurfaceIntersector::add_through_point`]         | `AddThroughPoint`                                |
 //! | [`SurfaceIntersector::reverse_curve_direction`]   | `ReverseCurveDirection`                          |
 //! | [`SurfaceIntersector::is_point_on_curve`]         | `IsPointOnCurve`                                 |
@@ -71,18 +71,13 @@
 //! - **`AddStartPoint`** keeps upstream's "replace a bounded start point by the exact
 //!   one" branch, which only reassigns a local pointer: the exact candidate is
 //!   dropped and the bounded point stays.
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   `AddStartPoint` keeps one start point per tangent cluster
+//! - **Fix (WR-76, #392).** `AddStartPoint` keeps one start point per tangent cluster
 //!   ([`SurfaceIntersector::is_same_tangent_cluster`]): a candidate in a cluster
 //!   replaces the start point it clusters with when it ranks better and is dropped
-//!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2). Off by default
-//!   (upstream behaviour).
-//! - **Opt-in fix (WR-51).** With
-//!   [`UpstreamFixes::point_on_start_point_squared_tolerance`](crate::kernel::UpstreamFixes::point_on_start_point_squared_tolerance)
-//!   `IsPointOnStartPoint` compares a squared distance with the squared tolerance (a
-//!   real distance of `this_approx_tol_3d`) instead of the tolerance itself; off by
-//!   default (pinned C++).
+//!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2); upstream keeps
+//!   every start point of the cluster.
+//! - **WR-51.** `IsPointOnStartPoint` compares each distance with the tolerance;
+//!   upstream compares the squared distance with the tolerance itself.
 //! - **WR-52.** [`SurfaceIntersector::is_point_on_curve`] (`SmSurfaceIntersector.cpp:7376`,
 //!   `:7391`) and [`is_point_on_tsect_curve`] (`SmSurfaceIntersector.cpp:4195`)
 //!   propagate a failing `EvaluatePoint`, `DropPoint`, or Hermite `LocalPointSolve`
@@ -193,7 +188,7 @@ pub enum IntersectionPointType {
 
 impl IntersectionPointType {
     /// A tangent point, tangent curve or coincidence point (the fork's
-    /// `sm_IsTangentType`, opt-in fix WR-76, #392).
+    /// `sm_IsTangentType`, fix WR-76, #392).
     #[must_use]
     pub const fn is_tangent_type(self) -> bool {
         matches!(
@@ -678,6 +673,14 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) start_loop_trace_steps: u64,
     /// Not upstream: a `trace_step` call was refused because `trace_steps_left` ran out.
     pub trace_budget_refused: bool,
+    /// Not upstream (fix WR-76): the curve's only point, when `TraceCurve` stopped
+    /// because the first span from it lies on a found curve
+    /// ([`SurfaceIntersector::span_on_found_curve`], which requires that point within
+    /// `this_approx_tol_3d` of a found curve). [`SurfaceIntersector::flush_curve`]
+    /// flushes nothing for that point alone: it is a point of a curve already found,
+    /// not a touching point. Cleared with `curve_points` (a new trace, a flush, and each
+    /// `curve_points.clear()`).
+    pub lone_start_on_found_curve: Option<TsectId>,
     /// `m_bCheckForInteriorCurves` (no longer used upstream).
     pub check_for_interior_curves: bool,
     /// `m_bDoingSelfIntersection`: both surfaces are the same object.
@@ -698,9 +701,12 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) start_points: Vec<TsectId>,
     /// `m_vThroughPoints`.
     pub(crate) through_points: Vec<TsectId>,
-    /// `Kernel::fixes.brep_edit_statuses_pass_on` captured from the constructing kernel
-    /// (WR-658; fork e7ebc8d's `SmAdvSurfaceIntersector` statuses).
-    pub(crate) edit_statuses: bool,
+    /// Touching points [`SurfaceIntersector::find_boundary_start_points`] left out
+    /// because a start point lies on them: added at the end of `DoIntersection` when
+    /// no curve found covers them
+    /// ([`SurfaceIntersector::add_deferred_touching_points`]; not upstream, which
+    /// drops them for good).
+    pub(crate) deferred_touching: Vec<super::p3::DeferredTouching>,
     /// The object is an `SmAdvSurfaceIntersector`: the virtual
     /// `ComputeSingularityPoint` that `ComputePointValues` calls is that class's
     /// override, not the basic `SM_ERR` one.
@@ -799,6 +805,7 @@ impl<'s> SurfaceIntersector<'s> {
             trace_steps_left: u64::MAX,
             start_loop_trace_steps: super::p4::MAX_START_LOOP_TRACE_STEPS,
             trace_budget_refused: false,
+            lone_start_on_found_curve: None,
             check_for_interior_curves: true,
             doing_self_intersection: core::ptr::eq(surface1, surface2),
             clipped_by_through_point: false,
@@ -809,7 +816,7 @@ impl<'s> SurfaceIntersector<'s> {
             curve_points: Vec::new(),
             start_points: Vec::new(),
             through_points: Vec::new(),
-            edit_statuses: k.fixes.brep_edit_statuses_pass_on,
+            deferred_touching: Vec::new(),
             advanced: false,
         })
     }
@@ -940,9 +947,9 @@ impl<'s> SurfaceIntersector<'s> {
     // ---- singularities -------------------------------------------------------------------------
 
     /// Steps back from a surface pole along the curve and recomputes good first
-    /// derivatives of surface `srf` (`StepBackFromSingularity`): copies the curve
-    /// tangent of one point to the other (not with
-    /// `Kernel::fixes.ssi_pole_point_keeps_its_tangent`, WR-550), drops the point at `t = 0.01` (from
+    /// derivatives of surface `srf` (`StepBackFromSingularity`): leaves each point its
+    /// own curve tangent (WR-550; upstream copies one point's over the other's), drops
+    /// the point at `t = 0.01` (from
     /// `previous`) or `t = 0.99` (from `current`, when `step_off_current`) of the
     /// Hermite span onto the surface, and stores the derivatives and the singular
     /// parameter found there in that point. For a point on the degenerate boundary (not
@@ -993,20 +1000,12 @@ impl<'s> SurfaceIntersector<'s> {
         curr: &mut TsectPnt,
         step_size: f64,
     ) -> Result<()> {
-        // copy the curve tangent of the point stepped off to the other one
-        // Not upstream (WR-550, opt-in `fixes.ssi_pole_point_keeps_its_tangent`; the
-        // fork's tangency-labs/smlib@8d95600): the points keep their own curve tangents.
-        // The tangent at the singular point comes from the surface's limit normal there
-        // (`ComputePointValues`), so it is exact; copying the other point's tangent over
-        // it bent the fitted span into the pole. Only the surface derivatives are taken
-        // from the stepped-back point.
-        if !k.fixes.ssi_pole_point_keeps_its_tangent {
-            if step_off_current {
-                curr.curve_pv[1] = prev.crv_deriv();
-            } else {
-                prev.curve_pv[1] = curr.crv_deriv();
-            }
-        }
+        // Not upstream (WR-550; the fork's tangency-labs/smlib@8d95600): the points keep
+        // their own curve tangents, where upstream copies the tangent of the point
+        // stepped off to the other one. The tangent at the singular point comes from the
+        // surface's limit normal there (`ComputePointValues`), so it is exact; copying
+        // the other point's tangent over it bent the fitted span into the pole. Only the
+        // surface derivatives are taken from the stepped-back point.
 
         let herm = HermiteCurve::new(
             prev.crv_pos(),
@@ -1513,9 +1512,9 @@ impl<'s> SurfaceIntersector<'s> {
         let scaled_zero = EFF_ZERO * 100.0 * (1.0 + start.srf_pos(SrfIndex::First).max_dimension());
         let bounded_start = start.is_bounded_start(scaled_zero);
 
-        // opt-in fix (WR-76, #392): keep one start point per tangent cluster, the
+        // fix (WR-76, #392): keep one start point per tangent cluster, the
         // tangent-curve point with the smallest deviation
-        if k.fixes.ssi_trace_tangent_curves_once && start.point_type.is_tangent_type() {
+        if start.point_type.is_tangent_type() {
             for i in 0..self.start_points.len() {
                 let Some(&tid) = self.start_points.get(i) else {
                     break;
@@ -1526,7 +1525,20 @@ impl<'s> SurfaceIntersector<'s> {
                 }
                 if tangent_start_rank(&start) < tangent_start_rank(&target) {
                     // the new point is the better representative: it takes the
-                    // target's place
+                    // target's place, keeping the target's direction. The sign of
+                    // a tangent sample's direction depends only on the boundary
+                    // that produced it, and `TestPoint` snaps a trace onto a start
+                    // point whose direction opposes the trace: flipping it with
+                    // the representative would let a trace from the contact band's
+                    // edge stop on the cluster after one step, short of the
+                    // contact curve, and the cluster would then go with that stub.
+                    if start.crv_deriv().dot(target.crv_deriv()) < 0.0 {
+                        let p = self.point_mut(id)?;
+                        p.curve_pv[1] = -p.curve_pv[1];
+                        for uv in &mut p.uv_curve_pv {
+                            uv[1] = -uv[1];
+                        }
+                    }
                     if let Some(slot) = self.start_points.get_mut(i) {
                         *slot = id;
                     }
@@ -1654,7 +1666,7 @@ impl<'s> SurfaceIntersector<'s> {
 
     /// True when two tangent-type boundary start points are two samples of one
     /// tangential contact crossing a boundary, not two intersection branches
-    /// (`IsSameTangentCluster`, opt-in fix WR-76, #392; the SolidCraft fork's
+    /// (`IsSameTangentCluster`, fix WR-76, #392; the SolidCraft fork's
     /// tangency-labs/smlib@0ce09f2): they lie on a common boundary side of both
     /// surfaces, within `10 sqrt(this_approx_tol_3d (1 + size))` of each other, and
     /// the surfaces stay within `this_approx_tol_3d` of each other at three points of
@@ -1729,7 +1741,7 @@ impl<'s> SurfaceIntersector<'s> {
     /// first or the last curve point, when those differ: the trace reaches the
     /// boundary within tolerance but not necessarily at the cluster's representative
     /// start point, which would otherwise be traced again from that end (the
-    /// SolidCraft fork's `DoIntersection` block before `FlushCurve`, opt-in fix
+    /// SolidCraft fork's `DoIntersection` block before `FlushCurve`, fix
     /// WR-76, #392; tangency-labs/smlib@0ce09f2).
     ///
     /// # Errors
@@ -1993,25 +2005,20 @@ impl<'s> SurfaceIntersector<'s> {
         ))
     }
 
-    /// True when both surface points of `point` are within `this_approx_tol_3d` of a
-    /// start point in `start_points` (skipping position `skip`) — upstream compares
-    /// the squared distances with the tolerance (`IsPointOnStartPoint`). With
-    /// [`UpstreamFixes::point_on_start_point_squared_tolerance`](crate::kernel::UpstreamFixes::point_on_start_point_squared_tolerance)
-    /// the squared distances are compared with the squared tolerance instead (WR-51).
+    /// True when both surface points of `point` are closer than `this_approx_tol_3d`
+    /// to those of a start point in `start_points` (skipping position `skip`)
+    /// (`IsPointOnStartPoint`).
+    ///
+    /// The distances themselves are compared with the tolerance (WR-51). Upstream
+    /// compares the squared distance with the tolerance, whose radius is `sqrt(tol)`:
+    /// far wider than the tolerance below 1 and narrower above it.
     pub fn is_point_on_start_point(
         &self,
-        k: &Kernel,
         point: &TsectPnt,
         start_points: &[TsectId],
         skip: Option<usize>,
     ) -> Result<bool> {
-        // WR-51: a squared distance needs the squared tolerance (a real distance of
-        // `this_approx_tol_3d`); the pinned C++ compares it with the tolerance itself.
-        let tol = if k.fixes.point_on_start_point_squared_tolerance {
-            self.this_approx_tol_3d * self.this_approx_tol_3d
-        } else {
-            self.this_approx_tol_3d
-        };
+        let tol = self.this_approx_tol_3d;
         let test_pt0 = point.srf_pos(SrfIndex::First);
         let test_pt1 = point.srf_pos(SrfIndex::Second);
         for (jj, &id) in start_points.iter().enumerate() {
@@ -2019,8 +2026,8 @@ impl<'s> SurfaceIntersector<'s> {
                 continue;
             }
             let sp = self.point(id)?;
-            if sp.srf_pos(SrfIndex::First).distance_squared(test_pt0) < tol
-                && sp.srf_pos(SrfIndex::Second).distance_squared(test_pt1) < tol
+            if sp.srf_pos(SrfIndex::First).distance(test_pt0) < tol
+                && sp.srf_pos(SrfIndex::Second).distance(test_pt1) < tol
             {
                 return Ok(true);
             }
@@ -2528,7 +2535,7 @@ fn surface_global_point_solve(
 
 /// The rank of a tangent start point as a cluster's representative, lower is better:
 /// a traceable tangent-curve point first, then the smallest deviation (the fork's
-/// `sm_TangentStartRank`, opt-in fix WR-76, #392).
+/// `sm_TangentStartRank`, fix WR-76, #392).
 fn tangent_start_rank(tsp: &TsectPnt) -> f64 {
     (if tsp.point_type == IntersectionPointType::TangentCurve {
         0.0
@@ -2792,11 +2799,10 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
-    /// WR-51: the pinned `IsPointOnStartPoint` compares a squared distance with the
-    /// tolerance itself, so it accepts points up to `sqrt(tol)` away. With
-    /// `point_on_start_point_squared_tolerance` it compares the squared distance with
-    /// the squared tolerance (a real distance of `tol`). Both surface comparisons are
-    /// gated.
+    /// WR-51: `IsPointOnStartPoint` compares each distance with the tolerance, so it
+    /// accepts a point within a real distance of `tol` of a start point on both
+    /// surfaces, and refuses one between `tol` and `sqrt(tol)` (which the
+    /// pinned C++ accepted, comparing the squared distance with the tolerance itself).
     #[test]
     fn is_point_on_start_point_accepts_a_real_distance() {
         // A 0.1-sized plane, so the intersector's own tolerance
@@ -2811,7 +2817,7 @@ mod tests {
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         // The intersector's own tolerance: (|P(min) P(mid)| + |P(mid) P(max)|) / 1000.
         let tol = 2.0 * 0.05 * 2.0f64.sqrt() / 1000.0;
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let mut si = SurfaceIntersector::new(&k, &s1, &dom, &s1, &dom, false).unwrap();
         assert!((si.this_approx_tol_3d - tol).abs() < 1e-15);
 
@@ -2820,46 +2826,40 @@ mod tests {
         *start.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, 0.0, 0.0);
         let start_id = si.alloc_point(start);
         si.start_points.push(start_id);
+        let starts = si.start_points().to_vec();
+        let at = |d0: f64, d1: f64| {
+            let mut p = TsectPnt::new();
+            *p.srf_pos_mut(SrfIndex::First) = Vec3::new(d0, 0.0, 0.0);
+            *p.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, d1, 0.0);
+            p
+        };
 
         // 1e-3 from the start point on both surfaces: the squared distance 1e-6 is
-        // below the tolerance, so the pinned test accepts it, while the real distance
-        // 1e-3 is above it, so the fixed test refuses it.
+        // below the tolerance (the pinned test accepted it), but the real distance
+        // 1e-3 is above it, so it is refused.
         let off = 1.0e-3;
-        let mut point = TsectPnt::new();
-        *point.srf_pos_mut(SrfIndex::First) = Vec3::new(off, 0.0, 0.0);
-        *point.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, off, 0.0);
-        let starts = si.start_points().to_vec();
-
-        // Pinned (default) path.
+        assert!(!si
+            .is_point_on_start_point(&at(off, off), &starts, None)
+            .unwrap());
+        // Both surface comparisons count: either one alone at `off` refuses.
+        assert!(!si
+            .is_point_on_start_point(&at(off, 0.0), &starts, None)
+            .unwrap());
+        assert!(!si
+            .is_point_on_start_point(&at(0.0, off), &starts, None)
+            .unwrap());
+        // Just inside and just outside the real distance `tol` on both surfaces.
+        let inside = at(0.99 * tol, 0.99 * tol);
+        assert!(si.is_point_on_start_point(&inside, &starts, None).unwrap());
+        assert!(!si
+            .is_point_on_start_point(&at(1.01 * tol, 1.01 * tol), &starts, None)
+            .unwrap());
+        // A point on the start point is accepted, unless that start point is skipped.
         assert!(si
-            .is_point_on_start_point(&k, &point, &starts, None)
+            .is_point_on_start_point(&at(0.0, 0.0), &starts, None)
             .unwrap());
-        // Correct distance-to-tolerance path.
-        k.fixes.point_on_start_point_squared_tolerance = true;
         assert!(!si
-            .is_point_on_start_point(&k, &point, &starts, None)
-            .unwrap());
-
-        // Both surface comparisons are gated: either one alone at `off` refuses.
-        let mut first_only = TsectPnt::new();
-        *first_only.srf_pos_mut(SrfIndex::First) = Vec3::new(off, 0.0, 0.0);
-        *first_only.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, 0.0, 0.0);
-        assert!(!si
-            .is_point_on_start_point(&k, &first_only, &starts, None)
-            .unwrap());
-        let mut second_only = TsectPnt::new();
-        *second_only.srf_pos_mut(SrfIndex::First) = Vec3::new(0.0, 0.0, 0.0);
-        *second_only.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, off, 0.0);
-        assert!(!si
-            .is_point_on_start_point(&k, &second_only, &starts, None)
-            .unwrap());
-
-        // A point on the start point stays accepted with the flag on.
-        let mut on_start = TsectPnt::new();
-        *on_start.srf_pos_mut(SrfIndex::First) = Vec3::new(0.0, 0.0, 0.0);
-        *on_start.srf_pos_mut(SrfIndex::Second) = Vec3::new(0.0, 0.0, 0.0);
-        assert!(si
-            .is_point_on_start_point(&k, &on_start, &starts, None)
+            .is_point_on_start_point(&at(0.0, 0.0), &starts, Some(0))
             .unwrap());
     }
 
@@ -2911,10 +2911,11 @@ mod tests {
             Ok(false)
         );
 
-        // 2. Empty `OffsetCurve`: `IsDegenerate` is `true`, `EvaluatePoint` fails with
-        //    `SM_ERR_NULL_POINTER` (1006).
+        // 2. Empty `OffsetCurve`: `EvaluatePoint` fails with `SM_ERR_NULL_POINTER` (1006),
+        //    so `IsDegenerate` is `false` (the fork shows nothing it could not evaluate,
+        //    tangency-labs/smlib 8311f8e; upstream read the unset points as one point)
         let bad_offset = Curve::from(OffsetCurve::empty());
-        assert!(bad_offset.is_degenerate(&k_fix, EFF_ZERO, None).unwrap());
+        assert!(!bad_offset.is_degenerate(&k_fix, EFF_ZERO, None).unwrap());
         let err = si
             .is_point_on_curve(&k_fix, far, core::slice::from_ref(&bad_offset), None)
             .unwrap_err();

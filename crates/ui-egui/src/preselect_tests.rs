@@ -978,7 +978,12 @@ fn used_profile_of_the_last_sketch_is_not_pre_picked() {
     h.frames(2);
     let ui = h.call("ui.selection", json!({}))["result"].clone();
     assert_eq!(ui["selection"], json!([]));
-    assert_eq!(ui["dialog"], json!([{"label":"Profiles","items":[]}]), "the extruded sketch's profile is taken again");
+    // Join also shows its empty Target Bodies (#17657).
+    assert_eq!(
+        ui["dialog"],
+        json!([{"label":"Profiles","items":[]},{"label":"Target Bodies","items":[]}]),
+        "the extruded sketch's profile is taken again"
+    );
     let d = h.app.dialog.as_ref().unwrap();
     assert!(matches!(d.kind, Kind::Extrude { operation: 1, auto_op: true, .. }), "Join, not Cut: {:?}", d.kind);
     assert_eq!(d.active, 0, "picks go to Profiles");
@@ -1848,7 +1853,8 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
         (large.clone(), "M20"),
         (large.clone(), "M20"),
         (small.clone(), "M8"),
-        (unsupported, ""),
+        // Past the coarse table the size is filled in with its pitch, and the next face replaces it.
+        (unsupported, "M100x4"),
         (small.clone(), "M8"),
         (planar, ""),
     ] {
@@ -3063,6 +3069,168 @@ fn the_patch_tool_takes_a_3d_spline() {
     let st = app.session.model.state();
     assert_eq!(st.bodies.len(), 1, "the patch is a body of its own");
     assert!(st.bodies[0].body.is_surface() && st.bodies[0].body.face_count() == 1);
+}
+
+#[test]
+fn split_body_by_a_planar_face_follows_edits_and_reopens_on_the_saved_body() {
+    for surface in [false, true] {
+        for moved in [false, true] {
+            let mut app = app_with(json!([
+                {"command":"component.create","params":{"name":"Part","grounded":false}},
+                {"command":"parameters.add","params":{"name":"tool_height","expression":"6 mm"}},
+                {"command":"solid.box","params":{"length":20,"width":20,"height":20,"body_name":"Target"}},
+                // An earlier face moves onto the original pick after the tool moves away.
+                {"command":"solid.box","params":{"length":30,"width":30,"height":"16 mm - tool_height","corner":[-5,-5,0],"operation":"new","body_name":"Decoy"}}
+            ]));
+            if surface {
+                for (command, params) in [
+                    ("construct.plane.offset", json!({"base":"XY","offset":"tool_height","name":"CutPlane"})),
+                    ("sketch.create", json!({"plane":"CutPlane","name":"ToolOutline"})),
+                    ("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[25,25]})),
+                    ("sketch.finish", json!({})),
+                    ("surface.patch", json!({"sketch":"ToolOutline","body_name":"Tool"})),
+                ] {
+                    app.session.execute(command, &params).unwrap();
+                }
+            } else {
+                app.session
+                    .execute(
+                        "solid.box",
+                        &json!({"length":30,"width":30,"height":"tool_height","corner":[-5,-5,0],"operation":"new","body_name":"Tool"}),
+                    )
+                    .unwrap();
+            }
+            let index = app
+                .session
+                .model
+                .state()
+                .body("Tool")
+                .unwrap()
+                .body
+                .faces(0.01)
+                .unwrap()
+                .into_iter()
+                .find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.99) && (face.centroid.z - 6.0).abs() < 1e-8)
+                .unwrap()
+                .index;
+            if moved {
+                app.session.execute("occurrence.move", &json!({"occurrence":"Part:1","translate":[0,0,-20]})).unwrap();
+            }
+            let frame = app.session.active_component_frame();
+            let point = solidcraft_engine::doc::apply_point(&frame, Vec3::new(-2.0, -2.0, 6.0));
+            let d = start(&mut app, vec![Sel::Body { name: "Target".into() }, Sel::Face { body: "Tool".into(), index, point }], "solid.split_body");
+            let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+            let split = app.session.execute(&command, &params).unwrap()["feature"].as_u64().unwrap();
+            let volumes = |app: &SolveApp| {
+                let state = app.session.model.state();
+                ["Target", "Target (1)"].map(|name| solidcraft_engine::kernel::measure(&state.body(name).unwrap().body).unwrap().volume)
+            };
+            let assert_volumes = |app: &SolveApp, expected: [f64; 2]| {
+                assert!(
+                    app.session.model.results.iter().all(|r| r.error.is_none()),
+                    "surface={surface}, moved={moved}, expected={expected:?}: {:?}",
+                    app.session.model.results
+                );
+                let actual = volumes(app);
+                assert!(actual.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6), "surface={surface}, moved={moved}: {actual:?}");
+            };
+            // Keep the plane split's positive side in Target, including after edits.
+            assert_volumes(&app, [5600.0, 2400.0]);
+            app.session.execute("parameters.change", &json!({"name":"tool_height","expression":"10 mm"})).unwrap();
+            assert_volumes(&app, [4000.0, 4000.0]);
+
+            app.session = Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
+            app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+            app.edit_feature(split);
+            let d = app.dialog.as_ref().unwrap();
+            let expected = solidcraft_engine::doc::apply_point(&frame, Vec3::new(-2.0, -2.0, 10.0));
+            assert!(
+                matches!(d.inputs[1].items.as_slice(), [Sel::Face { body, point, .. }] if body == "Tool" && point.dist(expected) < 1e-6),
+                "restore the moved tool, not the earlier coincident face: {:?}",
+                d.inputs[1].items
+            );
+            let d = app.dialog.take().unwrap();
+            crate::dialogs::run_dialog(&mut app, &d).unwrap();
+            app.editing_state = None;
+            assert_eq!(app.session.doc.marker, None);
+            assert_volumes(&app, [4000.0, 4000.0]);
+            app.session.execute("parameters.change", &json!({"name":"tool_height","expression":"12 mm"})).unwrap();
+            assert_volumes(&app, [3200.0, 4800.0]);
+        }
+    }
+}
+
+#[test]
+fn split_body_by_a_planar_tool_in_another_component_follows_its_placement() {
+    let mut app = app_with(json!([
+        {"command":"solid.box","params":{"length":20,"width":20,"height":20,"body_name":"Target"}},
+        {"command":"solid.box","params":{"length":30,"width":30,"height":10,"corner":[-5,-5,0],"operation":"new","body_name":"Decoy"}},
+        {"command":"component.create","params":{"name":"ToolPart","grounded":false}},
+        {"command":"solid.box","params":{"length":30,"width":30,"height":6,"corner":[-5,-5,0],"operation":"new","body_name":"Tool"}},
+        {"command":"occurrence.move","params":{"occurrence":"ToolPart:1","translate":[0,0,4]}},
+        {"command":"component.activate","params":{"component":0}}
+    ]));
+    let index = app
+        .session
+        .model
+        .state()
+        .body("Tool")
+        .unwrap()
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99))
+        .unwrap()
+        .index;
+    let d = start(
+        &mut app,
+        vec![Sel::Body { name: "Target".into() }, Sel::Face { body: "Tool".into(), index, point: Vec3::new(-2.0, -2.0, 10.0) }],
+        "solid.split_body",
+    );
+    let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
+    app.session.execute(&command, &params).unwrap();
+    let check = |app: &SolveApp, expected: [f64; 2]| {
+        assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+        let state = app.session.model.state();
+        let volumes = ["Target", "Target (1)"].map(|name| solidcraft_engine::kernel::measure(&state.body(name).unwrap().body).unwrap().volume);
+        assert!(volumes.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6), "{volumes:?}");
+    };
+    check(&app, [4000.0, 4000.0]);
+    app.session.execute("occurrence.move", &json!({"occurrence":"ToolPart:1","translate":[0,0,2]})).unwrap();
+    check(&app, [3200.0, 4800.0]);
+}
+
+#[test]
+fn split_body_edit_keeps_the_side_names_of_saved_planes_and_surface_tools() {
+    for surface_tool in [false, true] {
+        let mut app = app_with(json!([
+            {"command":"solid.box","params":{"length":20,"width":20,"height":20,"body_name":"Target"}},
+            {"command":"solid.box","params":{"length":30,"width":30,"height":6,"corner":[-5,-5,0],"operation":"new","body_name":"Tool"}}
+        ]));
+        let params = if surface_tool {
+            json!({"body":"Target","tool":{"body":"Tool","point":[-2,-2,6]}})
+        } else {
+            json!({"body":"Target","plane":{"origin":[-2,-2,6],"normal":[0,0,1]}})
+        };
+        let split = app.session.execute("solid.split_body", &params).unwrap()["feature"].as_u64().unwrap();
+        app.session = Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
+        app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+        let volumes = |app: &SolveApp| {
+            let state = app.session.model.state();
+            ["Target", "Target (1)"].map(|name| solidcraft_engine::kernel::measure(&state.body(name).unwrap().body).unwrap().volume)
+        };
+        let before = volumes(&app);
+        app.edit_feature(split);
+        let d = app.dialog.take().unwrap();
+        crate::dialogs::run_dialog(&mut app, &d).unwrap();
+        app.editing_state = None;
+        assert_eq!(app.session.doc.marker, None);
+        assert!(volumes(&app).iter().zip(before).all(|(a, b)| (a - b).abs() < 1e-6), "surface_tool={surface_tool}");
+        app.session.execute("timeline.edit", &json!({"feature":"Box2","set":{"height":"10"}})).unwrap();
+        let expected = if surface_tool { [4000.0, 4000.0] } else { [5600.0, 2400.0] };
+        assert!(volumes(&app).iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6), "a saved explicit plane stays fixed");
+    }
 }
 
 #[test]
@@ -4661,6 +4829,9 @@ fn hovering_a_body_or_feature_row_lights_it_as_the_browser_does() {
     d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
     d.inputs[1].items = vec![Sel::Body { name: "Cutter".into() }, Sel::Body { name: "Other".into() }];
     h.frames(2);
+    // The baseline is taken once the preview has come back from its worker: until then the picked
+    // bodies are lit as picked, and after it they are stood in for (#17989).
+    wait_feature_preview(&mut h);
     let label = open_list(&mut h, 1);
     let unlit = lit(&h);
     hover_handle(&mut h, &format!("dialog:list:{label}:1:remove"));
@@ -4953,4 +5124,31 @@ fn three_point_plane_dialog_takes_points_on_a_mesh_body() {
         h.app.run(&cmd, params).unwrap();
     }
     assert_eq!(solidcraft_engine::view::construction_planes(&h.app.session).len(), 1);
+}
+
+/// Move Features to Component started from the command search takes the features selected in
+/// the Browser or the History into the active component (#18702); with none selected it asks for
+/// them instead of failing with the command's "`features` must list 1...1000 features".
+#[test]
+fn move_features_to_component_takes_the_selected_features() {
+    let mut app = app_with(json!([
+        {"command":"solid.box","params":{"length":10,"width":10,"height":10}},
+        {"command":"solid.cylinder","params":{"radius":2,"height":5,"base":[30,0,0],"operation":"new_body"}},
+        {"command":"component.create","params":{"name":"Part"}}
+    ]));
+    let part = app.session.doc.find_component("Part").unwrap();
+    let (boxed, cylinder) = (app.session.doc.features[0].id, app.session.doc.features[1].id);
+    let component_of = |app: &crate::SolveApp, id: u64| app.session.doc.feature(id).unwrap().component;
+
+    app.session.selection.clear();
+    app.start("component.move_features");
+    let (status, error) = app.status.clone().map(|(s, _, e)| (s, e)).unwrap();
+    assert!(error && status.contains("Select the features"), "{status}");
+    assert!(!status.contains("must list"), "{status}");
+    assert_ne!(component_of(&app, boxed), part);
+
+    app.session.selection = vec![Sel::Feature { id: boxed }];
+    app.start("component.move_features");
+    assert_eq!(component_of(&app, boxed), part, "the selected feature moves");
+    assert_ne!(component_of(&app, cylinder), part, "an unselected one stays");
 }

@@ -10,6 +10,12 @@ fn dxf_has_layer(text: &str, name: &str) -> bool {
     solidcraft_io::read_dxf_file(text).unwrap().layers().iter().any(|layer| layer.name() == name)
 }
 
+/// How many entities the file puts on the layer `name`.
+fn dxf_on_layer(text: &str, name: &str) -> usize {
+    let file = solidcraft_io::read_dxf_file(text).unwrap();
+    file.entities().iter().filter(|entity| file.layer(entity.layer()).unwrap().name() == name).count()
+}
+
 fn dxf_count(text: &str, predicate: impl Fn(&DxfShape) -> bool) -> usize {
     solidcraft_io::read_dxf_file(text).unwrap().entities().iter().filter(|entity| predicate(entity.geometry())).count()
 }
@@ -117,6 +123,36 @@ fn side_edge_flanges_across_a_bend_keep_their_relief_through_rebuild_and_reopen(
             let dxf = run(&mut reopened, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_owned();
             assert!(!solidcraft_io::read_dxf(&dxf).unwrap().is_empty());
         }
+    }
+}
+
+#[test]
+fn two_arc_sheet_cut_does_not_depend_on_the_sketch_plane_origin() {
+    for offset in [0.0, 300.0, 1000.0, 10000.0, -10000.0] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"R1","thickness":"1.5 mm","bend_radius":"2 mm","k_factor":0.5,"active":true}));
+        base(&mut s, 200.0, 100.0);
+        run(&mut s, "sketch.create", json!({"plane":{"origin":[offset,offset,0],"x_dir":[1,0,0],"y_dir":[0,1,0]},"name":"Hole"}));
+        for y in [55.0, 45.0] {
+            let (start, end) = if y > 50.0 { (55.0, 45.0) } else { (45.0, 55.0) };
+            run(
+                &mut s,
+                "sketch.arc.three_point",
+                json!({"start":[start-offset,50.0-offset],"through":[50.0-offset,y-offset],"end":[end-offset,50.0-offset]}),
+            );
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch":"Hole","profiles":"all","distance":"6 mm","direction":"symmetric","operation":"cut"}));
+        let expected = (200.0 * 100.0 - PI * 25.0) * 1.5;
+        assert!((volume(&mut s) - expected).abs() < 1e-5, "origin {offset}");
+        let pattern = flat(&mut s);
+        assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(1));
+        let body = &s.model.state().bodies[0].body;
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(50.0, 50.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(60.0, 50.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((volume(&mut reopened) - expected).abs() < 1e-5);
+        assert_eq!(flat(&mut reopened), pattern);
     }
 }
 
@@ -502,7 +538,9 @@ fn base_and_edge_flange_follow_the_k_factor() {
     assert_eq!(f["bends"][0]["direction"], "up");
     assert!(rel(volume(&mut s), 18972.622) < 1e-4, "{}", volume(&mut s));
     let m = run(&mut s, "inspect.measure", json!({}));
-    assert_eq!(m["total"]["faces"], 14, "{m}");
+    // The coplanar end pieces count together, while the raw sewn faces stay available.
+    assert_eq!(m["total"]["faces"], 10, "{m}");
+    assert_eq!(m["bodies"][0]["kernel"]["faces"], 14, "{m}");
     // The angle is a parameter: 45° (oracle 70 uses height 15).
     let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
     run(&mut s, "parameters.change", json!({"name": names[0], "expression": "15"}));
@@ -2352,7 +2390,9 @@ fn flat_dxf_preserves_exact_cutout_entities() {
     let dxf = super::flat_dxf(&sh, &super::DxfOptions::default()).unwrap();
     assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), 5, "four outline lines and one exact cutout line");
     assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Arc { .. })), 1);
-    assert!(dxf.contains(" 50\n0.0\n 51\n180.0\n"), "{dxf}");
+    let half =
+        |shape: &DxfShape| matches!(shape, DxfShape::Arc { c, r, a0, a1 } if *c == Vec2::new(20.0, 10.0) && *r == 10.0 && (*a0, *a1) == (0.0, 180.0));
+    assert_eq!(dxf_count(&dxf, half), 1, "the half circle from 0° to 180°: {dxf}");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert_eq!(read.len(), 6);
     assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, a, b } if *c == Vec2::new(20.0, 10.0) && a.dist(Vec2::new(30.0, 10.0)) < 1e-9 && b.dist(Vec2::new(10.0, 10.0)) < 1e-9)));
@@ -2436,6 +2476,51 @@ fn inherited_round_hole_survives_flange_and_unfold_in_flipped_frames() {
         assert!((volume(&mut s) - expected).abs() < 0.1);
         run(&mut s, "sheet.refold", json!({}));
         assert!((volume(&mut s) - folded).abs() < 0.1);
+    }
+}
+
+#[test]
+fn measure_counts_round_holes_through_unfold_and_refold() {
+    // K-factor 0.33 gives different folded and flat volumes: compare each with its own blank.
+    let mut blank_volumes = [0.0; 3];
+    for holes in [0u64, 3, 19] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"R","thickness":"1","k_factor":"0.33","bend_radius":"0.74","active":true}));
+        base(&mut s, 120.0, 75.4);
+        run(&mut s, "sheet.flange", json!({"edges":[[60,0,1]],"height":10}));
+        for i in 0..holes {
+            run(&mut s, "solid.hole", json!({"position":[20 + 14 * (i % 7),20 + 15 * (i / 7),1],"diameter":4}));
+        }
+        for (stage_index, stage) in ["folded", "unfolded", "refolded"].into_iter().enumerate() {
+            match stage {
+                "unfolded" => {
+                    run(&mut s, "sheet.unfold", json!({}));
+                }
+                "refolded" => {
+                    run(&mut s, "sheet.refold", json!({}));
+                }
+                _ => {}
+            }
+            let measured = run(&mut s, "inspect.measure", json!({}));
+            let body = &measured["bodies"][0];
+            let counts = ["faces", "edges", "vertices"].map(|key| body[key].as_u64().expect("nonnegative topology count"));
+            let measured_volume = body["volume_mm3"].as_f64().unwrap();
+            if holes == 0 {
+                blank_volumes[stage_index] = measured_volume;
+            }
+            // A hole adds one wall and two circular rims, with one vertex on each rim.
+            // The flat extrusion also keeps each whole cylinder's seam.
+            // The folded blank extrudes an eight-segment L-section: ten faces, 24 edges, 16 vertices.
+            let blank = if stage == "unfolded" { [6, 12, 8] } else { [10, 24, 16] };
+            let edges_per_hole = if stage == "unfolded" { 3 } else { 2 };
+            assert_eq!(counts, [blank[0] + holes, blank[1] + edges_per_hole * holes, blank[2] + 2 * holes], "{holes} holes, {stage}: {body}");
+            assert_eq!(body["face_types"].as_object().unwrap().values().map(|n| n.as_u64().unwrap()).sum::<u64>(), counts[0]);
+            assert_eq!(body["sheet_metal"], true);
+            for (key, count) in ["faces", "edges", "vertices"].into_iter().zip(counts) {
+                assert_eq!(measured["total"][key], count, "{holes} holes, {stage}: total {key}");
+            }
+            assert!(rel(measured_volume, blank_volumes[stage_index] - holes as f64 * PI * 4.0) < 1e-5, "{body}");
+        }
     }
 }
 
@@ -3330,7 +3415,9 @@ fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
         assert!(rel(volume(&mut s), flat) < 1e-3, "a fold keeps the material");
         let bb = &run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
         assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
-        faces(&mut s)
+        // This construction check counts the sewn faces before coplanar end pieces merge.
+        let body = &run(&mut s, "inspect.measure", json!({}))["bodies"][0];
+        (body["kernel"]["faces"].as_u64().unwrap(), body["face_types"]["cylinder"].as_u64().unwrap_or(0))
     };
     let ((rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)) = (folded(&rounded), folded(&sharp));
     let counts = [(rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)];
@@ -7084,8 +7171,11 @@ fn flange_segments_take_their_own_angles() {
     let table: Value = serde_json::from_str(table["text"].as_str().unwrap_or_default()).unwrap_or(Value::Null);
     let rows = table["bends"].as_array().cloned().unwrap_or_default();
     assert_eq!(rows.len(), 2, "{table}");
-    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(dxf.contains("BEND_UP") && dxf.contains("OUTLINE"), "{dxf}");
+    let out = run(&mut s, "sheet.export_dxf", json!({}));
+    let dxf = out["dxf"].as_str().unwrap_or_default();
+    // Both segments bend up: a bend line each on BEND_UP, as many as the export reports.
+    assert_eq!((dxf_on_layer(dxf, "BEND_UP"), out["bends"].as_u64()), (2, Some(2)), "{dxf}");
+    assert!(dxf_on_layer(dxf, "OUTLINE") > 0, "{dxf}");
 }
 
 /// Each segment takes its own side: one bend up, one down, and the two still sew into one solid

@@ -336,8 +336,9 @@ impl ContactGeometry {
                         continue;
                     }
                     for session in [start, end] {
-                        for origin in [&joint.a, &joint.b] {
+                        for (side, origin) in [&joint.a, &joint.b].into_iter().enumerate() {
                             let frame = session.doc.origin_world(&state, origin)?;
+                            let frame = if side == 0 { joint.offset_frame_a(frame) } else { frame };
                             let pivot = apply_point(&frame, Vec3::ZERO);
                             let far = Vec3::new(
                                 (bounds.min.x - pivot.x).abs().max((bounds.max.x - pivot.x).abs()),

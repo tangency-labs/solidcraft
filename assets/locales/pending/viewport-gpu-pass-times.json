@@ -1,0 +1,32 @@
+{
+  "en": {
+    "perf.gpu_time": "GPU time"
+  },
+  "ar": {
+    "perf.gpu_time": "زمن GPU"
+  },
+  "de": {
+    "perf.gpu_time": "GPU-Zeit"
+  },
+  "es": {
+    "perf.gpu_time": "Tiempo de GPU"
+  },
+  "fr": {
+    "perf.gpu_time": "Temps GPU"
+  },
+  "he": {
+    "perf.gpu_time": "זמן GPU"
+  },
+  "ja": {
+    "perf.gpu_time": "GPU 時間"
+  },
+  "ko": {
+    "perf.gpu_time": "GPU 시간"
+  },
+  "vi": {
+    "perf.gpu_time": "Thời gian GPU"
+  },
+  "zh": {
+    "perf.gpu_time": "GPU 耗时"
+  }
+}

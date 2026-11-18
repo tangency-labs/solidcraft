@@ -18,7 +18,7 @@ use solidcraft_doc::config::RowKey;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, UserMaterial};
 
 use super::CommandSpec;
-use super::design_link::{LinkState, absolute, link_presence, read_linked_file, resolve, same_file, stored};
+use super::design_link::{LinkState, absolute, link_presence, link_target, read_linked_file, resolve, same_file, stored};
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
@@ -141,12 +141,11 @@ fn same_link_source(s: &Session, link: &DesignLink, file: &Path) -> bool {
     absolute(&old) == file || (link_refused(s.path.as_deref(), &link.path).is_ok() && same_file(&old, file))
 }
 
-/// Resolve a design's component links against its original file, before opening it from a
-/// different location (for example a recovery file) or keeping it in session history.
+/// Resolve a design's links (its component links and its drawings' sources) against its original
+/// file, before opening it from a different location (for example a recovery file) or keeping it
+/// in session history.
 pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
-    for link in doc.links.values_mut() {
-        link.path = absolute(&resolve(from, &link.path)).to_string_lossy().into_owned();
-    }
+    super::design_link::located(doc, from);
 }
 
 /// The bodies of a linked design: its name, the Import feature that holds them and the names
@@ -661,11 +660,12 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
+        let target = link_target(&file);
         let existing = s
             .doc
             .links
             .iter()
-            .find(|(_, link)| selected_configuration(link) == configuration && absolute(&resolve(s.path.as_deref(), &link.path)) == file)
+            .find(|(_, link)| selected_configuration(link) == configuration && link_target(&resolve(s.path.as_deref(), &link.path)) == target)
             .map(|(id, _)| *id);
         if let Some(component) = existing {
             let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
@@ -796,8 +796,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .feature(link.feature)
             .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
-        if let Some((known, properties)) =
-            kept_faces.and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.as_bytes()), faces))
+        if let Some((known, properties)) = kept_faces
+            .and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces))
         {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
@@ -823,7 +823,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
         };
         warnings.extend(sf.warnings.iter().cloned());
-        let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
+        let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
             if inherit_properties(s, comp, &properties)? {
@@ -877,14 +877,27 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// `comp`'s linked design as it was last read (its bodies) and as its file is now, read before
 /// anything in the design changes.
-fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(std::sync::Arc<str>, PathBuf, Vec<u8>), String> {
-    let Some(FeatureKind::Import { step: old, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
+fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(ImportSource, PathBuf, Vec<u8>), String> {
+    let Some(FeatureKind::Import { step: old, records, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
         return Err(format!("its linked bodies (feature {}) are gone; break the link or insert the design again", link.feature));
     };
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let file = resolve(s.path.as_deref(), &link.path);
     let bytes = read_link(&file, s.path.as_deref()).map_err(|e| e.to_string())?;
-    Ok((old.clone(), file, bytes))
+    Ok(((old.clone(), records.clone()), file, bytes))
+}
+
+/// What an Import feature's bodies are made from: its STEP text and its records.
+type ImportSource = (std::sync::Arc<str>, Option<std::sync::Arc<solidcraft_doc::kernel::ImportRecords>>);
+
+/// Whether two Import features make their bodies from the same source.
+fn same_import_source(a: &FeatureKind, b: &FeatureKind) -> bool {
+    match (a, b) {
+        (FeatureKind::Import { step, records, .. }, FeatureKind::Import { step: other, records: other_records, .. }) => {
+            step == other && records == other_records
+        }
+        _ => false,
+    }
 }
 
 /// The joints and joint origins on occurrences of `comp` that name its linked faces by their
@@ -944,10 +957,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let (source_name, sf, faces, _, properties) = design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
     let source_names = sf.body_names.clone();
-    let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
-        (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
-        _ => true,
-    };
+    let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind));
     let path = stored(s.path.as_deref(), &file);
     let mut warnings = sf.warnings;
     if geometry_changed
@@ -1095,8 +1105,8 @@ fn relink_placement(
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));
     }
     let feature = s.doc.links.get(&linked).map(|l| l.feature).ok_or_else(|| bad(cmd, "the design was not linked"))?;
-    let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), s.doc.feature(feature).map(|f| &f.kind)) {
-        (Some(FeatureKind::Import { step: was, .. }), Some(FeatureKind::Import { step, .. })) => was != step,
+    let geometry_changed = match (s.doc.feature(link.feature), s.doc.feature(feature)) {
+        (Some(was), Some(now)) => !same_import_source(&was.kind, &now.kind),
         _ => true,
     };
     let mut warnings: Vec<String> = made["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_string)).collect();
@@ -1221,6 +1231,50 @@ mod tests {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn save_as_through_directory_alias_keeps_links_after_reopening_and_moving() {
+        for format in ["json", "container"] {
+            let dir = std::env::temp_dir().join(format!("solidcraft-link-directory-alias-{format}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let dir = dir.canonicalize().unwrap();
+            let project = dir.join("projects/example");
+            std::fs::create_dir_all(project.join("out")).unwrap();
+            let alias = dir.join("output");
+            std::os::unix::fs::symlink(project.join("out"), &alias).unwrap();
+            let source_alias = dir.join("source");
+            std::os::unix::fs::symlink(&project, &source_alias).unwrap();
+            let part = project.join("part.sc");
+            let assembly = project.join("assembly.sc");
+            save_box(&part, 30.0);
+            let mut s = Session::default();
+            run(&mut s, "component.insert_design", json!({"path": part}));
+            run(&mut s, "file.save", json!({"path": assembly}));
+            run(&mut s, "doc.open", json!({"path": assembly}));
+            let saved = alias.join("assembly.sc");
+            run(&mut s, "file.save_as", json!({"path": saved, "format": format}));
+            let disk = solidcraft_io::read_design(&std::fs::read(&saved).unwrap()).unwrap();
+            assert_eq!(disk.links.len(), 1);
+            let link = &disk.links.values().next().unwrap().path;
+            assert_eq!(link, "../part.sc");
+            assert!(saved.parent().unwrap().join(link).is_file());
+            for reopened in [saved, project.join("out/assembly.sc")] {
+                run(&mut s, "doc.open", json!({"path": reopened}));
+                assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["found"], true);
+                let mut reused = s.scratch();
+                run(&mut reused, "component.insert_design", json!({"path": source_alias.join("part.sc"), "reuse": true}));
+                assert_eq!(reused.doc.links.len(), 1);
+            }
+            let moved = dir.join("moved");
+            std::fs::rename(&project, &moved).unwrap();
+            save_box(&moved.join("part.sc"), 40.0);
+            run(&mut s, "doc.open", json!({"path": moved.join("out/assembly.sc")}));
+            assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"], json!(["part"]));
+            assert!((volume(&mut s) - 8000.0).abs() < 1e-6);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
     /// #6860: Save As changes the file's folder, not the targets kept in the edit history.
     #[test]
     fn save_as_keeps_link_targets_through_undo_redo_and_checkpoints() {
@@ -1259,7 +1313,7 @@ mod tests {
                     run(&mut s, command, json!({}));
                     let links = run(&mut s, "component.links", json!({}));
                     assert_eq!(links["links"][0]["found"], true, "{on_copy}, {folder}, {command}: {links}");
-                    assert_eq!(absolute(Path::new(links["links"][0]["file"].as_str().unwrap())), absolute(&part));
+                    assert!(same_file(Path::new(links["links"][0]["file"].as_str().unwrap()), &part));
                 }
             }
             assert!(std::sync::Arc::ptr_eq(&s.doc, &before), "saving does not rewrite the live document");
@@ -1767,18 +1821,23 @@ mod tests {
             assert_eq!(run(&mut a, "component.links", json!({}))["links"][0]["found"], true, "{local}");
             assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["plate"]), "{local}");
         }
-        // Relink to a network path (programmatic: no prompt) is refused before the disk is asked.
-        let calls = solidcraft_io::vfs::file_calls();
-        let err = a.execute("component.relink", &json!({"component": comp, "path": r"\\evil.example\share\x.solidcraft"})).unwrap_err().to_string();
-        assert!(err.contains("network location"), "{err}");
-        assert_eq!(solidcraft_io::vfs::file_calls(), calls);
+        // Changing a link to a network path is refused before normalization or file access.
+        for command in ["component.relink", "component.replace_with_link"] {
+            for path in crafted {
+                let calls = solidcraft_io::vfs::file_calls();
+                let err = a.execute(command, &json!({"component": comp, "path": path})).unwrap_err().to_string();
+                assert!(err.contains("network location"), "{command} {path}: {err}");
+                assert_eq!(solidcraft_io::vfs::file_calls(), calls);
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Every place that reaches a file through a link path goes through the design-path rule
     /// (`vfs::check_design_path` / `read_design_path` / `design_path_is_file` / `link_refusal`):
-    /// no plain file call on a link's path in the link commands, and the font file a design's text
-    /// names is checked before it is read.
+    /// no plain file call on a link's path in the link commands, a drawing's source path judged by the
+    /// rule before `same_file` canonicalises it, and the font file a design's text names is checked
+    /// before it is read.
     #[test]
     fn every_link_path_goes_through_the_design_path_rule() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1811,6 +1870,11 @@ mod tests {
                 assert!(rule < at, "{file}: canonicalize before check_design_path");
             }
         }
+        // A drawing's source path: the rule judges its text before `same_file` canonicalises it (a network touch).
+        let drawing = code("src/cmd/drawing.rs");
+        let source = &drawing[drawing.find("fn linked_source(").unwrap()..];
+        let rule = source.find("check_design_path(given").expect("linked_source goes through the design-path rule");
+        assert!(rule < source.find("same_file(").unwrap(), "src/cmd/drawing.rs: same_file before check_design_path");
         let fonts = std::fs::read_to_string(root.join("../sketch/src/fonts.rs")).unwrap();
         let (check, read) = (fonts.find("FILE_CHECK.get()").unwrap(), fonts.find("read_font(&path)").unwrap());
         assert!(check < read, "a font file named by a design is checked before it is read");
