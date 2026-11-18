@@ -12,8 +12,10 @@
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
 //!   for a host that keeps the files itself (#8517)
-//! - document.close {document_id?}: close the active clean design, refusing unsaved changes
-//!   or a tab switched since document.revision (#18781); the last tab becomes blank.
+//! - `document.close {document_id?}`: close the active clean design, refusing unsaved changes.
+//!   To guard against tab switches, supply `document_id` from `document.revision`; omitting
+//!   it closes whichever clean tab is active when the request arrives (#18781).
+//!   Closing the last saved design leaves a blank design.
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -2413,12 +2415,6 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         let first = h.app.session.document_id.clone();
         let old = h.app.session.doc.to_json();
-        for bad in [json!({"document_id":"different"}), json!({"force":true}), json!({"document_id":7}), json!([])] {
-            let reply = h.call("document.close", bad);
-            assert_eq!(reply["ok"], false, "{reply}");
-            assert_eq!(h.app.session.document_id, first);
-            assert_eq!(h.app.session.doc.to_json(), old);
-        }
         let reply = h.call("document.close", json!({"document_id":first}));
         assert_eq!(reply["ok"], false, "unsaved design is preserved: {reply}");
         assert!(reply["error"].as_str().unwrap().contains("unsaved"));
@@ -2428,6 +2424,15 @@ mod tests {
         let path = h.dir.join("close-safe.solidcraft");
         h.app.run("file.save_as", json!({"path": path.to_string_lossy()})).unwrap();
         assert!(!h.app.session.is_dirty());
+        // Invalid parameters and stale tab identities must fail even for a clean design.
+        // Running these cases on a dirty design would only exercise the unsaved-work guard.
+        for bad in [json!({"document_id":"different"}), json!({"force":true}), json!({"document_id":7}), json!([])] {
+            let reply = h.call("document.close", bad);
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.session.document_id, first);
+            assert_eq!(h.app.session.doc.to_json(), old);
+            assert!(!h.app.session.is_dirty(), "an invalid request cannot dirty the saved design");
+        }
         let reply = h.call("document.close", json!({"document_id":first}));
         assert_eq!(reply["ok"], true, "{reply}");
         assert_eq!(reply["result"]["closed_document_id"], first);
