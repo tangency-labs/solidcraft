@@ -11,7 +11,9 @@ use solidcraft_geom::prelude::*;
 use crate::body::Body;
 use crate::{BoolOp, KernelError, Result};
 
-const MAX_PLANAR_SEGMENTS: usize = 8192;
+/// The most segments one planar call takes over all its loops: a sheet with 65 536 round holes
+/// (the flat's own limit) and its outline.
+const MAX_PLANAR_SEGMENTS: usize = 131_072;
 
 /// How far a free-form boundary may be replaced by lines and arcs where a caller needs lines and
 /// arcs only (sheet metal's flat patterns, mm). The booleans here keep free-form curves exact.
@@ -655,5 +657,15 @@ mod planar_tests {
         assert!(planar_regions_boolean(&[bad], &[], BoolOp::Union, 1e-7).is_err());
         let many = vec![plate; MAX_PLANAR_SEGMENTS / 4 + 1];
         assert!(planar_regions_boolean(&many, &[], BoolOp::Union, 1e-7).is_err());
+    }
+
+    #[test]
+    fn a_plate_with_10000_round_holes_is_within_the_planar_budget() {
+        // A perforated sheet: one outline and 10 000 circles, each one arc.
+        let mut plate = rectangle(Vec2::ZERO, Vec2::new(1010.0, 1010.0));
+        plate.holes = (0..100)
+            .flat_map(|i| (0..100).map(move |j| Loop2::circle(Vec2::new(10.0 + 10.0 * i as f64, 10.0 + 10.0 * j as f64), 2.0).reversed()))
+            .collect();
+        assert!(check_regions(std::iter::once(&plate), 1e-7).is_ok());
     }
 }

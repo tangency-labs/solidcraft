@@ -30,11 +30,13 @@ pub use face_names::body_sheet_face_names;
 // These are work limits, never geometry truncation: a larger input returns a useful error.
 // Exact lines and arcs count once each (the planar booleans work on them whole); free-form
 // curves (conics, splines, text) count the arcs the planar booleans follow them with.
-const MAX_FLAT_POINTS: usize = 16_384;
+// Sized for perforated sheets, not just a few cut-outs: a flat with 10 000 round holes (each a
+// whole circle, two halves where the walls are sewn) stays well within the counts.
+const MAX_FLAT_POINTS: usize = 262_144;
 // The 0.001 mm chords of everything, arcs included: what the planar booleans sample (their
 // own limit is the same).
-const MAX_FLAT_SAMPLES: usize = 65_536;
-const MAX_FLAT_PIECES: usize = 4096;
+const MAX_FLAT_SAMPLES: usize = 1_048_576;
+const MAX_FLAT_PIECES: usize = 65_536;
 const MAX_FLAT_WORK: usize = 500_000_000;
 /// Pieces of flat material sharing less area than this (mm²) only touch.
 const TOUCH_AREA: f64 = 1e-6;
@@ -7602,7 +7604,7 @@ mod tests {
     fn flat_geometry_budgets_reject_aggregate_and_intermediate_work() {
         let mut s = plate(100.0, 60.0);
         // Each arc is individually legal, but their combined sampled points exceed the cap.
-        s.base.outer.segs = vec![Seg2::Arc { center: Vec2::ZERO, radius: 1000.0, start: 0.0, sweep: std::f64::consts::TAU }; 32];
+        s.base.outer.segs = vec![Seg2::Arc { center: Vec2::ZERO, radius: 1000.0, start: 0.0, sweep: std::f64::consts::TAU }; 512];
         assert!(s.flat_regions().unwrap_err().to_string().contains("budget"));
         let mut s = plate(100.0, 60.0);
         s.holes = vec![Region2 { outer: Loop2::circle(Vec2::new(20.0, 20.0), 1.0), holes: vec![] }; MAX_FLAT_PIECES + 1];
@@ -7626,6 +7628,23 @@ mod tests {
         assert_eq!(regions[0].holes.len(), 240);
         let area = 250.0 * 130.0 - 240.0 * std::f64::consts::PI * 2.0 * 2.0;
         assert!((regions[0].area() - area).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_perforated_flat_with_more_than_4096_round_holes_is_within_the_flat_budget() {
+        // 10 000 round 4 mm holes at a 10 mm pitch on a 1010 x 1010 plate: a perforated panel, not
+        // hostile input. The budget used to refuse anything past 4096 cut-outs.
+        let holes: Vec<Loop2> = (0..100)
+            .flat_map(|i| (0..100).map(move |j| Loop2::circle(Vec2::new(10.0 + 10.0 * i as f64, 10.0 + 10.0 * j as f64), 2.0).reversed()))
+            .collect();
+        let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1010.0, 0.0), Vec2::new(1010.0, 1010.0), Vec2::new(0.0, 1010.0)]);
+        let region = Region2 { outer, holes };
+        let (edges, points) = region_complexity(std::slice::from_ref(&region)).unwrap();
+        assert_eq!((edges, points), (10_004, 10_004));
+        assert_eq!(planar_region(&region).unwrap().holes.len(), 10_000);
+        // Past the budget is still refused.
+        let many = Region2 { holes: vec![Loop2::circle(Vec2::new(5.0, 5.0), 1.0).reversed(); MAX_FLAT_PIECES + 1], ..region };
+        assert!(planar_region(&many).unwrap_err().to_string().contains("budget"));
     }
 
     /// #13493: a flat with many cut-outs takes them all from the material in one planar boolean,
