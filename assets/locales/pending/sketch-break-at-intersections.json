@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.sketch.break_at_intersections": "Break lines at surrounding intersections",
+    "prefs.sketch.break_at_intersections_help": "With this on, Break splits a straight line at the nearest crossing on each side of the click. With it off, Break splits the line where you click."
+  },
+  "ar": {
+    "prefs.sketch.break_at_intersections": "تقسيم الخطوط عند التقاطعات المحيطة",
+    "prefs.sketch.break_at_intersections_help": "عند تفعيل هذا الخيار، تقسم أداة الكسر الخط المستقيم عند أقرب تقاطع على كل جانب من موضع النقر. عند إيقافه، تقسم الخط في موضع النقر."
+  },
+  "de": {
+    "prefs.sketch.break_at_intersections": "Geraden an den umliegenden Schnittpunkten teilen",
+    "prefs.sketch.break_at_intersections_help": "Bei aktivierter Option wird die Gerade auf jeder Seite der angeklickten Stelle am nächsten Schnittpunkt geteilt. Bei deaktivierter Option wird sie an der angeklickten Stelle geteilt."
+  },
+  "he": {
+    "prefs.sketch.break_at_intersections": "פיצול קווים בנקודות החיתוך הסמוכות",
+    "prefs.sketch.break_at_intersections_help": "כשהאפשרות פעילה, כלי הפיצול מפצל קו ישר בנקודת החיתוך הקרובה ביותר בכל צד של הלחיצה. כשהאפשרות כבויה, הקו מתפצל במקום הלחיצה."
+  },
+  "ja": {
+    "prefs.sketch.break_at_intersections": "直線を前後の交点で分割",
+    "prefs.sketch.break_at_intersections_help": "オンにすると、クリック位置の両側でそれぞれ最も近い交点で直線を分割します。オフにすると、クリックした位置で直線を分割します。"
+  },
+  "ko": {
+    "prefs.sketch.break_at_intersections": "주변 교점에서 직선 분할",
+    "prefs.sketch.break_at_intersections_help": "켜면 클릭한 위치 양쪽에서 가장 가까운 교점을 찾아 직선을 분할합니다. 끄면 클릭한 위치에서 직선을 분할합니다."
+  },
+  "vi": {
+    "prefs.sketch.break_at_intersections": "Tách đoạn thẳng tại các giao điểm lân cận",
+    "prefs.sketch.break_at_intersections_help": "Khi bật, công cụ tách đoạn thẳng tại giao điểm gần nhất ở mỗi phía của vị trí nhấp. Khi tắt, công cụ tách đoạn thẳng ngay tại vị trí nhấp."
+  },
+  "zh": {
+    "prefs.sketch.break_at_intersections": "在相邻交点处打断直线",
+    "prefs.sketch.break_at_intersections_help": "开启时，打断工具会在点击位置两侧各自最近的交点处拆分直线。关闭时，直线在点击位置拆分。"
+  }
+}

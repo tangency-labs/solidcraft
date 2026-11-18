@@ -18,13 +18,17 @@ use crate::scenario::Harness;
 use crate::selection::{AXES, CURVES, POINTS, SelInput};
 use crate::sketch_modify_ui::{Mod, commands};
 
-/// Break once between crossings, on an isolated line, and on a crossing itself. The
-/// selected line keeps its first piece and undo restores the entire sketch in one step.
+/// A click at 50 splits at 50 by default or at 40 and 70 with the intersection preference.
+/// The selected line keeps its first piece and undo restores the entire sketch in one step.
 #[test]
-fn break_click_splits_the_line_at_the_picked_point() {
-    for (crossings, pick) in [(true, 50.0), (false, 50.0), (true, 40.0)] {
+fn break_click_uses_the_line_split_preference() {
+    for (crossings, at_intersections, pick) in [(true, false, 50.0), (false, false, 50.0), (true, false, 40.0), (true, true, 50.0)] {
+        let cuts: &[f64] = if at_intersections { &[40.0, 70.0] } else { std::slice::from_ref(&pick) };
         let mut h = Harness::new();
         h.app.home.open = false;
+        if at_intersections {
+            h.call("ui.prefs", json!({"sketch_break_at_intersections": true}));
+        }
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.app.run("sketch.line", json!({"points": [[0,0], [100,0]], "ids": ["target"], "infer": false})).unwrap();
         if crossings {
@@ -41,12 +45,15 @@ fn break_click_splits_the_line_at_the_picked_point() {
         h.step(&json!({"click": {"sketch": [pick,0]}})).unwrap();
         let state = h.app.session.model.state();
         let after = &state.sketch(sid).unwrap().sketch;
-        assert_eq!(after.curves.len(), before.curves.len() + 1, "one split at {pick}, crossings={crossings}");
+        assert_eq!(after.curves.len(), before.curves.len() + cuts.len(), "click at {pick}, expected cuts {cuts:?}");
         let target = after.curve_index("target").unwrap();
-        let (start, split) = after.curves[target].kind.ends().unwrap();
-        let (other_start, end) = after.curves.last().unwrap().kind.ends().unwrap();
-        assert_eq!(split, other_start);
-        assert!(after.point(split).unwrap().dist(Vec2::new(pick, 0.0)) < 1e-6);
+        let (start, mut end) = after.curves[target].kind.ends().unwrap();
+        for (piece, &x) in after.curves[before.curves.len()..].iter().zip(cuts) {
+            let (next_start, next_end) = piece.kind.ends().unwrap();
+            assert_eq!(end, next_start);
+            assert!(after.point(end).unwrap().dist(Vec2::new(x, 0.0)) < 1e-6, "expected a split at {x}");
+            end = next_end;
+        }
         assert_eq!((start, end), before.curves[target].kind.ends().unwrap());
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch, before);

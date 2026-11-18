@@ -1878,6 +1878,8 @@ preference_settings! {
     construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// Break a straight line at the crossings around the click. Off by default, so Break cuts at the click.
+    sketch_break_at_intersections: bool = false, PAGE_SKETCH;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -7313,6 +7315,7 @@ mod tests {
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
+            ("sketch_break_at_intersections", json!(true), PAGE_SKETCH),
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
@@ -8914,6 +8917,7 @@ mod tests {
                 ("construction_line_classic", "prefs.construction_line_classic"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
                 ("sketch_auto_locate", "prefs.sketch.auto_locate"),
+                ("sketch_break_at_intersections", "prefs.sketch.break_at_intersections"),
                 ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),

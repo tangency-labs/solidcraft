@@ -113,6 +113,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.first_dimension_scales_about_origin",
         ];
         let right_labels = [
+            "prefs.sketch.break_at_intersections",
             "prefs.sketch.shortcut_again_ends_tool",
             "prefs.sketch.shortcut_cycles_modes",
             "prefs.ribbon_click_ends_tool",
@@ -206,6 +207,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                check(
+                    ui,
+                    "sketch_break_at_intersections",
+                    "prefs.sketch.break_at_intersections",
+                    Some("prefs.sketch.break_at_intersections_help"),
+                    &mut app.preferences.sketch_break_at_intersections,
+                );
                 check(
                     ui,
                     "shortcut_again_ends_tool",

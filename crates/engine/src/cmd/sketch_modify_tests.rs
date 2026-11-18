@@ -726,6 +726,41 @@ fn breaking_a_center_rectangle_diagonal_at_its_centre_keeps_one_centre() {
     }
 }
 
+#[test]
+fn single_point_break_keeps_an_isolated_lines_held_midpoint() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0,0], [10,0]], "ids": ["side"], "connect": false, "infer": false}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "side.start"}));
+    let mid = run(&mut s, "sketch.point", json!({"point": "mid:side"}))["point"].as_str().unwrap().to_owned();
+    let before = sketch(&s);
+    let out = run(&mut s, "sketch.break", json!({"curve": "side", "at": [5,0], "at_intersections": false}));
+    let pieces = ids(&out["curves"]);
+    assert_eq!(pieces.len(), 2);
+    let sk = sketch(&s);
+    let (start, left_end) = sk.curves[sk.curve_index(&pieces[0]).unwrap()].kind.ends().unwrap();
+    let (right_start, end) = sk.curves[sk.curve_index(&pieces[1]).unwrap()].kind.ends().unwrap();
+    assert_eq!(Some(left_end), sk.resolve_point(&mid));
+    assert_eq!(right_start, left_end);
+    assert_eq!(sk.points.len(), before.points.len());
+
+    run(&mut s, "sketch.drag", json!({"entity": sk.points[end].id, "from": [10,0], "to": [14,4]}));
+    let sk = sketch(&s);
+    let outer_end = sk.point(end).unwrap();
+    assert!(outer_end.dist(Vec2::new(14.0, 4.0)) < 1e-5);
+    assert!(sk.point(left_end).unwrap().dist((sk.point(start).unwrap() + outer_end) * 0.5) < 1e-6);
+}
+
+#[test]
+fn single_point_break_refuses_an_infinite_target_without_changing_the_sketch() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0,0], [10,0]], "ids": ["axis"], "connect": false, "infer": false}));
+    run(&mut s, "sketch.infinite", json!({"curves": ["axis"]}));
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let error = s.execute("sketch.break", &json!({"curve": "axis", "at": [5,0], "at_intersections": false})).unwrap_err().to_string();
+    assert!(error.contains("infinite"), "{error}");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before);
+}
+
 /// A line's held midpoint broken at a crossing line that only happens to have its middle there
 /// joins the two pieces at that point and keeps it on the crossing line, without tying the
 /// crossing line's middle to it.

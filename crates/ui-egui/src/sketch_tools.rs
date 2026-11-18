@@ -1373,7 +1373,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     tool.point_picks.clear();
                     let mut params = json!({"curve": id, "at": xy(p)});
                     if cmd == "sketch.break" && straight {
-                        params["at_intersections"] = json!(false);
+                        params["at_intersections"] = json!(app.preferences.sketch_break_at_intersections);
                     }
                     let _ = app.run(cmd, params);
                 }
