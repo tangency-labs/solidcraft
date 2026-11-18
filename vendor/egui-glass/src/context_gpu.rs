@@ -12,10 +12,12 @@ fn render_state() -> RenderState {
         let (device, queue) = adapter.request_device(&Default::default()).await.expect("GPU device required");
         let target_format = wgpu::TextureFormat::Rgba8Unorm;
         let renderer = egui_wgpu::Renderer::new(&device, target_format, Default::default());
+        let device_lost = egui_wgpu::DeviceLost::watch(&device);
         RenderState {
-            adapter, available_adapters: vec![], device, queue, target_format,
+            adapter, available_adapters: vec![], instance, device, queue, target_format,
+            msaa_samples: 1, msaa_supported: vec![1],
             renderer: Arc::new(egui::mutex::RwLock::new(renderer)),
-            surface_config: egui_wgpu::SurfaceConfig::LOW_LATENCY,
+            device_lost,
         }
     })
 }

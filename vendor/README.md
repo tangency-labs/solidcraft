@@ -224,3 +224,9 @@ Glass surfaces (blur, refraction, tint, bevel) for glass themes, from commit
   spare `shadow_geo.z`): at 1 the rim shows the backdrop up to `refraction` past the edge, as
   upstream; at 0 the shift shrinks with the distance to the edge, so the rim only magnifies what is
   under the glass.
+- Tests: `vendor/` is outside the workspace, so nothing runs egui_glass's own tests by default.
+  To run them against the workspace's patched egui, narrow the root `Cargo.toml`'s `exclude` to
+  `["solidcore", "vendor/egui", "vendor/winit"]` (egui_glass then joins the workspace as a path
+  dependency) and run `cargo test -p egui_glass --lib`; don't commit that change. The three tests
+  that need a GPU adapter are `#[ignore]`d. `pollster` is a dev-dependency for them, and the tests
+  build their `RenderState` for egui-wgpu 0.37.

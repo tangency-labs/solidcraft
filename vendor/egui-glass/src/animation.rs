@@ -44,9 +44,10 @@ mod tests {
 
     fn frame(ctx: &Context, time: f64, state: Interaction, duration: f32) -> GlassStyle {
         let mut style = GlassStyle::regular().capsule();
-        let _ = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |_| {
+        let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |_| {
             style = animate_style(ctx, Id::new("control"), GlassStyle::regular().capsule(), state, duration);
         });
+        out.textures_delta.clear();
         style
     }
 
@@ -86,7 +87,7 @@ mod tests {
             let mut rect = egui::Rect::NOTHING;
             for hovered in [false, true] {
                 let events = if hovered { vec![egui::Event::PointerMoved(rect.center())] } else { vec![] };
-                let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                let mut out = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
                     ui.style_mut().animation_time = host_time;
                     let (area, response) = ui.allocate_exact_size(egui::vec2(100.0, 40.0), egui::Sense::click());
                     rect = area;
@@ -94,6 +95,7 @@ mod tests {
                     let style = interaction_style(ui, &response, base, animate);
                     assert_eq!(style, if hovered { base.hovered() } else { base });
                 });
+                out.textures_delta.clear();
             }
         }
     }
