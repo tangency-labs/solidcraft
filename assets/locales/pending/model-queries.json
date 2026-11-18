@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.model.classify_point": "Classify Point Against Body",
+    "cmd.model.face_outlines": "Read Face Outlines"
+  },
+  "ar": {
+    "cmd.model.classify_point": "تصنيف موضع النقطة بالنسبة إلى الجسم",
+    "cmd.model.face_outlines": "قراءة حدود الأوجه"
+  },
+  "de": {
+    "cmd.model.classify_point": "Punkt am Körper klassifizieren",
+    "cmd.model.face_outlines": "Flächenkonturen lesen"
+  },
+  "he": {
+    "cmd.model.classify_point": "סיווג מיקום נקודה ביחס לגוף",
+    "cmd.model.face_outlines": "קריאת גבולות פאות"
+  },
+  "ja": {
+    "cmd.model.classify_point": "ボディに対する点の位置を分類",
+    "cmd.model.face_outlines": "面の境界を読み取る"
+  },
+  "ko": {
+    "cmd.model.classify_point": "바디에 대한 점의 위치 분류",
+    "cmd.model.face_outlines": "면 경계 읽기"
+  },
+  "vi": {
+    "cmd.model.classify_point": "Phân loại vị trí điểm so với thân",
+    "cmd.model.face_outlines": "Đọc đường biên của mặt"
+  },
+  "zh": {
+    "cmd.model.classify_point": "判定点相对于实体的位置",
+    "cmd.model.face_outlines": "读取面的边界"
+  }
+}

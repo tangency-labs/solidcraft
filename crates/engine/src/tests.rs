@@ -62,6 +62,152 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 #[test]
+fn exact_model_queries_box_paging_and_classification() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Part"}));
+    let undo = s.undo.len();
+    let before = serde_json::to_value(&s.doc).unwrap();
+    let all = run(&mut s, "model.face_outlines", json!({"body":"Part"}));
+    let faces = all["faces"].as_array().unwrap();
+    assert_eq!(faces.len(), 6);
+    assert!(all["next"].is_null());
+    let top = faces.iter().find(|f| f["plane"]["normal"][2].as_f64().unwrap() > 0.99).unwrap();
+    let outer = top["loops"][0]["outer"].as_array().unwrap();
+    assert_eq!(outer.len(), 4);
+    assert!(top["loops"][0]["holes"].as_array().unwrap().is_empty());
+    let mut corners = Vec::new();
+    for seg in outer {
+        assert_eq!(seg["type"], "line");
+        for key in ["a", "b"] {
+            let p = seg[key].as_array().unwrap();
+            assert!((p[2].as_f64().unwrap() - 10.).abs() < 1e-9);
+            corners.push((p[0].as_f64().unwrap() as i32, p[1].as_f64().unwrap() as i32));
+        }
+    }
+    corners.sort();
+    corners.dedup();
+    assert_eq!(corners, [(0, 0), (0, 30), (40, 0), (40, 30)]);
+    let mut offset = 0;
+    let mut seen = Vec::new();
+    loop {
+        let page = run(&mut s, "model.face_outlines", json!({"body":"Part","limit":1,"offset":offset}));
+        assert_eq!(page["faces"].as_array().unwrap().len(), 1);
+        seen.push(page["faces"][0]["index"].as_u64().unwrap());
+        let Some(next) = page["next"].as_u64() else { break };
+        assert_eq!(next, offset + 1);
+        offset = next;
+    }
+    assert_eq!(seen, faces.iter().map(|f| f["index"].as_u64().unwrap()).collect::<Vec<_>>());
+    for (point, class) in [([20., 15., 5.], "inside"), ([41., 15., 5.], "outside"), ([20., 15., 10.], "on")] {
+        let got = run(&mut s, "model.classify_point", json!({"body":"Part","point":point}));
+        assert_eq!(got["class"], class);
+    }
+    let selected = run(&mut s, "model.face_outlines", json!({"body":"Part","faces":[{"index":top["index"]}]}));
+    assert_eq!(selected["faces"][0], *top);
+    for params in [json!({"body":"Part","faces":[]}), json!({"body":"Part","offset":faces.len()})] {
+        let page = run(&mut s, "model.face_outlines", params);
+        assert_eq!(page["body"], "Part");
+        assert_eq!(page["faces"], json!([]));
+        assert!(page["next"].is_null());
+    }
+    for id in ["model.face_outlines", "model.classify_point"] {
+        let spec = crate::command_specs().into_iter().find(|c| c.id == id).unwrap();
+        assert_eq!(spec.effect, craft_plugin::Effect::Read);
+        let schemas = run(&mut s, "engine.describe", json!({"command":id}));
+        assert!(schemas["input"].is_object() && schemas["output"].is_object());
+    }
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
+}
+
+#[test]
+fn exact_model_queries_hole_circle_and_fillet_arc() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Part"}));
+    run(&mut s, "solid.hole", json!({"position":[20,15,10],"diameter":10,"body":"Part"}));
+    let page = run(&mut s, "model.face_outlines", json!({"body":"Part"}));
+    let top = page["faces"].as_array().unwrap().iter().find(|f| f["plane"]["normal"][2].as_f64().unwrap() > 0.99).unwrap();
+    let holes = top["loops"][0]["holes"].as_array().unwrap();
+    assert_eq!(holes.len(), 1);
+    let circle = &holes[0][0];
+    assert_eq!(holes[0].as_array().unwrap().len(), 1);
+    assert_eq!(circle["type"], "circle");
+    assert!((circle["radius"].as_f64().unwrap() - 5.).abs() < 1e-9);
+    assert!((circle["sweep_rad"].as_f64().unwrap().abs() - std::f64::consts::TAU).abs() < 1e-9);
+    for (v, expected) in circle["center"].as_array().unwrap().iter().zip([20., 15., 10.]) {
+        assert!((v.as_f64().unwrap() - expected).abs() < 1e-8);
+    }
+    assert_eq!(run(&mut s, "model.classify_point", json!({"body":"Part","point":[20,15,5]}))["class"], "outside");
+    run(&mut s, "solid.fillet", json!({"body":"Part","edges":[[0,0,5]],"radius":3}));
+    let page = run(&mut s, "model.face_outlines", json!({"body":"Part"}));
+    let top = page["faces"].as_array().unwrap().iter().find(|f| f["plane"]["normal"][2].as_f64().unwrap() > 0.99).unwrap();
+    let arc = top["loops"][0]["outer"].as_array().unwrap().iter().find(|e| e["type"] == "arc").unwrap();
+    assert!((arc["radius"].as_f64().unwrap() - 3.).abs() < 1e-8);
+    assert!((arc["sweep_rad"].as_f64().unwrap().abs() - PI / 2.).abs() < 1e-8);
+}
+
+#[test]
+fn exact_model_queries_refuse_invalid_inputs() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Part"}));
+    for p in [
+        json!({}),
+        json!({"body":"missing"}),
+        json!({"body":"Part","limit":0}),
+        json!({"body":"Part","limit":65}),
+        json!({"body":"Part","offset":7}),
+        json!({"body":"Part","faces":[{"index":999}]}),
+        json!({"body":"Part","faces":[{"index":-1}]}),
+        json!({"body":"Part","faces":vec![json!({"index":0}); 257]}),
+        json!({"body":"Part","extra":true}),
+    ] {
+        assert!(s.execute("model.face_outlines", &p).is_err(), "{p}");
+    }
+    for p in [
+        json!({}),
+        json!({"body":"missing","point":[0,0,0]}),
+        json!({"body":"Part","point":[0,0]}),
+        json!({"body":"Part","point":[null,0,0]}),
+        json!({"body":"Part","point":"NaN"}),
+    ] {
+        assert!(s.execute("model.classify_point", &p).is_err(), "{p}");
+    }
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":10,"body_name":"Cylinder","operation":"new"}));
+    let faces = run(&mut s, "model.faces", json!({"body":"Cylinder"}));
+    let curved = faces["faces"].as_array().unwrap().iter().find(|f| f["cylinder"].is_object()).unwrap();
+    assert!(s.execute("model.face_outlines", &json!({"body":"Cylinder","faces":[{"index":curved["index"]}]})).is_err());
+}
+
+#[test]
+fn exact_model_queries_use_placed_model_coordinates() {
+    let mut s = Session::default();
+    let component = run(&mut s, "component.create", json!({"name":"Fixture","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Part"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":component["occurrence"],"translate":[100,200,300]}));
+    assert_eq!(run(&mut s, "model.classify_point", json!({"body":"Part","point":[120,215,305]}))["class"], "inside");
+    assert_eq!(run(&mut s, "model.classify_point", json!({"body":"Part","point":[20,15,5]}))["class"], "outside");
+    let page = run(&mut s, "model.face_outlines", json!({"body":"Part"}));
+    let top = page["faces"].as_array().unwrap().iter().find(|f| f["plane"]["normal"][2].as_f64().unwrap() > 0.99).unwrap();
+    for line in top["loops"][0]["outer"].as_array().unwrap() {
+        for key in ["a", "b"] {
+            assert!((line[key][2].as_f64().unwrap() - 310.).abs() < 1e-8);
+            assert!((100. - 1e-8..=140. + 1e-8).contains(&line[key][0].as_f64().unwrap()));
+            assert!((200. - 1e-8..=230. + 1e-8).contains(&line[key][1].as_f64().unwrap()));
+        }
+    }
+}
+
+#[test]
+fn exact_model_queries_refuse_mesh_bodies() {
+    let mut s = mesh_convert::imported_box();
+    for (id, params) in [("model.face_outlines", json!({"body":"Mesh"})), ("model.classify_point", json!({"body":"Mesh","point":[5,10,15]}))] {
+        let error = s.execute(id, &params).unwrap_err().to_string();
+        assert!(error.contains("mesh bodies are not supported"), "{error}");
+    }
+}
+
+#[test]
 fn round_as_tall_as_a_disc_uses_up_its_wall() {
     // #190: a disc 13 in radius and 2 high, its top edge rounded by 2.
     let mut s = Session::default();

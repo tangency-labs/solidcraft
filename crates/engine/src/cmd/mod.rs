@@ -120,6 +120,7 @@ pub(crate) mod measure_sel;
 mod measure_shape;
 mod mesh;
 mod metadata;
+mod model_queries;
 pub(crate) mod motion;
 mod notes;
 mod parts;
@@ -494,6 +495,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
+    v.extend(model_queries::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
     v.extend(compare_picture::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());
