@@ -196,6 +196,7 @@ mod tab_views;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
+mod wood_grain;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -525,6 +526,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(file_library::COMMANDS.iter());
     v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
+    v.extend(wood_grain::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());

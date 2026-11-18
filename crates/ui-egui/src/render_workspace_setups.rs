@@ -507,6 +507,7 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
         param_comments,
         materials,
         print_faces,
+        wood_grain,
         user_materials,
         appearances,
         body_components,

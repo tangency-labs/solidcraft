@@ -107,6 +107,12 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
     Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
 }
 
+/// Stock dimensions along the part, not the world axes; curved parts are approximate.
+pub fn stock_box(body: &Body) -> Result<solidcore_ops::measure::StockBox> {
+    let (b, _) = body.ops_body().ok_or_else(|| crate::KernelError::Invalid("stock size requires an exact B-rep body".into()))?;
+    b.stock_box().map_err(|e| crate::KernelError::Invalid(format!("stock size: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

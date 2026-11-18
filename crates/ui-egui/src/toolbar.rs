@@ -75,7 +75,7 @@ fn running_command(app: &SolveApp) -> Option<String> {
 /// Whether the toolbar shows command `id` pressed: its tool or dialog is open, or it turned on
 /// the view analysis on now (one at a time, `Session::active_analysis`), its tool running or not.
 pub(crate) fn shows_pressed(app: &SolveApp, id: &str) -> bool {
-    running_command(app).as_deref() == Some(id) || app.session.active_analysis() == Some(id)
+    running_command(app).as_deref() == Some(id) || app.session.active_analysis() == Some(id) || (id == "view.grain" && app.ui.show_grain)
 }
 
 /// [`shows_pressed`] for a ribbon button: a command with a persistent effect is pressed only while
