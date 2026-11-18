@@ -207,6 +207,7 @@ material.inspect                  materials and their properties
 material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
+mesh.reduce                       reduces a mesh without changing the source; tested in crates/engine/src/tests/mesh_convert.rs::reduction_persists_a_separate_mesh_for_conversion_and_undo
 model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
