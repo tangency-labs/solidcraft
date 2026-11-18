@@ -203,6 +203,11 @@ pub enum WindowTarget {
         window: WindowId,
         index: Option<usize>,
     },
+    /// Transfer into an explicitly targeted cell in another window.
+    Dock {
+        window: WindowId,
+        placement: Placement,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -222,6 +227,7 @@ pub enum MoveError {
     TooManyWindows,
     LastViewOfMainWindow,
     BadGeometry,
+    BadPlacement,
 }
 
 impl MoveError {
@@ -232,6 +238,7 @@ impl MoveError {
             Self::TooManyWindows => "too_many_windows",
             Self::LastViewOfMainWindow => "last_view_of_main_window",
             Self::BadGeometry => "bad_geometry",
+            Self::BadPlacement => "bad_placement",
         }
     }
 }
@@ -303,6 +310,7 @@ impl ViewSet {
         if self.window_id != 0 {
             return Err(MoveError::NoSuchWindow);
         }
+        let mut docked = None;
         let (window, index, created, placement) = match target {
             WindowTarget::New { placement } => {
                 if from == 0 && self.len() == 1 {
@@ -315,6 +323,20 @@ impl ViewSet {
                     return Err(MoveError::BadGeometry);
                 }
                 (self.allocate_window_id(), None, true, placement)
+            }
+            WindowTarget::Dock { window, placement } => {
+                let destination = self.views_of(window).ok_or(MoveError::NoSuchWindow)?;
+                if from == window {
+                    return Err(MoveError::BadPlacement);
+                }
+                if from == 0 && self.len() == 1 {
+                    return Err(MoveError::LastViewOfMainWindow);
+                }
+                let kind = self.views_of(from).and_then(|strip| strip.get(view)).ok_or(MoveError::NoSuchView)?.kind;
+                let tiles = destination.preview_incoming_placement(view, kind, placement).ok_or(MoveError::BadPlacement)?;
+                let active = if tiles.contains(destination.active) { destination.active } else { view };
+                docked = Some((tiles, active));
+                (window, None, false, self.window(window).and_then(|child| child.placement.clone()))
             }
             WindowTarget::Existing { window, index } => {
                 if self.views_of(window).is_none() {
@@ -357,8 +379,13 @@ impl ViewSet {
             let strip = self.strip_mut(window).ok_or(MoveError::NoSuchWindow)?;
             let at = index.unwrap_or(strip.len()).min(strip.len());
             strip.views.insert(at, moved);
-            strip.fill_empty(0, view);
-            strip.active = view;
+            if let Some((tiles, active)) = docked {
+                strip.active = active;
+                strip.tiles = (tiles.len() > 1).then_some(tiles);
+            } else {
+                strip.fill_empty(0, view);
+                strip.active = view;
+            }
         }
         Ok(result)
     }
@@ -905,7 +932,12 @@ impl ViewSet {
 
     /// What the window would show if it placed this view at the given target.
     pub fn preview_placement(&self, id: u64, placement: Placement) -> Option<Tiles> {
-        if !self.get(id).is_some_and(|view| view.kind.can_tile()) || !self.active().kind.can_tile() {
+        self.preview_incoming_placement(id, self.get(id)?.kind, placement)
+    }
+
+    /// Preview with the incoming view's kind before transferring it to this strip.
+    pub fn preview_incoming_placement(&self, id: u64, kind: ViewKind, placement: Placement) -> Option<Tiles> {
+        if !kind.can_tile() || !self.active().kind.can_tile() {
             return None;
         }
         let next = if let Some(tiles) = self.tiles.as_ref().filter(|tiles| tiles.contains(self.active)) {
@@ -913,7 +945,12 @@ impl ViewSet {
         } else {
             Tiles::Leaf(self.active).placed(id, placement)
         }?;
-        next.views().into_iter().all(|other| other == id || self.can_tile_with(id, other)).then_some(next)
+        next.views()
+            .into_iter()
+            .all(|other| {
+                other == id || self.get(other).is_some_and(|view| view.kind.can_tile() && (kind != ViewKind::Render || view.kind != ViewKind::Render))
+            })
+            .then_some(next)
     }
 
     /// Place an open view in the current window. Keep focus if it still has a cell.
@@ -1201,6 +1238,34 @@ mod tests {
         assert_eq!(child.active().id, model);
         assert_ne!(main.active().id, model);
         assert_eq!(main.active().kind, ViewKind::Model);
+    }
+
+    #[test]
+    fn cross_window_dock_preserves_views_and_rejects_a_stale_cell() {
+        let mut views = ViewSet::default();
+        let ground = views.active().id;
+        let incoming = views.open(ViewKind::Model, None, false);
+        let destination = views.open(ViewKind::Model, None, false);
+        let window = views.move_to_window(destination, new_window()).unwrap().window;
+        let before = views.clone();
+        assert_eq!(
+            views.move_to_window(incoming, WindowTarget::Dock { window, placement: Placement::Replace(ground) }),
+            Err(MoveError::BadPlacement)
+        );
+        assert_eq!(views, before);
+
+        let placement = Placement::Split { target: destination, edge: Edge::Right };
+        let layout = views.views_of(window).unwrap().preview_incoming_placement(incoming, ViewKind::Model, placement).unwrap();
+        views.move_to_window(incoming, WindowTarget::Dock { window, placement }).unwrap();
+        assert_eq!(views.views_of(window).unwrap().tiles(), Some(&layout));
+        assert_eq!(views.views_of(window).unwrap().active().id, destination);
+        assert_eq!(views.window_of(incoming), Some(window));
+        assert_eq!(views.window_of(ground), Some(0));
+
+        views.move_to_window(incoming, WindowTarget::Dock { window: 0, placement: Placement::Replace(ground) }).unwrap();
+        assert_eq!(views.active().id, incoming);
+        assert_eq!(views.window_of(ground), Some(0));
+        assert_eq!(views.views_of(window).unwrap().active().id, destination);
     }
 
     fn new_window() -> WindowTarget {

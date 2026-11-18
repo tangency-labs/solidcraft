@@ -42,6 +42,9 @@ pub struct TabViewMoveToWindowParams {
     /// Zero-based insertion position in an existing strip, after removing the view if it was there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<usize>,
+    /// A tile placement in an existing destination window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<super::tab_views::TabViewPlacement>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<TabWindowDisplay>,
     /// Horizontal position in logical points relative to the selected display.

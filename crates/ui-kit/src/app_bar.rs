@@ -23,6 +23,7 @@ const TABS_KEPT: f32 = 124.0;
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
 const DESIGN_PILL_HEIGHT: f32 = 30.0;
+const DESIGN_GROUP_BACKING_HEIGHT: f32 = VIEW_HEIGHT + 2.0;
 const PILL_RADIUS: u8 = 8;
 /// The room a pill keeps right of its views: the +, a separator, the close button and its padding.
 const PILL_AFTER: f32 = 63.0;
@@ -1569,6 +1570,10 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     }
 }
 
+fn group_backing(rect: Rect) -> Rect {
+    rect.shrink2(vec2(0.0, (rect.height() - DESIGN_GROUP_BACKING_HEIGHT).max(0.0) * 0.5))
+}
+
 /// The selected design's tab as a pill (option A) in `pr`: its frame and separator, the views that
 /// fit as sub-tabs (the rest under "N more"), the +, and the close button. The name block (the
 /// design's name, which the caller draws) is the left part; a view dragged along the sub-tabs
@@ -1578,8 +1583,9 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let painter = ui.painter().clone();
     let line = Stroke::new(1.0, line_colour(&t));
     let cy = pr.center().y;
-    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
-    painter.rect_stroke(pr, PILL_RADIUS, line, egui::StrokeKind::Inside);
+    let backing = group_backing(pr);
+    painter.rect_filled(backing, PILL_RADIUS, t.app_bar_tab_active);
+    painter.rect_stroke(backing, PILL_RADIUS, line, egui::StrokeKind::Inside);
     let separator = |x: f32| painter.line_segment([pos2(x, cy - 9.0), pos2(x, cy + 9.0)], line);
     let name_end = pr.left() + 13.0 + g.dot + g.name_w + 10.0;
     separator(name_end + 0.5);
@@ -1773,7 +1779,7 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let cy = pr.center().y;
-    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
+    painter.rect_filled(group_backing(pr), t.radius_md, t.app_bar_tab_active);
     let slash_x = pr.left() + 13.0 + g.dot + g.name_w + 8.0;
     painter.text(pos2(slash_x, cy), Align2::LEFT_CENTER, "/", FontId::proportional(t.font_button), t.app_bar_text.gamma_multiply(0.5));
     let shown =

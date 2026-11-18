@@ -366,7 +366,9 @@ fn move_view(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Valu
         }
         match &target {
             WindowTarget::New { .. } if !can_create(app) => return Err("too_many_windows".into()),
-            WindowTarget::Existing { window, .. } if !app.view_windows.choices.iter().any(|choice| choice.id == *window) => {
+            WindowTarget::Existing { window, .. } | WindowTarget::Dock { window, .. }
+                if !app.view_windows.choices.iter().any(|choice| choice.id == *window) =>
+            {
                 return Err("no_such_window".into());
             }
             _ => {}
@@ -381,7 +383,15 @@ fn move_view(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Valu
 
 pub(crate) fn detach(app: &mut SolveApp, view: u64, request: &Value) -> Result<Value, String> {
     let target = match request.get("window").and_then(Value::as_u64).and_then(|id| WindowId::try_from(id).ok()) {
-        Some(window) => WindowTarget::Existing { window, index: request.get("index").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()) },
+        Some(window) => {
+            if let Some(placement) = request.get("placement") {
+                let placement = serde_json::from_value::<solidcraft_engine::schema::tab_views::TabViewPlacement>(placement.clone())
+                    .map_err(|error| error.to_string())?;
+                WindowTarget::Dock { window, placement: placement.into() }
+            } else {
+                WindowTarget::Existing { window, index: request.get("index").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()) }
+            }
+        }
         None => WindowTarget::New { placement: placement(app, view, request, None) },
     };
     move_view(app, view, target)

@@ -272,9 +272,14 @@ const MIN_CELL: egui::Vec2 = vec2(200.0, 140.0);
 
 /// Targets are ordered by view, then left, right, top, bottom and middle, then empty cells.
 pub(crate) fn dock_targets(app: &SolveApp, view: u64) -> Vec<DockTarget> {
+    let Some(view) = app.docs.views.get(view) else { return Vec::new() };
+    incoming_dock_targets(app, view, &crate::shell::covered_rects(app))
+}
+
+pub(crate) fn incoming_dock_targets(app: &SolveApp, view: &solidcraft_views::DesignView, covers: &[Rect]) -> Vec<DockTarget> {
     let Some(area) = app.shell.content.filter(|r| r.is_finite() && r.is_positive()) else { return Vec::new() };
     let (cells, ground) = layout_bounds(app, area);
-    zones(&app.docs.views, view, cells, ground, &crate::shell::covered_rects(app))
+    zones_for_kind(&app.docs.views, view.id, view.kind, cells, ground, covers)
 }
 
 /// Keep an entered target until the pointer is six points beyond it. A value under one
@@ -299,7 +304,12 @@ pub(crate) fn dock_at(targets: &[DockTarget], pointer: Pos2, previous: Option<Pl
         .map(|(target, distance)| (target, 1.0 - distance / ATTRACTION))
 }
 
+#[cfg(test)]
 fn zones(views: &ViewSet, view: u64, area: Rect, ground: Rect, covers: &[Rect]) -> Vec<DockTarget> {
+    views.get(view).map_or_else(Vec::new, |view| zones_for_kind(views, view.id, view.kind, area, ground, covers))
+}
+
+fn zones_for_kind(views: &ViewSet, view: u64, kind: solidcraft_views::ViewKind, area: Rect, ground: Rect, covers: &[Rect]) -> Vec<DockTarget> {
     let active = views.active().id;
     let single = Tiles::Leaf(active);
     let tiled = views.tiles().filter(|_| views.is_tiled());
@@ -308,7 +318,7 @@ fn zones(views: &ViewSet, view: u64, area: Rect, ground: Rect, covers: &[Rect]) 
     let mut zones = Vec::new();
     let mut add = |placement: Placement, zone: Rect| {
         let button_zone = target_area(zone, covers);
-        let Some(next) = views.preview_placement(view, placement) else { return };
+        let Some(next) = views.preview_incoming_placement(view, kind, placement) else { return };
         let cells = next.rects(to_tile(area), GUTTER);
         let cell = |view| cells.iter().find(|(id, _)| *id == view).map(|(_, rect)| from_tile(*rect));
         let Some(rect) = cell(view) else { return };
@@ -378,6 +388,7 @@ pub(crate) fn commit_dock(app: &mut SolveApp, view: u64, placement: Placement) -
 
 /// Paint the view menu's click-to-place controls. Dragging uses the same targets.
 pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::view_window_drag::record_canvas(app, ctx);
     let Some((tab, view)) = app.docs.view_placement else { return };
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     if escape || tab != app.docs.active_tab() {
