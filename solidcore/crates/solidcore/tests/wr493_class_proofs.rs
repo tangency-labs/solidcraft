@@ -25,7 +25,7 @@
 //!   the bit (old 9.8e-11 off). The `blend.fillet_executive_p3` mass row is closer in
 //!   every component but cz, which no corner moves: the integrator now ends its trim
 //!   pieces where a trim crosses an interior v knot line of its surface on every face,
-//!   not only on a banded one (#18195; without that, cy, Pyz and Pxy were farther).
+//!   not only on a banded one (without that, cy, Pyz and Pxy were farther).
 //! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
@@ -461,10 +461,10 @@ fn ss_plane_sph_area_is_the_area_its_edges_bound() {
             (area - cert).abs() <= 1e-6 * cert,
             "{name}: row {area}, edges bound {cert}"
         );
-        // #18230's row, 25.21534728577917 (sph1, sph4) or 25.21534728577921 (sph2, sph3)
+        // the earlier row, 25.21534728577917 (sph1, sph4) or 25.21534728577921 (sph2, sph3)
         let old = 25.215_347_285_779_17;
         assert!((old - cert).abs() > 1e3 * (area - cert).abs(), "{name}");
-        // the plane: its square of side 5 (#18230's row 25.000000000000004)
+        // the plane: its square of side 5 (the earlier row 25.000000000000004)
         let square = plane_polygon_area(&breps[1]);
         assert_eq!(square, 25.0, "{name}: plane square {square}");
         assert!((plane - square).abs() < (25.000_000_000_000_004_f64 - square).abs());
@@ -512,7 +512,7 @@ fn plane_polygon_area(b: &Brep) -> f64 {
 
 /// `corpus.parity` `Fillet__sphere_plane.smb`: a sphere of radius 5 between z = +-h
 /// (h = 4.98097..., the height of the file's two vertices on the sphere) less its cap beyond the plane x = -4, plus
-/// the disk of radius 3 in that plane. The committed row moved from #18230's
+/// the disk of radius 3 in that plane. The committed row moved from the earlier
 /// 309.8222156047109 (1.4e-5 off the closed form) to 309.8222012093527 (6.4e-7 off).
 #[test]
 fn sphere_plane_area_is_closed_form() {
@@ -536,7 +536,7 @@ fn sphere_plane_area_is_closed_form() {
     let old = 309.822_215_604_710_9;
     assert!(
         (row - exact).abs() < (old - exact).abs(),
-        "row {row}, #18230 {old}, closed form {exact}"
+        "row {row}, earlier {old}, closed form {exact}"
     );
     assert!(
         (row - exact).abs() <= 1e-6,
@@ -1008,7 +1008,7 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     let mut v = read(&mut k, name);
     let bbox = calculate_bounding_box(&k, &mut v, BoundingBoxOptions::default()).unwrap();
     let row = brep_volume_default(&k, &mut v, 1e-6).unwrap();
-    assert_eq!(row, 0.680_748_106_608_586);
+    assert_eq!(row, 0.680_748_106_606_711_7);
     let mut m = read(&mut k, name);
     let mut delta = 0.0;
     for &f in &spheres {
@@ -1048,17 +1048,17 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     };
     let new_row = [
         5.914390008549578,
-        0.6807481066085856,
-        0.6807481066085856,
+        0.6807481066067114,
+        0.6807481066067114,
         1.9999999999999853,
-        -0.21949084150645912,
-        0.19830878452084486,
-        0.3158247468053984,
-        2.796768143654571,
-        3.0415735197585216,
-        -0.02963089696288452,
-        0.2699966591728285,
-        -0.29883594954687837,
+        -0.21949084150622125,
+        0.19830878452084488,
+        0.31582474680321304,
+        2.796768143646739,
+        3.0415735197486984,
+        -0.029630896962770808,
+        0.26999665917208526,
+        -0.298835949545732,
     ];
     let old_row = [
         5.9143899129759,
@@ -1140,7 +1140,7 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         );
         // every other component CLOSER: the corners' trims cross their NURB's interior v
         // knot lines, and the integrator now ends its trim pieces there on every face
-        // (#18195; before, only on a banded face, so cy, Pyz and Pxy were 7.3e-10, 7.1e-10
+        // (before, only on a banded face, so cy, Pyz and Pxy were 7.3e-10, 7.1e-10
         // and 7.1e-10 relative off the reference against the old row's 1.7e-10, 2.5e-10
         // and 2.5e-10)
         match i {

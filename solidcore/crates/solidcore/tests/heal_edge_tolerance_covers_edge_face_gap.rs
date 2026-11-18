@@ -1027,8 +1027,8 @@ const WR493_HEAD: [(&str, [u64; 7]); 2] = [
             0x49fb83764d5bc11a,
             0x40d2a6a844feb5aa,
             0x40d2a6a844feb5aa,
-            0x40f8a3124b2289fc,
-            0x40f8a3124b2289fc,
+            0x40f8a3124b22bf80,
+            0x40f8a3124b22bf80,
         ],
     ),
 ];

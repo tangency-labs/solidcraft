@@ -2001,9 +2001,8 @@ pub fn brep_properties_in_box(
 }
 
 /// [`brep_properties_in_box`] and its summands: each face use's, closure's and wire
-/// edge's contribution as it is added to the total, in order (#18195: the rounding of the
-/// total is at most `gamma_(n-1)` times the sum of the summands' magnitudes, per
-/// component). The total is the same, bit for bit.
+/// edge's contribution as it is added to the total, in order (the rounding of the total is at most `gamma_(n-1)` times the sum of the
+/// summands' magnitudes, per component). The total is the same, bit for bit.
 ///
 /// # Errors
 ///

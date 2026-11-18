@@ -108,7 +108,7 @@
 //!   (`topology::face::p3`). No input-driven recursion.
 //! - **Found spheres keep the tested NURB** (WR-493, the SolidCraft fork's
 //!   tangency-labs/smlib@7ea6a96): the sphere `IsNurbSurfaceSphere` finds keeps the
-//!   tested NURB (`SetFromGwNurb`), its sweep interval the polar curve's (#2073).
+//!   tested NURB (`SetFromGwNurb`), its sweep interval the polar curve's.
 //!   Upstream keeps the NURB made from the fitted circles. The fork also widens the
 //!   half-meridian test to `180 + 360 * SM_EFF_ZERO` degrees; that is not taken, since
 //!   the angles' rounding (far spheres, below) already covers it and no more.
@@ -2355,7 +2355,7 @@ impl Sphere {
         ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
         // (not in the fork) the rebuild takes the sweep interval from one iso circle and
         // the polar curve from another; they differ beyond the check's 1e-12 on a small
-        // sphere. The interval is the polar curve's (#2073).
+        // sphere. The interval is the polar curve's.
         if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
             let d = sphere.base.anal_uv_domain;
             sphere.base.anal_uv_domain =
