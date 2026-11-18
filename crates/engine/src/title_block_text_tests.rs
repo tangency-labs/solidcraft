@@ -118,6 +118,9 @@ fn labels_and_values_sit_by_the_cell_text_rule() {
 #[test]
 fn text_typed_over_a_cell_replaces_its_value_and_a_field_with_none_shows_nothing() {
     let (mut s, sheet) = drawing();
+    // A new drawing's sheet documents the design (#19009), so its number would show the design's
+    // name: the sheet documents nothing here, so the field has no value.
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": null}));
     let number = placed(&s, "identification_number").value_box;
     // The runs in the cell's value box: its value.
     let shown = |s: &Session| -> Vec<(String, Vec2)> {

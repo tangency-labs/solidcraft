@@ -265,6 +265,41 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     assert_eq!(open_one(&s).name, s.doc.name);
 }
 
+/// A new drawing's first sheet documents the design it draws (#19009), so its title block shows the
+/// design's name, material and mass, and the design's name as its number until the drawing has one,
+/// also with standard views, a sheet named or no title block,
+/// and after a template is applied. A template saved from it still documents nothing.
+#[test]
+fn a_new_drawings_title_block_shows_the_design() {
+    let mut s = design();
+    run(&mut s, "material.assign", json!({"bodies": ["Plate"], "material": "Steel"}));
+    let cell = |made: &Value, name: &str| {
+        let cells = made["sheets"][0]["title_block_cells"].as_array().unwrap();
+        cells.iter().find(|cell| cell["name"] == name).map(|cell| cell["text"].clone()).unwrap_or(Value::Null)
+    };
+    let own = |s: &Session| json!({"source": ids::encode(open_one(s).own_source().unwrap()), "component": 0});
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!(made["sheets"][0]["documents"], own(&s));
+    assert_eq!(cell(&made, "title"), json!(s.doc.name));
+    assert_eq!(cell(&made, "identification_number"), json!(s.doc.name), "the design's name until the drawing has a number");
+    assert_eq!(cell(&made, "material"), json!("Steel"));
+    let mass = cell(&made, "mass");
+    assert!(mass.as_str().is_some_and(|mass| mass.ends_with(" kg") && mass != "0.00 kg"), "{mass}");
+    for p in [json!({"standard_views": true}), json!({"first_sheet_name": "Front", "omit_first_sheet_title_block": true})] {
+        run(&mut s, "drawing.close", json!({}));
+        let made = run(&mut s, "drawing.create", p.clone());
+        assert_eq!(made["sheets"][0]["documents"], own(&s), "{p}");
+    }
+    run(&mut s, "drawing.template.apply", json!({"template": "iso-a2-part"}));
+    let applied = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!((&applied["sheets"][0]["documents"], cell(&applied, "title")), (&own(&s), json!(s.doc.name)), "kept by a template");
+    let folder = Folder::new("drawing-documents-template");
+    run(&mut s, "drawing.template.save", json!({"path": folder.path("plain.json")}));
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"template": folder.path("plain.json")}));
+    assert_eq!(made["sheets"][0]["documents"], own(&s), "a drawing from a saved template documents its own design");
+}
+
 /// A drawing's ids come from the session's id source: two sessions seeded alike make a drawing
 /// with the same ids (where a crash replay starts), another seed other ids. A file change keeps
 /// the source, so the same holds for a drawing made after `file.new`.
@@ -357,6 +392,7 @@ fn a_drawing_of_another_designs_file_is_made_only_of_a_design_there() {
     let made = run(&mut s, "drawing.create", json!({"source": folder.path("plate.sc")}));
     assert_eq!(made["sources"], json!([{"id": made["sources"][0]["id"], "path": "plate.sc"}]), "kept beside the design");
     assert_eq!(open_one(&s).own_source(), None);
+    assert_eq!(made["sheets"][0]["documents"], Value::Null, "a linked design's file can't be read yet, so it documents nothing");
     let drawn = s.doc.clone();
     let e = refused(&mut s, "drawing.view.base", json!({"sheet": made["sheets"][0]["id"]}));
     assert!(e.contains("not supported yet") && e.contains("linked design"), "{e}");
@@ -397,11 +433,9 @@ fn a_linked_source_is_never_read_as_the_design_the_drawing_is_in() {
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     assert_eq!(cells(&mut s), nothing);
-    // Its own source reads the design it is in.
+    // Its own source reads the design it is in, as a new drawing's first sheet does.
     run(&mut s, "drawing.close", json!({}));
-    let made = run(&mut s, "drawing.create", json!({}));
-    let own = json!({"source": made["sources"][0]["id"]});
-    run(&mut s, "drawing.sheet.set", json!({"sheet": made["sheets"][0]["id"], "documents": own}));
+    run(&mut s, "drawing.create", json!({}));
     assert_ne!(cells(&mut s), nothing, "the design's own fields");
 }
 

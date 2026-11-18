@@ -15,7 +15,7 @@ use solidcraft_doc::bom::{self, Tree};
 use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::table::Kind;
 use solidcraft_doc::drawing::view::{Diagonal, MAX_VIEW_DEPTH, View, ViewKind};
-use solidcraft_doc::drawing::{self, Drawing, Source, template};
+use solidcraft_doc::drawing::{self, Drawing, SheetComponent, Source, template};
 use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::ids;
 use solidcraft_geom::cell::Warning;
@@ -196,6 +196,13 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The design it is in, unless it draws another design's file.
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
+    // The first sheet documents the design it draws, so its title block shows the design's title,
+    // material and mass (#19009). A linked design's file can't be read yet, so it documents nothing.
+    if linked.is_none()
+        && let Some(sheet) = d.sheets.first_mut()
+    {
+        Arc::make_mut(sheet).documents = Some(SheetComponent { source, component: 0 });
+    }
     d.sources.push(Source { id: source, path: linked });
     if let Some(units) = request.units {
         d.units = units;

@@ -548,10 +548,12 @@ fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
         assert!((added["value"].as_f64().unwrap() - value).abs() < 1e-9, "{added}");
         dimensions.push((added["dimension"].clone(), added["value"].clone(), added["text"].clone()));
     }
-    let svg = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
     let drawing = ids::encode(s.drawing("test").unwrap().id);
     let folder = Folder::new("drawing-m2-plate");
     run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    // Saved, the design takes its file's name, which its title block shows (#19009): the sheet
+    // is exported once it has its name.
+    let svg = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
     let mut opened = Session::default();
     run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
     run(&mut opened, "drawing.open", json!({"drawing": drawing}));

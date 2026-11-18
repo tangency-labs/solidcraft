@@ -1933,8 +1933,11 @@ fn the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo() {
     }
     assert!(five.iter().all(|added| state_of(&longer, added).drawn));
     let opened = reopened(&mut s, id, "w23a-sheet.solidcraft");
+    // Saved, the design takes its file's name, which its title block shows (#19009): the sheet
+    // is compared once it has its name.
+    let saved = sheet_now(&s);
     let again = sheet_now(&opened);
-    assert!(near_json(&scene_of(&again), &scene_of(&longer)), "the reopened sheet draws the same");
+    assert!(near_json(&scene_of(&again), &scene_of(&saved)), "the reopened sheet draws the same");
 }
 
 /// Fillets that take the plate's corners leave its faces measured (#11871): the upright edge where

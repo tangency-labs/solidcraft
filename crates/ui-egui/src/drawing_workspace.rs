@@ -1089,6 +1089,33 @@ mod tests {
         assert_eq!(drawing.view_centre(base.id).unwrap().y, drawing.view_centre(projected.id).unwrap().y);
     }
 
+    /// A sheet added from the Add Sheet window documents what the sheet it follows does, so its
+    /// title block shows the same design (#19009); after a sheet that documents nothing, nothing.
+    #[test]
+    fn an_added_sheet_documents_what_the_sheet_it_follows_does() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let add = |h: &mut Harness| {
+            h.frames(4);
+            assert!(start(&mut h.app, "drawing.sheet.add"));
+            h.frames(4);
+            h.step(&serde_json::json!({"click":{"handle":"dialog:ok"}})).unwrap();
+            h.frames(4);
+            let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+            (drawing.sheets.first().unwrap().documents, drawing.sheets.last().unwrap().documents, drawing.sheets.len())
+        };
+        let (first, added, count) = add(&mut h);
+        assert_eq!(count, 2);
+        assert!(first.is_some(), "a new drawing's sheet documents the design");
+        assert_eq!(added, first);
+        h.app.run("drawing.sheet.set", serde_json::json!({"sheet": "Sheet 2", "documents": null})).unwrap();
+        let (_, added, count) = add(&mut h);
+        assert_eq!((added, count), (None, 3), "after a sheet that documents nothing");
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn base_view_snapshot_draws_marks_while_a_drawing_is_open() {

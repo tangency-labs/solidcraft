@@ -455,6 +455,11 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
         if !form.name.is_empty() {
             params["name"] = json!(form.name);
         }
+        // The new sheet documents what the sheet it follows does, so its title block shows the same
+        // design (#19009). The command itself leaves a new sheet's documents to the caller.
+        if let Some(documents) = after.documents {
+            params["documents"] = json!({"source": ids::encode(documents.source), "component": documents.component});
+        }
         match form.title_block {
             1 => params["title_block"] = json!("built-in"),
             2 => params["title_block"] = Value::Null,
