@@ -26,13 +26,15 @@ Every moved bound's vertex is closer to the surfaces of the faces it bounds (lar
 -> 3.66e-7, 3.3e-13 -> 1.5e-14, 9.73e-6 -> 1.9e-14; one unchanged at 7.93e-7):
 `crates/solidcore/tests/wr_410_best_crossing_offset_vertices.rs`. The two extrudeHoles1 hi bounds are also checked
 against an exact reference, the common point of the surfaces the vertex belongs on (Newton's method, its own error
-bound under 1e-10):
+bound under 1e-10 given exact surface distances). For hi.y every distance is a closed form. For hi.z the revolution's
+distance is `surface_closest_point` with its normal, a numerical projection, not a closed form, and the error bound
+assumes that projection exact:
 - hi.y: its faces lie on a plane, a cone and a sphere. Their common point is 1.44e-6 from the first crossing's vertex
   (1.20e-6 in y) and 5.68e-7 from the moved one (1.65e-7 in y). The moved vertex is closer, not exact: it is still
   3.66e-7 off the cone. Its gap to one edge grows from 2.43e-6 to 2.62e-6 (under the vertex tolerance 1e-5).
 - hi.z: its faces lie on one sphere and one surface of revolution, and one of its edges is an exact ellipse, the
   sphere's section by the plane x = 27.5. The common point of the sphere, that plane and the revolution is 1.88e-6
-  from the first crossing's z and 9.03e-7 from the moved z (9.69e-7 in all). Edge 125, a fit on the revolution,
+  from the first crossing's z (4.72e-6 in all) and 9.03e-7 from the moved z (9.69e-7 in all). Edge 125, a fit on the revolution,
   passes 3.63e-6 from that point, so its gap to the vertex grows from 6.83e-7 to 2.85e-6 as the vertex moves toward
   it; the vertex's largest edge gap falls from 4.70e-6 to 2.85e-6.
 

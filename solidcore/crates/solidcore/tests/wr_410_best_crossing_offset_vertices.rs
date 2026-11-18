@@ -29,7 +29,9 @@
 //!
 //! The two extrudeHoles1 hi rows are also measured against an exact reference, the common
 //! point of the surfaces the vertex belongs on (Newton's method, its own error bound under
-//! 1e-10):
+//! 1e-10 given exact surface distances). For hi.y every distance is a closed form. For hi.z
+//! the revolution's distance is `surface_closest_point` with its normal, a numerical
+//! projection, not a closed form, and the error bound assumes that projection exact:
 //!
 //! - hi.y: its faces lie on a plane, a cone and a sphere (closed forms). Their common point is
 //!   1.44e-6 from the first crossing's vertex (1.20e-6 in y) and 5.68e-7 from the moved one
@@ -38,8 +40,9 @@
 //! - hi.z: its faces lie on one sphere and one surface of revolution, and one of its edges is
 //!   an exact ellipse, the sphere's section by the plane x = 27.5 (the trace of a consumed
 //!   face). The common point of the sphere, that plane and the revolution is 1.88e-6 from the
-//!   first crossing's z and 9.03e-7 from the moved z (9.69e-7 in all). Its edge 125, a fit on
-//!   the revolution, passes 3.63e-6 from that point, so that edge's gap to the vertex grows,
+//!   first crossing's z (4.72e-6 in all) and 9.03e-7 from the moved z (9.69e-7 in all). Its
+//!   edge 125, a fit on the revolution, passes 3.63e-6 from that point, so that edge's gap to
+//!   the vertex grows,
 //!   6.83e-7 -> 2.85e-6, as the vertex moves toward it (the vertex's largest edge gap falls,
 //!   4.70e-6 -> 2.85e-6).
 //!
