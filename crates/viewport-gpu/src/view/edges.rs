@@ -24,10 +24,6 @@ struct EdgeSeg {
     flags: u32,
     b: vec3<f32>,
     edge: u32,
-    side0: vec4<f32>,
-    side1: vec4<f32>,
-    faces: vec2<u32>,
-    spare: vec2<u32>,
 };
 
 @group(3) @binding(0) var<storage, read> edge_segs: array<EdgeSeg>;

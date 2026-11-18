@@ -607,17 +607,8 @@ impl InstancedMesh {
 /// | 0..12 | `a`: one end (3 × f32) |
 /// | 12..16 | `flags` (u32): bit 0, a vertex marker (a = b); the rest are free (hover, selection, visibility) |
 /// | 16..28 | `b`: the other end (3 × f32) |
-/// | 28..32 | `edge` (u32): the B-rep edge's index in its mesh's `edges` |
-/// | 32..48 | `side[0]`: the unit direction (3 × f32) across the segment into the triangle of the face on that side, then that triangle's height from the segment (f32, mm): how far the face surely reaches; 0 when there is no face on that side |
-/// | 48..64 | `side[1]`: the same for the face on the other side |
-/// | 64..72 | `faces` (2 × u32): the B-rep faces on the two sides, [`NO_FACE`] for none |
-/// | 72..80 | spare (2 × u32) |
-///
-/// Made from the same triangles the placement is drawn from ([`SharedEdges::new`]), so the
-/// sides describe the faces as drawn.
-pub const EDGE_SEG_SIZE: usize = 80;
-/// [`EDGE_SEG_SIZE`]'s face id for no face.
-pub const NO_FACE: u32 = u32::MAX;
+/// | 28..32 | `edge` (u32): the B-rep edge's index in its mesh's `edges` (`u32::MAX` in a coarser level) |
+pub const EDGE_SEG_SIZE: usize = 32;
 
 /// A part's model edges for drawing at each of its placements ([`InstancedMesh::edges`]):
 /// segment records ([`EDGE_SEG_SIZE`]) in the part's frame, full detail first, then coarser
@@ -634,39 +625,13 @@ pub const EDGE_PX: f32 = 0.25;
 
 impl SharedEdges {
     /// The edges of `mesh` (`shown`: which of its `edges` are drawn), each polyline's segments
-    /// with the faces beside them found in `mesh`'s own triangles, and `levels` coarser copies:
-    /// `(tolerance, simplified polylines)` from a caller that knows how it simplifies (their
-    /// segments carry no faces).
+    /// with the B-rep edge they are on, and `levels` coarser copies: `(tolerance, simplified
+    /// polylines)` from a caller that knows how it simplifies.
     pub fn new(mesh: &solidcore_tess::Mesh, shown: impl Fn(usize) -> bool, levels: Vec<(f32, Vec<Vec<[f32; 3]>>)>) -> SharedEdges {
-        // Each triangle edge by its two ends' positions, with the triangle's third corner and
-        // its face: a segment of a model edge finds the triangle of each face beside it there.
-        let key = |p: [f32; 3]| p.map(|x| (x + 0.0).to_bits());
-        let mut sides: std::collections::HashMap<([u32; 3], [u32; 3]), Vec<([f32; 3], u32)>> = std::collections::HashMap::new();
-        for (t, tri) in mesh.triangles.iter().enumerate() {
-            let p = tri.map(|i| mesh.positions.get(i as usize).map_or([0.0; 3], |v| v.to_f32()));
-            let face = mesh.tri_face.get(t).copied().unwrap_or(NO_FACE);
-            for k in 0..3 {
-                let (a, b, c) = (p[k], p[(k + 1) % 3], p[(k + 2) % 3]);
-                let (ka, kb) = (key(a), key(b));
-                let pair = if ka <= kb { (ka, kb) } else { (kb, ka) };
-                sides.entry(pair).or_default().push((c, face));
-            }
-        }
         let mut full = Vec::new();
         for (i, polyline) in mesh.edges.iter().enumerate().filter(|(i, _)| shown(*i)) {
-            let faces = mesh.edge_faces.get(i).map(Vec::as_slice).unwrap_or_default();
             for w in polyline.windows(2) {
-                let [a, b] = [w[0].to_f32(), w[1].to_f32()];
-                let (ka, kb) = (key(a), key(b));
-                let found = sides.get(&if ka <= kb { (ka, kb) } else { (kb, ka) });
-                let side = |face: Option<&u32>| -> ([f32; 4], u32) {
-                    let Some(&face) = face else { return ([0.0; 4], NO_FACE) };
-                    let Some((c, _)) = found.into_iter().flatten().find(|(_, f)| *f == face) else { return ([0.0; 4], face) };
-                    inward(a, b, *c).map_or(([0.0; 4], face), |s| (s, face))
-                };
-                let (s0, f0) = side(faces.first());
-                let (s1, f1) = side(faces.get(1));
-                push_edge_seg(&mut full, a, b, 0, u32::try_from(i).unwrap_or(u32::MAX), [s0, s1], [f0, f1]);
+                push_edge_seg(&mut full, w[0].to_f32(), w[1].to_f32(), 0, u32::try_from(i).unwrap_or(u32::MAX));
             }
         }
         let mut out = SharedEdges { levels: vec![(full, 0.0)] };
@@ -674,7 +639,7 @@ impl SharedEdges {
             let mut records = Vec::new();
             for polyline in &polylines {
                 for w in polyline.windows(2) {
-                    push_edge_seg(&mut records, w[0], w[1], 0, u32::MAX, [[0.0; 4]; 2], [NO_FACE; 2]);
+                    push_edge_seg(&mut records, w[0], w[1], 0, u32::MAX);
                 }
             }
             out.levels.push((records, tolerance));
@@ -688,25 +653,9 @@ impl SharedEdges {
     }
 }
 
-/// The side of segment `a`–`b` toward `c`: the unit direction across the segment toward `c` and
-/// `c`'s distance from the segment's line; `None` when `c` is on that line.
-fn inward(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> Option<[f32; 4]> {
-    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-    let len2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-    if len2 <= f32::EPSILON {
-        return None;
-    }
-    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-    let t = (ac[0] * d[0] + ac[1] * d[1] + ac[2] * d[2]) / len2;
-    let across = [ac[0] - t * d[0], ac[1] - t * d[1], ac[2] - t * d[2]];
-    let h = (across[0] * across[0] + across[1] * across[1] + across[2] * across[2]).sqrt();
-    (h > 1e-9 && h.is_finite()).then(|| [across[0] / h, across[1] / h, across[2] / h, h])
-}
-
 /// One [`EDGE_SEG_SIZE`] record onto `out`.
-fn push_edge_seg(out: &mut Vec<u8>, a: [f32; 3], b: [f32; 3], flags: u32, edge: u32, sides: [[f32; 4]; 2], faces: [u32; 2]) {
+fn push_edge_seg(out: &mut Vec<u8>, a: [f32; 3], b: [f32; 3], flags: u32, edge: u32) {
     let words = a.into_iter().map(f32::to_bits).chain([flags]).chain(b.into_iter().map(f32::to_bits)).chain([edge]);
-    let words = words.chain(sides.into_iter().flatten().map(f32::to_bits)).chain(faces).chain([0, 0]);
     for w in words {
         out.extend_from_slice(&w.to_le_bytes());
     }
@@ -7537,11 +7486,10 @@ mod glass_tests {
         assert_eq!(f32::from_le_bytes(sorted[8..12].try_into().unwrap()), 5.0);
     }
 
-    /// A model edge's segment record carries, for each of the two faces beside it, the unit
-    /// direction across the segment into that face's triangle, how far the triangle reaches from
-    /// the segment, and the face: found in the triangles the part is drawn from.
+    /// A model edge's segment record holds its two ends in the part's frame and the B-rep edge
+    /// it is on, one record per segment of each edge drawn.
     #[test]
-    fn an_edge_segment_records_the_faces_on_both_sides() {
+    fn an_edge_segment_records_its_ends_and_its_edge() {
         let mesh = solidcore_tess::Mesh {
             positions: vec![Vec3::ZERO, Vec3::X, Vec3::new(0.0, 2.0, 0.0), Vec3::new(0.0, 0.0, 3.0)],
             normals: vec![Vec3::Z; 4],
@@ -7554,19 +7502,14 @@ mod glass_tests {
         let e = SharedEdges::new(&mesh, |_| true, Vec::new());
         assert_eq!(e.segments(), 2);
         let (records, _) = &e.levels[0];
+        assert_eq!(records.len(), 2 * EDGE_SEG_SIZE);
         let f = |at: usize| f32::from_le_bytes(records[at..at + 4].try_into().unwrap());
         let u = |at: usize| u32::from_le_bytes(records[at..at + 4].try_into().unwrap());
-        // The shared edge: face 4 lies toward +y (2 mm), face 7 toward +z (3 mm).
         assert_eq!([f(0), f(4), f(8), f(16), f(20), f(24)], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        assert_eq!(u(28), 0, "the B-rep edge's index");
-        assert_eq!([f(32), f(36), f(40), f(44)], [0.0, 1.0, 0.0, 2.0]);
-        assert_eq!([f(48), f(52), f(56), f(60)], [0.0, 0.0, 1.0, 3.0]);
-        assert_eq!([u(64), u(68)], [4, 7]);
-        // The open edge has a face on one side only.
+        assert_eq!([u(12), u(28)], [0, 0], "no flags; the first B-rep edge");
         let second = EDGE_SEG_SIZE;
-        assert!(f(second + 44) > 0.0, "face 4 is beside it");
-        assert_eq!([f(second + 48), f(second + 60)], [0.0, 0.0], "no face on the other side");
-        assert_eq!([u(second + 64), u(second + 68)], [4, NO_FACE]);
+        assert_eq!([f(second), f(second + 16), f(second + 20)], [1.0, 0.0, 2.0]);
+        assert_eq!(u(second + 28), 1, "the second B-rep edge");
     }
 
     /// `GpuScene::merged` keeps every triangle the scene holds: the blocks' PBR runs as well as

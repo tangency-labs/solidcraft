@@ -2093,9 +2093,8 @@ type SharedEdgesCache = std::sync::Arc<
 >;
 
 /// `mesh`'s model edges as the shaded view draws them, for the renderer to draw at each of its
-/// placements: each segment with the faces beside it in `mesh`'s own triangles (the triangles the
-/// placements are drawn from), and coarser copies for placements small on screen, simplified as
-/// a block's edges are ([`crate::edge_detail`]). Made once per mesh.
+/// placements, and coarser copies for placements small on screen, simplified as a block's edges
+/// are ([`crate::edge_detail`]). Made once per mesh.
 fn shared_edges(cache: &SharedEdgesCache, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> std::sync::Arc<crate::gpu::SharedEdges> {
     let key = std::sync::Arc::as_ptr(mesh) as usize;
     if let Ok(c) = cache.lock()
