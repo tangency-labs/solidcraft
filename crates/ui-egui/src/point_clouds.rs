@@ -276,7 +276,7 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
         return;
     }
     let clouds: Vec<&PointCloud> = solidcraft_engine::view::shown_point_clouds(&app.session).collect();
-    if clouds.iter().all(|c| c.len() == 0) {
+    if clouds.iter().all(|c| c.is_empty()) {
         return;
     }
     let stride = cpu_stride(app);
