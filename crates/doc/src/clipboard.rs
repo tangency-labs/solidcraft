@@ -431,7 +431,7 @@ impl crate::Feature {
                             pin.sketch = *id;
                         }
                     }
-                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name) {
+                    for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name).chain(&mut link.curve_edges) {
                         *n = remap_topology(n, ids, bodies);
                     }
                 }
