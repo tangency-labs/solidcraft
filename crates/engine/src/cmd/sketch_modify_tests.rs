@@ -3434,6 +3434,47 @@ fn offset_side_is_read_off_the_picked_curve() {
     assert!(sk.points[a].pos.y < 1e8, "below, toward `side`: {:?}", sk.points[a].pos);
 }
 
+/// A rounded outline whose first curve is a corner arc: a point in the middle of the outline is
+/// outside that small arc's circle, yet `side` still means "inside the outline" (#18606).
+#[test]
+fn offset_side_of_a_chain_starting_with_a_fillet_arc_means_the_outline_not_the_arc_circle() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [37, 3], "start": [37, 0], "end": [40, 3]}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 3], [40, 27]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [37, 27], "start": [40, 27], "end": [37, 30]}));
+    run(&mut s, "sketch.line", json!({"points": [[37, 30], [3, 30]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [3, 27], "start": [3, 30], "end": [0, 27]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 27], [0, 3]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [3, 3], "start": [0, 3], "end": [3, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[3, 0], [37, 0]]}));
+    let inward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [20, 15]}));
+    let sk = sketch(&s);
+    let made = ids(&inward["curves"]);
+    assert!(box_is(&sk, &made, [2.0, 2.0], [38.0, 28.0]), "inward: {:?}", bounds(&sk, &made));
+    let outward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [100, 100]}));
+    let sk = sketch(&s);
+    let made = ids(&outward["curves"]);
+    assert!(box_is(&sk, &made, [-2.0, -2.0], [42.0, 32.0]), "outward: {:?}", bounds(&sk, &made));
+}
+
+/// An open L of a line, a fillet arc and a line: a point on the inner side but beyond the arc's
+/// circle is still inside the corner, read off the pieces nearest it (#18606).
+#[test]
+fn offset_side_of_an_open_chain_is_read_off_the_nearest_piece() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [5, 5], "start": [0, 5], "end": [5, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 5]]}));
+    run(&mut s, "sketch.line", json!({"points": [[5, 0], [20, 0]]}));
+    let inward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [11, 11]}));
+    let sk = sketch(&s);
+    let made = ids(&inward["curves"]);
+    assert!(box_is(&sk, &made, [2.0, 2.0], [20.0, 20.0]), "inward: {:?}", bounds(&sk, &made));
+    let outward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [-3, -3]}));
+    let sk = sketch(&s);
+    let made = ids(&outward["curves"]);
+    assert!(box_is(&sk, &made, [-2.0, -2.0], [20.0, 20.0]), "outward: {:?}", bounds(&sk, &made));
+}
+
 #[test]
 fn offset_instances_count_must_be_a_whole_number_within_the_cap() {
     let mut s = new_sketch();

@@ -2795,3 +2795,93 @@ fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
         assert!((v - want).abs() <= 1e-9 * want, "off {off}: {v} vs {want}");
     }
 }
+
+/// `b` as a record whose tolerances (the body's, every edge's and vertex's) are all
+/// `tolerance`, as a file read at that tolerance gives it.
+fn read_at(b: &Body, tolerance: f64) -> Body {
+    fn set(v: &mut Value, t: f64) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m.iter_mut() {
+                    if k == "tolerance" {
+                        *x = serde_json::json!(t);
+                    } else {
+                        set(x, t);
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| set(x, t)),
+            _ => {}
+        }
+    }
+    let (r, _) = b.to_record().unwrap();
+    let mut v = serde_json::to_value(&r).unwrap();
+    set(&mut v, tolerance);
+    let r: Record = serde_json::from_value(v).unwrap();
+    Body::from_record(&r, true).unwrap().0
+}
+
+/// solidcore#3292: a body read at a file's round tolerance (0.01 mm) joined by one with an
+/// edge of 3 um, as a nameplate's plate and a letter read finer for its own short edges. The
+/// result took the plate's tolerance, the short edge's ends merged and its side face's edges
+/// ran together (`SmFace` test #34, partially coincident edges). The plate's geometry meets
+/// the letter's tolerance, so the boolean reads it at that one: the result is valid and keeps
+/// the short edge.
+///
+/// The plate 20 x 20 x 5; on it, from z = 5 to 10, the prism over (5, 5), (15, 5), (15, 12),
+/// (10.0015, 15), (9.9985, 15), (5, 12): a 10 x 7 rectangle and, above it, a trapezoid 3 high
+/// between widths 10 and 0.003, 70 + 3 (10 + 0.003) / 2 = 85.0045 in area. Volume
+/// 2000 + 5 * 85.0045 = 2425.0225.
+#[test]
+fn a_short_edge_joined_onto_a_body_read_coarser_is_kept() {
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    let corners = [
+        v(5.0, 5.0),
+        v(15.0, 5.0),
+        v(15.0, 12.0),
+        v(10.0015, 15.0),
+        v(9.9985, 15.0),
+        v(5.0, 12.0),
+    ];
+    let region = Region2 {
+        outer: Loop2::polygon(&corners),
+        holes: vec![],
+    };
+    let letter = read_at(
+        &extrude_planar_regions(&Plane::XY, &[region], 5.0, 10.0).unwrap(),
+        0.25 * 0.003,
+    );
+    for plate_tolerance in [0.01, 0.0001] {
+        let plate = read_at(
+            &make_box([0.0, 0.0, 0.0], [20.0, 20.0, 5.0]).unwrap(),
+            plate_tolerance,
+        );
+        for (a, b) in [
+            (letter.copy().unwrap(), plate.copy().unwrap()),
+            (plate.copy().unwrap(), letter.copy().unwrap()),
+        ] {
+            let r = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = r.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{plate_tolerance}: {}", report.text);
+            // the short edge, at the top and at the foot: from (9.9985, 15) to (10.0015, 15)
+            let (rec, _) = r.to_record().unwrap();
+            let at = |p: [f64; 3], x: f64| (p[0] - x).abs() < 1e-9 && (p[1] - 15.0).abs() < 1e-9;
+            let short = rec
+                .edges
+                .iter()
+                .filter(|e| {
+                    let [p, q] = e.vertices;
+                    let (p, q) = (
+                        rec.vertices[p as usize].point,
+                        rec.vertices[q as usize].point,
+                    );
+                    (at(p, 9.9985) && at(q, 10.0015)) || (at(p, 10.0015) && at(q, 9.9985))
+                })
+                .count();
+            assert_eq!(short, 2, "{plate_tolerance}");
+            let want = 2000.0 + 5.0 * 85.0045;
+            let got = volume(&r);
+            assert!(near(got, want), "{plate_tolerance}: {got} vs {want}");
+        }
+    }
+}

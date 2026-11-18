@@ -1855,7 +1855,7 @@ pub(super) mod round_definition_proof {
     use solidcore::kernel::Kernel;
     use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume};
     use solidcore::mass::integrator::properties::{
-        brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
+        brep_mass_properties, MassProperties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
     use solidcore::math::Vec3;
     use solidcore::surface::surface::Surface;
@@ -1864,6 +1864,16 @@ pub(super) mod round_definition_proof {
 
     /// The golden's requested relative accuracy of the mass properties.
     pub(in super::super) const MASS_ACCURACY: f64 = 1e-4;
+
+    /// The integrator's estimates of a closed body's mass values (density 1, about the
+    /// origin), taken once by [`volume_band`] and read again by [`mass_bands`]: at the
+    /// golden's accuracy and at the integrator's finest, where it converges.
+    pub(in super::super) struct Estimates {
+        /// At [`MASS_ACCURACY`], as the golden measures.
+        golden: MassProperties,
+        /// At [`ESTIMATE_ACCURACY_FINEST`].
+        converged: MassProperties,
+    }
 
     /// The faces of `b` whose surface is a blend by its definition, each with the proved
     /// distance `d_f` between its net and its definition (`recertify`, at most its bound);
@@ -1913,28 +1923,30 @@ pub(super) mod round_definition_proof {
     /// [`certified_blends`]). Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
     /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
-    /// printed beside the band for the record only: an estimate is not a bound.
+    /// printed beside the band for the record only: an estimate is not a bound. Returns
+    /// both estimates, for [`mass_bands`].
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
         blends: &[(FaceId, f64)],
         old: f64,
         name: &str,
-    ) {
+    ) -> Estimates {
         let spread = spread(k, b, blends);
         let store = solidcore::geom::attribute::AttributeStore::default();
         let attributes = PropertyAttributes {
             store: &store,
             key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
         };
-        let mut volume = |accuracy: f64| {
-            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes)
-                .unwrap()
-                .properties
-                .volume
+        let mut at = |accuracy: f64| {
+            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap()
         };
-        let new = volume(MASS_ACCURACY);
-        let converged = volume(ESTIMATE_ACCURACY_FINEST);
+        let estimates = Estimates {
+            golden: at(MASS_ACCURACY),
+            converged: at(ESTIMATE_ACCURACY_FINEST),
+        };
+        let new = estimates.golden.properties.volume;
+        let converged = estimates.converged.properties.volume;
         let enclosure = enclose_volume(k, b, 1e-6 * new.abs()).unwrap();
         let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
         assert!(
@@ -1946,6 +1958,7 @@ pub(super) mod round_definition_proof {
              certified [{lo}, {hi}], band width {:e}",
             hi - lo
         );
+        estimates
     }
 
     /// The certified bands of the closed body `b`'s other mass values, as the golden
@@ -1960,21 +1973,15 @@ pub(super) mod round_definition_proof {
     /// within that accuracy of it; prints `PROVEN` where the band is at most that accuracy
     /// wide (the golden's value is then within twice its accuracy of the true one) and
     /// `WIDE` where it is not. The bands are of the body as stored (its nets), which is the
-    /// body the golden measures.
-    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, name: &str) {
+    /// body the golden measures. The estimates are [`volume_band`]'s, of the same body.
+    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, estimates: &Estimates, name: &str) {
         use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
-        let store = solidcore::geom::attribute::AttributeStore::default();
-        let attributes = PropertyAttributes {
-            store: &store,
-            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
-        };
-        let mut at = |accuracy: f64| {
-            let m = brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap();
+        let at = |m: &MassProperties| {
             let v = |p: Vec3| [p.x, p.y, p.z];
             (m.properties.area, v(m.centroid), v(m.inertia), v(m.products))
         };
-        let golden = at(MASS_ACCURACY);
-        let converged = at(ESTIMATE_ACCURACY_FINEST);
+        let golden = at(&estimates.golden);
+        let converged = at(&estimates.converged);
         let e = enclose_mass_properties(k, b, 1e-5).unwrap();
         if let Some((q, stop)) = e.short {
             eprintln!("{name}: the {q:?} enclosure stopped at {stop:?}, its band wider");
@@ -2206,8 +2213,8 @@ pub(super) mod round_definition_rows {
             }
             let blends = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
-                volume_band(&k, &mut body, &blends, old, name);
-                mass_bands(&k, &mut body, name);
+                let estimates = volume_band(&k, &mut body, &blends, old, name);
+                mass_bands(&k, &mut body, &estimates, name);
             }
         }
     }
@@ -2440,18 +2447,17 @@ mod wr457_certificates {
     /// summed length `length`, meet at a vertex whose third edge is convex. Each round
     /// adds its section, the square of side `r` less its quarter disc, of area
     /// `A = r^2 (1 - pi/4)`, along its edge up to the plane through the convex edge square
-    /// to it. Between those two planes the round turns the corner: the section, whose
-    /// square corner lies on the convex edge, revolves a quarter turn about it, adding
-    /// `(pi/2) A d` (Pappus), where `d = r (10 - 3 pi) / (12 - 3 pi)` is the section's
-    /// centroid distance from its square corner along either leg. So the volume is
-    /// `2600 + A L + (pi/2) A d`. The premises (square ends, a convex third edge, a
-    /// rolling-ball quarter turn) are ARGUED from the fixture geometry; the cases are
+    /// to it. The common face's corner between the edges is concave, so the rounds are
+    /// mitred there (WR-642, the owner's ruling of 2026-10-30; before its flag was retired
+    /// the section turned a quarter about the convex edge, adding `(pi/2) A d` by Pappus):
+    /// the mitre adds `r^3 (5/3 - pi/2)`, as `g5_blend_corner_certificates::mitred`
+    /// derives. So the volume is `2600 + A L + r^3 (5/3 - pi/2)`. The premises (square
+    /// ends, a convex third edge) are ARGUED from the fixture geometry; the cases are
     /// picked by name in [`CONCAVE_PAIRS`].
     fn two_concave_rounds(r: f64, length: f64) -> f64 {
-        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4};
         let a = r * r * (1.0 - FRAC_PI_4);
-        let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
-        UNION_VOLUME + a * length + FRAC_PI_2 * a * d
+        UNION_VOLUME + a * length + r * r * r * (5.0 / 3.0 - FRAC_PI_2)
     }
 
     fn load(file: &str, name: &str) -> RealSolid {
@@ -2724,6 +2730,210 @@ mod wr56_certificates {
             assert!(
                 e.lo <= volume && volume <= e.hi,
                 "{name}: row volume {volume} not in [{}, {}]",
+                e.lo,
+                e.hi
+            );
+        }
+    }
+}
+
+/// WR-661 (#14246, `fillet_statuses_pass_on` retired): a fillet of an open sheet may keep
+/// its result. The stitched result has lamina edges, so the closed-solid orientation's
+/// "face uses gathered from both sides" check fires (walking a face use's neighbours
+/// crosses the sheet's boundary to its other side) without the sheet being
+/// non-orientable. The executive keeps the stitched body only when the input was open,
+/// every lamina edge of the result has its ends on the input's boundary, no lamina edge
+/// runs along another (an unstitched seam), and, once the filleting is done, the body
+/// passes the level-2 check; otherwise the 1005 is returned and the body is restored.
+/// The `degenerate-test5` and `shell_fillet2` rows pass all three and are kept, as with the
+/// status ignored; the open-shell row fails level 2 and is refused.
+#[cfg(test)]
+mod wr661_open_sheets {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// `name`'s sheet is open before and after; the fillet adds one face, and the
+    /// result passes the level-2 check.
+    fn keeps_the_filleted_sheet(name: &str, faces_before: usize) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before + 1, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2).unwrap().lines();
+        assert!(lines.is_empty(), "{name}: {lines:?}");
+    }
+
+    #[test]
+    fn a_degenerate_test5_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-degenerate-test5-e2-r0.5", 4);
+    }
+
+    #[test]
+    fn a_shell_fillet2_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-shell_fillet2-e5-r0.5", 3);
+    }
+
+    /// The open-shell sheet is open too, and its stitched result has its ends on the
+    /// sheet's boundary, but it fails the level-2 check (nine gaps beyond tolerance, up to
+    /// 3.0e-5: main's known-failing entry for this case, tangency-labs/solidcraft#13733), so
+    /// the pass-over does not keep it: the orientation's failure (1005) is returned and the
+    /// body is put back as it was.
+    #[test]
+    fn an_open_shell_sheet_fillet_that_fails_level_2_is_refused() {
+        let name = "stubs4-open_shell-e5-r0.5";
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let faces = p1::faces(&body, None).unwrap();
+        assert_eq!(faces.len(), 6, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let error = fillet_selected(&mut k, &mut body, &selected, &input)
+            .ok()
+            .unwrap()
+            .expect_err("the invalid open result is refused");
+        assert_eq!(solidcore::error::upstream_status(&error), Some(1005), "{name}: {error:?}");
+        // the closed-solid orientation's "gathered from both sides" failure, not another one
+        assert!(
+            matches!(
+                error.failure().map(|f| &f.reason),
+                Some(solidcore::error::Reason::Topology(
+                    solidcore::error::topology::TopologyFailure::Inconsistent(
+                        "more face uses are connected than faces remain to be oriented"
+                    )
+                ))
+            ),
+            "{name}: {error:?}"
+        );
+        assert_eq!(p1::faces(&body, None).unwrap(), faces, "{name}: the body is put back");
+    }
+}
+
+/// The G5 blend-corner flag retirement (#14246) of WR-642's mitred concave face corner
+/// (`fillet_mitre_concave_face_corners`) moved 10 rows.
+#[cfg(test)]
+mod g5_blend_corner_certificates {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::{apply, build, select_edges};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::edge;
+
+    /// The rows the mitred concave face corner moved, each two concave rounds r 1 of the
+    /// box union meeting at one corner whose third edge is convex (a boss's root at its
+    /// sharp corner, WR-642's case), with the volume its golden row held before.
+    const MITRE: &[(&str, f64)] = &[
+        ("stubs3-union-inset-side-step-edges13-15-r1", 2603.938129447188),
+        ("stubs3-union-inset-side-step-edges13-17-r1", 2602.865120264477),
+        ("stubs3-union-inset-side-step-edges14-15-r1", 2603.938129447186),
+        ("stubs3-union-inset-side-step-edges14-18-r1", 2602.8651202644614),
+        ("stubs3-union-inset-side-step-edges16-17-r1", 2603.2943239376245),
+        ("stubs3-union-inset-side-step-edges16-18-r1", 2603.294323937609),
+        ("stubs3-union-overhang-corner-edges12-13-r1", 2602.65051842809),
+        ("stubs3-union-overhang-corner-edges14-15-r1", 2602.65051842809),
+        ("stubs3-union-overhang-front-edges14-15-r1", 2603.0797221012954),
+        ("stubs3-union-overhang-front-edges15-16-r1", 2603.0797221012954),
+    ];
+
+    /// The union's volume, 20 x 10 x 10 + 10 x 6 x 10.
+    const UNION_VOLUME: f64 = 2600.0;
+
+    /// The volume of the union with two concave rounds of radius `r` along edges of summed
+    /// length `length` that meet at a corner whose third edge is convex, mitred there
+    /// (WR-642: the owner's ruling of 2026-10-30, the fork's 4f06e72). Each round adds its
+    /// section, the square of side `r` less its quarter disc, `A = r^2 (1 - pi/4)`, along
+    /// its edge up to the corner, and the mitre fills the square of side `r` beyond the
+    /// corner up to the lower of the two sections: with `g(t) = r - sqrt(r^2 - (r - t)^2)`
+    /// the section's height `t` from its wall (decreasing), that is
+    /// `int int g(max(x, y)) = int_0^r 2 m g(m) dm = r^3 - 2 int_0^r (r - u) sqrt(r^2 - u^2) du
+    /// = r^3 - (pi r^3 / 2 - 2 r^3 / 3) = r^3 (5/3 - pi/2)` (PROVEN; the corner term of
+    /// WR-642's closed forms). The premises (straight axis-aligned edges meeting square, a
+    /// convex third edge) are ARGUED from the fixture geometry and the edges' lengths.
+    fn mitred(r: f64, length: f64) -> f64 {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+        UNION_VOLUME + r * r * (1.0 - FRAC_PI_4) * length + r * r * r * (5.0 / 3.0 - FRAC_PI_2)
+    }
+
+    /// Main's swept corner: the section turned a quarter about the convex edge (Pappus),
+    /// `(pi/2) A d` with `d = r (10 - 3 pi) / (12 - 3 pi)` the section's centroid distance
+    /// from its square corner (the former closed form of `wr457_certificates`).
+    fn swept(r: f64, length: f64) -> f64 {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let a = r * r * (1.0 - FRAC_PI_4);
+        let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+        UNION_VOLUME + a * length + FRAC_PI_2 * a * d
+    }
+
+    /// Each mitred row builds one closed manifold solid with no Level 2 report whose
+    /// enclosed volume (an interval no wider than `1e-7 * 2600`) holds the mitred closed
+    /// form [`mitred`] (up to its f64 rounding, `16 eps |V|` as in `wr457_certificates`),
+    /// and excludes main's swept corner [`swept`], which the golden held before (the
+    /// golden's old volume, an estimate, lies within `1e-4` of it). So each row's volume
+    /// is PROVEN closer to the ruled shape's than main's: main's is `(5/3 - pi/2) -
+    /// (pi/2) A d = 0.02057` away, the new one inside the enclosure.
+    #[test]
+    fn mitred_rows_hold_the_mitred_closed_form() {
+        let width = 1e-7 * UNION_VOLUME;
+        for &(name, before) in MITRE {
+            let input = inputs(name).real_solid.expect("a real solid");
+            let mut k = Kernel::default();
+            let mut body = build(&mut k, &input).unwrap().unwrap();
+            let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+            assert_eq!(selected.len(), 2, "{name}");
+            let mut length = 0.0;
+            for &e in &selected {
+                let ivl = edge::interval(&body, e).unwrap();
+                let c = edge::curve(&body, e).unwrap().unwrap();
+                let a = c.evaluate_point(&k, ivl.min()).unwrap();
+                let b = c.evaluate_point(&k, ivl.max()).unwrap();
+                length += a.distance(b);
+            }
+            apply(&mut k, &mut body, &selected, &input)
+                .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+            let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+            assert!(is_manifold_solid(&body).unwrap(), "{name}: not one closed solid");
+            let e = enclose_volume(&k, &mut body, width).unwrap();
+            assert!(e.width() <= width, "{name}: enclosure {e:?} wider than {width}");
+            let r = input.radius;
+            let (exact, old) = (mitred(r, length), swept(r, length));
+            let slack = 16.0 * f64::EPSILON * exact.abs();
+            eprintln!(
+                "MITRE {name}: length {length}, volume in [{}, {}], mitred {exact}, swept {old}",
+                e.lo, e.hi
+            );
+            assert!(
+                e.lo - slack <= exact && exact <= e.hi + slack,
+                "{name}: the mitred closed form {exact} is outside [{}, {}]",
+                e.lo,
+                e.hi
+            );
+            assert!(
+                old < e.lo - slack || e.hi + slack < old,
+                "{name}: main's swept form {old} is inside [{}, {}]",
+                e.lo,
+                e.hi
+            );
+            assert!((before - old).abs() <= 1e-4, "{name}: main's row {before} is not swept {old}");
+            assert!((before - exact).abs() > 1e-2, "{name}: main's row {before} is not farther");
+            let row = super::rust(&input).unwrap_or_else(|e| panic!("{name}: harness: {e:?}"));
+            let volume = *row.values["mass_properties"].get(1).unwrap();
+            assert!(
+                e.lo - 1e-4 <= volume && volume <= e.hi + 1e-4,
+                "{name}: the row's volume {volume} is not within 1e-4 of [{}, {}]",
                 e.lo,
                 e.hi
             );

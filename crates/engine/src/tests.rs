@@ -5,6 +5,26 @@ use serde_json::{Value, json};
 
 use crate::*;
 
+/// A folder of the test's own, removed when dropped.
+pub(crate) struct Folder(pub std::path::PathBuf);
+
+impl Folder {
+    pub(crate) fn new(name: &str) -> Folder {
+        let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Folder(dir)
+    }
+    pub(crate) fn path(&self, file: &str) -> String {
+        self.0.join(file).to_str().unwrap().to_string()
+    }
+}
+
+impl Drop for Folder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 pub(crate) mod mesh_convert;
 
 /// Counts the copies `Session::doc_mut` makes of a shared document.
@@ -1165,6 +1185,15 @@ fn hostile_params_never_panic() {
         "keep_with",
         "stitch",
         "extend",
+        "view",
+        "visual_style",
+        "reference_style",
+        "reference_hides_model",
+        "reference_shown_percent",
+        "tangent_edges",
+        "line_group",
+        "sheet",
+        "position_mm",
         "profile",
         "anchor",
         "density",
@@ -1172,6 +1201,7 @@ fn hostile_params_never_panic() {
         "references",
         "head",
         "head_gap",
+        "configuration",
         "outline",
         "outline_text",
         "drills",
@@ -1186,6 +1216,7 @@ fn hostile_params_never_panic() {
         "through_all",
         "depth",
         "dot_grid",
+        "turn",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -1288,6 +1319,34 @@ fn registry_is_consistent() {
     assert!(!find_command("sketch.line").unwrap().info(&s).enabled);
 }
 
+/// One reading of a command id for everything that decides on it: any
+/// case and surrounding whitespace name the registered command; an id with any character that
+/// is not printable ASCII (a look-alike letter, a zero-width or non-breaking space inside) names
+/// none, so the engine never runs a command a gate took for something else. No two registered
+/// ids differ only in case, so a case variant names exactly one.
+#[test]
+fn command_ids_resolve_one_way() {
+    for (given, id) in [
+        ("FILE.SAVE", "file.save"),
+        (" file.open_in_easyprint ", "file.open_in_easyprint"),
+        ("\tDiagnostics.Crash_Reports\n", "diagnostics.crash_reports"),
+        ("\u{a0}DOC.OPEN\u{3000}", "doc.open"),
+    ] {
+        assert_eq!(find_command(given).map(|c| c.id), Some(id), "{given:?}");
+    }
+    for alike in ["fil\u{0435}.save", "file\u{ff0e}save", "\u{200b}file.save", "file.\u{200d}save", "FILE.SAVE\u{200b}", "\u{ff46}ile.save", "", "  "]
+    {
+        assert!(find_command(alike).is_none(), "{alike:?}");
+        assert!(matches!(Session::default().execute(alike, &json!({})), Err(EngineError::UnknownCommand(_))), "{alike:?}");
+    }
+    let mut lower: Vec<String> = command_specs().iter().map(|c| c.id.to_ascii_lowercase()).collect();
+    let n = lower.len();
+    lower.sort();
+    lower.dedup();
+    assert_eq!(lower.len(), n, "two command ids differ only in case");
+    assert!(command_specs().iter().all(|c| normalize_command_id(c.id) == Some(c.id)), "a registered id that does not read as itself");
+}
+
 /// Only SolidCraft's own dotted ids name commands; other ids are unknown commands.
 #[test]
 fn only_own_ids_name_commands() {
@@ -1300,12 +1359,12 @@ fn only_own_ids_name_commands() {
 }
 
 /// An unknown command's error names the ids it was probably meant to be: a typo's, or the
-/// command that ends in the same word.
+/// commands that end in the same word, the nearest first.
 #[test]
 fn unknown_commands_suggest_the_closest_ids() {
     let mut s = Session::default();
     let mut msg = |id: &str| s.execute(id, &serde_json::json!({})).unwrap_err().to_string();
-    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open`, `panel.open` or `tab.view.open`?)");
+    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open`, `panel.open` or `drawing.open`?)");
     assert!(msg("solid.extrud").starts_with("unknown command `solid.extrud` (did you mean `solid.extrude`"), "{}", msg("solid.extrud"));
     assert!(msg("Extrude").contains("`solid.extrude`"), "{}", msg("Extrude"));
     assert_eq!(msg("FusionFilletEdgesCommand"), "unknown command `FusionFilletEdgesCommand`");
@@ -4002,19 +4061,40 @@ mod naming {
         assert_eq!(warning(&s, "Round"), None);
     }
 
+    /// A notch through the right face, `p0` to `p1` on the top.
+    fn notch(s: &mut Session, p0: [f64; 2], p1: [f64; 2]) {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "N"}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "N", "distance": 10, "operation": "cut", "name": "Notch"}));
+    }
+
     /// The notch leaves the filleted edge in two pieces: neither is the edge, so the fillet fails,
     /// asking for its edge again, and never rounds the piece nearest the pick.
     #[test]
     fn a_split_edge_fails_the_fillet_asking_for_the_edge_again() {
         let mut s = block();
-        // Upstream of the fillet, a notch through the middle of the filleted edge.
         run(&mut s, "timeline.roll_to", json!({"feature": "Hole"}));
-        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "N"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [36, 12], "p1": [44, 18]}));
-        run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"sketch": "N", "distance": 10, "operation": "cut", "name": "Notch"}));
+        notch(&mut s, [36.0, 12.0], [44.0, 18.0]);
         run(&mut s, "timeline.roll_to", json!({}));
         assert_eq!(reselect(&s, "Round").as_deref(), Some("F2:side:l2|F2:top"));
+    }
+
+    /// A fillet on a piece of a split edge, its notch then suppressed: the edge is whole again, and
+    /// its piece's name doesn't stand for all of it, so the fillet fails, asking for its edge again.
+    #[test]
+    fn a_pieces_name_on_the_whole_edge_again_fails_asking_for_the_edge() {
+        let mut s = block();
+        run(&mut s, "timeline.delete", json!({"features": ["Round"]}));
+        notch(&mut s, [36.0, 12.0], [44.0, 18.0]);
+        run(&mut s, "solid.fillet", json!({"edges": [[40, 24, 10]], "radius": 2, "name": "Piece"}));
+        let named = s.doc.find_feature("Piece").map(|f| f.edge_names.clone()).unwrap_or_default();
+        assert!(!named.is_empty() && named.iter().all(|n| n.contains('#')), "a piece's name: {named:?}");
+        assert_eq!(warning(&s, "Piece"), None);
+        run(&mut s, "timeline.suppress", json!({"feature": "Notch", "suppressed": true}));
+        assert!(reselect(&s, "Piece").is_some(), "{:?}", warning(&s, "Piece"));
+        let unrounded = 12000.0 - std::f64::consts::PI * 160.0;
+        assert!((volume(&mut s) - unrounded).abs() < 0.1, "{} {unrounded}", volume(&mut s));
     }
 
     /// The face the filleted edge bounded is gone with its sketch line: the fillet fails, asking
@@ -6169,6 +6249,45 @@ fn a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_t
     }
     let v = volume(&mut s);
     assert!(v > 0.0 && v < 36554.03, "{v}");
+}
+
+fn block_with_a_square_notch() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 25, "center": [0, 0, 12.5], "operation": "new", "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "NotchSketch1", "offset": 25}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 20], "corner": [2.4, 22.4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "NotchSketch1", "distance": 12.5, "direction": "negative", "operation": "cut", "targets": ["Base"]}),
+    );
+    s
+}
+
+/// #18545: the top loop of a block with a 4.8 mm square notch in an edge, chamfered 4 and 2 mm,
+/// failed inside the blend (status 1001): the notch's side walls are 2.4 mm long, too short for
+/// the 4 mm side. It is refused naming the largest scale of the two distances that builds
+/// (2.4 / 4 less one step, 0.599); that scale builds, and 2 by 1 mm builds as before.
+#[test]
+fn an_unequal_chamfer_too_large_for_a_notch_names_the_scale_that_fits() {
+    let edges =
+        json!([[30, -10, 25], [-30, 10, 25], [-15, -20, 25], [16.2, 20, 25], [-16.2, 20, 25], [2.4, 18.8, 25], [-2.4, 18.8, 25], [0, 17.6, 25]]);
+    let chamfer = |d1: f64, d2: f64| {
+        let mut s = block_with_a_square_notch();
+        s.execute("solid.chamfer", &json!({"edges": edges, "distance": d1, "distance2": d2, "body": "Base"})).map(|_| ()).map_err(|e| e.to_string())
+    };
+    assert_eq!(chamfer(2.0, 1.0), Ok(()));
+    let e = chamfer(4.0, 2.0).unwrap_err();
+    assert!(!e.contains("1001"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    let scale: f64 = e
+        .split_once("the largest that fits is ")
+        .and_then(|(_, rest)| rest.split_once(" times the distances given"))
+        .and_then(|(n, _)| n.parse().ok())
+        .unwrap_or_else(|| panic!("no scale named: {e}"));
+    assert!((scale - 0.599).abs() < 1e-9, "{e}");
+    assert_eq!(chamfer(4.0 * scale, 2.0 * scale), Ok(()), "the scale named builds");
 }
 
 #[test]

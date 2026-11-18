@@ -89,6 +89,10 @@ start or end offsets or a From Object input, the target also sets the stored dis
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
 existing picks. With the setting off, picks only add profiles.
 
+**To Object** and **From Object** also take a point that isn't on the model: hover a sketch line
+or an edge and click one of the points that light up, its ends or its middle (a hole's centre
+too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
+
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
 screen points of such a face, the distance becomes exactly that face's and the face is
@@ -229,7 +233,7 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
-ball). See the roadmap's known limitations for the rest.
+ball). See the roadmap's [known limitations](https://github.com/tangency-labs/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) for the rest.
 
 **Curvature continuous** (G2) in the Fillet dialog's **Type** blends straight edges between two
 planar faces with an exact quintic section. The tangent plane and curvature match each side
