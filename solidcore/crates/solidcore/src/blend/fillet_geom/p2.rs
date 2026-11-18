@@ -3594,20 +3594,65 @@ impl FilletBrep {
                     *slot = dropped.result_uv;
                     continue;
                 }
-                let uv_dir = crate::surface::surface::p7::drop_vectors_at(
+                // Not the fork's: the foot is the surface's point nearest the vertex stepped
+                // along the binormal, solved in 3D from the edge use's parameters, which keep it
+                // on the edge use's side of a seam. The fork stepped the parameters by the
+                // binormal's first-order image, which is no foot where the parameterisation is
+                // singular on or near the step: at a sphere's pole the image is unbounded, and
+                // from a vertex a few degrees off a pole the step crosses it onto the wrong
+                // meridian. The section solve then starts away from the ball and cannot reach it.
+                let domain = base.natural_uv_domain_with_nurb(k)?;
+                let dropped = base.drop_point::<NoObject>(
                     k,
-                    &base,
-                    b.uv,
-                    Side::Left,
-                    Side::Left,
-                    &[bin],
-                )?
-                .first()
-                .copied()
-                .ok_or_else(|| {
-                    SolidError::blend_failed(OP, "the binormal drops onto the surface as no vector")
-                })?;
-                *slot = Point2::new(b.uv.x + uv_dir.x, b.uv.y + uv_dir.y);
+                    b.point + bin,
+                    &domain,
+                    &DropPointOptions {
+                        guess_uv: Some(b.uv),
+                        ..DropPointOptions::default()
+                    },
+                )?;
+                if !dropped.success {
+                    // the foot does not drop onto the surface: a defect, as for a rolled
+                    // rail's foot above
+                    return Err(SolidError::blend(OP, BlendFailure::StageFailed));
+                }
+                // a closed surface names the foot once per period: take the name nearest the
+                // edge use's parameters, as the section solve continues from them across a seam.
+                // Not along a direction that collapses at the edge use's parameters (a sphere's
+                // pole): there the edge use's parameter is an arbitrary label, not a side of the
+                // seam, and the nearest name to it could lie a quarter period outside the
+                // domain. A miss of that test leaves the nearest name, as on a regular point.
+                // (a predicate that cannot evaluate reads as collapsed: the foot keeps its name)
+                let sing = match base.is_singularity(k, b.uv, EFF_ZERO, false) {
+                    Ok(sing) => sing,
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Err(_) => crate::surface::surface::p5::Singularity {
+                        singular: true,
+                        direction: SurfParamType::Neither,
+                    },
+                };
+                let collapsed = |dir: SurfParamType| {
+                    sing.direction == dir
+                        || (sing.singular
+                            && matches!(
+                                sing.direction,
+                                SurfParamType::Neither | SurfParamType::Both
+                            ))
+                };
+                let mut foot = dropped.result_uv;
+                let periods = crate::blend::fillet_solver::p1::seam_periods(k, &base)?;
+                for (period, (value, near, dir)) in periods.iter().zip([
+                    (&mut foot.x, b.uv.x, SurfParamType::U),
+                    (&mut foot.y, b.uv.y, SurfParamType::V),
+                ]) {
+                    if let Some(interval) = period {
+                        if !collapsed(dir) {
+                            let length = interval.length();
+                            *value += length * ((near - *value) / length).round();
+                        }
+                    }
+                }
+                *slot = foot;
             }
 
             let (vu, tsect) = self.rail_end_tsect(v, Some(g), None, OP)?;
