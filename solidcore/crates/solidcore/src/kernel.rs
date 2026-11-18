@@ -867,6 +867,12 @@ pub struct Kernel {
     /// tree.
     #[cfg(feature = "profile")]
     pub profiler: crate::profile::Profiler,
+    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
+    /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
+    /// then it changes nothing. Shared with the kernel copies an operation makes for its
+    /// caches, which call through the same seam.
+    #[cfg(feature = "wr57-replay")]
+    pub replay: crate::surface::surface::replay::ReplaySeam,
 }
 
 impl Default for Kernel {
@@ -909,6 +915,8 @@ impl Kernel {
             coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),
+            #[cfg(feature = "wr57-replay")]
+            replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
     }
 

@@ -13,6 +13,8 @@ use crate::SolveApp;
 use crate::ui_kit;
 
 pub(crate) const DRAG_ZOOM: &str = crate::navigation_slots::ZOOM_TOOL;
+/// The command behind the navigation bar's Look At button and its key.
+const LOOK_AT: &str = "view.normal_to";
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
@@ -511,6 +513,11 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
         }
         app.start(resolved);
+    } else if app.session.active_sketch.is_some() && !crate::render_workspace::active(app) && commands_for(app, key).contains(&LOOK_AT) {
+        // Look At's key with no planar face or plane selected: `command_for` skips the disabled
+        // command, yet the navigation bar's button and Ctrl+8 then face the open sketch. So
+        // does the key the button shows.
+        crate::viewport::look_at_selection(app);
     } else if let Some(id) = sketch_tool_for(app, key) {
         let then = variant_for_key(app, id);
         app.start("sketch.create");

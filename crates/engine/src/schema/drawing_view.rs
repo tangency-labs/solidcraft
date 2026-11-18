@@ -825,6 +825,10 @@ pub struct EditResult {
     pub changed: Vec<String>,
     /// The other views whose resolved settings changed with it: the views projected from it.
     pub followers: Vec<String>,
+    /// It and the views lined up with it, when the edit moved it or changed its size and their
+    /// boundary leaves the sheet's drawing space or lies over its title block; none is moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
