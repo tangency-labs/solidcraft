@@ -318,6 +318,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.apply",
     "view.delete",
     "view.fit",
+    "view.grain",
     "view.grid",
     "view.ground_shadow",
     "view.home",
@@ -330,6 +331,8 @@ pub const DOCUMENTED: &[&str] = &[
     "view.spin",
     "view.tool",
     "view.visual_style",
+    "wood.grain",
+    "wood.grain.query",
 ];
 
 /// The help for `command` in the current language, when it has any.

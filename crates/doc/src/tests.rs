@@ -364,6 +364,23 @@ fn a_saved_model_with_a_long_warning_is_adopted() {
     assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
 }
 
+/// A cache written before grain frames existed has no `grain_frame` on its bodies; a design with
+/// no frame member reads it as it is instead of rebuilding.
+#[test]
+fn a_saved_model_from_before_grain_frames_is_adopted() {
+    let (doc, _) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let mut saved = m.saved(&doc).unwrap();
+    let bodies = saved.records["model_bodies"].as_array_mut().unwrap();
+    assert!(!bodies.is_empty());
+    for b in bodies.iter_mut() {
+        assert!(b.as_object_mut().unwrap().remove("grain_frame").is_some());
+    }
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    assert_eq!(reopened.state().bodies.len(), m.state().bodies.len());
+}
+
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
 /// evicted them. Opening an earlier feature and returning to the end otherwise rebuilds it all.
 #[test]

@@ -816,6 +816,9 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     solidcraft_theme::vision().hash(&mut h);
     // Two themes may share a light/dark base while drawing different geometry colours.
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
+    app.ui.show_grain.hash(&mut h);
+    serde_json::to_string(&app.session.doc.wood_grain).unwrap_or_default().hash(&mut h);
+    crate::dialogs_wood_grain::preview(app).map(|p| p.to_string()).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     crate::edit_in_place::scene_key(app).hash(&mut h);
     // A reset palette arena (another design) invalidates every cached block's indices.
@@ -1342,6 +1345,49 @@ fn resolve_appearance(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> 
         face_looks: if s.colored_components.is_none() { s.doc.face_colors(b).into_iter().collect() } else { Default::default() },
         pbr: s.doc.model_body_look(b).and_then(|l| l.pbr),
     }
+}
+
+/// A display-only growth axis, anchored to construction coordinates through moves and copies.
+/// Invalid saved grain has no preview; it is never inferred from the tessellation.
+fn wood_finish_frame(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> Option<[[f32; 3]; 2]> {
+    if app.session.colored_components.is_some() {
+        return None;
+    }
+    let axis = app.session.doc.grain_direction(b).ok()??;
+    let origin = b.grain_frame.as_ref().map_or(Vec3::ZERO, |frame| solidcraft_engine::doc::apply_point(&frame.matrix, Vec3::ZERO));
+    if !origin.is_finite() || [origin.x, origin.y, origin.z].iter().any(|v| v.abs() > 1e9) {
+        return None;
+    }
+    Some([origin.to_f32(), axis.to_f32()])
+}
+
+/// Whether `look` carries a built-in wood recipe: its colour, opacity and optical parameters equal
+/// the library oak or a starter wood preset. A look's name is inert, so a custom colour that borrows
+/// a wood name gets no figure, and a renamed wood recipe keeps it.
+fn is_wood_look(look: &solidcraft_engine::doc::appearance::Look) -> bool {
+    use solidcraft_engine::doc::{appearance, appearance_pack};
+    type Recipe = ([u8; 3], f64, Option<solidcraft_engine::doc::pbr_appearance::PbrParameters>);
+    static WOOD: std::sync::OnceLock<Vec<Recipe>> = std::sync::OnceLock::new();
+    WOOD.get_or_init(|| {
+        appearance::library("Wood - Oak")
+            .into_iter()
+            .chain(
+                appearance::OPAQUE_FINISHES
+                    .iter()
+                    .filter(|(name, ..)| name.starts_with("Wood - "))
+                    .filter_map(|(name, ..)| appearance::library(name)),
+            )
+            .chain(
+                appearance_pack::STARTER_PACK
+                    .iter()
+                    .filter(|preset| preset.category == appearance_pack::Category::Wood)
+                    .filter_map(|preset| preset.opaque_look().ok()),
+            )
+            .map(|wood| (wood.color, wood.opacity, wood.pbr))
+            .collect()
+    })
+    .iter()
+    .any(|(color, opacity, pbr)| *color == look.color && *opacity == look.opacity && *pbr == look.pbr)
 }
 
 /// How a body whose faces all share one class may be drawn from its plan: opaque on any GPU
@@ -2211,6 +2257,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     section_outlines(&mut sc, app, &st);
     continuity_seams(&mut sc, app);
     isocurves(&mut sc, app);
+    crate::grain_guides::draw(app, &mut sc);
     crate::edit_in_place::draw_context(app, &mut sc);
     sc
 }
@@ -2396,7 +2443,11 @@ fn body_scene(
             let slots = match b.placed_definition().filter(|_| repeated_copy(app, b)) {
                 Some(definition) => {
                     let look = look_key(&s.doc, b, &appearance.faces, colored);
-                    arena.shared(&b.name, &format!("\u{0}placed {definition:x} {look:x} {faded}"), b.body.face_count())
+                    // A slot's material holds one wood grain frame, so copies with grain share
+                    // slots only where their frames match: each copy's figure follows its own
+                    // placement.
+                    let grain = wood_finish_frame(app, b);
+                    arena.shared(&b.name, &format!("\u{0}placed {definition:x} {look:x} {faded} {grain:?}"), b.body.face_count())
                 }
                 None => arena.body(&b.name, b.body.face_count()),
             };
@@ -2454,6 +2505,14 @@ fn body_scene(
         arena.set_material(slots.body, finish(base, body_pbr));
         arena.set_material(slots.instance, finish(base, body_pbr));
         let face_looks = &resolved.face_looks;
+        let wood_frame = wood_finish_frame(app, b);
+        let body_look = s.doc.model_body_look(b);
+        if let Some(frame) = wood_frame
+            && body_look.as_ref().is_some_and(is_wood_look)
+        {
+            arena.set_wood(slots.body, frame);
+            arena.set_wood(slots.instance, frame);
+        }
         let faces = b.body.face_count();
         let mut face_colors = Vec::with_capacity(faces);
         let mut face_classes = Vec::with_capacity(faces);
@@ -2480,6 +2539,11 @@ fn body_scene(
             let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity >= 0.999));
             let material = finish(color, pbr);
             arena.set_material(slot, material);
+            if let Some(frame) = wood_frame
+                && look.or(body_look.as_ref()).is_some_and(is_wood_look)
+            {
+                arena.set_wood(slot, frame);
+            }
             face_colors.push(slot);
             face_classes.push(class);
             if !face_looks.is_empty() {
@@ -2626,6 +2690,7 @@ fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::Pb
         ior: p.dielectric_ior() as f32,
         pbr: true,
         two_sided: false,
+        wood: None,
     })
 }
 

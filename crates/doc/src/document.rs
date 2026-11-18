@@ -3801,6 +3801,9 @@ pub struct Document {
     /// The flat face per body (by body name) that a slicer export lays on the print bed.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub print_faces: std::collections::BTreeMap<String, crate::config::ConfigFaceTarget>,
+    /// Manufacturing grain in each body's construction coordinates; absent means automatic.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub wood_grain: std::collections::BTreeMap<String, crate::wood::Grain>,
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
@@ -4136,6 +4139,7 @@ impl Document {
             body_offsets: Default::default(),
             materials: Default::default(),
             print_faces: Default::default(),
+            wood_grain: Default::default(),
             user_materials: Vec::new(),
             appearances: Default::default(),
             favorites: Default::default(),
@@ -4166,6 +4170,9 @@ impl Document {
     pub fn rename_body_keys(&mut self, old: &str, new: &str) {
         if is_counted_body_name(old) {
             self.reserved_body_names.insert(old.to_string());
+        }
+        if let Some(grain) = self.wood_grain.remove(old) {
+            self.wood_grain.insert(new.to_string(), grain);
         }
         if let Some(m) = self.materials.remove(old) {
             self.materials.insert(new.to_string(), m);

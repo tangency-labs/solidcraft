@@ -969,6 +969,7 @@ impl crate::ModelBody {
     pub(crate) fn remade(&self, made: Traced) -> Self {
         let mut remade = Self::traced_new(self.name.clone(), made, self.feature);
         remade.component = self.component;
+        remade.grain_frame = self.grain_frame.clone();
         remade
     }
 

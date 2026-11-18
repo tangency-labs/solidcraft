@@ -1,0 +1,29 @@
+{
+  "ar": {
+    "ui.wood_finish_preview": "تتبع مظاهر الخشب اتجاه الألياف المعيَّن في العرض المظلَّل، مع ألياف على الجوانب وحلقات نمو على الأطراف. بدون اتجاه ألياف، يحتفظ المظهر بلونه الموحد."
+  },
+  "de": {
+    "ui.wood_finish_preview": "Holzdarstellungen folgen in der schattierten Ansicht der zugewiesenen Faserrichtung, mit Fasern an den Seiten und Jahresringen an den Enden. Ohne Faserrichtung behält die Darstellung ihre einheitliche Farbe."
+  },
+  "en": {
+    "ui.wood_finish_preview": "Wood appearances follow the assigned grain in the shaded viewport, with fibers on the sides and growth rings on the ends. Without grain, the appearance keeps its uniform color."
+  },
+  "en-GB": {
+    "ui.wood_finish_preview": "Wood appearances follow the assigned grain in the shaded viewport, with fibres on the sides and growth rings on the ends. Without grain, the appearance keeps its uniform colour."
+  },
+  "he": {
+    "ui.wood_finish_preview": "מראות עץ עוקבים אחר כיוון הסיבים שהוגדר בתצוגה המוצללת, עם סיבים בצדדים וטבעות גדילה בקצוות. ללא כיוון סיבים, המראה שומר על צבעו האחיד."
+  },
+  "ja": {
+    "ui.wood_finish_preview": "木材の外観は、シェーディング表示で割り当てた木目方向に沿い、側面に繊維、木口に年輪を表示します。木目方向がない場合、外観は均一な色のままです。"
+  },
+  "ko": {
+    "ui.wood_finish_preview": "목재 외관은 음영 뷰에서 지정한 나뭇결 방향을 따라 옆면에는 섬유를, 끝면에는 나이테를 표시합니다. 나뭇결 방향이 없으면 외관은 균일한 색을 유지합니다."
+  },
+  "vi": {
+    "ui.wood_finish_preview": "Vẻ ngoài gỗ đi theo hướng thớ đã gán trong khung nhìn tô bóng, với thớ ở các mặt bên và vân năm ở các đầu. Khi không có hướng thớ, vẻ ngoài giữ màu đồng nhất."
+  },
+  "zh": {
+    "ui.wood_finish_preview": "木材外观在着色视图中沿指定的木纹方向显示，侧面显示纤维，端面显示年轮。未指定木纹方向时，外观保持均匀颜色。"
+  }
+}
