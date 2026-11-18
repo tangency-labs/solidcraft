@@ -62,8 +62,10 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 /// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated.
 fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value> {
     let cmd = "selection.delete";
-    let model = || bad(cmd, "a drawing is open: close it to change the model (drawing.close)");
-    if ["components", "occurrences", "canvases", "point_clouds", "joints"].iter().any(|key| p.get(*key).is_some_and(|v| !v.is_null())) {
+    let model = || bad(cmd, "a drawing's objects are deleted apart from the model's: select one or the other");
+    // An empty list asks for nothing, as the app's Delete sends with only drawing objects selected.
+    let asks = |v: &Value| !v.is_null() && v.as_array().is_none_or(|list| !list.is_empty());
+    if ["components", "occurrences", "canvases", "point_clouds", "joints"].iter().any(|key| p.get(*key).is_some_and(asks)) {
         return Err(model());
     }
     let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected or cut from it")?;
@@ -119,6 +121,17 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     )
 }
 
+/// The delete `p` asks for is of the open drawing's objects (its undo step is the drawing's): it
+/// names one of them, or a sheet sketch is being edited. Any other is the model's, drawing open or
+/// not.
+pub(crate) fn in_drawing(s: &Session, p: &Value) -> bool {
+    let named = p
+        .get("items")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().any(|item| item.get("type").and_then(Value::as_str) == Some("drawing")));
+    named || s.sheet_sketching()
+}
+
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
     let items: Vec<Sel> = match p.get("items") {
@@ -128,7 +141,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
     };
-    if s.open_drawing.is_some() || items.iter().any(|x| matches!(x, Sel::Drawing { .. })) {
+    if items.iter().any(|x| matches!(x, Sel::Drawing { .. })) || s.sheet_sketching() {
         return delete_in_drawing(s, p, &items);
     }
     if let Some(value) = p.get("joints").filter(|v| !v.is_null()) {
@@ -585,6 +598,27 @@ mod tests {
         json!({"type": "drawing", "drawing": ids::encode(drawing), "object": ids::encode(object)})
     }
 
+    /// The app's Delete names a drawing's objects with empty component, canvas and joint lists:
+    /// an empty list asks for nothing, so they go; a list that names a model object is refused.
+    /// `select.all` takes what is on the sheet.
+    #[test]
+    fn empty_model_lists_beside_drawing_objects_ask_for_nothing() {
+        let (mut s, [_, _, top], dimension, _, drawing) = sheet_objects();
+        let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+        let all = run(&mut s, "select.all", json!({ "sheet": sheet }));
+        assert!(all["selected"].as_u64().is_some_and(|n| n >= 5), "{all}");
+        assert!(s.selection.iter().all(|x| matches!(x, Sel::Drawing { .. })));
+        let refused = s.execute("selection.delete", &json!({"items": [item(drawing, dimension)], "occurrences": [1], "canvases": [], "joints": []}));
+        assert!(refused.is_err());
+        let gone = run(
+            &mut s,
+            "selection.delete",
+            json!({"items": [item(drawing, top), item(drawing, dimension)], "occurrences": [], "canvases": [], "joints": []}),
+        );
+        assert_eq!(gone["views"], json!([ids::encode(top)]), "{gone}");
+        assert!(s.drawing("test").unwrap().dimension(dimension).is_none());
+    }
+
     /// A view, a dimension and a balloon are selected by their ids, as a view's own id reads in every
     /// reply, with no undo step and no change to the design or its export. Adding one keeps the rest.
     #[test]
@@ -802,7 +836,7 @@ mod tests {
     }
 
     /// What isn't there, or isn't the drawing's, is refused whole with the drawing as it was: unknown
-    /// ids beside good ones, another drawing, the model's items and lists while a drawing is open,
+    /// ids beside good ones, another drawing, the model's items and lists beside the drawing's,
     /// nothing at all, and a drawing's objects with none open.
     #[test]
     fn hostile_deletes_in_a_drawing_are_refused_whole() {
@@ -814,11 +848,13 @@ mod tests {
             (json!({"items": [good, item(drawing, 99)]}), "no view, dimension, balloon or note"),
             (json!({"items": [good, item(drawing, sheet)]}), "no view, dimension, balloon or note"),
             (json!({"items": [good, item(99, front)]}), "isn't the drawing open"),
-            (json!({"items": [good, {"type": "body", "name": "Block"}]}), "a drawing is open"),
-            (json!({"items": [{"type": "feature", "id": 1}]}), "a drawing is open"),
-            (json!({"components": ["Part"]}), "a drawing is open"),
-            (json!({"occurrences": ["Part:1"]}), "a drawing is open"),
-            (json!({"joints": []}), "a drawing is open"),
+            (json!({"items": [good, {"type": "body", "name": "Block"}]}), "deleted apart from the model's"),
+            (json!({"items": [good, {"type": "feature", "id": 1}]}), "deleted apart from the model's"),
+            (json!({"items": [good], "components": ["Part"]}), "deleted apart from the model's"),
+            (json!({"items": [good], "occurrences": ["Part:1"]}), "deleted apart from the model's"),
+            // A list that names a joint mixes the model's into the drawing's; an empty one names
+            // nothing (the app's Delete sends one) and is tested apart.
+            (json!({"items": [good], "joints": ["Joint1"]}), "deleted apart from the model's"),
             (json!({}), "nothing to delete"),
             (json!({"items": []}), "nothing to delete"),
             (json!({"items": [{"type": "drawing", "drawing": ids::encode(drawing), "object": front}]}), "bad item"),
@@ -830,6 +866,20 @@ mod tests {
         run(&mut s, "drawing.close", json!({}));
         let e = s.execute("selection.delete", &json!({"items": [item(drawing, front)]})).unwrap_err().to_string();
         assert!(e.contains("open a drawing first"), "{e}");
+    }
+
+    /// With a drawing open, the model's items are deleted as ever: the model's step, with the
+    /// drawing still open and as it was, so undo in the drawing leaves the delete alone.
+    #[test]
+    fn the_models_items_are_deleted_with_a_drawing_open() {
+        let (mut s, ..) = sheet_objects();
+        let (open, drawing) = (s.open_drawing, s.drawing("test").unwrap().clone());
+        let doc = s.doc.clone();
+        run(&mut s, "selection.delete", json!({"items": [{"type": "body", "name": "Block"}]}));
+        assert!(!Arc::ptr_eq(&s.doc, &doc), "the model changed");
+        assert_eq!(s.open_drawing, open);
+        assert_eq!(s.undo.last().unwrap().part, None, "the model's step");
+        assert_eq!(s.drawing("test").unwrap(), &drawing);
     }
 
     /// Seeded selections of the drawing's objects, deleted or dry-run in turn with undos between:

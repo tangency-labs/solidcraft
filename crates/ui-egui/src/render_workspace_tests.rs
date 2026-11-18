@@ -8964,6 +8964,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
         samples: 1,
         tess: false,
         oit: false,
+        edges: false,
     });
     h.app.render_workspace.host = Some(host_executor(4096, true, 1).unwrap());
     sync_backend(&mut h.app);

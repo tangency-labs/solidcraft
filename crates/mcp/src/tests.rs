@@ -2890,6 +2890,9 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
                 if o.contains_key("created_bodies") {
                     o.remove("bodies");
                 }
+                if o.get("warning").is_some_and(Value::is_null) {
+                    o.remove("warning");
+                }
                 for key in ["points", "curves", "constraints", "dimensions"] {
                     if o.get(key).is_some_and(|v| o.get("created").and_then(|c| c.get(key)) == Some(v)) {
                         o.remove(key);
@@ -2907,6 +2910,91 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
         let error = raw_tool(&mut s, "execute", json!({"command": "not.a.command", "verbose": false}));
         assert_eq!(error["result"]["isError"], true);
     }
+}
+
+/// #18831: a compact reply counts an export's repeated mesh warnings and keeps the worst of each
+/// kind; a lone warning of a kind, and any other warning, stays as it is.
+#[test]
+fn compact_reply_counts_repeated_mesh_warnings() {
+    let mut warnings: Vec<String> = (0..130)
+        .map(|i| format!("Node: face {i}: smallest angle {:.2}°, short of the 25° asked (stopped by: Corner)", 24.0 - f64::from(i) * 0.08))
+        .collect();
+    warnings.push("Node: face 200: its shaping stopped at a bound (Points) with the 25° asked reached (smallest angle 25.04°)".into());
+    warnings.push("Node: face 201: its shaping stopped at a bound (Points) with the 25° asked reached (smallest angle 25.01°)".into());
+    warnings.push(
+        "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)"
+            .into(),
+    );
+    warnings.push("Lid has a print face but was written as it lies".into());
+    let reply = json!({"path": "node.stl", "bytes": 84, "format": "StlBinary", "warnings": warnings});
+    let compact = crate::tools::compact(reply.clone());
+    assert_eq!(compact["warning_count"], json!(134), "{compact}");
+    assert_eq!(
+        compact["warnings"],
+        json!([
+            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (Node: face 129); bodies: \"Node\" (130)",
+            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (Node: face 201); bodies: \"Node\" (2)",
+            "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)",
+            "Lid has a print face but was written as it lies",
+        ]),
+        "{compact}"
+    );
+    // One warning of each kind is left as it is, and nothing is counted.
+    let few = json!({"warnings": ["Node: face 3: smallest angle 12.94°, short of the 25° asked (stopped by: Corner)", "something else"]});
+    assert_eq!(crate::tools::compact(few.clone()), few);
+    // A null `error` stays, so a client can read it; a null `warning` goes.
+    let built = crate::tools::compact(json!({"feature": 1, "name": "Box1", "error": null, "warning": null}));
+    assert_eq!(built, json!({"feature": 1, "name": "Box1", "error": null}));
+    // A script reply without `bytes` (an older app) keeps the script: nothing says it was written.
+    let old_app = json!({"path": "s.json", "script": {"commands": []}, "steps": 0, "omitted": []});
+    assert_eq!(crate::tools::compact(old_app.clone()), old_app);
+}
+
+/// #18831: with `verbose: false`, a batch that adds parameters, builds a part and exports it
+/// replies with each step's new values and the export's warnings counted, and a script written
+/// to a file is not repeated in the reply; with `verbose: true` everything stays.
+#[test]
+fn compact_batch_reply_of_parameters_export_and_script() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-quiet-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("disc.stl");
+    let script = dir.join("disc.json");
+    let steps = json!([
+        {"command": "parameters.add", "params": {"name": "R", "expression": "20 mm"}},
+        {"command": "parameters.add", "params": {"name": "H", "expression": "8 mm"}},
+        {"command": "solid.cylinder", "params": {"radius": "R", "height": "H", "body_name": "Disc"}},
+        {"command": "solid.hole", "params": {"position": [12, 0, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.hole", "params": {"position": [-12, 0, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.hole", "params": {"position": [0, 12, 8], "diameter": 6.3, "depth": 3.1}},
+        {"command": "solid.fillet", "params": {"edges": [[20, 0, 8]], "radius": 1.5}},
+        {"command": "file.export_stl", "params": {"path": stl}},
+        {"command": "timeline.export_script", "params": {"path": script}},
+    ]);
+    let mut s = server();
+    let full = tool(&mut s, "batch", json!({"commands": steps}));
+    tool(&mut s, "new_design", json!({}));
+    let r = tool(&mut s, "batch", json!({"commands": steps, "verbose": false}));
+    let written = std::fs::read_to_string(&script).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(full["results"][0]["display_value"], json!(20.0), "{full}");
+    assert_eq!(r["results"][0], json!({"name": "R", "unit": "mm", "value": 20.0}), "{r}");
+    assert!(r["results"][2].get("warning").is_none() && full["results"][2]["warning"].is_null(), "a null warning is left out: {r}");
+    // The fillet leaves three faces whose shaping stopped at a bound: one line in the compact reply.
+    let export = &r["results"][7];
+    let n = full["results"][7]["warnings"].as_array().map_or(0, Vec::len);
+    assert!(n >= 2, "the part should give the export several warnings: {full}");
+    assert_eq!(export["warning_count"], json!(n), "{r}");
+    assert_eq!(export["warnings"].as_array().map(Vec::len), Some(1), "{r}");
+    assert!(export["warnings"][0].as_str().is_some_and(|w| w.starts_with(&format!("{n} faces "))), "{r}");
+    let exported = &r["results"][8];
+    assert!(full["results"][8]["script"].is_object(), "{full}");
+    assert!(exported.get("script").is_none(), "{r}");
+    assert_eq!(exported["path"], json!(script), "{r}");
+    assert_eq!(exported["bytes"], json!(written.len()), "{r}");
+    assert!(written.contains("\"timeline.add\""), "the script is still written in full: {written}");
+    // The compact reply is a fraction of the full one.
+    let (full_len, compact_len) = (full.to_string().len(), r.to_string().len());
+    assert!(compact_len * 2 < full_len, "compact {compact_len} bytes, full {full_len} bytes: {r}");
 }
 
 /// #9180: a compact sketch reply counts the points of a spline's poles instead of listing them,
