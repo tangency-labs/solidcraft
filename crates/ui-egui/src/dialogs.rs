@@ -1454,6 +1454,7 @@ impl Dialog {
 
     /// The Name row's text (Extrude): what the feature is called, or will be.
     fn named(mut self, name: String) -> Self {
+        self.extra.insert("name_default".into(), json!(name.clone()));
         self.extra.insert("name".into(), json!(name));
         self
     }
@@ -3684,6 +3685,15 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     {
         d.refuse(app, error);
     }
+    // An Extrude's taken name is refused by `apply_commands` before any preview runs (#18668), so
+    // it is said here; its other refusals (a missing profile) keep their own way of showing.
+    if matches!(d.kind, Kind::Extrude { .. })
+        && d.previews()
+        && let Err(error) = apply_commands(app, d)
+        && error.starts_with("another feature is called")
+    {
+        d.refuse(app, error);
+    }
     let shown_id = egui::Id::unique("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));
@@ -5843,7 +5853,7 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     let mut normalized = d.clone();
     // The Name row (#18668): left blank it is the default name when making a feature and the name
     // it has when editing one; an edit that gives another name renames it after the rebuild.
-    let rename = extrude_rename(app, &mut normalized);
+    let rename = extrude_rename(app, &mut normalized)?;
     normalized.sync_material(&app.session);
     for value in crate::length_input::fields(&app.session.doc, &mut normalized.kind) {
         *value = crate::length_input::expression(&app.session.doc, value, ValueKind::Length);
@@ -5912,24 +5922,38 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     Ok(cmds)
 }
 
-/// An Extrude dialog's Name row: a blank or unchanged name is not sent (making one, the engine
-/// names it; editing one, it keeps its name), and the new name of an edited feature is returned
-/// to be applied as a rename, which `timeline.redefine` does not do.
-fn extrude_rename(app: &SolveApp, d: &mut Dialog) -> Option<String> {
+/// An Extrude dialog's Name row: a blank name, or the default the window suggested, is not sent
+/// (making one, the engine names it, so a name taken meanwhile cannot collide; editing one, it
+/// keeps its name), and the new name of an edited feature is returned to be applied as a rename,
+/// which `timeline.redefine` does not do. A name another feature has is refused here, before any
+/// command runs, so the edit is not half done.
+fn extrude_rename(app: &SolveApp, d: &mut Dialog) -> Result<Option<String>, String> {
     if !matches!(d.kind, Kind::Extrude { .. }) {
-        return None;
+        return Ok(None);
     }
     let name = d.extra.get("name").and_then(Value::as_str).map(|n| n.trim().to_string()).unwrap_or_default();
+    let suggested = d.extra.remove("name_default").and_then(|v| v.as_str().map(str::to_string));
     d.extra.remove("name");
     if name.is_empty() {
-        return None;
+        return Ok(None);
     }
     match d.editing {
         None => {
-            d.extra.insert("name".into(), json!(name));
-            None
+            if suggested.as_deref() != Some(name.as_str()) {
+                d.extra.insert("name".into(), json!(name));
+            }
+            Ok(None)
         }
-        Some((id, _)) => app.session.doc.feature(id).filter(|f| f.name != name).map(|_| name),
+        Some((id, _)) => {
+            let Some(feature) = app.session.doc.feature(id) else { return Ok(None) };
+            if feature.name == name {
+                return Ok(None);
+            }
+            if app.session.doc.features.iter().any(|f| f.name == name && f.id != id) {
+                return Err(format!("another feature is called `{name}`"));
+            }
+            Ok(Some(name))
+        }
     }
 }
 

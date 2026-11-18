@@ -1501,12 +1501,38 @@ fn a_name_another_feature_has_is_refused_and_leaves_the_design_alone() {
     h.frames(4);
     let undo = h.app.session.undo.len();
     open(&mut h);
+    // A changed distance and a taken name together: the name is refused before anything runs, so
+    // the distance is not applied either.
+    h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"20 mm"})).unwrap();
     h.app.dialog.as_mut().unwrap().extra.insert("name".into(), json!("Other"));
     h.frames(2);
+    h.frames(3);
     h.step(&json!({"widget":"OK"})).unwrap();
-    // The window stays open and the preview says why; nothing was committed.
+    // The window stays open and says why; nothing was committed.
     assert!(h.app.dialog.is_some());
-    assert!(h.app.preview.error.as_deref().is_some_and(|e| e.contains("another feature is called `Other`")), "{:?}", h.app.preview.error);
+    let said = h.app.dialog.as_ref().and_then(|d| d.error.clone()).or(h.app.preview.error.clone());
+    assert!(said.as_deref().is_some_and(|e| e.contains("another feature is called `Other`")), "{said:?}");
     assert_eq!(h.app.session.undo.len(), undo);
     assert!(h.app.session.doc.find_feature("Depth").is_some());
+    assert_eq!(extent(&h).distance, "10 mm", "the edit did not half happen");
+}
+
+#[test]
+fn a_default_name_nobody_touched_is_left_to_the_engine() {
+    // The window suggested Extrude1; another feature took it before OK. The untouched suggestion is
+    // not sent, so the engine names the new one Extrude2 instead of failing on a duplicate.
+    let mut h = make(json!({}));
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("name"), Some(&json!("Extrude1")));
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"2 mm","operation":"new","name":"Extrude1","body_name":"Taken"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!(h.app.session.doc.find_feature("Extrude2").is_some());
 }
