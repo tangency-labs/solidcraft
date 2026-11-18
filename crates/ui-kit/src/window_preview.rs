@@ -93,6 +93,17 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
     }
     let top = Rect::from_center_size(card.center() + vec2(0.0, 6.0 * scale), vec2(78.0, 78.0) * scale);
     painter.rect(top, 0, t.figure_face_top, Stroke::new(3.0 * scale, t.figure_line), StrokeKind::Inside);
+    if menu.panels {
+        let top = if menu.ribbon { 146.0 } else { 62.0 };
+        for (x, width, height) in [(17.0, 164.0, 238.0), (732.0, 150.0, 186.0)] {
+            let panel = region(x, top, width, height);
+            painter.rect(panel, 3, t.figure_card, Stroke::new(3.0 * scale, t.border), StrokeKind::Inside);
+            painter.rect_filled(region(x + 3.0, top + 3.0, width - 6.0, 22.0), 2, t.panel_header);
+            for y in [42.0, 61.0, 80.0] {
+                painter.rect_filled(region(x + 14.0, top + y, width * 0.55, 4.0), 1, t.text_dim.gamma_multiply(0.36));
+            }
+        }
+    }
     if menu.ribbon {
         let ribbon = region(3.0, 47.0, 894.0, 84.0);
         if menu.ribbon_auto_hide {

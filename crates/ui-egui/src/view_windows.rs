@@ -14,6 +14,7 @@ pub(crate) struct Windows {
     embedded: bool,
     painting: Option<WindowId>,
     painting_options: Option<WindowOptions>,
+    pub(crate) painting_panels: bool,
     closing: Option<Option<u64>>,
     parked: Option<(u64, Vec<u64>)>,
     focus: Option<(u64, WindowId)>,
@@ -68,6 +69,7 @@ struct Host {
     view_placement: Option<(u64, u64)>,
     menu: crate::context_menu::MenuState,
     preview: crate::preview::PreviewState,
+    panels: crate::panel_runtime::PopOutPanels,
     ribbon_reveal: crate::ui_kit::reveal::State,
     ribbon_focus_pending: bool,
     ribbon_tab: String,
@@ -736,6 +738,9 @@ fn options_command(app: &mut SolveApp, command: &str, request: Value) -> Result<
         if let Some(keep_on_top) = change.keep_on_top {
             current.keep_on_top = keep_on_top;
         }
+        if let Some(panels) = change.panels {
+            current.panels = panels;
+        }
         if let Some(ribbon) = change.ribbon {
             current.ribbon = ribbon;
         }
@@ -1058,6 +1063,7 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         displays: &displays,
         card_headers,
         keep_on_top: options.keep_on_top,
+        panels: options.panels,
         ribbon: options.ribbon,
         ribbon_auto_hide: options.ribbon_auto_hide,
     };
@@ -1072,6 +1078,7 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
             ("tab.window.set_options", json!({"window": id, "card_headers": value}))
         }
         Action::KeepOnTop(on) => ("tab.window.set_options", json!({"window": id, "keep_on_top": on})),
+        Action::Panels(on) => ("tab.window.set_options", json!({"window": id, "panels": on})),
         Action::Ribbon(on) => ("tab.window.set_options", json!({"window": id, "ribbon": on})),
         Action::RibbonAutoHide(on) => ("tab.window.set_options", json!({"window": id, "ribbon_auto_hide": on})),
         Action::MoveToDisplay(display) => ("tab.window.move_to_display", json!({"window": id, "display": display})),
@@ -1137,7 +1144,13 @@ fn show_window_rename(app: &mut SolveApp, ctx: &Context, id: WindowId) {
     });
 }
 
-fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, ribbon: (f32, bool), had_dialog: bool) {
+struct PanelContext<'a> {
+    workspace: Option<&'a solidcraft_engine::panels::WorkspaceId>,
+    tab: &'a str,
+    layout: &'a Option<Value>,
+}
+
+fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, ribbon: (f32, bool), had_dialog: bool, panel_context: PanelContext<'_>) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if is_clean(app) {
         let tab = app.docs.current_tab();
@@ -1218,8 +1231,29 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, ribbon: (f32, b
     } else {
         app.shell.ribbon_overlay = None;
     }
+    crate::ui_kit::Container::begin_host_windows(ui.ctx());
+    app.shell.browser = None;
+    app.shell.history = None;
+    app.shell.workspace_panels.clear();
+    app.viewport.palette_rect = None;
+    let panels = if child_options(app).panels {
+        let tab = std::mem::replace(&mut app.ui.tab, panel_context.tab.into());
+        let owner = format!("solidcraft.panels.{}.{}", app.docs.current_tab(), id);
+        let prepared = crate::panel_runtime::prepare_pop_out_panels(app, ui, rect, panel_context.workspace, &owner, panel_context.layout);
+        app.ui.tab = tab;
+        prepared
+    } else {
+        crate::panel_runtime::hide_app_host(app);
+        false
+    };
     let mut canvas = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    canvas.set_clip_rect(canvas.clip_rect().intersect(rect));
     app.show_workspace(&mut canvas);
+    if panels {
+        let tab = std::mem::replace(&mut app.ui.tab, panel_context.tab.into());
+        crate::panel_runtime::paint_pop_out_panels(app, &mut canvas);
+        app.ui.tab = tab;
+    }
     if let Some(rect) = app.viewport.rect.filter(|r| r.is_positive() && r.is_finite()) {
         if crate::view_tiles::shown(app) {
             crate::view_tiles::card_controls(app, &mut canvas);
@@ -1246,6 +1280,11 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, ribbon: (f32, b
     }
     show_window_rename(app, ui.ctx(), id);
     crate::context_menu::show(app, ui.ctx());
+    if panels {
+        let tab = std::mem::replace(&mut app.ui.tab, panel_context.tab.into());
+        crate::panel_runtime::finish_app_host(app, &mut canvas);
+        app.ui.tab = tab;
+    }
     documents::sync_window_title(app, ui.ctx());
     if app.custom_titlebar {
         crate::titlebar::resize_zones(ui);
@@ -1267,6 +1306,7 @@ impl Host {
             view_placement: None,
             menu: Default::default(),
             preview: Default::default(),
+            panels: Default::default(),
             ribbon_reveal: Default::default(),
             ribbon_focus_pending: false,
             ribbon_tab: String::new(),
@@ -1382,6 +1422,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         app.view_windows.choices = collect_choices(app);
         app.view_windows.setup_snapshot =
             (!app.preferences.view_window_setups.is_empty()).then(|| crate::view_setups::current_snapshot(app)).flatten();
+        let panel_workspace = crate::panel_runtime::panel_workspace(app);
         let Some(mut window) = app.docs.views.take_window(id) else { continue };
         let os_id = viewport_id(tab, id);
         let custom = !cfg!(target_os = "macos");
@@ -1481,6 +1522,13 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             if ui.input(|input| input.viewport().focused == Some(true)) {
                 app.view_windows.last_focus = Some((tab, id));
             }
+            let panel_tab = match app.view_windows.last_focus {
+                Some((owner, focused)) if owner == tab && focused == id => documents::view_workspace(window.views.active().kind).into(),
+                Some((owner, focused)) if owner == tab && focused != 0 => {
+                    app.docs.views.views_of(focused).map_or_else(|| app.ui.tab.clone(), |views| documents::view_workspace(views.active().kind).into())
+                }
+                _ => app.ui.tab.clone(),
+            };
             documents::park_active_look(app);
             app.view_windows.parked = Some((tab, app.docs.views.ids().collect()));
             app.view_windows.foreign_views = available_strip_views(app).map(|(owner, view)| (owner, view.clone())).collect();
@@ -1507,8 +1555,26 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let had_dialog = app.dialog.is_some();
             host.swap_ribbon_popup(ui.ctx());
             let ribbon_geometry = host.ribbon(app, ui.ctx());
+            host.panels.load(&window.panel_layout);
+            host.panels.swap(app);
+            app.view_windows.painting_panels = true;
+            if !options.panels || is_clean(app) {
+                crate::panel_runtime::hide_app_host(app);
+            }
             app.view_window_logic(ui.ctx());
-            window_content(app, ui, id, ribbon_geometry, had_dialog);
+            window_content(
+                app,
+                ui,
+                id,
+                ribbon_geometry,
+                had_dialog,
+                PanelContext { workspace: panel_workspace.as_ref(), tab: &panel_tab, layout: &window.panel_layout },
+            );
+            if app.docs.current_tab() == tab {
+                host.panels.save(app, &mut window.panel_layout);
+            }
+            app.view_windows.painting_panels = false;
+            host.panels.swap(app);
             host.swap_ribbon_popup(ui.ctx());
             if crate::render_workspace::active(app) || crate::render_workspace::tiled(app) {
                 crate::render_workspace::tick_live(app, ui.ctx());

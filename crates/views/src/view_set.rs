@@ -114,6 +114,7 @@ impl WindowLevel {
 /// An arrangement of existing views in one window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowArrangement {
+    pub panel_layout: Option<Value>,
     pub options: super::WindowOptions,
     pub views: Vec<u64>,
     pub active: Option<u64>,
@@ -199,6 +200,7 @@ fn anchored_window_axis(wanted: f32, room: f32, snap: bool) -> f32 {
 /// A pop-out holds its own strip, active view and layout for this design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopOut {
+    pub panel_layout: Option<Value>,
     pub options: super::WindowOptions,
     pub id: WindowId,
     pub level: WindowLevel,
@@ -341,6 +343,7 @@ impl ViewSet {
             let mut window = old.next().unwrap_or_else(|| {
                 let id = self.allocate_window_id();
                 PopOut {
+                    panel_layout: None,
                     options: super::WindowOptions::default(),
                     id,
                     level: WindowLevel::ViewsOnly,
@@ -350,6 +353,7 @@ impl ViewSet {
             });
             window.level = group.level;
             window.options = group.options;
+            window.panel_layout.clone_from(&group.panel_layout);
             if let Some(placement) = &group.placement {
                 window.placement = Some(placement.clone());
             }
@@ -488,6 +492,7 @@ impl ViewSet {
         if created {
             let views = Self::strip(vec![moved], view, self.next_id, window);
             self.put_window(PopOut {
+                panel_layout: None,
                 options: super::WindowOptions::default(),
                 id: window,
                 level: WindowLevel::ViewsOnly,
@@ -1176,6 +1181,7 @@ impl ViewSet {
                 "name": window.views.window_name(),
                 "level": window.level.key(),
                 "options": window.options,
+                "panel_layout": window.panel_layout,
                 "active": window.views.active,
                 "tiles": window.views.tiles().map(Tiles::to_json),
                 "placement": window.placement.as_ref().map(WindowPlacement::to_json),
@@ -1185,6 +1191,12 @@ impl ViewSet {
 
     /// Read a saved set. Keep the original validation on view identities and names. Broken
     /// window references fall back to the main strip and empty windows are ignored.
+    /// Keep an opaque, bounded UI panel record without parsing panel internals.
+    pub fn read_panel_layout(value: &Value) -> Option<Value> {
+        value.get("catalogue")?.as_str().filter(|record| record.len() <= 256 * 1024)?;
+        Some(value.clone())
+    }
+
     pub fn from_json(value: &Value) -> Option<ViewSet> {
         let views = value.get("views")?.as_array()?;
         if views.is_empty() || views.len() > MAX_VIEWS {
@@ -1262,7 +1274,8 @@ impl ViewSet {
             let level = item.get("level").and_then(Value::as_str).and_then(WindowLevel::from_key).unwrap_or_default();
             let placement = item.get("placement").and_then(WindowPlacement::from_json);
             let options = item.get("options").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
-            set.put_window(PopOut { options, id, level, placement, views });
+            let panel_layout = item.get("panel_layout").and_then(Self::read_panel_layout);
+            set.put_window(PopOut { panel_layout, options, id, level, placement, views });
         }
         for (owner, entry) in closed {
             let strip = set.windows.iter_mut().find(|window| window.id == owner).map_or(&mut set.closed, |window| &mut window.views.closed);
@@ -1664,16 +1677,20 @@ mod tests {
             WindowPlacement { display: Some("Display 2".into()), x: -25.0, y: 16.0, w: 700.0, h: 500.0, maximised: false, fullscreen: false };
         let id = set.move_to_window(2, WindowTarget::New { placement: Some(placement) }).unwrap().window;
         let options = crate::WindowOptions { card_headers: crate::CardHeaders::Hover, keep_on_top: true, ..crate::WindowOptions::new_pop_out() };
-        set.window_mut(id).unwrap().options = options;
+        let child = set.window_mut(id).unwrap();
+        child.options = options;
+        child.panel_layout = Some(json!({"catalogue":"opaque workspace positions"}));
         let mut saved = set.to_json();
         let restored = ViewSet::from_json(&saved).unwrap();
         assert_eq!(restored.to_json(), saved);
         assert_eq!(restored.window(id).unwrap().options, options);
+        assert_eq!(restored.window(id).unwrap().panel_layout, Some(json!({"catalogue":"opaque workspace positions"})));
         saved["windows"][0]["options"] = json!({"card_headers":"hover","keep_on_top":true});
         let old_options = ViewSet::from_json(&saved).unwrap().window(id).unwrap().options;
         assert!(!old_options.ribbon && old_options.ribbon_auto_hide);
         assert_eq!(old_options.card_headers, crate::CardHeaders::Hover);
         saved["windows"][0].as_object_mut().unwrap().remove("options");
+        saved["windows"][0]["panel_layout"] = json!({"catalogue": []});
         saved["windows"][0]["active"] = json!(5);
         saved["windows"][0]["level"] = json!("unknown future mode");
         saved["windows"][0]["placement"]["h"] = json!(-5);
@@ -1684,6 +1701,7 @@ mod tests {
         assert_eq!(repaired.window(id).unwrap().level, WindowLevel::ViewsOnly);
         assert_eq!(repaired.window(id).unwrap().options, crate::WindowOptions::default());
         assert_eq!(repaired.window(id).unwrap().placement, None);
+        assert_eq!(repaired.window(id).unwrap().panel_layout, None);
         assert!(repaired.check());
     }
 

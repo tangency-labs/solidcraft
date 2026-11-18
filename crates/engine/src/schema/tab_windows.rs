@@ -105,6 +105,8 @@ pub struct TabWindowSetOptionsParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ribbon: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panels: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ribbon_auto_hide: Option<bool>,
 }
 
