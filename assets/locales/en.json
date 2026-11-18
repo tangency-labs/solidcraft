@@ -6446,7 +6446,7 @@
   "ui.drawing_ribbon.align": "Align",
   "ui.drawing_ribbon.issue_short": "Issue Rev.",
   "ui.drawing_ribbon.model_dims_short": "Model Dims.",
-  "ui.drawing_ribbon.planned": "(planned)",
+  "ui.drawing_ribbon.planned": "Coming soon",
   "ui.drawing_ribbon.space": "Space",
   "ui.drawing_ribbon.surface_texture_short": "Surface Text.",
   "ui.drawing_settings.immediate": "Sheet changes apply immediately. Each edit is one drawing undo step.",

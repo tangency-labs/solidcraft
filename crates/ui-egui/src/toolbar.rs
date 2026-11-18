@@ -18,6 +18,12 @@ fn can_start(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> bool {
         || (crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(command.id))
 }
 
+/// A planned Drawing tool with a working options panel is a working tool, drawn and described as
+/// one. Only a planned tool that opens nothing yet is faded and says it is coming soon.
+pub(crate) fn coming_soon(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> bool {
+    command.planned.is_some() && !(crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(command.id))
+}
+
 /// Accent for a tab or a panel with a more specific semantic role.
 fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     if panel == "CONSTRAIN" {
@@ -1131,6 +1137,8 @@ struct PanelButton {
     exit: bool,
     persistent: bool,
     disabled: Option<String>,
+    /// Drawn faded: a planned tool that opens nothing yet.
+    coming_soon: bool,
     split_title: String,
     split_name: String,
 }
@@ -1144,7 +1152,7 @@ impl PanelButton {
             name: &self.name,
             icon: self.icon,
             size: self.size,
-            planned: self.selected.planned.is_some(),
+            planned: self.coming_soon,
             enabled: self.enabled,
             pressed: self.pressed,
             exit: self.exit,
@@ -1245,6 +1253,7 @@ impl RibbonPanels {
                             && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
                         persistent,
                         disabled: info.disabled_reason,
+                        coming_soon: coming_soon(app, selected),
                         split_title: family.map(|f| app.tr_label(crate::workspace::ribbon_family_label(f)).to_string()).unwrap_or_default(),
                         split_name: family.map(|f| app.tr_label(f.label).to_string()).unwrap_or_default(),
                     }
@@ -1265,6 +1274,7 @@ impl RibbonPanels {
                         exit: false,
                         persistent: false,
                         disabled: info.disabled_reason,
+                        coming_soon: coming_soon(app, c),
                         split_title: String::new(),
                         split_name: String::new(),
                     }
@@ -2090,7 +2100,7 @@ impl RowData {
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
         let reason = if crate::drawing_workspace::active(app) && c.planned.is_some() {
-            Some(app.tr("ui.drawing_ribbon.planned"))
+            coming_soon(app, c).then(|| app.tr("ui.drawing_ribbon.planned"))
         } else {
             info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason))
         };
@@ -2294,7 +2304,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
         let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
-            Some(app.tr("ui.drawing_ribbon.planned"))
+            coming_soon(app, command).then(|| app.tr("ui.drawing_ribbon.planned"))
         } else {
             disabled.map(|reason| app.tr_label(reason))
         };
