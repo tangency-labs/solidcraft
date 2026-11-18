@@ -54,7 +54,8 @@
 //!   (a blend and a cylinder in G2 contact), is held back likewise. Where the
 //!   faces part by more than the tolerance the sector decides; where a step leaves a face
 //!   or the rounds run out first, the class is returned. A step that leaves only one face of
-//!   the sector while the classified face is held to the other keeps that face's last step:
+//!   the sector while the classified face is held to the other, tangent to it at the edge
+//!   (under `EFF_ZERO_SQRT` rad, not crossing it at a small angle), keeps that face's last step:
 //!   a sliver cut off along the tangent line of a blend is left long before the faces part. Three planes are read once, at
 //!   the edge: two of them closer than 0.001° there are coincident only where their faces
 //!   stay within the tolerance band of each other's plane; walls 3.3e-7 rad apart through
@@ -806,11 +807,20 @@ pub fn radial_sector_classify_between(
         // step. A sliver face cut off by an intersection curve along the tangent line of a
         // blend (#18166) is left within a few tolerances of the edge, long before the faces
         // part, and read alone it makes the classified face coincide with the blend face.
+        // Only faces tangent at the edge are followed: an angle under `EFF_ZERO_SQRT`, the
+        // bound this classifier takes for faces parallel at the edge (the zero sector test
+        // below). Faces that cross at a small angle part linearly from the edge, and their
+        // angle is the classifier's own coincidence test: two fillets of one radius a 1e-4
+        // translate apart cross at 5e-5 rad and stay within 1e-4 of each other over their
+        // whole width (issue_3012's sliver), where following one to its far end read a
+        // 1.05e-4 parting as a side and lost the coincidence (status 1001). The G2 blend's
+        // faces meet at 5.5e-13 rad and part faster than the square of the step
+        // (6.8e-6 at 0.069, 5.6e-4 at 0.21).
         if count > 0 && !off3 && off1 != off2 && zero_sector.is_none() {
             let classify_brep = other_brep.as_deref().unwrap_or(&*brep);
             let follow = if off2 {
                 ang2 <= ang3 + EFF_ZERO
-                    && ang2 < 0.5 * PI / 180.0
+                    && ang2 < EFF_ZERO_SQRT
                     && on_other_surfaces(
                         k,
                         brep,
@@ -821,7 +831,7 @@ pub fn radial_sector_classify_between(
                     )?
             } else {
                 ang3 <= ang2 + EFF_ZERO
-                    && ang3 < 0.5 * PI / 180.0
+                    && ang3 < EFF_ZERO_SQRT
                     && on_other_surfaces(
                         k,
                         brep,
