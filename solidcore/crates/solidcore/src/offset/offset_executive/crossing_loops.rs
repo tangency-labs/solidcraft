@@ -1159,10 +1159,13 @@ impl OffsetExecutive {
                     .orientations
                     .push(eu::orientation(b, stretch.edgeuse)?);
             }
-            // (not in the fork, solidcore#3329) only a region under an opening can be the
-            // cavity's floor; then a point inside the region, just off it on the side the
-            // cavity would lie on
-            if !self.under_an_opening(original, b, &stretches, chain)?
+            // (not in the fork, solidcore#3329) of an offset that opens faces (a shell), only a
+            // region under an opening can be the cavity's floor; then a point inside the
+            // region, just off it on the side the cavity would lie on. An offset that opens
+            // nothing (a draft's local operation, solidcraft#18374) has no opening to ask
+            // about: the point alone says.
+            let opens = !self.shell_faces().is_empty();
+            if (opens && !self.under_an_opening(original, b, &stretches, chain)?)
                 || !self.floor_is_cavity(kernel, original, b, f, &stretches, chain)?
             {
                 continue;
@@ -1615,9 +1618,6 @@ impl OffsetExecutive {
         chain: &[usize],
     ) -> Result<bool> {
         let open = self.shell_faces();
-        if open.is_empty() {
-            return Ok(false);
-        }
         for &ss in chain {
             let edgeuse = at(stretches, ss)?.edgeuse;
             for offset_use in [Some(edgeuse), eu::mate(b, edgeuse)?].into_iter().flatten() {
