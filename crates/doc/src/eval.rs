@@ -12383,6 +12383,8 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Import { step, skip, records, .. } => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.imports_read += 1);
             let (imp, digest) = match records {
                 Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
