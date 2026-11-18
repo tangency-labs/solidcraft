@@ -127,9 +127,12 @@ impl FilletSession<'_> {
         // that is `None` (outside the sections it decides, or no inputs) or fails is taken
         // as a round that may roll anywhere. A round that is not apart rolls by its ball's
         // sections instead; on the faces the closed form decides (planes and cylinders
-        // parallel to a straight edge) every section across the edge is the same, so the
-        // sections find the contact on the same side of each smooth far edge as the closed
-        // form's one section does.
+        // parallel to a straight edge) every section across the edge is the same, so for a
+        // smooth far edge that spans the round's edge the sections find the contact on the
+        // same side of it as the closed form's one section does. The closed form looks only at
+        // far edges that span the round's edge and takes the first it rolls over; the
+        // sections take the first smooth far edge with no span test, so a far edge split into
+        // pieces along the round's edge (a seam cut in two) may be decided differently.
         let all_inputs: Vec<Option<Inputs>> = ids
             .iter()
             .map(|&id| self.rollover_inputs(id))

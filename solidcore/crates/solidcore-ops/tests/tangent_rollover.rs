@@ -2827,9 +2827,9 @@ fn slot_half_angle() -> f64 {
 /// takes about 7.1 degrees of wall (its ball touches the wall 0.36 from its edge) and the
 /// rolled round about 2.1 degrees past the seam, so the bands overlap below about 9.2 degrees:
 /// at 8 and 9 degrees the fillet is refused as having no room; at 12 and 20 degrees all four
-/// rounds build, each its exact [`root_area`] along the hole's depth. (At 5 degrees both near
-/// sides roll over the seam from both sides; that is refused before the rollover is decided,
-/// on main too, and is not a case of this change.)
+/// rounds build, each its exact [`root_area`] along the hole's depth. At 5 degrees (slots at
+/// 14.8 and -14.8) both near sides roll over the seam, from opposite sides, and their bands
+/// overlap: [`slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart`].
 #[test]
 fn slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping() {
     let r = 0.5;
@@ -2861,5 +2861,30 @@ fn slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapp
             (v - expected).abs() < 1e-6,
             "side {past} degrees past the seam: volume {v}, expected {expected}"
         );
+    }
+}
+
+/// Controls for #18830: slots at 14.8 and -14.8 degrees put a side 5 degrees either side of
+/// the hole's seam, and both those rounds roll over the seam, from opposite sides, so their
+/// bands overlap. Each round's closed form rolls over the seam, so neither is apart from the
+/// other: both go to the ball's sections, as on main, and the fillet is refused there with the
+/// corner error, in either order of the edges. (Taken as apart, each would roll in closed form
+/// and the overlap would surface later, as an edge of the fillet that maps back to no edge.)
+#[test]
+fn slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart() {
+    fixes();
+    let slots = [14.8, -14.8];
+    for reversed in [false, true] {
+        let b = slotted_hole(&slots);
+        let mut edges = slot_roots(&b, slots[0]).to_vec();
+        edges.extend(slot_roots(&b, slots[1]));
+        if reversed {
+            edges.reverse();
+        }
+        match blend(&b, Blend::Round, &edges, &[0.5; 4], &[], Corners::Filled) {
+            Err(Error::BlendFailed { phrase, .. })
+                if phrase.contains("Corner Edge Computation Failure") => {}
+            other => panic!("edges reversed {reversed}: {other:?}"),
+        }
     }
 }
