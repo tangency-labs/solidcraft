@@ -49,7 +49,6 @@ const NOTCHED: &[u8] = include_bytes!("data/issue_2364_solidcraft_1080_notched_b
 /// SolidCraft's rig set at the time (#2364's check): every fix but those it leaves off.
 fn kernel() -> Kernel {
     let mut f = UpstreamFixes::all();
-    f.cone_unbounded_parameterized_as_nurb = false;
     f.fillet_refuse_rounds_breaking_through = false;
     Kernel {
         fixes: f,

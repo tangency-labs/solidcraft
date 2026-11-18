@@ -227,6 +227,11 @@ impl<'t> Assembly<'t> {
         self.tol
     }
 
+    /// Where vertex `v` is, if there is one.
+    pub fn vertex_point(&self, v: u32) -> Option<P3> {
+        self.vertices.get(v as usize).map(|x| x.point)
+    }
+
     /// A vertex at `point`, its index.
     pub fn add_vertex(&mut self, point: P3) -> R<u32> {
         let i = index(self.vertices.len())?;
@@ -295,6 +300,20 @@ impl<'t> Assembly<'t> {
         let half = std::f64::consts::FRAC_PI_2;
         self.edges.push(EdgeB { curve: BCurve::Circle { frame, radius }, interval: [-half, half], vertices: ends, tolerance: self.tol, form: None });
         Ok(vec![Bound::Edges(vec![(e, true), (e, false)])])
+    }
+
+    /// An edge between vertices `ends` on `curve` where the producer gives no interval: the
+    /// interval is where the vertices lie on the curve (the whole of a closed curve when both
+    /// ends are one vertex or one point), the edge running from `ends[0]` along the curve, as a
+    /// STEP edge is read. Then as [`Assembly::add_edge`].
+    pub fn add_edge_on(&mut self, origin: u64, curve: BCurve, ends: [u32; 2]) -> R<(u32, bool)> {
+        let (ps, pe) = (self.point(ends[0])?, self.point(ends[1])?);
+        let closed = ends[0] == ends[1];
+        let full = closed || ps == pe;
+        let (curve, interval, with) =
+            crate::topology::record_edge(curve, ps, pe, closed, full, self.tol).map_err(|m| format!("edge #{origin}: {m}"))?;
+        let (e, along) = self.add_edge(origin, curve, interval, if with { ends } else { [ends[1], ends[0]] })?;
+        Ok((e, along == with))
     }
 
     /// A face on `surface` bounded by `bounds`, its index. Each bound is relative to the
@@ -529,6 +548,14 @@ impl<'t> Assembly<'t> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
+        // A face on a torus that is the rest of it round a patch its loop bounds gets the
+        // torus's seams, its loop a hole in it.
+        let outsides = self.complete_outsides()?;
+        if outsides > 0 {
+            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+        }
+        // A torus face's seams where its torus starts, so its (u, v) box is read whole.
+        self.seat_torus_seams()?;
         let slits = self.drop_inner_slits();
         if slits > 0 {
             notes.push(format!("{slits} slits of no area left out of the faces they lie in"));
@@ -1528,8 +1555,9 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
 /// that moves the surface within their edge's tolerance (`tolerances`, as `pcs`): the parameter
 /// tolerance that edge has on this patch. The kernel moves the control points and proves the
 /// bound, along u and v at once ([`SurfaceEval::pcurve_onto_knots`]); the gap to the edge is then
-/// measured and covered (`raise_edges`). A pcurve it refuses (farther past, on a rational or
-/// closed patch) is left as it is, for the record check to refuse. The number of moves made.
+/// measured and covered (`raise_edges`). A pcurve it refuses (farther past, past both ranges of
+/// a rational patch, or on a closed patch) is left as it is, for the record check to refuse. The
+/// number of moves made.
 pub(crate) fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut [Vec<Curve2>]) -> usize {
     let Ok(on) = SurfaceEval::new(surface) else { return 0 };
     let mut moved = 0;
@@ -1610,6 +1638,40 @@ pub(crate) fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2
         }
     }
     Ok(out)
+}
+
+/// An edge on a closed (periodic) spline over `interval` in the spline's parameter, which may
+/// lie a whole number of periods from the curve's own range and run across its seam (a producer
+/// that evaluates a periodic spline modulo its period): the curve and interval the record takes,
+/// the interval moved into the range by whole periods, and the curve restarted there (exactly:
+/// knot insertion) when the edge runs across the seam, as the STEP reader reads such an edge.
+pub fn periodic_edge(curve: BCurve, [t0, t1]: [f64; 2]) -> R<(BCurve, [f64; 2])> {
+    let Natural::Range(a, b) = curve.natural() else { return Err("a periodic spline without a range".into()) };
+    let period = b - a;
+    if !(period > 0.0) || !(t0 <= t1) || !(t1 - t0 <= period) {
+        return Err("an edge longer than its periodic spline's period".into());
+    }
+    let turns = ((t0 - a) / period).floor();
+    let (lo, hi) = (t0 - turns * period, t1 - turns * period);
+    if hi <= b {
+        return Ok((curve, [lo, hi]));
+    }
+    Ok((crate::kernel::restart_curve(&curve, lo)?, [lo, hi]))
+}
+
+/// The exact spline of a parabola edge over `interval` in the parabola's parameter: about
+/// `vertex`, `axis` its plane's normal, `reference` its axis of symmetry, `focal` its focal
+/// distance (`vertex + f t² x + 2 f t y`).
+pub fn parabola_curve(vertex: P3, axis: P3, reference: P3, focal: f64, interval: [f64; 2]) -> BCurve {
+    crate::topology::parabola_curve(&crate::geom::Placement { origin: vertex, axis, ref_direction: reference }, focal, interval)
+}
+
+/// The exact spline of a hyperbola edge over `interval` in the hyperbola's parameter: about
+/// `center`, `axis` its plane's normal, `reference` its major axis (`center + a cosh t x +
+/// b sinh t y`). Its ends and knots are at the hyperbola's parameters; between knots its
+/// parameter is not the hyperbola's (see `topology::hyperbola_curve`).
+pub fn hyperbola_curve(center: P3, axis: P3, reference: P3, radii: [f64; 2], interval: [f64; 2]) -> BCurve {
+    crate::topology::hyperbola_curve(&crate::geom::Placement { origin: center, axis, ref_direction: reference }, radii[0], radii[1], interval)
 }
 
 /// A B-spline curve of `degree` on its full knot vector `knots` (one knot per entry, `points`

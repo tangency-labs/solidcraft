@@ -34,9 +34,10 @@ use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::{
-    blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
-    make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
-    Error, FitKind, Order, SetBack, Turn, Unblendable,
+    blend, blend_ordered, blend_with, chamfer_sides, chamfer_sides_facing, edge_faces_along,
+    edges_share_wedge, fillet_variable, fillet_variable_from, make_box, make_cone, make_cylinder,
+    tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind,
+    Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -229,6 +230,93 @@ fn blends_turn_round_a_shallow_sharp_corner() {
             }
         }
     }
+}
+
+/// A plate `t` thick whose top face, through the origin, is tilted `tilt` degrees about y,
+/// bounded outside by two upright walls that meet in a shallow concave crease: the plane
+/// y = -46 for x < 0, and that plane turned `crease` degrees about the upright line through
+/// (0, -46) for x > 0. Inside it is bounded by y = -38, and it ends at x = +-30. The top meets the
+/// walls at 90 degrees and at 90 - atan(sin(tilt) tan(crease)) degrees. Made as solidcraft-cli
+/// makes it: boxes, turned and combined.
+fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
+    let (d, c, l) = (46.0, 38.0, 30.0);
+    let (a, k) = (tilt.to_radians(), crease.to_radians());
+    // p' = p A + t: rows the images of x, y, z, then the translation
+    let about_z = |th: f64, at: [f64; 3]| {
+        let (cs, sn) = (th.cos(), th.sin());
+        let m = [[cs, sn, 0.0], [-sn, cs, 0.0], [0.0, 0.0, 1.0]];
+        let tr = [0, 1, 2].map(|j| at[j] - (0..3).map(|i| at[i] * m[i][j]).sum::<f64>());
+        [
+            [m[0][0], m[0][1], m[0][2], 0.0],
+            [m[1][0], m[1][1], m[1][2], 0.0],
+            [m[2][0], m[2][1], m[2][2], 0.0],
+            [tr[0], tr[1], tr[2], 1.0],
+        ]
+    };
+    let outer = make_box([-l, -d, -200.0], [2.0 * l, d - c, 400.0]).unwrap();
+    let turned = make_box([0.0, -d, -200.0], [2.0 * l, d - c + 10.0, 400.0]).unwrap();
+    turned.transform(&about_z(-k, [0.0, -d, 0.0])).unwrap();
+    let outer = solidcore_ops::boolean::boolean(outer, turned, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let keep = make_box([-l, -d - 40.0, -200.0], [2.0 * l, d + 40.0 - c, 400.0]).unwrap();
+    let outer = solidcore_ops::boolean::boolean(outer, keep, solidcore_ops::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let slab = make_box([-271.5, -271.5, -t], [543.0, 543.0, t]).unwrap();
+    slab.transform(&[
+        [a.cos(), 0.0, -a.sin(), 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [a.sin(), 0.0, a.cos(), 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    let b = solidcore_ops::boolean::boolean(slab, outer, solidcore_ops::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let top = |x: f64| -x * a.tan();
+    let (xl, xr) = (-l / 2.0, l / 2.0 * k.cos());
+    let edges = [
+        edge_at(&b, [xl, -d, top(xl)]),
+        edge_at(&b, [xr, -d - l / 2.0 * k.sin(), top(xr)]),
+    ];
+    (b, edges)
+}
+
+/// The removed volume of [`crease_plate`]'s two top edges rounded `r`, as the prisms of their
+/// sections mitred on the crease's bisector plane: each section the wedge of the top and its
+/// wall less the ball's disc, cut off at the plate's bottom, in closed form; each prism measured
+/// along its centroid line between its end plane and the bisector plane (exact for a prism cut
+/// by planes). The corner's own construction departs from that mitre only within the ball
+/// about the corner, so the removed volume lies within that ball's eighth, `pi r^3 / 6`, of it.
+/// Values for the radii the test uses (the case's derivation, by hand).
+const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (4.0, 258.7033)];
+
+/// A round wider than the plate's walls are tall (it overflows them, runs on past the plate's
+/// bottom and is trimmed there), on two edges meeting at a shallow concave crease between the
+/// walls. At the crease's corner the round's piece along the crease line ran past the crease
+/// edge's lower end; the piece was the crease edge trimmed to its points' drops, both clamped
+/// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
+/// Computation Failure"). The piece is now the crease line continued: the rounds build valid
+/// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
+/// application's fix set (`kernel_cases/fixes.json`).
+#[test]
+fn rounds_overflowing_a_shallow_concave_crease_build() {
+    for (r, mitre) in CREASE_PLATE_MITRE {
+        rig_fixes();
+        let (b, edges) = crease_plate(3.0, 25.0, 15.0);
+        let before = volume(&b);
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        let off = before - volume(&b);
+        let bound = PI * r * r * r / 6.0;
+        assert!(
+            (off - mitre).abs() <= bound,
+            "r {r}: {off} off, mitre {mitre}, bound {bound}"
+        );
+    }
+    all_fixes();
 }
 
 /// Asserts that the faces of [`shallow_corner_plate`]`(kink, convex)` rounded r 1 that are not
@@ -484,7 +572,9 @@ fn a_rim_round_runs_through_a_near_tangent_corner() {
 /// is M = (5/6 - pi/4) r^3: mitred, 8 M in all; swept, the section revolved a quarter turn at
 /// each, 2 pi M, its face a torus. Unequal rounds are not swept yet. Along a pocket's floor the
 /// upright edges are sharp and concave: no ball turns round them, so the swept turn is refused
-/// there and the mitre builds, 60 A - 8 M. A swept turn is a round's.
+/// there and the mitre builds, 60 A - 8 M. A swept turn is a round's. A swept turn refused is
+/// [`Error::TurnRefused`] with the kernel's reason: whether no radius builds it (the pocket)
+/// or the corner is of a kind not built yet (the unequal rounds).
 #[test]
 fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     all_fixes();
@@ -568,14 +658,24 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let (order, edges) = loop_edges(&b, base, 10.0);
     let unequal = [1.0, 1.5, 1.0, 1.5];
     let r = swept(&b, &order, Blend::Round, &edges, &unequal);
-    assert_eq!(r, Some(Error::CornerUnsupported));
+    // not built there yet, with the kernel's reason and the corner's point
+    assert!(
+        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_) })
+            if why.starts_with("a swept turn is built between constant rounds of one radius")),
+        "{r:?}"
+    );
     let r = swept(&b, &order, Blend::Chamfer, &edges, &[1.0]);
     assert_eq!(r, Some(Error::Argument));
     let p = pocket();
     let (order, edges) = loop_edges(&p, floor, 5.0);
     let before = p.to_record().unwrap().0;
     let r = swept(&p, &order, Blend::Round, &edges, &[1.0]);
-    assert_eq!(r, Some(Error::NoRoom));
+    // no radius of the rounds passes the sharp concave edge: the kernel says what would
+    assert!(
+        matches!(&r, Some(Error::TurnRefused { room: true, why, at: Some(_) })
+            if why.contains("round that edge at a radius of at least 1 first")),
+        "{r:?}"
+    );
     assert_eq!(p.to_record().unwrap().0, before);
     blend_ordered(
         &p,
@@ -634,6 +734,266 @@ fn rounds_turn_round_a_thin_tab_wider_than_its_end() {
         let v = b.volume(1e-10).unwrap();
         assert!(rel(v, 56250.0 + 66.0 * a + 8.0 * m) < 1e-9, "r {r}: {v}");
     }
+}
+
+/// [`blend_with`] takes the body's own edge indices and the options [`blend_ordered`] takes:
+/// the boss of [`rounds_turn_round_a_boss_edge_mitred_or_swept`], its four base edges picked
+/// by point ([`solidcore_ops::pick::edges`]) and rounded r 1, holds 12500 + 40 A + 8 M mitred
+/// and 12500 + 40 A + 2 pi M swept (A = 1 - pi/4, M = 5/6 - pi/4), as through the record's
+/// order.
+#[test]
+fn rounds_turn_as_asked_on_the_body_s_own_indices() {
+    all_fixes();
+    let boss = || {
+        built(|k| {
+            let plate = create_box(k, Vec3::new(0.0, 0.0, 0.0), 40.0, 30.0, 10.0)?;
+            let boss = create_box(k, Vec3::new(15.0, 10.0, 10.0), 10.0, 10.0, 5.0)?;
+            boolean_union(k, plate, boss)
+        })
+    };
+    let middles = [
+        [20.0, 10.0, 10.0],
+        [25.0, 15.0, 10.0],
+        [20.0, 20.0, 10.0],
+        [15.0, 15.0, 10.0],
+    ];
+    let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    for (turn, corners) in [(Turn::Mitre, 8.0 * m), (Turn::Swept, 2.0 * PI * m)] {
+        let b = boss();
+        let edges = solidcore_ops::pick::edges(&b, &middles, 1e-6)
+            .unwrap()
+            .unwrap();
+        assert_eq!(edges, middles.map(|p| edge_at(&b, p)));
+        let options = BlendOptions {
+            turn,
+            ..BlendOptions::default()
+        };
+        blend_with(
+            &b,
+            Blend::Round,
+            &edges,
+            &[1.0],
+            &[],
+            Corners::Filled,
+            options,
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{turn:?}");
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, 12500.0 + 40.0 * a + corners) < 1e-9, "{turn:?}: {v}");
+    }
+    // the options are checked as blend_ordered checks them
+    let b = boss();
+    let swept = BlendOptions {
+        turn: Turn::Swept,
+        ..BlendOptions::default()
+    };
+    let e = edge_at(&b, middles[0]);
+    assert_eq!(
+        blend_with(
+            &b,
+            Blend::Chamfer,
+            &[e],
+            &[1.0],
+            &[],
+            Corners::Filled,
+            swept
+        )
+        .err(),
+        Some(Error::Argument)
+    );
+}
+
+/// [`edges_share_wedge`] on solidcore#2250's box (40 x 30 x 20, its top back edge chamfered
+/// 5): the chamfer's top edge meets its faces at 135 degrees (the normals 45 degrees apart) and
+/// the bottom front edge at 90, so the two share no wedge in either order; the bottom front and
+/// top front edges are both square and share one; one edge, or none, shares its own. The
+/// measure leaves the body as it was.
+#[test]
+fn edges_share_a_wedge_where_their_faces_meet_at_one_angle() {
+    all_fixes();
+    let b = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+    let back = edge_at(&b, [20.0, 30.0, 20.0]);
+    blend(&b, Blend::Chamfer, &[back], &[5.0], &[], Corners::Filled).unwrap();
+    let before = b.to_record().unwrap().0;
+    let a = edge_at(&b, [20.0, 25.0, 20.0]);
+    let bottom = edge_at(&b, [20.0, 0.0, 0.0]);
+    let top = edge_at(&b, [20.0, 0.0, 20.0]);
+    assert_eq!(edges_share_wedge(&b, &[a, bottom]), Ok(false));
+    assert_eq!(edges_share_wedge(&b, &[bottom, a]), Ok(false));
+    assert_eq!(edges_share_wedge(&b, &[bottom, top]), Ok(true));
+    assert_eq!(edges_share_wedge(&b, &[a]), Ok(true));
+    assert_eq!(edges_share_wedge(&b, &[]), Ok(true));
+    assert_eq!(edges_share_wedge(&b, &[999]), Err(Error::Argument));
+    assert_eq!(b.to_record().unwrap().0, before);
+}
+
+/// [`chamfer_sides_facing`] takes each edge's first distance along the face that faces the
+/// direction most: on the block's top front edge, 1 along the face facing up and 3 on the
+/// other leaves the top its 19 (of 20); facing forward (-y), its 17. Either takes
+/// d1 d2 / 2 = 1.5 off along the edge's 30, as [`chamfer_sides`] with that face named.
+#[test]
+fn chamfers_by_sides_take_the_face_facing_a_direction() {
+    all_fixes();
+    for (facing, leg) in [([0.0, 0.0, 1.0], 19.0), ([0.0, -1.0, 0.0], 17.0)] {
+        let b = block();
+        let e = top_front(&b);
+        chamfer_sides_facing(&b, &[e], 1.0, ChamferSecond::Distance(3.0), facing).unwrap();
+        assert!(rel(volume(&b), ABC - 1.5 * 30.0) < 1e-9, "{facing:?}");
+        let (k, made) = kernel_copy(&b);
+        let top = made
+            .face_list()
+            .iter()
+            .find_map(|&f| {
+                let bx = face_bounding_box(&k, &made, f, true).ok()?;
+                ((bx.min().z - 10.0).abs() < 1e-9 && (bx.max().z - 10.0).abs() < 1e-9)
+                    .then(|| bx.max().y - bx.min().y)
+            })
+            .unwrap();
+        assert!((top - leg).abs() < 1e-9, "{facing:?}: {top}");
+    }
+    // the same body as naming the face
+    let (named, faced) = (block(), block());
+    let e = top_front(&named);
+    let faces = edge_faces_along(&named, e, [0.0, 0.0, 1.0]).unwrap();
+    let top = if faces[1].1 > faces[0].1 {
+        faces[1].0
+    } else {
+        faces[0].0
+    };
+    chamfer_sides(&named, &[e], &[top], 1.0, ChamferSecond::Distance(3.0)).unwrap();
+    chamfer_sides_facing(
+        &faced,
+        &[e],
+        1.0,
+        ChamferSecond::Distance(3.0),
+        [0.0, 0.0, 1.0],
+    )
+    .unwrap();
+    assert_eq!(faced.to_record().unwrap().0, named.to_record().unwrap().0);
+    // a direction that is not finite or has no length is refused, the body untouched
+    let b = block();
+    let e = top_front(&b);
+    for facing in [[0.0; 3], [f64::NAN, 0.0, 1.0], [0.0, f64::INFINITY, 0.0]] {
+        assert_eq!(
+            chamfer_sides_facing(&b, &[e], 1.0, ChamferSecond::Distance(3.0), facing),
+            Err(Error::Argument),
+            "{facing:?}"
+        );
+    }
+    assert!(rel(volume(&b), ABC) < 1e-12);
+}
+
+/// The chamfers by sides and the variable rounds take the contract in their `_with` forms: on
+/// the block, whose results are valid solids facing out, [`Contract::Proved`] builds the body
+/// [`Contract::Closed`] does (the plain call's), each of the six calls.
+#[test]
+fn chamfers_by_sides_and_variable_rounds_build_alike_under_either_contract() {
+    use solidcore_ops::{
+        chamfer_sides_facing_with, chamfer_sides_ordered_with, chamfer_sides_with,
+        edge_faces_along_ordered, fillet_variable_from_with, fillet_variable_ordered_with,
+        fillet_variable_with, Contract,
+    };
+    type Call<'a> = &'a dyn Fn(&Body, Contract);
+    all_fixes();
+    let (knots, radii) = ([0.0, 0.0, 1.0, 1.0], [1.0, 2.0]);
+    let second = ChamferSecond::Distance(3.0);
+    let up = [0.0, 0.0, 1.0];
+    let near = [0.0, 0.0, 10.0];
+    let record = |f: &dyn Fn(&Body, Contract)| {
+        [Contract::Closed, Contract::Proved].map(|c| {
+            let b = block();
+            f(&b, c);
+            b.to_record().unwrap().0
+        })
+    };
+    let top = |b: &Body, e: usize| {
+        let f = edge_faces_along(b, e, up).unwrap();
+        if f[1].1 > f[0].1 {
+            f[1].0
+        } else {
+            f[0].0
+        }
+    };
+    // the record's order and its index of the top front edge, between (0, 0, 10) and (30, 0, 10)
+    let record_top_front = |b: &Body| {
+        let (record, order) = b.to_record().unwrap();
+        let at = |i: u32, x: f64| {
+            let p = record.vertices[i as usize].point;
+            (p[0] - x).abs() + p[1].abs() + (p[2] - 10.0).abs() < 1e-9
+        };
+        let e = record
+            .edges
+            .iter()
+            .position(|e| {
+                let [s, t] = e.vertices;
+                (at(s, 0.0) && at(t, 30.0)) || (at(s, 30.0) && at(t, 0.0))
+            })
+            .unwrap();
+        (order, e)
+    };
+    let cases: [Call<'_>; 6] = [
+        &|b, c| {
+            let e = top_front(b);
+            chamfer_sides_with(b, &[e], &[top(b, e)], 1.0, second, c).unwrap();
+        },
+        &|b, c| {
+            let (order, e) = record_top_front(b);
+            let f = edge_faces_along_ordered(b, &order, e, up).unwrap();
+            let first = if f[1].1 > f[0].1 { f[1].0 } else { f[0].0 };
+            chamfer_sides_ordered_with(b, &order, &[e], &[first], 1.0, second, c).unwrap();
+        },
+        &|b, c| chamfer_sides_facing_with(b, &[top_front(b)], 1.0, second, up, c).unwrap(),
+        &|b, c| {
+            let v = vertex_at(b, near);
+            fillet_variable_with(b, top_front(b), v, 1, &knots, &radii, c).unwrap();
+        },
+        &|b, c| {
+            let (order, e) = record_top_front(b);
+            fillet_variable_ordered_with(b, &order, e, near, 1, &knots, &radii, c).unwrap();
+        },
+        &|b, c| fillet_variable_from_with(b, top_front(b), near, 1, &knots, &radii, c).unwrap(),
+    ];
+    for (i, f) in cases.iter().enumerate() {
+        let [closed, proved] = record(*f);
+        assert_eq!(closed, proved, "call {i}");
+    }
+}
+
+/// [`fillet_variable_from`] runs the law from the end of the edge nearest a point, as
+/// [`fillet_variable`] does from that end's vertex: r from 1 to 2 along the block's top front
+/// edge from a point near (0, 0, 10) is the body that vertex gives, and from a point nearer
+/// the other end the body that end's vertex gives.
+#[test]
+fn a_variable_round_runs_from_the_end_nearest_a_point() {
+    all_fixes();
+    let (knots, radii) = ([0.0, 0.0, 1.0, 1.0], [1.0, 2.0]);
+    for (near, end) in [
+        ([1.0, -2.0, 11.0], [0.0, 0.0, 10.0]),
+        ([28.0, 3.0, 10.0], [30.0, 0.0, 10.0]),
+    ] {
+        let (by_vertex, by_point) = (block(), block());
+        let e = top_front(&by_vertex);
+        let start = vertex_at(&by_vertex, end);
+        fillet_variable(&by_vertex, e, start, 1, &knots, &radii).unwrap();
+        fillet_variable_from(&by_point, e, near, 1, &knots, &radii).unwrap();
+        assert_eq!(
+            by_point.to_record().unwrap().0,
+            by_vertex.to_record().unwrap().0,
+            "{near:?}"
+        );
+        assert!(by_point.check(CheckLevel::All).unwrap().is_valid());
+    }
+    let b = block();
+    let e = top_front(&b);
+    assert_eq!(
+        fillet_variable_from(&b, e, [f64::NAN, 0.0, 0.0], 1, &knots, &radii),
+        Err(Error::Argument)
+    );
+    assert_eq!(
+        fillet_variable_from(&b, 99, [0.0; 3], 1, &knots, &radii),
+        Err(Error::Argument)
+    );
 }
 
 #[test]
@@ -2320,10 +2680,13 @@ fn rolled_volume(r1: f64, r2: f64) -> f64 {
 }
 
 /// The kernel's certified enclosure of `b`'s volume holds `want`, and is narrower than
-/// `width` (so that it decides `want` against a nearby value).
+/// `width` (so that it decides `want` against a nearby value). The enclosure is asked for
+/// `width` itself: refinement stops as soon as it is that narrow, and a tighter ask only
+/// refines further, past what is asserted (on the ledge, into strips that settle at 7.4e-4
+/// and spend the cell budget).
 fn enclosure_holds(b: &Body, want: f64, width: f64) {
     let (k, mut brep) = kernel_copy(b);
-    let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, width / 4.0).unwrap();
+    let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, width).unwrap();
     assert!(e.lo <= want && want <= e.hi, "{} {want} {}", e.lo, e.hi);
     assert!(e.hi - e.lo <= width, "{} {}", e.lo, e.hi);
 }
@@ -3537,7 +3900,6 @@ fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
     for f in [
         "brep_ray_classifies_current_trims",
         "closed_smooth_pole_tangent_limit",
-        "face_swap_uv_transposes_trims",
         "fillet_chamfer_corner",
     ] {
         if !fixes.iter().any(|x| x == f) {

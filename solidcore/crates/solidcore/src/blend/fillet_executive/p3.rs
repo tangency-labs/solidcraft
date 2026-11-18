@@ -80,6 +80,17 @@ fn invalid(reason: &'static str) -> SolidError {
     }
 }
 
+/// Whether `e` is the closed-solid orientation's "face uses gathered from both sides"
+/// failure ([`crate::topology::brep::p3::GATHERED_BOTH_SIDES`]).
+fn gathered_both_sides(e: &SolidError) -> bool {
+    matches!(
+        e.failure().map(|f| &f.reason),
+        Some(crate::error::Reason::Topology(
+            crate::error::topology::TopologyFailure::Inconsistent(reason)
+        )) if *reason == crate::topology::brep::p3::GATHERED_BOTH_SIDES
+    )
+}
+
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
@@ -591,9 +602,32 @@ pub trait FilletFinishAccess<O: ClassObject + SolutionObject + Ord> {
         maybe_not_solid: &mut bool,
         just_unify: bool,
     ) -> Result<()>;
+    /// (not upstream, WR-661) Whether `brep`, which the stitch left open and whose
+    /// closed-solid orientation failed with `error` (face uses gathered from both
+    /// sides), is kept: its input was open and its boundary is the input's cut back where
+    /// a fillet meets it (the live session's `OpenInput::keeps_open_result`). A kept body
+    /// must still pass the level-2 check once the filleting is done, or the session
+    /// returns `error` then.
+    ///
+    /// # Errors
+    /// Lookup failures; unported or cancelled steps.
+    fn finish_keeps_open_result(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        error: &SolidError,
+    ) -> Result<bool>;
 }
 
 impl<O: ClassObject + SolutionObject + Ord, A: ExecutiveAccess<O>> FilletFinishAccess<O> for A {
+    fn finish_keeps_open_result(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        error: &SolidError,
+    ) -> Result<bool> {
+        self.keeps_open_result(k, brep, error)
+    }
     fn finish_delete_brep(&mut self, _k: &mut Kernel, brep: O) -> Result<()> {
         self.delete_brep(brep)
     }
@@ -1472,6 +1506,13 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
         just_unify: bool,
         faces_to_swap_uv: Option<&mut Vec<O>>,
     ) -> Result<()>;
+
+    /// (not upstream, WR-661) [`FilletFinishAccess::finish_keeps_open_result`]: whether
+    /// `brep`, left open by the stitch, is kept by the orientation's pass-over.
+    ///
+    /// # Errors
+    /// Lookup failures; unported or cancelled steps.
+    fn keeps_open_result(&mut self, k: &mut Kernel, brep: O, error: &SolidError) -> Result<bool>;
 
     // ---- added by blend.fillet_executive_p2 (PR #267) --------------------------------
 
@@ -4530,9 +4571,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access.finish_delete_brep(k, fillet)?;
         self.fillet = None;
         let mut tolerance = access.finish_tolerance(k, target)?;
+        let mut lamina = 0;
         for attempt in 0..5 {
             let stitch =
                 access.finish_do_stitching(k, target, tolerance, StitchSettings::default())?;
+            lamina = stitch.lamina;
             if stitch.status.is_none() && stitch.lamina == 0 {
                 break;
             }
@@ -4564,10 +4607,41 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // fork 873c7c9 passes this on (SER)
         let oriented =
             access.finish_orient_trimmed_surfaces(k, target, true, &mut maybe_not_solid, false);
-        ignore(crate::error::passed_on(
-            oriented,
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        match oriented {
+            // (not upstream, which ignores this status for every body; WR-661) A result
+            // left open by the stitch (lamina edges) is not a closed shell: walking a
+            // face use's neighbours crosses its boundary edges to the other side, so the
+            // "both sides gathered" check of the closed-solid orientation fires without
+            // the body being non-orientable. Such a result is kept only when
+            // `finish_keeps_open_result` says so (the input was open, the result's
+            // boundary is the input's cut back where a fillet meets it, and no seam is
+            // left unjoined), and when the open body's own orientation then succeeds: the
+            // one `StitchAndOrient` runs for a body with lamina edges (outward, just
+            // unifying the normals). That orientation may flip faces, so the kept body's
+            // normals agree whatever the failed closed-solid pass left; it runs here for
+            // every caller of this finish, `chamfer_fillet` included. The session then
+            // checks the finished body at level 2 and returns this failure if it is not
+            // clean. Anything else (a closed input left open, a gap the stitch left, a
+            // failed unify, an invalid body) returns the orientation's failure.
+            Err(e) if lamina > 0 && gathered_both_sides(&e) => {
+                if !access.finish_keeps_open_result(k, target, &e)? {
+                    return Err(e);
+                }
+                let mut unified_not_solid = false;
+                match access.finish_orient_trimmed_surfaces(
+                    k,
+                    target,
+                    true,
+                    &mut unified_not_solid,
+                    true,
+                ) {
+                    Ok(()) => {}
+                    Err(unify) if unify.is_unported_or_cancelled() => return Err(unify),
+                    Err(_) => return Err(e),
+                }
+            }
+            other => other?,
+        }
         Ok(())
     }
 

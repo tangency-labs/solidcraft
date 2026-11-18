@@ -50,6 +50,22 @@ fn look_at_on_the_active_sketch_keeps_a_wider_zoom() {
     assert_eq!(h.app.cam.distance, 5000.0, "it never zooms in on a zoom the user chose");
 }
 
+/// A key given to Look At faces the open sketch with nothing selected, as the navigation bar's
+/// button (which shows that key) and Ctrl+8 do; it used to do nothing there, because Normal to
+/// Selection is disabled without a planar face or plane.
+#[test]
+fn look_ats_own_key_faces_the_open_sketch_with_nothing_selected() {
+    let (mut h, id) = far_sketch();
+    h.app.session.active_sketch = Some(id);
+    crate::keymap::bind(&mut h.app, "view.normal_to", "N", true).unwrap();
+    h.app.cam.yaw = 0.7;
+    h.app.cam.pitch = 0.4;
+    assert!(h.app.session.selection.is_empty());
+    crate::keymap::press(&mut h.app, "N", false);
+    assert!((h.app.cam.back() - Vec3::new(0.0, 0.0, 1.0)).len() < 1e-6, "facing the sketch: {:?}", h.app.cam.back());
+    assert!(near(h.app.cam.target, Vec3::new(340.0, 490.0, 8.0)), "{:?}", h.app.cam.target);
+}
+
 #[test]
 fn an_empty_sketch_keeps_its_planes_origin() {
     let mut h = Harness::new();

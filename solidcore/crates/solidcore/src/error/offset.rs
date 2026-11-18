@@ -9,6 +9,7 @@
 //! |----------------------------------------|-------------------------------------------|
 //! | [`OffsetFailure::Folds`]               | `SM_ERR` (WR-718, solidcore-native)       |
 //! | [`OffsetFailure::Collapses`]           | `SM_ERR` (#2350, solidcore-native)        |
+//! | [`OffsetFailure::WallsMeetAcross`]     | `SM_ERR` (#18239, solidcore-native)       |
 //! | [`OffsetFailure::WallsTouch`]          | `SM_ERR_OFFSET_WALLS_TOUCH` (fork a759622) |
 //! | [`OffsetFailure::LoopsCross`]          | `SM_ERR_BAD_INTERSECTIONS` (WR-345)       |
 //! | [`OffsetFailure::EdgeVanishes`]        | `SM_ERR_OFFSET_EDGE_VANISHES` (fork 34318f4) |
@@ -20,6 +21,7 @@
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
@@ -98,6 +100,18 @@ pub enum OffsetFailure {
         /// A radius of curvature the face attains on the displaced side, or (WR-346, where
         /// no radius is proved) `|distance|`, an upper bound on its least radius.
         radius: f64,
+    },
+    /// The inset of `face` by `distance` meets the inset of a planar face opposite it across
+    /// material exactly twice the distance away (a square boss inset by half its width):
+    /// the material between them has no offset left, a change of topology the offset does not
+    /// make. `largest` is half the narrowest such width: the largest wall that fits (#18239).
+    WallsMeetAcross {
+        /// A face of the narrowest such pair.
+        face: FaceId,
+        /// The offset distance asked for (signed, as the operation takes it).
+        distance: f64,
+        /// The largest wall that fits.
+        largest: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
     /// come from meet there.
@@ -189,6 +203,21 @@ pub enum OffsetFailure {
     FacesApart {
         /// The face, of the operation's input.
         face: FaceId,
+    },
+    /// In a local operation, the plane of `face` moves past where the surface of `side`, a
+    /// face beside it across an edge, ends: the sphere's or the cylinder's extent along the
+    /// plane's normal stops short of the new plane, so no extension of the side meets it.
+    /// The two met at an angle before the move (a plane moved off a round it was tangent to
+    /// is not this: a wall closes that gap). `largest` is how far the plane could move and
+    /// still meet the side: the distance from its old place to the side's extent there
+    /// (#18564). Refused before anything changes.
+    PastSide {
+        /// The moved face, of the operation's input.
+        face: FaceId,
+        /// The face beside it whose surface ends, of the operation's input.
+        side: FaceId,
+        /// How far the face could move and still meet the side.
+        largest: f64,
     },
     /// In a local operation, a surface beside an edge or at a vertex of `face` moves, and
     /// how far the surfaces there must be extended to meet has no certified bound
@@ -353,8 +382,10 @@ impl OffsetFailure {
             Self::Folds { face, .. }
             | Self::NotCertified { face, .. }
             | Self::Collapses { face, .. }
+            | Self::WallsMeetAcross { face, .. }
             | Self::SeamOpened { face }
             | Self::FacesApart { face }
+            | Self::PastSide { face, .. }
             | Self::ReachUncertified { face } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. } | Self::LoopsCross { face, .. } => {
                 face.map(EntityRef::Face)
@@ -406,6 +437,7 @@ impl OffsetFailure {
             Self::Folds { .. }
             | Self::NotCertified { .. }
             | Self::Collapses { .. }
+            | Self::WallsMeetAcross { .. }
             | Self::WallsTouch { .. }
             | Self::LoopsCross { .. }
             | Self::EdgeVanishes { .. }
@@ -417,6 +449,7 @@ impl OffsetFailure {
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -439,6 +472,7 @@ impl OffsetFailure {
             Self::Folds { .. }
             | Self::NotCertified { .. }
             | Self::Collapses { .. }
+            | Self::WallsMeetAcross { .. }
             | Self::WallsTouch { .. }
             | Self::LoopsCross { .. }
             | Self::EdgeVanishes { .. }
@@ -450,6 +484,7 @@ impl OffsetFailure {
             | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -465,8 +500,10 @@ impl OffsetFailure {
             Self::Folds { .. }
             | Self::NotCertified { .. }
             | Self::Collapses { .. }
+            | Self::WallsMeetAcross { .. }
             | Self::SeamOpened { .. }
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -493,12 +530,13 @@ impl OffsetFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Folds { .. } | Self::NotCertified { .. } => ErrorKind::OffsetFolds,
-            Self::Collapses { .. } => ErrorKind::OffsetCollapses,
+            Self::Collapses { .. } | Self::WallsMeetAcross { .. } => ErrorKind::OffsetCollapses,
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
             Self::SeamOpened { .. }
             | Self::FacesApart { .. }
+            | Self::PastSide { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -667,6 +705,16 @@ impl core::fmt::Display for OffsetFailure {
                  across it, which the offset does not build)",
                 face.index()
             ),
+            Self::WallsMeetAcross {
+                face,
+                distance,
+                largest,
+            } => write!(
+                f,
+                "the offset of face {} by {distance} vanishes: the wall reaches half the width \
+                 between two opposite faces (the largest wall that fits is {largest})",
+                face.index()
+            ),
             Self::WallsTouch { face, contact } => {
                 let how = match contact {
                     WallContact::RunAlong => "run along one another",
@@ -716,6 +764,17 @@ impl core::fmt::Display for OffsetFailure {
                 "the new surfaces of face {} and of a neighbour meet nowhere near their \
                  edge: no extension makes them meet there",
                 face.index()
+            ),
+            Self::PastSide {
+                face,
+                side,
+                largest,
+            } => write!(
+                f,
+                "face {} moves past where the surface of face {} beside it ends: it meets \
+                 that side only while it moves less than {largest}",
+                face.index(),
+                side.index()
             ),
             Self::ReachUncertified { face } => write!(
                 f,
@@ -1033,6 +1092,26 @@ mod tests {
                 false,
                 false,
             ),
+            (
+                O::WallsMeetAcross {
+                    face,
+                    distance: 1.0,
+                    largest: 1.0,
+                },
+                ErrorKind::OffsetCollapses,
+                false,
+                false,
+            ),
+            (
+                O::PastSide {
+                    face,
+                    side: face,
+                    largest: 480.0,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1058,6 +1137,8 @@ mod tests {
                 O::TangentBranchUncertified => 19,
                 O::StageFailed => 20,
                 O::LooseTangentEdge { .. } => 21,
+                O::WallsMeetAcross { .. } => 22,
+                O::PastSide { .. } => 23,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
