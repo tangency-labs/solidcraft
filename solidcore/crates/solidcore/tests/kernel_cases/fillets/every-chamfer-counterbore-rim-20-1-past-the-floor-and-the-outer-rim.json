@@ -1,0 +1,143 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  27.6,
+                  0.0,
+                  35.2
+                ],
+                [
+                  27.6,
+                  0.0,
+                  35.2
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              -27.60000000000001,
+              0.0,
+              35.2
+            ]
+          ],
+          "tolerance": 5.655874003901414
+        },
+        "kind": "chamfer",
+        "sizes": [
+          20.1
+        ]
+      }
+    }
+  ],
+  "case": "every-chamfer-counterbore-rim-20-1-past-the-floor-and-the-outer-rim",
+  "expected": {
+    "bbox": {
+      "max": [
+        38.0,
+        38.0,
+        25.5
+      ],
+      "min": [
+        -38.0,
+        -38.0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "V0 = pi (R^2 - r1^2) h1 + pi (R^2 - r0^2)(H - h1) with R = 38, r1 = 27.6, r0 = 20.2, H = 35.2, h1 = 7.7: 106004.084273140. Section in (rho, z): the chamfer triangle (r1, H), (r1 + d, H), (r1, H - d) with d = 20.1, area d^2/2, centroid rho = r1 + d/3, wholly at rho >= r1 and in the ring's material (below a floor it takes ring material only, a groove, built as if the wall went on, the owner's ruling of 2026-10-30, d7; the ledges at rho < r1 are untouched); past the outer cylinder rho = R the triangle (R, H), (r1 + d, H), (R, H - e) with e = r1 + d - R = 9.7 is air (centroid rho = (2R + r1 + d)/3) and is clipped off, and the whole top goes (bbox max z = H - e = 25.5). Removed by Pappus, 2 pi Int rho dA = 31346.493149463. V = 74657.591123676",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-06
+    },
+    "volume_mm3": 74657.59112367615,
+    "what": "a ring (outer r38, bore r20.2, 35.2 high) with a counterbore r27.6, 7.7 deep (its floor a ledge from r20.2 to r27.6); its top rim chamfered 20.1: its leg down the wall runs past the floor and its leg on the top runs past the outer rim, so it builds as if both faces went on: a groove below the floor and the whole top taken"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 10 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "every-chamfer-counterbore-rim-20-1-past-the-floor-and-the-outer-rim.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 10 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001)",
+    "known_failing": null,
+    "measured": null,
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a ring (outer r38, bore r20.2, 35.2 high) with a counterbore r27.6, 7.7 deep (its floor a ledge from r20.2 to r27.6); its top rim chamfered 20.1: its leg down the wall runs past the floor and its leg on the top runs past the outer rim, so it builds as if both faces went on: a groove below the floor and the whole top taken",
+  "why_not": []
+}
