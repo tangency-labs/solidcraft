@@ -44,16 +44,19 @@ fn dimension_tool_places_a_view_edge_length() {
     let (mut h, front) = plate_sheet();
     assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
     h.frames(4);
-    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
-    let screen = |x: f32, y: f32| [paper.left() + paper.width() * x / 420.0, paper.bottom() - paper.height() * y / 297.0];
+    let screen = |x: f32, y: f32| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x / 420.0, paper.bottom() - paper.height() * y / 297.0]
+    };
     h.step(&json!({"click": screen(140.0, 175.0)})).unwrap();
     assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), 1);
+    h.frames(4);
     h.step(&json!({"click": screen(140.0, 163.0)})).unwrap();
     let drawing = h.app.session.drawing("drawing.inspect").unwrap();
     assert_eq!(drawing.dimensions.len(), 2);
     let placed = &drawing.dimensions[1];
     assert_eq!(solidcraft_engine::doc::ids::encode(placed.view), front);
-    assert!((placed.offset_mm.abs() - 12.0).abs() < 0.75);
+    assert!((placed.offset_mm.abs() - 12.0).abs() < 0.75, "offset was {} mm", placed.offset_mm);
 }
 
 /// Frames until no view or dimension is waiting to be drawn.
