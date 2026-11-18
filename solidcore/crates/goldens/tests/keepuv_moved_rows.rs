@@ -895,7 +895,7 @@ const GEN0181_V: [f64; 10] = [
     1.0,
 ];
 
-/// `topology.edgeuse_p1` (16 rows): corner gaps between iso edges of one surface (ref 0),
+/// `topology.edgeuse_p1` (20 rows): corner gaps between iso edges of one surface (ref 0),
 /// and the parameter `0.9` of the drop at the corner.
 #[test]
 fn edgeuse_p1_corner_gaps() {
@@ -944,6 +944,54 @@ fn edgeuse_p1_corner_gaps() {
                 5,
                 1.1175700191704681e-19,
                 2.710505431213761e-20,
+                Ref::X(d(0.0)),
+                Class::Closer,
+            )],
+        },
+        Row {
+            case: "face_bss_tiny_gaps1_1_0",
+            want: RowClass::Closer,
+            els: vec![el(
+                "state",
+                4,
+                6.776263578034403e-21,
+                0.0,
+                Ref::X(d(0.0)),
+                Class::Closer,
+            )],
+        },
+        Row {
+            case: "face_bss_tiny_gaps1_1_1",
+            want: RowClass::Closer,
+            els: vec![el(
+                "state",
+                4,
+                6.776263578034403e-21,
+                0.0,
+                Ref::X(d(0.0)),
+                Class::Closer,
+            )],
+        },
+        Row {
+            case: "face_bss_tiny_gaps1_3_0",
+            want: RowClass::Closer,
+            els: vec![el(
+                "state",
+                5,
+                6.776263578034403e-21,
+                0.0,
+                Ref::X(d(0.0)),
+                Class::Closer,
+            )],
+        },
+        Row {
+            case: "face_bss_tiny_gaps1_3_1",
+            want: RowClass::Closer,
+            els: vec![el(
+                "state",
+                5,
+                6.776263578034403e-21,
+                0.0,
                 Ref::X(d(0.0)),
                 Class::Closer,
             )],
@@ -1136,11 +1184,133 @@ fn edgeuse_p1_corner_gaps() {
     check("topology.edgeuse_p1", &rows);
 }
 
-/// `topology.vertex` (6 rows): the vertex's gaps to its edges and face (ref 0); the index of
+/// `topology.vertex` (12 rows): the vertex's gaps to its edges and face (ref 0); the index of
 /// the largest among gaps that are all 0 is a tie.
 #[test]
 fn vertex_gaps() {
     let rows = vec![
+        Row {
+            case: "patch_sub_v0_gaps_g0",
+            want: RowClass::Closer,
+            els: vec![
+                el("state", 1, 0.0, 1.0, Ref::Tie, Class::Equal),
+                el(
+                    "state",
+                    3,
+                    2.2887833992611187e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+                el(
+                    "state",
+                    13,
+                    2.2887833992611187e-16,
+                    1.3877787807814457e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+                el(
+                    "state",
+                    16,
+                    2.2247786310271853e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+            ],
+        },
+        Row {
+            case: "patch_sub_v0_gaps_g1",
+            want: RowClass::Closer,
+            els: vec![
+                el("state", 1, 0.0, 1.0, Ref::Tie, Class::Equal),
+                el(
+                    "state",
+                    3,
+                    2.2887833992611187e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+                el(
+                    "state",
+                    13,
+                    2.2887833992611187e-16,
+                    1.3877787807814457e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+                el(
+                    "state",
+                    16,
+                    2.2247786310271853e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+            ],
+        },
+        Row {
+            case: "patch_sub_v0_gaps_noarr_g0",
+            want: RowClass::Closer,
+            els: vec![
+                el("state", 1, 0.0, 1.0, Ref::Tie, Class::Equal),
+                el(
+                    "state",
+                    3,
+                    2.2887833992611187e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+            ],
+        },
+        Row {
+            case: "patch_sub_v0_gaps_noarr_g1",
+            want: RowClass::Closer,
+            els: vec![
+                el("state", 1, 0.0, 1.0, Ref::Tie, Class::Equal),
+                el(
+                    "state",
+                    3,
+                    2.2887833992611187e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+            ],
+        },
+        Row {
+            case: "patch_sub_v0_gaps_tol_g0",
+            want: RowClass::Closer,
+            els: vec![
+                el("state", 1, 0.0, 1.0, Ref::Tie, Class::Equal),
+                el(
+                    "state",
+                    3,
+                    2.2887833992611187e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+            ],
+        },
+        Row {
+            case: "patch_sub_v0_gaps_tol_g1",
+            want: RowClass::Closer,
+            els: vec![
+                el("state", 1, 0.0, 1.0, Ref::Tie, Class::Equal),
+                el(
+                    "state",
+                    3,
+                    2.2887833992611187e-16,
+                    2.7755575615628914e-17,
+                    Ref::X(d(0.0)),
+                    Class::Closer,
+                ),
+            ],
+        },
         Row {
             case: "patch_sub_v1_gaps_g0",
             want: RowClass::Mixed,

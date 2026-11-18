@@ -555,6 +555,19 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 /// 17 of those area and volume entries, on 14 files; they are main's with that split,
 /// each classified against a certified enclosure in goldens'
 /// `mass_knot_line_moved_rows_are_classified`.
+///
+/// `Fillet/bottle.smb`'s three digests are #17896's (retiring `keep_operand_uv_trims`).
+/// Its area and volume bits are main's. The digests moved only in the surface points they
+/// sample along face 15's trims (a surface of revolution); every UV trim, edge curve,
+/// tolerance and vertex of the read is bit for bit main's (MEASURED, a dump of the read on
+/// both trees). The rebuilding read refits the trims on that surface, and one UV
+/// coordinate moves by 8e-31. `CPoint::affine2` keeps a coordinate that both of its
+/// inputs share exactly (PROVEN: a convex combination of equal values). The surface's
+/// generator is made through it (`create_generator_from_angle`,
+/// `gen_adjust_step_interval`), so its shared coordinates are now exact rather than an
+/// ulp off. The surface's net is the rotation of that generator, so 107 of its
+/// coordinates move, each by at most 1.86e-17 times its point's magnitude: below one unit
+/// roundoff of that magnitude, at rounding (MEASURED).
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -589,9 +602,9 @@ const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/bottle.smb",
         [
-            0x569b0994d89a8785,
-            0x20f9e5358be089e4,
-            0x56d4f90e1a00266f,
+            0xf25190ec5d448d82,
+            0xc4a72239b7834c83,
+            0x93ae057464ce886f,
             0x40408f20e135de78,
             0x40262233c6c42c0b,
         ],
@@ -1723,9 +1736,12 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
 /// that fillet's result (the other 28 are unchanged there). Entry 14 (`bottle` e8 r0.1) is #18401's:
 /// that PR moves this fillet's digest and mass in their last bits, and its tree before
-/// #18230 makes the same digest and mass bit for bit. The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// #18230 makes the same digest and mass bit for bit. The 19 equal digests (`0xb5382d964fe60518`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
-/// same body and status.
+/// same body and status. #17896 moved those 19 digests and entry 14's (main's were
+/// `0x30d463838d7fca03` and `0x7442b43a428ea1ca`) through the bottle's read alone (see
+/// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
+/// edge, tolerance and entry 14's mass is bit for bit main's (MEASURED).
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1736,26 +1752,26 @@ const FILLET_MAIN: [u64; 29] = [
     0x2dd7a7af4ca5bb1e,
     0x51f6abb34e90bff2,
     0xb716929faf389955,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x7442b43a428ea1ca,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0x902afd170f1e23a9,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
 ];
 
 /// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
