@@ -570,9 +570,10 @@ fn wr_647_a_flat_touch_whose_run_within_the_zero_the_tolerance_resolves_stays_a_
     let all = intersect(&line, &curve);
     // the line is x = 6 t - 3: the origin at t = 1/2
     assert!(
-        all.iter().any(|s| s.solution_type == SolutionType::RangeOfValues
-            && s.start.parameters[0].min(s.end.parameters[0]) < 0.5
-            && s.start.parameters[0].max(s.end.parameters[0]) > 0.5),
+        all.iter()
+            .any(|s| s.solution_type == SolutionType::RangeOfValues
+                && s.start.parameters[0].min(s.end.parameters[0]) < 0.5
+                && s.start.parameters[0].max(s.end.parameters[0]) > 0.5),
         "{all:?}"
     );
 }
@@ -1279,7 +1280,13 @@ fn wr_647_a_run_within_the_zero_resolved_by_the_tolerance_stays_a_range() {
     let rows: [(f64, f64, f64, &[f64], f64); 6] = [
         (0.05, 1e-13, 2.2e-4, &[0.2, 0.45, 0.55, 0.8], 1e-5),
         (0.05, 1e-13, 2.2e-4, &[0.1, 0.2, 0.45, 0.55, 0.8, 0.9], 1e-5),
-        (0.04, 1e-13, 2.2e-4, &[0.15, 0.3, 0.46, 0.54, 0.7, 0.85], 1e-5),
+        (
+            0.04,
+            1e-13,
+            2.2e-4,
+            &[0.15, 0.3, 0.46, 0.54, 0.7, 0.85],
+            1e-5,
+        ),
         (0.05, 1e-13, 2.2e-2, &[0.2, 0.45, 0.55, 0.8], 1e-3),
         (
             0.05,

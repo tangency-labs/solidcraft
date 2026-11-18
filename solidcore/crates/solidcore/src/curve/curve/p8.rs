@@ -4078,9 +4078,10 @@ fn touch_is_alone_against(
 
 /// For [`touch_is_alone`]: a bound on the speed `|c'(u)|` of `spline` over its knots, a
 /// bound on `|c(u)|` (each coordinate) and the largest weight, or `None` (a weight not
-/// positive, or not finite). With `x w` the homogeneous points, `c = X / w` and `c' = (X'
-/// - c w') / w`: `X'` and `w'` are B-splines with the coefficients `p (a[i + 1] - a[i]) /
-/// (U[i + p + 1] - U[i + 1])`, so each is at most its largest coefficient; `c` lies in the
+/// positive, or not finite). With `X = x w` the homogeneous points, `c = X / w` and
+/// `c' = (X' - c w') / w`: `X'` and `w'` are B-splines with the coefficients
+/// `p (a[i + 1] - a[i]) / (U[i + p + 1] - U[i + 1])`, so each is at most its largest
+/// coefficient; `c` lies in the
 /// convex hull of the points `X_i / w_i` (positive weights), and `w` is at least the least
 /// weight. A curve without weights has `w = 1`, `w' = 0`.
 fn curve_speed_bound(spline: &StretchSpline) -> Option<(f64, f64, f64)> {
