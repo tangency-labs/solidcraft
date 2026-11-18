@@ -53,10 +53,11 @@
 //! - [`evaluate_curve_continuity`] judges G2 by the geometry (WR-380): the two sides'
 //!   Frenet curvature vectors (upstream computes them with `smgu_FrenetFromDerivatives`
 //!   and never reads them) are compared by length, relative to the larger, and by the
-//!   angle between their normals where both exceed the length gap. Upstream compares the
-//!   raw second-derivative lengths against an absolute gap and measures the first normal
-//!   against itself. The debug-only (and unused) `sDist` / projected-line computations of
-//!   other functions are omitted.
+//!   angle between their normals where both exceed the length gap; a C1 join within the
+//!   C2 gap is C2 (and G2) without that test. Upstream compares the raw second-derivative
+//!   lengths against an absolute gap, measures the first normal against itself and tests
+//!   C2 only after G2. The debug-only (and unused) `sDist` / projected-line computations
+//!   of other functions are omitted.
 //! - Calls into `geom.geom_utility_p1` use [`p1`] directly, through small private
 //!   adapters where the output shapes differ (`sm_AddClosestPoint` on a
 //!   [`SegmentHits`], `smgu_LineIntersectSphere` as a count and array,
@@ -1145,7 +1146,8 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 /// ones (`smgu_FrenetFromDerivatives`, `|P' x P''| / |P'|^3` along the normal), their
 /// lengths are compared relative to the larger (`SM_EFF_ZERO_SQRT / 10 * (1 + max)`), and
 /// the angle is between the two normals, where both curvatures exceed that gap (a smaller
-/// one is zero at it and has no normal). Upstream takes the curvatures as the lengths of
+/// one is zero at it and has no normal). A C1 join within the C2 gap is C2 and so G2
+/// without the curvature test. Upstream takes the curvatures as the lengths of
 /// the raw second derivatives (which depend on the parameter speed), compares them with
 /// an absolute `SM_EFF_ZERO_SQRT / 10`, and measures the angle of the first normal with
 /// itself (always 0).
@@ -1241,22 +1243,25 @@ pub fn evaluate_curve_continuity(
         normal2 /= curvature2;
         ang_rad = normal1.angle_between(normal2).unwrap_or(0.0);
     }
+    // C2 (upstream tests it only after G2): a C1 join whose second derivatives agree
+    // within the C2 gap is C2, and so G2, even when its curvatures, which the first
+    // derivatives' gap moves too, differ by more than the tighter curvature gap
+    let c2 = kind == ContinuityType::C1
+        && second1.distance(second2) < param_eff_zero * (1.0 + second12_max);
     // (as upstream's condition, NaN included)
-    if !in_tol(curvature1 - curvature2, gap_tol) || rad_to_deg(ang_rad) > continuity_angle_deg {
+    if !c2
+        && (!in_tol(curvature1 - curvature2, gap_tol)
+            || rad_to_deg(ang_rad) > continuity_angle_deg)
+    {
         return Ok(kind);
     }
-    kind = if kind == ContinuityType::G1 {
+    kind = if c2 {
+        ContinuityType::C1C2
+    } else if kind == ContinuityType::G1 {
         ContinuityType::G1G2
     } else {
         ContinuityType::C1G2
     };
-
-    // C2
-    if kind == ContinuityType::C1G2
-        && second1.distance(second2) < param_eff_zero * (1.0 + second12_max)
-    {
-        kind = ContinuityType::C1C2;
-    }
 
     // G3 / C3: algebraic Taylor-series test with a tolerance from the G1/G2 gaps
     if let (Some(t1), Some(t2)) = (third1, third2) {
