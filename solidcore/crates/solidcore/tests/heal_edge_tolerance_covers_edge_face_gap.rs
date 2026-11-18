@@ -1730,7 +1730,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
 /// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
-/// that fillet's result (the other 28 are unchanged there). The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// that fillet's result (the other 28 are unchanged there). Entry 14 (`bottle` e8 r0.1) is #18401's:
+/// that PR moves this fillet's digest and mass in their last bits, and its tree before
+/// #18230 makes the same digest and mass bit for bit. The 19 equal digests (`0x30d463838d7fca03`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
 /// same body and status.
 const FILLET_MAIN: [u64; 29] = [
@@ -1748,7 +1750,7 @@ const FILLET_MAIN: [u64; 29] = [
     0x30d463838d7fca03,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
-    0xef8776a78d7d7cbb,
+    0x7442b43a428ea1ca,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
@@ -1767,7 +1769,8 @@ const FILLET_MAIN: [u64; 29] = [
 
 /// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
-/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14).
+/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14 is #18401's (see
+/// [`FILLET_MAIN`]).
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1826,14 +1829,14 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
             0x40408bcce093b407,
             0x402621896e50fcb0,
             0x402621896e50fcb0,
-            0x3f10d1c99a559158,
+            0x3f10d1c99a55926e,
             0x3f13efa09958129b,
             0x4000a10fe9da9881,
             0x4050316571691566,
             0x4050a9c3826e8ec1,
             0x40151aaab5c59a6f,
             0x3f6aed515da75eee,
-            0x3f66b6a18cf50b4e,
+            0x3f66b6a18cf50c20,
             0xbf3c98659ef8970b,
         ],
     ),
