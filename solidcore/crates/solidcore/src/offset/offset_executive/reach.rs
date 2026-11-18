@@ -445,6 +445,51 @@ fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<E
     })
 }
 
+/// How far the plane `old` of a moved face could move and still meet the quadric `q` beside
+/// it, when its new plane `new` (parallel to it) passes the quadric's extent along their
+/// normal and `old` cut the quadric at an angle (strictly inside that extent, by more than
+/// `tolerance`): the distance from `old` to the extent on the side the plane moved to.
+/// `None` where the plane still meets the quadric, where `old` touched it (a plane moved off
+/// a round it was tangent to: a wall closes that gap), or where the quadric has no extent
+/// along the normal: a cone, or a cylinder whose axis is not parallel to the plane.
+///
+/// A sphere about `c` of radius `r` spans `n.c ± r` along a unit `n`; a cylinder about an
+/// axis through `o` square to `n`, `n.o ± r`. The heights are measured against these closed
+/// forms with `tolerance` (the B-rep's, far above their rounding) on either side, so a plane
+/// within the tolerance of the extent is not decided here (the pieces' bounds decide it).
+fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Option<f64> {
+    let n = new.normal;
+    // the move keeps the plane's direction
+    if old.normal.cross(n).length() > EFF_ZERO {
+        return None;
+    }
+    let (middle, half) = match *q {
+        Implicit::Sphere { centre, radius } => (n.dot(centre), radius.abs()),
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } if tan_angle.abs() <= EFF_ZERO && n.dot(axis).abs() <= EFF_ZERO => {
+            (n.dot(origin), radius.abs())
+        }
+        _ => return None,
+    };
+    let (lo, hi) = (middle - half, middle + half);
+    let (was, now) = (n.dot(old.point), n.dot(new.point));
+    // the old plane must cut the quadric at an angle
+    if was <= lo + tolerance || was >= hi - tolerance {
+        return None;
+    }
+    if now > hi + tolerance {
+        Some(hi - was)
+    } else if now < lo - tolerance {
+        Some(was - lo)
+    } else {
+        None
+    }
+}
+
 /// A certified upper bound on the distance from `x` to the surface of class `c` at a point
 /// (a moved surface's move at a vertex); `None` for a net, whose move is bounded by the
 /// meetings on it.
@@ -2741,6 +2786,39 @@ pub fn local_extension_reach(
                 }
                 (&Exact::Plane(plane), Exact::Quadric(q))
                 | (Exact::Quadric(q), &Exact::Plane(plane)) => {
+                    // a moved plane past where the kept quadric beside it ends meets it
+                    // nowhere: refused, naming how far it could move
+                    let plane_face = if matches!(own, Exact::Plane(_)) {
+                        own_face
+                    } else {
+                        other_face
+                    };
+                    let quadric_face = if plane_face == own_face {
+                        other_face
+                    } else {
+                        own_face
+                    };
+                    if let (Some(face), Some(side)) = (plane_face, quadric_face) {
+                        if is_moved(Some(face)) && !is_moved(Some(side)) {
+                            let old = match crate::topology::face::p2::surface(b, face)? {
+                                Some(s) => exact_class(k, s, tolerance)?,
+                                None => None,
+                            };
+                            if let Some(Exact::Plane(old)) = old {
+                                if let Some(largest) = past_extent(old, plane, q, tolerance) {
+                                    return Err(Failure::new(
+                                        LOCAL_OP,
+                                        OffsetFailure::PastSide {
+                                            face,
+                                            side,
+                                            largest,
+                                        },
+                                    )
+                                    .into_error());
+                                }
+                            }
+                        }
+                    }
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                         Ok(plane_quadric_piece(over, mid, dt, plane, q, tolerance))
                     };
