@@ -19,7 +19,7 @@ use crate::ui_kit::{Container, Surface};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use solidcraft_engine::doc::ModelState;
+use solidcraft_engine::doc::{ModelBody, ModelState};
 
 use crate::SolveApp;
 
@@ -65,28 +65,19 @@ impl Meshing {
             if seen.insert(b.definition_name().to_string()) { first.push(i) } else { rest.push(i) }
         }
         first.extend(rest);
-        let job = (world.clone(), ready.clone(), done.clone(), stop.clone());
+        let repeated = repeated_parts(&world);
+        let job = (world.clone(), ready.clone(), done.clone(), stop.clone(), repeated);
         let spawned = threads()
             && std::thread::Builder::new()
                 .name("open-meshing".into())
                 .spawn(move || {
-                    let (world, ready, done, stop) = job;
+                    let (world, ready, done, stop, repeated) = job;
                     solidcraft_engine::kernel::for_each_on_threads(&first, 16, |&i| {
                         if stop.load(Ordering::Relaxed) {
                             return;
                         }
                         if let Some(b) = world.bodies.get(i) {
-                            // What the viewport draws and picks: a placed part's shared mesh, not a
-                            // moved copy of it (its placements are drawn as instances of it).
-                            let (mesh, _) = b.mesh_in_place();
-                            // A large mesh's shared vertices too, so its first frame does not weld them.
-                            if shared {
-                                crate::viewport::warm_shared_tris(&mesh);
-                            }
-                            if plans {
-                                let _ = b.gpu_plan_at(solidcraft_engine::doc::display_quality::current());
-                                let _ = b.plan_mesh_in_place_at(solidcraft_engine::doc::display_quality::current());
-                            }
+                            warm(b, plans, shared, &repeated, solidcraft_engine::doc::display_quality::current());
                         }
                         if let Ok(mut r) = ready.lock() {
                             r.push(i);
@@ -291,6 +282,47 @@ pub(crate) fn refresh(app: &mut SolveApp, now: f64) {
     m.shown_at = now;
 }
 
+/// The parts placed more than once in `world` (by [`ModelBody::placed_definition`]).
+pub(crate) fn repeated_parts(world: &ModelState) -> std::collections::HashSet<usize> {
+    let mut placements: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for id in world.bodies.iter().filter_map(ModelBody::placed_definition) {
+        *placements.entry(id).or_default() += 1;
+    }
+    placements.into_iter().filter(|(_, n)| *n > 1).map(|(id, _)| id).collect()
+}
+
+/// Make what the viewport draws `b` from, so its first frames do not make it on the window's
+/// thread: the reference mesh (a placed part's shared one), with its shared vertices for a GPU
+/// viewport (`shared`), and the display plan's mesh, which a finer display quality draws (a placed
+/// copy's is its definition's, made once for every copy). A body drawn from display plans
+/// (`plans`) has its GPU plan made too, unless it is a placement of a part placed more than once
+/// (`repeated`): those are drawn as instances of the part's triangles, never from plans of their
+/// own, and each such plan is a moved copy of the part's (a large assembly placed a hundred times
+/// took tens of gigabytes while it opened). `q` is the display quality the viewport draws at.
+pub(crate) fn warm(
+    b: &ModelBody,
+    plans: bool,
+    shared: bool,
+    repeated: &std::collections::HashSet<usize>,
+    q: solidcraft_engine::doc::display_quality::DisplayQuality,
+) {
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
+    let (mesh, _) = b.mesh_in_place();
+    if shared {
+        crate::viewport::warm_shared_tris(&mesh);
+    }
+    // Its box, which framing the view reads for every body once they are all shown: worked out
+    // there, on the window thread, it moved every point of every placement (a second for a
+    // hundred copies of a large assembly).
+    let _ = b.mesh_bounds();
+    if plans && b.placed_definition().is_none_or(|id| !repeated.contains(&id)) {
+        let _ = b.gpu_plan_at(q);
+    }
+    if plans || q != DisplayQuality::Normal {
+        let _ = b.plan_mesh_in_place_at(q);
+    }
+}
+
 /// Whether the meshes may be made on a thread of their own. The web build cannot start one; a
 /// test says no to do the same ([`without_threads`]).
 fn threads() -> bool {
@@ -304,6 +336,16 @@ fn threads() -> bool {
 #[cfg(test)]
 thread_local! {
     static NO_THREADS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Show only the bodies `shown` of the world being opened (by their index in it), as the picture
+/// made while the others are still being meshed.
+#[cfg(test)]
+pub(crate) fn show_only(app: &mut SolveApp, shown: &[usize]) {
+    let Some(m) = app.open_meshing.as_mut() else { return };
+    let mut st = (*m.world).clone();
+    st.bodies = shown.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect();
+    m.shown = Some((shown.len(), Arc::new(st)));
 }
 
 /// Run `f` as the web build runs: meshing cannot start a thread.

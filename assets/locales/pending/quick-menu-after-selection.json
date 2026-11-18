@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.quick_menu_after_selection": "Quick menu after a selection"
+  },
+  "de": {
+    "prefs.quick_menu_after_selection": "Schnellmenü nach einer Auswahl"
+  },
+  "ja": {
+    "prefs.quick_menu_after_selection": "選択後にクイックメニュー"
+  },
+  "zh": {
+    "prefs.quick_menu_after_selection": "选择后显示快捷菜单"
+  },
+  "ko": {
+    "prefs.quick_menu_after_selection": "선택 후 빠른 메뉴"
+  },
+  "ar": {
+    "prefs.quick_menu_after_selection": "قائمة سريعة بعد التحديد"
+  },
+  "he": {
+    "prefs.quick_menu_after_selection": "תפריט מהיר אחרי בחירה"
+  },
+  "vi": {
+    "prefs.quick_menu_after_selection": "Menu nhanh sau khi chọn"
+  }
+}

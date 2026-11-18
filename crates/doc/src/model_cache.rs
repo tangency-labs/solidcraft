@@ -392,14 +392,36 @@ impl Model {
     /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation without an
     /// error and `doc` keeps no names saved before format 14. Works out
     /// the face names not asked for yet (a saved model keeps them as worked out).
+    ///
+    /// An import whose SMLib check of its parts is still running is saved with what the check
+    /// found: this waits for it ([`Self::saved_now`] does not). `None` when the check healed a
+    /// part: the states are of the import as first shown ([`PendingChecks::settle`]).
     pub fn saved(&self, doc: &Document) -> Option<SavedModel> {
-        if self.results.is_empty() || self.results.iter().any(|r| r.error.is_some()) || !self.is_current(doc) || has_legacy_names(doc) {
+        let (mut saved, pending) = self.saved_now(doc)?;
+        pending.settle(&mut saved).then_some(saved)
+    }
+
+    /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
+    /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
+    pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
+        // An import its checks healed is fingerprinted with its heals, which a model read back
+        // does not have: it would never be taken.
+        if self.results.is_empty()
+            || self.results.iter().any(|r| r.error.is_some())
+            || !self.is_current(doc)
+            || has_legacy_names(doc)
+            || self.has_import_heals()
+        {
             return None;
         }
         kernel::guard("save the model", || {
             let mut w = Writer::default();
             let mut features = Vec::with_capacity(self.results.len());
-            for r in &self.results {
+            let mut pending = Vec::new();
+            for (k, r) in self.results.iter().enumerate() {
+                if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
+                    pending.push((k, report.clone()));
+                }
                 let state = w.state(&r.state).ok_or_else(|| kernel::KernelError::Invalid("not kept".into()))?;
                 let mut f = json!({"id": r.id, "fingerprint": hex(r.fingerprint), "ms": r.ms, "skipped": r.skipped, "state": state});
                 if let Some(w) = &r.warning {
@@ -411,15 +433,61 @@ impl Model {
                 features.push(f);
             }
             // The check mode the results were evaluated under: they are another mode's results.
-            let records = json!({
+            let mut records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
                 "sheets": w.sheets, "threads": w.threads, "validation": self.validation().id(), "rounds": w.rounds,
                 "sketch_key_sets": w.sketch_key_sets,
                 "named_faces": w.named_faces,
             });
-            Ok(SavedModel { records, bodies: w.bodies })
+            // Evaluated with the tolerance heal off: recorded only then, so the models saved
+            // with it on (the default) are as before.
+            if !self.heals()
+                && let Some(out) = records.as_object_mut()
+            {
+                out.insert("tolerance_heal".into(), json!(false));
+            }
+            Ok((SavedModel { records, bodies: w.bodies }, PendingChecks(pending)))
         })
         .ok()
+    }
+}
+
+/// Imports of a saved model ([`Model::saved_now`]) whose SMLib check of their parts may still
+/// be running: by feature record, the report that holds the check.
+pub struct PendingChecks(Vec<(usize, Arc<kernel::ImportReport>)>);
+
+impl PendingChecks {
+    /// No import's check is left to wait for.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Wait for the checks and write what they found into `saved`'s feature records: each
+    /// import's report and warning as an import that waited for its check has them. A check a
+    /// token stopped leaves its record as it was.
+    ///
+    /// Returns whether `saved` stands: not when a check healed a part
+    /// ([`kernel::ImportChecks::heals`]), since its states hold the import as it was first shown,
+    /// and the model evaluates it again as its healed bodies (with other fingerprints). `saved`
+    /// is then left as it was.
+    #[must_use]
+    pub fn settle(self, saved: &mut SavedModel) -> bool {
+        if self.0.iter().any(|(_, report)| report.settled().is_some() && report.checks.heals().is_some()) {
+            return false;
+        }
+        for (k, report) in self.0 {
+            let Some(settled) = report.settled() else { continue };
+            let Some(f) = saved.records.get_mut("features").and_then(|f| f.get_mut(k)).and_then(Json::as_object_mut) else { continue };
+            match crate::eval::import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>()) {
+                Some(w) => f.insert("warning".into(), json!(w)),
+                None => f.remove("warning"),
+            };
+            match serde_json::to_value(&settled) {
+                Ok(v) if !settled.issues.is_empty() => f.insert("import_report".into(), v),
+                _ => f.remove("import_report"),
+            };
+        }
+        true
     }
 }
 
@@ -925,6 +993,9 @@ impl SavedModel {
         if let (Some(validation), Some(out)) = (self.records.get("validation"), records.as_object_mut()) {
             out.insert("validation".into(), validation.clone());
         }
+        if let (Some(heal), Some(out)) = (self.records.get("tolerance_heal"), records.as_object_mut()) {
+            out.insert("tolerance_heal".into(), heal.clone());
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))
@@ -956,10 +1027,12 @@ impl Model {
             return Err(bad("saved model: features"));
         }
         let (vals, param_errors) = evaluation_values(doc);
-        let import_digests = ImportDigests::of(doc, &ImportDigests::default());
-        let marker = doc.marker.unwrap_or(usize::MAX);
         // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
-        let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
+        // And under the tolerance heal preference it was evaluated with (on when not recorded).
+        let heal = records.get("tolerance_heal").and_then(Json::as_bool).unwrap_or(true);
+        let import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
+        let marker = doc.marker.unwrap_or(usize::MAX);
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
@@ -1023,7 +1096,7 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
+        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
         // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).

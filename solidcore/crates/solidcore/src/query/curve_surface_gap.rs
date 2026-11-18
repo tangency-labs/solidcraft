@@ -440,7 +440,18 @@ fn second_term(
 /// to some 1e-8 of a parameter, which the bound carries as well). A piece that cannot be cut
 /// further is bounded as it stands, so the result is a bound however the pieces ended; `None`
 /// when some piece has no bound at all.
+///
+/// The first pieces are also cut at every [`kinks`] of `C` and of `W` inside `[lo, hi]`:
+/// the second-order term bounds `|g − ℓ|` (`ℓ` the chord of the end values) by `h² / 8 sup
+/// |g''|` only where `g` is C¹, and the spans' second derivatives, hulled over a piece,
+/// know nothing of a jump in the first (a corner of `C` between two pieces' ends would be
+/// missed). No piece then has a corner of either inside it: it ends on the corner instead.
+///
+/// # Errors
+///
+/// Cancellation (polled at every piece), and the unported statuses of the evaluations.
 fn certified_gap(
+    k: &Kernel,
     curve: &BSplineCurve,
     uv: &BSplineCurve,
     surface: &NetSurface,
@@ -457,13 +468,21 @@ fn certified_gap(
     if !(lo.is_finite() && hi.is_finite() && d0 <= lo && lo < hi && hi <= d1) {
         return Ok(None);
     }
+    let mut corners = kinks(&cn, lo, hi);
+    corners.extend(kinks(&wn, lo, hi));
+    corners.sort_by(f64::total_cmp);
+    corners.dedup();
     bisect(
         [lo, hi],
         first_pieces,
+        &corners,
         CLOSE_RELATIVE,
         floor,
         f64::INFINITY,
-        |a, b| piece(&cn, &wn, surface, a, b),
+        |a, b| {
+            k.check_cancelled(OP)?;
+            piece(&cn, &wn, surface, a, b)
+        },
     )
 }
 
@@ -474,9 +493,14 @@ fn certified_gap(
 /// `over`, so is the whole bound, and the bisection stops there with an infinite bound (an
 /// `over` of `f64::INFINITY` never stops it): the pieces before it are cut exactly as without
 /// it, so the comparison of the bound with `over` is the same.
+///
+/// The first pieces are also cut at every point of `corners` (sorted, distinct) inside
+/// `(lo, hi)`, so no first piece has one inside it ([`certified_gap`] passes the curves'
+/// [`kinks`]).
 fn bisect(
     [lo, hi]: [f64; 2],
     first_pieces: usize,
+    corners: &[f64],
     relative: f64,
     floor: f64,
     over: f64,
@@ -485,19 +509,24 @@ fn bisect(
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
         return Ok(None);
     }
-    let mut stack: Vec<(f64, f64, u32)> = (0..first_pieces)
-        .rev()
-        .map(|i| {
-            let f = |j: usize| {
-                if j == first_pieces {
-                    hi
-                } else {
-                    lo + (hi - lo) * (j as f64) / (first_pieces as f64)
-                }
-            };
-            (f(i), f(i + 1), 0)
-        })
-        .collect();
+    let f = |j: usize| {
+        if j == first_pieces {
+            hi
+        } else {
+            lo + (hi - lo) * (j as f64) / (first_pieces as f64)
+        }
+    };
+    let mut stack: Vec<(f64, f64, u32)> = Vec::new();
+    for i in 0..first_pieces {
+        let (mut a, b) = (f(i), f(i + 1));
+        let start = a;
+        for &x in corners.iter().filter(|&&x| start < x && x < b) {
+            stack.push((a, x, 0));
+            a = x;
+        }
+        stack.push((a, b, 0));
+    }
+    stack.reverse();
     let mut worst = 0.0_f64;
     let mut made = stack.len();
     while let Some((a, b, depth)) = stack.pop() {
@@ -530,6 +559,63 @@ fn bisect(
         stack.push((a, mid, depth + 1));
     }
     Ok(worst.is_finite().then_some(worst))
+}
+
+/// The parameters strictly inside `(lo, hi)` where the curve `cn` may not be C¹: its
+/// interior knots of multiplicity at least its degree (a span's polynomial meets the next
+/// only in its value there), in increasing order.
+fn kinks(cn: &NurbsCurve, lo: f64, hi: f64) -> Vec<f64> {
+    let Some(knots) = cn.u.get(cn.p..=cn.n) else {
+        return Vec::new();
+    };
+    knots
+        .chunk_by(|a, b| a == b)
+        .filter(|run| run.len() >= cn.p.max(1))
+        .filter_map(|run| run.first().copied())
+        .filter(|&x| lo < x && x < hi)
+        .collect()
+}
+
+/// A proved upper bound on `sup |C(t) − S(W(t))|` over `t` in `range`, for the 3D curve
+/// `curve` (`C`), a B-spline `uv` of parameters `(u, v, 0)` on the same parameter (`W`: a
+/// UV curve or trim of `C` on the surface), and `surface`'s net (`S`): how far the curve
+/// strays from the surface's image of its UV curve, the bound [`certified_gap`] encloses
+/// (not upstream, tangency-labs/solidcraft#18166). For a surface kept as the net of a
+/// definition (a blend's or a sweep's), `S` is the net: the caller adds the net's own bound.
+/// `floor` is the caller's scale, as for [`curve_face_gap_bound`].
+///
+/// `None` when the gap is not enclosed: an empty, unordered or not finite `range`, a
+/// surface that is not a NURBS net or whose net's parameters are not the surface's
+/// ([`NetSurface::of`], probed at `W`'s ends and middle), a `W` that cannot be evaluated,
+/// or a piece the bisection cannot bound.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn curve_uv_gap_bound(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    uv: &BSplineCurve,
+    surface: &Surface,
+    range: [f64; 2],
+    floor: f64,
+) -> Result<Option<f64>> {
+    let [lo, hi] = range;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
+        return Ok(None);
+    }
+    let mut probe = Vec::new();
+    for t in [lo, 0.5 * (lo + hi), hi] {
+        let Ok(w) = uv.evaluate_point(t) else {
+            return Ok(None);
+        };
+        probe.push(Point2::new(w.x, w.y));
+    }
+    let surface = surface.clone_for_evaluation()?;
+    let Some(net) = NetSurface::of(k, &surface, &probe)? else {
+        return Ok(None);
+    };
+    certified_gap(k, curve, uv, &net, range, FIRST_PIECES, floor)
 }
 
 /// A proved upper bound on the distance from every point of `curve` over its parameters
@@ -634,7 +720,312 @@ pub fn curve_face_gap_bound(
     ) else {
         return Ok(None);
     };
-    certified_gap(curve, &correspondence, &net, range, FIRST_PIECES, floor)
+    certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
+}
+
+// ---- a curve piece against a point, a surface or a curve ------------------------------------
+
+/// What [`curve_piece_gap_bound`] bounds a curve piece's distance to: a point, a surface
+/// with the parameters of its points that correspond to the piece's two ends, or a curve
+/// with the parameters of those points.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PieceTarget<'a> {
+    /// A fixed point.
+    Point(crate::math::Point3),
+    /// A surface and its parameters at the points matching the piece's first and last end.
+    Surface(&'a Surface, [Point2; 2]),
+    /// A curve and its parameters at the points matching the piece's first and last end.
+    Curve(&'a Curve, [f64; 2]),
+}
+
+/// The NURBS data a curve evaluates over `[lo, hi]`, with the error bound of its points
+/// against the curve's own: the B-spline a B-spline, ellipse, circle, hyperbola or parabola
+/// evaluates (no error: it is that B-spline), and for a line the segment between its two
+/// computed end points, each within `e` per coordinate of the line's (so every point of the
+/// line over `[lo, hi]`, a convex combination of the exact ends, is within `sqrt(3) e <= 2 e`
+/// of the segment's point at that parameter). `None` for other kinds, a NURB that is not
+/// well formed, and a range outside the curve's domain.
+fn piece_nurbs(curve: &Curve, [lo, hi]: [f64; 2]) -> Option<(NurbsCurve, f64)> {
+    use crate::curve::curve::p2::CurveKind;
+    let (cn, err) = match curve.kind() {
+        CurveKind::Line(l) => {
+            let [(p0, e0), (p1, e1)] =
+                l.segment_over(&crate::geom::extent1d::Extent1d::from_min_max(lo, hi))?;
+            let err = 2.0 * e0.max(e1);
+            (
+                NurbsCurve {
+                    p: 1,
+                    n: 2,
+                    u: vec![lo, lo, hi, hi],
+                    pw: vec![p0.x, p0.y, p0.z, 1.0, p1.x, p1.y, p1.z, 1.0],
+                },
+                err,
+            )
+        }
+        CurveKind::BSpline(_)
+        | CurveKind::Ellipse(_)
+        | CurveKind::Hyperbola(_)
+        | CurveKind::Parabola(_) => (NurbsCurve::of(curve.b_spline_base()?).ok()?, 0.0),
+        _ => return None,
+    };
+    let (d0, d1) = (*cn.u.get(cn.p)?, *cn.u.get(cn.n)?);
+    (lo.is_finite() && hi.is_finite() && d0 <= lo && lo <= hi && hi <= d1 && err.is_finite())
+        .then_some((cn, err))
+}
+
+/// The distinct knots of `cn` strictly inside `(lo, hi)`, in order.
+fn interior_knots(cn: &NurbsCurve, lo: f64, hi: f64) -> Vec<f64> {
+    let mut out: Vec<f64> = cn.u.iter().copied().filter(|&u| lo < u && u < hi).collect();
+    out.dedup();
+    out
+}
+
+/// The target of one piece, prepared: its NURBS data, the parameter map from the piece's
+/// curve parameter and the error bound of its points.
+enum Prepared {
+    Point(V3<Ivl>),
+    Surface(NetSurface, [Point2; 2]),
+    Curve(NurbsCurve, [f64; 2]),
+}
+
+/// `w(t)` of the straight map from `[lo, hi]` onto `[w0, w1]`, enclosed for every `t` in `t`.
+fn along(t: Ivl, [lo, hi]: [f64; 2], [w0, w1]: [f64; 2]) -> Ivl {
+    let slope = (Ivl::from(w1) - Ivl::from(w0)) / (Ivl::from(hi) - Ivl::from(lo));
+    Ivl::from(w0) + (t - Ivl::from(lo)) * slope
+}
+
+/// [`along`]'s slope, enclosed.
+fn slope([lo, hi]: [f64; 2], [w0, w1]: [f64; 2]) -> Ivl {
+    (Ivl::from(w1) - Ivl::from(w0)) / (Ivl::from(hi) - Ivl::from(lo))
+}
+
+/// `x` cut to `[a, b]` (both ends of `x` past it become its ends): the map's exact values lie
+/// between its exact ends, which lie in `[a, b]`, so cutting the enclosure keeps them.
+fn clamp_ivl(x: Ivl, a: f64, b: f64) -> Ivl {
+    let (lo, hi) = (a.min(b), a.max(b));
+    Ivl::new(x.lo.max(lo).min(hi), x.hi.min(hi).max(lo))
+}
+
+/// The bound of one piece `[a, b]` of the curve against the target: `(end values, second
+/// term)`, `None` when some enclosure is not finite (module docs; the same chord bound as
+/// [`piece`] with the straight map in place of the correspondence `W`). A target curve whose
+/// knot lies inside the piece's image, or a surface only C^0 across a knot line the box
+/// crosses, is bounded by the Lipschitz form, `h sup |g'|`.
+fn target_piece(
+    cn: &NurbsCurve,
+    range: [f64; 2],
+    target: &Prepared,
+    a: f64,
+    b: f64,
+) -> Result<Option<(f64, f64)>> {
+    let mut ends = 0.0_f64;
+    for t in [a, b] {
+        let at = Ivl::from(t);
+        let Some(c0) = curve_derivs_over(cn, at, 0, None)?.first().copied() else {
+            return Ok(None);
+        };
+        let q = match target {
+            Prepared::Point(p) => *p,
+            Prepared::Surface(s, [w0, w1]) => {
+                let w = V3 {
+                    x: clamp_ivl(along(at, range, [w0.x, w1.x]), w0.x, w1.x),
+                    y: clamp_ivl(along(at, range, [w0.y, w1.y]), w0.y, w1.y),
+                    z: Ivl::from(0.0),
+                };
+                s.partials(&[w], 0, 0)?.0.at(0, 0)
+            }
+            Prepared::Curve(dn, [s0, s1]) => {
+                let s = clamp_ivl(along(at, range, [*s0, *s1]), *s0, *s1);
+                let Some(d0) = curve_derivs_over(dn, s, 0, None)?.first().copied() else {
+                    return Ok(None);
+                };
+                d0
+            }
+        };
+        let Some(g) = norm_upper(minus(c0, q)) else {
+            return Ok(None);
+        };
+        ends = ends.max(g);
+    }
+    let span = Ivl::new(a, b);
+    let h = Ivl::from(b) - Ivl::from(a);
+    let cd = curve_derivs_over(cn, span, 2, None)?;
+    let (Some(c1), Some(c2)) = (cd.get(1).copied(), cd.get(2).copied()) else {
+        return Ok(None);
+    };
+    // (g', g'') of g = c - target(w), the map straight (w'' = 0); `None` for the second
+    // where it is not defined over the piece
+    let (g1, g2) = match target {
+        Prepared::Point(_) => (c1, Some(c2)),
+        Prepared::Surface(s, [w0, w1]) => {
+            let (u1, v1) = (slope(range, [w0.x, w1.x]), slope(range, [w0.y, w1.y]));
+            let w = V3 {
+                x: clamp_ivl(along(span, range, [w0.x, w1.x]), w0.x, w1.x),
+                y: clamp_ivl(along(span, range, [w0.y, w1.y]), w0.y, w1.y),
+                z: Ivl::from(0.0),
+            };
+            // (S o w)'' = S_uu u'^2 + 2 S_uv u'v' + S_vv v'^2 where the surface is C^1
+            // across every knot line the box crosses; else g is Lipschitz, with the
+            // one-sided first partials hulled
+            let term = match s.partials(&[w], 2, 1) {
+                Ok((p, slack)) => {
+                    let mut swpp = scaled(p.at(2, 0), u1 * u1);
+                    swpp = plus(swpp, scaled(p.at(1, 1), Ivl::from(2.0) * u1 * v1));
+                    swpp = plus(swpp, scaled(p.at(0, 2), v1 * v1));
+                    let Some(m) = norm_upper(minus(c2, swpp)) else {
+                        return Ok(None);
+                    };
+                    (h * h * Ivl::from(m) * Ivl::from(0.125) + Ivl::from(slack)).hi
+                }
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => {
+                    let (p, slack) = s.partials(&[w], 1, 0)?;
+                    let sw = plus(scaled(p.at(1, 0), u1), scaled(p.at(0, 1), v1));
+                    let Some(m) = norm_upper(minus(c1, sw)) else {
+                        return Ok(None);
+                    };
+                    (h * Ivl::from(m) + Ivl::from(slack)).hi
+                }
+            };
+            return Ok(term.is_finite().then_some((ends, term)));
+        }
+        Prepared::Curve(dn, [s0, s1]) => {
+            let w1 = slope(range, [*s0, *s1]);
+            let s = clamp_ivl(along(span, range, [*s0, *s1]), *s0, *s1);
+            let dd = curve_derivs_over(dn, s, 2, None)?;
+            let (Some(d1), Some(d2)) = (dd.get(1).copied(), dd.get(2).copied()) else {
+                return Ok(None);
+            };
+            // a knot of the target inside the image: its derivatives are hulled over two
+            // pieces, the second-order bound needs one
+            let kinked = !interior_knots(dn, s.lo, s.hi).is_empty();
+            let g1 = minus(c1, scaled(d1, w1));
+            let g2 = (!kinked).then(|| minus(c2, scaled(d2, w1 * w1)));
+            (g1, g2)
+        }
+    };
+    let term = if let Some(gpp) = g2 {
+        let Some(m) = norm_upper(gpp) else {
+            return Ok(None);
+        };
+        (h * h * Ivl::from(m) * Ivl::from(0.125)).hi
+    } else {
+        let Some(m) = norm_upper(g1) else {
+            return Ok(None);
+        };
+        (h * Ivl::from(m)).hi
+    };
+    Ok(term.is_finite().then_some((ends, term)))
+}
+
+/// Not upstream (WR-410): a proved upper bound on the distance from every point of `curve`
+/// between its parameters `t[0]` and `t[1]` (either order) to `target`: no point of that
+/// piece is farther from the target. A surface or curve target is matched to the piece by
+/// the straight map from `t` onto its own parameters at the two ends (a witness only:
+/// `dist(c(t), S) <= |c(t) - S(w(t))|` for any `w`, so the map decides how tight the bound
+/// is, never whether it holds), and the bound is that of [`certified_gap`]'s module docs: the
+/// larger end value plus `h^2 / 8 sup |g''|` per piece, the pieces cut at the curve's knots
+/// and bisected, every value enclosed in outward-rounded intervals. Bisection stops once the
+/// bound passes `limit` (it is then returned) or closes below `floor`.
+///
+/// `None` when no bound is made: a curve kind without NURBS data ([`piece_nurbs`]), a range
+/// or target range outside its curve's domain, a surface without a net matching it at the
+/// two parameters (`NetSurface::of`), or a piece the bisection cannot bound.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn curve_piece_gap_bound(
+    k: &Kernel,
+    curve: &Curve,
+    t: [f64; 2],
+    target: PieceTarget<'_>,
+    floor: f64,
+    limit: f64,
+) -> Result<Option<f64>> {
+    let [t0, t1] = t;
+    if !(t0.is_finite() && t1.is_finite() && t0 != t1 && floor >= 0.0) {
+        return Ok(None);
+    }
+    // the piece runs from lo to hi; the target's ends follow it
+    let (lo, hi, flip) = if t0 < t1 {
+        (t0, t1, false)
+    } else {
+        (t1, t0, true)
+    };
+    let Some((cn, err)) = piece_nurbs(curve, [lo, hi]) else {
+        return Ok(None);
+    };
+    let (prepared, target_err) = match target {
+        PieceTarget::Point(p) => {
+            let p = V3 {
+                x: Ivl::from(p.x),
+                y: Ivl::from(p.y),
+                z: Ivl::from(p.z),
+            };
+            (Prepared::Point(p), 0.0)
+        }
+        PieceTarget::Surface(s, [w0, w1]) => {
+            let ends = if flip { [w1, w0] } else { [w0, w1] };
+            let Some(net) = NetSurface::of(k, s, &ends)? else {
+                return Ok(None);
+            };
+            (Prepared::Surface(net, ends), 0.0)
+        }
+        PieceTarget::Curve(c, [s0, s1]) => {
+            let ends = if flip { [s1, s0] } else { [s0, s1] };
+            let Some((dn, derr)) = piece_nurbs(c, [ends[0].min(ends[1]), ends[0].max(ends[1])])
+            else {
+                return Ok(None);
+            };
+            (Prepared::Curve(dn, ends), derr)
+        }
+    };
+    let range = [lo, hi];
+    let mut cuts = vec![lo];
+    cuts.extend(interior_knots(&cn, lo, hi));
+    cuts.push(hi);
+    let mut stack: Vec<(f64, f64, u32)> = cuts
+        .windows(2)
+        .rev()
+        .filter_map(|w| match *w {
+            [a, b] => Some((a, b, 0)),
+            _ => None,
+        })
+        .collect();
+    let extra = err + target_err;
+    let mut worst = 0.0_f64;
+    let mut made = stack.len();
+    while let Some((a, b, depth)) = stack.pop() {
+        let mid = 0.5 * (a + b);
+        let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
+        match target_piece(&cn, range, &prepared, a, b) {
+            Ok(Some((ends, term))) => {
+                let bound = (Ivl::from(ends) + Ivl::from(term) + Ivl::from(extra)).hi;
+                if !bound.is_finite() {
+                    return Ok(None);
+                }
+                // (past the limit at an end: no cut can bring it back)
+                if (Ivl::from(ends) + Ivl::from(extra)).hi > limit {
+                    return Ok(Some(bound));
+                }
+                if last || term <= (CLOSE_RELATIVE * ends).max(floor).max(CLOSE_ABSOLUTE) {
+                    worst = worst.max(bound);
+                    continue;
+                }
+            }
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Ok(None) | Err(_) => {
+                if last {
+                    return Ok(None);
+                }
+            }
+        }
+        made += 2;
+        stack.push((mid, b, depth + 1));
+        stack.push((a, mid, depth + 1));
+    }
+    Ok(worst.is_finite().then_some(worst))
 }
 
 /// Points of a UV trim at which its surface's net is checked to give the surface's point
@@ -689,22 +1080,6 @@ const PSI_MAX_POINTS: usize = 4097;
 const PSI_MAX_DEPTH: u32 = 16;
 /// The pieces each knot span of the curve and of the trim is cut into for `ψ`'s first points.
 const PSI_PER_SPAN: usize = 4;
-
-/// The knots of a NURBS curve strictly inside `(lo, hi)` it may not be parametrically C^1
-/// across (a knot whose multiplicity is at least the degree): a piece whose curve side crosses
-/// one has no second derivative to bound and is bounded to first order.
-fn kinks(n: &NurbsCurve, [lo, hi]: [f64; 2]) -> Vec<f64> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    while let Some(&x) = n.u.get(i) {
-        let m = n.u.iter().skip(i).take_while(|&&y| y == x).count().max(1);
-        if lo < x && x < hi && m >= n.p {
-            out.push(x);
-        }
-        i += m;
-    }
-    out
-}
 
 /// The curve parameter near `guess` (within `[lo, hi]`) of the curve point nearest `target`,
 /// by a few Newton steps, with the curve's speed there; the guess itself where a step fails.
@@ -1001,22 +1376,33 @@ pub fn trim_image_gap_bound_up_to(
     let Some(psi) = reparametrisation(k, surface, curve, uv, range, &knots, floor)? else {
         return Ok(None);
     };
-    if !kinks(&psi, range).is_empty() {
+    let [r0, r1] = range;
+    if !kinks(&psi, r0, r1).is_empty() {
         return Ok(None);
     }
     let sides = Sides {
         curve: &cn,
         trim: &wn,
         psi: &psi,
-        curve_kinks: kinks(&cn, range),
-        trim_kinks: kinks(&wn, range),
+        curve_kinks: kinks(&cn, r0, r1),
+        trim_kinks: kinks(&wn, r0, r1),
         range,
     };
-    // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is enough)
-    let Some(gap) = bisect(range, FIRST_PIECES, CLOSE_RELATIVE, floor, over, |a, b| {
-        k.check_cancelled(OP)?;
-        piece_reparametrised(&sides, &net, a, b)
-    })?
+    // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is enough;
+    // a piece across a corner is bounded to first order by `piece_reparametrised`, so the
+    // first pieces need no cut there)
+    let Some(gap) = bisect(
+        range,
+        FIRST_PIECES,
+        &[],
+        CLOSE_RELATIVE,
+        floor,
+        over,
+        |a, b| {
+            k.check_cancelled(OP)?;
+            piece_reparametrised(&sides, &net, a, b)
+        },
+    )?
     else {
         return Ok(None);
     };
@@ -1270,5 +1656,321 @@ mod tests {
         // a range past the curve's domain encloses nothing
         let past = trim_image_gap_bound(&t.k, &t.surface, &curve, &trim, [0.0, 1.5], 1e-9).unwrap();
         assert!(past.is_none());
+    }
+
+    /// [`curve_uv_gap_bound`] of a line `lift` above the bilinear plane patch z = 0 (x, y
+    /// in 0..1), at the UV line under it with the same parameters: at least `lift` and no
+    /// more than rounding above it. The same line read at the UV line's reversed parameters
+    /// (the same image, other points) is bounded by its true gap, which at either end is
+    /// the shadow's whole length (about 0.5831); an empty range encloses nothing. A corner of
+    /// the curve inside a first piece (a spike to 1e-3 between two ends on the plane) is
+    /// seen: the pieces are cut there.
+    #[test]
+    fn a_line_over_its_uv_line_is_bounded_by_its_height() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let k = Kernel::default();
+        let plane = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let surface = Surface::from(plane);
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let c = NurbCurve::new(
+                vec![
+                    CPoint::new(a[0], a[1], a[2], NOW),
+                    CPoint::new(b[0], b[1], b[2], NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(c, 3, false)
+        };
+        let lift = 4.2e-7;
+        let curve = line([0.2, 0.3, lift], [0.7, 0.6, lift]);
+        let uv = line([0.2, 0.3, 0.0], [0.7, 0.6, 0.0]);
+        let g = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        assert!(g >= lift && g <= lift * (1.0 + 1e-6), "{g:e}");
+        let reversed = line([0.7, 0.6, 0.0], [0.2, 0.3, 0.0]);
+        let g = curve_uv_gap_bound(&k, &curve, &reversed, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        // (at either end the curve is the shadow's length from its image: the whole gap, not
+        // a part of it; its rounding is far below the 1e-12 allowed)
+        let full = (0.5_f64 * 0.5 + 0.3 * 0.3 + lift * lift).sqrt();
+        assert!(g >= full * (1.0 - 1e-12), "{g:e} against {full:e}");
+        let empty = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.5, 0.5], 1e-9).unwrap();
+        assert_eq!(empty, None);
+        // (a corner of the curve inside a first piece, `[0, 1/32]`: the line over its UV
+        // line but for a spike to 1e-3 at t = 1/64, back at t = 1/32; the piece's ends and
+        // the spans' second derivatives are all 0, so only a cut at the corner sees it)
+        let at = |t: f64| CPoint::new(0.2 + 0.5 * t, 0.3 + 0.3 * t, 0.0, NOW);
+        let mut spike = at(1.0 / 64.0);
+        spike.z = 1e-3;
+        let c = NurbCurve::new(
+            vec![at(0.0), spike, at(1.0 / 32.0), at(1.0)],
+            1,
+            vec![0.0, 0.0, 1.0 / 64.0, 1.0 / 32.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let spiked = BSplineCurve::from_nurb(c, 3, false);
+        let g = curve_uv_gap_bound(&k, &spiked, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        assert!(g >= 1e-3, "{g:e}");
+        // (a cancelled kernel stops the bisection: cancellation, not an unenclosed gap)
+        let token = crate::kernel::CancelToken::default();
+        token.cancel();
+        let cancelled = Kernel {
+            cancel: Some(token),
+            ..Kernel::default()
+        };
+        let stopped = curve_uv_gap_bound(&cancelled, &curve, &uv, &surface, [0.0, 1.0], 1e-9);
+        assert!(
+            matches!(&stopped, Err(e) if e.is_cancelled()),
+            "{stopped:?}"
+        );
+    }
+
+    /// The top face (`z = 3`) of a 1 x 2 x 3 box: its surface, a plane with a net.
+    fn top_plane(k: &mut Kernel) -> Surface {
+        let b =
+            crate::primitive::api_primitives::create_box(k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        for f in crate::query::api_queries::get_faces(&b).unwrap() {
+            let s = crate::topology::face::p2::surface(&b, f)
+                .unwrap()
+                .unwrap()
+                .clone();
+            if let crate::surface::surface::p2::SurfaceKind::Plane(p) = s.kind() {
+                let uv = p.project_point_to_uv_domain(Point3::new(0.5, 1.0, 7.0));
+                if (s.evaluate_point(k, uv).unwrap().z - 3.0).abs() < 1e-12 {
+                    return s;
+                }
+            }
+        }
+        panic!("no top face");
+    }
+
+    /// The UV of `p` dropped onto the plane `s`.
+    fn plane_uv(s: &Surface, p: Point3) -> Point2 {
+        match s.kind() {
+            crate::surface::surface::p2::SurfaceKind::Plane(pl) => pl.project_point_to_uv_domain(p),
+            _ => panic!("not a plane"),
+        }
+    }
+
+    /// A line piece `lift` above a plane, matched to it at its two feet: every point is
+    /// exactly `lift` above it, the line and the plane are polynomial, so the bound is at
+    /// least `lift` and no more than rounding above it, either way round the parameters run.
+    #[test]
+    fn a_line_piece_above_a_plane_is_bounded_by_its_height() {
+        let mut k = Kernel::default();
+        let s = top_plane(&mut k);
+        let lift = 6.8e-5;
+        let (a, b) = (
+            Point3::new(0.2, 0.3, 3.0 + lift),
+            Point3::new(0.7, 1.6, 3.0 + lift),
+        );
+        let line = Curve::from(
+            crate::curve::line::Line::create_line_segment(
+                3,
+                a,
+                b,
+                Some(&crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0)),
+            )
+            .unwrap(),
+        );
+        let (ua, ub) = (plane_uv(&s, a), plane_uv(&s, b));
+        for (t, uv) in [([0.0, 1.0], [ua, ub]), ([1.0, 0.0], [ub, ua])] {
+            let g = curve_piece_gap_bound(&k, &line, t, PieceTarget::Surface(&s, uv), 0.0, 1.0)
+                .unwrap()
+                .unwrap();
+            assert!(
+                g >= lift && g <= lift * (1.0 + 1e-6),
+                "{g:e} against {lift:e}"
+            );
+        }
+        // the half piece matched to the wrong half of the plane: the witness is a bound
+        // only, so the bound grows with the mismatch, never below the true gap
+        let mid = plane_uv(&s, Point3::new(0.45, 0.95, 3.0));
+        let g = curve_piece_gap_bound(
+            &k,
+            &line,
+            [0.0, 1.0],
+            PieceTarget::Surface(&s, [ua, mid]),
+            0.0,
+            1.0,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(g >= lift, "{g:e}");
+    }
+
+    /// A segment against a point off its middle: the farthest point of the segment is an
+    /// end, `sqrt(0.25 + d^2)` away (the segment's second derivative is zero, so the bound
+    /// is the end values and rounding).
+    #[test]
+    fn a_segment_against_a_point_is_bounded_by_its_farther_end() {
+        let k = Kernel::default();
+        let line = Curve::from(
+            crate::curve::line::Line::create_line_segment(
+                3,
+                Point3::ZERO,
+                Point3::new(1.0, 0.0, 0.0),
+                Some(&crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0)),
+            )
+            .unwrap(),
+        );
+        let d = 3.0e-3;
+        let want = (0.25_f64 + d * d).sqrt();
+        let g = curve_piece_gap_bound(
+            &k,
+            &line,
+            [0.0, 1.0],
+            PieceTarget::Point(Point3::new(0.5, d, 0.0)),
+            0.0,
+            10.0,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            g >= want && g <= want * (1.0 + 1e-9),
+            "{g:e} against {want:e}"
+        );
+    }
+
+    /// An arc of radius `r` over `2 theta` against its chord: the arc's middle is the
+    /// sagitta `r (1 - cos theta)` from the chord, and the bound, whatever witness map is
+    /// used, is no smaller; at a limit below the sagitta the certificate does not accept.
+    #[test]
+    fn an_arc_against_its_chord_is_bounded_by_at_least_the_sagitta() {
+        let k = Kernel::default();
+        let (r, deg) = (2.0_f64, 10.0_f64);
+        let arc = Curve::from(
+            crate::primitive::api_curves::create_arc(Point3::ZERO, r, -deg, deg).unwrap(),
+        );
+        let base = NurbsCurve::of(arc.b_spline_base().unwrap()).unwrap();
+        let (t0, t1) = (base.u[base.p], base.u[base.n]);
+        let th = deg.to_radians();
+        let (a, b) = (
+            Point3::new(r * th.cos(), -r * th.sin(), 0.0),
+            Point3::new(r * th.cos(), r * th.sin(), 0.0),
+        );
+        let chord = Curve::from(
+            crate::curve::line::Line::create_line_segment(
+                3,
+                a,
+                b,
+                Some(&crate::geom::extent1d::Extent1d::from_min_max(0.0, 1.0)),
+            )
+            .unwrap(),
+        );
+        let sagitta = r * (1.0 - th.cos());
+        let g = curve_piece_gap_bound(
+            &k,
+            &arc,
+            [t0, t1],
+            PieceTarget::Curve(&chord, [0.0, 1.0]),
+            0.0,
+            1.0,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            g >= sagitta && g < 2.0 * sagitta,
+            "{g:e} against {sagitta:e}"
+        );
+        let tol = 0.5 * sagitta;
+        let g = curve_piece_gap_bound(
+            &k,
+            &arc,
+            [t0, t1],
+            PieceTarget::Curve(&chord, [0.0, 1.0]),
+            0.01 * tol,
+            tol,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(g > tol, "{g:e} accepted at {tol:e}");
+    }
+
+    /// The near-tangent counterexample to a reach argued from the crossing angle: a curve
+    /// that touches the plane at both ends, `z = 3 + k u (1 - u)(u^2 + eps)`, nearly
+    /// tangent at `u = 0` (slope `k eps`), whose middle bows `k / 8`-ish off it. Both ends
+    /// lie on the plane, any reach argued from them accepts the piece; the certificate
+    /// bounds the bow and refuses at a tolerance below it.
+    #[test]
+    fn a_piece_on_the_plane_at_both_ends_that_bows_off_it_is_refused() {
+        let mut k = Kernel::default();
+        let s = top_plane(&mut k);
+        let (kk, eps) = (8.0e-4_f64, 1.0e-6_f64);
+        // z - 3 in Bernstein form of degree 4: (0, k eps / 4, k eps / 3, k (eps + 1) / 4, 0)
+        let z = [
+            0.0,
+            kk * eps / 4.0,
+            kk * eps / 3.0,
+            kk * (eps + 1.0) / 4.0,
+            0.0,
+        ];
+        let pts = (0..5)
+            .map(|i| CPoint::new(0.2 + 0.5 * i as f64 / 4.0, 0.5, 3.0 + z[i], NOW))
+            .collect();
+        let bez = NurbCurve::new(
+            pts,
+            4,
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let bow = Curve::from(BSplineCurve::from_nurb(bez, 3, false));
+        // the true largest gap, from the polynomial on a fine grid (a lower bound)
+        let peak = (0..=1000)
+            .map(|i| {
+                let u = f64::from(i) / 1000.0;
+                kk * u * (1.0 - u) * (u * u + eps)
+            })
+            .fold(0.0_f64, f64::max);
+        let uv = [
+            plane_uv(&s, Point3::new(0.2, 0.5, 3.0)),
+            plane_uv(&s, Point3::new(0.7, 0.5, 3.0)),
+        ];
+        let tol = 0.5 * peak;
+        let g = curve_piece_gap_bound(
+            &k,
+            &bow,
+            [0.0, 1.0],
+            PieceTarget::Surface(&s, uv),
+            0.01 * tol,
+            tol,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(g > tol, "{g:e} accepted at {tol:e} (peak {peak:e})");
+        let g = curve_piece_gap_bound(&k, &bow, [0.0, 1.0], PieceTarget::Surface(&s, uv), 0.0, 1.0)
+            .unwrap()
+            .unwrap();
+        assert!(
+            g >= peak && g <= peak * (1.0 + 1e-2),
+            "{g:e} against {peak:e}"
+        );
     }
 }

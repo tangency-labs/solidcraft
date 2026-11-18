@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.sheet_page.picture_failed": "Can't draw this picture: {reason}"
+  },
+  "ar": {
+    "ui.sheet_page.picture_failed": "تعذّر رسم هذه الصورة: {reason}"
+  },
+  "de": {
+    "ui.sheet_page.picture_failed": "Dieses Bild kann nicht gezeichnet werden: {reason}"
+  },
+  "he": {
+    "ui.sheet_page.picture_failed": "לא ניתן לצייר את התמונה הזו: {reason}"
+  },
+  "ja": {
+    "ui.sheet_page.picture_failed": "この画像を描画できません: {reason}"
+  },
+  "ko": {
+    "ui.sheet_page.picture_failed": "이 그림을 그릴 수 없습니다: {reason}"
+  },
+  "vi": {
+    "ui.sheet_page.picture_failed": "Không thể vẽ hình ảnh này: {reason}"
+  },
+  "zh": {
+    "ui.sheet_page.picture_failed": "无法绘制此图像：{reason}"
+  }
+}
