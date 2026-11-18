@@ -1744,7 +1744,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
 /// edge and tolerance of the read is bit for bit main's
 /// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]); entry 14's mass
-/// is bit for bit main's (MEASURED).
+/// is bit for bit main's (MEASURED). Since #18918 entry 14 is that PR's: its near-knot rail
+/// trim (WR-664) moves a rail's cut onto the rail's nearby knot, which moves this fillet's
+/// geometry within the zone tolerance.
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1781,7 +1783,7 @@ const FILLET_MAIN: [u64; 29] = [
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
-/// since; its entries are classified against a certified enclosure in goldens'
+/// since, and #18918's near-knot rail trim; its entries are classified against a certified enclosure in goldens'
 /// `mass_knot_line_moved_rows_are_classified`.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
@@ -1838,18 +1840,18 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce093b407,
-            0x402621896ddff25f,
-            0x402621896ddff25f,
-            0x3f10d1d4e45e4676,
-            0x3f13efa0c2fbe9dc,
-            0x4000a10fe9b1ffd5,
-            0x4050316570dd030e,
-            0x4050a9c381d79ffa,
-            0x40151aaab4b869fc,
-            0x3f6aed519268bff5,
-            0x3f66b6ad970f60ae,
-            0xbf3c98793964b142,
+            0x40408bccdfac28b0,
+            0x402621896ddff26a,
+            0x402621896ddff26a,
+            0x3f10d1d4e45e263c,
+            0x3f13efa0c2faa159,
+            0x4000a10fe9b1ffdc,
+            0x4050316570dd0323,
+            0x4050a9c381d7a010,
+            0x40151aaab4b86a08,
+            0x3f6aed5192670272,
+            0x3f66b6ad970f2ece,
+            0xbf3c9879396462ce,
         ],
     ),
 ];
