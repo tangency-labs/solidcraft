@@ -1941,11 +1941,7 @@ mod tests {
     /// The default tolerance before tangency-labs/solidcraft#17720: a thousandth of
     /// `|P(min) P(mid)| + |P(mid) P(max)|` of `s` over `d` (upstream's, from the first
     /// surface alone).
-    fn first_surface_tolerance(
-        k: &Kernel,
-        s: &Surface,
-        d: &solidcore::geom::extent2d::Extent2d,
-    ) -> f64 {
+    fn first_surface_tolerance(k: &Kernel, s: &Surface, d: &Extent2d) -> f64 {
         let at = |p| s.evaluate_point(k, p).unwrap();
         let (a, m, b) = (at(d.min()), at(d.evaluate(0.5, 0.5)), at(d.max()));
         (a.distance(m) + m.distance(b)) / 1000.0
