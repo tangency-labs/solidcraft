@@ -13,7 +13,7 @@ use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
-    Error,
+    Error, PointClass,
 };
 use solidcore_record::brep::Brep as Record;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -2158,6 +2158,87 @@ fn a_traced_join_of_the_ten_wedges_in_turn_has_the_vertices_and_edges_of_each_jo
                 assert!(near(p, b), "a {name} {which}: {p:?}");
             }
         }
+    }
+}
+
+/// The ten wedges joined to the target one at a time, checked against the operands alone, with
+/// nothing taken from a join. The boundary of a union lies on the boundaries of its operands and
+/// inside none of them. So every point sampled from the result, nine along each edge's curve and
+/// one on each face (the face's point closest to the centroid of its area), must classify on the
+/// boundary of the target or of a wedge, and inside none of the eleven. A face kept on the wrong
+/// surface, a trim curve that leaves its surfaces, or a piece kept where another operand covers it
+/// fails this, whatever the volume and the counts say.
+#[test]
+#[allow(clippy::disallowed_methods)] // sampling the result to check it, not ops computing geometry
+fn a_traced_join_of_the_ten_wedges_in_turn_lies_on_its_operands_and_inside_none() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let operands: Vec<(String, Body)> = std::iter::once("target".to_string())
+        .chain((0..10).map(|i| format!("wedge{i}")))
+        .map(|name| {
+            let b = body(&name);
+            (name, b)
+        })
+        .collect();
+    let mut r = body("target");
+    for i in 0..10 {
+        r = boolean(r, body(&format!("wedge{i}")), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+
+    // nine points along each edge's curve, over its interval
+    let (k, brep) = common::kernel_copy(&r);
+    let mut points: Vec<([f64; 3], String)> = Vec::new();
+    for e in brep.edges().ids() {
+        let edge = brep.edge(e).unwrap();
+        let Some(curve) = edge.curve.as_ref() else {
+            continue;
+        };
+        for j in 1..10 {
+            let p = curve
+                .evaluate_point(&k, edge.interval.evaluate(f64::from(j) / 10.0))
+                .unwrap();
+            points.push(([p.x, p.y, p.z], format!("edge {e:?} at {j}/10")));
+        }
+    }
+    // one point on each face: its point closest to the centroid of its area
+    let (record, order) = r.to_record().unwrap();
+    for f in 0..record.faces.len() {
+        let c = r.face_centroid(&order, f, 1e-6).unwrap().centroid;
+        let on = r
+            .closest_to_point(&order, &[f], &[], c)
+            .unwrap()
+            .unwrap()
+            .to;
+        points.push((on, format!("face {f}")));
+    }
+    assert!(points.len() > 1000, "{} points", points.len());
+
+    let classes: Vec<Vec<PointClass>> = operands
+        .iter()
+        .map(|(_, b)| {
+            b.classify_points(&points.iter().map(|(p, _)| *p).collect::<Vec<_>>())
+                .unwrap()
+                .into_iter()
+                .map(Result::unwrap)
+                .collect()
+        })
+        .collect();
+    for (n, (p, from)) in points.iter().enumerate() {
+        let inside: Vec<_> = operands
+            .iter()
+            .zip(&classes)
+            .filter(|(_, c)| c[n] == PointClass::Inside)
+            .map(|((name, _), _)| name.as_str())
+            .collect();
+        assert!(inside.is_empty(), "{from} at {p:?} is inside {inside:?}");
+        assert!(
+            classes.iter().any(|c| c[n] == PointClass::OnBoundary),
+            "{from} at {p:?} is on no operand's boundary"
+        );
     }
 }
 
