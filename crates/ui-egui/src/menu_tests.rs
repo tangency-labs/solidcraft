@@ -2253,6 +2253,33 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
     }
 }
 
+/// A selected browser body exports the *full* body selection, just as Save As Mesh and
+/// Send to Slicer do (#18902). A body outside the selection exports only itself.
+#[test]
+fn export_from_a_selected_browser_body_includes_all_selected_bodies() {
+    let cases = [
+        ("One", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Two", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Other", vec!["One", "Two"], vec!["Other"]),
+        ("One", vec!["One"], vec!["One"]),
+        ("Other", vec!["One", "Two", "Other"], vec!["One", "Two", "Other"]),
+    ];
+    for (clicked, selected, expected) in cases {
+        let mut app = appearance_selection_app();
+        let items: Vec<_> = selected.iter().map(|name| json!({"type":"body","name":name})).collect();
+        app.run("select.set", json!({"items":items})).unwrap();
+        let export = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Export…");
+        assert_eq!(export.id, "ui.export");
+        assert_eq!(export.params.as_ref().unwrap()["bodies"], json!(expected), "clicked {clicked}, selected {selected:?}");
+        let mesh = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Save As Mesh");
+        assert_eq!(export.params.as_ref().unwrap()["bodies"], mesh.params.as_ref().unwrap()["bodies"], "Export and Save As Mesh target the same bodies");
+    }
+    let mut app = appearance_selection_app();
+    app.run("select.set", json!({"items":[{"type":"body","name":"Two"},{"type":"body","name":"One"}]})).unwrap();
+    let export = find(&context_menu::items(&app, &Target::Viewport), "Export…");
+    assert_eq!(export.params.as_ref().unwrap()["bodies"], json!(["Two", "One"]), "viewport export also respects selection order");
+}
+
 #[test]
 fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
     use crate::scenario::{Harness, rect_of};
