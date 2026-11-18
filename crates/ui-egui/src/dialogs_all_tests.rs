@@ -1545,32 +1545,18 @@ fn coil_picks_reference_axes_in_the_browser_and_viewport() {
 }
 
 #[test]
-fn coil_fills_profiles_from_whole_sketches_only_when_enabled() {
+fn coil_requires_an_explicit_profile_when_the_sketch_has_several_regions() {
     let (mut h, sketch, _) = repeated_profile_fixture();
     h.app.session.selection = vec![Sel::Feature { id: sketch }];
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    assert!(!d.pick_sketch(&h.app.session, sketch));
+    d.take_sketch_profile(&h.app.session, sketch);
     assert!(d.inputs[0].items.is_empty());
-    assert!(!d.pick_sketch(&h.app.session, sketch, false));
 
-    h.app.preferences.coil_use_sketch_profile = true;
-    for command in ["solid.extrude", "solid.revolve", "solid.emboss"] {
-        let d = Dialog::for_command(&h.app, command).unwrap();
-        assert!(d.inputs[0].items.is_empty(), "{command}");
-    }
-    let d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    let profiles = d.inputs[0].items.profiles();
-    assert_eq!(profiles.len(), 2);
-    assert!(profiles.iter().all(|(owner, _)| *owner == sketch));
-    h.app.session.selection.clear();
-    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    assert!(d.pick_sketch(&h.app.session, sketch, true));
-    assert_eq!(d.inputs[0].items.profiles().len(), 2);
-
-    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    d.take_sketch_profile(&h.app.session, sketch, false);
-    assert!(d.inputs[0].items.is_empty());
-    d.take_sketch_profile(&h.app.session, sketch, true);
-    assert_eq!(d.inputs[0].items.profiles(), profiles);
+    d.pick(&h.app.session, Sel::Profile { sketch, index: 1 });
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].1["sketch"], sketch);
+    assert_eq!(commands[0].1["profiles"], json!([1]));
 }
 
 #[test]
@@ -1602,7 +1588,7 @@ fn coil_edits_keep_whole_sketch_profiles_until_the_user_picks_them_explicitly() 
 }
 
 #[test]
-fn coil_keeps_face_placement_until_axis_preselection_is_enabled() {
+fn coil_keeps_face_placement_until_the_user_picks_an_axis() {
     use solidcraft_engine::doc::naming;
     let mut h = Harness::new();
     h.app.run("solid.cylinder", json!({"radius": 5, "height": 10, "body_name": "Pin"})).unwrap();
@@ -1619,8 +1605,9 @@ fn coil_keeps_face_placement_until_axis_preselection_is_enabled() {
     assert!(d.inputs[1].items.is_empty());
     assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["base"], pt(point));
 
-    h.app.preferences.coil_preselect_axis = true;
-    let d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    let mut d = d;
+    d.active = 1;
+    d.pick(&h.app.session, pick.clone());
     assert_eq!(d.inputs[1].items, vec![pick]);
     assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["base"], pt(origin));
 }
@@ -1638,7 +1625,7 @@ fn coil_picks_origin_axes_and_reverses_without_changing_clockwise() {
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::Axis { name: "X".into() }]);
     h.step(&json!({"click":{"handle":"dialog:Reverse Direction"}})).unwrap();
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(commands[0].1["axis"], "X");
+    assert_eq!(commands[0].1["axis"], json!({"type":"world","axis":"X"}));
     assert_eq!(commands[0].1["reversed"], true);
     assert_ne!(commands[0].1.get("clockwise"), Some(&json!(true)));
 }

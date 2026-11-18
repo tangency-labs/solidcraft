@@ -939,6 +939,38 @@ fn a_coil_uses_the_profile_plane_in_its_own_component_frame() {
 }
 
 #[test]
+fn a_coil_on_a_world_axis_rebuilds_in_its_moved_component_frame() {
+    let mut doc = Document::new("coil on a world axis");
+    let component = doc.add_component(Some("Coil part"), 0).unwrap();
+    add_in(
+        &mut doc,
+        component,
+        "Coil",
+        serde_json::json!({
+            "type": "coil", "base": ["0", "0", "0"], "axis": [0, 0, 1],
+            "axis_ref": {"type": "world", "axis": "Z"},
+            "diameter": "40", "section_size": "2", "pitch": "8", "turns": "2", "operation": "new_body"
+        }),
+    );
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    no_errors(&model);
+    doc.occurrences.iter_mut().find(|o| o.component == component).unwrap().transform =
+        rigid(Vec3::new(5., 7., 3.), Vec3::ZERO, Vec3::Y, std::f64::consts::FRAC_PI_2);
+    model.evaluate(&doc);
+    no_errors(&model);
+    assert_eq!(model.last_recomputed, 1);
+    let state = model.state();
+    let body = state.bodies.first().unwrap();
+    let bounds = body.body.exact_bounds().unwrap();
+    // World Z becomes local -X. The world axis passes through local (3, -7, -5).
+    // Two turns span 16 mm along X and the section adds 1 mm at either end.
+    assert!((bounds.min.x + 14.).abs() < 1e-6 && (bounds.max.x - 4.).abs() < 1e-6, "{bounds:?}");
+    assert!(((bounds.min.y + bounds.max.y) / 2. + 7.).abs() < 1e-3, "{bounds:?}");
+}
+
+#[test]
 fn box_fillet_cut_timeline() {
     let (mut doc, _) = plate_doc();
     doc.add_feature(

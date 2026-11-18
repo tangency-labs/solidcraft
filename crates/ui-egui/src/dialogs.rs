@@ -857,12 +857,6 @@ fn tracks_profile_selection(kind: &Kind) -> bool {
     matches!(kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Primitive { cmd: "solid.coil", .. })
 }
 
-/// Feature forms that take a whole sketch through their profile input in the Browser.
-fn accepts_sketch_profiles(kind: &Kind, coil_use_sketch_profile: bool) -> bool {
-    matches!(kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
-        || (coil_use_sketch_profile && matches!(kind, Kind::Primitive { cmd: "solid.coil", .. }))
-}
-
 impl Dialog {
     /// The command this dialog runs, whose icon and label its header shows.
     pub(crate) fn command(&self) -> Option<&'static str> {
@@ -1251,13 +1245,6 @@ impl Dialog {
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
-            if id == "solid.coil"
-                && app.preferences.coil_use_sketch_profile
-                && let Sel::Feature { id: sketch } = sel
-                && d.pick_sketch(s, *sketch, true)
-            {
-                continue;
-            }
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
             }
@@ -1338,7 +1325,7 @@ impl Dialog {
             };
             let takes = |i: &SelInput| {
                 fits(i.accept, sel)
-                    && (i.accept != AXIS_PICKS || id != "solid.coil" || app.preferences.coil_preselect_axis)
+                    && (i.accept != AXIS_PICKS || id != "solid.coil")
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
@@ -1470,18 +1457,16 @@ impl Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
     }
 
-    /// Extrude and Revolve take the sketch they start from (#14128). Coil can opt in.
-    pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64, coil_use_sketch_profile: bool) {
-        let coil = coil_use_sketch_profile && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. });
-        let takes_sketch = coil || matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. });
-        if !takes_sketch {
+    /// Extrude and Revolve take the sketch they start from (#14128).
+    pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64) {
+        if !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. }) {
             return;
         }
         self.started_from_sketch = Some(sketch);
         if let Some(inp) = self.inputs.first_mut()
             && inp.items.is_empty()
         {
-            inp.items = if coil { drawn_sketch_selection(s, sketch) } else { single_profile(s, sketch) };
+            inp.items = single_profile(s, sketch);
             self.advance();
         }
     }
@@ -1909,18 +1894,21 @@ impl Dialog {
     /// sketch is selected before the command starts. The island inside another profile's hole is
     /// left out, or it would fill the hole. False when the click is not one of those (the caller
     /// selects it as usual).
-    pub fn pick_sketch(&mut self, s: &Session, id: u64, coil_use_sketch_profile: bool) -> bool {
+    pub fn pick_sketch(&mut self, s: &Session, id: u64) -> bool {
         if self.refuse_sketch(s, id) {
             return true;
         }
         if self.active != 0
-            || !accepts_sketch_profiles(&self.kind, coil_use_sketch_profile)
+            || !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
             || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
             || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         {
             return false;
         }
-        let profiles = drawn_sketch_selection(s, id);
+        let profiles: Vec<Sel> = crate::open_meshing::session_world(s)
+            .sketch(id)
+            .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
+            .unwrap_or_default();
         let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
             return false;
@@ -2409,13 +2397,6 @@ fn drawn_profiles(ss: &solidcraft_engine::doc::SolvedSketch) -> Vec<usize> {
         })
         .map(|(i, _)| i)
         .collect()
-}
-
-fn drawn_sketch_selection(s: &Session, sketch: u64) -> Vec<Sel> {
-    crate::open_meshing::session_world(s)
-        .sketch(sketch)
-        .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch, index }).collect())
-        .unwrap_or_default()
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else
@@ -6939,11 +6920,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
             }
+            // A refilled reference already carries its saved axis and base. A new pick
+            // clears the saved axis and supplies its own origin.
             if *cmd == "solid.coil"
+                && !d.extra.contains_key("axis")
                 && let Some(sel) = sels(d, 1).first()
             {
                 let profile_sketch = sels(d, 0).profiles().first().map(|(sketch, _)| *sketch);
-                p.insert("axis".into(), selected_axis_param(app, sel, profile_sketch)?);
+                p.insert("axis".into(), coil_axis_param(app, sel, profile_sketch)?);
                 if let Some((origin, _)) = axis_of(app, sel) {
                     p.insert("base".into(), pt(origin));
                 }
@@ -7337,6 +7321,14 @@ fn selected_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -
         Sel::Axis { name } => Ok(json!(name)),
         Sel::SketchCurve { .. } => sketch_curve_axis(app, sel, profile_sketch),
         _ => axis_param(app, sel),
+    }
+}
+
+/// A picked world axis is a persistent reference. A typed X, Y or Z is a direction at the base.
+fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
+    match sel {
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Ok(json!({"type":"world","axis":name})),
+        _ => selected_axis_param(app, sel, profile_sketch),
     }
 }
 
@@ -8387,10 +8379,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("axis".into(), pt3(axis.0));
             if let Some(reference) = axis_ref {
                 if let Some(pick) = axis_reference_pick(s, reference, sketch.map(|id| id.0)) {
+                    let axis = coil_axis_param(app, &pick, sketch.map(|id| id.0)).ok()?;
                     if let Some(input) = d.inputs.get_mut(1) {
                         input.items = vec![pick];
                     }
-                    d.extra.remove("axis");
+                    d.extra.insert("axis".into(), axis);
                 } else {
                     let value = match reference {
                         AxisRef::Line { origin, dir } => line_axis_value(s, &feature_frame(s, f.component), origin, dir.0),

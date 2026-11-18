@@ -3092,6 +3092,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
         }
     }
+    // The assembly's origin axis has a fixed world placement, as seen from the Coil's component.
+    if f.component != 0 && matches!(f.kind, FeatureKind::Coil { axis_ref: Some(AxisRef::World { .. }), .. }) {
+        reads.components.insert(0);
+    }
     let path = match &f.kind {
         FeatureKind::Sweep { path_sketch, .. }
         | FeatureKind::SurfaceSweep { path_sketch, .. }
@@ -8193,7 +8197,9 @@ fn feature_tools_with_constructor(
                         "Z" => Vec3::Z,
                         _ => return Err(DocError::Unknown(format!("axis `{axis}`"))),
                     };
-                    (Vec3::ZERO, direction)
+                    let inverse = crate::mat_inverse(&doc.component_transform(f.component))
+                        .ok_or_else(|| DocError::Invalid("the feature's component frame is invalid".into()))?;
+                    (crate::apply_point(&inverse, Vec3::ZERO), crate::apply_vector(&inverse, direction))
                 }
                 Some(AxisRef::SketchAxis { axis }) => {
                     let solved =

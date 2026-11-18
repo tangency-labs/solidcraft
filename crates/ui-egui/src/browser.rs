@@ -2540,7 +2540,7 @@ fn dialog_takes_body(app: &SolveApp) -> bool {
 /// click then selects as usual.
 pub(crate) fn pick_sketch_into_dialog(app: &mut SolveApp, id: u64) -> bool {
     let Some(mut d) = app.dialog.take() else { return false };
-    let taken = d.pick_sketch(&app.session, id, app.preferences.coil_use_sketch_profile);
+    let taken = d.pick_sketch(&app.session, id);
     app.dialog = Some(d);
     taken
 }

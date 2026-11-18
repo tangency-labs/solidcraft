@@ -1669,11 +1669,6 @@ preference_settings! {
     /// the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). On: it
     /// opens at the number 2 read in the design's unit, as before.
     fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
-    /// Fill the Coil axis from the selection when the dialog opens. Off keeps initial placement
-    /// on the selected face or vertex and leaves Axis available for an explicit pick.
-    coil_preselect_axis: bool = false, PAGE_TOOLS => check_id_help("prefs.coil_preselect_axis", "prefs.coil_preselect_axis.help");
-    /// Use the sketch Coil starts from, or a sketch selected in the Browser or History, as its profile.
-    coil_use_sketch_profile: bool = false, PAGE_TOOLS => check_id_help("prefs.coil_use_sketch_profile", "prefs.coil_use_sketch_profile.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");

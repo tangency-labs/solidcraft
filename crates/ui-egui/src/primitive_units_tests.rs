@@ -446,8 +446,6 @@ fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
         .run("solid.coil", json!({"axis":{"origin":["axis_x",0,0],"dir":[0,0,1]},"diameter":20,"section_size":1,"revolutions":1,"pitch":8}))
         .unwrap();
     let id = made["feature"].as_u64().unwrap();
-    h.app.preferences.coil_preselect_axis = true;
-    h.app.preferences.coil_use_sketch_profile = true;
     h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: sketch }, solidcraft_engine::Sel::Axis { name: "Y".into() }];
     h.app.edit_feature(id);
     h.frames(3);
@@ -467,23 +465,61 @@ fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
 fn editing_a_coil_preserves_its_axis_reference_and_reverse_option() {
     let mut h = design("mm");
     h.app.run("construct.axis.two_points", json!({"a":{"point":[30,0,0]},"b":{"point":[30,0,10]},"name":"Spin"})).unwrap();
-    let reply = h.app.run("solid.coil", json!({"axis":"Spin","diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true})).unwrap();
+    h.app.run("parameters.add", json!({"name":"offset","expression":"40 mm"})).unwrap();
+    let reply = h
+        .app
+        .run(
+            "solid.coil",
+            json!({
+                "axis":"Spin","base":["offset",0,0],"diameter":20,"section_size":1,"revolutions":1,"pitch":8,"reversed":true
+            }),
+        )
+        .unwrap();
     let id = reply["feature"].as_u64().unwrap();
     h.app.edit_feature(id);
     h.frames(3);
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::Axis { name: "Spin".into() }]);
     assert_eq!(d.extra["reversed"], true);
-    assert!(!d.extra.contains_key("axis"), "the pick is used instead of a stale numeric direction");
+    assert_eq!(d.extra["axis"], "Spin");
     type_into(&mut h, "pitch", "10");
     ok(&mut h);
     match &h.app.session.doc.feature(id).unwrap().kind {
-        solidcraft_engine::doc::FeatureKind::Coil { axis_ref, reversed, .. } => {
+        solidcraft_engine::doc::FeatureKind::Coil { base, axis_ref, reversed, .. } => {
+            assert_eq!(base[0].as_str(), "offset");
             assert!(matches!(axis_ref, Some(solidcraft_engine::doc::AxisRef::Construction { name }) if name.as_ref() == "Spin"));
             assert!(*reversed);
         }
         other => panic!("expected coil: {other:?}"),
     }
+}
+
+#[test]
+fn editing_a_coil_keeps_its_explicit_world_axis_and_saved_base() {
+    let mut h = design("mm");
+    h.app.run("parameters.add", json!({"name":"offset","expression":"15 mm"})).unwrap();
+    let world = json!({"type":"world","axis":"Z"});
+    let feature = h
+        .app
+        .run(
+            "solid.coil",
+            json!({
+                "axis":world,"base":["offset",0,0],"diameter":20,"section_size":1,"revolutions":1,"pitch":8
+            }),
+        )
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    h.app.edit_feature(feature);
+    let mut d = h.app.dialog.take().unwrap();
+    let command = |d: &crate::dialogs::Dialog| crate::dialogs::apply_commands(&h.app, d).unwrap()[0].1["params"].clone();
+    assert_eq!(command(&d)["axis"], world);
+    assert_eq!(command(&d)["base"], json!(["offset", 0.0, 0.0]));
+
+    d.active = 1;
+    d.pick(&h.app.session, solidcraft_engine::Sel::Axis { name: "Y".into() });
+    assert_eq!(command(&d)["axis"], json!({"type":"world","axis":"Y"}));
+    assert_eq!(command(&d)["base"], json!([0.0, 0.0, 0.0]));
 }
 
 /// #3271: cover secondary and optional lengths as well as each tool's primary canvas value.
