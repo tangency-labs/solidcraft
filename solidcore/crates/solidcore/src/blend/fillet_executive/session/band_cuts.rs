@@ -109,14 +109,19 @@ struct CachedFace {
 pub(crate) struct BandCutCache {
     edges: Vec<CachedEdge>,
     faces: Vec<CachedFace>,
+    /// Whether some edge has no curve or some face no surface: those are not in `edges`
+    /// or `faces`, so nothing about the band is known in closed form ([`Band::events`]).
+    unseen: bool,
     query: BrepQuery<'static>,
 }
 
 impl BandCutCache {
     fn new(k: &Kernel, body: &mut Brep) -> Result<Self> {
         let mut edges = Vec::new();
+        let mut unseen = false;
         for e in crate::topology::brep::p1::edges(body, None)? {
             let Some(curve) = edge::evaluation_curve(body, e)? else {
+                unseen = true;
                 continue;
             };
             let interval = edge::interval(body, e)?;
@@ -144,6 +149,7 @@ impl BandCutCache {
         let mut faces = Vec::new();
         for f in crate::topology::brep::p1::faces(body, None)? {
             let Some(surface) = face::p2::surface(body, f)? else {
+                unseen = true;
                 continue;
             };
             let surface = surface.clone_for_evaluation()?;
@@ -160,6 +166,7 @@ impl BandCutCache {
         Ok(Self {
             edges,
             faces,
+            unseen,
             query,
         })
     }
@@ -860,7 +867,7 @@ impl ConcaveFill {
             }
             any = true;
             let (a, b) = (sigma(*e0), sigma(*e1));
-            if !(a.min(b) >= lo - tol && a.max(b) <= hi + tol) {
+            if !(a.is_finite() && b.is_finite() && a.min(b) >= lo - tol && a.max(b) <= hi + tol) {
                 return false;
             }
         }
@@ -1046,36 +1053,75 @@ impl Band {
         v - self.dir * v.dot(self.dir)
     }
 
-    /// A box holding the band, `tol` larger.
-    fn bounds(&self, tol: f64) -> Extent3d {
-        let mut corners = Vec::new();
-        for s in self.span {
-            match self.shape {
-                SectionShape::Arc {
-                    centre,
-                    e1,
-                    e2,
-                    rho,
-                    ..
-                } => {
-                    let base = centre + self.dir * (s - self.along(centre));
-                    for (x, y) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
-                        corners.push(base + e1 * (x * rho) + e2 * (y * rho));
-                    }
+    /// Whether the box `b` is certainly clear of the band by more than `tol`: all of it
+    /// beyond an end of the span; or, for an arc, all of it farther from the line of centres
+    /// than the radius, all of it nearer, or all of it on the line of centres' side of the
+    /// chord between the rails (the arc, less than a half turn, lies beyond that chord); or,
+    /// for a chord, all of it on one side of the strip's plane or beyond one of its rails.
+    /// Every bound is over the box's corners (the least distance from the line of centres
+    /// by the box's centre less its half-diagonal across the edge), so a box that meets the
+    /// band is never clear. A NaN is never clear.
+    fn misses(&self, b: &Extent3d, tol: f64) -> bool {
+        let corners: Vec<Point3> = (0..8_u8)
+            .map(|i| {
+                Point3::new(
+                    if i & 1 == 0 { b.min.x } else { b.max.x },
+                    if i & 2 == 0 { b.min.y } else { b.max.y },
+                    if i & 4 == 0 { b.min.z } else { b.max.z },
+                )
+            })
+            .collect();
+        if !corners
+            .iter()
+            .all(|c| c.x.is_finite() && c.y.is_finite() && c.z.is_finite())
+        {
+            return false;
+        }
+        // every corner's value of `f` above `limit`, or every one below `-limit`
+        let all_above =
+            |f: &dyn Fn(Point3) -> f64, limit: f64| corners.iter().all(|&c| f(c) > limit);
+        let [lo, hi] = self.span;
+        if all_above(&|c| lo - self.along(c), tol) || all_above(&|c| self.along(c) - hi, tol) {
+            return true;
+        }
+        match self.shape {
+            SectionShape::Arc {
+                centre,
+                e1,
+                e2,
+                rho,
+            } => {
+                let radial = |c: Point3| self.across(c - centre).length();
+                if all_above(&|c| rho - radial(c), tol) {
+                    return true;
                 }
-                SectionShape::Chord => {
-                    for r in self.rails {
-                        corners.push(r + self.dir * (s - self.along(r)));
-                    }
+                let middle = (b.min + b.max) * 0.5;
+                let mut reach = 0.0_f64;
+                for c in &corners {
+                    let h = self.across(*c - middle);
+                    reach = reach.max(h.length());
                 }
+                if radial(middle) - reach - rho > tol {
+                    return true;
+                }
+                let m = e1 * (0.5 * self.phi).cos() + e2 * (0.5 * self.phi).sin();
+                let floor = rho * (0.5 * self.phi).cos();
+                all_above(&|c| floor - self.across(c - centre).dot(m), tol)
+            }
+            SectionShape::Chord => {
+                let [r1, r2] = self.rails;
+                let Some((width, w)) = (r2 - r1).length_and_unit() else {
+                    return false;
+                };
+                let Some((_, n)) = w.cross(self.dir).length_and_unit() else {
+                    return false;
+                };
+                all_above(&|c| n.dot(c - r1), tol)
+                    || all_above(&|c| -n.dot(c - r1), tol)
+                    || all_above(&|c| -(c - r1).dot(w), tol)
+                    || all_above(&|c| (c - r1).dot(w) - width, tol)
             }
         }
-        let mut b = Extent3d::from_points(self.at, self.at);
-        for c in corners {
-            b.add_point(c);
-        }
-        let grow = Vec3::new(tol, tol, tol);
-        Extent3d::from_points(b.min - grow, b.max + grow)
     }
 
     /// Whether the section's point `x` (on the band's cylinder) lies on the arc between its
@@ -1106,18 +1152,21 @@ impl Band {
     /// `a + b cos θ + c sin θ`) or reaches a rail. Both ends of the edge are stations.
     ///
     /// `None` where this is not known in closed form: an edge that is not a line, or a face
-    /// that is not a plane, near the band, or a line or a plane lying on it.
+    /// that is not a plane, not certainly clear of the band ([`Band::misses`]); a line or a
+    /// plane lying on it; an edge with no curve or a face with no surface; or a NaN.
+    /// Events within `tol` of each other are one: a stretch of `2 tol` or less gets no
+    /// station of its own (a change of the section's meets within the body's tolerance).
     ///
     /// # Errors
     /// Those of the evaluations.
     fn events(&self, k: &Kernel, cache: &BandCutCache, tol: f64) -> Result<Option<Vec<f64>>> {
-        let bounds = self.bounds(tol);
+        if cache.unseen {
+            return Ok(None);
+        }
         let mut out = vec![self.span[0], self.span[1]];
         for e in &cache.edges {
-            if let Some(b) = &e.bbox {
-                if b.are_disjoint(&bounds, tol) {
-                    continue;
-                }
+            if e.bbox.as_ref().is_some_and(|b| self.misses(b, tol)) {
+                continue;
             }
             if !matches!(e.curve.kind(), CurveKind::Line(_)) {
                 return Ok(None);
@@ -1129,10 +1178,8 @@ impl Band {
             }
         }
         for f in &cache.faces {
-            if let Some(b) = &f.bbox {
-                if b.are_disjoint(&bounds, tol) {
-                    continue;
-                }
+            if f.bbox.as_ref().is_some_and(|b| self.misses(b, tol)) {
+                continue;
             }
             let SurfaceKind::Plane(plane) = f.surface.kind() else {
                 return Ok(None);
@@ -1162,6 +1209,9 @@ impl Band {
     /// The stations where the segment `p`-`q` crosses the band (onto `out`); `false` where
     /// it lies on the band.
     fn line_crossings(&self, p: Point3, q: Point3, tol: f64, out: &mut Vec<f64>) -> bool {
+        if ![p.x, p.y, p.z, q.x, q.y, q.z].iter().all(|v| v.is_finite()) {
+            return false;
+        }
         let [lo, hi] = self.span;
         let in_span = |s: f64| s >= lo - tol && s <= hi + tol;
         let overlaps = |a: f64, b: f64| a.min(b) <= hi + tol && a.max(b) >= lo - tol;
@@ -1187,6 +1237,9 @@ impl Band {
                 let closest = -ad / dd;
                 let mut ts = vec![closest];
                 let disc = ad * ad - dd * (aa - rho * rho);
+                if !disc.is_finite() || !closest.is_finite() {
+                    return false;
+                }
                 if disc >= 0.0 {
                     let root = disc.sqrt();
                     ts.push((-ad - root) / dd);

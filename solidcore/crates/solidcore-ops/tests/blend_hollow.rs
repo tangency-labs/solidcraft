@@ -7,7 +7,7 @@
 mod common;
 
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::primitive::api_primitives::create_box;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::Vec3;
 
 use common::*;
@@ -257,6 +257,83 @@ fn a_hollow_running_on_past_the_inside_round_is_refused() {
         [0.0, 32.0, 42.0],
     );
     breaks_through(round(&wall, &[top], &[7.0]), limit, [0.0, 32.0, 42.0]);
+}
+
+/// `stepped_hollow` with a blind hole r1 drilled up into its roof from the hollow, at
+/// (0, 20), z 39 to 40.5: a cylinder face 5.5 from the outer round's arc, which changes no
+/// section's meets.
+fn stepped_hollow_with_a_blind_hole() -> Body {
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    built(|k| {
+        let outer = create_box(k, v([-52.0, -32.0, 0.0]), 104.0, 64.0, 42.0)?;
+        let a = create_box(k, v([-50.0, -30.0, -1.0]), 98.6, 60.0, 41.0)?;
+        let b = create_box(k, v([48.6, -30.0, -1.0]), 1.4, 60.5, 41.0)?;
+        let hole = create_cylinder(k, v([0.0, 20.0, 39.0]), 1.0, 1.5)?;
+        let part = boolean_difference(k, outer, a)?;
+        let part = boolean_difference(k, part, b)?;
+        boolean_difference(k, part, hole)
+    })
+}
+
+/// A curved face near the band leaves its events unknown in closed form only where it
+/// meets the band itself. On `stepped_hollow` the outer round R6.5 alone keeps hollow A's
+/// corner (30, 40) inside its ball (6.364 from the centre (25.5, 35.5)) but uncovers hollow
+/// B's (30.5, 40) (6.727), between the 32 steps; a blind hole in the roof 5.5 from the arc
+/// does not change that: refused with the fit against B's corner, 3.5 + sqrt6.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_curved_face_clear_of_the_band_leaves_its_stretches_judged() {
+    all_fixes();
+    let limit = 3.5 + 6.0_f64.sqrt();
+    for wall in [stepped_hollow(), stepped_hollow_with_a_blind_hole()] {
+        let top = edge_at(&wall, [0.0, 32.0, 42.0]);
+        breaks_through(round(&wall, &[top], &[6.5]), limit, [0.0, 32.0, 42.0]);
+    }
+}
+
+/// #1668's box with its hollow turned 0.02 rad (as its tangent) about z: the inside corner
+/// edge runs skew to the outer top edge, the wall thinning from 3 to 1 along it, and the
+/// hollow's ends stay square to that edge.
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
+fn tapered_hollow() -> Body {
+    use solidcore_ops::boolean::boolean;
+    let hollow = make_box([-50.0, -30.0, -1.0], [100.0, 60.0, 41.0]).unwrap();
+    let a = 0.02_f64.atan();
+    let (c, s) = (a.cos(), a.sin());
+    hollow
+        .transform(&[
+            [c, s, 0.0, 0.0],
+            [-s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        .unwrap();
+    let outer = make_box([-52.0, -32.0, 0.0], [104.0, 64.0, 42.0]).unwrap();
+    boolean(outer, hollow, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// An inside round counts as a fill only along the band it runs beside: on `tapered_hollow`
+/// its edge is skew to the outer round's, so it is no fill and the R7 pair is refused for
+/// breaking through, as the outer round alone is.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
+fn an_inside_round_skew_to_the_outer_one_is_no_fill() {
+    all_fixes();
+    let wall = tapered_hollow();
+    let top = edge_at(&wall, [0.0, 32.0, 42.0]);
+    // the turned wall y = 30 meets x = 0 at y = 30 / cos a = 30 sqrt(1 + 0.02^2)
+    let inside = edge_at(&wall, [0.0, 30.0 * 1.0004_f64.sqrt(), 40.0]);
+    for edges in [&[top][..], &[top, inside][..]] {
+        match round(&wall, edges, &[7.0]) {
+            Err(Error::TooLarge {
+                why: Some(RoomReason::BreaksThrough),
+                ..
+            }) => {}
+            other => panic!("{other:?}"),
+        }
+    }
 }
 
 /// #1668's box with the hollow's +x end cut oblique, on the plane x - 0.1 y = 46 (square to
