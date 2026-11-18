@@ -108,6 +108,22 @@
 //!   conditions hold, so the loop and the conditions across it do not move.
 //!
 //! The fill's boundary is exact, whatever its inside: a station's gap is nought by construction.
+//!
+//! The edge limit is an input bound, not a promise that every loop of that many edges fits.
+//! [`MAX_BANDED_POINTS`] bounds free control points across the whole quilt, including its
+//! shared points once. For centre patches, with `c_k` basis functions along spoke `k`, the
+//! count is `1 + Σ_k (c_k - 2) + Σ_k (c_{k-1} - 2)(c_k - 2)`: the centre, spoke interiors,
+//! and patch interiors. Equal spaces of 22 functions on sixteen sides therefore need
+//! `1 + 16·20 + 16·20² = 6721` free points, beyond the 6000-point budget. Fourteen such sides
+//! need 5881; fifteen need 6301. These counts concern the point budget only, not whether the
+//! fill passes the other resource and geometry checks.
+//!
+//! For example, a cubic interpolating 41 uniformly spaced parameter stations has 18 interior
+//! knots in each half, hence 22 control points per half. Fewer original fit points do not reduce that
+//! count when a caller still interpolates 41 stations. Joining tangent-aligned edges into a
+//! side can introduce further knots into the compatible spaces, changing the count even
+//! when there are fewer sides. The budget counts those actual spaces, not just the edges.
+//!
 //! Input is hostile: sizes are capped and every evaluation checked; nothing here panics.
 
 use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, NurbsSurface, SplineError, SplineResult, check_knots, invalid, segment};

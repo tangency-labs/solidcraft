@@ -279,6 +279,30 @@ local segment. Preview does not change the design; OK creates one editable timel
 The plane follows later path edits. Curved paths use their sampled polyline; absolute distance,
 reference-object placement and multi-curve chains are not yet available in this dialog.
 
+## Surface Patch limits
+
+**Patch** (`surface.patch`) accepts a closed loop of 3 to 16 edges. The fill also has a
+6,000-point budget for the control points it solves for across all its surface pieces.
+Shared control points count once. The edge limit alone does not guarantee a fill.
+
+The point count depends on the boundary splines' knots and on how edges join into sides.
+For a fill around one centre, let `c` be the number of control points along each half-side,
+with matching knot patterns on every side. With `N` sides, the count is
+`1 + N*(c-2) + N*(c-2)^2`: one centre point, the points along the spokes, and the points
+inside the surface pieces.
+
+A 3D-sketch loft that interpolates 41 stations per edge, with uniformly spaced
+interpolation parameters, has 22 control points in each cubic half. For separate sides with
+those matching spaces, 14 sides need 5,881 free points, 15 need 6,301, and 16 need 6,721.
+Reducing the sketch's original fit points does not reduce that count while the loft still
+interpolates 41 stations. Joining tangent-aligned edges can introduce more knots. The
+sixteen-edge blade end in [#19051](https://github.com/tangency-labs/solidcraft/issues/19051)
+needs 9,458 free points after two edges join into one side.
+
+The error `spline too large: ... free control points (at most 6000)` reports this total,
+not a count of sketch fit points. Loops below the point budget must also pass the other
+resource checks and the fill's geometry checks, including the check for folds.
+
 ## Section Analysis
 
 Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden
