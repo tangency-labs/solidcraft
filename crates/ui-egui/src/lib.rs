@@ -4271,7 +4271,6 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        drawing_workspace::reconcile(self);
         if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 // This is the existing source manufacturing inspector, not a drawing scene.

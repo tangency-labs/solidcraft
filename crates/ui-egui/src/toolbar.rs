@@ -413,7 +413,7 @@ impl FileAction {
         // with unsaved changes under the report, and ask about it where it can't be answered.
         let behind_report = app.issue_report.draft.is_some();
         let available = match self {
-            Self::NewDrawing => crate::drawing_workspace::enabled(app) && app.session.doc.has_something_to_draw(),
+            Self::NewDrawing => app.session.doc.has_something_to_draw(),
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
@@ -517,11 +517,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
     let mut rows = vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)];
-    // Drawings are a preview (Preferences > Design > Drawings): off, the File menu has no New Drawing.
-    if crate::drawing_workspace::enabled(app) {
-        // The icon `drawing.create` itself uses.
-        rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
-    }
+    // The icon `drawing.create` itself uses.
+    rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
     rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
     let mut recent: Vec<FileRow> = app
         .home
@@ -2966,7 +2963,6 @@ mod header_report_tests {
     fn native_menu_actions_disable_save_on_home() {
         let mut h = crate::scenario::Harness::new();
         // New Drawing is there with drawings on (Preferences > Design > Drawings).
-        h.app.preferences.drawings_preview = true;
         h.app.home.open = true;
         assert!(!FileAction::Save.enabled(&h.app));
         assert!(!FileAction::SaveAs.enabled(&h.app));
@@ -3221,7 +3217,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_opens_the_first_sheet_of_the_open_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         assert!(!FileAction::NewDrawing.enabled(&h.app), "an empty design has nothing to draw");
         FileAction::NewDrawing.run(&mut h.app);
         assert!(h.app.session.doc.drawings.is_empty() && !crate::drawing_workspace::active(&h.app));
@@ -3245,7 +3240,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_that_fails_goes_back_to_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.preferences.part_drawing_template = "no-such-template".into();
         assert!(FileAction::NewDrawing.enabled(&h.app));
@@ -3261,7 +3255,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_that_fails_in_drawing_stays_in_drawing() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         let template = h.app.preferences.part_drawing_template.clone();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();

@@ -1096,10 +1096,6 @@ preference_settings! {
     library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
-    /// Drawings (preview): the Drawing workspace and its settings. Off by default, so the app shows
-    /// no Drawing workspace until it is turned on; a design's drawings are kept as they are either
-    /// way.
-    drawings_preview: bool = false, PAGE_DESIGN => check_id_help("prefs.drawings_preview", "prefs.drawings_preview_help");
     /// First or third angle for new drawings (third when not set, or set to one this version
     /// doesn't know).
     default_projection: Projection = Projection::Third, PAGE_DESIGN;

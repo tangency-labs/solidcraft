@@ -914,7 +914,6 @@ mod tests {
     fn drawing_search_exposes_only_drawing_and_explicit_source_actions() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         assert!(!search(&app, "").iter().any(|row| row.0.starts_with("drawing.")));
-        app.preferences.drawings_preview = true;
         crate::workspace::enter(&mut app, "drawing").unwrap();
         let rows = search(&app, "");
         assert!(rows.iter().any(|row| row.0 == "drawing.view.base.planned"));
