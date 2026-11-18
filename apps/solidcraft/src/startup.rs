@@ -492,7 +492,7 @@ fn note_backend(graphics: &mut GraphicsSettings, key: &str, name: Option<&str>, 
     if let Some(name) = name {
         record.insert(name.into(), serde_json::Value::String(version.into()));
     }
-    let after = (!record.is_empty()).then(|| serde_json::Value::Object(record));
+    let after = (!record.is_empty()).then_some(serde_json::Value::Object(record));
     let changed = after != before;
     match after {
         Some(record) => graphics.insert(key.into(), record),
@@ -501,13 +501,20 @@ fn note_backend(graphics: &mut GraphicsSettings, key: &str, name: Option<&str>, 
     changed
 }
 
-/// The APIs a launch skips ([`BackendGuard::begin`]).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The APIs a launch skips ([`BackendGuard::begin`]). Its default skips none (wgpu's
+/// `Backends::default()` is every backend, so it is not derived).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SkippedBackends {
     /// Crashed the process while starting: never loaded, safe mode and software rendering included.
     pub crashed: eframe::wgpu::Backends,
     /// Could not open the window (no hardware adapter): skipped by the automatic order only.
     pub failed: eframe::wgpu::Backends,
+}
+
+impl Default for SkippedBackends {
+    fn default() -> Self {
+        Self { crashed: eframe::wgpu::Backends::empty(), failed: eframe::wgpu::Backends::empty() }
+    }
 }
 
 /// A launch begins with what the last one left (`leftover`, the attempt file's text): a crash
@@ -1187,6 +1194,7 @@ mod tests {
         let path = dir.join("graphics.json");
         std::fs::write(&path, r#"{"msaa":4}"#).unwrap();
         let (guard, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
+        assert!(SkippedBackends::default().crashed.is_empty() && SkippedBackends::default().failed.is_empty(), "the default skips nothing");
         assert_eq!(skipped, SkippedBackends::default());
         guard.attempt(Backends::VULKAN);
         assert!(dir.join(GRAPHICS_ATTEMPT).is_file(), "on disk before the driver loads");
@@ -1259,7 +1267,7 @@ mod tests {
         let (_, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
         assert_eq!(choose_backends(true, false, false, None, skipped.crashed, skipped.failed), Some(Backends::GL));
         // Software rendering only after all three: with no hardware anywhere, WARP.
-        assert!(!has_hardware(&[warp.clone()]) && !has_hardware(&[]));
+        assert!(!has_hardware(std::slice::from_ref(&warp)) && !has_hardware(&[]));
         assert_eq!(fallback_backend(true, false, false, Backends::GL, none), Some("cpu"));
         assert!(!has_hardware(&[AdapterChoice { compatible: false, ..gl_card.clone() }]), "it must draw the window");
         // Only the automatic order (and its retries) needs hardware; a chosen API, WGPU_BACKEND
