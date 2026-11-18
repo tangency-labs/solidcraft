@@ -169,11 +169,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MaterialListResult>)
         .params("→ built-in and design-owned materials (user: true, look, optional physical_card/physical_validation/density_comparison). Read-only; candidate engineering records do not certify sources or supply a solver"),
     CommandSpec::new("engine.commands", "List Commands", crate::checked!("engine.commands", commands))
+        .any_part()
         .icon("list")
         .noundo()
         .contract(&COMMANDS_CONTRACT)
         .output(output_schema_for::<Vec<CommandEntry>>),
-    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe))
+    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe)).any_part()
         .icon("list")
         .noundo()
         .doc_only()

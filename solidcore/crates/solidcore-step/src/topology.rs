@@ -1376,7 +1376,13 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, full:
             let radii = [*semi_axis_1, *semi_axis_2];
             conic(BCurve::Ellipse { frame: frame(position), radii }, position, radii, ps, pe, same_sense, full)
         }
-        Curve::BSpline(b) => open_or_closed(map_bspline_curve(b)?, ps, pe, same_sense, closed, tol),
+        // A rational spline that is exactly a circular arc of at most a turn (an exporter's NURBS
+        // circle) is that circle where the edge is an arc of the spline, so its pcurves on a
+        // round face are in closed form.
+        Curve::BSpline(b) => match circle_edge(b, ps, pe, same_sense, full) {
+            Some(m) => Ok(m),
+            None => open_or_closed(map_bspline_curve(b)?, ps, pe, same_sense, closed, tol),
+        },
         Curve::Polyline(points) => {
             if points.windows(2).any(|w| w.first() == w.get(1)) {
                 return Err("a polyline with a repeated point".into());
@@ -1396,6 +1402,70 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, full:
         Curve::Replica { parent, transform } => map_edge(&replicate(parent, transform, 0)?, ps, pe, same_sense, closed, full, tol),
         Curve::Trimmed { .. } | Curve::SurfaceCurve { .. } => Err(unsupported("nested trimmed or surface curves")),
     }
+}
+
+/// A parabola as the record holds an edge on it: the exact spline over `[t0, t1]`, its
+/// parameter the parabola's (`origin + f t² x + 2 f t y`, STEP `PARABOLA`).
+pub(crate) fn parabola_curve(position: &Placement, focal: f64, [t0, t1]: [f64; 2]) -> BCurve {
+    swept::parabola_spline(position, focal, t0, t1)
+}
+
+/// A hyperbola as the record holds an edge on it: the exact spline over `[t0, t1]` of
+/// `origin + a cosh t x + b sinh t y` (STEP `HYPERBOLA`). Its knots, the ends of its rational
+/// quadratic pieces, are at the hyperbola's own parameters, so the edge's interval is the
+/// hyperbola's; between knots its parameter is not the hyperbola's `t` (no rational quadratic
+/// follows cosh and sinh), so an interior `t` is not mapped through it.
+pub(crate) fn hyperbola_curve(position: &Placement, a: f64, b: f64, [t0, t1]: [f64; 2]) -> BCurve {
+    swept::hyperbola_spline(position, a, b, t0, t1)
+}
+
+/// An edge from `ps` to `pe` on a record curve whose producer gives no interval (cadmpeg's
+/// neutral model read from a STEP file bounds an edge by its vertices alone): the curve as the
+/// record takes it, the interval (min → max) between the vertices, and whether the edge runs
+/// from `ps` to `pe` along it, found as [`map_edge`] finds a STEP edge's, its sense along the
+/// curve. `closed`: the same vertex at both ends; `full`: the ends are one point.
+pub(crate) fn record_edge(curve: BCurve, ps: P3, pe: P3, closed: bool, full: bool, tol: f64) -> R<(BCurve, [f64; 2], bool)> {
+    let mapped = match curve {
+        BCurve::Line { start, end } => {
+            if closed {
+                return Err("a closed edge on a line".into());
+            }
+            let d = sub(end, start);
+            let m2 = dot(d, d);
+            if !(m2 > 0.0) {
+                return Err("a line of no length".into());
+            }
+            let param = |p: P3| dot(sub(p, start), d) / m2;
+            let (ts, te) = (param(ps), param(pe));
+            // Its length, whatever the line's own parameter scale, as `map_edge` measures it.
+            let m = m2.sqrt();
+            if !((te - ts).abs() * m > 1e-12 * (1.0 + ts.abs().max(te.abs()) * m)) {
+                return Err("a degenerate edge on a line".into());
+            }
+            let with = ts < te;
+            let interval = if with { [ts, te] } else { [te, ts] };
+            Mapped { curve: BCurve::Line { start, end }, interval, with_step: with, sense_mismatch: false }
+        }
+        BCurve::Circle { ref frame, radius } => {
+            let position = placement(frame);
+            conic(curve.clone(), &position, [radius; 2], ps, pe, true, full)?
+        }
+        BCurve::Ellipse { ref frame, radii } => {
+            let position = placement(frame);
+            conic(curve.clone(), &position, radii, ps, pe, true, full)?
+        }
+        // Ends at one point, one vertex or two: the whole closed curve, as for a conic.
+        BCurve::Spline { .. } | BCurve::RationalSpline { .. } | BCurve::Polyline { .. } => open_or_closed(curve, ps, pe, true, full, tol)?,
+        BCurve::SurfaceIntersection { .. } => return Err(unsupported("an intersection curve without an interval")),
+    };
+    Ok((mapped.curve, mapped.interval, mapped.with_step))
+}
+
+/// The STEP placement of a record frame: its axis x × y.
+fn placement(f: &Frame) -> Placement {
+    let (x, y) = (f.x_axis, f.y_axis);
+    let axis = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+    Placement { origin: f.origin, axis, ref_direction: x }
 }
 
 /// A hyperbola or parabola: the vertices' parameters in closed form, the edge running the way
@@ -1432,6 +1502,26 @@ fn conic(curve: BCurve, position: &Placement, radii: [f64; 2], ps: P3, pe: P3, s
         return Err("a degenerate edge on a conic".into());
     }
     Ok(Mapped { curve, interval: [lo, lo + d], with_step: same_sense, sense_mismatch: false })
+}
+
+/// The edge from `ps` to `pe` on spline `b` as an arc of a circle, when `b` is exactly a circle
+/// sweeping at most one turn ([`swept::spline_circle`]) and the arc lies on it: a closed edge on a
+/// spline that closes in one turn, or an open one whose arc the spline sweeps. `None` otherwise.
+fn circle_edge(b: &crate::geom::BSplineCurve, ps: P3, pe: P3, same_sense: bool, full: bool) -> Option<Mapped> {
+    let (circle, swept) = swept::spline_circle(b)?;
+    let Curve::Circle { position, radius } = &circle else { return None };
+    let slack = 1e-9 * TAU;
+    if !(swept <= TAU + slack) {
+        return None;
+    }
+    let m = conic(BCurve::Circle { frame: frame(position), radius: *radius }, position, [*radius; 2], ps, pe, same_sense, full).ok()?;
+    // The circle starts at the spline's start: the arc lies on the spline when it ends within
+    // the angle the spline sweeps.
+    let [lo, hi] = m.interval;
+    let from = lo.rem_euclid(TAU);
+    let from = if from > TAU - slack { from - TAU } else { from };
+    let on = if full { (swept - TAU).abs() <= slack } else { from + (hi - lo) <= swept + slack };
+    on.then_some(m)
 }
 
 /// A spline or polyline: the vertices' parameters by projection. On an open curve the edge runs

@@ -333,15 +333,7 @@ pub fn evaluate_binormal_step_off(
     step_off_distance: f64,
     options: &StepOffOptions,
 ) -> Result<BinormalEval> {
-    let mut out = BinormalEval {
-        point: Point3::UNDEF,
-        binormal: Vec3::UNDEF,
-        tangent: Vec3::UNDEF,
-        face_normal: Vec3::UNDEF,
-        uv: Point2::UNDEF,
-    };
-    evaluate_binormal_step_off_into(k, b, eu, parameter, step_off_distance, options, &mut out)?;
-    Ok(out)
+    evaluate_binormal_step_off_or_left_face(k, b, eu, parameter, step_off_distance, options)?
 }
 
 /// [`evaluate_binormal_step_off`] writing its outputs into the caller's record in
@@ -367,6 +359,53 @@ pub fn evaluate_binormal_step_off_into(
     options: &StepOffOptions,
     out: &mut BinormalEval,
 ) -> Result<()> {
+    match step_off_into(k, b, eu, parameter, step_off_distance, options, out)? {
+        Some(left_face) => Err(left_face),
+        None => Ok(()),
+    }
+}
+
+/// [`evaluate_binormal_step_off`] with a step that leaves the face's UV domain as a
+/// value: the inner `Err` holds the error [`evaluate_binormal_step_off`] returns for
+/// it. For a caller that may take its point at another edge use.
+///
+/// # Errors
+///
+/// As [`evaluate_binormal_step_off`], but for the step that leaves the face's UV domain.
+pub(crate) fn evaluate_binormal_step_off_or_left_face(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    parameter: f64,
+    step_off_distance: f64,
+    options: &StepOffOptions,
+) -> Result<std::result::Result<BinormalEval, SolidError>> {
+    let mut out = BinormalEval {
+        point: Point3::UNDEF,
+        binormal: Vec3::UNDEF,
+        tangent: Vec3::UNDEF,
+        face_normal: Vec3::UNDEF,
+        uv: Point2::UNDEF,
+    };
+    Ok(
+        match step_off_into(k, b, eu, parameter, step_off_distance, options, &mut out)? {
+            Some(left_face) => Err(left_face),
+            None => Ok(out),
+        },
+    )
+}
+
+// The body of `evaluate_binormal_step_off_into`. `Some`: the step leaves the face's UV
+// domain (the error the entry returns for it); `out` then holds the values at the edge.
+fn step_off_into(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    parameter: f64,
+    step_off_distance: f64,
+    options: &StepOffOptions,
+    out: &mut BinormalEval,
+) -> Result<Option<SolidError>> {
     // evaluate binormal at the edge - set outputs for stepOffDistance = 0.0
     let at_edge = evaluate_binormal(
         k,
@@ -382,7 +421,7 @@ pub fn evaluate_binormal_step_off_into(
 
     // low work - StepOffDistance = 0.0
     if step_off_distance < EFF_ZERO {
-        return Ok(());
+        return Ok(None);
     }
 
     // edgeuse locals
@@ -432,19 +471,19 @@ pub fn evaluate_binormal_step_off_into(
         )?;
         let Some(first) = solutions.first() else {
             // stepoffdistance stepped off face UVDomain
-            return Err(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology_failed(
                 OP,
                 "the stepped-off point does not lie on the face",
-            ));
+            )));
         };
         uv_guess = Point2::new(first.param(0)?, first.param(1)?);
 
         // still stepping off face UVDomain
         if !uv_domain.contains_point(uv_guess, 0.0) {
-            return Err(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology_failed(
                 OP,
                 "the stepped-off point is outside the face's UV domain",
-            ));
+            )));
         }
     }
 
@@ -499,7 +538,7 @@ pub fn evaluate_binormal_step_off_into(
     out.point = surface.evaluate_point(k, uv_found)?;
     out.face_normal = normal;
     out.uv = uv_found;
-    Ok(())
+    Ok(None)
 }
 
 /// `IsConvexRadialSector`: true when, at `num_samples` evenly spaced interior samples
