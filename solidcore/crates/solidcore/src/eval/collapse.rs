@@ -1416,7 +1416,9 @@ fn rational_partial_bound(
             // Every weight is at least `low`, so with `low * low` normal so are the weights'
             // products below, and their rounding is the relative one `gamma` counts.
             if !(low * low >= f64::MIN_POSITIVE) {
-                return Err(refused("weights of a rational net whose products underflow"));
+                return Err(refused(
+                    "weights of a rational net whose products underflow",
+                ));
             }
             least = least.min(low);
             let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
