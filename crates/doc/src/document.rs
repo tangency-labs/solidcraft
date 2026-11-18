@@ -906,6 +906,12 @@ pub enum FeatureKind {
         /// smoothly at its ends, as far as they go), or only the picked edges.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         tangent_chain: bool,
+        /// Each picked edge's own radius, in the order of `edges`, all rounded in one blend
+        /// (`radius` is then the first edge's). Empty, the default: every edge takes `radius`.
+        /// A constant-radius, exact, rolling-corner, mitred fillet of the picked edges alone.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = |_i: usize, _n: usize| "Edge radius")]
+        edge_radii: Vec<Expr>,
     },
     Chamfer {
         edges: Vec<Position>,
@@ -2337,6 +2343,12 @@ pub enum FilletTurn {
 /// constant rounds of one radius, at its own corners only.
 pub const SWEPT_TAKES: &str = "a swept corner turns two constant rounds of one radius: `turn: swept` takes `type: constant`, \
 `corner: rolling`, no `setbacks` and `fit: exact` or `reduce`";
+
+/// Why per-edge radii are refused with a fillet's other options: the kernel rounds each picked
+/// edge at its own constant radius, exactly, rolling and mitred at the corners, and the radii
+/// follow the picks one for one.
+pub const EDGE_RADII_TAKE: &str = "each edge at its own radius (`edge_radii`) is a constant round of the picked edges alone: \
+it takes `type: constant`, `fit: exact`, `corner: rolling`, no `setbacks`, `turn: mitre` and `tangent_chain: false`";
 
 impl FilletTurn {
     pub fn is_mitre(&self) -> bool {

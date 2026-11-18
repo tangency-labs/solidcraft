@@ -6283,8 +6283,15 @@ fn blend_body(
     mb: &ModelBody,
     edges: &[Vec3],
     r: f64,
+    each: Option<&[f64]>,
     warning: &mut Option<String>,
 ) -> Result<(Traced, Option<Vec<f64>>, Tapered)> {
+    // Each edge at its own radius, in one blend (checked by the caller: constant, exact, rolling,
+    // mitred, the picked edges alone).
+    if let (FeatureKind::Fillet { turn, .. }, Some(each)) = (&f.kind, each) {
+        let nb = kernel::fillet_each(&mb.body, edges, each, turn.kernel())?;
+        return Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&mb.traced()]), None, Vec::new()));
+    }
     let (nb, from, used, tapered) = blend_raw(vals, f, mb, edges, r, warning)?;
     // Keeping the input's planar certificates may join faces; their history stays over the same
     // operand.
@@ -9746,6 +9753,13 @@ fn replay(
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
             let r = val(vals, radius, Kind::Length)?;
+            // A fillet's own per-edge radii, in the order of its picks (as it saved its edges).
+            let each_r: Option<Vec<f64>> = match &src.kind {
+                FeatureKind::Fillet { edge_radii, .. } if !edge_radii.is_empty() => {
+                    Some(edge_radii.iter().map(|e| val(vals, e, Kind::Length)).collect::<Result<_>>()?)
+                }
+                _ => None,
+            };
             // The edges the feature blended in this evaluation (found by name), falling back to
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
@@ -9770,6 +9784,12 @@ fn replay(
                         // A copy is congruent to the original: the radius it was reduced to first.
                         (FeatureKind::Fillet { turn, .. }, Some(used)) => {
                             let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                            mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
+                        }
+                        // A copy of a fillet with per-edge radii pairs each copied edge with its radius.
+                        (FeatureKind::Fillet { turn, .. }, None) if each_r.is_some() => {
+                            let all = each_r.as_deref().unwrap_or(&[]);
+                            let used: Vec<f64> = idx.iter().map(|i| all.get(*i).copied().unwrap_or(r)).collect();
                             mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
                         }
                         // Otherwise the copy is the same blend, with its type, fit, corners and
@@ -11588,6 +11608,27 @@ fn eval_feature_kind(
             {
                 return Err(DocError::Invalid("corner setbacks are built for a constant-radius fillet (type: constant, fit: exact) only".into()));
             }
+            // Each picked edge at its own radius: one value per pick, for the blend that supports it.
+            let each_r: Option<Vec<f64>> = match &f.kind {
+                FeatureKind::Fillet { edge_radii, style, fit, corner, setbacks, turn, tangent_chain, .. } if !edge_radii.is_empty() => {
+                    if !style.is_constant() || !fit.is_exact() || !corner.is_rolling() || !setbacks.is_empty() || !turn.is_mitre() || *tangent_chain {
+                        return Err(DocError::Invalid(crate::EDGE_RADII_TAKE.into()));
+                    }
+                    if edge_radii.len() != edges.len() {
+                        return Err(DocError::Invalid(format!(
+                            "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                            edge_radii.len(),
+                            edges.len()
+                        )));
+                    }
+                    let mut v = Vec::with_capacity(edge_radii.len());
+                    for e in edge_radii {
+                        v.push(val(vals, e, Kind::Length)?);
+                    }
+                    Some(v)
+                }
+                _ => None,
+            };
             let on = blend_bodies(st, f, body, &crate::plain(edges))?;
             let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
             for (i, ti) in on.iter().enumerate() {
@@ -11609,10 +11650,26 @@ fn eval_feature_kind(
                 _ => false,
             };
             let mut picks = Vec::with_capacity(groups.len());
+            // Per-edge radii: each resolved edge point keyed (exactly) to its pick and radius. The
+            // smooth-edge filter below only drops picks, so the keys survive it.
+            let key = |p: &Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+            let mut radius_of: BTreeMap<[u64; 3], (usize, f64)> = BTreeMap::new();
+            let mut by_pick: Vec<(usize, Vec3)> = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
-                picks.push((*ti, blend_edges_on(mb, f, edges, idx, &mut w)?));
+                let resolved = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                if let Some(all) = &each_r {
+                    if resolved.len() != idx.len() {
+                        return Err(DocError::Invalid(
+                            "an edge given its own radius (`edge_radii`) no longer resolves to one edge: each radius needs its edge".into(),
+                        ));
+                    }
+                    for (p, i) in resolved.iter().zip(idx) {
+                        radius_of.insert(key(p), (*i, all.get(*i).copied().unwrap_or(r)));
+                    }
+                }
+                picks.push((*ti, resolved));
                 if let Some(w) = w {
                     notes.push(w);
                 }
@@ -11624,14 +11681,20 @@ fn eval_feature_kind(
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
-                let (nb, used, tapered) =
-                    blend_body(vals, f, mb, &edges, r, &mut note).map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
+                // This body's edges' own radii, found by their resolved points.
+                let each: Option<Vec<f64>> = each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(e)).map_or(r, |(_, x)| *x)).collect());
+                let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
+                    .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
                     notes.push(n);
                 }
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
+                if each.is_some() {
+                    // Per-edge radii: each blended edge with its pick, so a pattern's copies pair each with its radius.
+                    by_pick.extend(edges.iter().filter_map(|e| radius_of.get(&key(e)).map(|(i, _)| (*i, *e))));
+                }
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
                 found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
@@ -11639,6 +11702,10 @@ fn eval_feature_kind(
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
+            }
+            if each_r.is_some() {
+                by_pick.sort_by_key(|(i, _)| *i);
+                found = by_pick.into_iter().map(|(_, p)| p).collect();
             }
             st.blend_edges.insert(f.id, found);
             if reduced {
@@ -13332,6 +13399,7 @@ mod chain_tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )
@@ -13392,6 +13460,7 @@ mod chain_tests {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain,
+            edge_radii: Vec::new(),
         }
     }
 
