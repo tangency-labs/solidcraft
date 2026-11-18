@@ -1,0 +1,20 @@
+{
+  "en": {
+    "prefs.sketch_construction_points": "X switches selected points to construction"
+  },
+  "ar": {
+    "prefs.sketch_construction_points": "يحوّل X النقاط المحددة إلى هندسة إنشائية"
+  },
+  "he": {
+    "prefs.sketch_construction_points": "X הופך נקודות שנבחרו לגיאומטריית בנייה"
+  },
+  "ja": {
+    "prefs.sketch_construction_points": "X で選択した点を補助（構築）ジオメトリに切り替える"
+  },
+  "vi": {
+    "prefs.sketch_construction_points": "X chuyển các điểm đã chọn sang hình học dựng"
+  },
+  "zh": {
+    "prefs.sketch_construction_points": "按 X 将所选点切换为构造几何"
+  }
+}

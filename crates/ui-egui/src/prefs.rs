@@ -1847,6 +1847,10 @@ preference_settings! {
     /// Shift while drawing a Two-Point or Center Rectangle makes it a square and adds an Equal
     /// constraint (#18114). Off (the default): Shift prefers a line midpoint there, as it always has.
     sketch_square_rectangles: bool = false, PAGE_SKETCH => check_tr("prefs.sketch_square_rectangles");
+    /// With points selected, X, the palette's Construction and the right-click Normal / Construction
+    /// switch those points to construction geometry (#18448). Off: points are left out, so X with
+    /// only points selected switches the drawing mode, as it always has.
+    sketch_construction_points: bool = true, PAGE_SKETCH => check_tr("prefs.sketch_construction_points");
     /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.

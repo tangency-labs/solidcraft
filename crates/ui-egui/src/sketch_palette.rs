@@ -106,7 +106,7 @@ pub fn toggle_construction(app: &mut SolveApp) {
         .selection
         .iter()
         .filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
-        .filter(|id| *id != "origin")
+        .filter(|id| app.preferences.sketch_construction_points && *id != "origin")
         .map(str::to_string)
         .collect();
     if curves.is_empty() && points.is_empty() && app.session.active_sketch.is_none() {

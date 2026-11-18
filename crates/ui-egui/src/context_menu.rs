@@ -1433,8 +1433,13 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     // Points switch too (#18448): a construction point is reference geometry a Hole leaves out.
     // The origin is the sketch's own and is not offered.
-    let construction_points: Vec<&str> =
-        app.session.selection.iter().filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel)).filter(|id| *id != "origin").collect();
+    let construction_points: Vec<&str> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .filter(|id| app.preferences.sketch_construction_points && *id != "origin")
+        .collect();
     if !curves.is_empty() || !construction_points.is_empty() {
         let mut params = json!({});
         if !curves.is_empty() {

@@ -129,7 +129,7 @@ two-point, three-point, tangent), arcs (three-point, centre, tangent), polygons,
 fit-point and control-point splines, conics, points and text. **Construction** (X) turns curves
 into reference geometry that doesn't form profiles. It switches selected points too: a
 construction point is drawn as an open square and a Hole from the whole sketch leaves it out.
-A Hole already made keeps its sites. Modify tools include trim (T), extend, break,
+A Hole already made keeps its sites. Preferences › Sketch › *X switches selected points to construction* (on by default) controls this: off, points are left out and X with only points selected switches the drawing mode, as it always has. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
 and all go when you let go, in one undo step (`sketch.trim.path`). Fillet and chamfer take
