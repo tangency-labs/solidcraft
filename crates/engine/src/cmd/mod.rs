@@ -159,7 +159,8 @@ mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
     DxfCurves, DxfText, FlangeType, ThenStep, bend_table_format, dxf_curves, dxf_layers, dxf_note_height, dxf_text, flange_edge, flange_edge_list,
-    flange_position, flange_type, flat_reply, fold_points, fold_position, perforation_pattern, sheet_points, sheet_rule_name, then_list,
+    flange_position, flange_type, flat_reply, fold_points, fold_position, fold_stays, material_side, perforation_pattern, sheet_points,
+    sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
@@ -168,6 +169,7 @@ pub(crate) use sketch::collapse_reason;
 pub(crate) use sketch::created as sketch_created;
 pub(crate) use sketch::{PLANE_REF_FORMS, custom_plane_form, point_arg_form};
 mod canvas_sketch;
+mod canvas_svg;
 mod sketch_3d;
 mod sketch_canvas;
 pub mod sketch_clipboard;
