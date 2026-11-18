@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Drawing dimension</title>
+  <path d="M10 10L10 55M54 10L54 55" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 14L54 14L54 36L10 36Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20 49L44 49" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11 49L23 43L23 55Z" fill="#236ead"/>
+  <path d="M53 49L41 55L41 43Z" fill="#236ead"/>
+</svg>

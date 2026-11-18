@@ -27,6 +27,8 @@
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
 //! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
+//! --plugins-dir DIR (local sessions only)                     installed plugins (default: the app's own)
+//! --keep-plugin-approvals (local sessions only)               keep plugin approvals between runs, in the plugins folder's grant store
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
 //! --max-file-size SIZE (with any command)                     read STEP and design files up to SIZE (2GB, 1500MB; at most 16GB)
 //! ```
@@ -117,6 +119,8 @@ const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (wh
 
 const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
 
+const USAGE_PLUGINS_DIR: &str = "  --plugins-dir DIR, with local commands: the folder plugin.install installs to and importers are found in;\n      default: the desktop app's plugins folder.\n  --keep-plugin-approvals, with local commands: keep plugin approvals between runs, in the plugins folder's grant\n      store (DIR/.grants), shared with the desktop app, so a plugin installed and approved there or in an earlier run\n      is used here; list them with plugin.grants and take one back with plugin.revoke. Without it, approvals last for\n      the run.\n";
+
 /// The commands the CLI takes, in the order the top-level usage lists them.
 const COMMANDS: &[Command] = &[
     Command { name: "run", usage: USAGE_RUN, listed: true },
@@ -169,6 +173,10 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugin_limits(&mut args) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = plugins_dir(&mut args) {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
@@ -316,6 +324,61 @@ fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
     solidcraft_engine::plugin::configure_process_host_limits(limits).map_err(|e| e.to_string())
 }
 
+/// `--plugins-dir DIR` (or `--plugins-dir=DIR`): the local sessions' plugins folder.
+/// `--keep-plugin-approvals`: local sessions keep plugin approvals between runs in that folder's
+/// grant store. Without it, approvals last for the session, as they always did.
+fn plugins_dir(args: &mut Vec<String>) -> Result<(), String> {
+    let mut dir = None;
+    let mut keep = false;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugins-dir" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugins-dir needs a folder")?;
+            args.drain(i..i + 2);
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("--plugins-dir=") {
+            let value = value.to_string();
+            args.remove(i);
+            Some(value)
+        } else if arg == "--keep-plugin-approvals" {
+            args.remove(i);
+            keep = true;
+            None
+        } else {
+            i += 1;
+            None
+        };
+        if let Some(value) = value
+            && (value.is_empty() || dir.replace(value).is_some())
+        {
+            return Err("provide one --plugins-dir folder".into());
+        }
+    }
+    if (dir.is_some() || keep)
+        && (args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
+            || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless")))
+    {
+        return Err(
+            "--plugins-dir and --keep-plugin-approvals control local sessions; use mcp --headless, or the connected desktop's own plugins".into()
+        );
+    }
+    let dir = match dir {
+        Some(dir) => {
+            let dir = std::path::PathBuf::from(dir);
+            let dir = if dir.is_absolute() { dir } else { std::env::current_dir().map_err(|e| format!("--plugins-dir: {e}"))?.join(dir) };
+            if dir.exists() && !dir.is_dir() {
+                return Err(format!("--plugins-dir: {} is not a folder", dir.display()));
+            }
+            Some(dir)
+        }
+        None => None,
+    };
+    if dir.is_none() && !keep {
+        return Ok(());
+    }
+    solidcraft_engine::plugin::configure_process_plugins(dir, keep).map_err(|e| e.to_string())
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -329,6 +392,7 @@ fn usage() -> String {
     }
     s.push_str(USAGE_DEBUG);
     s.push_str(USAGE_PLUGIN_LIMITS);
+    s.push_str(USAGE_PLUGINS_DIR);
     s
 }
 
