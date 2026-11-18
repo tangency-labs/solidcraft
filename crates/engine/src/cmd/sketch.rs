@@ -4265,24 +4265,16 @@ fn solved_measure(s: &Session, p: &Value, cmd: &str, id: &str) -> Option<(f64, &
 }
 
 /// The type of a dimension between `a` and `b` (two points or a line's ends). `auto` takes it
-/// from where the text is placed. Across from the two, between the perpendiculars through them
-/// on either side, it is the distance between them, and a little past those too (a tenth of
-/// that distance), so it takes a clear pull past an end to change it. Pulled past an end, the
-/// pull as seen from that end decides: up or down the horizontal distance, sideways the
-/// vertical one (#257, #7295). The two meet on the diagonals through the end, so each has a
-/// wide zone however shallow or steep the line is. With no text, or when the two already line
-/// up with an axis, `auto` stays the distance between them; other types are returned unchanged.
+/// from where the text is placed ([`solidcraft_sketch::linear_axis`], the rule a drawing's
+/// Dimension tool shares); with no text it stays the distance between them; other types are
+/// returned unchanged.
 fn auto_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
     let Some(t) = text_at.filter(|_| ty == "auto") else { return ty };
-    let d = b - a;
-    let len = d.len();
-    let along = (t - a).dot(d) / len;
-    let margin = len / 10.0;
-    if d.x.abs() <= 1e-9 * len || d.y.abs() <= 1e-9 * len || !along.is_finite() || (-margin..=len + margin).contains(&along) {
-        return ty;
+    match solidcraft_sketch::linear_axis(a, b, t) {
+        solidcraft_sketch::LinearAxis::Aligned => ty,
+        solidcraft_sketch::LinearAxis::Horizontal => "horizontal",
+        solidcraft_sketch::LinearAxis::Vertical => "vertical",
     }
-    let pull = t - if along < 0.0 { a } else { b };
-    if pull.y.abs() >= pull.x.abs() { "horizontal" } else { "vertical" }
 }
 
 /// Midpoint pairs choose an axis as soon as the text passes their bounding box: above or below
