@@ -71,5 +71,10 @@
     "issue": "tangency-labs/solidcraft#13755",
     "reason": "the rig's volume is the body whose Mixed chamfer face, the bilinear Coons patch, stood 7.2e-4 out of the front face y = 0; that face now stays behind the plane, 0.0777 mm^3 less, and the corner has no closed form to grade a volume against",
     "fails": "volume 9383.373306182111 (rig 9383.4506602363)"
+  },
+  {
+    "case": "fillets/every-chamfer-two-depth-counterbore-rim-9-7-past-the-shallow-floor",
+    "issue": "tangency-labs/solidcraft#18317",
+    "reason": "refused before any blend is built: the no-room check judges the rail past the shallow floor as running into the material (NoRoomReason::RailRunsPastFaceIntoMaterial, 'a blend's rail runs past the boundary of a face that is not planar into the material'), where the 2026-10-30 ruling builds it as if the bore wall went on below the floor, as every-chamfer-pocket-rim-5-5-past-the-floor does on straight edges"
   }
 ]

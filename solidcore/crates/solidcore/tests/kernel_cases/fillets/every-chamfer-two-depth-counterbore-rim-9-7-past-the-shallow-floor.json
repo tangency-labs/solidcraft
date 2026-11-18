@@ -1,0 +1,203 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b68"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b68"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b69"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b69"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b70"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "the blend is larger than its faces allow at the edge at (-27.600, 0.000, 35.200): the blend runs off a face into the material; the largest distance that fits is 7.689999999999992",
+      "inputs": [
+        "b70"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  27.6,
+                  0.0,
+                  35.2
+                ],
+                [
+                  27.6,
+                  0.0,
+                  35.2
+                ]
+              ],
+              "index": 10
+            }
+          ],
+          "points": [
+            [
+              -27.60000000000001,
+              0.0,
+              35.2
+            ]
+          ],
+          "tolerance": 5.655874003901414
+        },
+        "kind": "chamfer",
+        "sizes": [
+          7.7010000000000005
+        ]
+      }
+    }
+  ],
+  "case": "every-chamfer-two-depth-counterbore-rim-9-7-past-the-shallow-floor",
+  "expected": {
+    "bbox": {
+      "max": [
+        38.0,
+        38.0,
+        35.2
+      ],
+      "min": [
+        -38.0,
+        -38.0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "V0 = pi (R^2 - r1^2) h1 + pi (R^2 - r0^2)(H - h1) - (pi/2)(r1^2 - r0^2)(h2 - h1) (the deeper half of the ledge) with R = 38, r1 = 27.6, r0 = 20.2, H = 35.2, h1 = 7.7, h2 = 27.8: 94836.080531190. Section in (rho, z): the chamfer triangle (r1, H), (r1 + d, H), (r1, H - d) with d = 9.7, area d^2/2, centroid rho = r1 + d/3, wholly at rho >= r1 and in the ring's material (below a floor it takes ring material only, a groove, built as if the wall went on, the owner's ruling of 2026-10-30, d7; the ledges at rho < r1 are untouched). Removed by Pappus, 2 pi Int rho dA = 9114.100627268. V = 85721.979903922",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-06
+    },
+    "volume_mm3": 85721.9799039222,
+    "what": "a ring (outer r38, bore r20.2, 35.2 high) with a counterbore r27.6 whose floor is a ledge at two depths, 7.7 on the half x > 0 and 27.8 on the half x < 0 (split on x = 0); its top rim chamfered 9.7: over the shallow half its leg down the wall runs past the floor, so it builds there as if the wall went on below the floor, a groove round that half of the floor's outer edge (the owner's ruling of 2026-10-30, d7: a chamfer that reaches or runs past a rim builds); over the deep half it fits. Straight-edge twin: every-chamfer-pocket-rim-5-5-past-the-floor"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 15 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow, at the edge at (-27.600, 0.000, 35.200): the blend runs off a face into the material; the largest distance that fits is 7.7 mm",
+    "kernel_error": "the blend is larger than its faces allow at the edge at (-27.600, 0.000, 35.200): the blend runs off a face into the material; the largest distance that fits is 7.689999999999992",
+    "ran": false
+  },
+  "records": "every-chamfer-two-depth-counterbore-rim-9-7-past-the-shallow-floor.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 15 (solid.chamfer): not supported yet: the chamfer is larger than the faces beside its edges allow, at the edge at (-27.600, 0.000, 35.200): the blend runs off a face into the material; the largest distance that fits is 7.7 mm",
+    "known_failing": null,
+    "measured": null,
+    "refused_with": null,
+    "status": "unsupported"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a ring (outer r38, bore r20.2, 35.2 high) with a counterbore r27.6 whose floor is a ledge at two depths, 7.7 on the half x > 0 and 27.8 on the half x < 0 (split on x = 0); its top rim chamfered 9.7: over the shallow half its leg down the wall runs past the floor, so it builds there as if the wall went on below the floor, a groove round that half of the floor's outer edge (the owner's ruling of 2026-10-30, d7: a chamfer that reaches or runs past a rim builds); over the deep half it fits. Straight-edge twin: every-chamfer-pocket-rim-5-5-past-the-floor",
+  "why_not": []
+}
