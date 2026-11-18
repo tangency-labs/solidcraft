@@ -97,6 +97,11 @@ impl OpaqueSurface {
         }
     }
 
+    /// Whether the paint has flakes, authored or already resolved to the flake under a point.
+    pub fn has_flakes(self) -> bool {
+        !matches!(self.flakes, Flakes::None)
+    }
+
     /// This surface at one hit: on a flake it takes the flake's metal and normal, between
     /// flakes and without flakes it is unchanged. `normal` is the shading normal at the hit.
     pub fn at(self, position_mm: Vec3, normal: Vec3) -> Result<Self, SurfaceError> {

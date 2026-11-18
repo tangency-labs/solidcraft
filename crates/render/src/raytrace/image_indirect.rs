@@ -282,7 +282,7 @@ fn shared<'a>(task: &'a TransportContext<'_>, state: &State) -> job::Result<supe
         hit.surface = changed.surface;
         hit.shading_normal = changed.shading_normal;
     }
-    Ok(hit)
+    hit.on_flake().map_err(error)
 }
 fn unaged<'a>(task: &'a TransportContext<'_>, state: &State) -> job::Result<super::super::prepared::SharedHit<'a>> {
     let mut hit = unmapped(task, state)?;

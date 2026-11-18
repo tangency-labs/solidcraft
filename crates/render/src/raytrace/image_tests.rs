@@ -1574,6 +1574,23 @@ fn captured_clear_coat_keeps_direct_shading_but_refuses_unmatched_cpu_transport(
 }
 
 #[test]
+fn paint_flakes_keep_direct_shading_but_refuse_cpu_selected_transport() {
+    let (mut scene, mut request, mut options) = emission_fixture(false);
+    let flakes = solidcraft_viewport::flakes::FlakeLayer::new(0.5, 0.05, 0.5, 0.3, Vec3::new(0.9, 0.9, 0.9), 1.0, 0.2).unwrap();
+    let surface = OpaqueSurface::new(Vec3::new(0.4, 0.3, 0.2), 0.0, 0.4, 1.5).unwrap().with_flakes(flakes);
+    scene.meshes[0].surface = Some(surface);
+    request.raytrace = Some(options.clone());
+    admit(&scene, &request, &options).unwrap();
+    options.reflections = Some(job::ReflectionOptions {
+        bodies: vec![job::ReflectionBody { body: "emitter".into(), mode: job::ReflectionMode::RoughSpecular }],
+        max_bounces: 1,
+        samples: 1,
+    });
+    request.raytrace = Some(options.clone());
+    assert!(admit(&scene, &request, &options).unwrap_err().message.contains("paint flakes"));
+}
+
+#[test]
 fn pending_pixel_heap_slot_stays_single_and_reuses_storage_until_completion() {
     let mut task = triangle_task(CancelToken::default());
     let initial = task.pending.0.as_ptr();

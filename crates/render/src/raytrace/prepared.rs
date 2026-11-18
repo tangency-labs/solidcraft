@@ -84,6 +84,12 @@ impl<'a> PreparedScene<'a> {
     }
 }
 impl SharedHit<'_> {
+    /// This hit on the paint flake under it, once patterns, maps and aging have set its
+    /// surface. Without flakes, or between them, the hit is unchanged.
+    pub fn on_flake(mut self) -> Result<Self> {
+        self.surface = self.surface.at(self.position, self.shading_normal).map_err(|_| TraceError::InvalidInput("paint flake at a hit"))?;
+        Ok(self)
+    }
     pub fn oriented_geometric_normal(self) -> Vec3 {
         if self.front_face { self.geometric_normal } else { -self.geometric_normal }
     }

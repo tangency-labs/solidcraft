@@ -65,6 +65,24 @@ renormalized when it is read.
 the coat lobe about the surface normal. A half vector below the flake's plane is
 never drawn, so it has no density.
 
+## CPU ray tracing
+
+The CPU ray tracer puts each hit on its flake last, after surface patterns, texture
+maps and aging have set the surface and shading normal, so every flake is found from
+the final shading normal. Direct lights, the progressive Path transport and the
+guide pass of the denoiser use the same resolved surface. Continuation draws the
+base lobes about the flake's normal and the coat lobe about the surface normal; a
+flake seen from behind has no base lobe mass, as in `surface_pdf`. Without flakes,
+sampling uses the same random numbers as before.
+
+- Procedural roughness patterns keep the flakes, as they keep the coat.
+- Aging covers the flakes as it covers the coat: coverage is multiplied by one minus
+  the aged layer's weight, so a fully aged point shows no flakes.
+- CPU selected reflection, anisotropy and dielectric overrides shade a single layer
+  about the shading normal, so they refuse a target with flakes, as they refuse a
+  coat.
+- The denoiser never replaces a flaked point by an ideal mirror.
+
 ## Checks
 
 The tests check admission of every parameter, that the covered share matches

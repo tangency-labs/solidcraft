@@ -107,16 +107,23 @@ pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, 
         return Ok(None);
     }
     let [diffuse_probability, _, coat_probability] = solidcraft_viewport::clear_coat::lobe_probabilities(surface);
-    let direction = if u[0] >= coat_probability && u[0] - coat_probability < diffuse_probability {
-        cosine_direction(n, [u[1], u[2]])?
+    let coat = u[0] < coat_probability;
+    // On a flake the base lobes turn about the flake's normal; the coat keeps `n`.
+    // A flake seen from behind has no base lobes: that mass is null, as in `surface_pdf`.
+    let base = surface.base_normal(n);
+    if !coat && base != n && base.dot(v) <= 0.0 {
+        return Ok(None);
+    }
+    let direction = if !coat && u[0] - coat_probability < diffuse_probability {
+        cosine_direction(base, [u[1], u[2]])?
     } else {
-        let roughness = if u[0] < coat_probability {
-            surface.clear_coat().ok_or_else(|| invalid("CPU coat selection disappeared"))?.roughness()
+        let (roughness, about) = if coat {
+            (surface.clear_coat().ok_or_else(|| invalid("CPU coat selection disappeared"))?.roughness(), n)
         } else {
-            surface.roughness()
+            (surface.roughness(), base)
         };
-        let half =
-            solidcraft_viewport::surface::visible_normal(v, n, roughness * roughness, [u[1], u[2]]).map_err(|_| invalid("CPU visible GGX normal"))?;
+        let half = solidcraft_viewport::surface::visible_normal(v, about, roughness * roughness, [u[1], u[2]])
+            .map_err(|_| invalid("CPU visible GGX normal"))?;
         if v.dot(half) <= 0.0 {
             return Ok(None);
         }

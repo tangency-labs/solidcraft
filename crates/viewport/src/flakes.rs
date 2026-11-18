@@ -89,6 +89,14 @@ impl FlakeLayer {
             roughness: quantize(roughness),
         })
     }
+    /// The same flakes covering another share of the surface, as when a layer above hides some.
+    pub fn with_coverage(mut self, coverage: f64) -> Result<Self, SurfaceError> {
+        if !fraction(coverage) {
+            return Err(SurfaceError::FlakeFraction);
+        }
+        self.coverage = quantize(coverage);
+        Ok(self)
+    }
     // The stored values read back inside the admitted ranges, so `new` accepts them again.
     pub fn coverage(self) -> f64 {
         level(self.coverage)
