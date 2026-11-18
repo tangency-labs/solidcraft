@@ -46,6 +46,9 @@
 //!   homogeneous quartic is never expanded in powers and converted back: that lost
 //!   precision by cancellation near the last end. This changes its numerics for
 //!   correctness; the rational construction and its degree are unchanged.
+//! - **Conic arithmetic.** The quadric is restricted in the cutting plane's local
+//!   principal frame. Its coefficients and centred constant follow directly from
+//!   the rotational quadratic form, avoiding cancellation on shallow cones.
 
 use std::collections::VecDeque;
 
@@ -413,129 +416,85 @@ struct Conic {
 
 /// `sm_PlaneSection(crPoint, crNormal, crQ, rConic)`: the conic in which the plane through
 /// `point` with unit `normal` meets the quadric `q`.
+///
+/// In the principal frame, with `p = q.point - point`, the restriction is
+/// `R (x-pu)^2 + L (y-pv)^2 - 2 B pn (y-pv) + N pn^2 - k0`.
+/// Here `L = R t² + H s²`, `B = (H-R) st`, `N = R s² + H t²`,
+/// and `s²+t² = 1`. Thus `L N - B² = R H`: completing the square gives
+/// the centred constant `R H pn²/L - k0` directly, without a matrix eigensolve.
 #[allow(clippy::many_single_char_names)]
 fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic> {
-    // a frame of the plane
-    let mut u = if normal.x.abs() < 0.9 {
-        Vec3::new(1.0, 0.0, 0.0)
+    // A rotational quadric has radial coefficient R and axial coefficient H.
+    // Use the cutting plane's principal directions: u perpendicular to the
+    // quadric's axis, v in the plane containing that axis and the plane normal.
+    // Its restriction is diagonal in this frame, even on a shallow cone.
+    let normal = normal.unitize()?;
+    let (axis, radial, axial, k0) = match q.kind {
+        QuadricKind::Sphere => (normal, 1.0, 1.0, q.radius * q.radius),
+        QuadricKind::Cylinder => (q.dir.unitize()?, 1.0, 0.0, q.radius * q.radius),
+        QuadricKind::Cone => {
+            let (sin, cos) = q.angle.sin_cos();
+            (q.dir.unitize()?, cos * cos, -sin * sin, 0.0)
+        }
+        _ => return Err(sm_err("the plane meets the quadric in no conic")),
+    };
+    let cross = normal.cross(axis);
+    let u = if cross == Vec3::ZERO {
+        // A plane square to the axis cuts a circle: either in-plane direction
+        // is principal. Choose the coordinate least aligned with its normal.
+        let seed = if normal.x.abs() <= normal.y.abs() && normal.x.abs() <= normal.z.abs() {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else if normal.y.abs() <= normal.z.abs() {
+            Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            Vec3::new(0.0, 0.0, 1.0)
+        };
+        normal.cross(seed).unitize()?
     } else {
-        Vec3::new(0.0, 1.0, 0.0)
+        cross
+            .length_and_unit()
+            .ok_or_else(|| sm_err("the plane frame has no finite direction"))?
+            .1
     };
-    u = u - normal * u.dot(normal);
-    u = u.unitize()?;
-    let v = normal.cross(u);
-    let (am, bv, dc) = q.implicit();
-    let quad = |a: Vec3, b: Vec3| {
-        let av = [a.x, a.y, a.z];
-        let bw = [b.x, b.y, b.z];
-        let mut s = 0.0;
-        for (ai, row) in av.iter().zip(am.iter()) {
-            for (aij, bj) in row.iter().zip(bw.iter()) {
-                s += ai * aij * bj;
-            }
-        }
-        s
-    };
-    let s_bv = Vec3::new(bv[0], bv[1], bv[2]);
-    // q(x, y) = [x y] A2 [x y] + 2 b2.[x y] + c2 about point
-    let a11 = quad(u, u);
-    let a12 = quad(u, v);
-    let a22 = quad(v, v);
-    let g = Vec3::new(
-        quad(Vec3::new(1.0, 0.0, 0.0), point),
-        quad(Vec3::new(0.0, 1.0, 0.0), point),
-        quad(Vec3::new(0.0, 0.0, 1.0), point),
-    ) + s_bv;
-    let b1 = g.dot(u);
-    let b2 = g.dot(v);
-    let c2 = quad(point, point) + 2.0 * s_bv.dot(point) + dc;
-    // principal axes of A2: the eigenvalues m +- hypot(h, a12), h = (a11 - a22) / 2, and
-    // each axis in the form whose terms add (not upstream, which takes the eigenvalues from
-    // sqrt(tr^2 / 4 - det) and the axes from (a12, lambda - a11): both cancel as the section
-    // nears a circle, and the conic then misses the quadric by about eps / a^2,
-    // tangency-labs/solidcraft#15037). The axes are those upstream's give in exact
-    // arithmetic, signs included: (a12, lambda_0 - a11) = (a12, r - h) is a12 / |a12| times
-    // (r + h, a12) scaled by |a12| / (r + h), and (a12, lambda_1 - a11) = (a12, -(r + h)) is
-    // a12 / |a12| times (r - h, -a12) scaled by |a12| / (r - h).
-    let m = 0.5 * (a11 + a22);
-    let h = 0.5 * (a11 - a22);
-    let r = h.hypot(a12);
-    let adl = [m + r, m - r];
-    let sg = if a12 < 0.0 { -1.0 } else { 1.0 };
-    let axes = [
-        if h >= 0.0 {
-            [sg * (r + h), sg * a12]
-        } else {
-            [a12, r - h]
-        },
-        if h <= 0.0 {
-            [sg * (r - h), -sg * a12]
-        } else {
-            [a12, -(r + h)]
-        },
-    ];
-    let mut ade = [[0.0; 2]; 2];
-    for (kk, (row, &[x, y])) in ade.iter_mut().zip(axes.iter()).enumerate() {
-        let (mut ex, mut ey) = (x, y);
-        if ex.abs() + ey.abs() < EFF_ZERO * (a11.abs() + a22.abs() + 1.0) {
-            ex = if (kk == 0) == (a11 >= a22) { 1.0 } else { 0.0 };
-            ey = 1.0 - ex;
-        }
-        let l = (ex * ex + ey * ey).sqrt();
-        *row = [ex / l, ey / l];
-    }
-    let [[e00, e01], [e10, e11]] = ade;
-    let ae = [u * e00 + v * e01, u * e10 + v * e11];
-    let beta = [b1 * e00 + b2 * e01, b1 * e10 + b2 * e11];
-    let [l0, l1] = adl;
+    let v = normal.cross(u).unitize()?;
+    let (s, t) = (axis.dot(v), axis.dot(normal));
+    let (l0, l1) = (radial, radial * t * t + axial * s * s);
+    let coupling = (axial - radial) * s * t;
+    let p = q.point - point;
+    let (pu, pv, pn) = (p.dot(u), p.dot(v), p.dot(normal));
     let dscale = max2(l0.abs(), l1.abs());
-    if dscale <= 0.0 {
-        // the plane meets the quadric in no conic
+    if dscale <= 0.0 || l0 <= EFF_ZERO * dscale {
         return Err(sm_err("the plane meets the quadric in no conic"));
     }
-    let pick = |a: [f64; 2], k: usize| if k == 0 { a[0] } else { a[1] };
-    let pick_v = |a: [Vec3; 2], k: usize| if k == 0 { a[0] } else { a[1] };
-    // a parabola: one principal coefficient zero
-    for kk in 0..2 {
-        if pick(adl, kk).abs() <= EFF_ZERO * dscale {
-            // L t^2 + 2 beta_k s + 2 beta_o t + c2 = 0 along e_k (s) and the other (t)
-            let o = 1 - kk;
-            if pick(beta, kk).abs() <= EFF_ZERO * dscale {
-                // the plane meets the quadric in lines
-                return Err(sm_err("the plane meets the quadric in lines"));
-            }
-            // s = -(L t^2 + 2 beta_o t + c2) / (2 beta_k): about t0 = -beta_o / L
-            let (lo, bo, bk) = (pick(adl, o), pick(beta, o), pick(beta, kk));
-            let t0 = -bo / lo;
-            let s0 = -(lo * t0 * t0 + 2.0 * bo * t0 + c2) / (2.0 * bk);
-            return Ok(Conic {
-                kind: ConicKind::Parabola,
-                c: point + pick_v(ae, kk) * s0 + pick_v(ae, o) * t0,
-                a1: pick_v(ae, kk) * (-lo / (2.0 * bk)),
-                a2: pick_v(ae, o),
-                branch: 1.0,
-            });
+    if l1.abs() <= EFF_ZERO * dscale {
+        // F = R (x-pu)^2 - 2 B pn (y-pv) + N pn^2 - k0.
+        // A zero linear term gives lines, not a parabola.
+        let linear = coupling * pn;
+        if linear.abs() <= EFF_ZERO * dscale {
+            return Err(sm_err("the plane meets the quadric in lines"));
         }
+        let normal_coefficient = radial * s * s + axial * t * t;
+        let vertex = pv + (normal_coefficient * pn * pn - k0) / (2.0 * linear);
+        return Ok(Conic {
+            kind: ConicKind::Parabola,
+            c: point + u * pu + v * vertex,
+            a1: v * (radial / (2.0 * linear)),
+            a2: u,
+            branch: 1.0,
+        });
     }
-    // centred: (x - x0).A2.(x - x0) + q0 = 0
-    let [be0, be1] = beta;
-    let x0 = [-be0 / l0, -be1 / l1];
-    let q0 = c2 + be0 * x0[0] + be1 * x0[1];
-    let c = point + ae[0] * x0[0] + ae[1] * x0[1];
-    let adq = [-q0 / l0, -q0 / l1];
-    let (kind, a1, a2) = if adq[0] > 0.0 && adq[1] > 0.0 {
-        (
-            ConicKind::Ellipse,
-            ae[0] * adq[0].sqrt(),
-            ae[1] * adq[1].sqrt(),
-        )
-    } else if adq[0] > 0.0 || adq[1] > 0.0 {
-        let kk = usize::from(adq[0] <= 0.0);
-        (
-            ConicKind::Hyperbola,
-            pick_v(ae, kk) * pick(adq, kk).sqrt(),
-            pick_v(ae, 1 - kk) * (-pick(adq, 1 - kk)).sqrt(),
-        )
+    let c = point + u * pu + v * (pv + coupling * pn / l1);
+    // The Schur complement of the v coefficient is R H / l1. Read the
+    // centred constant from it, without subtracting squared apex coordinates
+    // or subtracting the distant centre from the apex in world coordinates.
+    let q0 = radial * axial * pn * pn / l1 - k0;
+    let (d0, d1) = (-q0 / l0, -q0 / l1);
+    let (kind, a1, a2) = if d0 > 0.0 && d1 > 0.0 {
+        (ConicKind::Ellipse, u * d0.sqrt(), v * d1.sqrt())
+    } else if d0 > 0.0 {
+        (ConicKind::Hyperbola, u * d0.sqrt(), v * (-d1).sqrt())
+    } else if d1 > 0.0 {
+        (ConicKind::Hyperbola, v * d1.sqrt(), u * (-d0).sqrt())
     } else {
         // the plane misses the quadric
         return Err(sm_err("the plane misses the quadric"));
@@ -1397,29 +1356,174 @@ mod tests {
 
     #[test]
     fn a_tilted_cylinder_cut_by_a_plane_is_an_ellipse_its_segments_on_it() {
-        let tau = 0.5f64;
-        let q = BlendQuadric {
-            kind: QuadricKind::Cylinder,
-            point: Point3::ZERO,
-            dir: Vec3::new(0.0, -tau.sin(), tau.cos()),
-            radius: 4.0,
-            angle: 0.0,
-            side: 1.0,
-            tube: 0.0,
-        };
-        let kc = plane_section(Point3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0), &q).unwrap();
-        assert_eq!(kc.kind, ConicKind::Ellipse);
-        for i in 0..8 {
-            let t = f64::from(i);
-            let s = conic_segment(&kc, t, t + 0.7);
-            for j in 0..=10 {
-                let x = v_eval(&s.m, f64::from(j) / 10.0) * (1.0 / eval(&s.w, f64::from(j) / 10.0));
-                assert!((x.z - 1.0).abs() < 1e-13);
-                assert!(q.distance(x).abs() < 1e-13, "{}", q.distance(x));
+        for tau in [0.0_f64, f64::EPSILON, 0.5] {
+            let q = BlendQuadric {
+                kind: QuadricKind::Cylinder,
+                point: Point3::ZERO,
+                dir: Vec3::new(0.0, -tau.sin(), tau.cos()),
+                radius: 4.0,
+                angle: 0.0,
+                side: 1.0,
+                tube: 0.0,
+            };
+            let kc =
+                plane_section(Point3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0), &q).unwrap();
+            assert_eq!(kc.kind, ConicKind::Ellipse);
+            for i in 0..8 {
+                let t = f64::from(i);
+                let s = conic_segment(&kc, t, t + 0.7);
+                for j in 0..=10 {
+                    let x =
+                        v_eval(&s.m, f64::from(j) / 10.0) * (1.0 / eval(&s.w, f64::from(j) / 10.0));
+                    assert!((x.z - 1.0).abs() < 1e-13);
+                    assert!(q.distance(x).abs() < 1e-13, "{}", q.distance(x));
+                }
+                let p = conic_point(&kc, t);
+                assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
             }
-            let p = conic_point(&kc, t);
-            assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
         }
+    }
+
+    /// A shallow revolved cone cut by a plane has a hyperbolic round. Its exact
+    /// certificate must survive rebuilding the supports from their rational forms.
+    #[test]
+    fn a_shallow_cone_round_keeps_its_certificate_through_its_record() {
+        shallow_cone_round_at(&Axis2Placement::default());
+    }
+
+    #[test]
+    fn a_rotated_shallow_cone_round_keeps_its_certificate_through_its_record() {
+        for placement in [
+            Axis2Placement::new(
+                Point3::ZERO,
+                Vec3::new(3.0 / 5.0, 0.0, -4.0 / 5.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ),
+            Axis2Placement::new(
+                Point3::new(60.0, 0.0, 0.0),
+                Vec3::new(-1.0, 1e-9, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ),
+        ] {
+            shallow_cone_round_at(&placement);
+        }
+    }
+
+    fn shallow_cone_round_at(placement: &Axis2Placement) {
+        use crate::surface::plane::Plane;
+
+        let k = Kernel::default();
+        let radius = 0.4;
+        let slope = 1.0_f64 / 320.0;
+        let cone = Surface::from(
+            Cone::create_canonical_with_semi_angle(
+                &k,
+                placement,
+                60.0,
+                slope.atan().to_degrees(),
+                Some(6.0),
+                false,
+                false,
+            )
+            .unwrap(),
+        );
+        let cone_uv = cone.natural_uv_domain_with_nurb(&k).unwrap().mid();
+        let quadric = BlendQuadric::from_surface(&k, &cone, cone_uv, 1e-5).unwrap();
+        let generator = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 1,
+            control_points: &[
+                placement.transform_point(Point3::new(60.0, 0.0, 0.0)),
+                placement.transform_point(Point3::new(60.0 + 6.0 * slope, 0.0, 6.0)),
+            ],
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[2, 2],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::PiecewiseBezierKnots,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        assert!(
+            crate::surface::implicit::curve_on_quadrics(&generator, &[quadric.implicit(); 2],)
+                .unwrap(),
+            "the exact generator lies on its cone's implicit equation"
+        );
+        let plane = Surface::from(
+            Plane::create_canonical(&placement.transform_axis2_placement(&Axis2Placement::new(
+                Point3::ZERO,
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            )))
+            .unwrap(),
+        );
+        let inputs = ClassInputs {
+            uv: [
+                plane.natural_uv_domain_with_nurb(&k).unwrap().mid(),
+                cone.natural_uv_domain_with_nurb(&k).unwrap().mid(),
+            ],
+            offsets: [-radius, -radius],
+            centre: placement.transform_point(Point3::new(-0.4, 59.6, 0.0)),
+            tol: 1e-5,
+            ball_on_collapsed: false,
+            radii_can_change: false,
+        };
+        let blend = classify_supports(&k, [&plane, &cone], &inputs).unwrap();
+        assert_eq!(blend.spine, BlendSpine::Conic);
+        let mut conic = plane_section(blend.point, blend.dir, &blend.offsets[1]).unwrap();
+        assert_eq!(conic.kind, ConicKind::Hyperbola);
+        if (inputs.centre - conic.c).dot(conic.a1) < 0.0 {
+            conic.branch = -1.0;
+        }
+        let t = conic_param(&conic, inputs.centre);
+        let parts = rational_spine_parts(
+            &k,
+            &blend,
+            vec![
+                conic_segment(&conic, t - 0.0001, t),
+                conic_segment(&conic, t, t + 0.0001),
+            ],
+            true,
+            inputs.tol,
+        )
+        .unwrap();
+        let CurveKind::BSpline(leader) = parts.center_line.as_ref().unwrap().kind() else {
+            panic!("the conic leader is a rational quadratic");
+        };
+        let round = ExactRound::create(
+            &k,
+            ExactClass::Conic,
+            [&plane, &cone],
+            radius,
+            Some(leader),
+            inputs,
+        )
+        .unwrap();
+        let mut net = parts.surface;
+        assert_eq!(round.recertify(&k, &net).unwrap(), 0.0);
+        net.set_exact_round(Some(round));
+        let record = exact_to_record(&k, &net).unwrap();
+        let rebuilt = exact_rebuild(&k, &record).unwrap();
+        assert_eq!(
+            rebuilt.procedural_blend().unwrap().recertify(&k).unwrap(),
+            0.0
+        );
+        let mut off = record;
+        let leader = off.leader.as_mut().unwrap();
+        let normal = placement.x_axis();
+        for (p, w) in leader
+            .points
+            .iter_mut()
+            .zip(leader.weights.as_ref().unwrap())
+        {
+            p[0] += 0.001 * normal.x * w;
+            p[1] += 0.001 * normal.y * w;
+            p[2] += 0.001 * normal.z * w;
+        }
+        assert!(
+            exact_rebuild(&k, &off).is_err(),
+            "a spine off its plane is refused"
+        );
     }
 
     /// A plane that meets the quadric in no conic says how it fails, with status `SM_ERR`.
