@@ -2646,7 +2646,7 @@ fn mixed_corner_rails_cross(
 pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows to a point here, \
      where the edge touches another edge of that face tangentially, so no blend of any size fits";
 
-/// Not upstream (#16404): whether a face around `vertex` closes to a cusp between a blended
+/// Not upstream (#16404): whether a face around the vertex closes to a cusp between a blended
 /// edge and an edge of the other convexity not blended there: in some face's loop the two edges
 /// leave the vertex along one tangent, within `tangency_tol_radians` and in the same sense, so
 /// the face's corner angle between them is zero (a boss's concave base circle tangent to the
@@ -2656,8 +2656,9 @@ pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows
 /// other convexity): no blend of any size fits. Where both are convex or both concave the blend
 /// may run over the other edge, so that is not this case; nor are two edges that run on into
 /// each other (opposite senses), two uses of one edge, a pair both or neither blended, an edge
-/// whose convexity there is not decided ([`crate::query::edge_turn::convex_at`]), and a tangent
-/// that cannot be evaluated or is shorter than `SM_EFF_ZERO`. The walk is
+/// not blended whose faces are tangent (no convexity), and a tangent that cannot be evaluated
+/// or is shorter than `SM_EFF_ZERO`. Convexity is the blend's own
+/// ([`crate::blend::fillet_solver::p5::is_concave_edge`]). The walk is
 /// [`FilletCorner::create_noting_roll_overs`]': each step is one face's corner at the vertex,
 /// the edge use leaving it and its clockwise neighbour arriving at it. `solver_eus`: the
 /// blended edge uses at the vertex, the first leaving it.
@@ -2665,21 +2666,18 @@ pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a walk that does not close or an edge use without a
-/// neighbour, radial partner or edge; those of the convexity test.
+/// neighbour, radial partner or edge; those of the tangency and convexity tests.
 pub fn face_closes_to_a_point(
     k: &Kernel,
     b: &mut Brep,
-    vertex: VertexId,
     solver_eus: &[EdgeuseId],
     tangency_tol_radians: f64,
 ) -> Result<bool> {
     let Some(&start_eu) = solver_eus.first() else {
         return Ok(false);
     };
-    // the convexity test's smooth angle, in (0, pi / 2)
-    if !(tangency_tol_radians > 0.0 && tangency_tol_radians < std::f64::consts::FRAC_PI_2) {
-        return Ok(false);
-    }
+    let tan_tol_deg = rad_to_deg(tangency_tol_radians);
+    let is_concave_edge = crate::blend::fillet_solver::p5::is_concave_edge;
     let edge_of = |b: &Brep, eu: EdgeuseId| -> Result<EdgeId> {
         eu1::edge(b, eu)?.ok_or_else(|| invalid(OP_CREATE, "edge use without edge"))
     };
@@ -2709,19 +2707,22 @@ pub fn face_closes_to_a_point(
         if e0 != e1 && blended.contains(&e0) != blended.contains(&e1) {
             // both pointing away from the vertex
             let cusp = match (tangent(b, leaving, 0.0), tangent(b, arriving, 1.0)) {
-                (Some(d0), Some(d1)) => ignored(d0.angle_between(-d1))?
-                    .is_some_and(|a| a < tangency_tol_radians),
+                (Some(d0), Some(d1)) => {
+                    ignored(d0.angle_between(-d1))?.is_some_and(|a| a < tangency_tol_radians)
+                }
                 _ => false,
             };
-            if cusp {
-                let convex = |b: &mut Brep, e: EdgeId| {
-                    crate::query::edge_turn::convex_at(k, b, e, vertex, tangency_tol_radians)
-                };
-                if let (Some(c0), Some(c1)) = (convex(b, e0)?, convex(b, e1)?) {
-                    if c0 != c1 {
-                        return Ok(true);
-                    }
-                }
+            // the edge not blended there: a smooth one (its faces tangent) has no convexity
+            let other = if blended.contains(&e0) {
+                arriving
+            } else {
+                leaving
+            };
+            if cusp
+                && !eu2::is_tangent_sector(k, b, other, tan_tol_deg, false, false)?
+                && is_concave_edge(k, b, e0)? != is_concave_edge(k, b, e1)?
+            {
+                return Ok(true);
             }
         }
         eu = eu1::radial(b, arriving)?

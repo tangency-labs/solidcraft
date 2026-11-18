@@ -2209,7 +2209,6 @@ impl<'target> FilletSession<'target> {
                         && crate::blend::fillet_corner::p3::face_closes_to_a_point(
                             k,
                             target,
-                            vertex,
                             &edgeuses,
                             tangency_tol_radians,
                         )?
