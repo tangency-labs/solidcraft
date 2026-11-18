@@ -67,32 +67,13 @@ pub(crate) use measure::{
 pub(crate) use solidcore_ops::Body;
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
-/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
-/// unless it appears broken (`HELD_BACK`). A flag new to the solidcore pin is on without an edit
-/// here, and a retired flag drops out of `UpstreamFixes::all` on its own.
+/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it.
+/// A flag new to the solidcore pin is on without an edit here, and a retired flag drops out of
+/// `UpstreamFixes::all` on its own. A fix that is broken is fixed or removed in solidcore, never
+/// held off here.
 pub(crate) fn fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::all();
-    for name in HELD_BACK {
-        // A test keeps every name here a flag that exists.
-        if let Some(on) = f.flag_mut(name) {
-            *on = false;
-        }
-    }
-    f
+    UpstreamFixes::all()
 }
-
-/// The fixes held off, each with the case and the numbers that show it broken: a volume or topology
-/// wrong against the analytic value, a check failure, a crash, sound geometry refused that builds
-/// without the flag, or a large slowdown. Differing from the C++ kernel is no such evidence: a fix
-/// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
-/// against its closed form is a win.
-///
-/// None is held back: the last two (WR-707's refusal of rounds breaking through a wall, and
-/// WR-730's round ending on the outline) were fixed or removed in solidcore.
-///
-/// solidcore's tests, its kernel rig and its diagnostics read this list from
-/// `kernel_cases/held_back.json`; a test keeps the file equal to it.
-pub(crate) const HELD_BACK: &[&str] = &[];
 
 /// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
@@ -413,27 +394,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_upstream_fix_is_on_unless_shown_broken() {
-        let f = fixes();
-        let flags: Vec<(&str, bool)> = f.flags().collect();
-        let off: Vec<&str> = flags.iter().filter(|(name, on)| !on && !HELD_BACK.contains(name)).map(|(name, _)| *name).collect();
+    fn every_upstream_fix_is_on() {
+        let off: Vec<&str> = fixes().flags().filter(|(_, on)| !on).map(|(name, _)| name).collect();
         assert!(off.is_empty(), "UpstreamFixes flags are off: {off:?}");
-        for name in HELD_BACK {
-            assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
-        }
-    }
-
-    /// solidcore's tests, kernel rig and diagnostics build this preset as every flag on but those
-    /// `kernel_cases/held_back.json` names: the file names exactly `HELD_BACK`.
-    #[test]
-    fn the_kernel_corpus_held_back_list_is_this_one() {
-        let listed: Vec<String> =
-            serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/held_back.json")).unwrap();
-        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
-        listed.sort_unstable();
-        let mut held = HELD_BACK.to_vec();
-        held.sort_unstable();
-        assert_eq!(listed, held, "kernel_cases/held_back.json must list exactly HELD_BACK");
     }
 
     #[test]

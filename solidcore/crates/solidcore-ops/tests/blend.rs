@@ -302,7 +302,7 @@ const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (
 /// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
 /// Computation Failure"). The piece is now the crease line continued: the rounds build valid
 /// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
-/// application's fix set (every fix less `kernel_cases/held_back.json`).
+/// application's fix set (every fix on).
 #[test]
 fn rounds_overflowing_a_shallow_concave_crease_build() {
     for (r, mitre) in CREASE_PLATE_MITRE {
@@ -3891,8 +3891,7 @@ fn issue_13911_rails(
 /// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
-    // SolidCraft's fix set when it traced the case: its preset, which has every flag on but the
-    // held-back ones
+    // SolidCraft's fix set: every flag on
     solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (input, _) = issue_13911_body();
     let before = input.check(CheckLevel::All).unwrap();
