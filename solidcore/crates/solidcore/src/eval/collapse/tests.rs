@@ -1254,6 +1254,53 @@ fn a_rational_net_whose_weight_products_underflow_or_overflow_is_refused() {
     }
 }
 
+/// A patch whose points do not change along u, so it moves along u only through its weights:
+/// at v = 0.5, x = 1e-20 / (2 + u), and the move from u = −0.1 to 0 is 2.6e-22. With weights
+/// near 2e-154 the weights' part of the bound is below the normal range once it is times the
+/// patch's extent; it is never dropped, so the bound still covers the move.
+#[test]
+fn a_rational_net_moved_only_by_its_tiny_weights_is_bounded_over_its_move() {
+    let linear = vec![0.0, 0.0, 1.0, 1.0];
+    let patch = |scale: f64| {
+        let row = |w: f64| vec![([0.0, 0.0, 0.0], w * scale), ([1e-20, 0.0, 0.0], scale)];
+        net(
+            [1, 1],
+            &[linear.clone(), linear.clone()],
+            &[row(1.0), row(2.0)],
+        )
+    };
+    let moved = 1e-20 * (1.0 / 1.9 - 1.0 / 2.0);
+    for scale in [1.0, 2e-154] {
+        let onto = pcurve_onto_knots(&patch(scale), &past_u(), 1e-18);
+        assert!(
+            matches!(&onto, Ok(Some(o)) if o.displacement >= moved),
+            "{scale:e}: {onto:?}"
+        );
+    }
+}
+
+/// The #15999 patch along knots 0 to 1e300 with weights 1e10 and 2e10: the piece's length
+/// times its least weight overflows, and the bound is never taken as zero for it.
+#[test]
+fn a_rational_net_whose_span_times_its_weight_overflows_is_not_bounded_by_zero() {
+    let (l, w) = (1e300, 1e10);
+    let row = |u: f64, k: f64| vec![([u, 0.0, u], k * w), ([u, 1.0, 2.0 * u], k * w)];
+    let s = net(
+        [1, 1],
+        &[vec![0.0, 0.0, l, l], vec![0.0, 0.0, 1.0, 1.0]],
+        &[row(0.0, 1.0), row(1.0, 2.0)],
+    );
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[-0.1 * l, 0.5], [0.9 * l, 0.5]],
+    };
+    let onto = pcurve_onto_knots(&s, &pc, 1.0);
+    assert!(
+        !matches!(&onto, Ok(Some(o)) if o.displacement < 0.1),
+        "{onto:?}"
+    );
+}
+
 /// Knots 0, 0, 0.5, 0.5, 1, 1 along u at degree 1: x is 0 below u = 0.5 and 100 above it, each
 /// piece flat along u, and the move from u = 0.48 to 0.522 at t = 0.58 crosses the jump. The
 /// knot's multiplicity is above the degree, so the knots do not fit and the move is refused.
