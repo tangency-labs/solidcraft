@@ -545,9 +545,10 @@ off the surface, edges off the curve) are counted. Two or more lines of one kind
 that gives how many there were, the bounds or reasons that stopped the mesh, the worst of them and
 the bodies they are on, for example
 `3 faces short of the 25° asked (stopped by: Corner, Points); the sharpest: smallest angle 3.00°
-(Base: face 9); bodies: Lid (1), Base (2)`. A face past its chord tolerance is never counted with
+(Base: face 9); bodies: "Lid" (1), "Base" (2)`. A face past its chord tolerance is never counted with
 one within it, and a surface or curve summary gives the chord tolerance of the face or edge it
-names. `warning_count` gives the number of lines that `verbose: true` lists. A line in a wording
+names. Body names are quoted, and faces that no bound stopped are counted as "nothing stopped
+N faces". `warning_count` gives the number of lines that `verbose: true` lists. A line in a wording
 the compact reply doesn't know stays as it is.
 
 A `warning` that is null is left out. A null `error` stays, so a client that reads `error` still

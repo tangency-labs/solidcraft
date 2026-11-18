@@ -209,7 +209,8 @@ fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The file written, as an absolute path: a relative one resolves against this process's
     // folder, which an agent talking to the app over MCP can't see. Where there is no such
-    // folder (browser storage) the path stays as given.
+    // folder (browser storage) the path stays as given. A ".." stays in it: taking it out by
+    // the text alone names another file when the folder before it is a link.
     let path = path.map(|p| std::path::absolute(p).ok().and_then(|a| a.to_str().map(str::to_string)).unwrap_or_else(|| p.to_string()));
     serde_json::to_value(ExportScriptResult { omitted, path, bytes, script, steps, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }

@@ -44,10 +44,42 @@ struct Note<'a> {
     unmeasured: u64,
 }
 
-/// A finite number from the text the export wrote; `None` for anything else.
-fn finite(t: &str) -> Option<f64> {
+/// How the export writes a number: `{}` (an angle asked), `{:.2}` (an angle) or `{:.3e}` (a
+/// distance).
+#[derive(Clone, Copy)]
+enum Format {
+    Plain,
+    TwoDecimals,
+    Exponent,
+}
+
+/// "123" or "-123": digits with an optional minus sign. The rest of the text after them.
+fn digits(t: &str) -> Option<(&str, &str)> {
+    let body = t.strip_prefix('-').unwrap_or(t);
+    let end = body.find(|c: char| !c.is_ascii_digit()).unwrap_or(body.len());
+    (end > 0).then(|| body.split_at(end))
+}
+
+/// The number in `t` if it is written exactly as the export writes it in `format` and finite;
+/// `None` for anything else ("+10", "1e1" for an angle, "NaN", "12,94").
+fn number(t: &str, format: Format) -> Option<f64> {
+    let (_, rest) = digits(t)?;
+    let ok = match format {
+        Format::Plain => rest.is_empty() || rest.strip_prefix('.').is_some_and(|f| !f.is_empty() && f.bytes().all(|c| c.is_ascii_digit())),
+        Format::TwoDecimals => rest.strip_prefix('.').is_some_and(|f| f.len() == 2 && f.bytes().all(|c| c.is_ascii_digit())),
+        Format::Exponent => rest
+            .strip_prefix('.')
+            .and_then(|f| f.split_once('e'))
+            .is_some_and(|(f, e)| f.len() == 3 && f.bytes().all(|c| c.is_ascii_digit()) && digits(e).is_some_and(|(_, after)| after.is_empty())),
+    };
+    if !ok {
+        return None;
+    }
     t.parse::<f64>().ok().filter(|x| x.is_finite())
 }
+
+/// What the export writes for a face whose shaping no bound stopped.
+const NOTHING_STOPPED: &str = "nothing stopped it";
 
 /// The bounds in "Points, Side".
 fn list(t: &str) -> Vec<&str> {
@@ -99,7 +131,7 @@ fn note(w: &str) -> Option<Note<'_>> {
         let (cap, r) = r.split_once("); its chords lie up to ")?;
         let (sag, r) = r.split_once(" mm off the curve, past the ")?;
         let tol = r.strip_suffix(" mm chord tolerance")?;
-        let (s, t) = (finite(sag)?, finite(tol)?);
+        let (s, t) = (number(sag, Format::Exponent)?, number(tol, Format::Exponent)?);
         return Some(base(Kind::OffCurve, list(cap), sag, tol, if t > 0.0 { s / t } else { s }, 0));
     }
     if let Some(r) = rest.strip_prefix("smallest angle ") {
@@ -107,16 +139,16 @@ fn note(w: &str) -> Option<Note<'_>> {
         let (angle, r) = r.split_once("°, short of the ")?;
         let (asked, r) = r.split_once("° asked (stopped by: ")?;
         let limits = r.strip_suffix(')')?;
-        finite(asked)?;
-        return Some(base(Kind::ShortOfAngle(asked), list(limits), angle, "", finite(angle)?, 0));
+        number(asked, Format::Plain)?;
+        return Some(base(Kind::ShortOfAngle(asked), list(limits), angle, "", number(angle, Format::TwoDecimals)?, 0));
     }
     if let Some(r) = rest.strip_prefix("its shaping stopped at a bound (") {
         // its shaping stopped at a bound ({limits}) with the {asked}° asked reached (smallest angle {x}°)
         let (limits, r) = r.split_once(") with the ")?;
         let (asked, r) = r.split_once("° asked reached (smallest angle ")?;
         let angle = r.strip_suffix("°)")?;
-        finite(asked)?;
-        return Some(base(Kind::BoundReached(asked), list(limits), angle, "", finite(angle)?, 0));
+        number(asked, Format::Plain)?;
+        return Some(base(Kind::BoundReached(asked), list(limits), angle, "", number(angle, Format::TwoDecimals)?, 0));
     }
     // {reason}. Its triangles lie up to {sag} mm off the surface, {how} (chord tolerance {tol} mm[, {n} middles unmeasured])
     let (reason, r) = rest.split_once(". Its triangles lie up to ")?;
@@ -130,12 +162,13 @@ fn note(w: &str) -> Option<Note<'_>> {
         "" => 0,
         r => r.strip_prefix(", ")?.strip_suffix(" middles unmeasured")?.parse::<u64>().ok()?,
     };
-    let (s, t) = (finite(sag)?, finite(tol)?);
+    let (s, t) = (number(sag, Format::Exponent)?, number(tol, Format::Exponent)?);
     Some(base(Kind::OffSurface(how), vec![reason], sag, tol, if t > 0.0 { s / t } else { s }, unmeasured))
 }
 
 /// The bodies of `notes` in the order they first appear, each with how many lines it has:
-/// "Base (2), Lid (1)".
+/// `"Base" (2), "Lid" (1)`. Names are quoted as JSON strings, so a name holding " (" or ", "
+/// can't be mistaken for two bodies or a count.
 fn bodies(notes: &[&Note<'_>]) -> String {
     let mut seen: Vec<(&str, usize)> = Vec::new();
     for n in notes {
@@ -144,18 +177,34 @@ fn bodies(notes: &[&Note<'_>]) -> String {
             None => seen.push((n.body, 1)),
         }
     }
-    seen.iter().map(|(b, c)| format!("{} ({c})", if b.is_empty() { "no body named" } else { b })).collect::<Vec<_>>().join(", ")
+    seen.iter()
+        .map(|(b, c)| if b.is_empty() { format!("no body named ({c})") } else { format!("{} ({c})", Value::String((*b).to_string())) })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The reasons of `notes`, each once, in the order they first appear.
 fn reasons(notes: &[&Note<'_>]) -> String {
     let mut all: Vec<&str> = Vec::new();
-    for r in notes.iter().flat_map(|n| n.reasons.iter()) {
+    for r in notes.iter().flat_map(|n| n.reasons.iter()).filter(|r| **r != NOTHING_STOPPED) {
         if !all.contains(r) {
             all.push(r);
         }
     }
     all.join(", ")
+}
+
+/// What stopped the shaping of the faces of an angle group: "stopped by: Corner, Points", with
+/// "nothing stopped 1 face" for the faces no bound stopped, or "nothing stopped them".
+fn stopped(notes: &[&Note<'_>]) -> String {
+    let free = notes.iter().filter(|n| n.reasons.iter().all(|r| *r == NOTHING_STOPPED)).count();
+    let bounds = reasons(notes);
+    let faces = if free == 1 { "1 face".to_string() } else { format!("{free} faces") };
+    match (bounds.is_empty(), free) {
+        (true, _) => "nothing stopped them".into(),
+        (false, 0) => format!("stopped by: {bounds}"),
+        (false, _) => format!("stopped by: {bounds}; nothing stopped {faces}"),
+    }
 }
 
 /// The one line that stands for `group` (two or more lines of one kind).
@@ -168,7 +217,7 @@ fn summary(kind: &Kind<'_>, group: &[&Note<'_>]) -> Option<String> {
     let (n, why, on) = (group.len(), reasons(group), bodies(group));
     Some(match kind {
         Kind::ShortOfAngle(asked) => {
-            format!("{n} faces short of the {asked}° asked (stopped by: {why}); the sharpest: smallest angle {}° ({at}); bodies: {on}", worst.value)
+            format!("{n} faces short of the {asked}° asked ({}); the sharpest: smallest angle {}° ({at}); bodies: {on}", stopped(group), worst.value)
         }
         Kind::BoundReached(asked) => format!(
             "{n} faces whose shaping stopped at a bound ({why}) with the {asked}° asked reached; the sharpest: smallest angle {}° ({at}); bodies: {on}",
@@ -257,8 +306,8 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "2 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, A: face 1); bodies: A (2)",
-                "2 faces whose triangles lie off the surface, still within it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 1.000e-3 mm (chord tolerance 2.000e-3 mm, B: face 4); 6 middles unmeasured; bodies: B (2)",
+                "2 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, A: face 1); bodies: \"A\" (2)",
+                "2 faces whose triangles lie off the surface, still within it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 1.000e-3 mm (chord tolerance 2.000e-3 mm, B: face 4); 6 middles unmeasured; bodies: \"B\" (2)",
             ]),
             "{r}"
         );
@@ -280,7 +329,7 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "3 faces short of the 25° asked (stopped by: Corner, Points, Side); the sharpest: smallest angle 3.00° (Base: face 9); bodies: Lid (1), Base (2)"
+                "3 faces short of the 25° asked (stopped by: Corner, Points, Side); the sharpest: smallest angle 3.00° (Base: face 9); bodies: \"Lid\" (1), \"Base\" (2)"
             ]),
             "{r}"
         );
@@ -292,8 +341,46 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "2 edges whose chords lie off the curve, past the chord tolerance (stopped by: Points); the farthest for its tolerance: up to 2.000e-2 mm (chord tolerance 5.000e-3 mm, body `Disc`: edge 4); bodies: body `Disc` (2)"
+                "2 edges whose chords lie off the curve, past the chord tolerance (stopped by: Points); the farthest for its tolerance: up to 2.000e-2 mm (chord tolerance 5.000e-3 mm, body `Disc`: edge 4); bodies: \"body `Disc`\" (2)"
             ]),
+            "{r}"
+        );
+    }
+
+    /// Body names holding " (" or ", " stay readable: each name is quoted (review of #18831).
+    #[test]
+    fn body_names_are_quoted() {
+        let r = compacted(&[
+            "Lid (1): face 1: smallest angle 10.00°, short of the 25° asked (stopped by: Corner)",
+            "Lid, Base: face 2: smallest angle 11.00°, short of the 25° asked (stopped by: Corner)",
+            "Lid: face 3: smallest angle 12.00°, short of the 25° asked (stopped by: Corner)",
+            r#"Say "hi": face 4: smallest angle 13.00°, short of the 25° asked (stopped by: Corner)"#,
+        ]);
+        assert_eq!(
+            r["warnings"],
+            json!([
+                r#"4 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° (Lid (1): face 1); bodies: "Lid (1)" (1), "Lid, Base" (1), "Lid" (1), "Say \"hi\"" (1)"#
+            ]),
+            "{r}"
+        );
+    }
+
+    /// A face no bound stopped is counted on its own, not listed as a bound.
+    #[test]
+    fn faces_nothing_stopped_are_counted() {
+        let line = |f: u32, by: &str| format!("A: face {f}: smallest angle 1{f}.00°, short of the 25° asked (stopped by: {by})");
+        let r = compacted(&[&line(1, "nothing stopped it"), &line(2, "Corner"), &line(3, "Corner, Points")]);
+        assert_eq!(
+            r["warnings"],
+            json!([
+                r#"3 faces short of the 25° asked (stopped by: Corner, Points; nothing stopped 1 face); the sharpest: smallest angle 11.00° (A: face 1); bodies: "A" (3)"#
+            ]),
+            "{r}"
+        );
+        let r = compacted(&[&line(1, "nothing stopped it"), &line(2, "nothing stopped it")]);
+        assert_eq!(
+            r["warnings"],
+            json!([r#"2 faces short of the 25° asked (nothing stopped them); the sharpest: smallest angle 11.00° (A: face 1); bodies: "A" (2)"#]),
             "{r}"
         );
     }
@@ -309,7 +396,7 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "2 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° (Top: face plate: face 1); bodies: Top: face plate (2)"
+                "2 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° (Top: face plate: face 1); bodies: \"Top: face plate\" (2)"
             ]),
             "{r}"
         );
@@ -321,6 +408,14 @@ mod tests {
             [
                 "A: face 1: smallest angle 12,94°, short of the 25° asked (stopped by: Corner)",
                 "A: face 2: smallest angle 12,95°, short of the 25° asked (stopped by: Corner)",
+            ],
+            [
+                "A: face 1: smallest angle +10.00°, short of the 25° asked (stopped by: Corner)",
+                "A: face 2: smallest angle 1e1°, short of the 25° asked (stopped by: Corner)",
+            ],
+            [
+                "A: face 1: smallest angle 10.0°, short of the +25° asked (stopped by: Corner)",
+                "A: face 2: smallest angle 10.00°, short of the 2.5e1° asked (stopped by: Corner)",
             ],
             [
                 "face plate: 1: smallest angle 10.00°, short of the 25° asked (stopped by: Corner)",
