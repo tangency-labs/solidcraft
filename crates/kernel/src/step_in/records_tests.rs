@@ -101,6 +101,14 @@ fn a_broken_record_is_left_out_with_the_reason_and_the_others_still_come_in() {
     let mut r = good;
     r.tree[0].bodies.push(7);
     assert!(records_import(&r).unwrap_err().to_string().contains("names a body"));
+    // A tree of more products than an assembly the STEP reader reads, however shallow, refuses
+    // it too; one of as many as it reads still imports.
+    r.tree[0].bodies.pop();
+    let leaf = StepNode { bodies: Vec::new(), children: Vec::new(), ..r.tree[0].clone() };
+    r.tree.resize(super::super::MAX_VISITS, leaf);
+    assert!(records_import(&r).is_ok());
+    r.tree.push(r.tree[1].clone());
+    assert!(records_import(&r).unwrap_err().to_string().contains("more than"));
 }
 
 /// A record body's colour is its body's, and each face is known by its record body and its face

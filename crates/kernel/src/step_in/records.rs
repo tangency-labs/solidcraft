@@ -68,7 +68,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     if records.bodies.len() > super::MAX_BODIES {
         return Err(KernelError::Invalid(format!("an import of {} bodies (at most {})", records.bodies.len(), super::MAX_BODIES)));
     }
-    check_tree(&records.tree, records.bodies.len(), 0)?;
+    check_tree(&records.tree, records.bodies.len(), 0, &mut 0)?;
     let mut bodies = Vec::with_capacity(records.bodies.len());
     let mut report = ImportReport { parts: records.bodies.len(), ..ImportReport::default() };
     let mut warnings = records.warnings.clone();
@@ -211,20 +211,25 @@ fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
     record_part(&r.brep, &r.face_origin, sheet).map_err(|f| f.msg)
 }
 
-/// Every node's bodies index one of `count` bodies, and the tree is no deeper than an assembly
-/// the STEP reader reads.
-fn check_tree(nodes: &[StepNode], count: usize, depth: usize) -> Result<()> {
+/// Every node's bodies index one of `count` bodies, and the tree is no deeper and has no more
+/// nodes ([`super::MAX_VISITS`], counted in `visits` over every root) than an assembly the STEP
+/// reader reads.
+fn check_tree(nodes: &[StepNode], count: usize, depth: usize, visits: &mut usize) -> Result<()> {
     if depth > super::MAX_ASSEMBLY_DEPTH {
         return Err(KernelError::Invalid("an import's product tree nested too deeply".into()));
     }
     for n in nodes {
+        *visits += 1;
+        if *visits > super::MAX_VISITS {
+            return Err(KernelError::Invalid(format!("an import's product tree of more than {} products", super::MAX_VISITS)));
+        }
         if n.bodies.iter().any(|b| *b >= count) {
             return Err(KernelError::Invalid(format!("product `{}` names a body the import does not have", n.name)));
         }
         if n.transform.iter().flatten().any(|x| !x.is_finite()) {
             return Err(KernelError::Invalid(format!("product `{}` has a placement that is not finite", n.name)));
         }
-        check_tree(&n.children, count, depth + 1)?;
+        check_tree(&n.children, count, depth + 1, visits)?;
     }
     Ok(())
 }

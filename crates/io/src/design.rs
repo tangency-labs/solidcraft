@@ -902,10 +902,15 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
             // the file has it rather than failing the whole design when it is hydrated, or losing
             // on save what this build does not read of them.
             FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()).map_err(IoError::from).and_then(|()| {
-                if value.get("records_blob").is_none() {
-                    return Ok(());
+                if value.get("records_blob").is_some() {
+                    return records_read_whole(reader.blob(value, "records_blob", "records")?);
                 }
-                records_read_whole(reader.blob(value, "records_blob", "records")?)
+                // Records a newer build wrote inline are held to the same reading: saving would
+                // move them to a part of their own, without what this build does not read.
+                match value.get("records").filter(|r| !r.is_null()) {
+                    Some(inline) => records_read_whole(&serde_json::to_vec(inline).map_err(invalid)?),
+                    None => Ok(()),
+                }
             }),
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut check = meshes.clone();
@@ -2449,6 +2454,23 @@ mod tests {
             assert!(said.iter().any(|what| what.contains("Imported block")), "{said:?}");
             assert_eq!(opened.features.len(), doc.features.len());
             assert_eq!(parts(&write_design_container(&opened).unwrap())[&blob], newer, "the records are kept as the file has them");
+        }
+        // The same records written inline, with no part of their own, are kept as the file has
+        // them too.
+        for newer in [top, within] {
+            let mut entries = entries.clone();
+            let mut metadata = metadata.clone();
+            let import = metadata["features"].as_array_mut().unwrap().iter_mut().find(|f| f.get("records_blob").is_some()).unwrap();
+            import.as_object_mut().unwrap().remove("records_blob");
+            import["records"] = newer.clone();
+            entries.remove(&old);
+            entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+            let opened = crate::read_design(&package(&entries)).unwrap();
+            let said = &opened.newer_file.as_ref().unwrap().not_understood;
+            assert!(said.iter().any(|what| what.contains("Imported block")), "{said:?}");
+            let saved: Value = serde_json::from_slice(&parts(&write_design_container(&opened).unwrap())["document.json"]).unwrap();
+            let import = saved["features"].as_array().unwrap().iter().find(|f| f.get("records").is_some_and(|r| !r.is_null())).unwrap();
+            assert_eq!(import["records"], newer, "the inline records are kept as the file has them");
         }
     }
 
