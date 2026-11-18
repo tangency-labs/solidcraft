@@ -6,8 +6,8 @@
 //! (`crate::geom::krawczyk`) on `z = y − c(t)`, `c` the quadratic through the Newton roots at
 //! the piece's ends and middle, proves for every `t` in `T` exactly one root `y(t)` in
 //! `c(t) + Z`: `F(t, c(t))` is enclosed by its mean-value form about the middle and the
-//! partials over `T x (c(T) + Z)`. At a piece's end, a point, the root is in a box of
-//! rounding's width. Each of the rib's three curves (3D; on the fillet surface's UV; on
+//! partials over `T x (c(T) + Z)`. At a piece's end, a point, the root is in a small box
+//! (Krawczyk's at the point, about the same Newton root the piece's quadratic starts from). Each of the rib's three curves (3D; on the fillet surface's UV; on
 //! the end surface's UV) has an error `e` against the root: its 3D point less the rib's
 //! point, its UV point less `(sigma, alpha)` or `(u, v)`. At the piece's ends `e` is
 //! enclosed from those small boxes; between them `|e(t)|` is at most the larger end's plus
@@ -24,8 +24,12 @@
 //!
 //! Each face is enclosed as its NURBS data over every polynomial piece the box covers,
 //! hulled: across a knot line inside the box only where the face is at least `C^1` (the
-//! remainder needs `e'` continuous), and past the knots on its end piece continued, as the
-//! face is evaluated there ([`crate::blend::fillet_section::station::Nurbs`]).
+//! remainder needs `e'` continuous), and past the knots on its end piece continued (a box
+//! reaches past them only by its rounding at a domain's end).
+//!
+//! The tangent end's span is graded toward it and closed by a bound without the Jacobian
+//! ([`Rib::first_span_bound`], [`Rib::near_bound`]). Every loop over pieces, grades, ring
+//! boxes and widenings polls the kernel's cancellation.
 
 use crate::blend::fillet_section::certificate::{
     curve_derivs_over, knot_cuts, nurbs_partials_over_piece, nurbs_partials_over_piece_about,
@@ -38,6 +42,7 @@ use crate::error::Result;
 use crate::geom::krawczyk::{
     contraction, inverse_of_columns3, krawczyk, newton, plus_c_times, Linearised,
 };
+use crate::kernel::Kernel;
 
 /// The continuity a face needs across a knot line inside a box for its second partials:
 /// `C^1`, so that the root and the errors are `C^1` and the remainder holds with `e''`
@@ -59,6 +64,8 @@ const RING_BOXES: usize = 1 << 12;
 const WIDENINGS: usize = 24;
 
 const ZERO: Ivl = Ivl::new(0.0, 0.0);
+
+const OP: &str = "blend::fillet_geom::tangent_end_rib::certificate";
 
 /// A Newton root of the rib `(alpha, u, v)` at `t` from a guess, or `None`.
 pub(super) type Solve<'a> = dyn Fn(f64, [f64; 3]) -> Result<Option<[f64; 3]>> + 'a;
@@ -178,6 +185,8 @@ fn solve_over(cols: [V3<Ivl>; 3], b: V3<Ivl>) -> Option<[Ivl; 3]> {
 pub(super) struct Rib<'a> {
     /// The fillet surface's NURBS data.
     pub fillet: &'a Nurbs,
+    /// The kernel, polled for a cancellation.
+    pub kernel: &'a Kernel,
     /// The end surface's NURBS data.
     pub end: &'a Nurbs,
     /// The fillet surface's section parameter: 0 u, 1 v.
@@ -246,10 +255,14 @@ impl Rib<'_> {
         Some(move |i, j| if section == 0 { p.at(i, j) } else { p.at(j, i) })
     }
 
+    /// `F(t, y)`, enclosed: both faces less one point of the end surface near the root, so
+    /// that `F` carries the rounding of their distance from it, not from the origin.
     fn value(&self, t: Ivl, y: [Ivl; 3]) -> Option<[Ivl; 3]> {
         let [a, u, v] = y;
-        let s = self.fillet_over(self.sigma(t).0, a, 0)?;
-        let e = partials_over(self.end, u, v, 0)?;
+        let o = partials_over(self.end, Ivl::from(u.mid()), Ivl::from(v.mid()), 0)?.at(0, 0);
+        let o = [o.x.mid(), o.y.mid(), o.z.mid()];
+        let s = self.fillet_about(self.sigma(t).0, a, 0, Some(o))?;
+        let e = partials_about(self.end, u, v, 0, o)?;
         Some(arr(v_sub(s(0, 0), e.at(0, 0))))
     }
 
@@ -538,6 +551,7 @@ impl Rib<'_> {
         let mut worst = 0.0_f64;
         let mut pieces = vec![(a, b, 0)];
         while let Some((a, b, depth)) = pieces.pop() {
+            self.kernel.check_cancelled(OP)?;
             if off(&a) || off(&b) {
                 return Ok(None);
             }
@@ -581,6 +595,7 @@ impl Rib<'_> {
         let mut worst = 0.0_f64;
         let (mut hi_t, mut hi_y) = (t1, y1);
         for _ in 0..GRADES {
+            self.kernel.check_cancelled(OP)?;
             let lo_t = 0.5 * hi_t;
             let mut guess = p;
             for (g, &h) in guess.iter_mut().zip(&hi_y) {
@@ -715,6 +730,7 @@ impl Rib<'_> {
         let mut boxes = vec![(sigma, alpha)];
         let mut seen = 0;
         while let Some((s, a)) = boxes.pop() {
+            self.kernel.check_cancelled(OP)?;
             seen += 1;
             if seen > RING_BOXES {
                 return Ok(false);
@@ -752,7 +768,9 @@ impl Rib<'_> {
     ///   [`Self::separation_over`]) keeps one sign over `sigma(0..t*)` and `A <= |alpha −
     ///   alpha0| <= 2A` ([`Self::one_sign`]). The rib's root is continuous in `t`, lies
     ///   within `A/2` at `t*` and has `lambda = 0`, so it never crosses that ring: `|alpha −
-    ///   alpha0| < A` over `[0, t*]`. Where the ring holds a sign change, `A` is doubled
+    ///   alpha0| < A` over `[0, t*]`. ARGUED, not checked: on the ring the rib's end UV is
+    ///   the separation's root in its box (the one root there), that is the end surface
+    ///   meets the section only once near the tangent end (it is one-to-one there). Where the ring holds a sign change, `A` is doubled
     ///   (the gap `½ Δκ (A² − a(t*)²) − θ A` grows with it), at most [`WIDENINGS`] times,
     ///   while `|S_alpha| A` is within `tol`; where `Δκ` vanishes it never clears, and the
     ///   span is refused.
@@ -773,6 +791,7 @@ impl Rib<'_> {
         let at = Ivl::from;
         let mut big_a = 2.0 * (b[0] - at(a0)).mag();
         for _ in 0..WIDENINGS {
+            self.kernel.check_cancelled(OP)?;
             let alpha = at(a0) + Ivl::new(-big_a, big_a);
             let Some(s) = self.fillet_over(sigma, alpha, 1) else {
                 return Ok(None);
