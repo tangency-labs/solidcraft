@@ -113,6 +113,8 @@ pub(super) struct Patch {
     pub curves: Vec<(Curve, TsectCurveType)>,
     /// The generator ranges covered.
     pub ranges: Vec<(f64, f64)>,
+    /// The maximum normal-distance bound of the generator ranges and boundaries.
+    pub deviation: f64,
 }
 
 /// `|x| + |y| + |z|`.
@@ -273,6 +275,33 @@ fn certify_in_plane(net: &Net, e: Vec3, plane: &Plane) -> bool {
         // (a NaN anywhere fails the check)
         n.dot(p - o).abs() + functional_err(n, p, o, err) <= bound
     })
+}
+
+/// Bounds distance to the plane on the whole positive-weight control net, by
+/// convexity. Keep the profile's bound even for boundaries made on the plane:
+/// those boundaries can still be that far from the extrusion. Dividing by the
+/// largest normal component is conservative since it is at most the normal's
+/// Euclidean length, without assuming the rounded unit normal has length 1.
+/// `gamma(16)` encloses the positive sums/products in the error expression, the
+/// final sum and division, and the inflation's rounding. Non-finite bounds decline.
+fn plane_deviation(net: &Net, plane: &Plane) -> Option<f64> {
+    let n = plane.position().z_axis();
+    let o = plane.position().origin();
+    let normal_scale = n.max_dimension();
+    let valid = normal_scale > 0.0 && normal_scale.is_finite();
+    if !valid {
+        return None;
+    }
+    let mut bound = 0.0_f64;
+    for &(p, err) in &net.pts {
+        let distance =
+            (n.dot(p - o).abs() + functional_err(n, p, o, err)) / normal_scale * (1.0 + gamma(16));
+        if !distance.is_finite() {
+            return None;
+        }
+        bound = bound.max(distance);
+    }
+    Some(bound)
 }
 
 /// Bisects for the single root of `g(C(s))` in `[a, b]`, `g` negative at `a` when
@@ -734,6 +763,7 @@ struct RangePiece {
     monotone: bool,
     nu_lo: f64,
     nu_hi: f64,
+    deviation: f64,
 }
 
 /// A generator range measured by [`range_piece`].
@@ -796,6 +826,9 @@ fn range_piece(
     if !certify_in_plane(&net, inputs.extrusion_vec, inputs.plane) {
         return Ok(Measured::Declined);
     }
+    let Some(deviation) = plane_deviation(&net, inputs.plane) else {
+        return Ok(Measured::Declined);
+    };
 
     // mu monotone on the control polygon (each step not against the direction beyond
     // the values' errors) makes it monotone on the curve: for positive weights the
@@ -877,6 +910,7 @@ fn range_piece(
         monotone,
         nu_lo,
         nu_hi,
+        deviation,
     }))
 }
 
@@ -1554,7 +1588,20 @@ pub(super) fn coincident_patch(
             return Ok(None);
         }
     }
+    // The profile bound also covers the normal offset of plane-made sides.
+    // Recheck the finished boundaries to include their trim/translation rounding.
+    let mut deviation = pieces.iter().map(|p| p.deviation).fold(0.0_f64, f64::max);
+    for curve in &out {
+        let Some(net) = net_points(curve) else {
+            return Ok(None);
+        };
+        let Some(bound) = plane_deviation(&net, inputs.plane) else {
+            return Ok(None);
+        };
+        deviation = deviation.max(bound);
+    }
     Ok(Some(Patch {
+        deviation,
         curves: out
             .into_iter()
             .map(|c| (c, TsectCurveType::RegionBoundary))
