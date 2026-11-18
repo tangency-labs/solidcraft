@@ -317,13 +317,24 @@ fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joi
     joints::solve_holding_with_analysis(&s.doc, &s.model.state(), held, analysis)
 }
 
+/// Applies the solve. A part it moves loses its move not captured, which would hide where the
+/// joints put it; an exploded view's placement stays shown.
 fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
     let sol = solution(s, held, analysis);
     if !sol.world.is_empty() {
         let mut next = (*s.doc).clone();
         if next.apply_joint_solution(&sol) {
+            let moved: BTreeSet<u64> = next
+                .occurrences
+                .iter()
+                .zip(&s.doc.occurrences)
+                .filter(|(n, o)| n.id != o.id || n.transform != o.transform)
+                .map(|(n, _)| n.id)
+                .collect();
             *s.doc_mut() = next;
             s.revision += 1;
+            let exploded = &s.exploded;
+            s.pending_moves.retain(|id, m| !moved.contains(id) || exploded.get(id) == Some(m));
         }
     }
     sol
@@ -2196,6 +2207,22 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     edit_joint(s, p, true)
 }
 
+/// The new name `p` gives joint `id` in an edit, if it changes it. A new name over 128 characters
+/// is refused before anything changes, as the other renames refuse it, in the name of the command
+/// `called`; the joint's own name (joint.create takes any) is kept whatever its length, spaces
+/// round it or not, and a blank one changes nothing.
+fn edited_name(s: &Session, id: u64, p: &Value, called: &str) -> Result<Option<String>> {
+    let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) else { return Ok(None) };
+    let own = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.name.trim());
+    if own == Some(n) {
+        return Ok(None);
+    }
+    if n.chars().count() > 128 {
+        return Err(bad(called, "`name` must be at most 128 characters"));
+    }
+    Ok(Some(n.to_string()))
+}
+
 /// joint.edit's change, also run by `assembly.constraint.edit`. `plain`: a change of kind makes a
 /// constraint a plain joint (joint.edit); the constraint command keeps the rule it has just set.
 pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Value> {
@@ -2215,6 +2242,7 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         Some(v) => Some(value(s, v, true, cmd)?),
         None => None,
     };
+    let name = edited_name(s, id, p, if plain { cmd } else { "assembly.constraint.edit" })?;
     // The sides, read as joint.create reads them; a side left out keeps its place.
     let a = p.get("a").map(|v| origin_param(s, Some(v), cmd)).transpose()?;
     let b = p.get("b").map(|v| origin_param(s, Some(v), cmd)).transpose()?;
@@ -2285,8 +2313,8 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
     if let Some(f) = bool_(p, "flip") {
         j.flip = f;
     }
-    if let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128) {
-        j.name = n.to_string();
+    if let Some(n) = name {
+        j.name = n;
     }
     if let Some(x) = bool_(p, "suppressed") {
         suppress_joints(s.doc_mut(), &[id], x);
@@ -2561,7 +2589,7 @@ pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
 
 #[cfg(test)]
 #[path = "joints_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 #[path = "joints_turn_tests.rs"]
 mod turn_tests;

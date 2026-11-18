@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_view_flat": "Flat Pattern View"
+  },
+  "ar": {
+    "cmd.drawing_view_flat": "عرض النمط المسطح"
+  },
+  "he": {
+    "cmd.drawing_view_flat": "תצוגת פריסה"
+  },
+  "ja": {
+    "cmd.drawing_view_flat": "展開図ビュー"
+  },
+  "vi": {
+    "cmd.drawing_view_flat": "Chế độ xem bản khai triển phẳng"
+  },
+  "zh": {
+    "cmd.drawing_view_flat": "展开视图"
+  },
+  "de": {
+    "cmd.drawing_view_flat": "Flachmusteransicht"
+  },
+  "ko": {
+    "cmd.drawing_view_flat": "전개도 뷰"
+  }
+}

@@ -40,6 +40,9 @@ const OP_REMOVE_COINCIDENT: &str =
 /// two combinable edge definitions, in units of their summed tolerances (upstream's).
 pub const ED_TOL_FACTOR: f64 = 5.0;
 const OP_POSITION: &str = "topology::proto_topology::p1::find_position_from_pcs";
+const OP_RESOLVE: &str =
+    "topology::proto_topology::p1::ProtoTopologyManager::resolve_vertex_definition";
+const OP_SET_POSITION: &str = "topology::proto_topology::p1::VertexDefinition::set_position";
 const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate";
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
 const OP_DEGEN: &str = "topology::proto_topology::p1::find_ed_on_degen_face";
@@ -371,6 +374,67 @@ pub struct PositionFromPcs {
     /// `rdDeviation`: the distance between the two object points (0 when only one
     /// was known at the start).
     pub deviation: f64,
+}
+
+/// Not upstream: the curve of the seam `pc` classifies onto: the seam edge its vertex ends
+/// ([`vertex::seam_edge`]), or the seam edge itself when `pc` lies on one
+/// ([`vertex::is_seam_edge`]), where the definition's vertex will split it and end both
+/// pieces. `None` when `pc` is on neither, or the adapter cannot resolve its handle.
+///
+/// # Errors
+///
+/// Those of [`vertex::seam_edge`], [`vertex::is_seam_edge`] and [`edge::curve`].
+fn seam_curve<'g, O: ClassObject>(
+    geometry: &'g impl ClassGeometry<O>,
+    pc: &PointClassification<O>,
+) -> Result<Option<&'g Curve>> {
+    let Some((b, entity)) = pc.object().and_then(|o| geometry.topology_entity(o)) else {
+        return Ok(None);
+    };
+    match (pc.point_class(), entity) {
+        (PointClassType::Vertex, EntityRef::Vertex(v)) => match vertex::seam_edge(b, v)? {
+            Some(e) => edge::curve(b, e),
+            None => Ok(None),
+        },
+        (PointClassType::Edge, EntityRef::Edge(e)) if vertex::is_seam_edge(b, e)? => {
+            edge::curve(b, e)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Not upstream: the point of the seam `curve` that `p` lies over: `p`'s foot on the curve
+/// over its natural interval, moved along the curve's tangent there by `p`'s offset along
+/// that tangent. With the foot inside the interval the offset is zero and the point is the
+/// seam's nearest to `p`; where the curve stops short of `p` (a seam line ending at the
+/// vertex, `p` past that end) it carries on along the seam's direction, as the seam of the
+/// closed surface does.
+///
+/// # Errors
+///
+/// Those of [`Curve::drop_point`] and [`Curve::evaluate`]; a topology failure when `p`
+/// does not drop onto the curve.
+fn onto_seam(k: &Kernel, curve: &Curve, p: Point3) -> Result<Point3> {
+    let natural = curve.natural_interval();
+    let foot = curve.drop_point(k, &natural, p, None, 0.0, None, SolverOperation::Minimize)?;
+    if !foot.success {
+        return Err(SolidError::topology_failed(
+            OP_RESOLVE,
+            "the definition's position does not drop onto its vertex's seam",
+        ));
+    }
+    let eval = curve.evaluate(k, foot.parameter, 1, false, false)?;
+    let (Some(&at), Some(&tangent)) = (eval.first(), eval.get(1)) else {
+        return Err(SolidError::topology_failed(
+            OP_RESOLVE,
+            "the seam does not evaluate at the definition's foot",
+        ));
+    };
+    let len2 = tangent.dot(tangent);
+    if len2 <= 0.0 {
+        return Ok(at);
+    }
+    Ok(at + ((p - at).dot(tangent) / len2) * tangent)
 }
 
 /// The position two point classifications define (`sm_FindPositionFromPCs`). A
@@ -946,6 +1010,10 @@ pub struct VertexDefinition<O> {
     /// placed this definition crosses its source edge; `-1` when no such crossing placed
     /// it ([`VertexDefinition::place_by_crossing`]).
     crossing_sine: f64,
+    /// Not upstream (WR-306): the certain hull points of the curves this definition
+    /// absorbed (`resolve_proto_edge`), each with the error bound of its coordinates,
+    /// which [`VertexDefinition::set_position`] keeps within the tolerance.
+    absorbed_hull: Vec<(Point3, f64)>,
 }
 
 /// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingError`): how far along its
@@ -993,6 +1061,7 @@ impl<O: ClassObject> VertexDefinition<O> {
             final_vtx1: None,
             final_vtx2: None,
             crossing_sine: -1.0,
+            absorbed_hull: Vec::new(),
         };
 
         if !vd.pc1.are_parameters_set() {
@@ -1098,30 +1167,6 @@ impl<O: ClassObject> VertexDefinition<O> {
         self.gap = gap;
         self.crossing_sine = crossing_sine;
         Ok(true)
-    }
-
-    /// Not upstream (#16637): a certified bound on how far this definition's position may
-    /// lie from the point it stands for, where one is known: its gap when either source
-    /// object is a vertex (the definition stands for that vertex, and its position is the
-    /// vertex's point or a point within the gap of it); the misplacement bound of the
-    /// crossing that placed it (`crossing_error`: the gap over the crossing's sine) when a
-    /// crossing at a known angle did; `None` otherwise, and for a gap that is not finite.
-    #[must_use]
-    pub fn placement_error(&self) -> Option<f64> {
-        if !self.gap.is_finite() {
-            return None;
-        }
-        if self.pc1.point_class() == PointClassType::Vertex
-            || self.pc2.point_class() == PointClassType::Vertex
-        {
-            return Some(max2(self.gap, 0.0));
-        }
-        if self.crossing_sine < 0.0 {
-            return None;
-        }
-        let error = crossing_error(self.gap, self.crossing_sine);
-        // (written to accept: an unknown angle's BIG_DOUBLE, or a NaN, gives no bound)
-        (error < BIG_DOUBLE).then_some(error)
     }
 
     /// The tolerance (`GetTolerance`, as an `SmZoneTol3d`).
@@ -1237,9 +1282,79 @@ impl<O: ClassObject> VertexDefinition<O> {
         }
     }
 
-    /// Sets the position (`SetPosition`).
-    pub fn set_position(&mut self, position: Point3) {
+    /// Not upstream (WR-306): the tolerance this definition needs at `position` to keep
+    /// every absorbed hull point ([`VertexDefinition::absorb_hull`]) covered, by the same
+    /// rounded distance `resolve_proto_edge` took it in by,
+    /// `|p - position| * (1 + gamma(8)) + 2 * err`, and never below its tolerance now;
+    /// `None` when a distance is not finite.
+    #[must_use]
+    pub fn covering_tolerance(&self, k: &Kernel, position: Point3) -> Option<f64> {
+        let mut needed = self.tolerance(k);
+        for &(p, err) in &self.absorbed_hull {
+            let d = p.distance(position) * (1.0 + gamma(8)) + 2.0 * err;
+            if !d.is_finite() {
+                return None;
+            }
+            needed = max2(needed, d);
+        }
+        Some(needed)
+    }
+
+    /// Sets the position (`SetPosition`). Not upstream (WR-306): the tolerance then grows,
+    /// never shrinks, to [`VertexDefinition::covering_tolerance`] at the new position, so
+    /// each curve the definition absorbed stays within its tolerance.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Failed`] (a topology failure) when a hull point's distance from
+    /// `position` is not finite; the definition is left unchanged then.
+    pub fn set_position(&mut self, k: &Kernel, position: Point3) -> Result<()> {
+        let needed = self.covering_tolerance(k, position).ok_or_else(|| {
+            SolidError::topology_failed(
+                OP_SET_POSITION,
+                "a vertex definition holding an absorbed curve cannot move to a position \
+                 at no finite distance from it",
+            )
+        })?;
         self.position = position;
+        if needed > self.tolerance(k) {
+            self.tol = needed;
+        }
+        Ok(())
+    }
+
+    /// Not upstream (WR-306): records the certain hull points (each with the error bound
+    /// of its coordinates) of a curve this definition absorbed, for
+    /// [`VertexDefinition::set_position`] to keep covered.
+    pub fn absorb_hull(&mut self, points: impl IntoIterator<Item = (Point3, f64)>) {
+        self.absorbed_hull.extend(points);
+    }
+
+    /// Not upstream (WR-306): the hull points recorded by
+    /// [`VertexDefinition::absorb_hull`].
+    #[must_use]
+    pub fn absorbed_hull(&self) -> &[(Point3, f64)] {
+        &self.absorbed_hull
+    }
+
+    /// Not upstream (WR-306): takes over the hull points `points` of a definition combined
+    /// into this one, and grows the tolerance, never shrinks it, to
+    /// [`VertexDefinition::covering_tolerance`] where the definition is, so the curves that
+    /// definition absorbed stay within this one's tolerance.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Failed`] (a topology failure) when a point's distance from the
+    /// position is not finite; the definition is left unchanged then.
+    pub fn take_over_hull(&mut self, k: &Kernel, points: &[(Point3, f64)]) -> Result<()> {
+        let kept = self.absorbed_hull.len();
+        self.absorbed_hull.extend_from_slice(points);
+        let position = self.position;
+        if let Err(e) = self.set_position(k, position) {
+            self.absorbed_hull.truncate(kept);
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Sets the owning proto vertex (`SetProtoVertex`).
@@ -1815,6 +1930,16 @@ pub struct ProtoVertex {
     /// The SMLib fork's `m_bAbsorbedProtoEdge`: a degenerate proto edge of ours was dropped,
     /// so our vertices stand for its curve (WR-306, opt-in).
     absorbed_proto_edge: bool,
+    /// Not upstream (#16637): the computed points (positions and object points) of the
+    /// vertex definitions combined away at this proto vertex, the attached curve ends
+    /// evaluated when it combined them, and the points of the definitions that remained
+    /// when it moved, which every write of its position covers
+    /// ([`ProtoVertex::set_position`]).
+    absorbed_points: Vec<Point3>,
+    /// Not upstream (#16637): a point to absorb here (of a definition combined away or an
+    /// attached curve end) could not be computed, so `absorbed_points` is incomplete and
+    /// `resolve_proto_vertex` leaves the position where upstream puts it.
+    absorbed_unbounded: bool,
 }
 
 impl ProtoVertex {
@@ -1823,6 +1948,53 @@ impl ProtoVertex {
     #[must_use]
     pub const fn absorbed_proto_edge(&self) -> bool {
         self.absorbed_proto_edge
+    }
+
+    /// Not upstream (#16637): the computed points (positions and object points) of the
+    /// vertex definitions combined away at this proto vertex, the attached curve ends
+    /// evaluated when it combined them, and, when it moved, the points of the definitions
+    /// that remained and the attached curve ends that trace to them.
+    #[must_use]
+    pub fn absorbed_points(&self) -> &[Point3] {
+        &self.absorbed_points
+    }
+
+    /// Not upstream (#16637): whether a point to absorb here could not be computed (so
+    /// [`ProtoVertex::absorbed_points`] is incomplete).
+    #[must_use]
+    pub const fn absorbed_unbounded(&self) -> bool {
+        self.absorbed_unbounded
+    }
+
+    /// Not upstream (#16637): records the computed points of vertex definitions combined
+    /// away at this proto vertex, and whether every point of them was computed. It does not
+    /// change the tolerance: the caller places the vertex ([`ProtoVertex::set_position`])
+    /// or covers the points where it is ([`ProtoVertex::cover_absorbed`]).
+    pub fn absorb(&mut self, points: &[Point3], bounded: bool) {
+        self.absorbed_points.extend_from_slice(points);
+        self.absorbed_unbounded = self.absorbed_unbounded || !bounded;
+    }
+
+    /// Not upstream (#16637): widens the tolerance to reach every absorbed point from the
+    /// position: the largest computed distance, rounded up by `γ_4` for the distance's own
+    /// rounding. Distances between computed points only, no stored gap and no estimate.
+    /// A non-finite distance (a non-finite position, or a distance that overflows) never
+    /// widens, so the tolerance stays finite; that point is then not covered, so it marks
+    /// the absorbed points unbounded ([`ProtoVertex::absorbed_unbounded`]: no later move).
+    pub fn cover_absorbed(&mut self) {
+        use crate::nurbs::math::gamma;
+        let mut reach = 0.0_f64;
+        for &at in &self.absorbed_points {
+            let r = self.position.distance(at) * (1.0 + gamma(4));
+            if !r.is_finite() {
+                self.absorbed_unbounded = true;
+            } else if r > reach {
+                reach = r;
+            }
+        }
+        if reach > self.tol {
+            self.tol = reach;
+        }
     }
 
     /// Marks a degenerate proto edge of this proto vertex as dropped (the fork's
@@ -1837,9 +2009,17 @@ impl ProtoVertex {
         self.position
     }
 
-    /// Sets the position (through `GetPosition`'s reference).
+    /// Sets the position (through `GetPosition`'s reference). Not upstream (#16637): the
+    /// tolerance then grows to cover every absorbed point from there
+    /// ([`ProtoVertex::cover_absorbed`]); with none absorbed it is upstream's write. A
+    /// vertex that absorbed points is not moved to a non-finite position, from which no
+    /// distance to them could be measured: it stays where it is, still covering them.
     pub fn set_position(&mut self, position: Point3) {
-        self.position = position;
+        let finite = position.x.is_finite() && position.y.is_finite() && position.z.is_finite();
+        if finite || self.absorbed_points.is_empty() {
+            self.position = position;
+        }
+        self.cover_absorbed();
     }
 
     /// The tolerance (`GetTolerance`, as an `SmZoneTol3d`).
@@ -2474,7 +2654,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Takes the refusal a proto edge from a proto vertex back to itself left
     /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
-    /// neither split nor dropped. Not upstream.
+    /// neither split nor dropped. Not upstream. It also holds the refusal of a resolution
+    /// that would grow a tolerance into another vertex definition (#18312,
+    /// [`ProtoTopologyManager::refuse_growth_overlap`]).
     pub fn take_self_loop_refusal(&mut self) -> Option<SolidError> {
         self.self_loop_refusal.take()
     }
@@ -2880,6 +3062,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 vertex_defs: Vec::new(),
                 proto_edges: Vec::new(),
                 absorbed_proto_edge: false,
+                absorbed_points: Vec::new(),
+                absorbed_unbounded: false,
             },
         )
         .map(ProtoVertexId)
@@ -2914,6 +3098,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 vertex_defs: vec![vd_id],
                 proto_edges: Vec::new(),
                 absorbed_proto_edge: false,
+                absorbed_points: Vec::new(),
+                absorbed_unbounded: false,
             },
         )
         .map(ProtoVertexId)
@@ -3007,12 +3193,32 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// are farther apart than the manager's tolerance and either classification has
     /// a gap, the position moves between them, proportionally closer to the object
     /// with the smaller gap but within both objects' zone tolerances. The status
-    /// output is always 0.
+    /// output is always 0. Not upstream (WR-306): the move goes through
+    /// [`VertexDefinition::set_position`], so the tolerance grows to keep every absorbed
+    /// hull point covered.
+    ///
+    /// With `seam_vertex_stays_on_seam` (not upstream): a definition on a vertex that ends
+    /// a seam edge ([`vertex::seam_edge`]), or on a seam edge itself, is put onto that seam,
+    /// at the seam's point under the position worked out as upstream ([`onto_seam`]). The
+    /// seam edge's curve is the seam, an iso line of its face's surface, and its vertex ends
+    /// that line; a definition on the seam edge makes a vertex that splits it and ends both
+    /// pieces. A vertex off the seam leaves the seam edge's trims off the seam, which the
+    /// face's seam test refuses (test 36, a suspicious edge near the seam) when another edge
+    /// runs beside the seam there: two edges crossing within tolerance, one of them a seam,
+    /// are blended halfway (`find_position_from_pcs`), which puts the crossing off the seam
+    /// by half the other edge's offset across it (#18689). Along the seam the definition
+    /// still moves as upstream's, sharing the gap with the other object. With both sides on
+    /// seams the first's seam holds it.
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without a proto vertex; [`SolidError::Unported`]
-    /// from the classifications (topology objects).
+    /// from the classifications (topology objects); [`SolidError::Failed`] (from
+    /// `set_position`, the definition unchanged) when an absorbed hull point lies at no
+    /// finite distance from the new position, and the refusal
+    /// ([`ProtoTopologyManager::refuse_growth_overlap`], the definition unchanged) when the
+    /// growth reaches another vertex definition
+    /// ([`ProtoTopologyManager::growth_reaches_another`]).
     pub fn resolve_vertex_definition(
         &mut self,
         k: &Kernel,
@@ -3043,6 +3249,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
+        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex or edge keeps to
+        let seam = if k.fixes.seam_vertex_stays_on_seam {
+            match seam_curve(geometry, &v.pc1)? {
+                Some(c) => Some(c),
+                None => seam_curve(geometry, &v.pc2)?,
+            }
+        } else {
+            None
+        };
+
         if dist > tol && dist1 + dist2 > EFF_ZERO {
             // Put it proportionally closer to the topo object with the smaller gap,
             // but not out of Tolerance
@@ -3061,6 +3277,33 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let frac = dist1 / (dist1 + dist2);
             let frac = frac_ivl.clamp_value(frac);
             let position = pt1 + frac * vec;
+            // Not upstream (WR-306): through `set_position`, so a definition that absorbed
+            // a self-loop grows to keep the curve's hull covered from the new position (a
+            // definition with no hull is moved as upstream moves it). Not upstream
+            // (#18312): a growth into another vertex definition its tolerance kept clear of
+            // is refused, with the definition unchanged. The move is upstream's, so "clear
+            // before" is judged at the new position, as the self-loop split judges its own.
+            if let Some(v) = self.vertex_def(vd) {
+                if let Some(cover) = v.covering_tolerance(k, position) {
+                    if self.growth_reaches_another(
+                        k,
+                        position,
+                        v.tolerance(k),
+                        position,
+                        cover,
+                        v.proto_vertex,
+                        &[vd],
+                    )? {
+                        return Err(self.refuse_growth_overlap());
+                    }
+                }
+            }
+            if let Some(v) = self.vertex_def_mut(vd) {
+                v.set_position(k, position)?;
+            }
+        }
+        if let Some(curve) = seam {
+            let position = onto_seam(k, curve, self.vd(vd)?.position)?;
             if let Some(v) = self.vertex_def_mut(vd) {
                 v.position = position;
             }
@@ -3256,7 +3499,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             };
             let count = self.pv(Some(pv))?.vertex_defs.len() as f64;
             let p = self.pv_mut(pv)?;
-            p.position += (new - old) / count;
+            // (#16637: through `set_position`, so a vertex that absorbed definitions keeps
+            // covering them)
+            p.set_position(p.position + (new - old) / count);
             p.tol = max2(p.tol, vd_tol);
         }
         Ok(())
@@ -3331,8 +3576,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Merges `other` into `pv` (`CombineProtoVertex`): the larger tolerance, all of
     /// `other`'s vertex definitions (re-owned, still listed at `other`), the position
     /// averaged over the definitions (`other` contributing its own position once per
-    /// definition), and `other`'s proto edges re-pointed and listed at `pv`; not upstream:
-    /// and the uncertainty regions of `other`'s points.
+    /// definition), and `other`'s proto edges re-pointed and listed at `pv`. Not upstream:
+    /// the uncertainty regions of `other`'s points, and (#16637) `other`'s absorbed points,
+    /// which are listed at `pv` too, the averaged position covering all of them
+    /// ([`ProtoVertex::set_position`]).
     ///
     /// # Errors
     ///
@@ -3346,6 +3593,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let this = self.pv_mut(pv)?;
         this.tol = max2(this.tol, o.tol);
         this.absorbed_proto_edge = this.absorbed_proto_edge || o.absorbed_proto_edge;
+        // Not upstream (#16637): the definitions `other` combined away are this one's
+        // (covered where the position is written below).
+        this.absorb(&o.absorbed_points, !o.absorbed_unbounded);
 
         // the average of all VDs, starting with what is here already
         let mut ave_pos = (this.vertex_defs.len() as f64) * this.position;
@@ -3356,7 +3606,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
         let this = self.pv_mut(pv)?;
         let num_vds = this.vertex_defs.len();
-        this.position = ave_pos / num_vds as f64;
+        this.set_position(ave_pos / num_vds as f64);
 
         // Replace pOtherPV with 'this' in all of pOtherPV's ProtoEdges.
         for &pe in &o.proto_edges {

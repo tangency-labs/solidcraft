@@ -587,6 +587,8 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
 /// [`check_raw`], the upgrade and the typed record alone: what a piece of a design must pass by
 /// itself ([`crate::newer_file`]), with nothing else in the file for it to refer to.
 pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<()> {
+    // Each drawing is a record of its own family, read by its own rules, numbers and all.
+    take_drawings(&mut v)?;
     check_raw(&v, version)?;
     DESIGN.upgrade(&mut v, version, applied)?;
     let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
@@ -595,6 +597,8 @@ pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>
 
 /// A design's JSON, its format taken out, as the document it holds.
 pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Document> {
+    // Each drawing is a record of its own family, read by its own rules, numbers and all.
+    let drawings = take_drawings(&mut v)?;
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied)?;
@@ -641,7 +645,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         group.features.retain(|feature| feature_ids.contains(feature) && grouped_features.insert(*feature));
     }
     for group in &d.timeline_groups {
-        if group.name.trim().is_empty() || group.name.len() > 128 || !group_ids.insert(group.id) {
+        if group.name.trim().is_empty() || group.name.chars().count() > 128 || !group_ids.insert(group.id) {
             return Err(DocError::Invalid("damaged design: invalid timeline folder".into()));
         }
         if group.parent.is_some_and(|parent| parent == group.id) {
@@ -729,9 +733,20 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
+}
+
+/// Take a plain JSON design's drawings out of its JSON and read each, before the design's own
+/// rules see anything: a drawing this build can't read refuses the design, never dropped.
+fn take_drawings(v: &mut Value) -> Result<Vec<crate::drawing::Drawing>> {
+    let Some(list) = v.as_object_mut().and_then(|o| o.remove("drawings")) else { return Ok(Vec::new()) };
+    let Value::Array(list) = list else { return Err(DocError::Invalid("damaged design: `drawings` is not a list".into())) };
+    crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+    let read = |(i, d): (usize, Value)| crate::drawing::Drawing::from_value(d).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)));
+    list.into_iter().enumerate().map(read).collect()
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {
@@ -1138,7 +1153,7 @@ fn validate_freeform_offsets(value: &Value) -> Result<()> {
 
 /// Largest coordinate or size a design may hold (mm): a kilometre-scale part is already far
 /// outside what the kernel's tolerances serve.
-const MAX_REAL: f64 = 1e9;
+pub(crate) const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
@@ -1953,7 +1968,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        from_level: false,
                         picked_placements: Vec::new(),
+                        one_sided_direction: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -1986,6 +2003,9 @@ mod tests {
         assert_eq!(upgraded.features[1].param_names.len(), 3);
         assert_eq!(upgraded.features[1].param_names[2], "d6");
         let saved: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
+        // The extent is kept, and its From Object keeps starting at the face's level (#17639).
+        let mut old_kind = old_kind;
+        old_kind["extent"]["from_level"] = Value::Bool(true);
         for field in ["extent", "sketch", "operation", "profiles"] {
             assert_eq!(saved["features"][1][field], old_kind[field]);
         }
