@@ -10,6 +10,7 @@
 pub mod agent_setup;
 pub mod batch_params;
 pub mod batch_preflight;
+pub mod browser_find;
 pub mod capture;
 pub mod cmd;
 pub mod control_auth;
@@ -65,9 +66,10 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
+pub use cmd::sketch_selection;
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
-    find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
+    Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
+    extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -3166,6 +3168,8 @@ pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
 
 #[cfg(test)]
 mod boolean_regression_tests;
+#[cfg(test)]
+mod browser_find_tests;
 #[cfg(test)]
 mod computed_commands_tests;
 #[cfg(test)]

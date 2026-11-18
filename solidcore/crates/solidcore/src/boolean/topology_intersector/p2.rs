@@ -162,6 +162,7 @@ use crate::topology::proto_topology::{
 };
 
 use super::coincident_strip::{crossing_inside_coincident_pair, strip_contacts};
+use super::curved_strip::drop_strip_crossings;
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
@@ -1731,6 +1732,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 intersections.push((f1, f2, are_coincident, fi, int_pts));
             }
         }
+
+        // Not upstream (#18166): a curve over a strip of a face within the tolerance of
+        // the other face beside an edge the coincident pairs imprint is no event (module
+        // docs of `curved_strip`).
+        #[cfg(test)]
+        super::curved_strip::probe(k, &*brep, &intersections)?;
+        drop_strip_crossings(k, &*brep, &mut intersections, approx_tol)?;
 
         // Not upstream: the contact points the strip rule proves (module docs of
         // `coincident_strip`), declared before any proto vertex of a face pair is made.

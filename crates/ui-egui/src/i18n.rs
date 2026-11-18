@@ -854,6 +854,7 @@ mod tests {
             include_str!("documents.rs"),
             include_str!("dialogs.rs"),
             include_str!("browser.rs"),
+            include_str!("browser_search.rs"),
             include_str!("sketch_palette.rs"),
             include_str!("design_properties.rs"),
             include_str!("home.rs"),
@@ -1603,6 +1604,7 @@ mod tests {
         KitCall { name: "search_field", args: &[3], id: false, trim: &[] },
         KitCall { name: "menu_filter", args: &[3], id: false, trim: &[] },
         KitCall { name: "placement_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "canvas_value_field", args: &[4], id: false, trim: &[] },
         KitCall { name: "library_cell", args: &[3], id: false, trim: &[] },
         // actions.rs
         KitCall { name: "icon_button_at", args: &[3], id: false, trim: &[] },

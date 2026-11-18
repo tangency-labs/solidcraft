@@ -330,6 +330,16 @@ row, `motion.play` lists such joints under `unmoved`, and `joint.list` names eve
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
 
+An imported assembly holds each of its parts with a rigid joint, so `joint.list` on it can run to
+hundreds of rows. Filters keep only the rows asked for: `moving_only` leaves out rigid and
+suppressed joints, `exclude_rigid` every rigid joint, `exclude_rigid_groups` only the rigid joints
+that hold a component's contents together (the ones Unlock Contents removes), `kinds` keeps the
+listed joint types, and `occurrences` keeps the joints with an end at those parts or at a part
+inside them. `dof_free_only` lists only the parts that can still move under `dof`, and
+`joint.solve` takes it too. The reply's `omitted` counts what was left out, by type, and
+`summary: true` adds every joint counted by type, with one row per component for the rigid joints
+that hold its contents (the 20 largest; `more_rigid_groups` counts the rest). `joint.inspect` takes the same filters.
+
 Driving a joint turns the side that is held by no grounded part, with everything joined to it
 rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
 they are, so the parts beyond it move with the side that turns. A joint between two grounded
@@ -703,3 +713,19 @@ no geometry, such as grease, paint, a label or packaging: it is listed in every 
 quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
 that would put a body, a sketch or a component into it is refused. An empty component can be
 made virtual with `component.metadata.set {component, virtual: true}`.
+
+## Finding things in the browser
+
+The magnifier in the Browser panel's header (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a
+search box in the header, in place of the panel's title. The box holds the magnifier, the field, a filter and **×**. It finds components, bodies, sketches, joints, and construction planes, axes and points by name. It finds the text anywhere in a name,
+ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
+`*:1` finds every first instance. Each placement of a component is found on its own, so a bolt
+placed six times is listed six times, each under the components that hold it.
+
+Only the matches and their parents stay in the tree, opened for the search; closing a row there
+leaves the tree's own folds as they were. The filter narrows the search to the kinds
+you tick, each with how many it matches, or with nothing typed lists everything of those kinds;
+**All kinds** clears them. **Select all** selects what was found, and **Hide others** hides every
+body it didn't find; the line under the field then says how many it hid, with **Undo**. Esc, **×**
+or the magnifier in the box ends the search and closes the box. Scripts and agents
+search the same way with `browser.find`.

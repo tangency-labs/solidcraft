@@ -134,6 +134,37 @@ pub fn icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) ->
     icon_button_colored(ui, rect, icon, label, None)
 }
 
+/// What [`filter_button_at`] drew: the button, its badge (when something is picked) and what the
+/// open list's `add` returned.
+pub struct FilterButton<R> {
+    pub response: Response,
+    pub badge: Option<egui::Rect>,
+    pub inner: Option<R>,
+}
+
+/// A filter's icon button inside `rect`: it opens a list of choices that stays open for clicks
+/// inside it (as `add_column_button`'s), and a badge at its corner counts the `picked` choices.
+/// Tokens: icon button tokens; `accent, on_accent, font_small, space_4`.
+pub fn filter_button_at<R>(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, picked: usize, add: impl FnOnce(&mut Ui) -> R) -> FilterButton<R> {
+    let t = Tokens::get();
+    let response = icon_button_at(ui, rect, icon, label);
+    let badge = (picked > 0).then(|| {
+        let galley = ui.painter().layout_no_wrap(picked.to_string(), egui::FontId::proportional(t.font_small), t.on_accent);
+        let size = vec2((galley.size().x + t.space_4).max(galley.size().y), galley.size().y);
+        let badge = egui::Rect::from_min_size(egui::pos2(rect.right() - size.x, rect.top()), size);
+        ui.painter().rect_filled(badge, size.y / 2.0, t.accent);
+        ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
+        badge
+    });
+    let popup = crate::Container::new(ui.ctx(), crate::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let open = popup.is_open();
+    let inner = popup.show(|ui| crate::scope(ui, add)).map(|r| r.inner);
+    if open {
+        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    }
+    FilterButton { response, badge, inner }
+}
+
 /// Quiet secondary action: a small, muted glyph with the normal full-size hit target.
 pub fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
     icon_button_presentation(ui, rect, icon, label, None, true, false)

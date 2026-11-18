@@ -207,6 +207,34 @@ sector that finds a coincident face use hands the pair to `fix_face_coincidence`
 face is merged into both until the two faces' edges are all mated, at most
 `MAX_COINCIDENT_SURFACE_PASSES` passes. If that changed the topology, the classify step starts again.
 
+**Coincident edges between related vertices.** Before that imprint, `relate_coincident_edges`
+(`merge/coincident_edges.rs`, called from `fix_face_coincidence` once the check asks for a merge)
+relates an unrelated edge of one face to the one unrelated edge of the other that joins the vertices
+related to its two ends, when `certified_line_gap` proves the two curves within the larger of their
+two edge tolerances of each other over both intervals (a Hausdorff bound with every rounding
+counted; one of the two must be a line, the other is taken through its certain hull points).
+Otherwise the imprint copies each onto the other face as a second edge between the same two
+vertices, and the two zero-area faces between the copies keep the result from closing (an arc that
+grazes a coplanar box face, `boolean_api.rs` `an_arc_grazing_a_coplanar_box_face_joins`). Shared
+ends alone relate nothing: two arcs that join the same vertices may bow apart, and a line and an
+arc that bow apart by more than the tolerance stay two edges and are imprinted. An edge with more
+than one such partner is left to the imprint.
+
+**Vertex placed by its best certified edge crossing.** An intersection curve that ends on an edge
+places the boolean vertex there; several curves can end on one edge near one point, and the first
+one found placed it upstream. A later crossing with a smaller misplacement bound along the edge
+(the points' gap over the sine of the curve's angle to the edge) moves the vertex definition only
+when two certificates hold over the stretch of the edge between the first placement and the new
+one, each a bound over the whole piece in outward-rounded interval arithmetic
+(`curve_piece_gap_bound`, `query/curve_surface_gap.rs`): the edge stays within the definition's
+tolerance of the other object (face, edge or vertex), and of the curve whose crossing placed it
+first. A grazing first crossing runs along the edge and certifies the stretch it covers; a steep one
+leaves the edge at once and certifies only a stretch within the tolerance. Every candidate is
+certified from the first placement, so the result does not depend on the order the crossings arrive
+in. A surface without a NURBS net (an offset surface) or a curve kind without NURBS data gives no
+certificate, and the vertex keeps its first placement (`VertexDefinition::place_by_crossing`,
+`topology/proto_topology/p1/proto.rs`).
+
 **How coincidence is decided.** `Surface::coincidence_check` (`surface/surface/p8.rs`) is exact only
 for the plane: a plane is parallel within the angle that moves its far end by the tolerance and
 passes through the other's origin (`surface/plane/p1.rs`). For other surfaces the base check is
@@ -403,13 +431,44 @@ intervals beside them with each curve bounded over its certified hull. To declar
 proto vertices exist, `intersect_topology` first intersects every face pair, then makes their proto
 topology in the same order (shell vertices and wire edges before them, as upstream).
 
+**What a vertex stands for.** The points a proto vertex takes for one become one vertex in each
+body, placed at one of them, and that vertex stands for all of them: a curve that fixed another of
+the points still ends at that point, not at the vertex's. An edge's end has to lie within half its
+vertex's tolerance ([validity-and-tolerances.md](validity-and-tolerances.md) §5.2), so the vertex's
+tolerance is at least twice the distance from its point to the end of each curve that ends at it:
+a distance between two computed points, exact to rounding, whatever the points lie on (a
+construction's bound, §8 there). After the imprint each vertex a definition made is given that
+tolerance (`certified_vertex_gaps`, `topology_intersector/p1.rs`), and only while its ball stays
+clear of the far vertex of each of its edges, that vertex taken at its own grown tolerance: a
+vertex cannot stand for both ends of an edge. For a definition placed exactly (each source a
+vertex, a line edge or a plane face) the gap is all there is to cover, so its edges grow to their
+own ends' gaps too and a ball that is not clear is refused (`MergedVertexReaches`). Any other
+vertex keeps its tolerance where its ball is not clear (`covers_staying_clear`): the points of
+its proto vertex may lie as far apart as their regions reach (a box edge grazing a unit sphere
+at 0.17° crosses it twice, 5.8e-3 apart, one point by its reach of 3.4e-3), and an edge that
+ends at another of them is not at this vertex for a tolerance to say so. Upstream grows a vertex
+to its distance from its edges' curves, not from their ends, and leaves an intersection curve's
+end where it is. Two vertices of a 0.68 mm sphere united with a box (`ub175` of
+`boolean.api_brep`) show both. A box corner 9.8e-6 outside the sphere is taken for the nearest
+point of the circle the box's bottom face cuts, 9.97e-6 away; it kept the 1.95e-5 that covers
+its 9.77e-6 from the corner's edge lines, 2e-7 short of the corner at half. And the sphere's seam
+meets a box edge that runs 4.2e-6 inside the sphere, 2.17e-5 below where the circle of the box's
+next face crosses the seam: the two crossings are one point (tolerances of 1.4e-5 and 1e-5), the
+vertex lies at the lower one (1.2e-5 in the union), and the circle's two halves end 2.17e-5 above it
+(Level2 "Edge/Vertex gap", twice). The corner now has 2.0e-5 and the seam vertex 4.3e-5, 7.5e-5
+from its neighbours.
+
 **One edge or two.** The same holds one dimension up. An intersection curve that runs between two
 vertices of a face which already has an edge between those two vertices is that edge when the two
 are proved one curve: every point of each within the sum of their tolerances (the larger of the
 face's and the curve's, plus the edge's, read at most the B-rep's) of the other, over their whole
 lengths, or within a vertex's tolerance of that vertex, which holds both ends. An edge's tolerance
 grows as its vertices take in points, so read as grown it made the answer depend on the order of
-the merges before (a sheet shelled by exactly two tolerances lost one of its four alike side walls). `SmEdgeDefinition::Imprint` then takes the
+the merges before (a sheet shelled by exactly two tolerances lost one of its four alike side walls).
+A vertex's tolerance grows the same way, as the curves that end at it are imprinted, so each of the
+two vertices is read with the ball that covers the asked curve's own end there, twice its distance
+from the vertex's point (what the vertex has once that curve is an edge: "What a vertex stands
+for"), where that is more than its stored tolerance. `SmEdgeDefinition::Imprint` then takes the
 edge and makes no second one beside it, in either operand (`face_edge_proved_to_be`,
 `proto_topology/p2.rs`; `find_edge_proved_along`, `geom/tools.rs`). The proof is an enclosure, never
 samples (`Curve::proved_together`, `curve/proximity.rs`): each curve is cut into pieces, a piece is
@@ -425,7 +484,13 @@ vertex and the crossing the wall's cut by the seat's end plane, an ellipse of ra
 4e-9 inside the circle: the circle's edge. The capture distance used to make the three one vertex,
 which hid the question. A sliver between two such edges is no solid: two boxes overlapping in a
 wedge 1e-4 across and 5e-6 thick intersect in nothing (kept as two edges, the wedge was a body of
-three faces that failed its check).
+three faces that failed its check). Nor is a lens between two such curves a face. In `ub175` the box
+edge runs 1.5e-4 inside the sphere, 4.2e-6 deep, and the circle the box's next face cuts rises
+2.13e-5 above it at the sphere's seam, where the seam vertex splits both: each half of the circle
+lies in the vertex's ball (4.3e-5) or within 1.6e-5 of its half of the edge, and is that edge.
+Read with the tolerance the vertex had when the circle was asked (1e-5), the two halves were
+second edges and the two slivers of the box face between them (5.5e-10 each) faces of the
+intersection and the difference, whose edges the face check takes for coincident.
 
 **Seams and poles.** A tolerance band says where a boundary of material may lie. A seam (an edge
 with the same face on both sides: `face_on_both_sides`, `topology/edge.rs`) and a pole (a vertex
@@ -433,7 +498,14 @@ all of whose edges are such seams: `inside_face`, `topology/vertex.rs`) bound no
 are where the surface's parametrisation ends or degenerates, and the face goes on across them. So
 their tolerance adds nothing to a contact: a curve meets a seam edge or a pole only where the
 curve's own uncertainty region reaches it (`SourceReach` and `in_reach_region`,
-`intersect/curve_class/p1.rs`; `edge_solutions`, `p9.rs`; `intersect_vertices_in`, `p5.rs`).
+`intersect/curve_class/p1.rs`; `edge_solutions`, `p9.rs`; `intersect_vertices_in`, `p5.rs`). For the
+same reason no other face pair meets a curve that runs along a seam: the face on the seam's
+other side is the face itself. Such a run, proved within the intersection tolerance of the seam
+(`Curve::proved_near`), is kept as on the seam rather than removed as mislabelled
+(`are_coincident_maybe`, `intersect/curve_class/p7.rs`), and its end is where it leaves the seam,
+known to its tolerance, not a crossing of the seam (`runs_along_seam`,
+`proto_topology/p3.rs`): a drill whose wall passed within the tolerance of a cut ball's rim
+vertex on the seam was left open there (tangency-labs/solidcore#3339).
 
 The region depends on what fixes the curve. An edge's curve is given: it is known to its
 tolerance. An intersection curve of two surfaces is known across itself only to
@@ -675,9 +747,10 @@ A reviewer can check each of these on a change to the boolean.
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
-- Opt-in fixes for the cases in §5, §6 and §8: `keep_operand_uv_trims`,
-  `boolean_vertex_by_best_crossing` (`solidcore/src/kernel.rs`). Always on: the union's
-  solid-leak refusal (WR-619), the outer shell first, the clean-up of slits and the split of a coincident
+- Opt-in fix for the cases in §5, §6 and §8: `keep_operand_uv_trims`
+  (`solidcore/src/kernel.rs`). Always on: the union's solid-leak refusal (WR-619), a boolean
+  vertex placed again by a later edge crossing with a smaller misplacement bound (gap over sine) only
+  where a certificate proves the move stays one point (WR-410, §5), the outer shell first, the clean-up of slits and the split of a coincident
   definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
   whose boxes lie apart, and a new planar face leaves in place the inner loops whose boxes lie
   outside its outer loop's box (WR-527), always.

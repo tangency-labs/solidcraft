@@ -70,7 +70,7 @@ pub(crate) enum Tree<'a> {
 /// bodies are meshes (a KiCad board's substrate next to its copper).
 pub(crate) fn add_step_in_component(s: &mut Session, component: u64, file: &str, step: String, feature_name: &str) -> Result<u64> {
     let imp = solidcraft_kernel::step_import_shared(&step).map_err(|e| EngineError::Other(format!("import: {e}")))?;
-    let kind = FeatureKind::Import { file: file.to_string(), step: step.into(), components: imp.tree.clone(), skip: Vec::new() };
+    let kind = FeatureKind::Import { file: file.to_string(), step: step.into(), components: imp.tree.clone(), skip: Vec::new(), records: None };
     let id = s.doc_mut().add_feature(kind, Some(feature_name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = component;

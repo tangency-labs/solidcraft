@@ -146,7 +146,7 @@ pub(super) struct Setup {
 /// selected edge use.
 fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     use crate::own_builder::{build, counts, failed_output, Built};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let built = match build(&mut k, &i.brep, i.validate_only, i.init_gaps)? {
         Some(built) => built,
         None => crate::own_reader::brep_in_order(
@@ -401,7 +401,7 @@ fn run_rust_op(
     b: &mut Brep,
     eu: EdgeuseId,
 ) -> Result<Result<Vec<f64>, SolidError>, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     Ok(match op {
         OpIn::Tangent {
             tol_deg,
@@ -420,7 +420,7 @@ fn run_rust_op(
             step_off,
             tol_deg,
             ..
-        } => eu2::is_convex_radial_sector(&Kernel::default(), b, eu, *n, *step_off, *tol_deg)
+        } => eu2::is_convex_radial_sector(&crate::runner_kernel(), b, eu, *n, *step_off, *tol_deg)
             .map(|r| vec![flag(r)]),
         OpIn::StepOff {
             frac,
@@ -451,7 +451,7 @@ fn run_rust_op(
             };
             let status = t.and_then(|t| {
                 eu2::evaluate_binormal_step_off_into(
-                    &Kernel::default(),
+                    &crate::runner_kernel(),
                     b,
                     eu,
                     t,

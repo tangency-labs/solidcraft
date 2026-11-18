@@ -323,7 +323,7 @@ fn a_part_the_check_fails_after_the_import_shows_raises_the_chip_and_the_status_
     let path = dir.join("block.step");
     std::fs::write(&path, include_str!("../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-    app.insert_path_with(&path.to_string_lossy(), &Default::default(), false);
+    app.insert_path_with(&path.to_string_lossy(), &Default::default(), false).unwrap();
     let id = app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).expect("the import").id;
     let report = app.session.model.result(id).and_then(|r| r.import_report.clone()).expect("the import's check");
     report.settled().expect("the check ends");
