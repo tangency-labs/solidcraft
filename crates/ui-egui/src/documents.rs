@@ -4468,7 +4468,6 @@ mod tests {
             let mut a = app();
             a.preferences.keep_work_on_tab_switch = keep;
             two_sheet_drawing(&mut a);
-            a.preferences.drawings_preview = true;
             crate::drawing_workspace::enter(&mut a, true).unwrap();
             a.drawing_workspace.settings_open = true;
             new_design(&mut a);

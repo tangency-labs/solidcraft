@@ -1647,6 +1647,8 @@ pub struct Model {
     import_notices: Vec<u64>,
     /// The import check runs this model has put in `import_notices`, by feature.
     told_imports: Vec<(u64, kernel::ImportChecks)>,
+    /// Import heals were settled into the model that no evaluation has brought in yet.
+    import_heals_owed: bool,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -1683,6 +1685,9 @@ pub struct Model {
     frame_bodies: Arc<std::sync::Mutex<FrameBodies>>,
     /// When SMLib's check runs on the features this model evaluates ([`Model::set_validation`]).
     validation: kernel::Validation,
+    /// The last `evaluate` ran with the tolerance heal preference off
+    /// ([`kernel::heals_tolerance_defects`]; [`Model::heals`]).
+    heal_off: bool,
     /// Inputs proven to describe placement-independent geometry, and the state they produced.
     placement_inputs: Option<placement_reuse::Inputs>,
     /// All evaluated features use supported local inputs; computed with the existing owner index.
@@ -1725,6 +1730,14 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     rolled_back.hash(&mut h);
     vals.get(DESIGN_LEN).map(|v| v.v.to_bits()).hash(&mut h);
     hash_feature_json(f, steps, &mut h);
+    // An import read, and a Repair evaluated, with the tolerance heal off are other results.
+    if steps.heal_off && matches!(f.kind, FeatureKind::Import { .. } | FeatureKind::Repair { .. }) {
+        ("tolerance heal", "off").hash(&mut h);
+    }
+    // An import whose checks healed its parts is the healed import ([`ImportDigests::heals`]).
+    if let Some(heals) = steps.heals(f.id) {
+        heals.digest().hash(&mut h);
+    }
     for n in param_names(f) {
         n.hash(&mut h);
         match (vals.get(&n), doc.text_param(&n)) {
@@ -1749,6 +1762,15 @@ struct ImportDigests {
     /// An import kept as records: its records and their digest, computed once per records.
     records: std::collections::HashMap<u64, (Arc<kernel::ImportRecords>, u64)>,
     meshes: std::collections::HashMap<u64, Vec<MeshDigest>>,
+    /// The parts SMLib's checks of an import healed once they ended (after the import was
+    /// first shown: [`Model::settle_import_checks`]), by import feature, with the digest of the
+    /// text they were read from: the import is then its healed bodies, and its fingerprint (and
+    /// so every fingerprint after it) says so. Kept while the feature's text is the same.
+    heals: std::collections::HashMap<u64, (u64, Arc<kernel::ImportHeals>)>,
+    /// Evaluated with the tolerance heal preference off: imports and Repair features say so in
+    /// their fingerprints ([`fingerprint`]), so turning the preference either way evaluates them
+    /// again. Nothing is added with it on, so the fingerprints saved before it stand.
+    heal_off: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1768,13 +1790,17 @@ impl MeshDigest {
 }
 
 impl ImportDigests {
-    fn of(doc: &Document, known: &ImportDigests) -> ImportDigests {
-        let mut out = ImportDigests::default();
+    fn of(doc: &Document, known: &ImportDigests, heal: bool) -> ImportDigests {
+        let mut out = ImportDigests { heal_off: !heal, ..ImportDigests::default() };
         for f in &doc.features {
             match &f.kind {
                 FeatureKind::Import { step, records, .. } => {
                     let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
                     out.steps.insert(f.id, (step.clone(), digest));
+                    // Kept while the heal preference is on: off, the import is its parts as read.
+                    if let Some(heals) = known.heals.get(&f.id).filter(|(of, _)| *of == digest && heal) {
+                        out.heals.insert(f.id, heals.clone());
+                    }
                     if let Some(r) = records {
                         let digest = known.records_digest(f.id, r).unwrap_or_else(|| records_digest(r));
                         out.records.insert(f.id, (r.clone(), digest));
@@ -1800,6 +1826,11 @@ impl ImportDigests {
             }
         }
         out
+    }
+
+    /// The heals the import `id` is evaluated with, if its checks healed its parts.
+    fn heals(&self, id: u64) -> Option<&Arc<kernel::ImportHeals>> {
+        self.heals.get(&id).map(|(_, heals)| heals)
     }
 
     fn get(&self, id: u64, step: &Arc<str>) -> Option<u64> {
@@ -2251,6 +2282,18 @@ fn validation_digest(validation: kernel::Validation) -> u64 {
             h.finish()
         }
     }
+}
+
+/// What the tolerance heal preference ([`kernel::heals_tolerance_defects`]) adds to the context
+/// digest: nothing with it on (the default), so a result is taken from the cache only as healed
+/// as it was evaluated (an import's parts, and Repair's heal first).
+pub(crate) fn heal_digest(heal: bool) -> u64 {
+    if heal {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    ("tolerance heal", "off").hash(&mut h);
+    h.finish()
 }
 
 /// SMLib's check of every body a feature made or changed (in `after`, not in `before`, the
@@ -3397,15 +3440,53 @@ impl Model {
     /// Which runs were told of is this model's own record ([`Self::import_notices`]), kept with
     /// its copies, so a copy evaluated beside it (a scratch or look-ahead evaluation) cannot take
     /// a notice from it, and a result restored from the evaluation cache is not told of twice.
-    pub fn settle_import_checks(&mut self) {
+    ///
+    /// Checks that healed parts the result does not have yet ([`kernel::ImportChecks::heals`])
+    /// make the import its healed bodies from then on: the heals join the import's fingerprint,
+    /// and the import and every result after it are marked stale, keeping their geometry until
+    /// the next [`Model::evaluate`] brings them up to date ([`Model::is_stale`]). Returns
+    /// whether an evaluation is owed to such heals: settled now or by an earlier call, and not
+    /// evaluated since (a caller that could not evaluate then is asked again).
+    ///
+    /// With the tolerance heal preference off ([`kernel::heals_tolerance_defects`]), a run that
+    /// healed (begun while it was on) is not taken, nor what it found: the import is marked stale
+    /// and evaluation owed, which reads it again as read.
+    pub fn settle_import_checks(&mut self) -> bool {
+        self.settle_import_checks_under(kernel::heals_tolerance_defects())
+    }
+
+    /// [`Self::settle_import_checks`] with the heal preference given.
+    pub(crate) fn settle_import_checks_under(&mut self, heal: bool) -> bool {
         let (found, told) = (&mut self.import_notices, &mut self.told_imports);
-        for r in &mut self.results {
+        let digests = &mut self.import_digests;
+        let mut stale_from: Option<usize> = None;
+        for (i, r) in self.results.iter_mut().enumerate() {
             let Some(report) = r.import_report.as_ref() else { continue };
             if report.checks.is_empty() || report.checking() {
                 continue;
             }
             let run = &report.checks;
-            let fresh = run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
+            // The read that brings healed parts in checks and heals the file again: that run ends
+            // with the heals the model already has, and is not news.
+            let heals = run.heals();
+            let known = heals.as_ref().is_some_and(|h| digests.heals(r.id).is_some_and(|k| k.digest() == h.digest()));
+            // With the heal preference off, a run that healed (begun while it was on) is not taken,
+            // nor its notes (the heal's note over the part as read): the run is dropped, so no
+            // view of the report shows them, and the import is read again.
+            if heals.is_some() && !known && !heal {
+                let as_read = kernel::ImportReport { checks: Default::default(), ..(**report).clone() };
+                r.import_report = (!as_read.issues.is_empty()).then(|| Arc::new(as_read));
+                stale_from = Some(stale_from.map_or(i, |s| s.min(i)));
+                continue;
+            }
+            if let Some(heals) = heals
+                && !known
+                && let Some((_, text)) = digests.steps.get(&r.id)
+            {
+                digests.heals.insert(r.id, (*text, heals));
+                stale_from = Some(stale_from.map_or(i, |s| s.min(i)));
+            }
+            let fresh = !known && run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
             if fresh {
                 told.push((r.id, run.clone()));
             }
@@ -3416,6 +3497,21 @@ impl Model {
                 found.push(r.id);
             }
         }
+        if let Some(from) = stale_from {
+            for r in self.results.iter_mut().skip(from) {
+                r.stale = true;
+            }
+            // The fingerprints from the import on are no longer the results'.
+            self.fingerprinted = None;
+            self.placement_inputs = None;
+            self.import_heals_owed = true;
+        }
+        self.import_heals_owed
+    }
+
+    /// Some import is its bodies as its checks healed them ([`Self::settle_import_checks`]).
+    pub(crate) fn has_import_heals(&self) -> bool {
+        !self.import_digests.heals.is_empty()
     }
 
     /// The imports whose checks found a part to repair since the last call
@@ -3557,7 +3653,7 @@ impl Model {
         }
         // The fingerprints from the first stored sketch on.
         let vals = evaluation_values(doc).0;
-        let steps = ImportDigests::of(doc, &self.import_digests);
+        let steps = ImportDigests::of(doc, &self.import_digests, self.heals());
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev_fp = first.checked_sub(1).and_then(|i| self.results.get(i)).map_or(0, |r| r.fingerprint);
         for (i, f) in doc.features.iter().enumerate().skip(first) {
@@ -3611,7 +3707,8 @@ impl Model {
             return false;
         }
         let vals = evaluation_values(doc).0;
-        let steps = ImportDigests::of(doc, &self.import_digests);
+        // as the next evaluation would fingerprint them: under the preference as it is now
+        let steps = ImportDigests::of(doc, &self.import_digests, kernel::heals_tolerance_defects());
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev = 0;
         // The model each feature starts from (which components the bodies it names are in).
@@ -3645,6 +3742,14 @@ impl Model {
         self.validation
     }
 
+    /// Whether this model's results were evaluated with the tolerance heal preference on
+    /// ([`kernel::heals_tolerance_defects`]): an import's failing parts healed, Repair healing
+    /// first. A model evaluated with it off holds other results: a saved one is not taken up
+    /// with the preference on, nor the reverse.
+    pub fn heals(&self) -> bool {
+        !self.heal_off
+    }
+
     /// Check the features evaluated from now on under `validation` ([`kernel::Validation`]):
     /// after every sweep, boolean and blend, once on the bodies each feature keeps, or not at
     /// all. The results already there stand until their features are evaluated again; the cache
@@ -3659,6 +3764,7 @@ impl Model {
         // sketch and every feature after it fail, the results end in the state they ended in
         // before, which would keep showing the sketch as it was before the edit.
         self.held = None;
+        self.import_heals_owed = false;
         let _span = solidcraft_profile::span("doc", "evaluate");
         self.placement_inputs = None;
         self.fingerprinted = None;
@@ -3677,11 +3783,14 @@ impl Model {
         let mut restored = 0;
         let marker = doc.marker.unwrap_or(usize::MAX);
         let validation = self.validation;
-        let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
+        // read once: the context, the fingerprints and the model's record agree
+        let heal = kernel::heals_tolerance_defects();
+        self.heal_off = !heal;
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
-        self.import_digests = ImportDigests::of(doc, &self.import_digests);
+        self.import_digests = ImportDigests::of(doc, &self.import_digests, heal);
         let primed = self.primed.as_ref().filter(|(context, _)| !self.no_cache && *context == ctx).map(|(_, results)| results.clone());
         // Each feature's component, for `Document::legacy_body_component` on every body after
         // every feature without searching the timeline for each (the first feature with an id).
@@ -3980,8 +4089,12 @@ impl Model {
                     }
                     None => kernel::guard(&f.name, || {
                         let _val_guard = EvalValidationGuard::new(validation);
-                        let (r, deferred) =
-                            kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
+                        let (r, deferred) = kernel::validating(validation, || {
+                            IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
+                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal);
+                            IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
+                            r
+                        });
                         r.map_err(|e| match e {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
@@ -4324,7 +4437,7 @@ impl Model {
     pub(crate) fn refingerprint_from(&mut self, doc: &Document, start: usize) {
         self.placement_inputs = None;
         self.fingerprinted = None;
-        self.import_digests = ImportDigests::of(doc, &self.import_digests);
+        self.import_digests = ImportDigests::of(doc, &self.import_digests, self.heals());
         let start = start.min(self.results.len()).min(doc.features.len());
         if start == self.results.len().min(doc.features.len()) {
             return;
@@ -4961,8 +5074,14 @@ const MAX_CLOSE_TOOL_PAIRS: usize = 4096;
 
 /// Whether no two of `bodies` meet or touch, decided on their exact shapes. Only pairs whose
 /// exact boxes, grown by twice the bodies' tolerances (as [`kernel::apart`] grows them), meet
-/// are tested, by [`apart_by_union`]. `false` whenever that cannot be shown: a mesh body, a body
-/// without an exact box, too many pairs to test, a union that fails.
+/// are tested. All of the bodies of those pairs are tested together: their union comes out with
+/// as many material regions as there are bodies of them, and no two of those regions meet.
+/// Crossing and nested bodies come out in one piece, touching ones in one or in two that share
+/// an edge or a face.
+/// One union of all of them replaces a union for every pair of them: a pattern of fifty copies
+/// of a coil cut took a union for each of its pairs, and minutes (#17632).
+/// `false` whenever that cannot be shown: a mesh body, a body without an exact box, too many
+/// pairs to test, a union that fails.
 fn tools_clearly_apart(bodies: &[Body]) -> bool {
     if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
         return false;
@@ -4987,13 +5106,35 @@ fn tools_clearly_apart(bodies: &[Body]) -> bool {
             close.push((i, j));
         }
     }
-    close.into_iter().all(|(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b)))
+    if close.is_empty() {
+        // No two of them meet: they are apart.
+        return true;
+    }
+    // The bodies of those pairs: the union of all of them says whether they are apart.
+    let mut in_pair = vec![false; bodies.len()];
+    for &(i, j) in &close {
+        in_pair[i] = true;
+        in_pair[j] = true;
+    }
+    let group: Vec<&Body> = (0..bodies.len()).filter(|&i| in_pair[i]).map(|i| &bodies[i]).collect();
+    #[cfg(test)]
+    cost_tests::count(|c| c.apart_unions += 1);
+    match kernel::union_all(&group) {
+        // One union of all of them: it comes out with a piece for each of them when no two of
+        // them meet or touch.
+        Ok(one) => one.record().material_regions().len() == group.len() && one.region_contacts().is_ok_and(|c| c.is_empty()),
+        // The union of all of them failed: each pair is tried on its own, as before.
+        Err(_) => close.iter().all(|&(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b))),
+    }
 }
 
 /// Whether the exact union of `a` and `b` comes out in two pieces that share no face, edge or
 /// vertex. Crossing and nested bodies come out in one piece, touching ones in one or in two that
-/// share an edge or a face.
+/// share an edge or a face. The fallback of [`tools_clearly_apart`], for a union of all the
+/// bodies that failed.
 fn apart_by_union(a: &Body, b: &Body) -> bool {
+    #[cfg(test)]
+    cost_tests::count(|c| c.apart_unions += 1);
     match kernel::boolean(a, b, BoolOp::Union) {
         Ok(Some(u)) => u.record().material_regions().len() == 2 && u.region_contacts().is_ok_and(|c| c.is_empty()),
         _ => false,
@@ -5017,6 +5158,9 @@ thread_local! {
     /// What the feature being evaluated says about targets it found joined into another body
     /// ([`joined_into`]); [`eval_feature`] adds them to its warning.
     static JOINED_TARGETS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The heals of the import being evaluated, as its fingerprint has them
+    /// ([`ImportDigests::heals`]); set by [`Model::evaluate`] for that one feature.
+    static IMPORT_HEALS: std::cell::RefCell<Option<Arc<kernel::ImportHeals>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The body that the target `name`, gone from the model, is part of now: a Combine before `f`
@@ -5321,6 +5465,10 @@ fn apply_traced_with(
             // boolean: in a design of many bodies that was most of a hole's time (#10225). A body
             // whose exact box lies clear of every tool's is left as it is. A body shown in another
             // frame, and a mesh body, are cut as before; an intersect removes the bodies it misses.
+            // The exact box of the body is measured only when it can show a tool apart of it: a
+            // tool inside the body is not apart from it, and measuring the box of a body with
+            // many faces costs the kernel minutes (#18821: 347 s for the cup of the report,
+            // against 30 s for the cut the box was measured for).
             let reach: Option<Vec<Option<solidcraft_geom::Aabb3>>> =
                 (op == Operation::Cut && !tools.iter().any(|t| t.body.is_mesh())).then(|| tools.iter().map(|t| more::exact_box(&t.body)).collect());
             for &ti in &target_idx {
@@ -5331,6 +5479,7 @@ fn apply_traced_with(
                     && into.is_none()
                     && !reach.is_empty()
                     && !target.body.is_mesh()
+                    && !more::tools_inside(target, reach)
                     && let Some(tb) = more::exact_box(&target.body)
                     && reach.iter().all(|tool| more::boxes_apart(&Some(tb), tool))
                 {
@@ -9823,7 +9972,16 @@ fn replay(
                         }
                         // A copy of a fillet with per-edge radii pairs each copied edge with its radius.
                         (FeatureKind::Fillet { turn, .. }, None) if each_r.is_some() => {
+                            // Before its fillet has run (a pattern placed ahead of it): the radii
+                            // pair with the picks, so their count is checked as the fillet checks it.
                             let all = each_r.as_deref().unwrap_or(&[]);
+                            if all.len() != edges.len() {
+                                return Err(DocError::Invalid(format!(
+                                    "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                                    all.len(),
+                                    edges.len()
+                                )));
+                            }
                             let used: Vec<f64> = idx.iter().map(|i| all.get(*i).copied().unwrap_or(r)).collect();
                             mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
                         }
@@ -10933,6 +11091,7 @@ fn chamfer_with(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -10941,16 +11100,20 @@ fn eval_feature(
     warning: &mut Option<String>,
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
+    heal: bool,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
     r
 }
 
-/// [`eval_feature`] for one kind of feature.
+/// [`eval_feature`] for one kind of feature. `heal` is the tolerance heal preference the
+/// evaluation read once ([`Model::heals`]): Repair heals first as it says, whatever the
+/// preference became since.
+#[allow(clippy::too_many_arguments)]
 fn eval_feature_kind(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -10959,6 +11122,7 @@ fn eval_feature_kind(
     warning: &mut Option<String>,
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
+    heal: bool,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -11685,11 +11849,12 @@ fn eval_feature_kind(
                 _ => false,
             };
             let mut picks = Vec::with_capacity(groups.len());
-            // Per-edge radii: each resolved edge point keyed (exactly) to its pick and radius. The
-            // smooth-edge filter below only drops picks, so the keys survive it.
-            let key = |p: &Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
-            let mut radius_of: BTreeMap<[u64; 3], (usize, f64)> = BTreeMap::new();
-            let mut by_pick: Vec<(usize, Vec3)> = Vec::new();
+            // Per-edge radii: each resolved edge point, on its body, keyed (exactly) to its pick and
+            // radius. The smooth-edge filter below only drops picks, so the keys survive it.
+            let key = |ti: usize, p: &Vec3| (ti, [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+            let mut radius_of: BTreeMap<(usize, [u64; 3]), (usize, f64)> = BTreeMap::new();
+            // (pick, the blended edge's middle, its radius), for pattern and mirror copies.
+            let mut by_pick: Vec<(usize, Vec3, f64)> = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
@@ -11701,7 +11866,7 @@ fn eval_feature_kind(
                         ));
                     }
                     for (p, i) in resolved.iter().zip(idx) {
-                        radius_of.insert(key(p), (*i, all.get(*i).copied().unwrap_or(r)));
+                        radius_of.insert(key(*ti, p), (*i, all.get(*i).copied().unwrap_or(r)));
                     }
                 }
                 picks.push((*ti, resolved));
@@ -11717,7 +11882,8 @@ fn eval_feature_kind(
                 let mut note = None;
                 let propagated = edges.len() > picked;
                 // This body's edges' own radii, found by their resolved points.
-                let each: Option<Vec<f64>> = each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(e)).map_or(r, |(_, x)| *x)).collect());
+                let each: Option<Vec<f64>> =
+                    each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(ti, e)).map_or(r, |(_, x)| *x)).collect());
                 let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
                     .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
@@ -11726,21 +11892,26 @@ fn eval_feature_kind(
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
-                if each.is_some() {
-                    // Per-edge radii: each blended edge with its pick, so a pattern's copies pair each with its radius.
-                    by_pick.extend(edges.iter().filter_map(|e| radius_of.get(&key(e)).map(|(i, _)| (*i, *e))));
-                }
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
-                found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
+                let middles = kernel::blend_edge_middles(&mb.body, &edges)?;
+                if each.is_some() {
+                    // Per-edge radii: each blended edge's middle with its pick and radius.
+                    by_pick.extend(edges.iter().zip(&middles).filter_map(|(e, m)| radius_of.get(&key(ti, e)).map(|(i, x)| (*i, *m, *x))));
+                }
+                found.extend(middles);
                 blended.push((ti, nb));
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
             }
             if each_r.is_some() {
-                by_pick.sort_by_key(|(i, _)| *i);
-                found = by_pick.into_iter().map(|(_, p)| p).collect();
+                // The blended edges in pick order, each with its own radius: pattern and mirror
+                // copies read the radius at the same index as the edge (as a fitted fillet's).
+                by_pick.sort_by_key(|(i, _, _)| *i);
+                found = by_pick.iter().map(|(_, m, _)| *m).collect();
+                fitted = by_pick.iter().map(|(_, _, x)| *x).collect();
+                reduced = true;
             }
             st.blend_edges.insert(f.id, found);
             if reduced {
@@ -11853,14 +12024,33 @@ fn eval_feature_kind(
                 return Ok(()); // the pieces were all joined back into the body they are part of
             }
             let op = if *operation == Operation::NewBody { Operation::Join } else { *operation };
-            // #15913: a join of a surface body fails deep in the kernel or swallows the surface; refuse it here, by name.
-            if op == Operation::Join {
-                let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| b.is_surface()));
-                if let Some(name) = surface {
-                    return Err(DocError::Invalid(format!(
-                        "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
-                    )));
+            // #15913, #18708: booleans require closed solids: an open tool body (or open target in join)
+            // fails deep in kernel export with cryptic errors or swallows surfaces. Refuse it here,
+            // naming the offending body in user terms before attempting the boolean.
+            match op {
+                Operation::Join => {
+                    let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| b.is_surface()));
+                    if let Some(name) = surface {
+                        return Err(DocError::Invalid(format!(
+                            "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
+                        )));
+                    }
                 }
+                Operation::Cut => {
+                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                        return Err(DocError::Invalid(format!(
+                            "\"{name}\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+                        )));
+                    }
+                }
+                Operation::Intersect => {
+                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                        return Err(DocError::Invalid(format!(
+                            "\"{name}\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+                        )));
+                    }
+                }
+                _ => {}
             }
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {
@@ -12013,7 +12203,7 @@ fn eval_feature_kind(
             let gap = val(vals, gap, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let source = st.bodies.get(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
-            let (repaired, report) = kernel::repair(&source.body, &kernel::RepairOptions { gap, patch_holes: *patch_holes })?;
+            let (repaired, report) = kernel::repair(&source.body, &kernel::RepairOptions { gap, patch_holes: *patch_holes, heal_first: heal })?;
             let repaired = repaired.with_color(source.body.color());
             let result = ModelBody::new(source.name.clone(), repaired, source.feature);
             let mut left: Vec<String> =
@@ -12046,10 +12236,15 @@ fn eval_feature_kind(
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
             };
             let names = import_body_names(st, &f.body_names, &imp, skip);
+            // The parts the import's checks healed, when the model has them ([`ImportDigests::heals`]).
+            let heals = IMPORT_HEALS.with(|h| h.borrow().clone());
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
                 let carried = f.link_faces.get(k).map_or(&[][..], Vec::as_slice);
-                let b = crate::lineage::linked_tool(b.body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
+                let healed = heals.as_ref().and_then(|h| h.body(k));
+                let body = healed.map_or(&b.body, |h| &h.body);
+                let source = healed.map(|h| h.face_source.as_slice());
+                let b = crate::lineage::linked_tool_from(body.clone().with_import_certificate(&digest, f.id)?, f.id, carried, source);
                 for record in f.link_threads.get(k).into_iter().flatten() {
                     if !record.axis_point.is_finite()
                         || !record.start.is_finite()

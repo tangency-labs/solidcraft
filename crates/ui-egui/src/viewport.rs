@@ -180,7 +180,24 @@ pub struct ViewportState {
     /// The graphics backend and adapter, as the frame-rate details show them.
     pub(crate) adapter: String,
     pub(crate) slot: SceneSlot,
+    /// The edges of each shared mesh simplified to each tolerance the view asked for
+    /// ([`SimplifiedEdges`]): every copy of a part placed many times draws them, moved.
+    simplified_edges: SimplifiedEdges,
+    /// The model scene key of the last scene built (`scene_key`).
     pub(crate) key: u64,
+    /// The last model scene published to the renderer, kept so levels of detail made since can
+    /// be filled into it ([`publish_levels`]) without building it again.
+    last_scene: std::sync::Mutex<Option<GpuScene>>,
+    /// The instanced meshes of that scene still waiting for their levels: each one's place in
+    /// its `instanced` and its mesh.
+    lod_waiting: std::sync::Mutex<Vec<(usize, std::sync::Arc<solidcraft_engine::geom::Mesh>)>>,
+    /// The levels-of-detail generation the published scene has (`MeshLods::generation`).
+    lods_seen: u64,
+    /// Scenes published since the last one built, each with more levels filled in: the renderer
+    /// takes each as new ([`published_key`]).
+    patches: u64,
+    /// Model scenes built since the viewport started (a scene with levels filled in is not one).
+    pub(crate) scenes_built: u64,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
@@ -753,7 +770,8 @@ fn scene_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     base_scene_key(app).hash(&mut h);
     lod_generation(app).hash(&mut h);
-    app.viewport.mesh_lods.generation().hash(&mut h);
+    // Not the levels of detail: those made since are filled into the scene built
+    // ([`publish_levels`]), each rebuild of a large scene costing a frame.
     h.finish()
 }
 
@@ -1442,6 +1460,49 @@ fn taken_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> Op
 
 /// One body as the model scene draws it. Its geometry lives in a block's canonical vertex
 /// buffer; its colours are palette indices, so appearance edits never touch vertex bytes.
+/// Each mesh's edges simplified to a tolerance (mm, by its bits), by the mesh's address, the mesh
+/// held so its address stays its own: one list per edge, in the mesh's own frame. A placement that
+/// keeps distances (turned, moved, mirrored) moves them where it stands, the same edges as
+/// simplifying its moved copy, so a part placed many times is simplified once per tolerance.
+#[derive(Clone, Default)]
+struct SimplifiedEdges(std::sync::Arc<std::sync::Mutex<SimplifiedMap>>);
+
+type SimplifiedMap = std::collections::HashMap<(usize, u64), (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<Vec<Vec<Vec3>>>)>;
+
+impl SimplifiedEdges {
+    /// `mesh`'s edges simplified to `tol`, made the first time.
+    fn of(&self, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, tol: f64) -> std::sync::Arc<Vec<Vec<Vec3>>> {
+        let key = (std::sync::Arc::as_ptr(mesh) as usize, tol.to_bits());
+        if let Ok(map) = self.0.lock()
+            && let Some((_, edges)) = map.get(&key).filter(|(held, _)| std::sync::Arc::ptr_eq(held, mesh))
+        {
+            return edges.clone();
+        }
+        let edges = std::sync::Arc::new(
+            mesh.edges.iter().map(|e| if e.len() > 2 { crate::edge_detail::simplify(e, tol) } else { e.clone() }).collect::<Vec<_>>(),
+        );
+        if let Ok(mut map) = self.0.lock() {
+            map.insert(key, (mesh.clone(), edges.clone()));
+        }
+        edges
+    }
+
+    /// Let go of the edges of meshes nothing else holds any more (a part no longer shown).
+    fn prune(&self) {
+        if let Ok(mut map) = self.0.lock() {
+            map.retain(|_, (mesh, _)| std::sync::Arc::strong_count(mesh) > 1);
+        }
+    }
+}
+
+/// Whether a placement keeps distances (its turn orthonormal, as a rigid move or a mirror is): its
+/// edges simplified before it moves them are the same as simplified after.
+fn keeps_distances(m: &solidcraft_engine::doc::Mat) -> bool {
+    let column = |c: usize| Vec3::new(m[c][0], m[c][1], m[c][2]);
+    let (x, y, z) = (column(0), column(1), column(2));
+    [x.dot(x), y.dot(y), z.dot(z)].iter().all(|l| (l - 1.0).abs() < 1e-9) && x.dot(y).abs() < 1e-9 && x.dot(z).abs() < 1e-9 && y.dot(z).abs() < 1e-9
+}
+
 struct BodyDraw {
     /// The body's name in the world state, for the highlight's lookup of its triangles.
     name: String,
@@ -1469,6 +1530,8 @@ struct BodyDraw {
     /// shows it ([`crate::edge_detail`]). Part of its block's key, not of [`BodyDraw::key`]: the
     /// blocks keep their bodies when the view changes it.
     edge_tol: f64,
+    /// The simplified edges of the meshes drawn, shared with every other body ([`SimplifiedEdges`]).
+    simplified: SimplifiedEdges,
 }
 
 impl BodyDraw {
@@ -1506,6 +1569,9 @@ impl BodyDraw {
         }
         let placed = |p: Vec3| self.place.as_ref().map_or(p, |m| solidcraft_engine::doc::apply_point(m, p));
         let at = |p: Vec3| placed(p).to_f32();
+        // A placed copy's edges: its part's simplified once for every copy that keeps distances
+        // (most do). A body drawn from its own mesh simplifies its own: nothing would share them.
+        let shared = (edges && self.edge_tol > 0.0 && self.place.as_ref().is_some_and(keeps_distances)).then(|| self.simplified.of(m, self.edge_tol));
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
             if !m.edge_visible(ei) || (shaded && !m.shaded_edge_visible(ei)) {
                 continue;
@@ -1516,8 +1582,12 @@ impl BodyDraw {
                     out.hidden_line(a, b, self.hidden_edge, 1.0);
                 }
             };
-            if self.edge_tol > 0.0 && e.len() > 2 {
-                // Simplified where it stands (a placement may scale), to the view's tolerance.
+            if let Some(simplified) = shared.as_ref().and_then(|s| s.get(ei)) {
+                for w in simplified.windows(2) {
+                    emit(at(w[0]), at(w[1]));
+                }
+            } else if self.edge_tol > 0.0 && e.len() > 2 {
+                // Simplified where it stands (a placement that scales), to the view's tolerance.
                 let simplified = crate::edge_detail::simplify(&e.iter().map(|p| placed(*p)).collect::<Vec<_>>(), self.edge_tol);
                 for w in simplified.windows(2) {
                     emit(w[0].to_f32(), w[1].to_f32());
@@ -1713,6 +1783,8 @@ struct Instances {
     lods: crate::mesh_lod::MeshLods,
     /// The parts of meshes drawn a look at a time, from the last scene and made in this one.
     parts: LookParts,
+    /// The meshes placed whose levels of detail are not made yet: each one's place in `meshes`.
+    waiting: Vec<(usize, std::sync::Arc<solidcraft_engine::geom::Mesh>)>,
     /// The parts this scene used (the others are dropped when it holds every shown body).
     parts_used: std::collections::HashSet<(usize, u64)>,
 }
@@ -1753,6 +1825,7 @@ impl Instances {
             lods: app.viewport.mesh_lods.clone(),
             parts,
             parts_used: std::collections::HashSet::new(),
+            waiting: Vec::new(),
         }
     }
 
@@ -1770,7 +1843,7 @@ impl Instances {
         if !lod_eligible && matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded) && !oit {
             return None;
         }
-        self.add_placement(&mesh, &m, lod_eligible, b.is_closed(), col, look)?;
+        self.add_placement(&mesh, &m, true, b.is_closed(), col, look)?;
         Some((mesh, m))
     }
 
@@ -1821,17 +1894,19 @@ impl Instances {
     }
 
     /// One placement `m` of `mesh` in colour `col`, drawn `look`, among the instances (its
-    /// triangles made, or kept from the last scene, the first time).
+    /// triangles made, or kept from the last scene, the first time; with its levels of detail
+    /// when `levels`).
     fn add_placement(
         &mut self,
         mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>,
         m: &solidcraft_engine::doc::Mat,
-        lod_eligible: bool,
+        levels: bool,
         closed: bool,
         col: crate::gpu::PaletteIndex,
         look: crate::gpu::InstanceLook,
     ) -> Option<()> {
         let mesh = mesh.clone();
+        let wants_levels = levels;
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
         let at = match self.by_mesh.get(&(key, look)).copied() {
@@ -1846,10 +1921,12 @@ impl Instances {
                             Some((_, t)) => t.clone(),
                             None => taken_shared_tris(&mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(&mesh))),
                         },
-                        // Keep the existing detail of newly instanced single reference meshes.
-                        if lod_eligible { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
+                        if levels { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
                     ),
                 };
+                if levels.is_empty() && wants_levels {
+                    self.waiting.push((self.meshes.len(), mesh.clone()));
+                }
                 self.meshes.push((mesh.clone(), crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, closed }));
                 self.by_mesh.insert((key, look), self.meshes.len() - 1);
                 self.meshes.len() - 1
@@ -1863,6 +1940,10 @@ impl Instances {
     /// The instanced meshes, keeping their triangles for the next scene (and, for a scene of
     /// only some bodies, the others' too: their levels of detail stay).
     fn finish(self, app: &SolveApp, whole: bool) -> Vec<crate::gpu::InstancedMesh> {
+        // A whole scene's meshes waiting for levels: filled in when made ([`publish_levels`]).
+        if whole && let Ok(mut w) = app.viewport.lod_waiting.lock() {
+            w.clone_from(&self.waiting);
+        }
         let kept: InstancedTris =
             self.meshes.iter().map(|(mesh, inst)| (std::sync::Arc::as_ptr(mesh) as usize, (mesh.clone(), inst.tris.clone()))).collect();
         if whole {
@@ -1900,12 +1981,83 @@ fn shared_mesh(
     Some(if q == DisplayQuality::Normal { b.mesh_in_place() } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()) })
 }
 
+/// Build the model scene (whose key is `key`) and hand it to the renderer, keeping it to fill in
+/// levels of detail made later ([`publish_levels`]).
+fn publish_model_scene(app: &mut SolveApp, key: u64) {
+    // Levels made while it is built are filled in afterwards.
+    let lods = app.viewport.mesh_lods.generation();
+    let sc = build_scene(app);
+    if let Ok(mut last) = app.viewport.last_scene.lock() {
+        *last = Some(sc.clone());
+    }
+    if let Ok(mut slot) = app.viewport.slot.lock() {
+        *slot = Some(sc);
+    }
+    app.viewport.key = key;
+    app.viewport.patches = 0;
+    app.viewport.lods_seen = lods;
+    app.viewport.scenes_built += 1;
+}
+
+/// Fill the levels of detail made since into the published model scene and hand it to the
+/// renderer again, without building it again: the renderer keeps every buffer it has and uploads
+/// only the new levels' triangles. Each part's levels come as they are made; a large scene built
+/// again for them would cost a frame each time. Whether a scene was published.
+fn publish_levels(app: &mut SolveApp) -> bool {
+    let generation = app.viewport.mesh_lods.generation();
+    if generation == app.viewport.lods_seen {
+        return false;
+    }
+    app.viewport.lods_seen = generation;
+    let lods = app.viewport.mesh_lods.clone();
+    let mut ready: Vec<(usize, crate::mesh_lod::Levels)> = Vec::new();
+    if let Ok(mut waiting) = app.viewport.lod_waiting.lock() {
+        waiting.retain(|(at, mesh)| match lods.levels(mesh) {
+            Some(levels) => {
+                ready.push((*at, levels));
+                false
+            }
+            None => true,
+        });
+    }
+    ready.retain(|(_, levels)| !levels.is_empty());
+    if ready.is_empty() {
+        return false;
+    }
+    let Some(mut sc) = app.viewport.last_scene.lock().ok().and_then(|last| last.clone()) else { return false };
+    for (at, levels) in ready {
+        if let Some(m) = sc.instanced.get_mut(at) {
+            m.levels = levels.as_ref().clone();
+        }
+    }
+    if let Ok(mut last) = app.viewport.last_scene.lock() {
+        *last = Some(sc.clone());
+    }
+    if let Ok(mut slot) = app.viewport.slot.lock() {
+        *slot = Some(sc);
+    }
+    app.viewport.patches += 1;
+    true
+}
+
+/// The key the renderer takes the published model scene by: the scene's own, and another for
+/// each time levels of detail were filled into it ([`publish_levels`]).
+fn published_key(app: &SolveApp) -> u64 {
+    if app.viewport.patches == 0 {
+        return app.viewport.key;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (app.viewport.key, app.viewport.patches).hash(&mut h);
+    h.finish()
+}
+
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     // Bodies where their occurrences place them.
     let st = crate::open_meshing::shown_world(app);
     // The blocks the last scene built, reused when their bodies come back as they were.
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
     let (mut sc, made) = body_scene(app, &st, |_| true, true, &mut kept);
+    app.viewport.simplified_edges.prune();
     keep_body_tris(app, &made);
     if let Ok(mut b) = app.viewport.blocks.lock() {
         *b = made;
@@ -2254,6 +2406,7 @@ fn body_scene(
                 edge: slots.edge,
                 hidden_edge: slots.hidden_edge,
                 edge_tol,
+                simplified: app.viewport.simplified_edges.clone(),
             },
             None => BodyDraw {
                 name,
@@ -2269,6 +2422,7 @@ fn body_scene(
                 edge: slots.edge,
                 hidden_edge: slots.hidden_edge,
                 edge_tol,
+                simplified: app.viewport.simplified_edges.clone(),
             },
         };
         let key = body.key(shaded, edges, hidden_edges, markers);
@@ -6539,14 +6693,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.preview.moving_layer()
         };
         if !layered && key != app.viewport.key {
-            let sc = build_scene(app);
-            if let Ok(mut slot) = app.viewport.slot.lock() {
-                *slot = Some(sc);
-            }
+            publish_model_scene(app, key);
             drag_layer::whole_scene_built(app);
-            app.viewport.key = key;
             app.viewport.build_ms = crate::now_ms() - t0;
             crate::frame_watch::step(app, "model scene");
+        } else if !layered {
+            publish_levels(app);
         }
         refresh_sketch_scene(app, &proj);
         if app.viewport.wireframe.busy() {
@@ -6572,7 +6724,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ao_samples,
             product: false,
             upload_error: None,
-            key: app.viewport.key,
+            key: published_key(app),
             slot: app.viewport.slot.clone(),
             sketch_key: app.viewport.sketch_key,
             sketch_slot: app.viewport.sketch_slot.clone(),
@@ -11426,6 +11578,90 @@ mod tests {
         app
     }
 
+    /// The edges of a part placed many times are simplified once for every copy (in the part's own
+    /// frame, then moved), the same lines as simplifying each moved copy: a large assembly copied a
+    /// hundred times simplified every copy's edges on the window's thread at each scene build. A
+    /// placement that scales simplifies its own.
+    #[test]
+    fn a_parts_edges_are_simplified_once_for_every_copy_that_keeps_distances() {
+        let part =
+            solidcraft_engine::doc::ModelBody::new("Part".into(), solidcraft_engine::kernel::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap(), 1);
+        let mesh = part.mesh();
+        assert!(mesh.edges.iter().any(|e| e.len() > 8), "round edges to simplify");
+        let simplified = SimplifiedEdges::default();
+        let tol = 0.05;
+        let draw = |place: solidcraft_engine::doc::Mat| BodyDraw {
+            name: "Copy".into(),
+            mesh: mesh.clone(),
+            place: Some(place),
+            face_colors: Vec::new(),
+            body_color: crate::gpu::PaletteIndex(0),
+            face_classes: Vec::new(),
+            faded: false,
+            closed: true,
+            on_gpu: true,
+            slot_base: 0,
+            edge: crate::gpu::PaletteIndex(1),
+            hidden_edge: crate::gpu::PaletteIndex(2),
+            edge_tol: tol,
+            simplified: simplified.clone(),
+        };
+        let lines = |d: &BodyDraw| {
+            let block = build_block(std::slice::from_ref(d), true, &|d, out| d.build(out, true, true, false, false));
+            let f = |b: &[u8], i: usize| f32::from_le_bytes(b[4 * i..4 * i + 4].try_into().unwrap());
+            block
+                .bytes
+                .lines
+                .as_chunks::<{ crate::gpu::LINE_SIZE }>()
+                .0
+                .iter()
+                .map(|r| [f(r, 0), f(r, 1), f(r, 2), f(r, 3), f(r, 4), f(r, 5)])
+                .collect::<Vec<_>>()
+        };
+        // Simplified where each copy stands, as before.
+        let expected = |m: &solidcraft_engine::doc::Mat| {
+            let mut out = Vec::new();
+            for (ei, e) in mesh.edges.iter().enumerate() {
+                if !mesh.edge_visible(ei) || !mesh.shaded_edge_visible(ei) {
+                    continue;
+                }
+                let moved: Vec<Vec3> = e.iter().map(|p| solidcraft_engine::doc::apply_point(m, *p)).collect();
+                let kept = if moved.len() > 2 { crate::edge_detail::simplify(&moved, tol) } else { moved };
+                for w in kept.windows(2) {
+                    let (a, b) = (w[0].to_f32(), w[1].to_f32());
+                    out.push([a[0], a[1], a[2], b[0], b[1], b[2]]);
+                }
+            }
+            out
+        };
+        let turned = solidcraft_engine::doc::rigid(Vec3::new(40.0, -5.0, 3.0), Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0), 0.6);
+        let moved = solidcraft_engine::doc::rigid(Vec3::new(-70.0, 12.0, 0.0), Vec3::ZERO, Vec3::Z, 2.1);
+        for m in [turned, moved] {
+            let (got, want) = (lines(&draw(m)), expected(&m));
+            assert_eq!(got.len(), want.len());
+            for (g, w) in got.iter().zip(&want) {
+                assert!(g.iter().zip(w).all(|(a, b)| (a - b).abs() < 1e-4), "{g:?} vs {w:?}");
+            }
+        }
+        assert_eq!(simplified.0.lock().unwrap().len(), 1, "simplified once for both copies");
+        // Scaled: simplified where it stands, not from the part's.
+        let mut scaled = moved;
+        for column in scaled.iter_mut().take(3) {
+            for v in column.iter_mut().take(3) {
+                *v *= 2.0;
+            }
+        }
+        let _ = lines(&draw(scaled));
+        assert_eq!(simplified.0.lock().unwrap().len(), 1);
+        // Let go of when the part is no longer drawn.
+        drop(part);
+        simplified.prune();
+        assert_eq!(simplified.0.lock().unwrap().len(), 1, "still held by the mesh drawn");
+        drop(mesh);
+        simplified.prune();
+        assert!(simplified.0.lock().unwrap().is_empty());
+    }
+
     /// On a device that evaluates plans, the placements of a part placed many times are drawn
     /// as instances of the part's triangles, not each from its own moved plan (every placement
     /// took its own copy of the part's triangles on the GPU), and they share the part's palette
@@ -11921,16 +12157,27 @@ mod tests {
         app
     }
 
+    /// A single reference mesh drawn as an instance gets levels of detail like any other: no size
+    /// threshold. Its first scene draws it in full while they are made off the window thread;
+    /// then they are filled into that scene without building it again.
     #[test]
-    fn a_single_reference_mesh_below_the_former_instance_threshold_keeps_full_detail() {
-        let app = single_reference_grid(100);
-        let scene = build_scene(&app);
-        let instance = scene.instanced.first().unwrap();
+    fn a_single_reference_mesh_drawn_as_an_instance_gets_levels_too() {
+        let mut app = single_reference_grid(100);
+        let key = scene_key(&app);
+        publish_model_scene(&mut app, key);
+        let published = |app: &SolveApp| app.viewport.last_scene.lock().unwrap().clone().unwrap();
+        let scene = published(&app);
         assert_eq!(scene.instanced.len(), 1);
-        assert_eq!(instance.tris.indices.len(), 20_000 * 3);
-        assert!(instance.levels.is_empty());
-        assert!(!app.viewport.mesh_lods.busy(), "no simplification job is started");
-        assert_eq!(app.viewport.mesh_lods.generation(), 0);
+        assert_eq!(scene.instanced[0].tris.indices.len(), 20_000 * 3);
+        assert!(scene.instanced[0].levels.is_empty(), "drawn in full while its levels are made");
+        let began = std::time::Instant::now();
+        while app.viewport.mesh_lods.busy() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "made off the window thread");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(publish_levels(&mut app));
+        assert_eq!(app.viewport.scenes_built, 1, "filled in, not built again");
+        assert!(!published(&app).instanced[0].levels.is_empty());
     }
 
     #[test]
@@ -12027,7 +12274,9 @@ mod tests {
         let (mesh, _) = crate::open_meshing::session_world(&app.session).bodies[0].mesh_in_place();
         assert!(mesh.triangles.len() >= INSTANCE_ALONE);
         let key = scene_key(&app);
-        let first = build_scene(&app);
+        publish_model_scene(&mut app, key);
+        let published = |app: &SolveApp| app.viewport.last_scene.lock().unwrap().clone().unwrap();
+        let first = published(&app);
         assert_eq!(first.instanced.len(), 1);
         assert!(first.instanced[0].levels.is_empty(), "drawn in full meanwhile");
         let began = std::time::Instant::now();
@@ -12035,8 +12284,16 @@ mod tests {
             assert!(began.elapsed() < std::time::Duration::from_secs(120), "the levels are made");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert_ne!(scene_key(&app), key, "the scene is built again when they are");
-        let scene = build_scene(&app);
+        // Filled into the scene published, not built again: rebuilding a large scene for each
+        // part's levels cost a frame each time.
+        assert_eq!(scene_key(&app), key, "the scene is not built again for them");
+        let renderer_key = published_key(&app);
+        assert!(publish_levels(&mut app), "the scene is published again with them");
+        assert_ne!(published_key(&app), renderer_key, "the renderer takes it as new");
+        assert!(!publish_levels(&mut app), "and only once");
+        assert_eq!(app.viewport.scenes_built, 1, "built once");
+        let scene = published(&app);
+        assert!(std::sync::Arc::ptr_eq(&scene.instanced[0].tris, &first.instanced[0].tris), "the same triangles: kept on the GPU");
         let levels = &scene.instanced[0].levels;
         assert!(levels.len() >= 2, "{} levels", levels.len());
         // Small on screen: the sphere about 30 px across.

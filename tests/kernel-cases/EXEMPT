@@ -258,6 +258,7 @@ parameters.move                   parameter bookkeeping; a value change that reb
 parameters.rename                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.users                  parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parts.library                     a listing of the parts library
+parts.seats                       read-only bore seat frames from the current model
 plugin.check                      plugins: checks a package's manifest and component without running it, no geometry; crates/engine/src/plugin/tests.rs
 plugin.grants                     plugins: lists the stored approvals, no geometry; apps/solidcraft-cli/tests/run_results.rs
 plugin.inspect                    plugins: a package's manifest and entries, no geometry; crates/engine/src/plugin/tests.rs

@@ -1098,7 +1098,9 @@ fn value_box_full(
     // #6608: the box moves out of the command window it would otherwise cover, and out of the
     // manipulator's handles: it keeps its place by its geometry, but a box that would cover
     // either of them moves out of it.
-    let at = if place.dialog.is_some() || place.handles.is_some() {
+    // Always inside the drawing area too: a box hung from a handle that has left the window
+    // (a far drag) would be cut off at its edge, out of reach (#18722).
+    let at = if place.dialog.is_some() || place.handles.is_some() || place.view.is_some() {
         let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), place);
         pivot.pos_in_rect(&kept)
     } else {
@@ -1140,10 +1142,12 @@ const DIALOG_GAP: f32 = 4.0;
 /// handles: whole, beside what it would cover (leaving a gap of `DIALOG_GAP`), and inside the
 /// drawing area (`view`), like a box kept in view (#6608). The sides of the command window
 /// are tried first, then the sides of the handles, and the first side that leaves the box
-/// clear of both wins. A box that misses them keeps its place, and one that no side clears
-/// keeps it too, unless a side leaves the handles free: a box over a handle takes the press
-/// the user meant for the handle.
+/// clear of both wins. A box that misses them keeps its place (inside the drawing area), and
+/// one that no side clears keeps it too, unless a side leaves the handles free: a box over a
+/// handle takes the press the user meant for the handle.
 fn clear_of_dialog(rect: egui::Rect, place: BoxPlace) -> egui::Rect {
+    // A box beyond the drawing area comes back inside it before anything else (#18722).
+    let rect = keep_in_view(rect, place.view);
     let mut obstacles: Vec<egui::Rect> = Vec::new();
     if let Some(dialog) = place.dialog {
         obstacles.push(dialog);
@@ -2445,6 +2449,22 @@ mod tests {
         let clear = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(140.0, 24.0));
         let place = BoxPlace { dialog: Some(dialog), view: Some(view), handles: None };
         assert_eq!(clear_of_dialog(clear, place), clear, "a box that misses the window stays");
+    }
+
+    /// #18722: a value box hung from a handle that left the drawing area is brought back inside
+    /// it, whole, with no command window or handles to clear; one already inside stays.
+    #[test]
+    fn a_value_box_beyond_the_drawing_area_comes_back_inside() {
+        let view = egui::Rect::from_min_size(egui::pos2(100.0, 40.0), egui::vec2(1000.0, 700.0));
+        let place = BoxPlace { dialog: None, view: Some(view), handles: None };
+        let size = egui::vec2(140.0, 24.0);
+        for far in [egui::pos2(5000.0, 3000.0), egui::pos2(-900.0, -400.0), egui::pos2(1050.0, 300.0), egui::pos2(300.0, 735.0)] {
+            let kept = clear_of_dialog(egui::Rect::from_min_size(far, size), place);
+            assert!(view.contains_rect(kept), "the box at {far:?} stayed at {kept:?}, outside {view:?}");
+            assert_eq!(kept.size(), size, "the box keeps its size");
+        }
+        let inside = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), size);
+        assert_eq!(clear_of_dialog(inside, place), inside, "a box inside stays where it is");
     }
 
     /// Canvas value boxes sit under Preferences and Report a bug (#9016).
