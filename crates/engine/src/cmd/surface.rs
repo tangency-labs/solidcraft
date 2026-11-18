@@ -2208,6 +2208,46 @@ mod tests {
         }
     }
 
+    /// #18708: a Combine cut or intersect whose tool is open (a shaft through a box with its top
+    /// cap removed, as a STEP shell comes in) is refused up front and names the tool, in any
+    /// position among the tools; the bodies are left as they were.
+    #[test]
+    fn a_cut_with_an_open_tool_is_refused_and_names_it() {
+        for (op, verb) in [("cut", "cut"), ("intersect", "intersect")] {
+            for tools in [vec!["Shaft"], vec!["Peer", "Shaft"]] {
+                let mut s = Session::default();
+                run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+                let shaft = json!({"radius": 2, "height": 20, "base": [5, 5, -5], "operation": "new", "body_name": "Shaft"});
+                run(&mut s, "solid.cylinder", shaft);
+                run(&mut s, "face.delete", json!({"faces": [[5, 5, 15]], "body": "Shaft", "heal": false}));
+                let peer = json!({"length": 4, "width": 4, "height": 4, "corner": [-2, -2, -2], "operation": "new", "body_name": "Peer"});
+                run(&mut s, "solid.box", peer);
+                let before = s.doc.clone();
+                let open = s.world_state().unwrap().body("Shaft").unwrap().body.clone();
+                assert!(open.is_surface());
+                assert_eq!(open.face_count(), 2);
+                let err = s.execute("solid.combine", &json!({"target": "Block", "tools": tools, "operation": op})).unwrap_err().to_string();
+                let says = format!("Shaft isn't a closed solid (it has open edges), so it can't {verb}");
+                assert!(err.contains(&says), "{op} {tools:?}: {err}");
+                assert_eq!(s.doc, before, "a refused Combine must not change the design");
+                let st = s.world_state().unwrap();
+                assert_eq!(st.body("Shaft").unwrap().body.record(), open.record());
+                assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+            }
+        }
+    }
+
+    /// #18708 negative control: a cut with a closed tool through the same box still cuts.
+    #[test]
+    fn a_cut_with_a_closed_tool_is_unchanged() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 20, "base": [5, 5, -5], "operation": "new", "body_name": "Shaft"}));
+        run(&mut s, "solid.combine", json!({"target": "Block", "tools": ["Shaft"], "operation": "cut"}));
+        let want = 1000.0 - std::f64::consts::PI * 4.0 * 10.0;
+        assert!((volume(&s, "Block") - want).abs() < 1e-6, "{}", volume(&s, "Block"));
+    }
+
     /// #15913 negative control: a join of overlapping solids still makes one body of the union.
     #[test]
     fn a_join_of_solids_is_unchanged() {
