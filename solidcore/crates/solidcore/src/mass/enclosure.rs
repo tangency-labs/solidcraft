@@ -2826,10 +2826,18 @@ mod tests {
         let old = nurbs_partials_within_span(cn, ku, kv, ua, ub, va, vb, lk).unwrap();
         let comps = |p: V3<Ivl>| [p.x, p.y, p.z];
         let inside = |p: Ivl, e: Ivl| e.lo <= p.lo && p.hi <= e.hi;
+        // the grid's last point is the box's end exactly (a + (b - a) may round past b)
+        let grid = |a: f64, b: f64, n: i32| {
+            if n == 4 {
+                b
+            } else {
+                a + (b - a) * f64::from(n) / 4.0
+            }
+        };
         for i in 0..=4 {
             for j in 0..=4 {
-                let u = ua + (ub - ua) * f64::from(i) / 4.0;
-                let v = va + (vb - va) * f64::from(j) / 4.0;
+                let u = grid(ua, ub, i);
+                let v = grid(va, vb, j);
                 let at = nurbs_partials(cn, ku, kv, Ivl::from(u), Ivl::from(v), lk);
                 for a in 0..=lk {
                     for c in 0..=(lk - a) {
