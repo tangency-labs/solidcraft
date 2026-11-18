@@ -22,6 +22,7 @@
 )] // test helpers
 
 use solidcore::geom::attribute::AttributeStore;
+use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -851,9 +852,9 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`). Each pair is classified
 ///   against a certified enclosure `[lo, hi]` of the exact volume
 ///   (`mass::enclosure::enclose_volume`, which reads no edge tolerance), asked
-///   `1e-9 * |V|` wide, the goldens' relative tolerance. On `test1` it reaches 7.7e-7 and
-///   both values lie below `lo`, so the larger, this branch's, is closer to the exact
-///   volume. On `corner_box` it stops at its cell budget, 3.1e-3 wide, holding both
+///   `1e-9 * |V|` wide, the goldens' relative tolerance. On `test1` it reaches that width
+///   and both values lie below `lo`, so the larger, this branch's, is closer to the exact
+///   volume. On `corner_box` it stops at its cell budget, wider than asked, holding both
 ///   values: neither can be told farther.
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
@@ -908,8 +909,8 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             let main = f64::from_bits(volume_main);
             let mut k = Kernel::default();
             let mut b = read_corpus(&mut k, name, false);
-            let e =
-                solidcore::mass::enclosure::enclose_volume(&k, &mut b, 1e-9 * main.abs()).unwrap();
+            let asked = 1e-9 * main.abs();
+            let e = solidcore::mass::enclosure::enclose_volume(&k, &mut b, asked).unwrap();
             let class = if e.lo <= volume.min(main) && volume.max(main) <= e.hi {
                 "both enclosed"
             } else if volume.max(main) < e.lo {
@@ -927,7 +928,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             } else {
                 "straddles"
             };
-            volume_classes.push((name, class, e.lo, e.hi));
+            volume_classes.push((name, class, e.lo, e.hi, asked, e.stop));
             moved_volumes.push(name);
         }
     }
@@ -937,7 +938,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         ["Fillet/corner_box.smb", "Fillet/test1.smb"],
         "{failures:#?}"
     );
-    let classes: Vec<_> = volume_classes.iter().map(|&(n, c, _, _)| (n, c)).collect();
+    let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
         [
@@ -946,16 +947,20 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         ],
         "{volume_classes:?}"
     );
-    // (the enclosure widths the doc quotes, to the quoted two figures)
+    // (the doc's claims on the widths, against the asked width rather than as printed
+    // digits, which move with any change to the enclosure's cells: `test1`'s enclosure is
+    // as narrow as asked, so its "closer" is decided within the goldens' relative
+    // tolerance; `corner_box`'s spent its cell budget wider than asked, so "both
+    // enclosed" is all it can say)
     let widths: Vec<_> = volume_classes
         .iter()
-        .map(|&(n, _, lo, hi)| (n, format!("{:.1e}", hi - lo)))
+        .map(|&(n, _, lo, hi, asked, stop)| (n, stop, hi - lo <= asked))
         .collect();
     assert_eq!(
         widths,
         [
-            ("Fillet/corner_box.smb", "3.1e-3".to_string()),
-            ("Fillet/test1.smb", "7.7e-7".to_string())
+            ("Fillet/corner_box.smb", EnclosureStop::Budget, false),
+            ("Fillet/test1.smb", EnclosureStop::Reached, true)
         ],
         "{volume_classes:?}"
     );
