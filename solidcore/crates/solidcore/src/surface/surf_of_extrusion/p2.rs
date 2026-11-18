@@ -76,8 +76,9 @@
 //!   certificate shows the patch in the plane; else the general intersection as
 //!   upstream.
 //! - **Plane-parallel sweep.** Classify against the supplied plane using the sweep
-//!   direction before reducing to intersecting planes. A normal inferred from a thin
-//!   generator triangle can lose accuracy when its points are far from the origin.
+//!   displacement over the full sweep interval before reducing to intersecting planes.
+//!   A normal inferred from a thin generator triangle can lose accuracy when its
+//!   points are far from the origin.
 //! - **Debug code.** The `SM_DEBUG_CODE` drawing and dumps are omitted.
 
 use crate::curve::curve::p7::PropertyAnalysisOptions;
@@ -99,7 +100,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BoundingBoxRequest as SurfaceBoxRequest, IsoCurveOptions, SurfParamType,
 };
-use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use crate::surface::cone::Cone;
 use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
@@ -561,17 +562,47 @@ impl SurfOfExtrusion {
         let gen_own = self.gen_or_null(OP_PLANE)?;
         let tmp = gen_with_out_of_bounds(gen_own, self.base.is_out_of_bounds_enabled());
         let gen = tmp.as_ref().unwrap_or(gen_own);
+        let sweep_ivl = if self.swap_uv {
+            uv_domain.u_interval()
+        } else {
+            uv_domain.v_interval()
+        };
+        // Directrices use the full analytic interval; patches use the caller's
+        // interval (which may extend it when out-of-bounds evaluation is enabled).
+        let full_sweep_ivl = self.anal_uv_domain.v_interval();
+        let sweep_ends = [
+            sweep_ivl.min(),
+            sweep_ivl.max(),
+            full_sweep_ivl.min(),
+            full_sweep_ivl.max(),
+        ];
+        let max_sweep_param = sweep_ends.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+        // Relative to a generator point on the plane, the swept point's normal
+        // displacement is v (n . E). Do not subtract absolute plane equations at
+        // large coordinates. Bound dot-product cancellation and multiplication
+        // rounding, then use the distance tolerance also passed to PatchInputs.
+        let e = self.extrusion_vec;
+        let dot_err = gamma(5)
+            * ((plane_normal.x * e.x).abs()
+                + (plane_normal.y * e.y).abs()
+                + (plane_normal.z * e.z).abs());
+        let sweep_displacement =
+            (plane_normal.dot(e).abs() + dot_err) * max_sweep_param * (1.0 + gamma(2));
         let sweep_parallel_to_plane = self
             .extrusion_vec
-            .is_perpendicular_to(plane_normal, ang_tol);
+            .is_perpendicular_to(plane_normal, ang_tol)
+            && sweep_ends.iter().all(|v| v.is_finite())
+            && sweep_displacement.is_finite()
+            && sweep_displacement <= tol;
 
         // When GenCurve is linear or Planar and swept in its own plane
         // and SweptPlanarSurface is not parallel to input Surface
         // Then,
         //   XSect = Line
-        // A plane-parallel sweep uses the generator/plane intersection below. Its
-        // inferred plane normal may be inaccurate for a thin control-point triangle
-        // at large coordinates; it must not turn a coincident region into a line.
+        // A sweep staying in the plane within tol uses the generator/plane
+        // intersection below. Its inferred plane normal may be inaccurate for a
+        // thin control-point triangle at large coordinates; it must not turn a
+        // coincident region into a line. Larger accumulated drift keeps this path.
         if !sweep_parallel_to_plane
             && matches!(
                 self.orientation,
@@ -2820,6 +2851,56 @@ mod tests {
         let beta = mu(a).max(mu(b));
         let want = uv_area(&cut(&corners, &|p| beta - mu(p))).abs();
         assert_region(&r, &plane, want);
+    }
+
+    /// An angularly parallel sweep can drift 1e-3 off the plane over its extent.
+    /// Both a generator in the plane and one crossing it must give curves on the
+    /// plane within their reported deviation, or decline. A short interval far
+    /// from zero still has the same drift from the generator.
+    #[test]
+    fn nearly_parallel_long_sweep_respects_reported_plane_deviation() {
+        let k = k();
+        for offset in [0.0, 1e6] {
+            let origin = Point3::new(offset, offset, offset);
+            let plane = Plane::from_normal(origin, Vec3::X);
+            for generator_direction in [Vec3::Y, Vec3::X] {
+                for (vmin, vmax) in [(-1e6, 1e6), (1e6, 1e6 + 1.0)] {
+                    let a = origin - generator_direction;
+                    let b = origin + generator_direction;
+                    let mut s = swept(
+                        &k,
+                        &[(a.x, a.y, a.z), (b.x, b.y, b.z)],
+                        None,
+                        Vec3::new(1e-9, 0.0, 1.0),
+                    );
+                    let domain = Extent2d::from_bounds(0.0, vmin, 1.0, vmax);
+                    s.trim_with_domain(&k, &domain).unwrap();
+                    let r = s
+                        .intersect_with_plane(&k, &domain, &plane, &plane.step_uv_domain(), None)
+                        .unwrap();
+                    if r.needs_more_intersections {
+                        assert!(r.curves_3d.is_empty());
+                        continue;
+                    }
+                    assert!(!r.curves_3d.is_empty());
+                    assert_eq!(r.curves_3d.len(), r.deviations.len());
+                    for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+                        let net = gen_base(curve).unwrap().canonical().unwrap();
+                        // Degree-one curves lie on their control segments, so this
+                        // checks every point of every output curve, not samples.
+                        assert_eq!(net.degree, 1);
+                        for &p in &net.control_points {
+                            let distance = plane.position().z_axis().dot(p - origin).abs();
+                            assert!(
+                                distance <= deviation,
+                                "offset {offset}, generator {generator_direction:?}, sweep \
+                                 [{vmin}, {vmax}]: distance {distance} exceeds {deviation}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
