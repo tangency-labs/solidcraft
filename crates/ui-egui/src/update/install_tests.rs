@@ -228,10 +228,7 @@ fn installers_and_disk_images_are_handed_over() {
     std::fs::write(&pkg, b"msi").unwrap();
     assert_eq!(
         apply(&Method::Msi, &pkg).unwrap(),
-        Outcome::Installer(
-            "msiexec".into(),
-            vec!["/i".into(), pkg.to_string_lossy().to_string(), "/passive".into(), "REBOOT=ReallySuppress".into()],
-        )
+        Outcome::Installer("msiexec".into(), vec!["/i".into(), pkg.to_string_lossy().to_string(), "/passive".into(), "REBOOT=ReallySuppress".into()],)
     );
     assert_eq!(apply(&Method::Dmg, &pkg).unwrap(), Outcome::Opened(pkg.clone()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -239,12 +236,8 @@ fn installers_and_disk_images_are_handed_over() {
 
 #[test]
 fn windows_installer_is_followed_by_the_new_version() {
-    let args = vec![
-        "/i".to_string(),
-        r"C:\Users\a b\Temp\solidcraft-update\x.msi".to_string(),
-        "/passive".to_string(),
-        "REBOOT=ReallySuppress".to_string(),
-    ];
+    let args =
+        vec!["/i".to_string(), r"C:\Users\a b\Temp\solidcraft-update\x.msi".to_string(), "/passive".to_string(), "REBOOT=ReallySuppress".to_string()];
     let (program, out) = relaunch_after(Path::new("msiexec"), &args, Path::new(r"C:\Program Files\SolidCraft\it's.exe"));
     assert_eq!(program, PathBuf::from("powershell"));
     assert_eq!(
