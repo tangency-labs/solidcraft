@@ -38,6 +38,8 @@ pub mod soundness;
 pub mod ssi;
 pub mod step;
 pub mod util;
+#[cfg(test)]
+mod wr57_replay;
 
 pub use case::{Case, CaseContext, CaseSource};
 pub use compare::{compare, AbsFloor, CaseDiff, Mismatch, REL_TOL};

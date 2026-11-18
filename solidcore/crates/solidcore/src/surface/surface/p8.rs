@@ -3215,6 +3215,27 @@ impl Surface {
         tol: f64,
         farthest: bool,
     ) -> Result<SingularityInversion> {
+        let body =
+            || self.invert_near_singularity_body(k, test_pt, uv_domain, uv_guess, tol, farthest);
+        // (test-only seam of the WR-57 substitution replay, feature `wr57-replay`)
+        #[cfg(feature = "wr57-replay")]
+        let body = || {
+            let input = super::replay::invert_input(test_pt, uv_domain, uv_guess, tol);
+            super::replay::wrap(super::replay::Seam::Invert, &input, body)
+        };
+        body()
+    }
+
+    /// [`Surface::invert_point_near_singularity_for`]'s work.
+    fn invert_near_singularity_body(
+        &self,
+        k: &Kernel,
+        test_pt: Point3,
+        uv_domain: &Extent2d,
+        uv_guess: Point2,
+        tol: f64,
+        farthest: bool,
+    ) -> Result<SingularityInversion> {
         let reason = TerminationReason::FoundAnswerConverged;
 
         // (the statuses SMLib drops here are passed on, as the fork does, WR-663,
