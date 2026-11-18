@@ -6446,7 +6446,7 @@
   "ui.drawing_ribbon.align": "对齐",
   "ui.drawing_ribbon.issue_short": "发布修订",
   "ui.drawing_ribbon.model_dims_short": "模型尺寸",
-  "ui.drawing_ribbon.planned": "（计划中）",
+  "ui.drawing_ribbon.planned": "即将推出",
   "ui.drawing_ribbon.space": "分布",
   "ui.drawing_ribbon.surface_texture_short": "表面纹理",
   "ui.drawing_settings.immediate": "图纸更改立即生效。每次编辑都是一个撤销步骤。",

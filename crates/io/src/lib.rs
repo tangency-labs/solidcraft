@@ -503,9 +503,9 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
         g.flatten();
         return Ok(g.feature);
     }
-    if bytes.len() > MAX_3MF_BYTES {
-        return Err(IoError::Invalid(format!("mesh file too large ({} MB)", bytes.len() >> 20)));
-    }
+    // A mesh file is read up to the limit for STEP and import files, which Preferences raise
+    // (#17446, #14548).
+    limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();

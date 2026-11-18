@@ -658,13 +658,9 @@ fn add_mesh(
 ) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let gltf = solidcraft_io::is_gltf_path(path);
-    // A glTF file is read up to the limit for STEP and import files, which Preferences raise (#17446).
-    let bytes = if gltf {
-        solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step)
-    } else {
-        solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES)
-    }
-    .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // A mesh file is read up to the limit for STEP and import files, which Preferences raise
+    // (#17446, #14548).
+    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let (mut mf, plan, looks) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =

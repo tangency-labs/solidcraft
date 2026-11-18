@@ -145,7 +145,8 @@ pub struct ExtrusionIntersection {
     pub surface2_uv_curves: Vec<Option<Curve>>,
     /// `pOptCurveTypes`: the kind of each intersection.
     pub curve_types: Vec<TsectCurveType>,
-    /// `pOptDeviations`: the distance of each curve from the surfaces (`0`).
+    /// `pOptDeviations`: distance bounds from the surfaces. Coincident patch
+    /// boundaries carry their certified control-net bound.
     pub deviations: Vec<f64>,
 }
 
@@ -533,6 +534,7 @@ impl SurfOfExtrusion {
     ) -> Result<ExtrusionIntersection> {
         // init output
         let mut out = ExtrusionIntersection::default();
+        let mut patch_output = None;
 
         // plane and ExtrusionSurface locals
         let plane_normal = plane.position().z_axis();
@@ -821,7 +823,7 @@ impl SurfOfExtrusion {
                 .iter()
                 .map(|s| first_param(&s.start.parameters))
                 .collect();
-            let mut patch = Vec::new();
+            let mut patch = None;
             if !ranges.is_empty() {
                 let inputs = PatchInputs {
                     gen,
@@ -850,7 +852,7 @@ impl SurfOfExtrusion {
                         .iter()
                         .any(|&(a, b)| a - EFF_ZERO_PARAM <= t && t <= b + EFF_ZERO_PARAM)
                 });
-                patch = p.curves;
+                patch = Some(p);
             }
             // arrive here for the PointSolutions
 
@@ -980,9 +982,12 @@ impl SurfOfExtrusion {
             }
 
             // the coincident patches' boundaries (not upstream)
-            for (c, t) in patch {
-                out.curves_3d.push(c);
-                out.curve_types.push(t);
+            if let Some(p) = patch {
+                patch_output = Some((out.curves_3d.len(), p.deviation));
+                for (c, t) in p.curves {
+                    out.curves_3d.push(c);
+                    out.curve_types.push(t);
+                }
             }
         } else {
             // this is not a special case intersection:
@@ -1008,7 +1013,10 @@ impl SurfOfExtrusion {
                 };
                 out.curve_types.push(t);
             }
-            out.deviations.push(0.0);
+            let deviation = patch_output
+                .filter(|(start, _)| ii >= *start)
+                .map_or(0.0, |(_, bound)| bound);
+            out.deviations.push(deviation);
         }
 
         // all done
@@ -2476,6 +2484,21 @@ mod tests {
                         assert!(r.curves_3d.is_empty());
                         continue;
                     }
+                    // Each copy reaches |z| = d at a generator control point.
+                    // A reported deviation must enclose that distance, including
+                    // the rounding of computing the control-net bound.
+                    assert_eq!(r.deviations.len(), r.curves_3d.len());
+                    assert!(r.deviations.iter().all(|&v| v.is_finite() && v >= d));
+                    for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+                        let ivl = curve.natural_interval();
+                        for t in [ivl.min(), ivl.mid(), ivl.max()] {
+                            let distance = curve.evaluate_point(&k, t).unwrap().z.abs();
+                            assert!(
+                                distance <= deviation,
+                                "d {d:e} shape {shape}: distance {distance:e} exceeds deviation {deviation:e}"
+                            );
+                        }
+                    }
                     // the sweep (length 2 along Y) of a generator 3 long in X
                     assert_region(&r, &plane, 6.0);
                     if shape < 2 {
@@ -2490,6 +2513,49 @@ mod tests {
                             ],
                         );
                     }
+                }
+            }
+        }
+    }
+
+    /// Positive rational weights keep the generator at z = d. Clipping the
+    /// sweep to the plane's domain returns plane-made sides at z = 0, whose
+    /// deviation must still cover their distance d from the extrusion.
+    #[test]
+    fn clipped_rational_patch_reports_the_generator_offset() {
+        let k = k();
+        for scale in [1e-3, 1.0, 1e3] {
+            let d = 1e-12 * scale;
+            let s = swept(
+                &k,
+                &[(0.0, 0.0, d), (scale, 0.0, d), (2.0 * scale, 0.0, d)],
+                Some(0.5),
+                Vec3::Y * scale,
+            );
+            let plane = xy_plane(Extent2d::from_bounds(
+                0.5 * scale,
+                -0.5 * scale,
+                1.5 * scale,
+                0.5 * scale,
+            ));
+            let dom = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+            let r = s
+                .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), None)
+                .unwrap();
+            assert!(!r.needs_more_intersections, "scale {scale:e}");
+            assert_eq!(r.curves_3d.len(), 4);
+            assert_eq!(r.surface1_uv_curves.len(), r.curves_3d.len());
+            assert_eq!(r.surface2_uv_curves.len(), r.curves_3d.len());
+            assert_eq!(r.curve_types.len(), r.curves_3d.len());
+            assert_eq!(r.deviations.len(), r.curves_3d.len());
+            for ((curve, kind), &deviation) in
+                r.curves_3d.iter().zip(&r.curve_types).zip(&r.deviations)
+            {
+                assert_eq!(*kind, TsectCurveType::RegionBoundary);
+                assert!(deviation.is_finite() && deviation >= d);
+                let ivl = curve.natural_interval();
+                for t in [ivl.min(), ivl.mid(), ivl.max()] {
+                    assert_eq!(curve.evaluate_point(&k, t).unwrap().z, 0.0);
                 }
             }
         }

@@ -25,11 +25,17 @@ fn runs_new_enough(candidate: &[&str]) -> bool {
     Command::new(program).args(prefix).args(["-c", VERSION_CHECK]).output().is_ok_and(|out| out.status.success())
 }
 
-pub fn run(root: &Path) -> Result<(), String> {
-    let Some(python) = choose(candidates(), runs_new_enough) else {
+/// The command that starts a Python new enough for the repository's tools (`cargo xtask fast`
+/// uses it for `scripts/ci/affected.py` too).
+pub(crate) fn python() -> Result<&'static [&'static str], String> {
+    choose(candidates(), runs_new_enough).ok_or_else(|| {
         let tried: Vec<String> = candidates().iter().map(|c| c.join(" ")).collect();
-        return Err(format!("UI icon standards need Python {MINIMUM}+, but none of these started one: {}", tried.join(", ")));
-    };
+        format!("the repository's tools need Python {MINIMUM}+, but none of these started one: {}", tried.join(", "))
+    })
+}
+
+pub fn run(root: &Path) -> Result<(), String> {
+    let python = python().map_err(|e| format!("UI icon standards: {e}"))?;
     let checks = [
         vec!["-B", "crates/look/icons/design/tools/lint_icons.py"],
         vec!["-B", "crates/look/icons/design/tools/icon_status.py", "--check"],
