@@ -882,6 +882,17 @@ fn a_view_menu_opens_under_its_view_and_turns_off_rows_that_do_not_apply() {
 }
 
 #[test]
+fn shift_f10_opens_the_menu_of_the_focused_view_tab() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.clear = true;
+    rig.frame(Vec::new());
+    rig.press(rig.at("t:view:0"), egui::PointerButton::Primary);
+    rig.frame(vec![egui::Event::Key { key: egui::Key::F10, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::SHIFT }]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:vclose").is_some());
+}
+
+#[test]
 fn detached_view_has_a_window_mark_and_retains_its_own_click_targets() {
     let mut rig = TabsRig::with(Some(true));
     let normal = solidcraft_ui_registry::rect_of("t:view:1").expect("view is drawn");
