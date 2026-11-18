@@ -1309,11 +1309,6 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
         "render" => &[&[(8.0, 9.0), (8.9, 7.9), (9.9, 7.2), (11.0, 7.0)]],
         "animation" => &[&[(5.0, 5.0), (19.0, 5.0), (19.0, 19.0), (5.0, 19.0), (5.0, 5.0)], &[(10.0, 9.0), (15.0, 12.0), (10.0, 15.0), (10.0, 9.0)]],
         "rename" => &[&[(4.0, 20.0), (5.0, 16.0), (16.0, 5.0), (19.0, 8.0), (8.0, 19.0), (4.0, 20.0)]],
-        "window" => &[
-            &[(14.0, 4.0), (20.0, 4.0), (20.0, 10.0)],
-            &[(20.0, 4.0), (11.0, 13.0)],
-            &[(18.0, 14.0), (18.0, 20.0), (4.0, 20.0), (4.0, 6.0), (10.0, 6.0)],
-        ],
         "close" => &[&[(6.0, 6.0), (18.0, 18.0)], &[(18.0, 6.0), (6.0, 18.0)]],
         "duplicate" => &[&[(8.0, 8.0), (19.0, 8.0), (19.0, 19.0), (8.0, 19.0), (8.0, 8.0)], &[(5.0, 15.0), (5.0, 5.0), (15.0, 5.0)]],
         "tiles" => &[&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0), (4.0, 4.0)], &[(12.0, 4.0), (12.0, 20.0)], &[(4.0, 12.0), (20.0, 12.0)]],
@@ -1328,6 +1323,10 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
 /// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
 /// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
+    if matches!(icon, "window_here" | "window_other") {
+        crate::icons::paint_ink(p, r, icon, ink);
+        return;
+    }
     let s = r.width() / 24.0;
     let stroke = Stroke::new(2.0 * s, ink);
     let at = |(x, y): (f32, f32)| r.min + vec2(x * s, y * s);
@@ -1362,7 +1361,13 @@ fn menu_rows<'a>(
         }
         let mut item = crate::Item::action(row.id, row.label, "");
         if !row.icon.is_empty() {
-            let (icon, ink) = (row.icon.to_string(), row.accent.unwrap_or(Tokens::get().form_dim));
+            let (icon, ink) = (
+                row.icon.to_string(),
+                row.accent.unwrap_or_else(|| {
+                    let t = Tokens::get();
+                    if matches!(row.icon, "window_here" | "window_other") { t.text_dim } else { t.form_dim }
+                }),
+            );
             item.icon = crate::ItemIcon::paint(move |p, r, opacity| paint_view_glyph(p, r, &icon, ink.gamma_multiply(opacity)));
         }
         if keys && !row.key_on_selected.is_empty() {
@@ -1443,7 +1448,7 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, m
         solidcraft_ui_registry::publish_target(&id, resp.rect);
         if !modern && view.to_window.is_some() {
             let mark = Rect::from_center_size(pos2(resp.rect.right() - t.space_16, resp.rect.center().y), vec2(13.0, 13.0));
-            paint_view_glyph(ui.painter(), mark, "window", t.form_ink.gamma_multiply(DETACHED_VIEW_OPACITY));
+            paint_view_glyph(ui.painter(), mark, crate::icons::window_icon(false), t.app_bar_text.gamma_multiply(DETACHED_VIEW_OPACITY));
             solidcraft_ui_registry::publish_target(&format!("{id}:window"), mark);
         }
         match view.state {
@@ -1638,7 +1643,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     if detached {
         let dot_width = if view.state == ViewState::SourceChanged { 14.0 } else { 0.0 };
         let rect = Rect::from_center_size(pos2(label_x + label_w + dot_width + 10.0, vr.center().y), vec2(13.0, 13.0));
-        paint_view_glyph(&painter, rect, "window", ink);
+        paint_view_glyph(&painter, rect, crate::icons::window_icon(false), ink);
         solidcraft_ui_registry::publish_target(&format!("{}{k}:window", h.view), rect);
     }
     if view.active {
@@ -1856,7 +1861,7 @@ fn draw_clear_view(
             let badge = window_badge(view, stage);
             let mark = Rect::from_min_size(pos2(after, rect.center().y - 5.5), vec2(11.0, 11.0));
             let badge_ink = t.app_bar_text.gamma_multiply(0.70);
-            paint_view_glyph(&painter, mark, "window", badge_ink);
+            paint_view_glyph(&painter, mark, crate::icons::window_icon(false), badge_ink);
             solidcraft_ui_registry::publish_target(&format!("{}{k}:window", strip.handles.view), mark);
             painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(11.0), badge_ink);
         }

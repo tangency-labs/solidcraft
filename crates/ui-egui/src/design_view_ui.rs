@@ -37,9 +37,9 @@ pub const SWITCHER_REOPEN: &str = "switcher.reopen";
 pub const SWITCHER_AS_TABS: &str = "switcher.as_tabs";
 
 pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_TO_WINDOW, "multi_window.move_to_window", "")
-    .with_icon("window", None)
+    .with_icon(solidcraft_ui_kit::icons::window_icon(false), None)
     .for_local_view()
-    .with_children(&[TabMenuRow::new(VIEW_NEW_WINDOW, "multi_window.new_window", "").with_icon("window", None)]);
+    .with_children(&[TabMenuRow::new(VIEW_NEW_WINDOW, "multi_window.new_window", "").with_icon(solidcraft_ui_kit::icons::window_icon(false), None)]);
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
@@ -67,7 +67,11 @@ pub(crate) fn window_menu_rows<'a>(app: &SolveApp, entries: &'a [(String, String
     }
     [new, TabMenuRow::heading(app.tr("multi_window.open_windows")).separated()]
         .into_iter()
-        .chain(entries.iter().map(|(id, label)| TabMenuRow { checked: window_menu_target(id) == Some(current), ..TabMenuRow::new(id, label, "") }))
+        .chain(entries.iter().map(|(id, label)| {
+            let here = window_menu_target(id) == Some(current);
+            let label = if here { app.tr("view_layout.this_window") } else { label };
+            TabMenuRow { checked: here, ..TabMenuRow::new(id, label, "").with_icon(solidcraft_ui_kit::icons::window_icon(here), None) }
+        }))
         .collect()
 }
 
