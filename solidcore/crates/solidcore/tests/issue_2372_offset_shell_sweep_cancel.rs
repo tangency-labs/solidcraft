@@ -217,15 +217,13 @@ fn a_token_fired_before_the_call_cancels_offset_shell_and_sweep() {
     }
 }
 
-/// Every opt-in fix but `geometric_g2_continuity` (as `fork_ea59e9c_section_orders`'s
+/// Every opt-in fix (as `fork_ea59e9c_section_orders`'s
 /// SolidCraft kernel): with them the shell takes #1476's slow path (two 38 000-sample
 /// curve offsets, over 4 min in a debug build).
 fn every_fix_but_g2() -> solidcore::kernel::UpstreamFixes {
     let mut f = solidcore::kernel::UpstreamFixes::default();
     for &name in solidcore::kernel::UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     f
 }
