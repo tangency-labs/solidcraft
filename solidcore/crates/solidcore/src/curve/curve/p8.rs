@@ -8,6 +8,7 @@
 //! | Rust                                                    | Upstream                        |
 //! |---------------------------------------------------------|---------------------------------|
 //! | [`Curve::global_curve_intersect`], [`CurveIntersectOptions`] | `SmCurve::GlobalCurveIntersect` |
+//! | [`curves_meet_at_most_once`], [`touch_is_alone`]         | not upstream (WR-647)           |
 //!
 //! Deviations:
 //! - **Out-params.** The solutions are returned as a [`SolutionArray`].
@@ -82,7 +83,12 @@
 //!   tolerance from both ends of each curve's interval: there the curves part) is taken
 //!   for the one contact inside it: the crossing when the curves change sides across it
 //!   (the separations at its ends, taken across this curve, both past the scaled zero
-//!   with a negative dot product) and part at both of its ends, found by [`local_curve_intersect`] from where the
+//!   with a negative dot product), part at both of its ends and are certified to meet at
+//!   most once over it ([`curves_meet_at_most_once`]: their cones of derivative
+//!   directions part, over the stretches or, nearly parallel, over the pieces left
+//!   near the meeting once the pieces whose hulls are apart are dropped, or one is a
+//!   conic along which the other moves monotonically through the conic's quadratic;
+//!   every rounding counted), found by [`local_curve_intersect`] from where the
 //!   separation, taken as linear, vanishes (or from the nearest range end) inside the
 //!   stretch and nearer than every range end; otherwise, when the stretch is all the
 //!   solutions, the touch: the least distance over it ([`Curve::local_curve_solve`],
@@ -90,10 +96,13 @@
 //!   minimum found from another range end nearer by more than the scaled zero), nearer
 //!   than where they part, placed where the separation across the curves is least
 //!   (`SignedDirectedMinimize`), where the curves MEET (within the scaled zero, evaluated),
-//!   the stretch's only contact (it reaches no farther from the touch than a single
-//!   tangency of the curves' relative curvature there stays within the tolerance, and
-//!   that curvature lifts them apart by more than the scaled zero over it), and for a
-//!   curve against itself not on a fold. Curves within the tolerance of each other that
+//!   certified the stretch's only contact ([`touch_is_alone`]: a straight curve against
+//!   one whose second derivative across it, bounded over the whole stretch from its
+//!   Bernstein-B-spline coefficients, keeps one sign: its meetings with the line lie in
+//!   one interval of rounding size), and for a curve against itself not on a fold. A
+//!   touch of two curved curves, or one the bounds do not certify, keeps its ranges (a
+//!   flat touch, the curves meeting where their separation is at its least and that
+//!   least is zero, is a touch only when so certified). Curves within the tolerance of each other that
 //!   never meet (an edge against a fitted copy of a part of it, leaving it on one side),
 //!   and curves lying on each other over a part of the stretch, keep their ranges as
 //!   upstream. Curves that come
@@ -104,7 +113,9 @@
 //!   lying on each other ends where one of them stops, so a fitted copy of a curve, whose
 //!   tolerance-scale separation can change sides, stays a range (#1036). The fork decided
 //!   this per span pair (tangency-labs/smlib@c2e3d9d, 04b42b4), where the two cannot be
-//!   told apart.
+//!   told apart. The certificates do bounded work: at most
+//!   16 control points of a curve's stretch, and at most 64 pieces of each in the slope
+//!   test; past that, or for curve kinds they do not cover, the ranges are kept.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve, CurveKind};
@@ -127,7 +138,8 @@ use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, min4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
-use crate::nurbs::math::gamma;
+use crate::nurbs::crv_basic::Curve as NurbCurve;
+use crate::nurbs::math::{gamma, NOZ};
 use crate::nurbs::nurbs_crv::{crv_accel_bound, crv_point_error, crv_speed_bound};
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
@@ -2377,9 +2389,12 @@ impl Curve {
     /// The contact is
     /// - a crossing when the separations at the stretch's ends, taken across this curve
     ///   (the tangent's component removed), are both longer than the scaled zero and point
-    ///   to opposite sides (a negative dot product), and the curves part at both of its
+    ///   to opposite sides (a negative dot product), the curves part at both of its
     ///   ends (a stretch that runs on to a curve end may be a crossing followed by the
-    ///   curves together within the tolerance up to that end, and keeps its ranges): the
+    ///   curves together within the tolerance up to that end, and keeps its ranges), and
+    ///   [`curves_meet_at_most_once`] certifies one meeting at most over the stretch (on
+    ///   each curve, from its least to its greatest range-end parameter; three crossings
+    ///   in one stretch keep their ranges): the
     ///   one [`local_curve_intersect`]
     ///   finds within `dist_tol` in the stretch, started where the separation, taken as
     ///   linear between the ends, vanishes, and when the point found there is no nearer
@@ -2409,12 +2424,10 @@ impl Curve {
     ///   against a fitted copy of a part of it that leaves it on one side), and keep their
     ///   ranges as upstream. Nearest at an end of the stretch, they meet there (a round
     ///   leaving a line it is tangent to at their shared end touches it there). And the
-    ///   touch must be the stretch's only contact: the curves' curvatures across the
-    ///   tangent there differ by `kappa`, so a single tangency keeps them within `tol` of
-    ///   each other for at most `sqrt(2 tol / kappa)` along the tangent either side; a
-    ///   stretch reaching farther from the touch on either side (`kappa x² / 2 > tol`), or
-    ///   one over which that curvature lifts them apart by no more than the scaled zero
-    ///   (an exact overlap, whose curvatures agree), keeps its ranges. So does a curve
+    ///   touch must be certified the stretch's only contact ([`touch_is_alone`], over the
+    ///   whole stretch: one straight curve, the other's second derivative across it of
+    ///   one sign); else (an exact overlap, two touches, two curved curves) the stretch
+    ///   keeps its ranges. So does a curve
     ///   against itself whose touch is where it folds back onto itself. Curves that come
     ///   back within the tolerance elsewhere without changing sides
     ///   are one coincidence whose separation passes the tolerance here and there (a fitted
@@ -2557,6 +2570,18 @@ impl Curve {
             ivl1.add_value(e[0]);
             let mut ivl2 = Extent1d::from_value(s[1]);
             ivl2.add_value(e[1]);
+            // the stretch on each curve: this curve's from its least to its greatest
+            // parameter, the other's over every range end of its members
+            let mut other_lo = f64::INFINITY;
+            let mut other_hi = f64::NEG_INFINITY;
+            for &m in &members {
+                let Some(r) = ends.get(m) else { continue };
+                for end in [r.0, r.1] {
+                    other_lo = min2(other_lo, end[1]);
+                    other_hi = max2(other_hi, end[1]);
+                }
+            }
+            let stretches = ((s[0], e[0]), (other_lo, other_hi));
             // the range end (the stretch's, or one where two of its ranges meet) where the
             // curves are nearest
             let (gap_a, gap_b) = (this_a.distance(other_a), this_b.distance(other_b));
@@ -2580,6 +2605,12 @@ impl Curve {
                 // crossing and then the two curves together within the tolerance up to
                 // that end, a coincidence
                 if !(parts_a && parts_b) {
+                    continue;
+                }
+                // and only where it is the stretch's one meeting: the curves' cones of
+                // derivative directions over it part (else three crossings, or a crossing
+                // and a coincidence, could hide in one stretch, and it keeps its ranges)
+                if !curves_meet_at_most_once(k, self, stretches.0, other, stretches.1) {
                     continue;
                 }
                 // start where the separation, taken as linear between the ends, vanishes;
@@ -2721,18 +2752,8 @@ impl Curve {
                         .distance(other.evaluate_point(k, u)?);
                     touch = [t, u, value];
                 }
-                let d1 = self.evaluate(k, touch[0], 2, false, true)?;
-                let d2 = other.evaluate(k, touch[1], 2, false, true)?;
-                let (Some(&p1), Some(&t1), Some(&a1), Some(&p2), Some(&t2), Some(&a2)) = (
-                    d1.first(),
-                    d1.get(1),
-                    d1.get(2),
-                    d2.first(),
-                    d2.get(1),
-                    d2.get(2),
-                ) else {
-                    continue;
-                };
+                let p1 = self.evaluate_point(k, touch[0])?;
+                let p2 = other.evaluate_point(k, touch[1])?;
                 let meet_zero = EFF_ZERO * (1.0 + max2(p1.max_dimension(), p2.max_dimension()));
                 if !matches!(
                     p1.distance(p2).partial_cmp(&meet_zero),
@@ -2745,37 +2766,22 @@ impl Curve {
                 if fold([touch[0], touch[1]], p1)? {
                     continue;
                 }
-                // the touch is the only place in the stretch where the curves meet: they
-                // part from it at second order, with the curvature of each across the
-                // tangent there (`(a - (a.u) u) / |t|²`) differing by `kappa`, so that
-                // within the tolerance of each other they reach `sqrt(2 tol / kappa)` along
-                // the tangent either side of it, and the stretch reaches no farther. A
-                // longer stretch holds more than that one contact: the curves lie on each
-                // other over a part of it (an exact overlap, whose curvatures agree, or a
-                // fitted copy touching its edge where the fit is exact) and it keeps its
-                // ranges. A difference of curvatures that lifts the curves apart by no
-                // more than the scaled zero over the stretch is no parting either.
-                let curvature = |t: Vec3, a: Vec3| -> Option<Vec3> {
-                    let speed2 = t.dot(t);
-                    if speed2.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater) {
-                        return None;
-                    }
-                    let u = t * (1.0 / speed2.sqrt());
-                    Some((a - u * a.dot(u)) * (1.0 / speed2))
-                };
-                let (Some(k1), Some(k2)) = (curvature(t1, a1), curvature(t2, a2)) else {
-                    continue;
-                };
-                let unit = t1 * (1.0 / t1.length());
-                let dk = k1 - k2;
-                let kappa = (dk - unit * dk.dot(unit)).length();
-                let reach_a = (this_a - p1).dot(unit).abs();
-                let reach_b = (this_b - p1).dot(unit).abs();
-                let lift = |x: f64| 0.5 * kappa * x * x;
-                let farthest = max2(reach_a, reach_b);
-                if !(lift(reach_a) <= dist_tol
-                    && lift(reach_b) <= dist_tol
-                    && lift(farthest) > meet_zero)
+                // the touch is the only place in the stretch where the curves meet,
+                // certified over the whole stretch ([`touch_is_alone`]: a straight curve
+                // against one whose second derivative across it keeps one sign over the
+                // stretch; or [`curves_meet_at_most_once`], for curves that pass through
+                // each other in space with both ends of the stretch on one side, as a
+                // line through a space curve); else the stretch may hold more than that
+                // one contact (an exact overlap, a fitted copy touching its edge where the
+                // fit is exact, two touches) and keeps its ranges
+                if !(touch_is_alone(
+                    k,
+                    self,
+                    stretches.0,
+                    other,
+                    stretches.1,
+                    [touch[0], touch[1]],
+                )? || curves_meet_at_most_once(k, self, stretches.0, other, stretches.1))
                 {
                     continue;
                 }
@@ -2936,6 +2942,1122 @@ impl Curve {
         }
         Ok(())
     }
+}
+
+// ---- WR-647 contact certificates ---------------------------------------------------------
+
+/// The most control points of one curve's stretch the WR-647 contact certificates take
+/// (bounded work: the cone test runs over every pair and triple of their differences); a
+/// stretch over more gets no certificate, and its ranges are kept.
+const MAX_STRETCH_POINTS: usize = 16;
+
+/// A curve over a stretch written as a B-spline (WR-647 certificates): knots, degree and
+/// homogeneous control points `(x w, w)` (`w = 1` without weights), each with a bound on
+/// the distance of its computed `x w` from the exact one. With exact arithmetic the curve
+/// over the stretch IS this B-spline: a B-spline kind is its own NURB (the spans meeting
+/// the stretch, by local support), a line or a Hermite cubic is a polynomial written in
+/// Bernstein form, a parallel projection an affine map of the control points.
+struct StretchSpline {
+    knots: Vec<f64>,
+    degree: usize,
+    /// `(x w, w, error of x w)`.
+    points: Vec<(Vec3, f64, f64)>,
+    rational: bool,
+}
+
+/// `a > b`, false for a NaN.
+fn above(a: f64, b: f64) -> bool {
+    a.partial_cmp(&b) == Some(core::cmp::Ordering::Greater)
+}
+
+/// One generator of a cone of derivative directions: a vector and a bound on the
+/// distance of the computed vector from an exact generator.
+#[derive(Clone, Copy)]
+struct ConeGenerator {
+    v: Vec3,
+    err: f64,
+}
+
+impl StretchSpline {
+    /// The spline of `curve` over `[lo, hi]`, or `None` (no certificate) for other curve
+    /// kinds (offset, on-surface, composite, perspective or rotation projections, a
+    /// projection of a projection), a stretch outside the curve's knots, more than
+    /// [`MAX_STRETCH_POINTS`] points, a 2D curve, or anything not finite or a weight not
+    /// positive.
+    fn of(curve: &Curve, lo: f64, hi: f64, projected: bool) -> Option<Self> {
+        if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+            return None;
+        }
+        let spline = match curve.kind() {
+            CurveKind::BSpline(c) => Self::of_nurb(c.nurb_ref().ok()?, lo, hi)?,
+            CurveKind::Ellipse(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi)?,
+            CurveKind::Parabola(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi)?,
+            CurveKind::Hyperbola(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi)?,
+            CurveKind::Line(l) => {
+                // affine in the parameter: the segment between its points at the ends of
+                // the stretch, each computed from `point + s vector scale` (a few
+                // rounded operations on each coordinate)
+                if lo >= hi {
+                    return None;
+                }
+                let anchor = l.line_point().length();
+                let end = |t: f64| -> Option<(Vec3, f64, f64)> {
+                    let p = *l.evaluate(t, 0).first()?;
+                    Some((p, 1.0, 4.0 * gamma(16) * (anchor + p.length())))
+                };
+                Self {
+                    knots: vec![lo, lo, hi, hi],
+                    degree: 1,
+                    points: vec![end(lo)?, end(hi)?],
+                    rational: false,
+                }
+            }
+            CurveKind::Hermite(h) => {
+                // the power basis `P1 + t (D1 + t (C + t D))` in Bernstein form on [0, 1]
+                if !(0.0 <= lo && hi <= 1.0) {
+                    return None;
+                }
+                let (p, d1) = (h.start_point(), h.start_derivative());
+                let (c, d) = h.power_basis();
+                let err = 4.0 * gamma(6) * (p.length() + d1.length() + c.length() + d.length());
+                let bezier = [
+                    p,
+                    p + d1 * (1.0 / 3.0),
+                    p + (d1 * 2.0 + c) * (1.0 / 3.0),
+                    p + d1 + c + d,
+                ];
+                Self {
+                    knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+                    degree: 3,
+                    points: bezier.iter().map(|&b| (b, 1.0, err)).collect(),
+                    rational: false,
+                }
+            }
+            CurveKind::Projected(pc)
+                if pc.proj_type() == ProjectionType::Parallel && !projected =>
+            {
+                // `x - n ((x - o) . n)` is affine: the control points map by it (in
+                // homogeneous form, `x w - n ((x w - o w) . n)`)
+                let base = Self::of(pc.curve(), lo, hi, true)?;
+                let (n, o) = (pc.proj_vec(), pc.proj_point());
+                let stretch = 1.0 + n.dot(n);
+                let points = base
+                    .points
+                    .iter()
+                    .map(|&(x, w, err)| {
+                        let y = x - n * (x - o * w).dot(n);
+                        let size = x.length() + w * o.length();
+                        (y, w, (2.0 * err + 8.0 * gamma(8) * size) * stretch)
+                    })
+                    .collect();
+                Self { points, ..base }
+            }
+            _ => return None,
+        };
+        let finite = spline.points.iter().all(|&(x, w, err)| {
+            x.x.is_finite()
+                && x.y.is_finite()
+                && x.z.is_finite()
+                && w.is_finite()
+                && w > 0.0
+                && err.is_finite()
+        });
+        finite.then_some(spline)
+    }
+
+    /// The spans of a NURB meeting `[lo, hi]`, with the control points and knots they use.
+    fn of_nurb(nurb: &NurbCurve, lo: f64, hi: f64) -> Option<Self> {
+        let p = nurb.degree();
+        let (cpts, knots) = (nurb.cpts(), nurb.knots());
+        let n = cpts.len().checked_sub(1)?;
+        if p == 0 || knots.len() != n + p + 2 {
+            return None;
+        }
+        if !knots
+            .windows(2)
+            .all(|w| matches!(w, [a, b] if a.is_finite() && a <= b))
+        {
+            return None;
+        }
+        if !(*knots.get(p)? <= lo && hi <= *knots.get(n + 1)?) {
+            return None;
+        }
+        let meets = |j: usize| -> bool {
+            matches!(
+                (knots.get(j), knots.get(j + 1)),
+                (Some(&a), Some(&b)) if a < b && a <= hi && lo <= b
+            )
+        };
+        let first = (p..=n).find(|&j| meets(j))?;
+        let last = (p..=n).rev().find(|&j| meets(j))?;
+        if last + 1 - first + p > MAX_STRETCH_POINTS {
+            return None;
+        }
+        let rational = nurb.is_rational();
+        let mut points = Vec::new();
+        for cp in cpts.get(first - p..=last)? {
+            if cp.z == NOZ {
+                return None;
+            }
+            let w = if rational { cp.w } else { 1.0 };
+            points.push((Vec3::new(cp.x, cp.y, cp.z), w, 0.0));
+        }
+        Some(Self {
+            knots: knots.get(first - p..=last + p + 1)?.to_vec(),
+            degree: p,
+            points,
+            rational,
+        })
+    }
+
+    /// The spans `j` (`knots[j] < knots[j + 1]`) meeting `[lo, hi]`.
+    fn spans(&self, lo: f64, hi: f64) -> Vec<usize> {
+        let p = self.degree;
+        (p..self.points.len())
+            .filter(|&j| {
+                matches!(
+                    (self.knots.get(j), self.knots.get(j + 1)),
+                    (Some(&a), Some(&b)) if a < b && a <= hi && lo <= b
+                )
+            })
+            .collect()
+    }
+
+    /// The point `i` (`x w / w`) and a bound on its error.
+    fn point(&self, i: usize) -> Option<(Vec3, f64)> {
+        let &(x, w, err) = self.points.get(i)?;
+        if self.rational {
+            let p = x * (1.0 / w);
+            Some((
+                p,
+                (err / w) * (1.0 + gamma(2)) + 2.0 * gamma(2) * p.length(),
+            ))
+        } else {
+            Some((x, err))
+        }
+    }
+
+    /// Generators of a convex cone holding every first derivative over `[lo, hi]`: the
+    /// differences of consecutive control points of the spans meeting it (the derivative
+    /// over span `j` is a combination with non-negative coefficients of `P[i + 1] - P[i]`,
+    /// `j - p <= i < j`, those whose basis has a positive support). With weights, only
+    /// for degrees up to 2: a rational quadratic span with positive weights is a conic arc
+    /// whose derivative is a non-negative combination of its two legs (`2 w0 w1 (1 - t)²
+    /// (Q1 - Q0) + 2 w0 w2 t (1 - t) (Q2 - Q0) + 2 w1 w2 t² (Q2 - Q1)` over `w²`, and the
+    /// legs of its Bezier form lie along these differences). `None` past that.
+    fn derivative_cone(&self, lo: f64, hi: f64) -> Option<Vec<ConeGenerator>> {
+        let p = self.degree;
+        if self.rational && p > 2 {
+            return None;
+        }
+        let mut used: Vec<usize> = Vec::new();
+        for j in self.spans(lo, hi) {
+            for i in j - p..j {
+                let support = match (self.knots.get(i + 1), self.knots.get(i + p + 1)) {
+                    (Some(&a), Some(&b)) => a < b,
+                    _ => false,
+                };
+                if support && !used.contains(&i) {
+                    used.push(i);
+                }
+            }
+        }
+        let mut gens = Vec::new();
+        for i in used {
+            let ((a, ea), (b, eb)) = (self.point(i)?, self.point(i + 1)?);
+            let v = b - a;
+            let err = ea + eb + 2.0 * gamma(1) * v.length();
+            if v == Vec3::ZERO && err == 0.0 {
+                continue;
+            }
+            gens.push(ConeGenerator { v, err });
+        }
+        (!gens.is_empty()).then_some(gens)
+    }
+}
+
+/// Whether the vectors lie in an open half-space through the origin: some `n` with
+/// `n . v > 0` for each, the rounding of each vector and of the dot product counted
+/// (`γ_3 |n| |v|`, Cauchy-Schwarz). The candidate normals are those of the least cap of
+/// directions holding them all (its centre lies on the bisector of two of them or is
+/// equally far from three), which is a separating `n` whenever one exists.
+fn in_open_half_space(gens: &[ConeGenerator]) -> bool {
+    let mut units = Vec::new();
+    for g in gens {
+        let length = g.v.length();
+        if !above(length, g.err) {
+            return false;
+        }
+        units.push(g.v * (1.0 / length));
+    }
+    let holds = |n: Vec3| {
+        let size = n.length();
+        gens.iter()
+            .all(|g| n.dot(g.v) > size * (g.err + gamma(3) * g.v.length()) * (1.0 + gamma(16)))
+    };
+    for (i, &a) in units.iter().enumerate() {
+        for &b in units.iter().skip(i) {
+            if holds(a + b) {
+                return true;
+            }
+        }
+    }
+    for (i, &a) in units.iter().enumerate() {
+        for (j, &b) in units.iter().enumerate().skip(i + 1) {
+            for &c in units.iter().skip(j + 1) {
+                let n = (a - b).cross(a - c);
+                if holds(n) || holds(-n) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Not upstream (WR-647): a certificate that two curves meet at most once over the
+/// stretches `[a.0, a.1]` of `a` and `[b.0, b.1]` of `b` (parameters), and part linearly
+/// from where they come nearest: their cones of derivative directions there, `K_a` and
+/// `K_b`, meet only at the origin, and so do `K_a` and `-K_b`. Two meetings `(t, u)`,
+/// `(t', u')` with `t < t'` would give a chord `c_a(t') - c_a(t)`, the integral of `c_a'`,
+/// in `K_a \ {0}` and, the same chord, in `K_b` or `-K_b`. Each test is a separating
+/// plane ([`in_open_half_space`] of the generators of one cone and those of the other,
+/// negated or not), so the rounding of the generators and of the test is counted.
+///
+/// Lines, B-splines (rational ones up to degree 2: conic arcs), Hermite cubics and their
+/// parallel projections; any other curve, or a stretch over more than
+/// [`MAX_STRETCH_POINTS`] control points, gets no certificate (`false`).
+#[must_use]
+pub fn curves_meet_at_most_once(
+    k: &Kernel,
+    a: &Curve,
+    a_stretch: (f64, f64),
+    b: &Curve,
+    b_stretch: (f64, f64),
+) -> bool {
+    let cone = |c: &Curve, (lo, hi): (f64, f64)| {
+        StretchSpline::of(c, lo, hi, false).and_then(|s| s.derivative_cone(lo, hi))
+    };
+    let (Some(ka), Some(kb)) = (cone(a, a_stretch), cone(b, b_stretch)) else {
+        return false;
+    };
+    let with = |sign: f64| -> Vec<ConeGenerator> {
+        ka.iter()
+            .copied()
+            .chain(kb.iter().map(|g| ConeGenerator {
+                v: g.v * sign,
+                err: g.err,
+            }))
+            .collect()
+    };
+    if in_open_half_space(&with(-1.0)) && in_open_half_space(&with(1.0)) {
+        return true;
+    }
+    subdivision_parts(k, a, a_stretch, b, b_stretch).unwrap_or(false)
+        || conic_parts(a, a_stretch, b, b_stretch)
+        || conic_parts(b, b_stretch, a, a_stretch)
+}
+
+/// The quadratic `G(x) = ((x - c) . X)² + ((x - c) . Y)² - 1` that an ellipse (or its
+/// parallel projection) lies on, as three linear forms of the homogeneous point
+/// `(x w, w)`: `l1 = (x w - c w) . X`, `l2 = (x w - c w) . Y`, `l3 = w`, and
+/// `w² G = l1² + l2² - l3²`. `X` and `Y` are the axes over the radii; for a projection along `n` the point
+/// is first moved along `n` into the ellipse's plane (normal `N`), which folds into the
+/// axes: `X - N (n . X) / (n . N)`. Any computed `c`, `X`, `Y` serve: the certificate
+/// bounds `G` over the conic's own stretch rather than assuming it vanishes there.
+fn conic_forms(curve: &Curve) -> Option<(Vec3, Vec3, Vec3)> {
+    let (ellipse, along) = match curve.kind() {
+        CurveKind::Ellipse(e) => (e, None),
+        CurveKind::Projected(pc) if pc.proj_type() == ProjectionType::Parallel => {
+            match pc.curve().kind() {
+                CurveKind::Ellipse(e) => (e, Some(pc.proj_vec())),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    let place = ellipse.position();
+    let (c, x_axis, y_axis) = (place.origin(), place.x_axis(), place.y_axis());
+    let (rx, ry) = (ellipse.x_radius(), ellipse.y_radius());
+    if !(above(rx, 0.0) && above(ry, 0.0)) {
+        return None;
+    }
+    let (mut x, mut y) = (x_axis * (1.0 / rx), y_axis * (1.0 / ry));
+    if let Some(n) = along {
+        let normal = x_axis.cross(y_axis);
+        let d = n.dot(normal);
+        if !above(d.abs(), 1e-3 * n.length() * normal.length()) {
+            return None;
+        }
+        x = x - normal * (n.dot(x) / d);
+        y = y - normal * (n.dot(y) / d);
+    }
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    (finite(c) && finite(x) && finite(y)).then_some((c, x, y))
+}
+
+/// The Bezier coefficients of `w² G` over a piece (degree `2 p`, from the homogeneous
+/// Bezier points of degree `p` by the product of Bernstein polynomials), each with an
+/// error bound.
+fn conic_coefficients(
+    forms: (Vec3, Vec3, Vec3),
+    piece: &[(Vec3, f64, f64, f64)],
+) -> Option<Vec<(f64, f64)>> {
+    let (c, x, y) = forms;
+    let (sx, sy, sc) = (x.length(), y.length(), c.length());
+    // l1, l2, l3 of each point, and their errors
+    let mut forms_at = Vec::new();
+    for &(xw, w, ex, ew) in piece {
+        let d = xw - c * w;
+        let size = xw.length() + sc * w;
+        let err_d = ex + sc * ew + 2.0 * gamma(2) * size;
+        let grow = 1.0 + gamma(4);
+        let l1 = (d.dot(x), (sx * err_d + gamma(3) * sx * d.length()) * grow);
+        let l2 = (d.dot(y), (sy * err_d + gamma(3) * sy * d.length()) * grow);
+        forms_at.push([l1, l2, (w, ew)]);
+    }
+    let p = piece.len().checked_sub(1)?;
+    let binomial = |n: usize, r: usize| -> f64 {
+        let mut b = 1.0;
+        for i in 0..r {
+            #[allow(clippy::cast_precision_loss)]
+            let step = (n - i) as f64 / (i + 1) as f64;
+            b *= step;
+        }
+        b
+    };
+    let mut out = Vec::new();
+    for kk in 0..=2 * p {
+        let (mut value, mut err) = (0.0, 0.0);
+        let whole = binomial(2 * p, kk);
+        for i in kk.saturating_sub(p)..=kk.min(p) {
+            let j = kk - i;
+            let (Some(a), Some(b)) = (forms_at.get(i), forms_at.get(j)) else {
+                return None;
+            };
+            let weight = binomial(p, i) * binomial(p, j) / whole;
+            let mut term = 0.0;
+            let mut term_err = 0.0;
+            let mut size = 0.0;
+            for (f, sign) in [(0, 1.0), (1, 1.0), (2, -1.0)] {
+                let (Some(&(u, eu)), Some(&(v, ev))) = (a.get(f), b.get(f)) else {
+                    return None;
+                };
+                term += sign * u * v;
+                term_err += u.abs() * ev + v.abs() * eu + eu * ev;
+                size += u.abs() * v.abs();
+            }
+            value += weight * term;
+            err += weight * (term_err + gamma(4) * size);
+        }
+        // the weights (exact up to a few roundings each) and the sum
+        let size: f64 = value.abs() + err;
+        out.push((
+            value,
+            (err + gamma(4 * p + 8) * size * 4.0) * (1.0 + gamma(4)),
+        ));
+    }
+    Some(out)
+}
+
+/// Not upstream (WR-647): the third certificate of [`curves_meet_at_most_once`], for a
+/// conic `a` (an ellipse or its parallel projection) against `b` (two equal circles a
+/// little apart cross at a small angle, too small against their turning over the stretch
+/// for cones or slopes). Every point of `a` over its stretch has `|G| <= eps` (the bound
+/// of `w² G`'s Bezier coefficients over its pieces, over the least weight squared); a
+/// meeting is a point of `b` with `|G| <= eps`, so `|w² G(b(u))| <= eps w_max²`. When the
+/// Bezier coefficients of `w² G(b)` over every piece of `b`'s stretch strictly increase (or
+/// strictly decrease) in turn, `w² G(b)` is strictly monotone over it and the meetings lie
+/// in one interval of `b`'s parameter where it is within `eps w_max²` of zero: one contact.
+/// Each span's part of `b`'s stretch is cut into 1, 2, 4, ... pieces, up to
+/// [`MAX_SLOPE_PIECES`] in all.
+fn conic_parts(a: &Curve, a_stretch: (f64, f64), b: &Curve, b_stretch: (f64, f64)) -> bool {
+    let Some(forms) = conic_forms(a) else {
+        return false;
+    };
+    let (Some(sa), Some(sb)) = (
+        StretchSpline::of(a, a_stretch.0, a_stretch.1, false),
+        StretchSpline::of(b, b_stretch.0, b_stretch.1, false),
+    ) else {
+        return false;
+    };
+    // eps: |G| over a's stretch (its curve lies in the hull of its Bezier coefficients)
+    let Some(pieces_a) = sa.homogeneous_pieces(a_stretch.0, a_stretch.1, 1) else {
+        return false;
+    };
+    let mut bound: f64 = 0.0;
+    let mut least_w = f64::INFINITY;
+    for piece in &pieces_a {
+        let Some(coef) = conic_coefficients(forms, piece) else {
+            return false;
+        };
+        for (v, e) in coef {
+            bound = max2(bound, v.abs() + e);
+        }
+        for &(_, w, _, ew) in piece {
+            least_w = min2(least_w, w - ew);
+        }
+    }
+    if !(above(least_w, 0.0) && bound.is_finite()) {
+        return false;
+    }
+    let spans = sb.spans(b_stretch.0, b_stretch.1).len();
+    let mut m = 1;
+    while spans * m <= MAX_SLOPE_PIECES {
+        let monotone = sb
+            .homogeneous_pieces(b_stretch.0, b_stretch.1, m)
+            .and_then(|pieces| {
+                let mut side = 0.0;
+                for piece in &pieces {
+                    let coef = conic_coefficients(forms, piece)?;
+                    for pair in coef.windows(2) {
+                        let [(v0, e0), (v1, e1)] = pair else {
+                            return None;
+                        };
+                        let step = v1 - v0;
+                        let err = (e0 + e1 + gamma(1) * step.abs()) * (1.0 + gamma(1));
+                        let sign = if above(step, err) {
+                            1.0
+                        } else if above(-step, err) {
+                            -1.0
+                        } else {
+                            return None;
+                        };
+                        if side != 0.0 && sign != side {
+                            return None;
+                        }
+                        side = sign;
+                    }
+                }
+                Some(())
+            })
+            .is_some();
+        if monotone {
+            return true;
+        }
+        m *= 2;
+    }
+    false
+}
+
+/// The homogeneous Bezier points `(x w, w, error of x w, error of w)` of a piece.
+type HomogeneousPiece = Vec<(Vec3, f64, f64, f64)>;
+
+/// A piece of a curve over a parameter interval inside one span: its Bezier points
+/// (Euclidean, each with an error bound), from the blossom of the span.
+struct BezierPiece {
+    points: Vec<(Vec3, f64)>,
+}
+
+impl StretchSpline {
+    /// The blossom `f(args)` of span `span` (`args` in `[knots[span], knots[span + 1]]`):
+    /// de Boor's recursion with the argument of each level, convex combinations, in
+    /// homogeneous form; `(x w, w, error of x w, error of w)`.
+    fn blossom(&self, span: usize, args: &[f64]) -> Option<(Vec3, f64, f64, f64)> {
+        let p = self.degree;
+        let first = span.checked_sub(p)?;
+        let used = self.points.get(first..=span)?;
+        let mut x: Vec<Vec3> = used.iter().map(|c| c.0).collect();
+        let mut w: Vec<f64> = used.iter().map(|c| c.1).collect();
+        let size = used.iter().map(|c| c.0.length() + c.2).fold(0.0, max2);
+        let w_size = used.iter().map(|c| c.1).fold(0.0, max2);
+        let input = used.iter().map(|c| c.2).fold(0.0, max2);
+        for r in 1..=p {
+            let arg = *args.get(r - 1)?;
+            for j in (r..=p).rev() {
+                let i = first + j;
+                let (lo, hi) = (*self.knots.get(i)?, *self.knots.get(i + p + 1 - r)?);
+                let alpha = (arg - lo) / (hi - lo);
+                if !(0.0..=1.0).contains(&alpha) {
+                    return None;
+                }
+                let xv = *x.get(j - 1)? * (1.0 - alpha) + *x.get(j)? * alpha;
+                *x.get_mut(j)? = xv;
+                if self.rational {
+                    let wv = (1.0 - alpha) * *w.get(j - 1)? + alpha * *w.get(j)?;
+                    *w.get_mut(j)? = wv;
+                }
+            }
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let levels = p as f64;
+        let grow = 1.0 + gamma(4 * p + 4);
+        // each coordinate as in [`de_boor`], the vector's error within twice the largest
+        let err_x = 2.0 * (input + 4.0 * levels * gamma(4) * size) * grow;
+        let err_w = if self.rational {
+            4.0 * levels * gamma(4) * w_size * grow
+        } else {
+            0.0
+        };
+        Some((*x.get(p)?, *w.get(p)?, err_x, err_w))
+    }
+
+    /// The Bezier points of the curve over `[t0, t1]` inside span `span` (blossom values
+    /// `f(t0^(p - r), t1^r)`), Euclidean, each with an error bound; `None` for a weight
+    /// not above its error.
+    fn piece(&self, span: usize, t0: f64, t1: f64) -> Option<BezierPiece> {
+        let mut points = Vec::new();
+        for (x, w, ex, ew) in self.homogeneous_piece(span, t0, t1)? {
+            if self.rational {
+                if !above(w, ew) {
+                    return None;
+                }
+                let point = x * (1.0 / w);
+                let err = (ex + point.length() * ew) / (w - ew) * (1.0 + gamma(4))
+                    + 2.0 * gamma(2) * point.length();
+                points.push((point, err));
+            } else {
+                points.push((x, ex));
+            }
+        }
+        Some(BezierPiece { points })
+    }
+
+    /// The homogeneous Bezier points `(x w, w, error of x w, error of w)` of the curve over
+    /// `[t0, t1]` inside span `span` (blossom values `f(t0^(p - r), t1^r)`).
+    fn homogeneous_piece(&self, span: usize, t0: f64, t1: f64) -> Option<HomogeneousPiece> {
+        let p = self.degree;
+        (0..=p)
+            .map(|r| {
+                let args: Vec<f64> = (0..p).map(|i| if i < p - r { t0 } else { t1 }).collect();
+                self.blossom(span, &args)
+            })
+            .collect()
+    }
+
+    /// The stretch `[lo, hi]` cut at the knots and each span's part into `m` equal pieces.
+    fn pieces(&self, lo: f64, hi: f64, m: usize) -> Option<Vec<BezierPiece>> {
+        self.cut(lo, hi, m, Self::piece)
+    }
+
+    /// [`StretchSpline::pieces`] in homogeneous form.
+    fn homogeneous_pieces(&self, lo: f64, hi: f64, m: usize) -> Option<Vec<HomogeneousPiece>> {
+        self.cut(lo, hi, m, Self::homogeneous_piece)
+    }
+
+    /// `make` over the stretch `[lo, hi]` cut at the knots and each span's part into `m`
+    /// equal pieces.
+    fn cut<T>(
+        &self,
+        lo: f64,
+        hi: f64,
+        m: usize,
+        make: impl Fn(&Self, usize, f64, f64) -> Option<T>,
+    ) -> Option<Vec<T>> {
+        let mut out = Vec::new();
+        #[allow(clippy::cast_precision_loss)]
+        let mf = m as f64;
+        for j in self.spans(lo, hi) {
+            let (a, b) = (
+                max2(lo, *self.knots.get(j)?),
+                min2(hi, *self.knots.get(j + 1)?),
+            );
+            if a > b {
+                continue;
+            }
+            let at = |i: usize| -> f64 {
+                #[allow(clippy::cast_precision_loss)]
+                let f = i as f64 / mf;
+                if i == m {
+                    b
+                } else {
+                    min2(b, a + (b - a) * f)
+                }
+            };
+            for i in 0..m {
+                out.push(make(self, j, at(i), at(i + 1))?);
+            }
+        }
+        (!out.is_empty()).then_some(out)
+    }
+}
+
+/// The interval of `dir . x` over a piece (its hull: the curve lies in the convex hull of
+/// its Bezier points), every rounding counted.
+fn piece_extent(piece: &BezierPiece, dir: Vec3) -> (f64, f64) {
+    let size = dir.length();
+    let mut range = (f64::INFINITY, f64::NEG_INFINITY);
+    for &(q, err) in &piece.points {
+        let value = dir.dot(q);
+        let slack = (size * err + gamma(3) * size * q.length()) * (1.0 + gamma(4));
+        range = (min2(range.0, value - slack), max2(range.1, value + slack));
+    }
+    range
+}
+
+/// The most pieces each curve's stretch is cut into by [`conic_parts`] (bounded work).
+const MAX_SLOPE_PIECES: usize = 64;
+
+/// The most piece pairs [`subdivision_parts`] keeps at one level, and the most levels.
+const MAX_SURVIVING_PAIRS: usize = 4096;
+/// See [`MAX_SURVIVING_PAIRS`].
+const MAX_SUBDIVISION_LEVELS: usize = 24;
+
+/// A piece of a stretch in [`subdivision_parts`]: its span and its interval in that span.
+type PieceSpan = (usize, f64, f64);
+
+/// The generators of the cone of first derivatives of a stretch from the legs of its
+/// Bezier pieces (each span's part of `[lo, hi]`), as [`StretchSpline::derivative_cone`]
+/// but of the stretch alone.
+fn stretch_cone(s: &StretchSpline, lo: f64, hi: f64) -> Option<Vec<ConeGenerator>> {
+    if s.rational && s.degree > 2 {
+        return None;
+    }
+    let mut gens = Vec::new();
+    for piece in s.pieces(lo, hi, 1)? {
+        for pair in piece.points.windows(2) {
+            let [(a, ea), (b, eb)] = pair else {
+                return None;
+            };
+            let v = *b - *a;
+            let err = ea + eb + 2.0 * gamma(1) * v.length();
+            if v == Vec3::ZERO && err == 0.0 {
+                continue;
+            }
+            gens.push(ConeGenerator { v, err });
+        }
+    }
+    (!gens.is_empty()).then_some(gens)
+}
+
+/// Whether the cones of derivative directions of `a` over `[a.0, a.1]` and `b` over `[b.0,
+/// b.1]` part (as in [`curves_meet_at_most_once`]).
+fn cones_part(sa: &StretchSpline, a: (f64, f64), sb: &StretchSpline, b: (f64, f64)) -> bool {
+    let (Some(ka), Some(kb)) = (stretch_cone(sa, a.0, a.1), stretch_cone(sb, b.0, b.1)) else {
+        return false;
+    };
+    let with = |sign: f64| -> Vec<ConeGenerator> {
+        ka.iter()
+            .copied()
+            .chain(kb.iter().map(|g| ConeGenerator {
+                v: g.v * sign,
+                err: g.err,
+            }))
+            .collect()
+    };
+    in_open_half_space(&with(-1.0)) && in_open_half_space(&with(1.0))
+}
+
+/// Not upstream (WR-647): the second certificate of [`curves_meet_at_most_once`], for two
+/// curves too close to parallel over their stretches for their cones to part (a curve
+/// and its slightly rotated copy). Cut both stretches into pieces (one span each, halved
+/// level by level) and drop every pair of pieces whose hulls (of their Bezier points,
+/// from blossoms, rounding counted) are apart along one of eight directions (the axes, the
+/// chord of `a`, the change of the separation across it, their cross product, and the two
+/// normals of the chord of the pair's piece of `a`): no meeting lies in a dropped pair. When the pairs left lie in a box (of each curve's
+/// least and greatest parameter over them) over which the two cones part, the curves
+/// meet at most once there, so at most once over the stretches; none left, they do not
+/// meet. Near a crossing at a small angle the pairs left shrink with the pieces until
+/// their box is short enough for the cones to part. At most [`MAX_SURVIVING_PAIRS`] pairs
+/// are kept at a level, over at most [`MAX_SUBDIVISION_LEVELS`] levels; past either,
+/// no certificate.
+///
+/// # Errors
+///
+/// Those of the evaluations of the stretches' ends.
+fn subdivision_parts(
+    k: &Kernel,
+    a: &Curve,
+    a_stretch: (f64, f64),
+    b: &Curve,
+    b_stretch: (f64, f64),
+) -> Result<bool> {
+    let (Some(sa), Some(sb)) = (
+        StretchSpline::of(a, a_stretch.0, a_stretch.1, false),
+        StretchSpline::of(b, b_stretch.0, b_stretch.1, false),
+    ) else {
+        return Ok(false);
+    };
+    if (sa.rational && sa.degree > 2) || (sb.rational && sb.degree > 2) {
+        return Ok(false);
+    }
+    let (a0, a1) = (
+        a.evaluate_point(k, a_stretch.0)?,
+        a.evaluate_point(k, a_stretch.1)?,
+    );
+    let (mut b0, mut b1) = (
+        b.evaluate_point(k, b_stretch.0)?,
+        b.evaluate_point(k, b_stretch.1)?,
+    );
+    let v = a1 - a0;
+    if (b1 - b0).dot(v) < 0.0 {
+        core::mem::swap(&mut b0, &mut b1);
+    }
+    let w = (b1 - a1) - (b0 - a0);
+    let directions = [
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        v,
+        w,
+        v.cross(w),
+    ];
+    let plane = v.cross(w);
+    // whether the hulls of two pieces are apart along one of the six directions, or along
+    // the two normals of the chord of `a`'s piece (across which the piece is thin, so near
+    // a crossing at a small angle its pairs part once the pieces are thinner than the
+    // curves' separation there)
+    let apart = |x: PieceSpan, y: PieceSpan| -> Option<bool> {
+        let (px, py) = (sa.piece(x.0, x.1, x.2)?, sb.piece(y.0, y.1, y.2)?);
+        let (first, last) = (px.points.first()?.0, px.points.last()?.0);
+        let chord = last - first;
+        let across = chord.cross(plane);
+        let normals = [across, chord.cross(across)];
+        Some(directions.iter().chain(&normals).any(|&d| {
+            let (p, q) = (piece_extent(&px, d), piece_extent(&py, d));
+            p.1 < q.0 || q.1 < p.0
+        }))
+    };
+    let first = |s: &StretchSpline, (lo, hi): (f64, f64)| -> Option<Vec<PieceSpan>> {
+        let mut out = Vec::new();
+        for j in s.spans(lo, hi) {
+            let (a, b) = (max2(lo, *s.knots.get(j)?), min2(hi, *s.knots.get(j + 1)?));
+            if a <= b {
+                out.push((j, a, b));
+            }
+        }
+        Some(out)
+    };
+    let (Some(pa), Some(pb)) = (first(&sa, a_stretch), first(&sb, b_stretch)) else {
+        return Ok(false);
+    };
+    let mut pairs: Vec<(PieceSpan, PieceSpan)> = Vec::new();
+    for &x in &pa {
+        for &y in &pb {
+            pairs.push((x, y));
+        }
+    }
+    for _ in 0..MAX_SUBDIVISION_LEVELS {
+        if pairs.len() > MAX_SURVIVING_PAIRS {
+            return Ok(false);
+        }
+        let mut left = Vec::new();
+        for &(x, y) in &pairs {
+            let Some(parted) = apart(x, y) else {
+                return Ok(false);
+            };
+            if !parted {
+                left.push((x, y));
+            }
+        }
+        if left.is_empty() {
+            return Ok(true);
+        }
+        let mut box_a = (f64::INFINITY, f64::NEG_INFINITY);
+        let mut box_b = (f64::INFINITY, f64::NEG_INFINITY);
+        for &(x, y) in &left {
+            box_a = (min2(box_a.0, x.1), max2(box_a.1, x.2));
+            box_b = (min2(box_b.0, y.1), max2(box_b.1, y.2));
+        }
+        if cones_part(&sa, box_a, &sb, box_b) {
+            return Ok(true);
+        }
+        let halves = |(j, lo, hi): PieceSpan| {
+            let mid = lo + (hi - lo) * 0.5;
+            [(j, lo, mid), (j, mid, hi)]
+        };
+        pairs = Vec::new();
+        for (x, y) in left {
+            for x2 in halves(x) {
+                for y2 in halves(y) {
+                    pairs.push((x2, y2));
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// The value at `x` of the scalar B-spline of degree `p` on `knots` with coefficients
+/// `coef` (each `(value, error)`), by de Boor's recursion in span `span`
+/// (`knots[span] <= x <= knots[span + 1]`), and a bound on its error: each level is a
+/// convex combination (`alpha` in `[0, 1]`), which adds at most `4 γ_3` of the largest
+/// magnitude `M` (the rounded `alpha` and the two products and the sum) and keeps the
+/// input errors' bound (`|1 - alpha| + |alpha| = 1`, up to the same rounding).
+fn de_boor(
+    knots: &[f64],
+    p: usize,
+    coef: &[(f64, f64)],
+    span: usize,
+    x: f64,
+) -> Option<(f64, f64)> {
+    let first = span.checked_sub(p)?;
+    let used = coef.get(first..=span)?;
+    let mut d: Vec<f64> = used.iter().map(|c| c.0).collect();
+    let size = used.iter().map(|c| c.0.abs() + c.1).fold(0.0, max2);
+    let input = used.iter().map(|c| c.1).fold(0.0, max2);
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = first + j;
+            let (lo, hi) = (*knots.get(i)?, *knots.get(i + p + 1 - r)?);
+            let alpha = (x - lo) / (hi - lo);
+            let value = (1.0 - alpha) * *d.get(j - 1)? + alpha * *d.get(j)?;
+            *d.get_mut(j)? = value;
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let levels = p as f64;
+    let err = (input + 4.0 * levels * gamma(4) * size) * (1.0 + gamma(4 * p + 4));
+    Some((*d.get(p)?, err))
+}
+
+/// Not upstream (WR-647): a certificate that a touch of two curves at `at` (parameters,
+/// the curves meeting there) is their only contact over the stretches `[a.0, a.1]` and
+/// `[b.0, b.1]`, for a straight curve (a line, or a degree 1 span) against a B-spline or
+/// a Hermite cubic: all points where they meet lie in one interval of the curved one's
+/// parameter, over which they stay within the rounding of the test of each other.
+///
+/// Take `n`, across the line `q + s v` (`q` its control point, exact), along the curved
+/// curve's second derivative at the touch, and `g(u) = n . (x(u) - w(u) q)`, a scalar
+/// B-spline with the coefficients `n . (x_i w_i - w_i q)` (`x w` its homogeneous form,
+/// `g = w f`, `f = n . (c(u) - q)`). Where the curves meet, `c(u) = q + s v` and
+/// `|f| <= |s| |n . v| = eps_f` (`n` is a rounded normal to `v`; `|s v|` is bounded by the
+/// control points' distances from `q`), so `|g| <= eps_f w_max`.
+/// The curved curve is C1 over its stretch and the second derivative coefficients of `g`
+/// over it (Bernstein-B-spline, by local support) are at least `kappa > 0`, so
+/// `g(u) >= g(u0) + g'(u0) (u - u0) + kappa (u - u0)² / 2` and `g >= g(u0) - g'(u0)² /
+/// (2 kappa)` over the stretch. When that is at least `-eps_f w_max`, the meetings lie
+/// where the convex `g` is at most `eps_f w_max`: one interval, over which `|g|` stays
+/// within `eps_f w_max`. Every rounding (the coefficients, the de Boor values at the
+/// touch, the second differences) is bounded and taken against acceptance.
+///
+/// `Ok(false)` (no certificate, the ranges are kept) for any other pair of curves, a
+/// rational curve of degree above 2 or a weight not positive, a stretch over more than
+/// [`MAX_STRETCH_POINTS`] points, a curved curve not C1 inside its stretch, or a NaN.
+///
+/// # Errors
+///
+/// Those of the second derivative's evaluation at the touch.
+pub fn touch_is_alone(
+    k: &Kernel,
+    a: &Curve,
+    a_stretch: (f64, f64),
+    b: &Curve,
+    b_stretch: (f64, f64),
+    at: [f64; 2],
+) -> Result<bool> {
+    for (straight, s_stretch, curved, c_stretch, u0) in [
+        (a, a_stretch, b, b_stretch, at[1]),
+        (b, b_stretch, a, a_stretch, at[0]),
+    ] {
+        // the straight curve over its stretch: one degree 1 span
+        let Some(line) = StretchSpline::of(straight, s_stretch.0, s_stretch.1, false) else {
+            continue;
+        };
+        let spans = line.spans(s_stretch.0, s_stretch.1);
+        let ([span], 1) = (spans.as_slice(), line.degree) else {
+            continue;
+        };
+        let (Some((q, err_q)), Some((q1, err_q1))) = (line.point(span - 1), line.point(*span))
+        else {
+            continue;
+        };
+        let v = q1 - q;
+        let err_v = err_q + err_q1 + 2.0 * gamma(1) * v.length();
+        let v_length = v.length();
+        if !above(v_length, 2.0 * err_v) {
+            continue;
+        }
+        if touch_is_alone_against(k, &q, err_q, v, err_v, curved, c_stretch, u0)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// [`touch_is_alone`] for the line `q + s v` (computed `q` exact, `v` within `err_v`)
+/// against `curved` over `stretch`, touching at `u0`.
+#[allow(clippy::too_many_arguments)]
+fn touch_is_alone_against(
+    k: &Kernel,
+    q: &Vec3,
+    err_q: f64,
+    v: Vec3,
+    err_v: f64,
+    curved: &Curve,
+    stretch: (f64, f64),
+    u0: f64,
+) -> Result<bool> {
+    let (lo, hi) = stretch;
+    let Some(spline) = StretchSpline::of(curved, lo, hi, false) else {
+        return Ok(false);
+    };
+    let p = spline.degree;
+    if p < 2 || !(lo <= u0 && u0 <= hi) {
+        return Ok(false);
+    }
+    let knots = &spline.knots;
+    // C1 inside the stretch: no interior knot of multiplicity p or more
+    let c1 = knots
+        .iter()
+        .all(|&t| !(lo < t && t < hi) || knots.iter().filter(|&&s| s == t).count() < p);
+    if !c1 {
+        return Ok(false);
+    }
+    let derivs = curved.evaluate(k, u0, 2, false, false)?;
+    let unit = v * (1.0 / v.length());
+    // a unit normal to the line along the across-line part of `d`
+    let across_of = |d: Vec3| -> Option<Vec3> {
+        let across = d - unit * d.dot(unit);
+        let length = across.length();
+        above(length, 0.0).then(|| across * (1.0 / length))
+    };
+    let pf = int_to_f64(p);
+    // the speed bound of a curve without weights over its control polygon, and its size
+    let mut speed: f64 = 0.0;
+    let mut size: f64 = 0.0;
+    for i in 0..spline.points.len() {
+        let Some(&(x, _, err)) = spline.points.get(i) else {
+            return Ok(false);
+        };
+        size = max2(size, x.max_dimension() + err);
+        let (Some(&(y, _, err_y)), Some(&u1), Some(&u2)) = (
+            spline.points.get(i + 1),
+            knots.get(i + 1),
+            knots.get(i + p + 1),
+        ) else {
+            continue;
+        };
+        if u2 > u1 {
+            speed = max2(speed, ((y - x).length() + err + err_y) * pf / (u2 - u1));
+        }
+    }
+    // the meetings lie in an interval of parameter length `width`: a curve without
+    // weights moves no farther over it than its speed bound times that, and when that is
+    // within the scaled zero the meetings are one contact
+    let one_contact = |width: f64| {
+        !spline.rational
+            && width.is_finite()
+            && width * speed * (1.0 + gamma(16)) <= EFF_ZERO * (1.0 + size)
+    };
+    // a touch: n across the line, along the curved curve's second derivative at the touch
+    let Some(n) = across_of(at(&derivs, 2)) else {
+        return Ok(false);
+    };
+    let Some((coef, slope, eps)) = line_offsets(&spline, q, err_q, v, err_v, n) else {
+        return Ok(false);
+    };
+    // kappa: the least second derivative coefficient (p - 1) (d[i + 1] - d[i]) / (U[i + p + 1]
+    // - U[i + 2]) of the spans meeting the stretch, less its error
+    let mut kappa = f64::INFINITY;
+    let spans = spline.spans(lo, hi);
+    for &j in &spans {
+        for i in j - p..j - 1 {
+            let (Some(&u1), Some(&u2)) = (knots.get(i + 2), knots.get(i + p + 1)) else {
+                return Ok(false);
+            };
+            let Some((r, e)) = coefficient_difference(&slope, i, pf - 1.0, u2 - u1) else {
+                return Ok(false);
+            };
+            kappa = min2(kappa, r - e);
+        }
+    }
+    if !(kappa > 0.0 && kappa.is_finite()) {
+        return Ok(false);
+    }
+    // g and g' at the touch, in the span holding it
+    let Some(&span) = spans.iter().find(|&&j| {
+        matches!((knots.get(j), knots.get(j + 1)), (Some(&a), Some(&b)) if a <= u0 && u0 <= b)
+    }) else {
+        return Ok(false);
+    };
+    let (Some((g0, e0)), Some((g1, e1))) = (
+        de_boor(knots, p, &coef, span, u0),
+        knots
+            .get(1..)
+            .and_then(|tail| de_boor(tail, p - 1, &slope, span - 1, u0)),
+    ) else {
+        return Ok(false);
+    };
+    let slack = g1.abs() + e1;
+    let least = (g0 - e0) - slack * slack / (2.0 * kappa) * (1.0 + gamma(4));
+    if least >= -eps {
+        return Ok(true);
+    }
+    // else the meetings lie where g <= eps, inside where its quadratic lower bound is:
+    // an interval of length 2 sqrt(2 (eps - least) / kappa) (an exact touch whose least the
+    // bounds place a rounding below zero)
+    if !(least.is_finite() && eps.is_finite()) {
+        return Ok(false);
+    }
+    Ok(one_contact(2.0 * (2.0 * (eps - least) / kappa).sqrt()))
+}
+
+/// Scalar B-spline or Bezier coefficients, each `(value, error)`.
+type Coefficients = Vec<(f64, f64)>;
+
+/// The `f64` of a small count (a degree).
+#[allow(clippy::cast_precision_loss)]
+fn int_to_f64(n: usize) -> f64 {
+    n as f64
+}
+
+/// The coefficient `scale (a[i + 1] - a[i]) / gap` of a B-spline's derivative and its
+/// error (0 where the basis has no support, `gap <= 0`).
+fn coefficient_difference(a: &[(f64, f64)], i: usize, scale: f64, gap: f64) -> Option<(f64, f64)> {
+    let (&(a0, e0), &(a1, e1)) = (a.get(i)?, a.get(i + 1)?);
+    if gap <= 0.0 {
+        return Some((0.0, 0.0));
+    }
+    let value = scale * (a1 - a0) / gap;
+    let e = (scale * (e0 + e1) / gap + 2.0 * gamma(4) * scale * (a0.abs() + a1.abs()) / gap)
+        * (1.0 + gamma(4));
+    Some((value, e))
+}
+
+/// For [`touch_is_alone`]: the signed offset `g(u) = n . (x(u) - w(u) q)` of `spline` across
+/// the line `q + s v` (computed `q` exact, `v` within `err_v`) along the unit normal `n`, as
+/// the scalar B-spline coefficients of `g` and of its derivative (each `(value, error)`),
+/// and `eps`, the most `|g|` can be where the curve meets the line: there `c(u) = q + s v`,
+/// so `|f| <= |s| |n . v|` (`n` a rounded normal to `v`; `|s v|` bounded by the control
+/// points' distances from `q`) and `|g| <= eps`.
+fn line_offsets(
+    spline: &StretchSpline,
+    q: &Vec3,
+    err_q: f64,
+    v: Vec3,
+    err_v: f64,
+    n: Vec3,
+) -> Option<(Coefficients, Coefficients, f64)> {
+    let p = spline.degree;
+    let knots = &spline.knots;
+    let n_length = n.length();
+    // g's coefficients n . (x w - w q), and the distance of the control points from q
+    let mut coef = Vec::new();
+    let mut reach: f64 = 0.0;
+    let mut w_max: f64 = 0.0;
+    for i in 0..spline.points.len() {
+        let &(x, w, err) = spline.points.get(i)?;
+        // componentwise: each coordinate of x - q w within gamma_2 of its size, the dot
+        // product within gamma_3 of the sum of its terms' sizes
+        let d = x - *q * w;
+        let comp = |nc: f64, xc: f64, qc: f64, dc: f64| {
+            nc.abs() * (gamma(2) * (xc.abs() + qc.abs() * w) + gamma(3) * dc.abs())
+        };
+        let rounding =
+            comp(n.x, x.x, q.x, d.x) + comp(n.y, x.y, q.y, d.y) + comp(n.z, x.z, q.z, d.z);
+        let value = n.dot(d);
+        let e = (n_length * err + rounding) * (1.0 + gamma(8));
+        coef.push((value, e));
+        let (point, err_point) = spline.point(i)?;
+        reach = max2(reach, (point - *q).length() + err_point);
+        w_max = max2(w_max, w);
+    }
+    // the derivative's coefficients p (a[i + 1] - a[i]) / (U[i + p + 1] - U[i + 1]) (degree
+    // p - 1 on the knots without their first and last)
+    let pf = int_to_f64(p);
+    let mut slope = Vec::new();
+    for i in 0..coef.len().saturating_sub(1) {
+        let (&u1, &u2) = (knots.get(i + 1)?, knots.get(i + p + 1)?);
+        slope.push(coefficient_difference(&coef, i, pf, u2 - u1)?);
+    }
+    // eps: |n . v| for the exact v and unit n, at most what the computed one gives plus
+    // its rounding, over |v| (less its error)
+    let terms = (n.x * v.x).abs() + (n.y * v.y).abs() + (n.z * v.z).abs();
+    let n_dot_v = (n.dot(v).abs() + gamma(3) * terms + n_length * err_v) / (v.length() - err_v)
+        * (1.0 + gamma(4));
+    let eps = (n_length * err_q + (reach + err_q) * n_dot_v) * w_max * (1.0 + gamma(8));
+    Some((coef, slope, eps))
 }
 
 #[cfg(test)]

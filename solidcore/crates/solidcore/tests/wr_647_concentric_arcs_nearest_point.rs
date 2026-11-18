@@ -212,9 +212,13 @@ fn cubic(angle: f64, shift: f64) -> Curve {
 }
 
 fn intersect(a: &Curve, b: &Curve) -> Vec<Solution<H>> {
+    intersect_at(a, b, TOL)
+}
+
+fn intersect_at(a: &Curve, b: &Curve, tol: f64) -> Vec<Solution<H>> {
     let k = Kernel::default();
     let (ia, ib) = (a.natural_interval(), b.natural_interval());
-    a.global_curve_intersect(&k, &ia, b, &ib, TOL, &CurveIntersectOptions::<H>::default())
+    a.global_curve_intersect(&k, &ia, b, &ib, tol, &CurveIntersectOptions::<H>::default())
         .unwrap()
         .as_slice()
         .to_vec()
@@ -548,6 +552,139 @@ fn wr_647_a_coincidence_running_to_a_curve_end_is_not_a_crossing() {
             .any(|s| s.solution_type == SolutionType::RangeOfValues
                 && s.start.parameters[0] <= 1.0 / 3.0
                 && (s.end.parameters[0] - 1.0).abs() < 1e-9),
+        "{all:?}"
+    );
+}
+
+/// The quadratic B-spline on the knots 0, 1, 2, 3, 4, 5 (end multiplicities 3) through
+/// the control points `(x, y)` in the plane z = 0.
+fn quadratic_on_five_spans(control: &[(f64, f64); 7]) -> Curve {
+    let control: Vec<Point3> = control
+        .iter()
+        .map(|&(x, y)| Point3::new(x, y, 0.0))
+        .collect();
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[3, 1, 1, 1, 1, 3],
+            knots: &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// Three crossings in one stretch within the tolerance (the r2 review's probe of
+/// tangency-labs/solidcraft#18392): the quadratic B-spline with control points (-2, 0.5),
+/// (-1.25, h), (-0.6, -h), (0, h), (0.6, -h), (1.25, -h), (2, -0.5), h = 4e-3, against the
+/// line from (-3, 0) to (3, 0), at tolerance 1e-2. Closed form: on the knots 1, 2 and 3
+/// the curve is the midpoint of two control points, (-0.925, 0), (-0.3, 0) and (0.3, 0);
+/// the Bezier heights of the spans between are (h/2 + h/2 = 0, -h, 0), (0, h, 0) and
+/// (0, -h, -h), and of the first span (0.5, h, 0): the curve is above the axis on [0, 1)
+/// and [2, 3) and below it on (1, 2) and (3, 5], so it crosses the axis at exactly those
+/// three points. All of it from x = -1.6 on lies within the tolerance of the line (its
+/// heights there are below 1e-2), one stretch whose ends lie inside both curves and whose
+/// end separations point to opposite sides. One point cannot stand for it (the head
+/// before the certificate returned the crossing at x = 0.3 alone): every crossing must
+/// lie in the answer, as a point within 1e-6 of it or inside a range.
+#[test]
+fn wr_647_three_crossings_in_one_stretch_are_not_one_point() {
+    let k = Kernel::default();
+    let h = 4e-3;
+    let curve = quadratic_on_five_spans(&[
+        (-2.0, 0.5),
+        (-1.25, h),
+        (-0.6, -h),
+        (0.0, h),
+        (0.6, -h),
+        (1.25, -h),
+        (2.0, -0.5),
+    ]);
+    // the three crossings, on the curve's knots 1, 2, 3 (closed form above)
+    let crossings = [(-0.925, 1.0), (-0.3, 2.0), (0.3, 3.0)];
+    for &(x, u) in &crossings {
+        let p = curve.evaluate_point(&k, u).unwrap();
+        assert!((p.x - x).abs() <= 1e-15 && p.y.abs() <= 1e-15, "{p:?}");
+    }
+    let all = intersect_at(&axis_line(), &curve, 1e-2);
+    for &(x, u) in &crossings {
+        let at = Point3::new(x, 0.0, 0.0);
+        let held = all.iter().any(|s| match s.solution_type {
+            SolutionType::RangeOfValues => {
+                let (lo, hi) = (
+                    s.start.parameters[1].min(s.end.parameters[1]),
+                    s.start.parameters[1].max(s.end.parameters[1]),
+                );
+                lo <= u && u <= hi
+            }
+            _ => {
+                curve
+                    .evaluate_point(&k, s.start.parameters[1])
+                    .unwrap()
+                    .distance(at)
+                    <= 1e-6
+            }
+        });
+        assert!(held, "the crossing at x = {x} is lost: {all:?}");
+    }
+}
+
+/// Two touches in one stretch within the tolerance: the quadratic B-spline with control
+/// points (-2, 0.5), (-1.25, 0), (-0.5, 0), (0, c), (0.5, 0), (1.25, 0), (2, 0.5), c = 4e-6,
+/// against the line along the x axis, at tolerance 1e-5. Closed form: its Bezier heights
+/// are (0.5, 0, 0) on [0, 1], (0, 0, c/2) on [1, 2], (c/2, c, c/2) on [2, 3] and their
+/// mirror images beyond, so it meets the axis at x = -0.875 and x = 0.875 (the knots 1 and
+/// 4, the tangent along the axis), lies above it between them at most 3c/4 = 3e-6 high, and
+/// leaves it steeply outside. Its second derivative across the axis changes sign (the
+/// heights of [2, 3] are concave), so the touch certificate fails, and the stretch keeps a
+/// range covering both touches: one point would lose the other touch.
+#[test]
+fn wr_647_two_touches_in_one_stretch_keep_their_range() {
+    let k = Kernel::default();
+    let c = 4e-6;
+    let curve = quadratic_on_five_spans(&[
+        (-2.0, 0.5),
+        (-1.25, 0.0),
+        (-0.5, 0.0),
+        (0.0, c),
+        (0.5, 0.0),
+        (1.25, 0.0),
+        (2.0, 0.5),
+    ]);
+    let touches = [(-0.875, 1.0), (0.875, 4.0)];
+    for &(x, u) in &touches {
+        let p = curve.evaluate_point(&k, u).unwrap();
+        assert!((p.x - x).abs() <= 1e-15 && p.y.abs() <= 1e-15, "{p:?}");
+    }
+    let all = intersect(&axis_line(), &curve);
+    for &(x, u) in &touches {
+        let at = Point3::new(x, 0.0, 0.0);
+        let held = all.iter().any(|s| match s.solution_type {
+            SolutionType::RangeOfValues => {
+                let (lo, hi) = (
+                    s.start.parameters[1].min(s.end.parameters[1]),
+                    s.start.parameters[1].max(s.end.parameters[1]),
+                );
+                lo <= u && u <= hi
+            }
+            _ => {
+                curve
+                    .evaluate_point(&k, s.start.parameters[1])
+                    .unwrap()
+                    .distance(at)
+                    <= 1e-6
+            }
+        });
+        assert!(held, "the touch at x = {x} is lost: {all:?}");
+    }
+    assert!(
+        all.iter()
+            .any(|s| s.solution_type == SolutionType::RangeOfValues),
         "{all:?}"
     );
 }
