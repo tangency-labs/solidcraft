@@ -1231,12 +1231,15 @@ pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 /// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
 /// themselves ([`tangent_chain`]): one list per such edge, in chain order, of `per_edge` points
 /// spread evenly inside the edge, never at its ends (solidcore's
-/// [`solidcore_ops::Body::edge_points`], which holds the count to 1 … 64). For a caller that
+/// [`solidcore_ops::Body::edge_points`]; `per_edge` is held to 1 … its
+/// [`solidcore_ops::EDGE_POINTS_MAX`]). For a caller that
 /// checks which of those edges a blend left as they were: a blend may take part of an edge it
 /// runs past the end of, so its middle alone does not tell. Picks that find no edge are
 /// refused; a mesh body has no chain.
 pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize) -> Result<Vec<Vec<Vec3>>> {
     let (_, chain, picked) = picked_chain(body, picks)?;
+    let most = usize::try_from(solidcore_ops::EDGE_POINTS_MAX).unwrap_or(1);
+    let per_edge = if per_edge == 0 { 1 } else { per_edge.min(most) };
     let Some((ops, order)) = body.ops_body() else {
         return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
     };

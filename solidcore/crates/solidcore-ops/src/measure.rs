@@ -1325,19 +1325,24 @@ impl Body {
         Ok(p)
     }
 
-    /// Points of record edge `edge`'s curve spread evenly inside the edge's parameter interval,
-    /// never at its ends: at the fractions k / (n + 1), k = 1 … n, of the interval (the kernel's
-    /// evaluation of the curve there), where n is `count` held to
-    /// 1 … [`EDGE_POINTS_MAX`] (0 gives 1, more gives the most). One point is
-    /// [`Body::edge_middle`]'s. For a caller that checks what happened along an edge, not only at
-    /// its middle: a blend that runs on past the end of its edge takes part of the next one.
+    /// `count` points of record edge `edge`'s curve inside the edge, never at its ends: the
+    /// kernel's evaluation of the curve at the fractions k / (count + 1), k = 1 … count, of the
+    /// edge's parameter interval. They are spaced evenly in parameter, not in length: on a
+    /// line they are evenly spaced along it, on a rational arc or a spline they need not be. One
+    /// point is [`Body::edge_middle`]'s. For a caller that checks what happened along an edge,
+    /// not only at its middle: a blend that runs on past the end of its edge takes part of the
+    /// next one. The body is only read, never copied for a rollback.
     ///
     /// # Errors
-    /// As [`Body::edge_middle`].
+    /// [`Error::Argument`] for a `count` of 0 or past [`EDGE_POINTS_MAX`]; otherwise as
+    /// [`Body::edge_middle`].
     pub fn edge_points(&self, order: &Order, edge: usize, count: usize) -> Result<Vec<[f64; 3]>> {
+        let n = match u32::try_from(count) {
+            Ok(n) if (1..=EDGE_POINTS_MAX).contains(&n) => n,
+            _ => return Err(Error::Argument),
+        };
         let e = order::edge(order, edge)?;
-        let n = edge_point_count(count);
-        let points = with_body("edge_points", self, |k, b| {
+        let points = read_body("edge_points", self, |k, b| {
             let interval = edge::interval(b, e)?;
             let curve = edge::curve(b, e)?
                 .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_points"))?;
@@ -1355,15 +1360,6 @@ impl Body {
 
 /// The most points [`Body::edge_points`] gives along one edge.
 pub const EDGE_POINTS_MAX: u32 = 64;
-
-/// `count` held to 1 … [`EDGE_POINTS_MAX`].
-fn edge_point_count(count: usize) -> u32 {
-    match u32::try_from(count) {
-        Ok(0) => 1,
-        Ok(n) if n <= EDGE_POINTS_MAX => n,
-        _ => EDGE_POINTS_MAX,
-    }
-}
 
 /// The parameter `i / (n + 1)` of the way along `[lo, hi]`: the `i`-th of `n` sample positions
 /// ops chooses inside the interval, as [`middle`] is the one position for `n` = 1.
