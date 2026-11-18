@@ -44,9 +44,10 @@ pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_T
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
-pub const VIEW_MENU: [TabMenuRow<'static>; 10] = [
+pub const VIEW_MENU: [TabMenuRow<'static>; 11] = [
     TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None).for_local_view(),
     TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None).for_local_view(),
+    TabMenuRow::new("view.compass", "view_compass.visibility", "").separated().for_local_view(),
     TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None).for_local_view(),
     TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others().for_local_view(),
     MOVE_TO_WINDOW_MENU,
@@ -180,6 +181,11 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
     match id {
         VIEW_RENAME => {
             documents::view_rename_start(app, view);
+        }
+        "view.compass" => {
+            let Some(current) = app.docs.views.get(view) else { return false };
+            let on = !current.compass;
+            return app.run("view.set_compass", serde_json::json!({"view": view, "on": on})).is_ok();
         }
         VIEW_DUPLICATE => {
             return app.run("tab.view.duplicate", serde_json::json!({"id": view})).is_ok();
@@ -493,7 +499,7 @@ mod tests {
     #[test]
     fn view_menu_groups_are_set_apart_by_lines() {
         let starts: Vec<&str> = VIEW_MENU.iter().filter(|r| r.separator_before).map(|r| r.id).collect();
-        assert_eq!(starts, [VIEW_CLOSE, DESIGN_CLOSE]);
+        assert_eq!(starts, ["view.compass", VIEW_CLOSE, DESIGN_CLOSE]);
     }
 
     #[test]

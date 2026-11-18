@@ -1104,7 +1104,9 @@ pub(crate) fn with_view_look<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&
     let mut look = app.docs.navigation.remove(&id).unwrap_or_else(|| ViewLook::from_ui(&app.ui));
     look.swap(app);
     show_look(app, &view);
+    let previous_compass = app.viewport.compass_view.replace(id);
     let out = draw(app);
+    app.viewport.compass_view = previous_compass;
     app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
     app.docs.inspect.insert(id, app.session.inspect());
     look.swap(app);
@@ -1126,7 +1128,7 @@ pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
 pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
     let prefs = DesignTabPrefs::from(&app.preferences);
     if !prefs.opens_sub_tab(kind) {
-        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None });
+        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None, compass: true });
         return app.docs.views.active().id;
     }
     change_views(app, |views| views.open(kind, subject, reuse && prefs.reuse_views))
@@ -1565,6 +1567,15 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, v: Value) -> Resul
         return crate::view_windows::with_strip(app, requested, |app| view_command_local(app, command, v));
     }
     view_command_local(app, command, v)
+}
+
+pub(crate) fn set_compass(app: &mut SolveApp, request: Value) -> Result<Value, String> {
+    let options: solidcraft_engine::schema::tab_views::ViewCompassParams =
+        serde_json::from_value(request.clone()).map_err(|error| error.to_string())?;
+    if !app.docs.views.set_compass(options.view, options.on) {
+        return Err("no_such_3d_view".into());
+    }
+    Ok(request)
 }
 
 fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result<Value, String> {
@@ -2662,6 +2673,7 @@ fn view_tab<'a>(
 ) -> crate::app_bar::ViewTab<'a> {
     let colour = crate::workspace::view_icon_colour(kind_word(view.kind), true);
     crate::app_bar::ViewTab {
+        compass: view.kind.can_tile().then_some(view.compass),
         name: &view.name,
         icon: view.kind.key(),
         accent: colour,
