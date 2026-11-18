@@ -17,7 +17,7 @@ fn pieces(sk: &Sketch, ci: usize) -> Vec<Seg2> {
 }
 
 /// Position along the pieces (piece index + local parameter) closest to `p`, and the distance.
-fn locate(segs: &[Seg2], p: Vec2) -> (f64, f64) {
+pub(super) fn locate(segs: &[Seg2], p: Vec2) -> (f64, f64) {
     segs.iter()
         .enumerate()
         .map(|(i, s)| {
@@ -28,7 +28,7 @@ fn locate(segs: &[Seg2], p: Vec2) -> (f64, f64) {
         .unwrap_or((0.0, f64::INFINITY))
 }
 
-fn point_at(segs: &[Seg2], u: f64) -> Vec2 {
+pub(super) fn point_at(segs: &[Seg2], u: f64) -> Vec2 {
     let n = segs.len();
     let i = (u.floor() as usize).min(n.saturating_sub(1));
     segs.get(i).map(|s| s.point_at((u - i as f64).clamp(0.0, 1.0))).unwrap_or_default()
@@ -115,7 +115,7 @@ pub(super) fn analytic_cut_points(sk: &Sketch, ci: usize) -> Vec<(Vec2, usize)> 
 
 /// Exact sub-pieces between positions `ua` < `ub` (positions may run past the end on closed
 /// curves; they wrap).
-fn span(segs: &[Seg2], ua: f64, ub: f64) -> Vec<Seg2> {
+pub(super) fn span(segs: &[Seg2], ua: f64, ub: f64) -> Vec<Seg2> {
     let n = segs.len() as f64;
     let mut out = Vec::new();
     let mut u = ua;

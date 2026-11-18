@@ -2307,7 +2307,7 @@
   "help.sketch.ellipse": "Draws an ellipse from its centre, the end of its major axis and a point on its minor side. Use it for oval openings, cams and other elongated round shapes.",
   "help.sketch.equation_curve": "Draws a curve from formulas: x(t) and y(t), or y = f(x), over a range. The formulas can use parameters and the curve follows them: use it for a sine wave, a spiral or a gear tooth's involute.",
   "help.sketch.extend": "Lengthens a line or arc up to the nearest curve in its way, or grows two curves until they meet. Use it to close gaps in a profile after trimming or editing.",
-  "help.sketch.fillet": "Rounds the corner where two lines or arcs meet with an arc of a given radius. Several corners rounded together share one radius.",
+  "help.sketch.fillet": "Rounds the corner where two curves meet (lines, arcs, conics or control point splines) with an arc of a given radius. Several corners rounded together share one radius.",
   "help.sketch.finish": "Leaves the sketch and returns to the model. Its closed profiles are then ready for Extrude, Revolve and other features.",
   "help.sketch.finish_auto_constrain": "Runs AutoConstrain on the sketch, then finishes it. Use it to leave a sketch fully defined in one step.",
   "help.sketch.fit_curves_to_section": "Cuts a mesh or solid body with the sketch plane and fits lines and arcs to the section. Use it to rebuild a scanned or imported part as an editable sketch.",
