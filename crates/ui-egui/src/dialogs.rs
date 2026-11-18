@@ -7323,8 +7323,7 @@ pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Optio
     if !origin.is_finite() || !dir.is_finite() {
         return Err(AXIS_PICK.into());
     }
-    let owner = if profile_sketch.is_some() { picks_sketch(app, std::slice::from_ref(sel), None) } else { *sketch };
-    if let Some(owner) = owner.filter(|owner| Some(*owner) != profile_sketch) {
+    if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
         return Ok(json!({"sketch": owner, "curve": id}));
     }
     let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
