@@ -223,6 +223,10 @@ fn crossing_creases_union(k: &mut Kernel) -> Brep {
         .unwrap()
         .result;
     u.refresh_cached_topology();
+    // the union that reaches the two-point drop: 3000 less a speck where the creases cross
+    assert_eq!(counts(&u), [12, 26, 17]);
+    let volume = measure(k, &mut u).2.map(|p| p.0);
+    assert!(volume.is_some_and(|v| close_props(v, 3000.0)), "{volume:?}");
     u
 }
 

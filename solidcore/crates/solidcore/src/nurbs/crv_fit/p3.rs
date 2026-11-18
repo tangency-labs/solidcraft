@@ -595,9 +595,8 @@ fn rescale(t: &mut Vec3, fac: f64) -> Result<()> {
 /// # Errors
 ///
 /// [`NurbsFailure::Input`] for a given knot vector whose knots are all equal, `p < 2`,
-/// `per` outside `[0, 1]`, `u` not spanning a given knot vector, or a degree above the
-/// highest control point index the end conditions give (`p > k`, `p > k + 1` with one
-/// tangent, `p > k + 2` with both); [`NurbsFailure::Knots`] for an invalid given knot vector;
+/// `per` outside `[0, 1]`, `u` not spanning a given knot vector, `p > k` without
+/// tangents, or `p > k + 1` with one tangent; [`NurbsFailure::Knots`] for an invalid given knot vector;
 /// `NL_GEO_ERR` for a tangent that cannot be normalised; errors of
 /// [`interp_given_params`], [`interp_knots_and_deriv`] and
 /// [`interp_knots_and_derivs`]; `InvalidInput` for empty `a`, too few parameters, a
@@ -660,12 +659,6 @@ pub fn interp_knots_and_tangents(
         EndTangents::End(_) => (Tan::End, k + 1),
         EndTangents::Both(..) | EndTangents::Same(_) => (Tan::Both, k + 2),
     };
-    // A curve of degree p needs p + 1 control points. Upstream builds one with fewer from
-    // too few points and no tangent (`N_FitCalcKnotVector` fills the knots it has room
-    // for), which no reader accepts; refuse it as `N_FitCrvInterp` does.
-    if p > n {
-        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
-    }
 
     // Compute parameters if not passed in.
     let ul: Vec<f64> = if let Some(u) = u {
@@ -774,6 +767,12 @@ pub fn interp_knots_and_tangents(
     // Now interpolate data points.
     if !ideal_ok {
         // N_FitCrvKnotsAndDeriv: p > k + 1 = n.
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
+    }
+    // A curve of degree p needs p + 1 control points. Without a tangent upstream builds one
+    // with fewer from too few points (`N_FitCalcKnotVector` fills the knots it has room
+    // for), which no reader accepts (WR-16922); refuse it as `N_FitCrvInterp` does.
+    if tan == Tan::No && p > n {
         return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let kni = KnotVector::from_slice(&ui)?;
