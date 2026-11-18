@@ -920,3 +920,42 @@ const ORIGINAL_BUILTIN_IDS: &[&str] = &[
     "clay-dark",
     "cga",
 ];
+
+/// A theme file's glass: read in its ranges, refused out of them or with an unknown key, and kept
+/// by both exports. A theme without it has no glass.
+#[test]
+fn a_theme_file_may_carry_glass() {
+    let file = json!({"format":"solidcraft-theme/1","name":"Glassy","base":"light","colors":{"panel":"#ffffffb3"},
+        "glass":{"blur":30,"refraction":5,"see_through":0.6,"reach":0.8}});
+    let theme = from_value(&file).expect("a glass theme reads");
+    let t = resolve(&theme);
+    let glass = t.glass.expect("glass");
+    assert_eq!((glass.blur, glass.refraction, glass.see_through, glass.reach), (30.0, 5.0, 0.6, 0.8));
+    let back = from_value(&export("Glassy", theme.base, &t, None)).expect("the export reads");
+    assert_eq!(resolve(&back).glass, Some(glass));
+    let kept = from_value(&export_file(&theme)).expect("the theme file export reads");
+    assert_eq!(resolve(&kept).glass, Some(glass));
+    let glassy = |glass: Value| from_value(&json!({"format":"solidcraft-theme/1","name":"G","base":"dark","colors":{},"glass":glass}));
+    assert!(glassy(json!({"blur": 99})).is_err());
+    assert!(glassy(json!({"frost": 1})).is_err());
+    assert!(glassy(json!(3)).is_err());
+    assert_eq!(resolve(&from_value(&json!({"format":"solidcraft-theme/1","name":"F","base":"dark","colors":{}})).unwrap()).glass, None);
+}
+
+/// Opt-in: a theme file without glass resolves, serialises and exports as it did, with no glass layer.
+#[test]
+fn a_theme_without_glass_loads_as_before() {
+    crate::test_support::host_data();
+    for theme in builtin() {
+        assert!(theme.glass.is_empty(), "{}", theme.id);
+        assert_eq!(resolve(theme).glass, None, "{}", theme.id);
+        assert!(serde_json::to_value(theme).unwrap().get("glass").is_none(), "{}", theme.id);
+        assert!(export_file(theme).get("glass").is_none(), "{}", theme.id);
+        assert!(export(&theme.name, theme.base, &resolve(theme), None).get("glass").is_none(), "{}", theme.id);
+    }
+    let plain = json!({"format":"solidcraft-theme/1","name":"Plain","base":"dark","colors":{"panel":"#18202aff"}});
+    let mut empty = plain.clone();
+    empty["glass"] = json!({});
+    assert_eq!(resolve(&from_value(&plain).unwrap()), resolve(&from_value(&empty).unwrap()));
+    assert_eq!(resolve(&from_value(&plain).unwrap()).glass, None);
+}
