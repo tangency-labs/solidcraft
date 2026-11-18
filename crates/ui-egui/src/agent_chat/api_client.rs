@@ -1911,7 +1911,8 @@ mod tests {
     /// past `keep`, become a note as older pictures do.
     #[test]
     fn the_newest_message_keeps_all_its_pictures_and_pdfs() {
-        let pdf = |n: u8| PromptPart::Document { name: format!("d{n}.pdf"), uri: String::new(), mime: "application/pdf".into(), base64: format!("D{n}") };
+        let pdf =
+            |n: u8| PromptPart::Document { name: format!("d{n}.pdf"), uri: String::new(), mime: "application/pdf".into(), base64: format!("D{n}") };
         let photo = |n: u8| PromptPart::Image { mime: "image/jpeg".into(), base64: format!("P{n}") };
         let mut parts = vec![PromptPart::Text("these".into())];
         parts.extend((1..=8).map(photo));
@@ -1926,7 +1927,8 @@ mod tests {
         h.push(user_message(Protocol::OpenAi, &[PromptPart::Text("next".into())]));
         assert!(drop_old_views(&mut h, MAX_HISTORY_IMAGES));
         assert_eq!(pictures(&h), vec!["data:image/jpeg;base64,P7", "data:image/jpeg;base64,P8"]);
-        let kept: Vec<&str> = h[1]["content"].as_array().unwrap().iter().filter_map(|p| p.pointer("/file/filename").and_then(Value::as_str)).collect();
+        let kept: Vec<&str> =
+            h[1]["content"].as_array().unwrap().iter().filter_map(|p| p.pointer("/file/filename").and_then(Value::as_str)).collect();
         assert_eq!(kept, ["d2.pdf", "d3.pdf"]);
         assert_eq!(h[1]["content"].as_array().unwrap().iter().filter(|p| p["text"] == DROPPED_DOCUMENT_NOTE).count(), 1);
 
