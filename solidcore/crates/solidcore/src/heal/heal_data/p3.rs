@@ -48,7 +48,7 @@
 //! `Fix_SplitEdgesAtSeam` does not format the diagnostic of a pole split refused at
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
 
-use crate::error::{ignored as ignore_soft, EntityRef, Result, SolidError, SM_ERR};
+use crate::error::{ignored as ignore_soft, EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::heal::face_props::{HealerOpType, LoopObject};
@@ -131,11 +131,10 @@ impl<O: LoopObject> HealData<O> {
         through: HealerOpType,
     ) -> Result<()> {
         if tracker.is_tracking(Some(&k.context)) {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::heal_failed(
+                OP,
+                "the topology changes are still being tracked",
+            ));
         }
         if let Some(error) = tracker.failure() {
             return Err(error);
@@ -459,10 +458,8 @@ impl<O: LoopObject> HealData<O> {
             let mut changes = Changes::default();
             for id in queue.into_iter().rev() {
                 let p = self.edge_props.props(id)?;
-                let e = p.edge.ok_or(SolidError::Upstream {
-                    operation: OP,
-                    code: SM_ERR,
-                    entity: None,
+                let e = p.edge.ok_or_else(|| {
+                    SolidError::heal_failed(OP, "the edge properties have no edge")
                 })?;
                 if p.bad_degen_edge.is_false() {
                     continue;
@@ -512,7 +509,6 @@ fn capture_changes<T>(
         let value = edit(k, b)?;
         return Ok((value, Changes::default()));
     }
-    let stop_checks_own = k.fixes.stop_tracking_checks_own_callback;
     k.context
         .set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(1))));
     let result = edit(k, b);
@@ -521,9 +517,9 @@ fn capture_changes<T>(
         .sys_notify_callback()
         .and_then(NotifyCallback::as_any)
         .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
-        .filter(|callback| !stop_checks_own || callback.tracker() == 1)
+        .filter(|callback| callback.tracker() == 1)
         .map(|callback| (callback.lists(), callback.failure()));
-    if !stop_checks_own || captured.is_some() {
+    if captured.is_some() {
         k.context.set_sys_notify_callback(None);
     }
     let value = result?;
@@ -597,8 +593,7 @@ fn tracked_edit<R>(
     use crate::topology::brep::p3 as brep_p3;
     let lent = brep_p3::with_lent_context(k, |k, ctx| {
         // (the tracker reads its B-rep only to tell it from null)
-        let mut tracker = TrackTopologyChanges::new_with_kernel(
-            k,
+        let mut tracker = TrackTopologyChanges::new(
             Some(crate::topology::BrepId::from_index(0)),
             EDIT_TRACKER,
             true,
@@ -918,7 +913,7 @@ impl<O: LoopObject> HealData<O> {
             // Only endpoint rejection is known to leave the edge unsplit. Other errors
             // can follow interval/curve edits, so do not continue with stale properties.
             if !split.split {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::heal_failed(OP, "the edge was not split"));
             }
             // UpdateTargetLists deletes old properties. Reacquire the next candidate.
             self.update_target_lists(
@@ -1382,6 +1377,7 @@ fn split_face_at_seam<O: LoopObject>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR;
     use crate::heal::face_props::Tri;
     use crate::intersect::point_class::{ClassObject, ClassObjectKind};
     use crate::topology::LoopId;
@@ -1730,7 +1726,7 @@ mod tests {
                 &mut Brep::default(),
                 HealerOpType::FixDegenEdges
             ),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if e.upstream_status() == Some(SM_ERR)
         ));
     }
 
@@ -1877,7 +1873,7 @@ mod tests {
         let (mut b, mut k, seen, mut h1, mut h2) = two_healer_setup();
         let r1 = h1.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges);
         assert!(
-            matches!(r1, Err(SolidError::Upstream { code: SM_ERR, .. })),
+            matches!(&r1, Err(e) if e.upstream_status() == Some(SM_ERR)),
             "{r1:?}"
         );
         let first = seen.lock().unwrap().len();
@@ -1898,7 +1894,7 @@ mod tests {
         h1_clone.bad_edge_props_degen_edges = h2.bad_edge_props_degen_edges.clone();
         let r1 = h1.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges);
         assert!(
-            matches!(r1, Err(SolidError::Upstream { code: SM_ERR, .. })),
+            matches!(&r1, Err(e) if e.upstream_status() == Some(SM_ERR)),
             "{r1:?}"
         );
         let first = seen.lock().unwrap().len();
@@ -1930,5 +1926,32 @@ mod tests {
             .unwrap();
         assert_eq!(callback.tracker(), 27);
         assert!(callback.lists().notify_events.is_empty());
+    }
+
+    /// WR-17: an edit that replaces the capture's tracker with another one is refused,
+    /// and the replacing tracker stays installed; its lists are not taken as the edit's.
+    #[test]
+    fn capture_refuses_a_replaced_tracker_and_leaves_it_installed() {
+        use crate::geom::context::NotifyCallback;
+        use crate::topology::topology::TopologyChangeCallback;
+        let mut k = Kernel::default();
+        let mut b = Brep::new();
+        let r = capture_changes(&mut k, &mut b, |k, _| {
+            k.context
+                .set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(5))));
+            Ok(())
+        });
+        let err = r.err();
+        assert!(
+            matches!(err, Some(SolidError::InvalidInput { .. })),
+            "{err:?}"
+        );
+        let callback = k
+            .context
+            .sys_notify_callback()
+            .and_then(NotifyCallback::as_any)
+            .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
+            .unwrap();
+        assert_eq!(callback.tracker(), 5);
     }
 }

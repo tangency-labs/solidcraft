@@ -1,4 +1,4 @@
-//! WR-591 at operation level (`Kernel::fixes.loops_go_on_round_the_vertex`, the fork's
+//! WR-591 at operation level (the loops go on round a shared vertex, the fork's
 //! tangency-labs/smlib@9209e76 and b0ee3f9): the record's 10 x 6 outline and the
 //! triangular hole whose corner touches it at (0, 3), as eight lines in the record's 24
 //! orders (none, the outline or the hole reversed, every rotation of the list), swept 2
@@ -11,9 +11,9 @@
 //! plate and hole, 2 up: volume 118, the level 2 check clean, 10 faces of one loop each,
 //! two regions). These tests add the other 23 orders.
 //!
-//! Without the flag the cap plane is refused in 15 of the 24 orders, and the sweep still
-//! returns its eight side faces as an open skin. With it the plane is one loop of all eight
-//! lines (area 59) in every order, and the swept body has ten faces, every edge manifold
+//! Upstream's ordering (the first end by index) refused the cap plane in 15 of the 24
+//! orders, and the sweep still returned its eight side faces as an open skin. Going on
+//! round the vertex, the plane is one loop of all eight lines (area 59) in every order, and the swept body has ten faces, every edge manifold
 //! and the right area, the plate less the hole, volume 118, in every order. In 9 of them
 //! (rotations 4, 6 and 7 of each variant) the closed shell got no solid region (one void
 //! region, volume 0, though `check_brep` passed it) until the sweep's stitch glued its
@@ -53,27 +53,8 @@ fn area() -> f64 {
     2.0 * 59.0 + 2.0 * (32.0 + 1.0 + 2.0 * 4.25_f64.sqrt())
 }
 
-/// The orders whose cap plane is refused without the flag: (variant, rotation).
-const REFUSED_OFF: [(usize, usize); 15] = [
-    (0, 5),
-    (0, 6),
-    (0, 7),
-    (1, 4),
-    (1, 5),
-    (1, 6),
-    (1, 7),
-    (2, 0),
-    (2, 1),
-    (2, 2),
-    (2, 3),
-    (2, 4),
-    (2, 5),
-    (2, 6),
-    (2, 7),
-];
-
-/// The rotations whose closed body got no solid region with the flag before #2506's
-/// stitch fix, in every variant.
+/// The rotations whose closed body got no solid region before #2506's stitch fix, in
+/// every variant.
 const NO_SOLID_ROTATIONS: [usize; 3] = [4, 6, 7];
 
 fn p(q: [f64; 2]) -> Point3 {
@@ -117,10 +98,9 @@ fn orders() -> Vec<(usize, usize, Vec<Curve>)> {
     out
 }
 
-fn kernel(round: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.join_touching_loops = true;
-    k.fixes.loops_go_on_round_the_vertex = round;
     k
 }
 
@@ -185,52 +165,13 @@ fn is_plate(s: &Swept) -> bool {
         && s.check.is_empty()
 }
 
-/// The defect WR-591 is about, pinned while the flag is opt-in, not a result to keep:
-/// without the flag the cap plane is refused in 15 orders (the loop ordering ends on a
-/// curve it already used, or runs round the hole the wrong way), and the capped sweep
-/// still returns `Ok`, the eight side faces as an open skin: no solid region, volume 0.
-/// In the other orders the plane is the one loop. This test goes when the flag becomes
-/// the default.
-#[test]
-fn wr591_without_the_flag_the_capped_sweep_returns_an_open_skin() {
-    assert!(!Kernel::default().fixes.loops_go_on_round_the_vertex);
-    let mut refused = Vec::new();
-    for (variant, turn, curves) in orders() {
-        let mut k = kernel(false);
-        match cap_loops(&k, &curves) {
-            None => {
-                refused.push((variant, turn));
-                let s = sweep(&mut k, &curves);
-                assert_eq!(s.faces, 8, "variant {variant}, turn {turn}: {s:?}");
-                assert!(
-                    !s.edges_manifold && !s.manifold_solid && s.volume == 0.0,
-                    "variant {variant}, turn {turn}: {s:?}"
-                );
-                assert!(
-                    (s.area - (area() - 2.0 * 59.0)).abs() < 1e-9,
-                    "variant {variant}, turn {turn}: {s:?}"
-                );
-            }
-            Some((outer, loops, enclosed)) => {
-                assert_eq!(
-                    (outer, loops),
-                    (vec![1], vec![8]),
-                    "variant {variant}, turn {turn}"
-                );
-                assert!((enclosed.abs() - 59.0).abs() < 1e-12, "{enclosed}");
-            }
-        }
-    }
-    assert_eq!(refused, REFUSED_OFF);
-}
-
-/// With the flag the cap plane is one loop of all eight lines, enclosing 59, in every
+/// The cap plane is one loop of all eight lines, enclosing 59, in every
 /// order, and the sweep closes: ten faces, every edge manifold, the area of the plate
 /// less the hole.
 #[test]
 fn wr591_on_cap_plane_is_one_loop_in_every_order() {
     for (variant, turn, curves) in orders() {
-        let mut k = kernel(true);
+        let mut k = kernel();
         let (outer, loops, enclosed) = cap_loops(&k, &curves)
             .unwrap_or_else(|| panic!("variant {variant}, turn {turn}: plane refused"));
         assert_eq!(
@@ -250,7 +191,7 @@ fn wr591_on_cap_plane_is_one_loop_in_every_order() {
     }
 }
 
-/// With the flag the 15 orders outside [`NO_SOLID_ROTATIONS`] give the plate less the
+/// The 15 orders outside [`NO_SOLID_ROTATIONS`] give the plate less the
 /// hole: a manifold solid of volume 118, the check clean.
 #[test]
 fn wr591_on_sweep_is_the_plate_less_the_hole() {
@@ -259,7 +200,7 @@ fn wr591_on_sweep_is_the_plate_less_the_hole() {
         if NO_SOLID_ROTATIONS.contains(&turn) {
             continue;
         }
-        let s = sweep(&mut kernel(true), &curves);
+        let s = sweep(&mut kernel(), &curves);
         if !is_plate(&s) {
             bad.push((variant, turn, s));
         }
@@ -279,7 +220,7 @@ fn wr591_on_sweep_is_the_plate_less_the_hole() {
 fn wr591_on_sweep_is_the_plate_less_the_hole_in_every_order() {
     let mut bad = Vec::new();
     for (variant, turn, curves) in orders() {
-        let s = sweep(&mut kernel(true), &curves);
+        let s = sweep(&mut kernel(), &curves);
         if !is_plate(&s) {
             bad.push((variant, turn, s));
         }

@@ -25,6 +25,7 @@
 //! share of the whole range, not to the integral so far, so the steps' errors together stay
 //! within the accuracy (the curve length; `plan/findings/curve.curve_p5--curve-length-global-error-moves-cases-2026-11-08.md`).
 
+use crate::error::mass::MassFailure;
 use crate::geom::tol::are_same;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
 use crate::{Kernel, Result, SolidError};
@@ -36,6 +37,16 @@ const OP: &str = "mass::integrator";
 pub(crate) const OP_STEP_CONTROL: &str = "mass::integrator::step_control";
 /// The operation an ODE integration's `SM_ERR` names when the integrand is not finite.
 pub(crate) const OP_INTEGRAND: &str = "mass::integrator::integrand";
+
+/// The integration's step control failing ([`MassFailure::StepControl`], `SM_ERR`).
+fn step_control_failed() -> SolidError {
+    SolidError::mass(OP_STEP_CONTROL, MassFailure::StepControl)
+}
+
+/// The integrand not being finite ([`MassFailure::Integrand`], `SM_ERR`).
+fn integrand_failed() -> SolidError {
+    SolidError::mass(OP_INTEGRAND, MassFailure::Integrand)
+}
 /// A step's refusal of an accuracy below its error's rounding: its step control cannot
 /// meet it.
 const UNACHIEVABLE: &str = "unachievable accuracy";
@@ -225,15 +236,18 @@ impl OdeIntegrator {
                 },
             )
             .map_err(|e| match e {
-                SolidError::Upstream {
-                    operation: OP_STEP_CONTROL | OP_INTEGRAND,
-                    ..
-                } => e,
+                e if matches!(
+                    e.mass_failure(),
+                    Some(MassFailure::StepControl | MassFailure::Integrand)
+                ) =>
+                {
+                    e
+                }
                 // the step control cannot meet the accuracy (upstream: SM_ERR, as below)
                 SolidError::InvalidInput {
                     reason: UNACHIEVABLE,
                     ..
-                } => SolidError::sm_err(OP_STEP_CONTROL),
+                } => step_control_failed(),
                 e => SolidError::nurbs_routine(OP)(e),
             })?;
             if step.taken == h {
@@ -261,18 +275,18 @@ impl OdeIntegrator {
                         size = size.max(at(lower, i)?);
                     }
                     if *owed > options.accuracy * size {
-                        return Err(SolidError::sm_err(OP_STEP_CONTROL));
+                        return Err(step_control_failed());
                     }
                 }
                 initial.copy_from_slice(&y);
                 return Ok(counts);
             }
             if step.next.abs() <= options.minimum_step {
-                return Err(SolidError::sm_err(OP_STEP_CONTROL));
+                return Err(step_control_failed());
             }
             h = step.next;
         }
-        Err(SolidError::sm_err(OP_STEP_CONTROL))
+        Err(step_control_failed())
     }
 
     /// `RungeKutta5thOrderStep`; also applies the upstream in-place scale floor.
@@ -429,10 +443,10 @@ impl OdeIntegrator {
                 htemp.min(0.1 * h)
             };
             if !h.is_finite() || are_same(x + h, x) {
-                return Err(SolidError::sm_err(OP_STEP_CONTROL));
+                return Err(step_control_failed());
             }
         }
-        Err(SolidError::sm_err(OP_STEP_CONTROL))
+        Err(step_control_failed())
     }
 }
 
@@ -455,7 +469,7 @@ fn finite(values: &[f64]) -> Result<()> {
     if values.iter().all(|v| v.is_finite()) {
         Ok(())
     } else {
-        Err(SolidError::sm_err(OP_INTEGRAND))
+        Err(integrand_failed())
     }
 }
 fn validate_scale(scale: &[f64]) -> Result<()> {
@@ -765,7 +779,7 @@ fn quadrature_estimate(h: f64, samples: [f64; 6]) -> Result<f64> {
     if error.is_finite() {
         Ok(error)
     } else {
-        Err(SolidError::sm_err(OP_INTEGRAND))
+        Err(integrand_failed())
     }
 }
 
@@ -1145,12 +1159,10 @@ mod tests {
         });
         assert!(
             matches!(
-                nan,
-                Err(SolidError::Upstream {
-                    operation: OP_INTEGRAND,
-                    code: crate::error::SM_ERR,
-                    ..
-                })
+                &nan,
+                Err(e) if e.operation() == OP_INTEGRAND
+                    && e.sm_status() == Some(crate::error::SM_ERR)
+                    && e.mass_failure() == Some(&MassFailure::Integrand)
             ),
             "{nan:?}"
         );
@@ -1164,12 +1176,10 @@ mod tests {
             });
         assert!(
             matches!(
-                tight,
-                Err(SolidError::Upstream {
-                    operation: OP_STEP_CONTROL,
-                    code: crate::error::SM_ERR,
-                    ..
-                })
+                &tight,
+                Err(e) if e.operation() == OP_STEP_CONTROL
+                    && e.sm_status() == Some(crate::error::SM_ERR)
+                    && e.mass_failure() == Some(&MassFailure::StepControl)
             ),
             "{tight:?}"
         );

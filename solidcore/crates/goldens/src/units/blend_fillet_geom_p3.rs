@@ -945,8 +945,7 @@ fn dump_curve(o: &mut Vec<f64>, c: Option<&Curve>) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -1.0,
+        e => crate::output::blend_status(e).map_or(-1.0, f64::from),
     }
 }
 
@@ -1234,9 +1233,14 @@ mod contract {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+    rust_with_error(i).map(|(out, _)| out)
+}
+
+/// [`rust`], with the op's error when it failed.
+fn rust_with_error(i: &Inputs) -> Result<(Output, Option<SolidError>), HarnessError> {
     let mut tg = match own_target(&i.brep)? {
         Ok(t) => t,
-        Err(out) => return Ok(out),
+        Err(out) => return Ok((out, None)),
     };
     // an input outside the contract is a harness error: the Rust side must not build a
     // model from it. Nightly fuzz case fuzz00137 mutated a vertex's corner tag to 2^31: the
@@ -1328,12 +1332,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     if let Err(e) = &res {
         if let Some(out) = Output::unported(e) {
-            return Ok(out);
+            return Ok((out, res.err()));
         }
     }
     let mut o = vec![0.0, res.as_ref().err().map_or(0.0, status)];
     m.put(&mut o)?;
-    Ok(Output::new().values("flat", o))
+    Ok((Output::new().values("flat", o), res.err()))
 }
 
 // ---- generators ----------------------------------------------------------------------------
@@ -2107,6 +2111,28 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The recalculation whose golden moved when `fillet_statuses_pass_on` was removed
+    /// (WR-661). The rail's end points drop back onto it in reverse order, so the trim
+    /// interval it asks for has its start after its end. `Extent1d::set_min_max` refuses
+    /// that, and the refusal is now returned. Upstream ignored the refusal and went on
+    /// with the rail's previous interval.
+    #[test]
+    fn wr661_moved_recalculation_trims_a_rail_that_ends_before_it_starts() {
+        let case = crate::case::regression_case(&Runner, "gen0210");
+        let inputs: Inputs = case.parse().expect("inputs");
+        let (_, error) = rust_with_error(&inputs).expect("run");
+        assert!(
+            matches!(
+                error,
+                Some(SolidError::InvalidInput {
+                    operation: "geom::extent1d::Extent1d::set_min_max",
+                    ..
+                })
+            ),
+            "{error:?}"
+        );
+    }
 
     /// Nightly fuzz case `blend.fillet_geom_p3/fuzz00137` (runs 40177686438 and
     /// 40298730423): a vertex corner tag of 2^31. The FFI refuses it for the C++ side

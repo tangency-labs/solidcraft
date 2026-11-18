@@ -68,8 +68,7 @@ fn cclosest(o: &mut Vec<f64>, p: api::CurveClosestPoint) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -1.,
+        e => solidcore::error::upstream_status(e).map_or(-1., f64::from),
     }
 }
 fn output(op: i32, r: Result<Vec<f64>>) -> Output {
@@ -968,7 +967,7 @@ impl UnitDiff for Runner {
         let i: Inputs = c.parse()?;
         compared_input(&i)?;
         let a = &i.data;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let point = v([a[11], a[12], a[13]]);
         let result = match i.op {
             1 => curve(&k, a)
@@ -1075,5 +1074,68 @@ impl UnitDiff for Runner {
         let mut ctx = ctx.clone();
         ctx.seeds = ctx.seeds.max(800);
         default_cases(self, &ctx)
+    }
+}
+
+#[cfg(test)]
+mod wr57_tests {
+    use super::*;
+    use solidcore::geom::vector2d::Point2;
+
+    /// WR-57 (#17856): `rational_kind9_1e-05_axis` asks for the point of a rational
+    /// sphere of radius `r = 1e-5` closest to its own centre. The net is the standard
+    /// rational quadratic sphere, which represents the sphere exactly (closed form), so
+    /// every surface point is `r` from the centre and every one is a closest point; the
+    /// answers are at `u ~ 0`, the pole row, whose control row is one point (collapsed),
+    /// so `S(0, v)` is the north pole for every `v`. The moved `v` (main 1/9, now 1/6) is
+    /// a degenerate parameter of that row, and both are correct. Checked: the case is the
+    /// centre query; the first control row is one point; the answer's distance and each
+    /// answer's point (main's parameters too) are `r` to the evaluation's rounding
+    /// ([`crate::certify::evaluation_slack_at`]) and the distance's own; and the pole
+    /// row's points at main's and the new `v` are one point to that rounding.
+    #[test]
+    fn wr57_the_centre_of_a_rational_sphere_is_answered_from_its_pole_row() {
+        let case = crate::case::regression_case(&Runner, "rational_kind9_1e-05_axis");
+        let i: Inputs = case.parse().unwrap();
+        let a = &i.data;
+        assert_eq!((i.op, a[21]), (3, 9.0), "a closest point on a rational sphere");
+        let k = Kernel::default();
+        let centre = v([a[0], a[1], a[2]]);
+        let r = a[6];
+        assert_eq!(v([a[11], a[12], a[13]]), centre, "the test point is the centre");
+        let s = surface(&k, a).unwrap();
+        let form = solidcore::blend::fillet_section::station::as_b_spline(&k, &s)
+            .unwrap()
+            .expect("a NURBS form");
+        let nurb = form.gw_nurb().expect("a NURB");
+        let first = nurb.rows().next().expect("a row");
+        // (one point to the division's rounding)
+        let at = |c: &CPoint| Vec3::new(c.x / c.w, c.y / c.w, c.z / c.w);
+        assert!(
+            first.iter().all(|c| (at(c) - at(&first[0])).length() <= 4.0 * f64::EPSILON * r),
+            "the pole row is one point: {first:?}"
+        );
+        let on_sphere = |uv: Point2| {
+            let q = s.evaluate_point(&k, uv).unwrap();
+            let d = solidcore::geom::certified::distance(q, centre);
+            let slack = crate::certify::evaluation_slack_at(&k, &s, uv).expect("bounded");
+            assert!((d.value - r).abs() <= d.bound + slack, "{uv:?}: {} from the centre, r {r}", d.value);
+            (q, d.bound + slack)
+        };
+        let answer = api::surface_closest_point(&k, &s, centre).unwrap();
+        assert!(!answer.uvs.is_empty());
+        for &uv in &answer.uvs {
+            on_sphere(uv);
+        }
+        let first_uv = answer.uvs[0];
+        // (the reported distance: `r` to the same rounding)
+        let (_, e) = on_sphere(first_uv);
+        assert!((answer.closest.distance - r).abs() <= 2.0 * e, "{}", answer.closest.distance);
+        // main's answer and the new one: the pole row at v = 1/9 and v = 1/6
+        let u = first_uv.x;
+        assert!(u.abs() < 1e-15, "{first_uv:?} is on the pole row");
+        let (main_pt, em) = on_sphere(Point2::new(u, 1.0 / 9.0));
+        let (new_pt, en) = on_sphere(Point2::new(u, 1.0 / 6.0));
+        assert!(main_pt.distance(new_pt) <= em + en, "{main_pt:?} {new_pt:?}");
     }
 }

@@ -65,6 +65,15 @@ impl Group {
         collect(&self.rows, &mut all);
         all
     }
+
+    /// Does `test` hold for anything in the group, groups inside it included? Allocates nothing:
+    /// a search asks this of a group each frame.
+    pub fn any_entry(&self, test: &impl Fn(&Entry) -> bool) -> bool {
+        self.rows.iter().any(|r| match r {
+            Row::Item(e) => test(e),
+            Row::Group(g) => g.any_entry(test),
+        })
+    }
 }
 
 #[derive(Default)]
@@ -109,6 +118,12 @@ impl Cache {
             && self.sketch == app.session.active_sketch
             && self.colors == colors
         {
+            // A Save As can move the design to a new file without changing the document;
+            // the top row follows the file's name (#7267).
+            let name = component_name(app, 0);
+            if self.root.name != name {
+                self.root.name = name;
+            }
             return;
         }
         self.components.clear();

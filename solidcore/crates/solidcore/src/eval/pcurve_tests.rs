@@ -1489,3 +1489,351 @@ fn an_edge_is_fitted_to_its_own_tolerance() {
     let pc = &pcurves(&plane, &own, 1e-5).unwrap()[0][0];
     assert!(lift_error(&plane, &off, [0., 1.], pc) <= 2e-4);
 }
+
+#[test]
+fn restarting_a_closed_curve_preserves_both_pieces() {
+    // Non-unit domain, unequal seam weights: each side is a rational quadratic
+    // Bezier. The cut inside a span requires knot insertion; 5 is a repeated knot.
+    let rational = Curve::RationalSpline {
+        knots: vec![2., 2., 2., 5., 5., 8., 8., 8.],
+        homogeneous: vec![
+            [2., 0., 0., 2.],
+            [2., 4., 0., 2.],
+            [4., 0., 0., 2.],
+            [1., -2., 0., 1.],
+            [1., 0., 0., 1.],
+        ],
+    };
+    let spline = Curve::Spline {
+        knots: vec![2., 2., 2., 5., 5., 8., 8., 8.],
+        points: vec![
+            [0., 0., 0.],
+            [1., 2., 0.],
+            [2., 0., 0.],
+            [1., -2., 0.],
+            [0., 0., 0.],
+        ],
+    };
+    let polyline = Curve::Polyline {
+        points: vec![
+            [0., 0., 0.],
+            [1., 0., 0.],
+            [1., 1., 0.],
+            [0., 1., 0.],
+            [0., 0., 0.],
+        ],
+    };
+    for (curve, a, b, cuts) in [
+        (rational, 2., 8., [4.25, 5.]),
+        (spline, 2., 8., [4.25, 5.]),
+        (polyline, 0., 4., [1.25, 2.]),
+    ] {
+        let original = CurveEval::new(&curve).unwrap();
+        for start in cuts {
+            let rotated = restart_curve(&curve, start).unwrap();
+            let eval = CurveEval::new(&rotated).unwrap();
+            for i in 0..=128 {
+                let t = start + (b - a) * f64::from(i) / 128.;
+                let old_t = if t >= b { t - (b - a) } else { t };
+                assert!(
+                    eval.point(t).unwrap().dist(original.point(old_t).unwrap()) < 1e-12,
+                    "{start} {t}"
+                );
+            }
+            assert!(restart_curve(&curve, a).is_err());
+            assert!(restart_curve(&curve, b).is_err());
+            assert!(restart_curve(&curve, f64::NAN).is_err());
+        }
+    }
+    // Approximate closure must not move either endpoint or its neighbouring span.
+    let near_closed = Curve::Polyline {
+        points: vec![[0., 0., 0.], [1., 1., 0.], [0., 1e-8, 0.]],
+    };
+    assert!(restart_curve(&near_closed, 1.).is_err());
+}
+
+/// A reader-style rational spline: the two seam coefficients are formed as p*w.
+fn weighted_decimal_seam(endpoint: [f64; 3], weight: f64) -> Curve {
+    let [x, y, z] = endpoint;
+    Curve::RationalSpline {
+        knots: vec![2., 2., 2., 5., 5., 8., 8., 8.],
+        homogeneous: vec![
+            [x * weight, y * weight, z * weight, weight],
+            [3., 6., 0., 3.],
+            [4., 0., 0., 2.],
+            [1., -2., 0., 1.],
+            [x, y, z, 1.],
+        ],
+    }
+}
+
+#[test]
+fn restarting_a_decimal_seam_accepts_only_endpoint_rounding() {
+    assert_ne!(0.1_f64 * 3. / 3., 0.1);
+    for endpoint in [
+        [0.1, -0.2, 0.3],
+        [0.1, -0.2, 0.0],
+        [1e8, 0.1, 1e-8],
+        [1e-100, -2e-100, 3e-100],
+    ] {
+        let curve = weighted_decimal_seam(endpoint, 3.);
+        let original = CurveEval::new(&curve).unwrap();
+        for start in [4.25, 5.] {
+            let rotated = restart_curve(&curve, start).unwrap();
+            let eval = CurveEval::new(&rotated).unwrap();
+            for i in 0..=128 {
+                let t = start + 6. * f64::from(i) / 128.;
+                let old_t = if t >= 8. { t - 6. } else { t };
+                let expected = original.point(old_t).unwrap();
+                assert!(eval.point(t).unwrap().dist(expected) <= 1e-12 * (1. + expected.len()));
+            }
+        }
+        let Curve::RationalSpline {
+            mut homogeneous,
+            knots,
+        } = curve
+        else {
+            panic!()
+        };
+        // A small y gap must not be hidden by a large x coordinate or an absolute floor.
+        homogeneous.last_mut().unwrap()[1] += endpoint[1].abs() * f64::EPSILON * 64.;
+        assert!(restart_curve(&Curve::RationalSpline { knots, homogeneous }, 4.25).is_err());
+    }
+    for bad in [f64::INFINITY, f64::NAN, f64::MAX] {
+        let curve = Curve::RationalSpline {
+            knots: vec![0., 0., 1., 2., 2.],
+            homogeneous: vec![[bad, 0., 0., 0.5], [1., 1., 0., 1.], [bad, 0., 0., 0.5]],
+        };
+        assert!(restart_curve(&curve, 0.5).is_err());
+    }
+}
+
+#[test]
+fn restarting_weighted_seams_encloses_random_coordinate_rounding() {
+    // Deterministic random mantissas of both signs, all bounded away from zero.
+    let mut state = 0x6a09_e667_f3bc_c909_u64;
+    let mut coordinate = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let magnitude = f64::from_bits(0x3ff0_0000_0000_0000 | (state >> 12)) - 0.75;
+        if state & 1 == 0 {
+            magnitude
+        } else {
+            -magnitude
+        }
+    };
+    let mut unequal_quotients = [0; 2];
+    for scale in [1e-100, 1., 1e100] {
+        for _ in 0..64 {
+            let endpoint = [
+                coordinate() * scale,
+                coordinate() * scale,
+                coordinate() * scale,
+            ];
+            // The exact STEP quarter-circle seam weight is 0.7071067811865476.
+            for (which, weight) in [std::f64::consts::FRAC_1_SQRT_2, 3.]
+                .into_iter()
+                .enumerate()
+            {
+                unequal_quotients[which] +=
+                    usize::from(endpoint.iter().any(|x| x * weight / weight != *x));
+                let curve = weighted_decimal_seam(endpoint, weight);
+                let original = CurveEval::new(&curve).unwrap();
+                for start in [4.25, 5.] {
+                    let restarted = restart_curve(&curve, start).unwrap();
+                    let eval = CurveEval::new(&restarted).unwrap();
+                    for i in 0..=16 {
+                        let t = start + 6. * f64::from(i) / 16.;
+                        let old_t = if t >= 8. { t - 6. } else { t };
+                        let expected = original.point(old_t).unwrap();
+                        assert!(
+                            eval.point(t).unwrap().dist(expected)
+                                <= 1e-12 * expected.len().max(scale),
+                            "{endpoint:?}, weight {weight}, t {t}"
+                        );
+                    }
+                }
+                // Each axis is checked on its own, only a few ulps from closure.
+                for axis in 0..3 {
+                    let Curve::RationalSpline {
+                        knots,
+                        mut homogeneous,
+                    } = curve.clone()
+                    else {
+                        panic!()
+                    };
+                    homogeneous.last_mut().unwrap()[axis] +=
+                        endpoint[axis].abs() * f64::EPSILON * 64.;
+                    assert!(
+                        restart_curve(&Curve::RationalSpline { knots, homogeneous }, 4.25).is_err(),
+                        "{endpoint:?}, weight {weight}, axis {axis}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        unequal_quotients.iter().all(|count| *count > 0),
+        "exercise unequal divisions of matching source endpoints"
+    );
+}
+
+#[test]
+fn restarting_a_curve_returns_typed_errors_with_its_operation() {
+    use crate::SolidError;
+    let operation = "eval::pcurve::restart_curve";
+    let unsupported = Curve::Line {
+        start: [0.; 3],
+        end: [1.; 3],
+    };
+    let error = restart_curve(&unsupported, 0.5).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::Unsupported {
+            reason: "only splines and polylines can be restarted",
+            ..
+        }
+    ));
+
+    let closed = Curve::Polyline {
+        points: vec![[0.; 3], [1.; 3], [0.; 3]],
+    };
+    let error = restart_curve(&closed, 0.).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::InvalidInput {
+            reason: "spline restart outside the open domain",
+            ..
+        }
+    ));
+
+    let malformed = Curve::Spline {
+        knots: vec![0., 1.],
+        points: vec![[0.; 3], [1.; 3]],
+    };
+    let error = restart_curve(&malformed, 0.5).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::InvalidInput {
+            reason: "spline degree",
+            ..
+        }
+    ));
+
+    let open = Curve::Polyline {
+        points: vec![[0.; 3], [1.; 3], [2.; 3]],
+    };
+    let error = restart_curve(&open, 0.5).unwrap_err();
+    assert_eq!(error.operation(), operation);
+    assert!(matches!(
+        error,
+        SolidError::InvalidInput {
+            reason: "spline seam endpoints do not coincide",
+            ..
+        }
+    ));
+}
+
+/// The pieces a face's flux is integrated over along a pcurve: the knot spans inside its
+/// interval, each in one piece for a straight pcurve and in two for a curved one, and 64 even
+/// pieces over the interval where that would be more.
+#[test]
+fn flux_pieces_are_one_to_a_straight_span_two_to_a_curved_one_and_at_most_64() {
+    // A pcurve of `degree` on clamped knots over [0, spans], a span to each unit, with
+    // `degree + spans` points zigzagging (so each span of a degree-1 one is straight).
+    let pcurve = |spans: usize, degree: usize| {
+        let mut knots = vec![0.; degree];
+        knots.extend((0..=spans).map(|i| i as f64));
+        knots.extend(std::iter::repeat_n(spans as f64, degree));
+        Curve2::Spline {
+            knots,
+            points: (0..degree + spans)
+                .map(|i| [i as f64, (i % 2) as f64])
+                .collect(),
+        }
+    };
+    // Each unit span [k, k + 1] of [0, n] in halves, [k, k + ½] and [k + ½, k + 1].
+    let halves = |n: usize| -> Vec<[f64; 2]> {
+        (0..2 * n)
+            .map(|k| [k as f64 / 2., (k + 1) as f64 / 2.])
+            .collect()
+    };
+    // Degree 1 on [0, 0, 1, 2, 2] (3 points: 5 − 3 − 1 = 1): spans [0, 1] and [1, 2], one piece
+    // each.
+    assert_eq!(flux_pieces(&pcurve(2, 1)), Some(vec![[0., 1.], [1., 2.]]));
+    // The same polygon (0, 0), (1, 1), (2, 0) weighted 1, 2, 1 is rational, so curved: two
+    // pieces to each span, 4 in all.
+    let rational = Curve2::RationalSpline {
+        knots: vec![0., 0., 1., 2., 2.],
+        homogeneous: vec![[0., 0., 1.], [2., 2., 2.], [2., 0., 1.]],
+    };
+    assert_eq!(flux_pieces(&rational), Some(halves(2)));
+    // A cubic on [0, 0, 0, 0, 1, 2, 3, 3, 3, 3] (6 points): 3 spans, 2 pieces each, 6 in all.
+    assert_eq!(flux_pieces(&pcurve(3, 3)), Some(halves(3)));
+    // Only the spans inside the interval: a periodic quadratic on [−2, −1, 0, 1, 2, 3, 4] (4
+    // points) runs over [knots[2], knots[4]] = [0, 2], 2 of its 6 spans, so 4 pieces.
+    let periodic = Curve2::Spline {
+        knots: vec![-2., -1., 0., 1., 2., 3., 4.],
+        points: vec![[0., 0.], [1., 1.], [2., 0.], [3., 1.]],
+    };
+    assert_eq!(flux_pieces(&periodic), Some(halves(2)));
+    // 32 cubic spans make 32 · 2 = 64 pieces, the most: still each span in halves.
+    assert_eq!(flux_pieces(&pcurve(32, 3)), Some(halves(32)));
+    // 40 make 80, past 64: 64 even pieces over [0, 40] instead, each 40 / 64 = 0.625 long (the
+    // k-th starts at 40 k / 64 = 0.625 k, exactly).
+    let even: Vec<[f64; 2]> = (0..64)
+        .map(|k| [0.625 * k as f64, 0.625 * (k + 1) as f64])
+        .collect();
+    assert_eq!(flux_pieces(&pcurve(40, 3)), Some(even));
+    // Two knots, fewer than two points of any degree take (2 + 0 + 1 = 3): no pieces.
+    let short = Curve2::Spline {
+        knots: vec![0., 1.],
+        points: vec![[0., 0.], [1., 0.]],
+    };
+    assert_eq!(flux_pieces(&short), None);
+}
+
+/// `eval_d1` answers where `eval` does, and only with numbers. A quarter of the unit circle as a
+/// rational quadratic over [0, 1] (weights 1, √½, 1): at 0 the point (1, 0) and the derivative
+/// (0, √2), as A′(0) = 2 (P₁ − P₀) = (2(√½ − 1), 2√½, 2(√½ − 1)) and C′ = (A′ − w′ C) / w =
+/// (0, 2√½); at 1 the point (0, 1) and the derivative (−√2, 0); at ½ the point `eval` gives.
+/// Past [0, 1], or at NaN, neither answers. A line on the knots 0, 1, 2, 3 (degree 1, its
+/// interval [1, 2]) has the point (½, 0) and the derivative (1, 0) at 1.5, and none at 2.5,
+/// where its last basis function alone still reads ½ (the point (1, 0), at weight ½, came back).
+/// A control point at infinity leaves no point between the knots it reaches: (∞, 0) came back.
+#[test]
+fn a_pcurves_derivative_is_answered_on_its_interval_and_only_in_numbers() {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let s = std::f64::consts::SQRT_2;
+    let quarter = Curve2::RationalSpline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        homogeneous: vec![[1., 0., 1.], [w, w, w], [0., 1., 1.]],
+    };
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-12;
+    for (t, point, way) in [(0., [1., 0.], [0., s]), (1., [0., 1.], [-s, 0.])] {
+        let (p, d) = eval_d1(&quarter, t).unwrap();
+        assert!(near(p, point) && near(d, way), "{t}: {p:?} {d:?}");
+    }
+    let (p, _) = eval_d1(&quarter, 0.5).unwrap();
+    assert!(near(p, eval(&quarter, 0.5).unwrap()), "{p:?}");
+    for t in [-0.1, 1.1, f64::NAN] {
+        assert_eq!(eval(&quarter, t), None, "{t}");
+        assert_eq!(eval_d1(&quarter, t), None, "{t}");
+    }
+    let line = Curve2::Spline {
+        knots: vec![0., 1., 2., 3.],
+        points: vec![[0., 0.], [1., 0.]],
+    };
+    let (p, d) = eval_d1(&line, 1.5).unwrap();
+    assert!(near(p, [0.5, 0.]) && near(d, [1., 0.]), "{p:?} {d:?}");
+    assert_eq!(eval_d1(&line, 2.5), None);
+    let far = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0.], [f64::INFINITY, 0.]],
+    };
+    assert_eq!(eval_d1(&far, 0.5), None);
+}

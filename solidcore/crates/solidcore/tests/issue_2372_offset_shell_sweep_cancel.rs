@@ -24,8 +24,7 @@ mod offset_fixture;
 use offset_fixture::{api_shell, offset_full, planar_faces_at, volume};
 use solidcore::curve::curve::p2::Curve;
 use solidcore::error::SolidError;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::vector2d::Point2;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -38,7 +37,7 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2 as face;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{vertex, FaceId};
-use solidcore::{Brep, CancelToken, EntityRef, Kernel, Result};
+use solidcore::{Brep, CancelToken, Kernel, Result};
 
 /// `SmBrep::ReadFromFile` of #1476's operand (the rig's working copy of shell/566).
 fn swept_bar(k: &mut Kernel) -> Brep {
@@ -46,10 +45,7 @@ fn swept_bar(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

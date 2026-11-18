@@ -49,6 +49,22 @@ impl TriMesh {
         out
     }
 
+    /// Measured properties of a mesh body.
+    pub(crate) fn measure(&self) -> (solidcraft_geom::MeshMeasure, solidcraft_geom::Aabb3) {
+        let m = self.to_mesh();
+        (m.measure(), m.bounds())
+    }
+
+    /// Triangle count.
+    pub(crate) fn face_count(&self) -> usize {
+        self.triangles.len()
+    }
+
+    /// Vertex count.
+    pub(crate) fn vertex_count(&self) -> usize {
+        self.positions.len()
+    }
+
     /// Distinct undirected triangle sides.
     pub(crate) fn edge_count(&self) -> usize {
         let mut set = std::collections::HashSet::new();
@@ -172,6 +188,19 @@ fn unify_winding(m: &mut TriMesh) {
             }
         }
     }
+}
+
+/// Where the ray from `o` along unit `d` first meets mesh body `m` (its triangles are its exact
+/// shape): the distance along the ray and the hit triangle's own unit normal. A closed mesh is
+/// wound outward, so its normal is the outward one, also where a ray from inside leaves it; an
+/// open mesh has no outside, so its normal is turned against the ray. `None` where it meets
+/// nothing.
+pub(crate) fn mesh_ray(m: &TriMesh, o: Vec3, d: Vec3) -> Option<(f64, Vec3)> {
+    let mesh = m.to_mesh();
+    let (t, ti) = mesh.raycast(o, d)?;
+    let [a, b, c] = mesh.tri(mesh.triangles.get(ti)?)?;
+    let n = (b - a).cross(c - a).normalized()?;
+    Some((t, if !is_closed(m) && n.dot(d) > 0.0 { n * -1.0 } else { n }))
 }
 
 /// Every triangle side is shared by exactly two triangles in opposite directions.

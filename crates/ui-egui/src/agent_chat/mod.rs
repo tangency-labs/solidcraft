@@ -10,6 +10,7 @@
 //! - `backend.rs`: the [`backend::ChatBackend`] seam; `acp_client.rs` is the ACP backend.
 //! - `gate.rs`: what the agent's tool requests may do (run, ask the user first, or never).
 //! - `panel.rs`: the panel itself (docking, minimising, the picker, the conversation).
+//! - `times.rs`: when each item came in, and how long the agent has been working.
 //! - Here: the conversation, turns (each one undoes as one step), and the requests waiting for
 //!   Allow or Deny.
 
@@ -39,6 +40,7 @@ mod process;
 mod select_all;
 pub mod settings;
 pub mod summary;
+mod times;
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
@@ -51,7 +53,7 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
-pub(crate) use panel::{finish_shared, left_inset, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
+pub(crate) use panel::{finish_shared, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
 
 /// Most entries kept in the conversation; older ones are dropped.
@@ -295,10 +297,12 @@ pub enum Item {
         tool: String,
         answer: Option<bool>,
     },
-    /// A message's changes, merged into one undo step; `revision`: the design right after it.
+    /// A message's changes, merged into one undo step; `revision`: the design right after it,
+    /// `history`: the undo history right after it ([`UndoMark::revision`]).
     Changes {
         steps: usize,
         revision: Revision,
+        history: Revision,
         undone: bool,
     },
     Notice {
@@ -307,13 +311,64 @@ pub enum Item {
     },
 }
 
+/// Which undo step is the last one done: the history's depth and its top step. The chat keeps it
+/// as a [`Revision`] ([`UndoMark::revision`]) and never reads it; the host compares it with the
+/// history, since a section step leaves the design as it was.
+#[derive(Clone, Debug)]
+pub struct UndoMark {
+    depth: usize,
+    top: Option<Box<solidcraft_engine::Snapshot>>,
+}
+
+impl UndoMark {
+    pub fn of(undo: &[solidcraft_engine::Snapshot]) -> Self {
+        UndoMark { depth: undo.len(), top: undo.last().cloned().map(Box::new) }
+    }
+
+    /// `undo` as it is now, as the chat keeps it.
+    pub fn revision(undo: &[solidcraft_engine::Snapshot]) -> Revision {
+        Revision::of(&Arc::new(Self::of(undo)))
+    }
+
+    /// Whether `undo` is still as it was when marked.
+    pub fn is_at(&self, undo: &[solidcraft_engine::Snapshot]) -> bool {
+        self.depth == undo.len()
+            && match (&self.top, undo.last()) {
+                (Some(a), Some(b)) => same_step(a, b),
+                (a, b) => a.is_none() && b.is_none(),
+            }
+    }
+
+    /// Whether `mark` ([`UndoMark::revision`]) is where `undo` is now.
+    fn reached(mark: &Revision, undo: &[solidcraft_engine::Snapshot]) -> bool {
+        mark.get::<UndoMark>().is_some_and(|m| m.is_at(undo))
+    }
+
+    /// The history a message's changes in `items` left, while `undo` is still there.
+    pub(crate) fn current(items: &[Item], undo: &[solidcraft_engine::Snapshot]) -> Option<Revision> {
+        items.iter().rev().find_map(|item| match item {
+            Item::Changes { history, undone: false, .. } if Self::reached(history, undo) => Some(history.clone()),
+            _ => None,
+        })
+    }
+}
+
+fn same_step(a: &solidcraft_engine::Snapshot, b: &solidcraft_engine::Snapshot) -> bool {
+    Arc::ptr_eq(&a.doc, &b.doc)
+        && a.label == b.label
+        && a.section == b.section
+        && a.visibility == b.visibility
+        && a.active_sketch == b.active_sketch
+        && a.pending_moves == b.pending_moves
+}
+
 /// The message being answered: what undo and the limits need.
 struct Turn {
     /// Deferred requests stop being valid when this turn ends or its tab is left.
     active: Arc<std::sync::atomic::AtomicBool>,
-    /// The design and the undo depth before it.
+    /// The design and the undo history ([`UndoMark::revision`]) before it.
     start: Revision,
-    start_undo: usize,
+    start_undo: Revision,
     /// Requests that ran commands, and requests of any kind.
     changes: u32,
     requests: u32,
@@ -323,6 +378,9 @@ struct Turn {
     replied: bool,
     edit_requested: bool,
     label: String,
+    /// When it was sent, and when the agent last said or did something (ms since the epoch).
+    began: f64,
+    heard: f64,
 }
 
 /// A message typed while the agent works: shown in the transcript as "Queued" until it is sent.
@@ -398,6 +456,9 @@ pub struct AgentChat {
     /// creating/opening a design may carry the conversation, but a person's tab switch may not.
     pub(crate) following_document: bool,
     pub items: Vec<Item>,
+    /// When each item came in, beside it (`times[n]` is `items[n]`'s); shorter when items were
+    /// added without one, which then show no time.
+    pub(crate) times: Vec<times::Stamp>,
     pub input: String,
     /// The viewer, open on one message's pictures.
     gallery: Option<Gallery>,
@@ -466,12 +527,8 @@ pub struct AgentChat {
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
     keyboard_owned: bool,
-    /// The panel forgets its own width the next time it is drawn, so the preference applies.
-    pub(crate) forget_width: bool,
     /// Select All (Ctrl+A) in the transcript took the whole conversation (#10676).
     all_selected: bool,
-    /// Unreserved sheet space, shared by the actual dock and its drag preview.
-    pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).
     last: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
     /// Files for the next message (pictures, text files, imported parts), shown as chips.
@@ -610,7 +667,6 @@ impl AgentChat {
     pub(crate) fn swap_document(&mut self, other: &mut Self) {
         std::mem::swap(self, other);
         std::mem::swap(&mut self.open, &mut other.open);
-        std::mem::swap(&mut self.forget_width, &mut other.forget_width);
         std::mem::swap(&mut self.following_document, &mut other.following_document);
         std::mem::swap(&mut self.settings, &mut other.settings);
         std::mem::swap(&mut self.control_starter, &mut other.control_starter);
@@ -628,7 +684,6 @@ impl AgentChat {
         self.panel_rect = None;
         self.keyboard_owned = false;
         self.all_selected = false;
-        self.dock_space = None;
         self.drop_rect = None;
     }
 
@@ -754,8 +809,29 @@ impl AgentChat {
         if self.items.len() >= MAX_ITEMS {
             self.items.drain(..MAX_ITEMS / 10);
             self.chips_version += 1;
+            self.times.drain(..self.times.len().min(MAX_ITEMS / 10));
         }
+        // Items added without a time (none are, outside tests) keep their places unknown.
+        self.times.resize(self.items.len(), times::Stamp::default());
         self.items.push(item);
+        self.times.push(times::Stamp::now());
+    }
+    /// Take the item at `at` out of the conversation, with its time.
+    fn remove_item(&mut self, at: usize) {
+        if at < self.items.len() {
+            self.items.remove(at);
+        }
+        if at < self.times.len() {
+            self.times.remove(at);
+        }
+    }
+    /// When the item at `n` came in (not known: an item added without one).
+    pub(crate) fn stamp(&self, n: usize) -> times::Stamp {
+        if self.times.len() > self.items.len() { times::Stamp::default() } else { self.times.get(n).copied().unwrap_or_default() }
+    }
+    /// While the agent works on a message: when it last said or did something.
+    pub(crate) fn heard_at(&self) -> Option<f64> {
+        self.turn.as_ref().filter(|_| self.state() == State::Busy).map(|t| t.heard)
     }
     /// Keep the picture just sent with the message at `at` in the conversation (the user can open
     /// it). A message sent again (after a sign-in) has its picture already: nothing is added, and
@@ -838,6 +914,11 @@ impl AgentChat {
             self.login_results.insert(self.running_id.clone(), signed_in);
             // A newer chat result supersedes the old test, including one still in flight.
             self.settings.tests.remove(&self.running_id);
+        }
+        if matches!(e, Event::Text { .. } | Event::Tool { .. } | Event::Plan(_))
+            && let Some(turn) = self.turn.as_mut()
+        {
+            turn.heard = crate::now_ms();
         }
         match e {
             Event::Documents(documents) => self.documents = documents,
@@ -1326,7 +1407,7 @@ pub(crate) fn with_tool_request<T>(
     });
     // A batch may replace the design and then roll back to its checkpoint. Keep the turn's
     // original undo boundary when that happens, including edits made before the batch.
-    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (Revision::of(&app.session.doc), t.start.clone(), t.start_undo));
+    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (Revision::of(&app.session.doc), t.start.clone(), t.start_undo.clone()));
     let previous = std::mem::replace(&mut app.agent_chat.following_document, own);
     let result = run(app);
     app.agent_chat.following_document = previous;
@@ -1346,7 +1427,7 @@ pub(crate) fn with_tool_request<T>(
 pub(crate) fn continue_in_document(app: &mut SolveApp) {
     if let Some(turn) = app.agent_chat.turn.as_mut() {
         turn.start = Revision::of(&app.session.doc);
-        turn.start_undo = app.session.undo.len();
+        turn.start_undo = UndoMark::revision(&app.session.undo);
     }
     let chat = &mut app.agent_chat;
     // The pills stand for the old design's geometry: take them and their marks out of the box.
@@ -1367,11 +1448,14 @@ pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveA
         return;
     }
     if let Some(turn) = app.agent_chat.turn.as_ref() {
-        let steps = turn.start.get::<solidcraft_engine::doc::Document>().map_or(0, |start| {
-            merge_undo(&mut app.session.undo, &start, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]))
-        });
+        let steps = merge_turn(&mut app.session.undo, turn);
         if steps > 0 {
-            app.agent_chat.push(Item::Changes { steps, revision: Revision::of(&app.session.doc), undone: false });
+            app.agent_chat.push(Item::Changes {
+                steps,
+                revision: Revision::of(&app.session.doc),
+                history: UndoMark::revision(&app.session.undo),
+                undone: false,
+            });
         }
     }
     let mut chat = AgentChat::default();
@@ -1395,7 +1479,7 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
     // with the explicit queue so a late Ready event cannot send it on returning to the tab.
     if let Some((text, image, at, files)) = chat.queued.take() {
         if let Some(at) = at.filter(|&at| matches!(chat.items.get(at), Some(Item::User { .. }))) {
-            chat.items.remove(at);
+            chat.remove_item(at);
         }
         // The text already carries the selection, so there is no context to show again.
         chat.pending.insert(0, Pending { text, image, context: Context::default(), files });
@@ -1788,6 +1872,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.confirm_new = false;
     chat.items.clear();
     chat.all_selected = false;
+    chat.times.clear();
     chat.turn_warning = None;
     chat.gallery = None;
     chat.chips_version += 1;
@@ -1877,10 +1962,11 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     let first_line = text.lines().find(|l| !l.trim().is_empty()).or_else(|| files.first().map(|f| f.name.as_str())).unwrap_or("");
     let label: String = first_line.chars().take(48).collect();
     app.agent_chat.turn_warning = None;
+    let now = crate::now_ms();
     app.agent_chat.turn = Some(Turn {
         active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         start: Revision::of(&app.session.doc),
-        start_undo: app.session.undo.len(),
+        start_undo: UndoMark::revision(&app.session.undo),
         changes: 0,
         requests: 0,
         limit_told: false,
@@ -1889,6 +1975,8 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         tool_called: false,
         replied: false,
         edit_requested: requests_edit(&text),
+        began: now,
+        heard: now,
     });
     app.agent_chat.last = Some((text, image, at, files));
     app.agent_chat.state = Some(State::Busy);
@@ -2131,11 +2219,7 @@ fn end_turn(app: &mut SolveApp) {
 fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     let Some(turn) = chat.turn.take() else { return };
     turn.active.store(false, std::sync::atomic::Ordering::Relaxed);
-    // The host keeps the designs: the one the turn began on comes back from its revision.
-    let steps = turn
-        .start
-        .get::<solidcraft_engine::doc::Document>()
-        .map_or(0, |start| merge_undo(&mut session.undo, &start, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)])));
+    let steps = merge_turn(&mut session.undo, &turn);
     // A turn the agent never answered (a sign-in, an error before its reply) showed it nothing.
     if turn.replied || turn.tool_called || turn.requests > 0 {
         chat.seen = Some(Revision::of(&session.doc));
@@ -2155,35 +2239,70 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         chat.notice(warning, false);
     }
     if steps > 0 {
-        chat.push(Item::Changes { steps, revision: Revision::of(&session.doc), undone: false });
+        chat.push(Item::Changes { steps, revision: Revision::of(&session.doc), history: UndoMark::revision(&session.undo), undone: false });
+    }
+    // How long the answer took, under its last item ("Answered in 23 min").
+    let answered = chat.ended.as_deref().is_some_and(|r| !matches!(r, "cancelled" | "error" | "auth")) && !chat.stopped;
+    let took = (crate::now_ms() - turn.began).max(0.0);
+    if chat.times.len() == chat.items.len()
+        && let Some(stamp) = chat.times.last_mut()
+    {
+        stamp.took = Some((took, answered));
     }
 }
 
-/// Merge the undo steps made since `start_doc` (at depth `start_undo`) into one, labelled `label`;
-/// how many steps it took in (0: none were made, or the history no longer reaches that far).
+/// [`merge_undo`] of `turn`'s steps: the design and history it began on come back from its
+/// revisions.
+fn merge_turn(undo: &mut Vec<solidcraft_engine::Snapshot>, turn: &Turn) -> usize {
+    let (Some(start_doc), Some(start)) = (turn.start.get::<solidcraft_engine::doc::Document>(), turn.start_undo.get::<UndoMark>()) else {
+        return 0;
+    };
+    merge_undo(undo, &start_doc, &start, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]))
+}
+
+/// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
+/// `label`; how many steps it took in (0: none were made, the history no longer reaches that far, or
+/// they changed several parts of the design, whose steps are each undone in their own part).
 fn merge_undo(
     undo: &mut Vec<solidcraft_engine::Snapshot>,
     start_doc: &Arc<solidcraft_engine::doc::Document>,
-    start_undo: usize,
+    start: &UndoMark,
     label: &str,
 ) -> usize {
-    // The first change of the turn saved the design as it was when the turn began. When the
-    // history is full its oldest steps go, so look for it at or below where it was put.
-    let Some(first) = (0..undo.len().min(start_undo + 1)).rev().find(|&i| undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc))) else {
+    if start.is_at(undo) {
+        return 0;
+    }
+    // The turn's first step follows the top step at its start; a full history drops its oldest
+    // steps, so look at or below where that was, and past it for the design the first step saved.
+    let below = 0..undo.len().min(start.depth);
+    let trimmed = undo.len() >= start.depth;
+    let first = match &start.top {
+        None => Some(0),
+        Some(top) => below.clone().rev().find(|&i| undo.get(i).is_some_and(|s| same_step(s, top))).map(|i| i + 1),
+    }
+    .or_else(|| below.rev().find(|&i| trimmed && undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc))));
+    let Some(first) = first.filter(|&f| f < undo.len()) else {
         return 0;
     };
+    let part = undo.get(first).map(|s| s.part);
+    if undo.iter().skip(first).any(|s| Some(s.part) != part) {
+        return 0;
+    }
     let steps = undo.len() - first;
+    // The merged step brings back the section as it was before the first step that changed it.
+    let section = undo.get(first..).and_then(|merged| merged.iter().find_map(|s| s.section.clone()));
     undo.truncate(first + 1);
     if let Some(s) = undo.get_mut(first) {
         s.label = label.to_string();
+        s.section = s.section.take().or(section);
     }
     steps
 }
 
 /// Undo a message's changes from the conversation (only while they are the last thing done).
 pub fn undo_changes(app: &mut SolveApp, index: usize) {
-    let Some(Item::Changes { revision, undone, .. }) = app.agent_chat.items.get(index) else { return };
-    if *undone || !revision.is(&app.session.doc) {
+    let Some(Item::Changes { revision, history, undone, .. }) = app.agent_chat.items.get(index) else { return };
+    if *undone || !revision.is(&app.session.doc) || !UndoMark::reached(history, &app.session.undo) {
         return;
     }
     if app.run("edit.undo", json!({})).is_ok()
@@ -2202,6 +2321,12 @@ fn pump_tools(app: &mut SolveApp) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
         };
+        if let Err(error) = crate::plugins::normalize_request(&app.session, &req.method, &mut req.params) {
+            refuse(req, error);
+            continue;
+        }
+        // What runs after the gate is what the gate decided on: the registered command ids.
+        gate::canonicalize(&req.method, &mut req.params);
         let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());
@@ -2215,13 +2340,15 @@ fn pump_tools(app: &mut SolveApp) {
         {
             o.insert("allow_paths".into(), json!([working_dir().to_string_lossy()]));
         }
-        let undo_left = undo_len.saturating_sub(turn.start_undo);
+        let undo_left = undo_len.saturating_sub(turn.start_undo.get::<UndoMark>().map_or(0, |m| m.depth));
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);
         let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
+        // Plugin runs, named tools and importers ask in every mode, alone or as a batch step.
+        let plugin_run = gate::runs_plugin(&req.method, &req.params) || crate::plugins::runs_plugin_code(&app.session, &req.method, &req.params);
         let verdict = match gate::request(&req.method, &req.params, undo_left) {
-            gate::Verdict::Ask(_) if mode == agents::Mode::All || always => gate::Verdict::Run { change: true },
+            gate::Verdict::Ask(_) if !plugin_run && (mode == agents::Mode::All || always) => gate::Verdict::Run { change: true },
             gate::Verdict::Run { change: true } if mode == agents::Mode::Ask && !always => {
                 gate::Verdict::Ask(gate::describe(&req.method, &req.params))
             }
@@ -2254,6 +2381,8 @@ fn pump_tools(app: &mut SolveApp) {
                 app.agent_chat.notice(trf("ui.agent_chat_refused", &[("reason", &e)]), false);
                 refuse(req, e);
             }
+            // A mistyped id: the agent hears what the engine would have said, and nothing runs.
+            gate::Verdict::Unknown(e) => refuse(req, e),
         }
     }
     app.agent_chat.tools_rx = Some(rx);
@@ -2436,6 +2565,12 @@ pub fn set_model(app: &mut SolveApp, model: &str) {
 /// option, or a legacy ACP agent that listed models.
 pub fn custom_models_accepted(app: &SolveApp) -> bool {
     app.agent_chat.custom_models_accepted()
+}
+
+/// The model pickers' search hint: one that takes a typed model id says so (#14369), since
+/// the list holds only the models the agent reported.
+pub(crate) fn model_search_hint(custom: bool) -> &'static str {
+    tr(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
 }
 
 /// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's
@@ -2796,21 +2931,19 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     if p.get("toggle").and_then(Value::as_bool) == Some(true) {
         toggle(app);
     }
-    if let Some(s) = p.get("side").and_then(Value::as_str) {
-        if !matches!(s, "left" | "right") {
-            return Err("side must be left or right".into());
-        }
-        app.preferences.agent_chat_side = s.into();
-    }
-    if let Some(m) = p.get("minimized").and_then(Value::as_bool) {
-        app.preferences.agent_chat_minimized = m;
-    }
     if let Some(w) = p.get("popped").and_then(Value::as_bool) {
         app.preferences.agent_chat_popped = w;
     }
-    if let Some(w) = p.get("width").and_then(Value::as_f64).filter(|w| w.is_finite()) {
-        app.preferences.agent_chat_width = (w as f32).clamp(panel::MIN_WIDTH, panel::MAX_WIDTH);
-        app.agent_chat.forget_width = true;
+    let side = match p.get("side").and_then(Value::as_str) {
+        Some("left") => Some(solidcraft_engine::panels::Zone::Left),
+        Some("right") => Some(solidcraft_engine::panels::Zone::Right),
+        Some(_) => return Err("side must be left or right".into()),
+        None => None,
+    };
+    let width = p.get("width").and_then(Value::as_f64).filter(|width| width.is_finite()).map(|width| width as f32);
+    let collapsed = p.get("minimized").and_then(Value::as_bool);
+    if (side.is_some() || width.is_some() || collapsed.is_some()) && !app.preferences.agent_chat_popped {
+        crate::panel_runtime::place_assistant(app, side, width, collapsed).map_err(solidcraft_engine::panels::commands::error_text)?;
     }
     if let Some(path) = p.get("attach").and_then(Value::as_str) {
         attach_path(app, path)?;
@@ -2934,11 +3067,8 @@ pub fn status(app: &SolveApp) -> Value {
         "modes": c.modes.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
         "mode": c.mode,
         "open": c.open,
-        "side": app.preferences.agent_chat_side,
-        "minimized": app.preferences.agent_chat_minimized,
         "popped": app.preferences.agent_chat_popped,
         "window": app.preferences.agent_chat_window,
-        "width": app.preferences.agent_chat_width,
         "state": c.state().id(),
         "agent": c.agent,
         "images": c.images,

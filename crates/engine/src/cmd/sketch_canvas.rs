@@ -22,7 +22,7 @@ const STRAIGHTEN_CONTRACT: TypedContract<CanvasStraightenParams> = TypedContract
 const DELETE_CONTRACT: TypedContract<CanvasDeleteParams> = TypedContract::new();
 
 /// A canvas command's reply, built from its schema's type so the two can't drift apart.
-fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+pub(super) fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
 }
 
@@ -32,13 +32,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (base64 PNG or JPEG); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
+        .params("path | data (base64 PNG, JPEG or SVG; an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
     CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
         .at("SKETCH", "INSERT")
         .icon("decal")
         .contract(&DECAL_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data; face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
+        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
     CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
@@ -79,9 +79,19 @@ fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
 }
 
 fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
-    let bytes = image_bytes(p, cmd)?;
-    let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG and JPEG images can be inserted"))?;
-    let plane = super::sketch::plane_ref(s, p, cmd)?;
+    let mut bytes = image_bytes(p, cmd)?;
+    if super::canvas_svg::is_svg(&bytes) {
+        let side = match p.get("resolution") {
+            None | Some(Value::Null) => super::canvas_svg::DEFAULT_SIDE,
+            Some(_) => num(p, "resolution")
+                .filter(|r| (1.0..=f64::from(super::canvas_svg::MAX_SIDE)).contains(r))
+                .map(|r| r.round() as u32)
+                .ok_or_else(|| bad(cmd, format!("`resolution` must be a number of pixels from 1 to {}", super::canvas_svg::MAX_SIDE)))?,
+        };
+        bytes = super::canvas_svg::rasterize(&bytes, side).map_err(|e| bad(cmd, e))?;
+    }
+    let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG, JPEG and SVG images can be inserted"))?;
+    let plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
     // A decal sits where the face was picked.
@@ -280,6 +290,128 @@ mod tests {
     }
 
     #[test]
+    fn canvases_on_faces_follow_geometry_edits_and_reopen() {
+        let mut s = Session::default();
+        for (command, params) in [
+            ("parameters.add", json!({"name": "height", "expression": "10 mm"})),
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": "height", "name": "Block"})),
+            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10]}, "name": "Face", "width": 20})),
+            ("canvas.decal", json!({"data": png(40, 20), "face": [20, 15, 10], "name": "Decal", "width": 20})),
+            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10]}, "offset": 2, "name": "Offset", "width": 20})),
+            ("canvas.insert", json!({"data": png(40, 20), "plane": {"face": [20, 15, 10], "fixed": true}, "name": "Fixed", "width": 20})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+        }
+        let check = |s: &Session, height: f64| {
+            let (vals, _) = s.doc.param_values();
+            let state = s.model.state();
+            for canvas in &s.doc.canvases {
+                let expected = match canvas.name.as_str() {
+                    "Offset" => height + 2.0,
+                    "Fixed" => 10.0,
+                    _ => height,
+                };
+                let plane = s.doc.canvas_plane(&vals, canvas, &state).unwrap();
+                for corner in canvas.world_corners(&plane) {
+                    assert!((corner.z - expected).abs() < 1e-9, "{}: expected z={expected}, got {corner:?}", canvas.name);
+                }
+            }
+        };
+        check(&s, 10.0);
+        s.execute("parameters.change", &json!({"name": "height", "expression": "14 mm"})).unwrap();
+        check(&s, 14.0);
+        s.execute("edit.undo", &json!({})).unwrap();
+        check(&s, 10.0);
+        s.execute("edit.redo", &json!({})).unwrap();
+        check(&s, 14.0);
+        check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 14.0);
+        s.execute("timeline.suppress", &json!({"feature": "Block", "suppressed": true})).unwrap();
+        let (vals, _) = s.doc.param_values();
+        let state = s.model.state();
+        for canvas in &s.doc.canvases {
+            let plane = s.doc.canvas_plane(&vals, canvas, &state);
+            assert_eq!(plane.is_ok(), canvas.name == "Fixed", "{}: {plane:?}", canvas.name);
+        }
+        s.execute("timeline.suppress", &json!({"feature": "Block", "suppressed": false})).unwrap();
+        check(&s, 14.0);
+    }
+
+    #[test]
+    fn canvases_on_model_planes_follow_rebuilds_and_reopen() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::PlaneGeom as _;
+
+        let mut s = Session::default();
+        for (command, params) in [
+            ("parameters.add", json!({"name": "station", "expression": "0.25", "unit": ""})),
+            ("sketch.create", json!({"plane": "XY", "name": "Path"})),
+            ("sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]], "ids": ["a", "b"]})),
+            ("sketch.finish", json!({})),
+            (
+                "construct.plane.three_points",
+                json!({"a": {"point": [0, 0, 5]}, "b": {"point": [1, 0, 5]}, "c": {"point": [0, 1, 5]}, "name": "Numeric"}),
+            ),
+            (
+                "construct.plane.three_points",
+                json!({"a": {"sketch": "Path", "point": "a.start"}, "b": {"sketch": "Path", "point": "a.end"},
+                    "c": {"sketch": "Path", "point": "b.end"}, "name": "Points"}),
+            ),
+            ("construct.plane.along_path", json!({"path": {"sketch": "Path", "curve": "a"}, "t": "station", "name": "Along"})),
+            ("construct.plane.offset", json!({"base": "Along", "offset": 2, "name": "AlongOffset"})),
+            ("construct.plane.at_angle", json!({"base": "Numeric", "axis": "X", "angle": 90, "name": "Angled"})),
+            ("construct.plane.offset", json!({"base": "Angled", "offset": 2, "name": "Derived"})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+        }
+        for plane in ["XY", "Numeric", "Points", "Along", "AlongOffset", "Angled", "Derived"] {
+            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": plane, "name": plane, "width": 40})).unwrap();
+        }
+        let check = |s: &Session, station: f64| {
+            let (vals, _) = s.doc.param_values();
+            let state = s.model.state();
+            for (name, origin, normal, expected_corners) in [
+                ("XY", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 0.0], [20.0, -10.0, 0.0], [20.0, 10.0, 0.0], [-20.0, 10.0, 0.0]]),
+                ("Numeric", [0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 5.0], [20.0, -10.0, 5.0], [20.0, 10.0, 5.0], [-20.0, 10.0, 5.0]]),
+                ("Points", [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [[-20.0, -10.0, 0.0], [20.0, -10.0, 0.0], [20.0, 10.0, 0.0], [-20.0, 10.0, 0.0]]),
+                (
+                    "Along",
+                    [station, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [[station, -20.0, -10.0], [station, 20.0, -10.0], [station, 20.0, 10.0], [station, -20.0, 10.0]],
+                ),
+                (
+                    "AlongOffset",
+                    [station + 2.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [[station + 2.0, -20.0, -10.0], [station + 2.0, 20.0, -10.0], [station + 2.0, 20.0, 10.0], [station + 2.0, -20.0, 10.0]],
+                ),
+                ("Angled", [0.0, -5.0, 0.0], [0.0, -1.0, 0.0], [[-20.0, -5.0, -10.0], [20.0, -5.0, -10.0], [20.0, -5.0, 10.0], [-20.0, -5.0, 10.0]]),
+                ("Derived", [0.0, -7.0, 0.0], [0.0, -1.0, 0.0], [[-20.0, -7.0, -10.0], [20.0, -7.0, -10.0], [20.0, -7.0, 10.0], [-20.0, -7.0, 10.0]]),
+            ] {
+                let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
+                let plane = s.doc.canvas_plane(&vals, c, &state).unwrap_or_else(|e| panic!("{name}: {e}"));
+                let assert_components = |actual: Vec3, expected: [f64; 3], context: &str| {
+                    for ((axis, actual), expected) in ["x", "y", "z"].into_iter().zip([actual.x, actual.y, actual.z]).zip(expected) {
+                        assert!((actual - expected).abs() < 1e-9, "{name} {context}.{axis}: expected {expected}, got {actual}");
+                    }
+                };
+                assert_components(plane.origin, origin, "origin");
+                assert_components(plane.normal(), normal, "normal");
+                for (index, (actual, expected)) in c.world_corners(&plane).into_iter().zip(expected_corners).enumerate() {
+                    assert_components(actual, expected, &format!("corner {index}"));
+                }
+            }
+        };
+        check(&s, 5.0);
+        s.execute("parameters.change", &json!({"name": "station", "expression": "0.75"})).unwrap();
+        check(&s, 15.0);
+        check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
+    }
+
+    #[test]
     fn deleted_canvas_ids_are_not_reused_after_reopening() {
         let mut s = Session::default();
         let params = json!({"data": png(10, 10)});
@@ -359,6 +491,21 @@ mod tests {
         s.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10})).unwrap();
         let r = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [15, 15, 10], "width": 20})).unwrap();
         assert!(r["canvas"].is_u64());
+    }
+
+    /// #18422: a decal on a curved face says the face is curved, not that it no longer exists;
+    /// a point that is on no face still gets the old words.
+    #[test]
+    fn a_decal_on_a_curved_face_says_the_face_is_curved() {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 10, "height": 10})).unwrap();
+        let curved = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [10, 0, 5], "width": 5})).unwrap_err().to_string();
+        assert!(curved.contains("curved or is not an exact plane"), "{curved}");
+        assert!(!curved.contains("no longer exists"), "{curved}");
+        let nowhere = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [100, 100, 100], "width": 5})).unwrap_err().to_string();
+        assert!(nowhere.contains("no longer exists"), "{nowhere}");
+        // The flat end of the same cylinder still takes a decal.
+        assert!(s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [0, 0, 10], "width": 5})).is_ok());
     }
 
     /// Where a point of the plane is on the image, as fractions (s, t) of its bottom and left
@@ -466,6 +613,22 @@ mod tests {
             (1.0, 92.0, 91.0 - 180.0),
         ] {
             assert!((deg(now, target) - want).abs() < 1e-9, "{now} -> {target}: {}", deg(now, target));
+        }
+    }
+
+    /// An SVG decal is kept as the PNG it draws, at the resolution asked for.
+    #[test]
+    fn an_svg_decal_is_kept_as_the_png_it_draws() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+        let svg = base64_encode(br#"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="10"><rect width="30" height="10" fill="red"/></svg>"#);
+        let r = s.execute("canvas.decal", &json!({"data": svg, "face": [20, 15, 10], "width": 30, "resolution": 300})).unwrap();
+        assert_eq!(r["pixels"], json!([300, 100]));
+        let c = s.doc.canvases.last().unwrap();
+        assert_eq!(c.format, "png");
+        assert!(c.bytes().unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+        for resolution in [json!(0), json!(5000), json!("big")] {
+            assert!(s.execute("canvas.decal", &json!({"data": svg, "face": [20, 15, 10], "resolution": resolution})).is_err(), "{resolution}");
         }
     }
 }

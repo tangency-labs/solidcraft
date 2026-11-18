@@ -236,7 +236,9 @@ fn operation_output(items: &[Item], i: &Inputs) -> Result<Output, HarnessError> 
 /// Upstream status of a Rust error: the guard's `-2` for `InvalidInput`.
 fn status(e: &SolidError) -> i64 {
     match e {
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => -2,
         _ => -1,
     }
@@ -447,7 +449,10 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
         healer_enabled,
     };
     match make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options) {
-        Ok(()) => out.push(Item::Int(0)),
+        Ok(()) => {
+            crate::tolsub::after_read(&mut b);
+            out.push(Item::Int(0));
+        }
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
         Err(e) => {
             out.push(Item::Int(status(&e)));

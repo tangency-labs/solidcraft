@@ -53,6 +53,8 @@ fn the_list_schema_takes_each_readers_availability() {
 #[test]
 fn strict_keeps_todays_errors() {
     let long = "x".repeat(257);
+    // A targets query may be a whole body name, up to `MAX_BODY_NAME_BYTES` (512).
+    let longer = "x".repeat(513);
     assert_strict_keeps_todays_errors(&[
         ("render.library.list", json!({"kind": "not-a-kind"})),
         ("render.library.list", json!({"query": long})),
@@ -70,7 +72,7 @@ fn strict_keeps_todays_errors() {
         ("render.library.describe", json!({"kind": "physical_profiles", "id": "no-such-profile"})),
         ("render.library.targets", json!({"limit": 0})),
         ("render.library.targets", json!({"limit": 129})),
-        ("render.library.targets", json!({"query": long})),
+        ("render.library.targets", json!({"query": longer})),
         ("render.library.targets", json!({"offset": 262_145})),
         ("render.library.preview", json!({"id": "MAT-001"})),
         ("render.library.preview", json!({"id": ""})),

@@ -78,6 +78,10 @@
 //!   `topology.brep_p1`) are wired; [`SolidError::Unported`] from their own unported
 //!   callees propagates. `Cache_DegenFaces` defers where `IsDegenerate` does
 //!   (`SmCurveClassification`).
+//! - **`Fix_TolSizes` edge tolerances** (not upstream): an edge's new tolerance is at
+//!   least the gap gain times its edge/face gap. Upstream's `gain * gap - def` is under
+//!   gaps below ten times the default, leaving a fixed edge the check's edge/face test
+//!   (`SmBrep` Test #4) fails.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
 use crate::error::{Result, SolidError};
@@ -89,7 +93,7 @@ use crate::geom::hash_table::{
 use crate::geom::tol::{
     approx_tol_3d, brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d,
     brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, calc_edge_zone_tol_3d,
-    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d,
+    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d, gap_gain,
     set_brep_model_size_estimate, size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType,
     USE_DEFAULT,
 };
@@ -3111,6 +3115,14 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_face_tol),
             );
+            // not upstream: `gain * gap - def` is under an edge/face gap below ten times the
+            // default, so a fixed edge failed the check's edge/face test (gap over the edge
+            // tolerance, SmBrep Test #4). The tolerance covers the gap with the gap gain.
+            let zone_tol_3d = if max_edge_face_gap_3d_length > zone_tol_3d {
+                zone_tol3d(k, gap_gain(k) * max_edge_face_gap_3d_length)
+            } else {
+                zone_tol_3d
+            };
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = edge::tolerance(b, bad_tol_edge)?;
                 self.edge_props.props_mut(id)?.orig_zone_tol_3d = t;
@@ -3379,8 +3391,9 @@ impl<O: LoopObject> HealData<O> {
     pub fn fix_coin_edges(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_coin_edges.base.is_empty() {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::heal_failed(
                 "heal::heal_data::p2::HealData::fix_coin_edges",
+                "coincident edges cannot be fixed",
             ));
         }
         Ok(())
@@ -3401,8 +3414,9 @@ impl<O: LoopObject> HealData<O> {
     pub fn fix_missed_edge_xsects(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_missed_edge_xsects.base.is_empty() {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::heal_failed(
                 "heal::heal_data::p2::HealData::fix_missed_edge_xsects",
+                "missed edge intersections cannot be fixed",
             ));
         }
         Ok(())

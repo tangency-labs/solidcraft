@@ -50,7 +50,7 @@ fn output(v: Vec<f64>) -> Output {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         _ => 1001.0,
     }
 }
@@ -337,14 +337,150 @@ fn face_surface(
         ))
     })
 }
-fn geometry_rust(g: &Geometry) -> Output {
+/// The face of a `face` geometry case as the runner makes it (the shim's `new SmBrep()`,
+/// then `SmBrep::CreateFaceFromSurface` over the requested UV domain, or
+/// `SmBrep::CreateFacesWithCurves` for the disk / annulus kinds): its kernel, B-rep, face
+/// and UV domain.
+///
+/// # Errors
+///
+/// Those of the construction.
+pub fn face_model(
+    kind: i32,
+    p: &[f64; 16],
+) -> solidcore::Result<(
+    solidcore::kernel::Kernel,
+    solidcore::topology::Brep,
+    solidcore::topology::FaceId,
+    solidcore::geom::extent2d::Extent2d,
+)> {
     use solidcore::curve::curve::Curve;
     use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
     use solidcore::geom::extent1d::Extent1d;
     use solidcore::geom::extent2d::Extent2d;
     use solidcore::kernel::Kernel;
-    use solidcore::mass::integrator::properties as props;
     use solidcore::math::{Vec2, Vec3};
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    let kind = &kind;
+    let mut fk = Kernel::default();
+    let mut brep = solidcore::topology::brep::p3::new_brep(
+        &mut fk,
+        solidcore::geom::tol::USE_DEFAULT,
+        solidcore::geom::tol::USE_DEFAULT,
+    )?;
+    let dom = Extent2d::from_points(Vec2::new(p[5], p[6]), Vec2::new(p[7], p[8]));
+    let surface = face_surface(*kind, p, &dom)?;
+    let face = {
+        use crate::units::topology_brep_p8::key_of;
+        use solidcore::EntityRef;
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
+        let mut attributes = solidcore::geom::attribute::AttributeStore::default();
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let mut marks = solidcore::topology::topology_traverser::Marks::default();
+        let this_face = |f| key_of(EntityRef::Face(f));
+        let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
+            env: &mut env,
+            marks: &mut marks,
+            this_face: &this_face,
+        };
+        if *kind == 1 || *kind == 2 {
+            // As the shim: concentric circles on the plane (radius 0.5 and
+            // 0.2 over the full 0..360 degree domain), the disk's one loop
+            // SAME and the annulus's outer loop SAME with its hole OPPOSITE.
+            let n_loops = if *kind == 2 { 2 } else { 1 };
+            let mut curves = Vec::with_capacity(n_loops);
+            let mut orientations = Vec::with_capacity(n_loops);
+            for i in 0..n_loops {
+                let circle = Ellipse::new_circle(
+                    &fk,
+                    Vec3::new(p[0], p[1], p[2]),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                    Extent1d::from_min_max(0.0, 360.0),
+                    if i == 0 { 0.5 } else { 0.2 },
+                    &EllipseOptions::default(),
+                )?;
+                curves.push(Some(Curve::from(circle)));
+                orientations.push(if i == 0 {
+                    OrientType::Same
+                } else {
+                    OrientType::Opposite
+                });
+            }
+            let made = solidcore::topology::brep::p8::create_faces_with_curves(
+                &mut fk,
+                &mut brep,
+                None,
+                &vec![1; n_loops],
+                Some(curves),
+                &orientations,
+                Some(surface),
+                &mut fenv,
+            )?;
+            *made.faces.first().ok_or_else(|| {
+                SolidError::sm_err("CreateFacesWithCurves made no face")
+            })?
+        } else {
+            solidcore::topology::brep::p8::create_face_from_surface(
+                &mut fk,
+                &mut brep,
+                Some(surface),
+                &dom,
+                &mut fenv,
+            )?
+        }
+    };
+    Ok((fk, brep, face, dom))
+}
+
+/// A `face` geometry case's face model ([`face_model`]) with the case's parameters and
+/// query (#18325's certificates, `tests/issue_18325_moved_rows.rs`); `None` for any other
+/// case.
+///
+/// # Errors
+///
+/// A case that does not parse, or a failed construction.
+#[allow(clippy::type_complexity)] // the model and the case's own fields
+pub fn face_scene(
+    case: &Case,
+) -> Result<
+    Option<(
+        solidcore::kernel::Kernel,
+        solidcore::topology::Brep,
+        solidcore::topology::FaceId,
+        [f64; 16],
+        i32,
+    )>,
+    HarnessError,
+> {
+    let Some(g) = case.inputs.get("geometry") else {
+        return Ok(None);
+    };
+    let g: Geometry =
+        serde_json::from_value(g.clone()).map_err(|e| HarnessError::new(e.to_string()))?;
+    let Geometry::Face {
+        kind,
+        parameters,
+        query,
+    } = g
+    else {
+        return Ok(None);
+    };
+    let (k, b, f, _) =
+        face_model(kind, &parameters).map_err(|e| HarnessError::new(e.to_string()))?;
+    Ok(Some((k, b, f, parameters, query)))
+}
+fn geometry_rust(g: &Geometry) -> Output {
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::integrator::properties as props;
+    use solidcore::math::Vec3;
     use solidcore::nurbs::b_spline_curve::BSplineCurve;
     use solidcore::nurbs::math::CPoint;
     use solidcore::topology::Brep;
@@ -450,79 +586,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                         store: &store,
                         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
                     };
-                    let mut fk = Kernel::default();
-                    let mut brep = solidcore::topology::brep::p3::new_brep(
-                        &mut fk,
-                        solidcore::geom::tol::USE_DEFAULT,
-                        solidcore::geom::tol::USE_DEFAULT,
-                    )?;
-                    let dom = Extent2d::from_points(Vec2::new(p[5], p[6]), Vec2::new(p[7], p[8]));
-                    let surface = face_surface(*kind, p, &dom)?;
-                    let face = {
-                        use crate::units::topology_brep_p8::key_of;
-                        use solidcore::EntityRef;
-                        let mut records = solidcore::topology::topology::NotifyRecords::new();
-                        let mut attributes = solidcore::geom::attribute::AttributeStore::default();
-                        let mut env = solidcore::topology::edge::NotifyEnv {
-                            records: &mut records,
-                            attributes: &mut attributes,
-                            context: None,
-                            key_of: &key_of,
-                        };
-                        let mut marks = solidcore::topology::topology_traverser::Marks::default();
-                        let this_face = |f| key_of(EntityRef::Face(f));
-                        let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
-                            env: &mut env,
-                            marks: &mut marks,
-                            this_face: &this_face,
-                        };
-                        if *kind == 1 || *kind == 2 {
-                            // As the shim: concentric circles on the plane (radius 0.5 and
-                            // 0.2 over the full 0..360 degree domain), the disk's one loop
-                            // SAME and the annulus's outer loop SAME with its hole OPPOSITE.
-                            let n_loops = if *kind == 2 { 2 } else { 1 };
-                            let mut curves = Vec::with_capacity(n_loops);
-                            let mut orientations = Vec::with_capacity(n_loops);
-                            for i in 0..n_loops {
-                                let circle = Ellipse::new_circle(
-                                    &fk,
-                                    Vec3::new(p[0], p[1], p[2]),
-                                    Vec3::new(1.0, 0.0, 0.0),
-                                    Vec3::new(0.0, 1.0, 0.0),
-                                    Extent1d::from_min_max(0.0, 360.0),
-                                    if i == 0 { 0.5 } else { 0.2 },
-                                    &EllipseOptions::default(),
-                                )?;
-                                curves.push(Some(Curve::from(circle)));
-                                orientations.push(if i == 0 {
-                                    OrientType::Same
-                                } else {
-                                    OrientType::Opposite
-                                });
-                            }
-                            let made = solidcore::topology::brep::p8::create_faces_with_curves(
-                                &mut fk,
-                                &mut brep,
-                                None,
-                                &vec![1; n_loops],
-                                Some(curves),
-                                &orientations,
-                                Some(surface),
-                                &mut fenv,
-                            )?;
-                            *made.faces.first().ok_or_else(|| {
-                                SolidError::sm_err("CreateFacesWithCurves made no face")
-                            })?
-                        } else {
-                            solidcore::topology::brep::p8::create_face_from_surface(
-                                &mut fk,
-                                &mut brep,
-                                Some(surface),
-                                &dom,
-                                &mut fenv,
-                            )?
-                        }
-                    };
+                    let (fk, mut brep, face, dom) = face_model(*kind, p)?;
                     let accuracy = p[12];
                     match *query {
                         0 => {

@@ -120,8 +120,8 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let loops = std::slice::from_ref(&l);
     let mut stats = PlanStats::default();
-    assert!(plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::No).is_err());
-    let Ok(fp) = plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::Yes) else { panic!("a lenient fill") };
+    assert!(plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::No, Purpose::Display).is_err());
+    let Ok(Planned::Face(fp)) = plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::Yes, Purpose::Display) else { panic!("a lenient fill") };
     assert!(!fp.triangles.is_empty());
     assert!(fp.uv.len() > fp.fixed.len(), "{} points, {} on the boundary", fp.uv.len(), fp.fixed.len());
     // Each point inside the face on the surface where its parameters put it.
@@ -138,7 +138,7 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
 fn a_face_filled_leniently_is_named_in_the_stats() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None) else { panic!("filled leniently") };
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None, Purpose::Display) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     assert_eq!((stats.planar, stats.structured, stats.delaunay), (0, 0, 0));
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
@@ -155,7 +155,7 @@ fn a_face_untangling_cannot_resolve_is_filled_leniently_and_named() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let why = "face 7 (spline): boundary crosses itself: edges [1, 2] run closer together than their chords can follow";
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, Some(why)) else { panic!("filled leniently") };
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, Some(why), Purpose::Display) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
     assert_eq!(lenient.face, 7);
@@ -216,6 +216,137 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
         let area = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
         let longest = [(p, q), (q, r), (r, p)].iter().map(|(x, y)| (x[0] - y[0]).hypot(x[1] - y[1])).fold(0.0, f64::max);
         assert!(area > 1e-6 * longest * longest, "a sliver {t:?}: {p:?} {q:?} {r:?}");
+    }
+}
+
+/// The two triangles are flat on the support in (u, v), but their held vertices are
+/// above it. Subdividing their shared side cannot repair the boundary displacement.
+#[test]
+fn sag_refinement_keeps_a_displaced_flat_boundary_without_splitting() {
+    let offset = 0.05;
+    let tol = 0.01;
+    let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let fixed = corners.map(|[u, v]| Vec3::new(u, v, offset));
+    let mut uv = corners.to_vec();
+    let mut triangles = vec![[0, 1, 2], [0, 2, 3]];
+    let face = poles::Face::new(EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }, offset);
+    let poles = sag::Poles::new(&face, 1e-9);
+    let refinement = sag::refine(&face, tol, &poles, &fixed, &mut uv, &mut triangles, 64);
+    assert!(!refinement.capped && refinement.boundary_has_residual(&face, tol, &poles, &fixed, &uv, &triangles));
+    assert_eq!(uv.len(), corners.len(), "added {} points to a flat support", uv.len() - corners.len());
+    assert_eq!(triangles, [[0, 1, 2], [0, 2, 3]]);
+    let (measured, unmeasured) = sag::worst(&face, &poles, &fixed, &uv, &triangles);
+    assert_eq!(unmeasured, 0);
+    assert!((measured - offset).abs() < 1e-12, "measured {measured} mm, wanted {offset} mm");
+}
+
+/// A radius-4 cylinder over two radians and six millimetres. Its boundary lies at
+/// radius `4 + offset`, within its own tolerance. Four rational quadratic arcs in
+/// the same parameter make the face's two rims and its surface's two control rows.
+fn cylinder_with_displaced_boundary(offset: f64) -> brep::Brep {
+    let radius = 4.0;
+    let height = 6.0;
+    let rim = radius + offset;
+    let tol = offset.max(1e-6);
+    let angle = |i: u32| 0.5 + 0.25 * f64::from(i);
+    let point = |a: f64, z| [rim * a.cos(), rim * a.sin(), z];
+    let points = [point(angle(0), 0.0), point(angle(8), 0.0), point(angle(8), height), point(angle(0), height)];
+    let arc_knots = vec![0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+    let control = |r, z, i| {
+        let a = angle(i);
+        let w = if i % 2 == 0 { 1.0 } else { 0.25_f64.cos() };
+        [r * a.cos(), r * a.sin(), z * w, w]
+    };
+    let arc = |z| Curve::RationalSpline { knots: arc_knots.clone(), homogeneous: (0..=8).map(|i| control(rim, z, i)).collect() };
+    let line = |a: usize, b: usize| Curve::Line { start: points[a], end: points[b] };
+    let corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let mut edges = Vec::new();
+    let mut uses = Vec::new();
+    for (i, (curve, vertices, forward)) in [
+        (arc(0.0), [0, 1], true),
+        (line(1, 2), [1, 2], true),
+        (arc(height), [3, 2], false),
+        (line(0, 3), [0, 3], false),
+    ].into_iter().enumerate() {
+        let position = u32::try_from(i).unwrap();
+        let pcurve = brep::Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vertices.map(|j| corners[j as usize]).to_vec(),
+        };
+        edges.push(brep::Edge {
+            curve,
+            nurbs: None,
+            interval: [0.0, 1.0],
+            vertices,
+            tolerance: tol,
+            uses: vec![brep::EdgeUseRef { face: 0, r#loop: 0, position, upper: !forward }],
+        });
+        uses.push(brep::OrientedEdge { edge: position, forward, pcurve });
+    }
+    brep::Brep {
+        version: brep::VERSION,
+        tolerance: tol,
+        regions: vec![brep::Region { shells: vec![0], void: false }],
+        shells: vec![Shell::Faces { faces: vec![brep::OrientedFace { face: 0, forward: true }], wires: Vec::new() }],
+        faces: vec![brep::Face {
+            surface: brep::Surface::Cylinder {
+                frame: brep::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+                radius,
+            },
+            nurbs: Some(brep::Surface::RationalSpline {
+                u_knots: arc_knots,
+                v_knots: vec![0.0, 0.0, 1.0, 1.0],
+                homogeneous: (0..=8).map(|i| vec![control(radius, 0.0, i), control(radius, height, i)]).collect(),
+            }),
+            domain: [[0.0, 1.0], [0.0, 1.0]],
+            loops: vec![Loop::Edges { edges: uses }],
+        }],
+        edges,
+        vertices: points.into_iter().map(|point| brep::Vertex { point, tolerance: tol }).collect(),
+    }
+}
+
+#[test]
+fn sag_refinement_keeps_displaced_cylinder_rims_and_reports_their_gap() {
+    let chord = 0.01;
+    let area = 4.0 * 2.0 * 6.0;
+    for offset in [0.0, 0.05, 0.1] {
+        let record = cylinder_with_displaced_boundary(offset);
+        record.validate().unwrap();
+        let (plan, stats) = plan(&record, &crate::MeshTolerance::chord(chord), 8.0).unwrap();
+        let (mesh, refused) = plan.evaluate();
+        assert!(refused.is_empty() && stats.unmeshed.is_empty() && stats.lenient.is_empty(), "offset {offset}: {refused:?} {stats:?}");
+        assert!(!mesh.triangles.is_empty() && mesh.triangles.len() < 5_000, "offset {offset}: {} triangles", mesh.triangles.len());
+
+        let [face] = plan.faces.as_slice() else { panic!("expected one face") };
+        assert_eq!(plan.edges.len(), 4);
+        assert!(plan.edges.iter().all(|edge| edge.len() >= 2));
+        for point in plan.edges.iter().flatten() {
+            assert!(face.fixed.contains(point), "edge sample {point:?} moved or went missing");
+            assert!((point.x.hypot(point.y) - (4.0 + offset)).abs() < 1e-9, "edge sample {point:?} left its radius");
+        }
+        assert!(face.fixed.iter().all(|point| plan.edges.iter().flatten().any(|p| p == point)));
+        assert_eq!(&mesh.positions[..face.fixed.len()], face.fixed.as_slice(), "the evaluated mesh retains the shared edge samples");
+
+        let total: f64 = mesh.triangles.iter().map(|triangle| {
+            let [a, b, c] = triangle.map(|i| kernel::vec3(mesh.positions[i as usize]));
+            let cross = (b - a).cross(c - a);
+            let radial = a + b + c;
+            assert!(cross.dot(Vec3::new(radial.x, radial.y, 0.0)) > 0.0, "offset {offset}: reversed or degenerate triangle {triangle:?}");
+            0.5 * cross.length()
+        }).sum();
+        assert!((total - area).abs() <= 0.02 * area, "offset {offset}: area {total} mm², wanted {area} mm²");
+
+        if offset == 0.0 {
+            assert!(stats.over_tolerance.is_empty(), "{stats:?}");
+        } else {
+            let [residual] = stats.over_tolerance.as_slice() else { panic!("offset {offset}: {stats:?}") };
+            assert_eq!(residual.face, 0);
+            assert_eq!(residual.tol, chord);
+            assert_eq!(residual.unmeasured, 0);
+            assert!(residual.caps.is_empty(), "boundary displacement is not a budget cap: {residual:?}");
+            assert!(!residual.within && residual.sag >= offset - 1e-9, "vertical boundary midpoint retains {offset} mm of sag: {residual:?}");
+        }
     }
 }
 
@@ -490,3 +621,33 @@ mod refusals {
         assert_eq!(meshed_faces(&p), vec![0, 1, 2, 3, 5]);
     }
 }
+
+/// A sliver far below the display tolerance, bounded by two edges whose pcurves lie apart in
+/// (u, v) (a gap within the edges' tolerance), sampled coarsely: six boundary nodes that are
+/// three points in space, each twice. Its sides cross, so it is filled leniently, and every
+/// Delaunay triangle has two corners on one point: the fill was left empty and the
+/// face not drawn ("1 face(s) could not be meshed", a crankshaft's oil drilling in an engine
+/// assembly). It is now fanned from its own boundary nodes, each triangle on three distinct
+/// nodes, and still named as filled leniently.
+#[test]
+fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
+    let (s, _, rules) = a_face_crossing_itself();
+    let uv = vec![[0.40, 0.40], [0.40, 0.46], [0.42, 0.50], [0.42, 0.40], [0.45, 0.46], [0.45, 0.50]];
+    let mut pts: Vec<Vec3> = uv.iter().filter_map(|q| s.derivs(q[0], q[1]).map(|(p, _, _)| p)).collect();
+    assert_eq!(pts.len(), uv.len());
+    // At this tolerance the sliver is three points in space, each sampled twice along the loop
+    // with (u, v) apart: nodes 0 and 1 are one point, 2 and 3 another, 4 and 5 the third.
+    pts[1] = pts[0];
+    pts[3] = pts[2];
+    pts[5] = pts[4];
+    let l = seam::Loop { uv, pts: pts.clone() };
+    let size = size::face_size(&s, &uv::domain(&s), &rules);
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None, Purpose::Display) else { panic!("planned") };
+    assert!(!fp.triangles.is_empty(), "the face has triangles");
+    assert_eq!(stats.lenient.len(), 1, "{:?}", stats.lenient);
+    for t in &fp.triangles {
+        let p = t.map(|i| fp.fixed.get(i as usize).copied());
+        assert!(p[0] != p[1] && p[1] != p[2] && p[2] != p[0], "a triangle on one node twice: {t:?}");
+    }
+}
+

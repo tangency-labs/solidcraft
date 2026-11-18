@@ -32,7 +32,7 @@ pub(crate) fn start_selected(app: &mut SolveApp) {
 /// Ask for the design a linked component shows instead: in all its placements, or with
 /// `occurrence` in that one only.
 pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>) {
-    if app.file_picker_busy() || app.file_load.busy() {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     if !app.session.doc.links.contains_key(&component) {
@@ -74,7 +74,7 @@ pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>)
 
 /// Ask where the component's design goes, then move its history there and link it.
 pub(crate) fn extract(app: &mut SolveApp, component: u64) {
-    if app.file_picker_busy() || app.file_load.busy() {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     let Some(name) = app.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()) else { return };
@@ -307,7 +307,7 @@ mod tests {
 
     fn answer(app: &mut SolveApp, path: Option<String>) {
         app.services.pick_open = Some(Box::new(move |extensions| {
-            assert_eq!(extensions, &["sc", "solidcraft", "solvecraft", "json"], "a design of any release, or a plain JSON design");
+            assert_eq!(extensions, &["sc", "solidcraft", "json"], "a design of any release, or a plain JSON design");
             let result = path.clone();
             Box::pin(async move { result })
         }));

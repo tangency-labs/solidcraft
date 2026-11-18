@@ -6,6 +6,11 @@
 //! Deviations: `sm_SbTNonneg` recurses to its `depth` argument (at most
 //! [`super::graph::GRAPH_DEPTH`] from its callers), the fork's own bound.
 //! `std::min_element` is the first least coefficient by `<`, as the fork's.
+//! `sm_SbTMulFast`'s binomials are read from a table ([`Binomials`]) built by the same
+//! function, a factor shared by many products is scaled by them once ([`t_scaled`]), and
+//! `sm_SbTDet4`'s minors of rows that recur are taken once ([`det4_minors`]): the same
+//! operations on the same values in the same order, so the same bits, without evaluating
+//! two binomials per coefficient of every factor and product.
 
 use super::{
     binomial, el, el_mut, el_ref, euclid, sm_err, smax, tensor_elevate, Face, Net, Tensor,
@@ -133,59 +138,127 @@ pub(super) fn t_pieces(a: &Tensor, levels: usize) -> Result<Vec<Tensor>> {
     Ok(pieces)
 }
 
-/// `sm_SbTMulFast`: `a b`, as `sm_SbTMul` but the binomials taken once: the coefficients
-/// scaled by them, convolved, and unscaled.
-pub(super) fn t_mul_fast(a: &Tensor, b: &Tensor) -> Result<Tensor> {
+/// The binomial coefficients `C(n, i)` for `i` in `0 ..= n`, each as [`binomial`] gives it,
+/// kept per `n` once asked: the products' scalings read them per coefficient.
+#[derive(Debug, Default)]
+pub(super) struct Binomials {
+    rows: Vec<Vec<f64>>,
+    /// The [`binomial`] evaluations made (the work the table saves is counted, never timed).
+    evaluations: usize,
+}
+
+impl Binomials {
+    /// The row `C(n, 0 ..= n)`.
+    fn row(&mut self, n: usize) -> Result<&[f64]> {
+        while self.rows.len() <= n {
+            let m = self.rows.len();
+            let row = (0..=m)
+                .map(|i| binomial(m, i))
+                .collect::<Result<Vec<f64>>>()?;
+            self.evaluations = self.evaluations.saturating_add(row.len());
+            self.rows.push(row);
+        }
+        self.rows.get(n).map(Vec::as_slice).ok_or_else(sm_err)
+    }
+}
+
+/// A polynomial's coefficients scaled by their binomials, `c[i, j] C(p, i) C(q, j)`, as
+/// [`t_mul_fast`] scales its factors: a factor used in many products is scaled once.
+pub(super) struct ScaledTensor {
+    p: usize,
+    q: usize,
+    c: Vec<f64>,
+}
+
+/// `a`'s coefficients scaled by their binomials (`sm_SbTMulFast`'s first step).
+pub(super) fn t_scaled(a: &Tensor, binomials: &mut Binomials) -> Result<ScaledTensor> {
+    let width = a.q + 1;
+    if a.c.len() != (a.p + 1) * width {
+        return Err(sm_err());
+    }
+    let bq = binomials.row(a.q)?.to_vec();
+    let bp = binomials.row(a.p)?;
+    let mut c = Vec::new();
+    for (i, &bpi) in bp.iter().enumerate() {
+        for (&x, &bqj) in row(&a.c, i, width)?.iter().zip(&bq) {
+            c.push(x * bpi * bqj);
+        }
+    }
+    Ok(ScaledTensor { p: a.p, q: a.q, c })
+}
+
+/// Row `i` of coefficients `c` stored `width` to a row.
+fn row(c: &[f64], i: usize, width: usize) -> Result<&[f64]> {
+    let start = i * width;
+    c.get(start..start + width).ok_or_else(sm_err)
+}
+
+/// The product of two scaled polynomials, convolved and unscaled (`sm_SbTMulFast`'s
+/// second and third steps): the same operations, in the same order, as [`t_mul_fast`].
+pub(super) fn t_mul_scaled(
+    a: &ScaledTensor,
+    b: &ScaledTensor,
+    binomials: &mut Binomials,
+) -> Result<Tensor> {
     let mut c = t_make(a.p + b.p, a.q + b.q);
-    let mut sa = vec![0.0; a.c.len()];
-    let mut sb = vec![0.0; b.c.len()];
+    let (aw, bw, cw) = (a.q + 1, b.q + 1, c.q + 1);
     for i in 0..=a.p {
-        for j in 0..=a.q {
-            *el_mut(&mut sa, i * (a.q + 1) + j)? =
-                el(&a.c, i * (a.q + 1) + j)? * binomial(a.p, i)? * binomial(a.q, j)?;
-        }
-    }
-    for i in 0..=b.p {
-        for j in 0..=b.q {
-            *el_mut(&mut sb, i * (b.q + 1) + j)? =
-                el(&b.c, i * (b.q + 1) + j)? * binomial(b.p, i)? * binomial(b.q, j)?;
-        }
-    }
-    for i in 0..=a.p {
-        for j in 0..=a.q {
-            let av = el(&sa, i * (a.q + 1) + j)?;
+        for (j, &av) in row(&a.c, i, aw)?.iter().enumerate() {
             if av == 0.0 {
                 continue;
             }
             for k in 0..=b.p {
-                let row = (i + k) * (c.q + 1) + j;
-                for l in 0..=b.q {
-                    *el_mut(&mut c.c, row + l)? += av * el(&sb, k * (b.q + 1) + l)?;
+                let start = (i + k) * cw + j;
+                let out = c.c.get_mut(start..start + bw).ok_or_else(sm_err)?;
+                for (cv, &bv) in out.iter_mut().zip(row(&b.c, k, bw)?) {
+                    *cv += av * bv;
                 }
             }
         }
     }
-    for i in 0..=c.p {
-        for j in 0..=c.q {
-            let f = binomial(c.p, i)? * binomial(c.q, j)?;
-            *el_mut(&mut c.c, i * (c.q + 1) + j)? /= f;
+    let bq = binomials.row(c.q)?.to_vec();
+    let bp = binomials.row(c.p)?;
+    for (i, &bpi) in bp.iter().enumerate() {
+        let start = i * cw;
+        let out = c.c.get_mut(start..start + cw).ok_or_else(sm_err)?;
+        for (x, &bqj) in out.iter_mut().zip(&bq) {
+            let f = bpi * bqj;
+            *x /= f;
         }
     }
     Ok(c)
 }
 
+/// `sm_SbTMulFast`: `a b`, as `sm_SbTMul` but the binomials taken once: the coefficients
+/// scaled by them, convolved, and unscaled.
+pub(super) fn t_mul_fast(a: &Tensor, b: &Tensor) -> Result<Tensor> {
+    t_mul_with(a, b, &mut Binomials::default())
+}
+
+/// [`t_mul_fast`] with its binomials from `binomials`.
+fn t_mul_with(a: &Tensor, b: &Tensor, binomials: &mut Binomials) -> Result<Tensor> {
+    let sa = t_scaled(a, binomials)?;
+    let sb = t_scaled(b, binomials)?;
+    t_mul_scaled(&sa, &sb, binomials)
+}
+
 /// `sm_SbTDet3`: the determinant of a 3 x 3 matrix of polynomials.
 pub(super) fn t_det3(m: [[&Tensor; 3]; 3]) -> Result<Tensor> {
+    t_det3_with(m, &mut Binomials::default())
+}
+
+/// [`t_det3`] with its binomials from `binomials`.
+fn t_det3_with(m: [[&Tensor; 3]; 3], binomials: &mut Binomials) -> Result<Tensor> {
     let mut s = t_make(0, 0);
     for j in 0..3 {
         let (j1, j2) = ((j + 1) % 3, (j + 2) % 3);
         let [r0, r1, r2] = m;
         let minor = t_axpy(
-            &t_mul_fast(el(&r1, j1)?, el(&r2, j2)?)?,
+            &t_mul_with(el(&r1, j1)?, el(&r2, j2)?, binomials)?,
             -1.0,
-            &t_mul_fast(el(&r1, j2)?, el(&r2, j1)?)?,
+            &t_mul_with(el(&r1, j2)?, el(&r2, j1)?, binomials)?,
         )?;
-        s = t_axpy(&s, 1.0, &t_mul_fast(el(&r0, j)?, &minor)?)?;
+        s = t_axpy(&s, 1.0, &t_mul_with(el(&r0, j)?, &minor, binomials)?)?;
     }
     Ok(s)
 }
@@ -304,15 +377,28 @@ pub(super) fn minor_without<'a>(
     ])
 }
 
-/// `sm_SbTDet4`: the determinant of a 4 x 4 matrix of polynomials (rows `m[r]`), along its
-/// last row.
-fn t_det4(m: [&[Tensor; 4]; 4]) -> Result<Tensor> {
+/// `sm_SbTDet4`'s minors: the 3 x 3 minors of the first three rows `rows` of a 4 x 4 matrix
+/// of polynomials, column `c` struck out in minor `c`.
+fn det4_minors(rows: [&[Tensor; 4]; 3], binomials: &mut Binomials) -> Result<[Tensor; 4]> {
+    let mut minors: [Tensor; 4] = Default::default();
+    for (c, minor) in minors.iter_mut().enumerate() {
+        *minor = t_det3_with(minor_without(rows, c)?, binomials)?;
+    }
+    Ok(minors)
+}
+
+/// `sm_SbTDet4`: the determinant along its last row `last`, from the minors of its other
+/// rows ([`det4_minors`]): a determinant whose first three rows recur takes their minors
+/// once.
+fn t_det4_along(
+    last: &[Tensor; 4],
+    minors: &[Tensor; 4],
+    binomials: &mut Binomials,
+) -> Result<Tensor> {
     let mut s = t_make(0, 0);
-    let [r0, r1, r2, r3] = m;
-    for c in 0..4 {
-        let pm = minor_without([r0, r1, r2], c)?;
+    for (c, minor) in minors.iter().enumerate() {
         let sign = if (3 + c) % 2 == 0 { 1.0 } else { -1.0 };
-        s = t_axpy(&s, sign, &t_mul_fast(el_ref(r3, c)?, &t_det3(pm)?)?)?;
+        s = t_axpy(&s, sign, &t_mul_with(el_ref(last, c)?, minor, binomials)?)?;
     }
     Ok(s)
 }
@@ -325,17 +411,13 @@ pub(super) fn fundamentals(net: &Net, e: Vec3) -> Result<[Tensor; 4]> {
     let rows = rows_of(net, e)?;
     let [huu, huv, hvv] = &rows.hx;
     let last = [huu, huv, hvv, &rows.one];
+    let mut binomials = Binomials::default();
+    // the minors of H, Hu, Hv, the same for every last row: taken once
+    let minors = det4_minors([&rows.h, &rows.hu, &rows.hv], &mut binomials)?;
     let mut out: [Tensor; 4] = Default::default();
-    for (k, slot) in out.iter_mut().enumerate() {
+    for (slot, row) in out.iter_mut().zip(last) {
         // along the last row: det = sum_c (-1)^(3 + c) last[c] minor(3, c)
-        let mut s = t_make(0, 0);
-        for c in 0..4 {
-            let pm = minor_without([&rows.h, &rows.hu, &rows.hv], c)?;
-            let minor = t_det3(pm)?;
-            let sign = if (3 + c) % 2 == 0 { 1.0 } else { -1.0 };
-            s = t_axpy(&s, sign, &t_mul_fast(el_ref(el(&last, k)?, c)?, &minor)?)?;
-        }
-        *slot = s;
+        *slot = t_det4_along(row, &minors, &mut binomials)?;
     }
     Ok(out)
 }
@@ -422,36 +504,73 @@ pub(super) struct AffineFundamentals {
 /// `E = (e, 0)`, `det(H, Hu, Hv, X) = det(H0, H0u, H0v, X0) + sum_r Z_r det(.., E in row r,
 /// ..)` (two rows along E give 0): affine in Z.
 pub(super) fn affine_fundamentals(p: &AffinePatch, e: Vec3) -> Result<AffineFundamentals> {
+    affine_fundamentals_with(p, e, &mut Binomials::default())
+}
+
+/// [`affine_fundamentals`] with its binomials from `binomials`. Every product is
+/// [`t_mul_fast`]'s, in its order, but a factor in many products is scaled by its binomials
+/// once (the cofactors, each unknown's share and its partials), the minors of `H, Hu, Hv`
+/// are taken once for `o`, `l`, `m` and `n`, and the binomials are read from the table: the
+/// same operations on the same values, so the same bits.
+fn affine_fundamentals_with(
+    p: &AffinePatch,
+    e: Vec3,
+    binomials: &mut Binomials,
+) -> Result<AffineFundamentals> {
     let rows = rows_of(&p.base, e)?;
-    let o = t_det4([&rows.h, &rows.hu, &rows.hv, &rows.one])?;
+    let base_minors = det4_minors([&rows.h, &rows.hu, &rows.hv], binomials)?;
+    let o = t_det4_along(&rows.one, &base_minors, binomials)?;
+    // each unknown's share and its first partials, the same for l, m and n: scaled once
+    let mut z_scaled = Vec::new();
+    for zt in &p.z {
+        let (zu, zv) = (t_du(zt)?, t_dv(zt)?);
+        let scaled = [
+            t_scaled(zt, binomials)?,
+            t_scaled(&zu, binomials)?,
+            t_scaled(&zv, binomials)?,
+        ];
+        z_scaled.push((zu, zv, scaled));
+    }
     let mut q0: [Tensor; 3] = Default::default();
     let mut qj: [Vec<Tensor>; 3] = Default::default();
     for k in 0..3 {
         let hx = el_ref(&rows.hx, k)?;
         let prows = [&rows.h, &rows.hu, &rows.hv, hx];
-        *el_mut(&mut q0, k)? = t_det4(prows)?;
+        *el_mut(&mut q0, k)? = t_det4_along(hx, &base_minors, binomials)?;
         // the cofactors: row r replaced by E (row 3's is o)
         let mut cof: [Tensor; 4] = Default::default();
         for r in 0..3 {
             let mut pr = prows;
             *el_mut(&mut pr, r)? = &rows.one;
-            *el_mut(&mut cof, r)? = t_det4(pr)?;
+            let [r0, r1, r2, r3] = pr;
+            let minors = det4_minors([r0, r1, r2], binomials)?;
+            *el_mut(&mut cof, r)? = t_det4_along(r3, &minors, binomials)?;
         }
         cof[3] = o.clone();
+        // each cofactor is a factor of every unknown's products: scaled once
+        let mut cof_scaled = Vec::new();
+        for c in &cof {
+            cof_scaled.push(t_scaled(c, binomials)?);
+        }
+        let [c0, c1, c2, c3] = cof_scaled.as_slice() else {
+            return Err(sm_err());
+        };
         let out = el_mut(&mut qj, k)?;
         out.clear();
-        for zt in &p.z {
-            let zu = t_du(zt)?;
-            let zv = t_dv(zt)?;
+        for (zu, zv, [st, su, sv]) in &z_scaled {
             let zx = match k {
-                0 => t_du(&zu)?,
-                1 => t_dv(&zu)?,
-                _ => t_dv(&zv)?,
+                0 => t_du(zu)?,
+                1 => t_dv(zu)?,
+                _ => t_dv(zv)?,
             };
-            let mut s = t_mul_fast(zt, &cof[0])?;
-            s = t_axpy(&s, 1.0, &t_mul_fast(&zu, &cof[1])?)?;
-            s = t_axpy(&s, 1.0, &t_mul_fast(&zv, &cof[2])?)?;
-            s = t_axpy(&s, 1.0, &t_mul_fast(&zx, &cof[3])?)?;
+            let mut s = t_mul_scaled(st, c0, binomials)?;
+            s = t_axpy(&s, 1.0, &t_mul_scaled(su, c1, binomials)?)?;
+            s = t_axpy(&s, 1.0, &t_mul_scaled(sv, c2, binomials)?)?;
+            s = t_axpy(
+                &s,
+                1.0,
+                &t_mul_scaled(&t_scaled(&zx, binomials)?, c3, binomials)?,
+            )?;
             out.push(s);
         }
     }
@@ -583,4 +702,258 @@ pub(super) fn certified_convex(
         }
     }
     Ok(Ok(()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// The binomials the reference products evaluate.
+        static EVALUATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn counted_binomial(n: usize, k: usize) -> f64 {
+        EVALUATIONS.with(|e| e.set(e.get() + 1));
+        binomial(n, k).unwrap()
+    }
+
+    /// `sm_SbTMulFast` as it was ported before the table: each coefficient's binomials
+    /// evaluated where it is scaled and unscaled.
+    fn reference_mul(a: &Tensor, b: &Tensor) -> Tensor {
+        let mut c = t_make(a.p + b.p, a.q + b.q);
+        let mut sa = vec![0.0; a.c.len()];
+        let mut sb = vec![0.0; b.c.len()];
+        for i in 0..=a.p {
+            for j in 0..=a.q {
+                sa[i * (a.q + 1) + j] =
+                    a.c[i * (a.q + 1) + j] * counted_binomial(a.p, i) * counted_binomial(a.q, j);
+            }
+        }
+        for i in 0..=b.p {
+            for j in 0..=b.q {
+                sb[i * (b.q + 1) + j] =
+                    b.c[i * (b.q + 1) + j] * counted_binomial(b.p, i) * counted_binomial(b.q, j);
+            }
+        }
+        for i in 0..=a.p {
+            for j in 0..=a.q {
+                let av = sa[i * (a.q + 1) + j];
+                if av == 0.0 {
+                    continue;
+                }
+                for k in 0..=b.p {
+                    let row = (i + k) * (c.q + 1) + j;
+                    for l in 0..=b.q {
+                        c.c[row + l] += av * sb[k * (b.q + 1) + l];
+                    }
+                }
+            }
+        }
+        for i in 0..=c.p {
+            for j in 0..=c.q {
+                let f = counted_binomial(c.p, i) * counted_binomial(c.q, j);
+                c.c[i * (c.q + 1) + j] /= f;
+            }
+        }
+        c
+    }
+
+    fn reference_det3(m: [[&Tensor; 3]; 3]) -> Tensor {
+        let mut s = t_make(0, 0);
+        for j in 0..3 {
+            let (j1, j2) = ((j + 1) % 3, (j + 2) % 3);
+            let [r0, r1, r2] = m;
+            let minor = t_axpy(
+                &reference_mul(r1[j1], r2[j2]),
+                -1.0,
+                &reference_mul(r1[j2], r2[j1]),
+            )
+            .unwrap();
+            s = t_axpy(&s, 1.0, &reference_mul(r0[j], &minor)).unwrap();
+        }
+        s
+    }
+
+    fn reference_det4(m: [&[Tensor; 4]; 4]) -> Tensor {
+        let mut s = t_make(0, 0);
+        let [r0, r1, r2, r3] = m;
+        for (c, last) in r3.iter().enumerate() {
+            let pm = minor_without([r0, r1, r2], c).unwrap();
+            let sign = if (3 + c) % 2 == 0 { 1.0 } else { -1.0 };
+            s = t_axpy(&s, sign, &reference_mul(last, &reference_det3(pm))).unwrap();
+        }
+        s
+    }
+
+    /// `sm_SbAffineFundamentals` as it was ported before the table: every product of every
+    /// determinant and of every unknown's share taken afresh.
+    fn reference_affine_fundamentals(p: &AffinePatch, e: Vec3) -> AffineFundamentals {
+        let rows = rows_of(&p.base, e).unwrap();
+        let o = reference_det4([&rows.h, &rows.hu, &rows.hv, &rows.one]);
+        let mut q0: [Tensor; 3] = Default::default();
+        let mut qj: [Vec<Tensor>; 3] = Default::default();
+        for k in 0..3 {
+            let prows = [&rows.h, &rows.hu, &rows.hv, &rows.hx[k]];
+            q0[k] = reference_det4(prows);
+            let mut cof: [Tensor; 4] = Default::default();
+            for r in 0..3 {
+                let mut pr = prows;
+                pr[r] = &rows.one;
+                cof[r] = reference_det4(pr);
+            }
+            cof[3] = o.clone();
+            for zt in &p.z {
+                let zu = t_du(zt).unwrap();
+                let zv = t_dv(zt).unwrap();
+                let zx = match k {
+                    0 => t_du(&zu).unwrap(),
+                    1 => t_dv(&zu).unwrap(),
+                    _ => t_dv(&zv).unwrap(),
+                };
+                let mut s = reference_mul(zt, &cof[0]);
+                s = t_axpy(&s, 1.0, &reference_mul(&zu, &cof[1])).unwrap();
+                s = t_axpy(&s, 1.0, &reference_mul(&zv, &cof[2])).unwrap();
+                s = t_axpy(&s, 1.0, &reference_mul(&zx, &cof[3])).unwrap();
+                qj[k].push(s);
+            }
+        }
+        AffineFundamentals { q0, qj, o }
+    }
+
+    /// A fixed-seed generator of coefficients in [-1, 1), with exact zeros (both signs)
+    /// sprinkled in: the products skip a zero scaled coefficient.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let x = ((self.0 >> 11) as f64) / ((1u64 << 53) as f64) * 2.0 - 1.0;
+            match self.0 % 11 {
+                0 => 0.0,
+                1 => -0.0,
+                _ => x,
+            }
+        }
+
+        fn tensor(&mut self, p: usize, q: usize) -> Tensor {
+            let mut t = t_make(p, q);
+            for c in &mut t.c {
+                *c = self.next();
+            }
+            t
+        }
+    }
+
+    fn same_bits(a: &Tensor, b: &Tensor) {
+        assert_eq!((a.p, a.q), (b.p, b.q));
+        for (x, y) in a.c.iter().zip(&b.c) {
+            assert_eq!(x.to_bits(), y.to_bits(), "{x} vs {y}");
+        }
+    }
+
+    #[test]
+    fn products_from_the_table_are_the_per_coefficient_products_bit_for_bit() {
+        let mut rng = Lcg(1557);
+        let mut binomials = Binomials::default();
+        for (p, q, r, s) in [
+            (0, 0, 0, 0),
+            (0, 3, 2, 0),
+            (1, 1, 9, 9),
+            (3, 9, 12, 27),
+            (9, 9, 9, 9),
+            (2, 5, 0, 7),
+        ] {
+            let (a, b) = (rng.tensor(p, q), rng.tensor(r, s));
+            let want = reference_mul(&a, &b);
+            same_bits(&t_mul_fast(&a, &b).unwrap(), &want);
+            same_bits(&t_mul_with(&a, &b, &mut binomials).unwrap(), &want);
+            let (sa, sb) = (
+                t_scaled(&a, &mut binomials).unwrap(),
+                t_scaled(&b, &mut binomials).unwrap(),
+            );
+            same_bits(&t_mul_scaled(&sa, &sb, &mut binomials).unwrap(), &want);
+        }
+    }
+
+    /// A rational net of degree (3, 7) about a point away from the origin, its weights in
+    /// [0.5, 1.5], moved along e by five unknowns (four dense shares, one a single
+    /// coefficient), as the setback fill's patches are.
+    fn rational_patch(rng: &mut Lcg) -> AffinePatch {
+        let (p, q) = (3, 7);
+        let mut pts = Vec::new();
+        for i in 0..=p {
+            for j in 0..=q {
+                let w = 1.0 + 0.5 * rng.next();
+                let (x, y, z) = (
+                    f64::from(i as u32) + 0.1 * rng.next(),
+                    f64::from(j as u32) + 0.1 * rng.next(),
+                    0.3 * rng.next(),
+                );
+                pts.push([(x + 20.0) * w, (y - 7.0) * w, (z + 3.0) * w, w]);
+            }
+        }
+        let mut z: Vec<Tensor> = (0..4).map(|_| rng.tensor(p, q)).collect();
+        let mut single = t_make(p, q);
+        single.c[9] = 1.0;
+        z.push(single);
+        AffinePatch {
+            base: Net { p, q, pts },
+            index: (0..z.len()).collect(),
+            z,
+        }
+    }
+
+    #[test]
+    fn affine_fundamentals_are_the_forks_bit_for_bit_with_each_binomial_evaluated_once() {
+        let mut rng = Lcg(14460);
+        let patch = rational_patch(&mut rng);
+        let e = Vec3::new(0.3, -0.2, 1.0);
+        EVALUATIONS.with(|c| c.set(0));
+        let want = reference_affine_fundamentals(&patch, e);
+        let forks = EVALUATIONS.with(Cell::get);
+        let mut binomials = Binomials::default();
+        let got = affine_fundamentals_with(&patch, e, &mut binomials).unwrap();
+        same_bits(&got.o, &want.o);
+        for k in 0..3 {
+            same_bits(&got.q0[k], &want.q0[k]);
+            assert_eq!(got.qj[k].len(), want.qj[k].len());
+            for (a, b) in got.qj[k].iter().zip(&want.qj[k]) {
+                same_bits(a, b);
+            }
+        }
+        // The work counted, never timed: one evaluation per binomial up to the products'
+        // largest degree, where the fork's evaluates two per coefficient of every factor and
+        // of every product.
+        let largest = [&got.o, &got.q0[0], &got.q0[1], &got.q0[2]]
+            .iter()
+            .map(|t| t.p.max(t.q))
+            .max()
+            .unwrap();
+        assert!(
+            binomials.evaluations <= (largest + 1) * (largest + 2) / 2,
+            "{} evaluations",
+            binomials.evaluations
+        );
+        assert!(
+            forks > 500 * binomials.evaluations,
+            "{forks} against {}",
+            binomials.evaluations
+        );
+        // and the curvature determinants of the net itself
+        let net = &patch.base;
+        let rows = rows_of(net, e).unwrap();
+        let [huu, huv, hvv] = &rows.hx;
+        let got = fundamentals(net, e).unwrap();
+        for (k, last) in [huu, huv, hvv, &rows.one].into_iter().enumerate() {
+            same_bits(
+                &got[k],
+                &reference_det4([&rows.h, &rows.hu, &rows.hv, last]),
+            );
+        }
+    }
 }

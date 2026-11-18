@@ -308,16 +308,26 @@ fn chamfer(
     session.do_filleting(k, None)
 }
 
-fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
+/// The chamfered body, with the record's head (`0`, the rim's index and the offsets), the
+/// rim's record before the chamfer and the chamfer's result.
+struct Chamfered {
+    body: Brep,
+    head: Vec<f64>,
+    before: Vec<f64>,
+    result: SolidResult<()>,
+}
+
+/// The case's chamfer, or the outcome the shim records when its set-up stops short.
+fn chamfered(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Result<Chamfered, f64>> {
     let mut body = match or_outcome(build(k, input), NO_BODY)? {
         Ok(body) => body,
-        Err(outcome) => return Ok(vec![outcome]),
+        Err(outcome) => return Ok(Err(outcome)),
     };
     let Some((index, e)) = rim(k, &body, input.rim_z, input.rim_nth)? else {
-        return Ok(vec![NO_RIM]);
+        return Ok(Err(NO_RIM));
     };
     let Some(u0) = edge::blend_edgeuse(k, &mut body, e)? else {
-        return Ok(vec![NO_BLEND_EDGEUSE]);
+        return Ok(Err(NO_BLEND_EDGEUSE));
     };
     let offsets = match (input.offsets, input.setbacks) {
         (Some(offsets), _) => Some(offsets),
@@ -325,7 +335,7 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
         (None, None) => None,
     };
     let Some(offsets) = offsets else {
-        return Ok(vec![NO_OFFSETS]);
+        return Ok(Err(NO_OFFSETS));
     };
     // with `rim_all`, every other edge `rim` would find after the first, in edge list order
     let mut edges = vec![(e, u0)];
@@ -335,7 +345,7 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
                 break;
             };
             let Some(other_eu) = edge::blend_edgeuse(k, &mut body, other)? else {
-                return Ok(vec![NO_BLEND_EDGEUSE]);
+                return Ok(Err(NO_BLEND_EDGEUSE));
             };
             edges.push((other, other_eu));
         }
@@ -366,6 +376,24 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
             Err(error) => return Err(error),
         }
     }
+    Ok(Ok(Chamfered {
+        body,
+        head: values,
+        before,
+        result,
+    }))
+}
+
+fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
+    let Chamfered {
+        mut body,
+        head: mut values,
+        before,
+        result,
+    } = match chamfered(k, input)? {
+        Ok(chamfered) => chamfered,
+        Err(outcome) => return Ok(vec![outcome]),
+    };
     let result_status = match result {
         Ok(()) => 0.0,
         Err(error) => status(error)?,
@@ -389,6 +417,7 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
+    crate::dump::body(k, "mass", &body);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
         &mut body,
@@ -411,4 +440,85 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
         Err(error) => values.push(status(error)?),
     }
     Ok(values)
+}
+
+#[cfg(test)]
+mod round_definition_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::super::end_to_end::round_definition_proof::{
+        certified_blends, mass_bands, volume_band,
+    };
+    use super::super::end_to_end::round_definition_rows::no_bare_blend_face;
+    use solidcore::blend::definition_check::BlendFaceLog;
+    use super::*;
+    use solidcore::surface::procedural_blend::BlendRef;
+
+    /// The rows that moved when a blend face became its definition (#16580): name, the
+    /// volume and counts the golden held before, and the counts after. The half rims at
+    /// setbacks split at the chamfer's crease where its wall foot crosses the wall's G1
+    /// boundary (one face more, `issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition`).
+    /// A moved row: name, the volume before, counts before and after.
+    type Row = (&'static str, f64, [i64; 4], [i64; 4]);
+
+    const ROWS: &[Row] = &[
+        ("issue-880-half-arc-rim-0-setbacks-1-1", 1741.1776984571911, [0, 9, 14, 7], [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-0-setbacks-1-2", 1722.3666858359127, [0, 9, 14, 7], [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-whole-offsets-1-1", 1738.1708223107416, [0, 6, 10, 6], [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1-2", 1722.716085907456, [0, 6, 10, 6], [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1.4437-1.4437", 1719.809788606565, [0, 6, 10, 6], [0, 6, 10, 6]),
+        ("issue-880-tilted-cylinder-rim-offsets-1-1", 1738.1703582153193, [0, 3, 5, 4], [0, 3, 5, 4]),
+        ("issue-880-tilted-cylinder-rim-offsets-1-2", 1720.1400294065647, [0, 3, 5, 4], [0, 3, 5, 4]),
+        ("issue-880-tilted-cylinder-rim-setbacks-1-1", 1711.0808718624999, [0, 3, 5, 4], [0, 3, 5, 4]),
+        ("issue-880-tilted-cylinder-rim-setbacks-1-2", 1660.057563906371, [0, 3, 5, 4], [0, 3, 5, 4]),
+    ];
+
+    /// Every moved chamfer row: its chamfer faces are chamfers by their definition whose
+    /// nets re-certify, its counts are the golden's, and its converged volume lies in its
+    /// certified band.
+    #[test]
+    fn moved_chamfer_rows_are_certified_definitions() {
+        let cases = crate::fixtures::load_fixture_dir(
+            &crate::case::repo_root(),
+            "blend.fillet_executive_p3",
+        )
+        .unwrap();
+        for &(name, old, before, after) in ROWS {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let input = case
+                .parse::<super::super::Inputs>()
+                .unwrap()
+                .two_offset_chamfer
+                .expect("a two-offset chamfer");
+            let mut k = Kernel {
+                blend_face_log: Some(BlendFaceLog::default()),
+                ..Kernel::default()
+            };
+            let Ok(mut done) = chamfered(&mut k, &input).unwrap() else {
+                panic!("{name}: set-up stopped short");
+            };
+            assert!(done.result.is_ok(), "{name}: {:?}", done.result);
+            no_bare_blend_face(&k, &done.body, name);
+            let counts = [
+                0,
+                p1::vertices(&done.body, None).unwrap().len() as i64,
+                p1::edges(&done.body, None).unwrap().len() as i64,
+                p1::faces(&done.body, None).unwrap().len() as i64,
+            ];
+            assert_eq!(counts, after, "{name}");
+            if !name.contains("-0-setbacks-") {
+                assert_eq!(before, after, "{name}");
+            }
+            for f in p1::faces(&done.body, None).unwrap() {
+                let surface = done.body.face(f).unwrap().surface.clone();
+                if let Some(BlendRef::Procedural(blend)) =
+                    surface.as_ref().and_then(solidcore::surface::surface::Surface::procedural_blend)
+                {
+                    assert!(blend.chamfer().is_some(), "{name}: {f:?} is not a chamfer");
+                }
+            }
+            let blends = certified_blends(&k, &mut done.body, name);
+            let estimates = volume_band(&k, &mut done.body, &blends, old, name);
+            mass_bands(&k, &mut done.body, &estimates, name);
+        }
+    }
 }

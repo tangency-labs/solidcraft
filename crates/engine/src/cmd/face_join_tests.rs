@@ -59,6 +59,63 @@ fn face_join_and_press_pull_leave_the_edge_touching_cap_in_either_body_order() {
 }
 
 #[test]
+fn press_pull_selects_either_body_at_a_shared_flat_face() {
+    for (key, both) in [("body", false), ("face_body", false), ("body", true)] {
+        for selected in ["Body1", "Body1 (1)"] {
+            for distance in [-5, 5] {
+                let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+                run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"corner":[0,0,0]}));
+                run(&mut s, "solid.split_body", json!({"body":"Body1","plane":{"origin":[0,0,10],"normal":[0,0,1]}}));
+                let before = s.model.state();
+                let mut params = json!({"face":[10,10,10],"distance":distance});
+                params[key] = json!(selected);
+                if both {
+                    params["face_body"] = json!(if selected == "Body1" { "Body1 (1)" } else { "Body1" });
+                }
+                let result = run(&mut s, "solid.press_pull", params);
+                assert_eq!(result["changed_bodies"], json!([selected]));
+                let check = |s: &Session| {
+                    let state = s.model.state();
+                    assert_eq!(state.bodies.len(), 2);
+                    for body in &state.bodies {
+                        let expected = if body.name == selected { 4000.0 + 400.0 * f64::from(distance) } else { 4000.0 };
+                        let measure = solidcraft_kernel::measure(&body.body).unwrap();
+                        assert!((measure.volume - expected).abs() < 1e-6, "{key} {selected} {distance}: {measure:?}");
+                    }
+                };
+                check(&s);
+                let other = before.bodies.iter().find(|body| body.name != selected).unwrap();
+                assert!(s.model.state().body(&other.name).unwrap().body.same(&other.body));
+                let saved = s.doc.to_json();
+                run(&mut s, "edit.undo", json!({}));
+                assert!(s.model.state().body(selected).unwrap().body.same(&before.body(selected).unwrap().body));
+                run(&mut s, "edit.redo", json!({}));
+                assert_eq!(s.doc.to_json(), saved);
+                check(&s);
+                check(&Session::new(Document::from_json(&saved).unwrap()));
+            }
+        }
+    }
+}
+
+#[test]
+fn press_pull_reports_ambiguous_or_unknown_flat_face_bodies_without_changes() {
+    let mut s = assembly(false);
+    let before = s.doc.to_json();
+    for selector in [None, Some("body"), Some("face_body")] {
+        let mut params = json!({"face":[20,15,20],"distance":5});
+        if let Some(key) = selector {
+            params[key] = json!("Missing");
+        }
+        let error = s.execute("solid.press_pull", &params).unwrap_err();
+        let crate::EngineError::BadParams { cmd, msg } = error else { panic!("{error}") };
+        assert_eq!(cmd, "solid.press_pull");
+        assert!(msg.contains(if selector.is_some() { "Missing" } else { "face_body" }), "{msg}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
 fn face_join_respects_explicit_targets_and_participants() {
     for key in ["targets", "participants"] {
         for all in [false, true] {
@@ -76,28 +133,35 @@ fn face_join_respects_explicit_targets_and_participants() {
 
 #[test]
 fn face_join_maps_the_picked_instance_body_and_point_together() {
-    let mut s = Session::default();
-    let component = run(&mut s, "component.create", json!({"name":"Repeated"}))["component"].as_u64().unwrap();
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Wall"}));
-    run(&mut s, "component.activate", json!({"component":0}));
-    let occurrence = run(&mut s, "occurrence.copy", json!({"component":component,"translate":[100,0,0]}))["occurrence"].as_u64().unwrap();
-    run(&mut s, "component.activate", json!({"component":component,"occurrence":occurrence}));
-    let world = s.world_state().unwrap();
-    let body = world
-        .bodies
-        .iter()
-        .find(|body| body.body.classify_point(Vec3::new(139.0, 15.0, 10.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
-        .unwrap()
-        .name
-        .clone();
-    assert_ne!(body, "Wall", "exercise an instance body name");
-    let result = run(&mut s, "solid.extrude", json!({"face":[140,15,10],"face_body":body,"distance":10,"operation":"join"}));
-    let FeatureKind::Extrude { targets, .. } = &s.doc.feature(result["feature"].as_u64().unwrap()).unwrap().kind else { panic!("extrude") };
-    assert_eq!(targets, &["Wall"]);
-    let world = s.world_state().unwrap();
-    assert_eq!(world.bodies.len(), 2);
-    for point in [Vec3::new(49.0, 15.0, 10.0), Vec3::new(149.0, 15.0, 10.0)] {
-        assert!(world.bodies.iter().any(|body| body.body.classify_point(point).unwrap() == solidcraft_kernel::PointClass::Inside), "{point:?}");
+    for (command, key) in [("solid.extrude", "face_body"), ("solid.press_pull", "body"), ("solid.press_pull", "face_body")] {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name":"Repeated"}))["component"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Wall"}));
+        run(&mut s, "component.activate", json!({"component":0}));
+        let occurrence = run(&mut s, "occurrence.copy", json!({"component":component,"translate":[100,0,0]}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "component.activate", json!({"component":component,"occurrence":occurrence}));
+        let world = s.world_state().unwrap();
+        let body = world
+            .bodies
+            .iter()
+            .find(|body| body.body.classify_point(Vec3::new(139.0, 15.0, 10.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            .unwrap()
+            .name
+            .clone();
+        assert_ne!(body, "Wall", "exercise an instance body name");
+        let mut params = json!({"face":[140,15,10],"distance":10});
+        params[key] = json!(body);
+        if command == "solid.extrude" {
+            params["operation"] = json!("join");
+        }
+        let result = run(&mut s, command, params);
+        let FeatureKind::Extrude { targets, .. } = &s.doc.feature(result["feature"].as_u64().unwrap()).unwrap().kind else { panic!("extrude") };
+        assert_eq!(targets, &["Wall"]);
+        let world = s.world_state().unwrap();
+        assert_eq!(world.bodies.len(), 2);
+        for point in [Vec3::new(49.0, 15.0, 10.0), Vec3::new(149.0, 15.0, 10.0)] {
+            assert!(world.bodies.iter().any(|body| body.body.classify_point(point).unwrap() == solidcraft_kernel::PointClass::Inside), "{point:?}");
+        }
     }
 }
 

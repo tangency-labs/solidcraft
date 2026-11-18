@@ -108,6 +108,13 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
     ButtonAppearance { fill, ink, stroke }
 }
 
+/// Fill, ink and border of a normal button in the response's current state, for controls
+/// that paint their own content (icon plus label) but must read as the kit's buttons.
+pub(super) fn normal_button_look(ui: &Ui, response: &Response) -> (egui::Color32, egui::Color32, egui::Stroke) {
+    let look = button_appearance(ui, Some(response), ButtonTone::Normal);
+    (look.fill, look.ink, look.stroke)
+}
+
 fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Button<'static> {
     // Match egui's own Button lookup: its previous rectangle is hit-tested with this frame's
     // input before allocation. No extra UI scope or widget changes the button's identity.
@@ -127,6 +134,37 @@ pub fn icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) ->
     icon_button_colored(ui, rect, icon, label, None)
 }
 
+/// What [`filter_button_at`] drew: the button, its badge (when something is picked) and what the
+/// open list's `add` returned.
+pub struct FilterButton<R> {
+    pub response: Response,
+    pub badge: Option<egui::Rect>,
+    pub inner: Option<R>,
+}
+
+/// A filter's icon button inside `rect`: it opens a list of choices that stays open for clicks
+/// inside it (as `add_column_button`'s), and a badge at its corner counts the `picked` choices.
+/// Tokens: icon button tokens; `accent, on_accent, font_small, space_4`.
+pub fn filter_button_at<R>(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, picked: usize, add: impl FnOnce(&mut Ui) -> R) -> FilterButton<R> {
+    let t = Tokens::get();
+    let response = icon_button_at(ui, rect, icon, label);
+    let badge = (picked > 0).then(|| {
+        let galley = ui.painter().layout_no_wrap(picked.to_string(), egui::FontId::proportional(t.font_small), t.on_accent);
+        let size = vec2((galley.size().x + t.space_4).max(galley.size().y), galley.size().y);
+        let badge = egui::Rect::from_min_size(egui::pos2(rect.right() - size.x, rect.top()), size);
+        ui.painter().rect_filled(badge, size.y / 2.0, t.accent);
+        ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
+        badge
+    });
+    let popup = crate::Container::new(ui.ctx(), crate::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let open = popup.is_open();
+    let inner = popup.show(|ui| crate::scope(ui, add)).map(|r| r.inner);
+    if open {
+        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    }
+    FilterButton { response, badge, inner }
+}
+
 /// Quiet secondary action: a small, muted glyph with the normal full-size hit target.
 pub fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
     icon_button_presentation(ui, rect, icon, label, None, true, false)
@@ -137,7 +175,7 @@ pub fn mirrored_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label:
     icon_button_presentation(ui, rect, icon, label, None, false, true)
 }
 
-pub(super) fn icon_button_colored(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, ink: Option<egui::Color32>) -> Response {
+pub fn icon_button_colored(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, ink: Option<egui::Color32>) -> Response {
     icon_button_presentation(ui, rect, icon, label, ink, false, false)
 }
 
@@ -196,6 +234,43 @@ pub fn keyboard(ctx: &egui::Context, ok_enabled: bool) -> Action {
     } else {
         Action::None
     }
+}
+
+/// First-letter accelerators (#9841): a typed character answers the visible button whose
+/// translated label starts with it. The match is on the typed glyph (`Event::Text`), not the
+/// physical key, so it works on any keyboard layout, and on the label after translation, so a
+/// German dialog answers N, A and S. Ambiguous letters do nothing; a matched but disabled
+/// button still swallows the key so it cannot reach the app behind the dialog. A focused text
+/// editor keeps the keystroke, as with Enter in [`keyboard`]. The host's preference gates the
+/// whole accelerator ([`super::set_dialog_mnemonics`]); this runs only when it is on.
+pub(super) fn first_letter_action(ctx: &egui::Context, candidates: &[(Action, &str, bool)]) -> Action {
+    if ctx.memory(|m| m.focused().is_some()) {
+        return Action::None;
+    }
+    ctx.input_mut(|i| {
+        let hit = i.events.iter().enumerate().find_map(|(index, event)| match event {
+            egui::Event::Text(text) => {
+                let mut letters = text.chars();
+                let (Some(ch), None) = (letters.next(), letters.next()) else {
+                    return None;
+                };
+                let mut matches = candidates.iter().filter(|(_, label, _)| {
+                    solidcraft_ui_text::tr_label(label).trim().chars().next().is_some_and(|first| first.to_lowercase().eq(ch.to_lowercase()))
+                });
+                let (action, live) = match (matches.next(), matches.next()) {
+                    (Some((action, _, live)), None) => (*action, *live),
+                    _ => return None,
+                };
+                Some((index, action, live))
+            }
+            _ => None,
+        });
+        if let Some((index, action, live)) = hit {
+            i.events.remove(index);
+            return if live { action } else { Action::None };
+        }
+        Action::None
+    })
 }
 
 /// Pinned actions with optional Apply, compute status and keyboard selection mark.
@@ -365,13 +440,8 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     };
     // Style after add_enabled sets the state, preserving the native button's ID and layout.
     let response = ui.add_enabled(live, |ui: &mut Ui| {
-        ui.add(
-            styled_button(ui, if primary && ok_enabled { text.bold_face().into() } else { text.into() }, tone)
-                .selected(marked && !primary)
-                .wrap_mode(egui::TextWrapMode::Extend)
-                .corner_radius(t.control_radius)
-                .min_size(vec2(min_width, t.form_button_height)),
-        )
+        let text = if primary && ok_enabled { text.bold_face() } else { text };
+        ui.add(form_action_widget(ui, text, tone, marked && !primary, vec2(min_width, t.form_button_height)))
     });
     t.button_bevel(ui, &response, false);
     pointer_on_hover(ui, &response);
@@ -382,6 +452,34 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     };
     solidcraft_ui_registry::publish_target(key, response.rect);
     solidcraft_ui_registry::publish_handle(&format!("dialog:{label}"), response.rect.center());
+    response
+}
+
+fn form_action_widget(ui: &Ui, text: RichText, tone: ButtonTone, selected: bool, min_size: egui::Vec2) -> egui::Button<'static> {
+    styled_button(ui, text.into(), tone)
+        .selected(selected)
+        .wrap_mode(egui::TextWrapMode::Extend)
+        .corner_radius(Tokens::get().control_radius)
+        .min_size(min_size)
+}
+
+/// A full-width form action for entry cards, with the same control styling as dialog actions.
+pub fn wide_form_button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Response {
+    let t = Tokens::get();
+    let size = vec2(dimension(ui.available_width()), t.form_button_height + t.space_8);
+    let response = ui
+        .allocate_ui_with_layout(size, egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+            ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
+            ui.add_enabled(enabled, |ui: &mut Ui| {
+                let text = RichText::new(label).size(t.font_button);
+                let text = if primary && enabled { text.semibold() } else { text };
+                let tone = if primary && enabled { ButtonTone::Primary } else { ButtonTone::Normal };
+                ui.add(form_action_widget(ui, text, tone, false, size))
+            })
+        })
+        .inner;
+    t.button_bevel(ui, &response, false);
+    pointer_on_hover(ui, &response);
     response
 }
 
@@ -458,13 +556,28 @@ pub struct PairButton<'a> {
 
 /// Equal-width secondary actions with optional icons and selected state. Tokens: `form_button_height, control_*, selected_bg, hover, font_label, text, icon/fill, accent, sketch_footer_icon_size, space_4/6/10`.
 pub fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], buttons: [PairButton<'_>; 2]) -> (bool, bool) {
+    {
+        let clicked = button_row_surface(ui, key, states, buttons, true);
+        (clicked[0], clicked[1])
+    }
+}
+
+/// Equal-width actions sharing the existing contained-card styling.
+pub fn button_row_in_card<const N: usize>(ui: &mut Ui, key: &str, buttons: [PairButton<'_>; N]) -> [bool; N] {
+    button_row_surface(ui, key, [false; N], buttons, false)
+}
+
+fn button_row_surface<const N: usize>(ui: &mut Ui, key: &str, states: [bool; N], buttons: [PairButton<'_>; N], rule: bool) -> [bool; N] {
     let t = Tokens::get();
-    t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.dialog_rule);
-    let mut clicked = [false; 2];
+    let ink = if rule { t.form_ink } else { t.text };
+    if rule {
+        t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.dialog_rule);
+    }
+    let mut clicked = [false; N];
     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_6 as i8)).show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = t.space_6;
-            let width = (ui.available_width() - t.space_6) / 2.0;
+            let width = ((ui.available_width() - t.space_6 * N.saturating_sub(1) as f32) / N.max(1) as f32).max(0.0);
             for (index, button) in buttons.iter().enumerate() {
                 let (rect, response) = ui.allocate_exact_size(vec2(width, t.form_button_height), egui::Sense::click());
                 let on = states.get(index).copied().unwrap_or(false);
@@ -476,28 +589,28 @@ pub fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], buttons: [Pa
                     } else if response.hovered() || response.has_focus() {
                         t.hover
                     } else {
-                        t.control_fill
+                        if rule { t.control_fill } else { t.field }
                     },
-                    t.control_border_stroke(t.control_border),
+                    t.control_border_stroke(if rule { t.control_border } else { t.border }),
                     egui::StrokeKind::Inside,
                 );
                 let label = solidcraft_ui_text::tr_label(button.label);
-                let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_label), t.form_ink);
+                let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_label), ink);
                 let icon_width = if button.icon.is_some() { t.sketch_footer_icon_size + t.space_4 } else { 0.0 };
                 let left = rect.center().x - (galley.size().x + icon_width) / 2.0;
+                let text_left = left + icon_width;
+                let icon_x = if rule { left + t.sketch_footer_icon_size / 2.0 } else { (rect.left() + text_left) / 2.0 };
                 let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
                 if let Some(icon) = button.icon {
                     crate::icons::paint_icon(
                         &painter,
-                        egui::Rect::from_center_size(
-                            egui::pos2(left + t.sketch_footer_icon_size / 2.0, rect.center().y),
-                            vec2(t.sketch_footer_icon_size, t.sketch_footer_icon_size),
-                        ),
+                        egui::Rect::from_center_size(egui::pos2(icon_x, rect.center().y), vec2(t.sketch_footer_icon_size, t.sketch_footer_icon_size)),
                         icon,
                         f32::from(t.icon.a()) / 255.0,
                     );
                 }
-                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, t.form_ink);
+                let ink = if on { crate::layout::ink_on(&t, t.selected_bg, ink, 4.5) } else { ink };
+                painter.galley(egui::pos2(text_left, rect.center().y - galley.size().y / 2.0), galley, ink);
                 response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, label));
                 t.button_bevel(ui, &response, on);
                 pointer_on_hover(ui, &response);
@@ -508,7 +621,7 @@ pub fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], buttons: [Pa
             }
         });
     });
-    (clicked.first().copied().unwrap_or(false), clicked.get(1).copied().unwrap_or(false))
+    clicked
 }
 
 /// Shared button variants preserve native sizing and enabled-button translation.

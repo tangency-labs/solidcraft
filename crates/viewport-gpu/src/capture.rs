@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use solidcore_record::Vec3;
 use solidcraft_viewport::hatch::Hatch;
 use solidcraft_viewport::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
-use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
 use crate::{GpuError, Result, caught, error_scopes};
@@ -192,17 +191,30 @@ impl Capturer {
     /// [`Capturer::rgba`] with `highlight` drawn as the viewport draws its highlight scene
     /// (selection and hover feedback), over the model scene.
     pub fn rgba_highlighted(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
-        self.draw(scene, highlight, cam, width, height).map(|(rgba, _)| rgba)
+        self.draw(scene, highlight, cam, [width, height], 0.0).map(|(rgba, _)| rgba)
+    }
+
+    /// [`Capturer::rgba`] with ambient occlusion of `radius` (world units), as the viewport
+    /// shades with it on.
+    pub fn rgba_occluded(&self, scene: &Scene, cam: &Camera, width: u32, height: u32, radius: f32) -> Result<Vec<u8>> {
+        self.draw(scene, None, cam, [width, height], radius).map(|(rgba, _)| rgba)
     }
 
     /// [`Capturer::rgba`] and what the picture drew ([`DrawStats`]). Both come from the same
     /// turn on the device, so another thread's picture can't put its counts in their place.
     pub fn rgba_with_stats(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
-        self.draw(scene, None, cam, width, height)
+        self.draw(scene, None, cam, [width, height], 0.0)
     }
 
     /// The picture and what it drew, both read while this call has the device to itself.
-    fn draw(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
+    fn draw(
+        &self,
+        scene: &Scene,
+        highlight: Option<GpuScene>,
+        cam: &Camera,
+        [width, height]: [u32; 2],
+        ao_radius: f32,
+    ) -> Result<(Vec<u8>, DrawStats)> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
@@ -221,6 +233,7 @@ impl Capturer {
             _ => None,
         };
         let mut frame = frame(scene, cam, [width, height], state.key, access);
+        frame.ao_radius = ao_radius;
         // Always a highlight scene of the picture's own, empty without one: the renderer keeps
         // its last highlight scene while the slot is empty (as the viewport does until the next
         // is built), so the previous picture's highlight would show in this one.
@@ -252,7 +265,13 @@ impl Capturer {
         let depth = texture("sc_capture_depth", self.depth, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
-        let background = background_vertices(device, top, bottom);
+        let background = match background_vertices(device, top, bottom) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = caught(scopes);
+                return Err(e);
+            }
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
         // Multisampled, the picture's texture is written only by the resolve: cleared first, or
         // some AMD Radeon Direct3D 12 drivers read it back black or as garbage (#10140), as the
@@ -263,6 +282,10 @@ impl Capturer {
             state.resolve_clears += _cleared;
         }
         state.renderer.prepare(device, queue, &mut encoder, frame);
+        if let Some(reason) = state.renderer.take_refused_upload() {
+            let _ = caught(scopes);
+            return Err(GpuError::Render(reason));
+        }
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -435,9 +458,11 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         pv_hide: false,
         preview_bounds: None,
         view_proj: cam.view_proj(f64::from(width) / f64::from(height.max(1)), scene.radius.max(1.0)).to_f32(),
+        turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
-        clip: scene.clip.map_or([0.0; 4], |(n, d)| [n.x as f32, n.y as f32, n.z as f32, d as f32]),
+        clip: crate::view::clip_planes(&scene.clip),
+        clip_hatch: crate::view::clip_hatches(&(0..scene.clip.len()).map(|k| scene.clip_hatch.get(k).copied().unwrap_or(k)).collect::<Vec<_>>()),
         cap: [f32::from(cap.0) / 255.0, f32::from(cap.1) / 255.0, f32::from(cap.2) / 255.0, if scene.plain_cap { 0.0 } else { 1.0 }],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -465,7 +490,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
 /// of its own, carrying its hatch.
 pub fn scene_geometry(scene: &Scene) -> GpuScene {
-    let by_part = scene.part_hatch.is_some() && scene.clip.is_some();
+    let by_part = scene.part_hatch.is_some() && !scene.clip.is_empty();
     // Per body, its colours' stable entries (by part), and the stable palette they make.
     let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
     let mut stable: Vec<[u8; 4]> = Vec::new();
@@ -503,12 +528,14 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
                 let n = mesh.normals.get(*k as usize).copied().filter(|n| n.is_finite() && n.len() > 0.5).unwrap_or(flat);
-                if m.glass() {
-                    sc.glass_tri(p.to_f32(), n.to_f32(), col);
-                } else if m.closed {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
-                } else {
-                    sc.open_tri(p.to_f32(), n.to_f32(), col);
+                // A mesh with values gives each vertex its own ([`SceneMesh::values`]).
+                match m.values.as_ref().and_then(|v| v.get(*k as usize)).copied() {
+                    Some(value) if m.glass() => sc.glass_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) if m.closed => sc.tri_value(p.to_f32(), n.to_f32(), col, value),
+                    Some(value) => sc.open_tri_value(p.to_f32(), n.to_f32(), col, value),
+                    None if m.glass() => sc.glass_tri(p.to_f32(), n.to_f32(), col),
+                    None if m.closed => sc.tri(p.to_f32(), n.to_f32(), col),
+                    None => sc.open_tri(p.to_f32(), n.to_f32(), col),
                 }
             }
         }
@@ -575,7 +602,7 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Buffer {
+fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> Result<wgpu::Buffer> {
     let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
     let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
     for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
@@ -583,11 +610,7 @@ fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Bu
         bytes.extend_from_slice(&y.to_le_bytes());
         bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_capture_background"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    })
+    crate::buffer_init(device, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -633,7 +656,7 @@ fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::Texture
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::TRI_SIZE;
+    use crate::view::{TRI_COLOR_AT, TRI_SIZE};
     use solidcore_tess::Mesh;
     use std::sync::Arc;
 
@@ -650,7 +673,7 @@ mod tests {
 
     /// The colour of a triangle `scene_geometry` wrote (its first vertex's palette entry).
     fn color(scene: &GpuScene, bytes: &[u8]) -> Option<[u8; 4]> {
-        let index = bytes.get(TRI_SIZE - 4..TRI_SIZE)?.try_into().ok().map(u32::from_le_bytes)?;
+        let index = bytes.get(TRI_COLOR_AT..TRI_COLOR_AT + 4)?.try_into().ok().map(u32::from_le_bytes)?;
         scene.palette.get(crate::view::PaletteIndex(index))
     }
 
@@ -666,6 +689,7 @@ mod tests {
             opacity,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
@@ -755,6 +779,38 @@ mod tests {
         assert_eq!(back, expected);
     }
 
+    /// A frame without a moving layer lets the layer's scene go: the same key handed in again
+    /// with nothing in its slot draws nothing, and a new key takes the scene waiting in its slot.
+    /// So who leaves its layer out of a frame (a preview hidden for a pick) hands the scene over
+    /// again under a new key (on this machine's GPU, skipped without one).
+    #[test]
+    fn a_moving_layer_left_out_of_a_frame_is_drawn_again_only_under_a_new_key() {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let wide = Mesh { positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)], ..(*sheet()).clone() };
+        let body = scene_geometry(&Scene { meshes: vec![SceneMesh::solid(Arc::new(wide), Rgb(200, 30, 30))], ..Default::default() });
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        // The picture of an empty model scene with the layer `moving`, and how much of it is red.
+        let mut picture = |model: u64, moving: Option<(u64, Option<GpuScene>)>| {
+            let mut f = frame(&Scene::default(), &cam, size, model, None);
+            f.moving = moving.map(|(key, scene)| crate::view::MovingLayer { key, slot: Arc::new(Mutex::new(scene)), transform });
+            let drawn = capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0;
+            let red = drawn.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count();
+            (drawn, red)
+        };
+        let (shown, red) = picture(1, Some((7, Some(body.clone()))));
+        assert!(red > 50, "the layer's body shows");
+        assert_eq!(picture(2, Some((7, None))).0, shown, "the same key again: the scene taken stays");
+        assert_eq!(picture(3, None).1, 0, "a frame without the layer");
+        assert_eq!(picture(4, Some((7, None))).1, 0, "the scene went with that frame: its key alone brings nothing back");
+        assert_eq!(picture(5, Some((8, Some(body)))).0, shown, "handed over again under a new key");
+    }
+
     /// A dragged component's parts drawn as instances (one copy of a part's triangles, placed
     /// many times) move with its layer too, lit flat or smooth: the layer built where the drag
     /// found them and moved by its transform draws what the model scene draws with the
@@ -816,6 +872,7 @@ mod tests {
             opacity: 0.5,
             closed: true,
             hatch: Default::default(),
+            values: None,
         };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);
