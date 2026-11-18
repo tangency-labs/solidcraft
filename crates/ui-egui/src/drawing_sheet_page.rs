@@ -442,10 +442,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let page = &mut app.drawing_workspace.page;
     page.cam.distance = distance_for(page.scale, canvas.height());
     let before_navigation = OnScreen::of(&page.cam, canvas);
+    // As in the model, a primary drag the navigation does not take is a box selection.
+    let mut box_free = true;
     if !view_tools::owns_drag(app, &response, before_navigation, &view.objects) {
         with_sheet_camera(app, |app| {
-            crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+            let input = crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+            box_free = input.primary_nav.is_none() && input.mode.is_none();
         });
+    } else {
+        box_free = false;
     }
     let page = &mut app.drawing_workspace.page;
     let scale = OnScreen::of(&page.cam, canvas).scale;
@@ -492,6 +497,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let placing = placing || placing_note || placing_dimension;
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
         .show(app, ui, placing);
+    view_tools::box_select(app, ui, &painter, &response, at, &drawing, &view.objects, canvas, box_free && !placing);
     let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
     if response.double_clicked()
         && let Some(hit) = hit
@@ -513,6 +519,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
         let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
         painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(t.space_2 * 0.5, t.accent), t.space_4, t.space_2));
+    }
+    let chosen = view_tools::selected(app, drawing.id);
+    for object in view.objects.iter().filter(|o| chosen.contains(&o.object)) {
+        let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
+        painter.rect_stroke(r, t.radius_sm, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
     }
     let states = view_states(&painter, &at, &view.views, &view.stale, &view.objects);
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
