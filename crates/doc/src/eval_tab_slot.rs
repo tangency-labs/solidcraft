@@ -262,7 +262,7 @@ enum Route {
 
 /// The route of the pair of plates `names`.
 fn route_of(st: &ModelState, names: [&str; 2]) -> Route {
-    match names.into_iter().find(|n| st.sheets.iter().any(|s| s.body == *n)) {
+    match names.into_iter().find(|n| st.surface_sheets.iter().any(|s| s.body == *n)) {
         Some(sheet) => Route::Sheet(sheet.to_string()),
         None => Route::Plate,
     }
@@ -737,30 +737,28 @@ mod tests {
 
     #[test]
     fn tab_slot_skips_every_pair_with_a_sheet_metal_plate() {
-        use crate::sheet::{AngleDisplay, ReliefShape, RuleValues, base_flange};
         use solidcore_record::{Loop2, Region2, Vec2, Vec3};
+        use solidcraft_geom::prelude::*;
         use solidcraft_kernel as kernel;
         let mut st = ModelState::default();
         let bottom = kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(160.0, 100.0, 6.0)).unwrap();
         let wall = kernel::box_solid(Vec3::new(20.0, 60.0, 6.0), Vec3::new(140.0, 66.0, 66.0)).unwrap();
         st.bodies.push(super::super::ModelBody::new("Bottom".into(), bottom, 0));
         st.bodies.push(super::super::ModelBody::new("Wall".into(), wall, 0));
-        let rv = RuleValues {
+        let rule = crate::ConvertRule {
             thickness: 6.0,
             k_factor: 0.44,
             bend_radius: 6.0,
+            gap: 6.0,
+            corner_relief: crate::sheet::ReliefShape::Notch,
+            corner_relief_size: 10.0,
             relief_width: 6.0,
             relief_depth: 3.0,
-            corner_relief: 10.0,
-            corner_relief_shape: ReliefShape::Notch,
-            hem_gap: 0.01,
-            gap: 6.0,
-            angle_display: AngleDisplay::Bend,
         };
         let outline = [Vec2::new(0.0, 0.0), Vec2::new(160.0, 0.0), Vec2::new(160.0, 100.0), Vec2::new(0.0, 100.0)];
-        let region = Region2 { outer: Loop2::polygon(&outline), holes: Vec::new() };
-        let frame = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
-        st.sheets.push(base_flange("Bottom", "Steel (mm)", &rv, frame, region));
+        let region = Region2 { outer: Loop2::polygon(&outline).ccw(), holes: Vec::new() };
+        let (sheet, _) = crate::SurfaceSheet::base("Bottom", "Steel (mm)", &rule, solidcore_record::Plane::XY, region, &[], 1).unwrap();
+        st.surface_sheets.push(sheet);
         let mut warning = None;
         let err = apply(&BTreeMap::new(), &kind(serde_json::json!({"clearance": "0.1"})), &mut st, &mut warning).unwrap_err().to_string();
         assert_eq!(

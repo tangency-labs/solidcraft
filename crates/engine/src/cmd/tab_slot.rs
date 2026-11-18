@@ -184,7 +184,7 @@ pub(crate) fn check(s: &Session, st: &ModelState, kind: &FeatureKind) -> Result<
             if body.body.is_mesh() {
                 return Err(bad(cmd, format!("{name} is a mesh body: tab and slot needs a solid")));
             }
-            if st.sheets.iter().any(|sh| sh.body == name) {
+            if st.surface_sheets.iter().any(|sh| sh.body == name) {
                 return Err(bad(
                     cmd,
                     format!("{name} is a sheet metal body: Tab and Slot works on solid plates (sheet metal tab and slot is #11398)"),
