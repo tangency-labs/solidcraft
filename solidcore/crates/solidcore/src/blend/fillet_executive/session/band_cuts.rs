@@ -1149,7 +1149,7 @@ impl Band {
         let mut out: Vec<f64> = out
             .into_iter()
             .filter(|s| *s >= lo - tol && *s <= hi + tol)
-            .map(|s| s.clamp(lo, hi))
+            .map(|s| s.max(lo).min(hi))
             .collect();
         if out.iter().any(|s| !s.is_finite()) {
             return Ok(None);
