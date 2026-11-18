@@ -338,16 +338,19 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let (Some(a), Some(b)) = (pts.first().copied(), pts.last().copied()) else { return Err(DocError::Invalid("empty rib curve".into())) };
     let chord = (b - a).normalized().ok_or_else(|| DocError::Invalid("a closed or zero-length rib curve".into()))?;
     let tol = 1e-7 * (1.0 + reach);
-    let inside = |q: Vec2| {
-        let w = ss.plane.to_world(q);
+    let normal = ss.plane.normal();
+    // Whether `q`, moved `off` along the sketch normal (across the wall's thickness), is in a body.
+    let inside = |q: Vec2, off: f64| {
+        let w = ss.plane.to_world(q) + normal * off;
         meshes.iter().any(|m| m.contains(w))
     };
     // Where the body begins and ends again from `q` along `d` (a unit direction in the plane),
     // up to `limit`: the ray's crossings of the bodies' surfaces, with the first beyond `limit`,
     // each span between two tested at its middle. Fixed steps passed over thin walls or landed
     // on their faces, so whether a rib found the floor of a long tray hung on its length (#16874).
-    let entry = |q: Vec2, d: Vec2, limit: f64| -> Option<(f64, f64)> {
-        let (o, dir) = (ss.plane.to_world(q), ss.plane.dir_to_world(d));
+    // `off` moves the ray along the sketch normal, to one of the wall's faces or between them.
+    let entry = |q: Vec2, d: Vec2, limit: f64, off: f64| -> Option<(f64, f64)> {
+        let (o, dir) = (ss.plane.to_world(q) + normal * off, ss.plane.dir_to_world(d));
         let mut cuts = Vec::new();
         for m in &meshes {
             let mut from = 0.0;
@@ -361,7 +364,7 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
                 from += tol;
             }
         }
-        ray_entry(cuts, tol, |s| inside(q + d * s)).filter(|(h, _)| *h <= limit)
+        ray_entry(cuts, tol, |s| inside(q + d * s, off)).filter(|(h, _)| *h <= limit)
     };
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     let samples = ((len / (t.min(len) * 0.25).max(len / 400.0)).ceil() as usize).clamp(2, 400);
@@ -372,7 +375,7 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let probe = |side: Vec2| {
         let (mut reached, mut nearest) = (0usize, f64::INFINITY);
         for q in along.iter().step_by((along.len() / 24).max(1)) {
-            if let Some((h, _)) = entry(*q, side, reach * 2.0 + 1.0) {
+            if let Some((h, _)) = entry(*q, side, reach * 2.0 + 1.0, 0.0) {
                 reached += 1;
                 nearest = nearest.min(h);
             }
@@ -393,13 +396,32 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let limit = depth.unwrap_or(reach * 2.0 + 1.0);
     let step = (limit.min(reach * 2.0 + 1.0) / 400.0).max(1e-3);
     let overlap = (len / samples as f64 * 2.0).max(step * 2.0).min(t);
-    // How far the wall runs across the plane from curve point `q`.
+    // How far the wall runs across the plane from curve point `q`. The wall's end is flat across
+    // its thickness, so it is found on both of the wall's faces and between them, not only on the
+    // sketch plane: a face that curves across the thickness (a cylinder standing across the rib,
+    // a round) is further away at the wall's faces than at its middle, and an end found on the
+    // middle alone left a sliver of air at the faces, wider the thicker the rib (#18261). The end
+    // goes as far as the furthest of these reaches the body, and on into the material, never
+    // beyond where the nearest leaves it again; where no flat end can do both (a thin curved wall),
+    // it is found on the sketch plane as before.
     let across = |q: Vec2| -> Result<f64> {
-        match (entry(q, n, limit), depth) {
-            (Some((h, _)), Some(d)) if h >= d => Ok(d),
-            (Some((h, out)), _) => Ok(h + overlap.min(0.5 * (out - h))),
-            (None, Some(d)) => Ok(d),
-            (None, None) => Err(DocError::Invalid("the rib curves do not face a body (give a depth)".into())),
+        let centre = entry(q, n, limit, 0.0);
+        let hits: Vec<(f64, f64)> = [-0.5, -0.25, 0.25, 0.5].iter().filter_map(|k| entry(q, n, limit, k * t)).chain(centre).collect();
+        let Some(nearest) = centre.or_else(|| hits.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0))) else {
+            return depth.ok_or_else(|| DocError::Invalid("the rib curves do not face a body (give a depth)".into()));
+        };
+        let far = hits.iter().map(|(h, _)| *h).fold(f64::NEG_INFINITY, f64::max);
+        let leaves = hits.iter().map(|(_, out)| *out).fold(f64::INFINITY, f64::min);
+        if let Some(d) = depth
+            && far >= d
+        {
+            return Ok(d);
+        }
+        if far < leaves {
+            Ok(far + overlap.min(0.5 * (leaves - far)))
+        } else {
+            let (h, out) = nearest;
+            Ok(h + overlap.min(0.5 * (out - h)))
         }
     };
     // An end of the curves often sits exactly on a wall (a rib from wall to wall), where the
