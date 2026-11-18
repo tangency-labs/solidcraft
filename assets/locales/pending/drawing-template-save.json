@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_template_save": "Save as Drawing Template"
+  },
+  "ar": {
+    "cmd.drawing_template_save": "حفظ كقالب لوحة"
+  },
+  "de": {
+    "cmd.drawing_template_save": "Als Zeichnungsvorlage speichern"
+  },
+  "he": {
+    "cmd.drawing_template_save": "שמירה כתבנית שרטוט"
+  },
+  "ja": {
+    "cmd.drawing_template_save": "図面テンプレートとして保存"
+  },
+  "ko": {
+    "cmd.drawing_template_save": "도면 템플릿으로 저장"
+  },
+  "vi": {
+    "cmd.drawing_template_save": "Lưu thành mẫu bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_template_save": "另存为绘图模板"
+  }
+}

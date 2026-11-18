@@ -572,6 +572,14 @@ pub struct CreateParams {
     #[serde(default, deserialize_with = "grounded_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub grounded: Option<bool>,
+    /// What one placement means in a bill of materials, as an expression (`component.metadata.set`'s
+    /// `bom_quantity`). Default: one.
+    #[serde(default)]
+    pub bom_quantity: Option<String>,
+    /// A component with no geometry (grease, paint, a label): listed in bills of materials with
+    /// its quantity, never active, and nothing can be put in it. Only `true`. Default: not virtual.
+    #[serde(default, rename = "virtual")]
+    pub r#virtual: Option<bool>,
 }
 
 /// What `component.create` returns.
@@ -807,11 +815,24 @@ pub struct PlacementInfo {
     pub transform: [[f64; 4]; 4],
     /// Whether it is grounded.
     pub grounded: bool,
+    /// How this occurrence counts in the bill of materials, in place of its component's type;
+    /// left out when it counts as its component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub bom_type: Option<solidcraft_doc::BomType>,
 }
 
 impl From<&Occurrence> for PlacementInfo {
     fn from(o: &Occurrence) -> Self {
-        PlacementInfo { id: o.id, component: o.component, parent: o.parent, name: o.name.clone(), transform: o.transform, grounded: o.grounded }
+        PlacementInfo {
+            id: o.id,
+            component: o.component,
+            parent: o.parent,
+            name: o.name.clone(),
+            transform: o.transform,
+            grounded: o.grounded,
+            bom_type: o.bom_type,
+        }
     }
 }
 
@@ -828,6 +849,11 @@ pub struct CompactPlacement {
     /// Its placement in its parent, as a 4×4 matrix; left out when it is the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<[[f64; 4]; 4]>,
+    /// How this occurrence counts in the bill of materials, in place of its component's type;
+    /// left out when it counts as its component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub bom_type: Option<solidcraft_doc::BomType>,
 }
 
 /// A placement in a component's `occurrences`: in full, or compact.

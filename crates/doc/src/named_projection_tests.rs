@@ -154,6 +154,25 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     assert!(matches!(&sketch.links[0].source,LinkSource::Face{body,..} if body=="Source"));
 }
 
+/// A view edge belongs to a drawing view's sketch. A model sketch holding one (a hand-edited
+/// design) loses that link with the reason and keeps its last geometry.
+#[test]
+fn a_model_sketch_loses_a_view_edge_link_and_keeps_its_line() {
+    let doc = Document::default();
+    let mut state = ModelState::default();
+    state.bodies.push(named_box("Body1", 20., 10.));
+    let source = LinkSource::ViewEdge { body: "Body1".into(), origin_feature: 1, name: "F1:e#1".into(), path: Vec::new() };
+    let refused = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &source).unwrap_err();
+    assert!(matches!(&refused, crate::DocError::Invalid(why) if why == "a view edge is projected only in its drawing view's sketch"), "{refused}");
+    let mut sketch = Sketch::default();
+    sketch.add_link(LinkKind::Project, source, &[LinkGeom::Line(Vec2::new(0., 0.), Vec2::new(20., 0.))]).unwrap();
+    let saved = sketch.clone();
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut sketch).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("a view edge is projected only in its drawing view's sketch")), "{warnings:?}");
+    assert!(sketch.links[0].lost);
+    assert_eq!((&sketch.points, &sketch.curves), (&saved.points, &saved.curves));
+}
+
 #[test]
 fn numbered_manual_projection_rebuilds_from_the_whole_planar_face() {
     let mut doc = Document::default();
@@ -848,6 +867,7 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
         transform: PART_FRAME,
         grounded: false,
         expressed_moves: Vec::new(),
+        bom_type: None,
     });
     let mid = doc
         .add_feature(

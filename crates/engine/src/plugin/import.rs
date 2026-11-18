@@ -114,6 +114,7 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 /// anywhere yet. Nothing changes unless the whole import succeeds; a failure starts with the
 /// plugin's name and the file's.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    session.plugin_state.refresh_stored();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
     convert(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))
 }

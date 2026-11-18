@@ -94,6 +94,26 @@ fn hostile_manifest_fields_return_errors() {
 }
 
 #[test]
+fn larger_manifests_fit_without_removing_input_descriptions() {
+    let serialized = serde_json::to_vec(&manifest()).unwrap();
+    assert!(serialized.len() < 16 * 1024);
+    assert_eq!(MAX_MANIFEST_BYTES, 64 * 1024);
+
+    // Whitespace pads a real manifest to exact byte boundaries without changing its
+    // meaning. The old 16 KiB cap no longer rejects a valid manifest.
+    for len in [16 * 1024 + 1, 64 * 1024] {
+        let mut bytes = serialized.clone();
+        bytes.resize(len, b' ');
+        let parsed = parse_manifest(&bytes, "sample").unwrap();
+        assert_eq!(parsed.id, "sample");
+    }
+
+    let mut too_large = serialized;
+    too_large.resize(MAX_MANIFEST_BYTES + 1, b' ');
+    assert!(matches!(parse_manifest(&too_large, "sample"), Err(HostError::LimitExceeded { limit }) if limit.contains("64 KiB")));
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());

@@ -28,6 +28,11 @@ mod mouse_buttons;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
 
+/// The folder the page serves its fonts from: index.html copies each there, and a drawing's text
+/// fetches its fonts from it (#4890).
+#[cfg(any(target_arch = "wasm32", test))]
+const FONTS: &str = "fonts";
+
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
 /// it (#5227); plain Tab and Shift+Tab still move between the app's fields. (Ctrl+PageUp and
 /// Ctrl+PageDown already reach the browser.)
@@ -356,6 +361,8 @@ mod web {
     const KOREAN_FONT_PATH: &str = "./fonts/CraftUI-KR.otf";
 
     type FontLoadResult = Rc<std::cell::RefCell<Option<Result<(String, Vec<u8>), String>>>>;
+    /// The fetches of drawing fonts that have finished, for the next frame to hand on.
+    type DrawingFontsDone = Rc<std::cell::RefCell<Vec<(solidcraft_engine::sketch::fallback::WebFont, Result<Vec<u8>, String>)>>>;
 
     struct Shell {
         app: SolveApp,
@@ -388,6 +395,9 @@ mod web {
         font_fetch_kind: Option<&'static str>,
         /// The language the fonts were last set up for (a CJK UI leads with the CJK face).
         font_language: String,
+        /// The fonts a drawing's text asked for, other than Japanese, each fetched once a session.
+        drawing_fonts_asked: std::collections::HashSet<solidcraft_engine::sketch::fallback::WebFont>,
+        drawing_fonts_done: DrawingFontsDone,
         space_mouse: SpaceMouse,
         wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
         /// The mouse buttons the browser holds, which egui's are kept to (`mouse_buttons`).
@@ -1064,6 +1074,10 @@ mod web {
                                 self.korean_bytes = Some(bytes);
                             }
                             _ => {
+                                solidcraft_engine::sketch::fallback::provide_web_font(
+                                    solidcraft_engine::sketch::fallback::WebFont::Japanese,
+                                    bytes.clone(),
+                                );
                                 self.cjk_bytes = Some(bytes);
                             }
                         }
@@ -1078,6 +1092,9 @@ mod web {
                             _ => JAPANESE_FONT_PATH,
                         };
                         log::warn!("failed to fetch script font from {path}: {err}");
+                        if !matches!(kind, Some("zh" | "zh-TW")) {
+                            solidcraft_engine::sketch::fallback::web_font_failed(solidcraft_engine::sketch::fallback::WebFont::Japanese);
+                        }
                         false
                     }
                 };
@@ -1120,10 +1137,12 @@ mod web {
             self.font_language = effective.to_owned();
         }
 
-        /// CJK text on screen with no Japanese font yet (an English UI showing a Japanese name):
-        /// fetch the Japanese font, so the text does not stay tofu (#720).
+        /// CJK text on screen with no Japanese font yet (an English UI showing a Japanese name), or a
+        /// drawing's text waiting for one: fetch the Japanese font, so the text does not stay tofu (#720).
         fn watch_text_for_font(&mut self, ctx: &egui::Context) {
-            if self.font.watching_text() && solidcraft_ui_egui::ui_kit::type_face::painted_cjk(ctx) && self.font.text_needs_font() {
+            let japanese = solidcraft_engine::sketch::fallback::web_fonts_wanted().contains(&solidcraft_engine::sketch::fallback::WebFont::Japanese);
+            let wanted = solidcraft_ui_egui::ui_kit::type_face::painted_cjk(ctx) || japanese;
+            if self.font.watching_text() && wanted && self.font.text_needs_font() {
                 self.fetch_font(ctx, "ja");
             }
         }
@@ -1145,6 +1164,33 @@ mod web {
                 ctx.request_repaint();
             });
         }
+
+        /// The other fonts a drawing's text waits for (Arabic, Chinese, Korean): each fetched once,
+        /// and handed to the text when it comes. Japanese comes with the interface's CJK font.
+        fn fetch_drawing_fonts(&mut self, ctx: &egui::Context) {
+            use solidcraft_engine::sketch::fallback::{self, WebFont};
+            for (font, res) in self.drawing_fonts_done.borrow_mut().drain(..) {
+                match res {
+                    Ok(bytes) => fallback::provide_web_font(font, bytes),
+                    Err(err) => {
+                        log::warn!("failed to fetch the drawing font {}/{}: {err}", crate::FONTS, font.file());
+                        fallback::web_font_failed(font);
+                    }
+                }
+                ctx.request_repaint();
+            }
+            for font in fallback::web_fonts_wanted() {
+                if font == WebFont::Japanese || !self.drawing_fonts_asked.insert(font) {
+                    continue;
+                }
+                let (done, ctx) = (self.drawing_fonts_done.clone(), ctx.clone());
+                wasm_bindgen_futures::spawn_local(async move {
+                    let res = fetch_font_bytes(&format!("./{}/{}", crate::FONTS, font.file())).await;
+                    done.borrow_mut().push((font, res));
+                    ctx.request_repaint();
+                });
+            }
+        }
     }
 
     impl eframe::App for Shell {
@@ -1152,6 +1198,7 @@ mod web {
             // First: a language another tab chose fetches its font this frame.
             self.load_other_tabs_prefs();
             self.tick_font(ctx);
+            self.fetch_drawing_fonts(ctx);
             self.app.logic(ctx);
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
@@ -1423,6 +1470,8 @@ mod web {
                             korean_bytes: None,
                             font_fetch_kind: None,
                             font_language,
+                            drawing_fonts_asked: Default::default(),
+                            drawing_fonts_done: Default::default(),
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
                             mouse_buttons,
@@ -1621,5 +1670,21 @@ mod tests {
         assert_eq!(settings_written(key, Some(key), None), None, "removed settings leave this tab's");
         assert_eq!(settings_written(key, None, None), None, "clearing all storage leaves this tab's settings");
         assert_eq!(settings_written(key, Some("rc:solidcraft.prefs"), Some("{}".into())), None, "another channel's settings are not loaded");
+    }
+
+    /// Each font a drawing's text can ask for on the web is one index.html copies, from an asset
+    /// in the repository, into the folder the app fetches it from.
+    #[test]
+    fn each_drawing_font_is_copied_where_it_is_fetched() {
+        let page = include_str!("../index.html");
+        let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for font in solidcraft_engine::sketch::fallback::WebFont::ALL {
+            let served = format!("{FONTS}/{}", font.file());
+            let (folder, file) = served.rsplit_once('/').unwrap_or_default();
+            let copy = page.lines().find(|l| l.contains("rel=\"copy-file\"") && l.contains(&format!("/{file}\""))).unwrap_or_default();
+            assert!(copy.contains(&format!("data-target-path=\"{folder}\"")), "index.html doesn't copy {served}: {copy}");
+            let from = copy.split("href=\"").nth(1).and_then(|rest| rest.split('"').next()).unwrap_or_default();
+            assert!(here.join(from).is_file(), "{served}: no {from}");
+        }
     }
 }

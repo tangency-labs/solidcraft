@@ -51,7 +51,7 @@ mod types;
 #[cfg(test)]
 mod coverage_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 // The contracts, by command file.
 pub mod align;
@@ -69,6 +69,22 @@ pub mod config;
 pub mod construct;
 pub mod delete;
 pub mod diagnostics;
+pub mod drawing;
+pub mod drawing_balloon;
+pub mod drawing_check;
+pub mod drawing_dimension;
+pub mod drawing_export;
+pub mod drawing_fill;
+pub mod drawing_image;
+pub mod drawing_model_dimensions;
+pub mod drawing_note;
+pub mod drawing_revision;
+pub mod drawing_scene;
+pub mod drawing_sheet;
+pub mod drawing_sketch;
+pub mod drawing_symbol;
+pub mod drawing_table;
+pub mod drawing_view;
 pub mod edit;
 pub mod end_cap;
 pub mod features;
@@ -157,6 +173,7 @@ pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
 
+pub(crate) use check::read;
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as};
 pub use types::*;
 
