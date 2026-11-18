@@ -600,6 +600,10 @@ Next, each as its own version and review: `panel` materials (glass panels that b
 them, drawn from a backdrop the host provides), and a previous-frame texture for effects with
 memory (rain that stays where it landed).
 
+**Amendment 1 note (2026-11-16):** a texture may carry `choose` (a label, 1 to 40 characters)
+instead of or beside `file`. The person picks its picture on the plugin's card; the choice is kept
+in the preferences, not in the plugin. Older hosts refuse the field.
+
 ### Rules for every new capability
 
 1. Additive only. A new capability adds optional manifest fields and new interfaces. It never

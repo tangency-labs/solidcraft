@@ -64,6 +64,9 @@ pub(crate) fn runs_plugin_code(session: &solidcraft_engine::Session, method: &st
 
 /// How many turned-off ids a preferences file may name.
 pub const MAX_DISABLED: usize = 256;
+/// The most chosen background pictures kept in the preferences, and the longest path of one.
+pub const MAX_PICTURES: usize = 64;
+pub const MAX_PICTURE_PATH: usize = 1024;
 /// `plugin.json` larger than this is refused.
 const MAX_MANIFEST_BYTES: u64 = solidcraft_engine::plugin::MAX_MANIFEST_BYTES as u64;
 
@@ -86,6 +89,8 @@ pub struct Plugin {
     pub(crate) swatches: crate::plugin_images::Swatches,
     /// Its view backgrounds (`shaders@0.1`): the preference's key, `id/shader`, and the name.
     pub shaders: Vec<(String, String)>,
+    /// Its textures a person chooses (`choose` in the manifest): `plugin/shader/<index>` and the label.
+    pub pictures: Vec<(String, String)>,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -154,6 +159,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         images: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
+        pictures: Vec::new(),
     })
 }
 
@@ -166,10 +172,22 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
     let parsed = package.manifest;
     let shaders = parsed.shaders.iter().map(|shader| (format!("{}/{}", parsed.id, shader.id), shader.name.clone())).collect();
+    let pictures = parsed
+        .shaders
+        .iter()
+        .flat_map(|shader| {
+            shader
+                .textures
+                .iter()
+                .enumerate()
+                .filter_map(|(i, texture)| texture.choose.as_ref().map(|label| (format!("{}/{}/{i}", parsed.id, shader.id), label.clone())))
+        })
+        .collect();
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
     plugin.path = dir.to_string_lossy().into_owned();
     plugin.approval = package.approval;
     plugin.shaders = shaders;
+    plugin.pictures = pictures;
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
@@ -808,8 +826,47 @@ fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: b
                 if value != active {
                     app.preferences.background_shader = if value { key.clone() } else { String::new() };
                 }
+                for (picture, choose) in
+                    plugin.pictures.iter().filter(|(p, _)| p.strip_prefix(key.as_str()).is_some_and(|rest| rest.starts_with('/')))
+                {
+                    picture_row(app, ui, picture, choose);
+                }
             }
         });
+    });
+}
+
+/// One chosen texture under its background's switch: its label, the picked file's name (or
+/// "Default"), Choose… and, once a picture is picked, Clear.
+#[cfg(not(target_arch = "wasm32"))]
+fn picture_row(app: &mut SolveApp, ui: &mut egui::Ui, picture: &str, choose: &str) {
+    let chosen = app.preferences.background_shader_pictures.get(picture).cloned();
+    let shown = chosen
+        .as_deref()
+        .and_then(|path| Path::new(path).file_name())
+        .map_or_else(|| app.tr("prefs.background_picture_default").to_owned(), |name| name.to_string_lossy().into_owned());
+    let row = format!("{choose}: {shown}");
+    let picture = picture.to_owned();
+    crate::ui_kit::row(ui, &row, |ui| {
+        let pick = crate::ui_kit::button(ui, app.tr("prefs.background_picture_choose"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_target(&format!("prefs:background_picture:{picture}:choose"), pick.rect);
+        if pick.clicked() {
+            let for_picture = picture.clone();
+            app.pick_file(choose, &["png", "jpg", "jpeg", "webp"], move |app, path| {
+                if let Some(path) = path
+                    && let Err(error) = crate::plugin_shaders::choose_picture(app, &for_picture, path)
+                {
+                    app.set_status(error, true);
+                }
+            });
+        }
+        if chosen.is_some() {
+            let clear = crate::ui_kit::button(ui, app.tr("prefs.background_picture_clear"), crate::ui_kit::Button::Ghost);
+            crate::scenario::publish_target(&format!("prefs:background_picture:{picture}:clear"), clear.rect);
+            if clear.clicked() {
+                app.preferences.background_shader_pictures.remove(&picture);
+            }
+        }
     });
 }
 

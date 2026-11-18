@@ -673,7 +673,9 @@ not run, or two versions at once, is refused before any of its code runs.
 
 `shaders@0.1` lets a plugin draw the 3D view's background with a WGSL shader the host checks,
 wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) and
-[RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders).
+[RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders). A shader's
+texture can be a picture the person chooses under the plugin's card (`choose`, see
+[pictures the person chooses](plugin-shaders.md#pictures-the-person-chooses)).
 
 ## Commands and permissions
 
