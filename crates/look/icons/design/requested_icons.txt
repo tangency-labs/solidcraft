@@ -284,11 +284,13 @@ rect_edge_center	false
 rect_rounded	false
 redo	false
 refold	false
+reload	false
 rename	false
 render_image	false
 render_scene	false
 reorder	false
 replace_face	false
+reset	false
 rest	false
 restore	false
 revert	false

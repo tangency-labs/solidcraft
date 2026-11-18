@@ -216,6 +216,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         rect,
         // The View menu's slot, by the name older scenarios use.
         alias: (slot.id == "display").then_some("nav:view"),
+        dot: slot.id == SELECTION_MODE && editing.is_none() && crate::selection_mode::filters_off(app) > 0,
     }
 }
 
@@ -322,9 +323,16 @@ fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
         NavAction::Item { menu, item } if menu == "visual_style" => {
             let _ = app.run("view.visual_style", json!({"style":item}));
         }
-        NavAction::Item { menu, item } if menu == SELECTION_MODE => {
-            let _ = app.run("select.mode", json!({"mode":item}));
-        }
+        NavAction::Item { menu, item } if menu == SELECTION_MODE => match item.as_str() {
+            "filters_reset" => crate::selection_mode::reset_filters(app),
+            "shape:0" | "shape:1" => app.ui.lasso_select = item == "shape:1",
+            _ => match item.strip_prefix("filter:") {
+                Some(filter) => crate::selection_mode::toggle_filter(app, filter),
+                None => {
+                    let _ = app.run("select.mode", json!({"mode":item}));
+                }
+            },
+        },
         NavAction::Item { menu, item } if menu == SHEET_ZOOM => match item.as_str() {
             "actual" => crate::drawing_sheet_page::actual_size(app, ctx),
             "fit" => crate::drawing_sheet_page::fit(app),
@@ -414,7 +422,41 @@ fn selection_menu(app: &SolveApp) -> Menu {
         row.selected = app.ui.pick_mode == mode;
         entries.push(MenuEntry::Row(row));
     }
+    entries.extend([MenuEntry::Separator, MenuEntry::Row(pick_filters_row(app))]);
     Menu { entries, close_on_pick: true }
+}
+
+/// The detailed pick, one row deep: which kinds of object a click can take, and the drag shape.
+/// Its flyout stays open, as several filters are often changed in one visit.
+fn pick_filters_row(app: &SolveApp) -> MenuRow {
+    let off = crate::selection_mode::filters_off(app);
+    let filter = |id: &str, label: &str, indent: bool| {
+        let mut row = MenuRow::new(format!("filter:{id}"), label, "", format!("nav:filter:{id}"));
+        row.check = Some(!app.ui.pick_off.iter().any(|x| x == id));
+        row.indent = indent;
+        MenuEntry::Row(row)
+    };
+    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.filters_solid").to_owned())];
+    entries.extend(crate::selection_mode::SOLID_FILTERS.iter().map(|(id, label)| filter(id, solidcraft_ui_text::tr_label(label), false)));
+    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.filters_sketch").to_owned())]);
+    entries.extend(crate::selection_mode::SKETCH_FILTERS.iter().map(|(id, key, indent)| filter(id, app.tr(key), *indent)));
+    entries.extend([
+        MenuEntry::Separator,
+        MenuEntry::Heading(app.tr("navbar.filters_shape").to_owned()),
+        MenuEntry::Segments {
+            id: "shape".into(),
+            options: vec![app.tr("navbar.shape_rectangle").to_owned(), app.tr("navbar.shape_lasso").to_owned()],
+            selected: usize::from(app.ui.lasso_select),
+            targets: vec!["nav:shape:rectangle".into(), "nav:shape:lasso".into()],
+        },
+        MenuEntry::Separator,
+        MenuEntry::Row(MenuRow::new("filters_reset", app.tr("navbar.filters_reset"), "reset", "nav:filter:reset")),
+    ]);
+    let mut row = MenuRow::new("pick_filters", app.tr("navbar.pick_filters"), "filter", "nav:selection:pick_filters");
+    row.detail = (off > 0).then(|| solidcraft_ui_text::format("navbar.filters_off", &[("count", &off.to_string())]));
+    row.submenu = entries;
+    row.keep_open = true;
+    row
 }
 
 /// Visual style: the four styles, then Translucent (later); a pick closes the menu.
@@ -454,7 +496,7 @@ fn display_menu(app: &SolveApp) -> Menu {
     preset.detail = Some(app.tr(&format!("ui.graphics_{current}")).to_owned());
     preset.submenu = [("performance", "ui.graphics_performance"), ("quality", "ui.graphics_quality")]
         .into_iter()
-        .map(|(id, label)| row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id))
+        .map(|(id, label)| MenuEntry::Row(row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id)))
         .collect();
     entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.show").to_owned())]);
     for id in ["grid", "ground_shadow", "ambient_occlusion"] {

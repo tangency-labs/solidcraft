@@ -1,0 +1,17 @@
+{
+  "en": {
+    "navbar.filter.constraints": "Constraints",
+    "navbar.filter.curves": "Curves",
+    "navbar.filter.dimensions": "Dimensions",
+    "navbar.filter.geometry": "Geometry and profiles",
+    "navbar.filter.points": "Points",
+    "navbar.filters_off": "{count} off",
+    "navbar.filters_reset": "Reset filters",
+    "navbar.filters_shape": "Drag shape",
+    "navbar.filters_sketch": "Sketch",
+    "navbar.filters_solid": "Solid",
+    "navbar.pick_filters": "Pick filters",
+    "navbar.shape_lasso": "Lasso",
+    "navbar.shape_rectangle": "Rectangle"
+  }
+}

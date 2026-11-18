@@ -67,6 +67,39 @@ pub(crate) fn picks(app: &SolveApp) -> PickMode {
     if crate::render_workspace::active(app) { from_render_filter(Some(&app.ui.render_pick)) } else { app.ui.pick_mode }
 }
 
+/// The Solid pick filters of the Selection mode menu: (id, English label).
+pub(crate) const SOLID_FILTERS: [(&str, &str); 3] = [("faces", "Faces"), ("edges", "Edges"), ("vertices", "Vertices")];
+
+/// The Sketch pick filters: (id, message id, indented); curves and points sit under geometry.
+pub(crate) const SKETCH_FILTERS: [(&str, &str, bool); 5] = [
+    ("sketch", "navbar.filter.geometry", false),
+    ("sketch_curves", "navbar.filter.curves", true),
+    ("sketch_points", "navbar.filter.points", true),
+    ("dimensions", "navbar.filter.dimensions", false),
+    ("constraints", "navbar.filter.constraints", false),
+];
+
+/// How many pick filters are switched off; the Selection mode slot shows a dot while any is.
+pub(crate) fn filters_off(app: &SolveApp) -> usize {
+    let off = |id: &str| app.ui.pick_off.iter().any(|x| x == id);
+    SOLID_FILTERS.iter().filter(|(id, _)| off(id)).count() + SKETCH_FILTERS.iter().filter(|(id, ..)| off(id)).count()
+}
+
+/// Switch one pick filter on or off.
+pub(crate) fn toggle_filter(app: &mut SolveApp, id: &str) {
+    let was_off = app.ui.pick_off.iter().any(|x| x == id);
+    app.ui.pick_off.retain(|x| x != id);
+    if !was_off {
+        app.ui.pick_off.push(id.to_owned());
+    }
+}
+
+/// Turn every pick filter back on and the drag shape back to a rectangle.
+pub(crate) fn reset_filters(app: &mut SolveApp) {
+    app.ui.pick_off.clear();
+    app.ui.lasso_select = false;
+}
+
 /// What the mode and the selection filter let a click pick with no dialog.
 pub(crate) fn allowed(app: &SolveApp, h: &Hit) -> bool {
     let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);

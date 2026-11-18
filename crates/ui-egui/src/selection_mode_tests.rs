@@ -331,3 +331,19 @@ fn a_click_and_select_other_follow_the_mode() {
         assert_eq!(body_rows(&h), rows, "{mode:?}");
     }
 }
+
+#[test]
+fn pick_filters_count_toggle_and_reset_without_changing_the_mode() {
+    let mut app = crate::SolveApp::new(Default::default(), Default::default());
+    assert_eq!((app.ui.pick_mode, super::filters_off(&app)), (PickMode::Faces, 0), "faces, edges and vertices are all pickable by default");
+    super::toggle_filter(&mut app, "vertices");
+    super::toggle_filter(&mut app, "dimensions");
+    assert_eq!(super::filters_off(&app), 2);
+    super::toggle_filter(&mut app, "vertices");
+    assert_eq!(super::filters_off(&app), 1);
+    super::set(&mut app, PickMode::Bodies);
+    assert_eq!(super::filters_off(&app), 1, "a mode keeps the filters it narrows by");
+    app.ui.lasso_select = true;
+    super::reset_filters(&mut app);
+    assert_eq!((super::filters_off(&app), app.ui.lasso_select, app.ui.pick_mode), (0, false, PickMode::Bodies));
+}
