@@ -1574,9 +1574,11 @@ impl Curve {
             let this_b = self.evaluate_point(k, last.0)?;
             let other_a = other.evaluate_point(k, first.1)?;
             let other_b = other.evaluate_point(k, last.1)?;
-            // The side is taken across this curve, its tangent's component removed (an end of
-            // one curve that runs past the other's end drops onto that end, and the pair's
-            // difference then points along the curves)
+            // The side is taken across this curve, its tangent's component removed. An end
+            // of one curve that runs past the other's end drops onto that end, and the
+            // pair's difference then points along the curves, forward at one end and back at
+            // the other, for two curves that lie on each other; upstream took that for a
+            // crossing.
             let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
             let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
             let scaled_zero =

@@ -99,7 +99,9 @@
 //!   certified the stretch's only contact ([`touch_is_alone`]: a straight curve against
 //!   one whose second derivative across it, bounded over the whole stretch from its
 //!   Bernstein-B-spline coefficients, keeps one sign: its meetings with the line lie in
-//!   one interval of rounding size; or [`curves_meet_at_most_once`]), and for a curve
+//!   one interval of rounding size, and its run within the scaled zero of the line, bounded
+//!   by the same curvature, is under half the stretch; or [`curves_meet_at_most_once`]),
+//!   and for a curve
 //!   against itself not on a fold. A touch the bounds do not certify (two curved curves
 //!   tangent to each other, an exact or near overlap with a conic over an arc) keeps its
 //!   ranges (a
@@ -3874,6 +3876,15 @@ fn de_boor(
 /// within `eps_f w_max`. Every rounding (the coefficients, the de Boor values at the
 /// touch, the second differences) is bounded and taken against acceptance.
 ///
+/// The same lower bound bounds the run within the meeting zero: where the curves are
+/// within `zero = EFF_ZERO (1 + size)` of each other, `g <= zero_g = 2 w_max zero +
+/// eps_f w_max`, which lies in an interval of length at most `2 sqrt(2 (zero_g - least) /
+/// kappa)` (`least` the bound's least value). Curves that never meet exactly but run
+/// within the zero of each other (a near overlap at the zero, for which the set of exact
+/// meetings is empty and the interval argument holds vacuously) have a run of half the
+/// stretch or more and are not certified; a touch's run is short beside its stretch, the
+/// stretch being where the curves are within the tolerance.
+///
 /// `Ok(false)` (no certificate, the ranges are kept) for any other pair of curves, a
 /// rational curve of degree above 2 or a weight not positive, a stretch over more than
 /// [`MAX_STRETCH_POINTS`] points, a curved curve not C1 inside its stretch, or a NaN.
@@ -4024,15 +4035,32 @@ fn touch_is_alone_against(
     };
     let slack = g1.abs() + e1;
     let least = (g0 - e0) - slack * slack / (2.0 * kappa) * (1.0 + gamma(4));
+    if !(least.is_finite() && eps.is_finite()) {
+        return Ok(false);
+    }
+    // the run within the meeting zero: where the curves are within `zero` of each other
+    // (the touch's meeting test, `EFF_ZERO (1 + size)` over both curves' points),
+    // `c(u) = q + s v + d` with `|d| <= zero`, so `|f| <= |n| zero + |s| |n . v|` with `|s v|
+    // <= reach + zero` and `|n . v| / |v| <= |n|` (`eps` holds the `reach` part): `g <=
+    // zero_g = 2 w_max |n| zero + eps`, its rounding in the last factor; g lies above its
+    // quadratic lower bound, whose least is at least `least`, so that run lies in an
+    // interval of parameter length at most `2 sqrt(2 (zero_g - least) / kappa)`. A touch
+    // runs within the zero over a small part of the stretch; curves within the zero over
+    // half of it or more (a near overlap at the zero, which need not meet exactly, so the
+    // meetings below may be none) are not certified
+    let w_max = spline.points.iter().map(|c| c.1).fold(0.0, max2);
+    let zero = EFF_ZERO * (1.0 + max2(size, q.max_dimension() + err_q)) * (1.0 + gamma(4));
+    let zero_g = (2.0 * w_max * n.length() * zero + eps) * (1.0 + gamma(4));
+    let run = 2.0 * (2.0 * (zero_g - least) / kappa).sqrt() * (1.0 + gamma(8));
+    if !(run.is_finite() && 2.0 * run < hi - lo) {
+        return Ok(false);
+    }
     if least >= -eps {
         return Ok(true);
     }
     // else the meetings lie where g <= eps, inside where its quadratic lower bound is:
     // an interval of length 2 sqrt(2 (eps - least) / kappa) (an exact touch whose least the
     // bounds place a rounding below zero)
-    if !(least.is_finite() && eps.is_finite()) {
-        return Ok(false);
-    }
     Ok(one_contact(2.0 * (2.0 * (eps - least) / kappa).sqrt()))
 }
 
@@ -4530,5 +4558,34 @@ mod tests {
         assert!(!curves_meet_at_most_once(
             &k, &floor, whole, &above_it, whole
         ));
+    }
+
+    /// Review r7 (M2): a line and a parabola `(s, dr + c (s - 1/2)², 0)` that never
+    /// meet exactly (`dr` above the line) but stay within the scaled zero of it over the
+    /// whole stretch (`c` tiny): a near overlap at the zero, not a touch. The convex
+    /// offset puts the (empty) set of exact meetings in one interval, so without a bound
+    /// on the run within the zero this was certified the stretch's only contact. A
+    /// parabola that does bend away (`c = 1`) touching the line stays certified.
+    #[test]
+    fn a_run_within_the_zero_over_the_stretch_is_not_a_lone_touch() {
+        let k = Kernel::default();
+        let line = polyline(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]);
+        // (s, dr + c (s² - s + 1/4))
+        let parabola =
+            |dr: f64, c: f64| power_bezier(&[[0.0, dr + 0.25 * c, 0.0], [1.0, -c, 0.0], [0.0, c, 0.0]]);
+        let whole = (0.0, 1.0);
+        let flat = parabola(5e-13, 1e-12);
+        for s in [0.0, 0.5, 1.0] {
+            let p = flat.evaluate_point(&k, s).unwrap();
+            let q = line.evaluate_point(&k, s).unwrap();
+            let zero = EFF_ZERO * (1.0 + max2(p.max_dimension(), q.max_dimension()));
+            assert!(p.distance(q) <= zero, "{s}: {p:?} {q:?}");
+            assert!(p.distance(q) > 0.0, "{s}: {p:?} {q:?}");
+        }
+        assert!(!touch_is_alone(&k, &line, whole, &flat, whole, [0.5, 0.5]).unwrap());
+        assert!(!touch_is_alone(&k, &flat, whole, &line, whole, [0.5, 0.5]).unwrap());
+        let bent = parabola(0.0, 1.0);
+        assert!(touch_is_alone(&k, &line, whole, &bent, whole, [0.5, 0.5]).unwrap());
+        assert!(touch_is_alone(&k, &bent, whole, &line, whole, [0.5, 0.5]).unwrap());
     }
 }

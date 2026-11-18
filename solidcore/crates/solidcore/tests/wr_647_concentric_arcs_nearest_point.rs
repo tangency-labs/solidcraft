@@ -815,8 +815,9 @@ fn wr_647_two_touches_in_one_stretch_keep_their_range() {
 /// meetings. So it meets A exactly twice, at t = (1 ± δ)/2 on both, and every answer must
 /// hold both meetings (a point within 1e-5 of each, or a range over it). The head before
 /// this test took the stretch for one touch (the band of A's plane alone put both in one
-/// interval) and lost one meeting at tolerances 1e-3, 3e-3 and 1e-2; A, a planar spline,
-/// now gives no band certificate, and the stretch keeps main's range.
+/// interval) and lost one meeting at tolerances 1e-3, 3e-3 and 1e-2. The stretch now has
+/// no certificate (neither curve is straight, and `curves_meet_at_most_once` refuses two
+/// meetings), so it keeps main's range.
 #[test]
 fn wr_647_two_meetings_within_a_planar_curves_band_are_both_kept() {
     let k = Kernel::default();
