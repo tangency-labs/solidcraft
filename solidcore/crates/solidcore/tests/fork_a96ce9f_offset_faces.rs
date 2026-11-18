@@ -312,7 +312,7 @@ fn a_face_without_blends_moves_as_the_local_operation_moves_it() {
 }
 
 /// A 5 x 4 x 3 block the kernel cut from the part of tangency-labs/solidcraft#17598
-/// (CADGenBench task 215, imported from STEP; `data/issue_17598_pole_corner_patch.smb`)
+/// (`CADGenBench` task 215, imported from STEP; `data/issue_17598_pole_corner_patch.smb`)
 /// around a three-sided corner patch: a B-spline whose one side closes to a pole, where
 /// two of its edges end, one of them on a plane beside it.
 fn pole_corner_block(k: &mut Kernel) -> Brep {
@@ -373,6 +373,33 @@ fn a_face_moved_beside_a_corner_patch_with_a_pole_keeps_the_patchs_edges() {
     let got = volume(&k, &mut b);
     let want = before + 0.2 * area;
     assert!(near(got, want, 1e-8), "volume {got}, want {want}");
+}
+
+/// A 20 x 20 x 5 plate with a hole r 3 through it, its top moved up 1 by the local
+/// operation: the hole's wall keeps its surface and is rebuilt from its own loops, its
+/// seam used twice; each use keeps its own trim curve, not the other side's, and the
+/// plate is 20 x 20 x 6 less the hole.
+#[test]
+fn a_top_moved_beside_a_hole_keeps_the_holes_seam() {
+    let mut k = Kernel::default();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 5.0).unwrap();
+    let tool = create_cylinder(&mut k, Point3::new(10.0, 10.0, -1.0), 3.0, 7.0).unwrap();
+    let mut b = solidcore::boolean::api_brep::boolean_difference(&mut k, plate, tool).unwrap();
+    let before = counts(&mut k, &b);
+    let top: Vec<FaceId> = b
+        .face_list()
+        .iter()
+        .copied()
+        .filter(|&f| face_points(&b, f).iter().all(|p| (p.z - 5.0).abs() < 1e-9))
+        .collect();
+    assert_eq!(top.len(), 1);
+    let mut ex = OffsetFacesExecutive::new();
+    ex.offset_faces(&mut k, &mut b, &top, 1.0).unwrap();
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    assert_eq!(counts(&mut k, &b), before);
+    let want = 20.0 * 20.0 * 6.0 - PI * 9.0 * 6.0;
+    let got = volume(&k, &mut b);
+    assert!(near(got, want, 1e-9), "volume {got}, want {want}");
 }
 
 #[test]
