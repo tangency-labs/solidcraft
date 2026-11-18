@@ -41,8 +41,9 @@
 //! each level with its own bounds of 48 levels and 100,000 pieces (so the work is bounded
 //! by their product), cancel polled in both, and no recursion. Neither level has a node
 //! at a piece's end, so the WR-670 one-sided end evaluation (#2091) is not needed on this
-//! path; every trim piece also ends where its trim crosses a surface v knot line, banded
-//! or not, as the outer integrand has a kink there.
+//! path; every trim piece also ends at each crossing of its trim with a surface v knot
+//! line, banded or not, as the outer integrand has a kink there (crossings found by sign
+//! change between samples of each trim span, as `trim_curve_breaks` finds them).
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
 //! Not upstream (#16735): `brep_properties` closes every volume-bounding face onto its
@@ -1103,7 +1104,8 @@ pub fn boundary_properties(
         floors.extend(lines.iter().copied());
     }
     let banded = floors.len() > 1;
-    // Every trim piece ends where its trim crosses a surface v knot line, banded or not:
+    // Every trim piece ends at each crossing, found by sign change between samples, of its
+    // trim with a surface v knot line, banded or not:
     // across one the iso-u integrand's v derivatives jump, so the outer integrand along
     // the trim is not smooth there and a piece's error estimate, the leading term of an
     // expansion that holds only where it is smooth, may not bound the piece's error.
@@ -1772,6 +1774,9 @@ fn gap_closure(
     // The surface's v knot lines: a strip, like the face's own trim pieces
     // ([`boundary_properties`]), ends where its trim crosses a surface knot line in either
     // direction, as the trim image's derivative `su u' + sv v'` need not be smooth there.
+    // Taken over the whole real line, end knots included: `trim_curve_breaks` keeps only
+    // the lines strictly inside each trim's box, and a trim that leaves a clamped domain
+    // still breaks at a line it crosses there.
     let v_lines = surface_knots_inside(
         k,
         &surface,
