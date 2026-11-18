@@ -48,7 +48,7 @@ use crate::nurbs::math::CPoint;
 use crate::nurbs::srf_basic::{Direction, Surface};
 
 /// Snap tolerance of [`extract_patch`] (hard coded upstream).
-const PATCH_SNAP_TOL: f64 = 1.0e-08;
+pub(crate) const PATCH_SNAP_TOL: f64 = 1.0e-08;
 
 /// A control net, `Pw[i][j]`.
 pub(super) type Net = Vec<Vec<CPoint>>;

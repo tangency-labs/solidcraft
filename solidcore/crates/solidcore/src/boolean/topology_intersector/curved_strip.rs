@@ -99,6 +99,9 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::b_spline_surface::BSplineSurface;
+use crate::nurbs::geom::Rectangle;
+use crate::nurbs::srf_basic::Surface as NurbSurface;
+use crate::nurbs::srf_tool::p1::{extract_patch, PATCH_SNAP_TOL};
 use crate::query::curve_surface_gap::curve_uv_gap_bound;
 use crate::surface::implicit::{off_surface_bound, AnalyticSupport, Implicit};
 use crate::surface::surface::p2::SurfaceKind;
@@ -924,14 +927,33 @@ fn net_of(surface: &Surface) -> Option<(BSplineSurface, f64)> {
 /// must lie in the net's domain within the extraction's snapping (a box past it would
 /// hold points of no face, or of the surface across a seam), and the sub-patch is
 /// extracted over the box widened by that snapping and must cover the box; else `None`.
+///
+/// The sub-patch is A's own surface over its domain, by construction: it is cut by
+/// [`extract_patch`] from A's NURB directly, its ends first snapped here as the extraction
+/// would (so the extraction's snap moves nothing and no reparametrisation rounds its
+/// knots), and it is never passed through a knot fixup (`copy_sub_patch` and
+/// `from_gw_nurb` spread knots closer than 1.2e-8 without moving the control points, a
+/// different surface the bound would not count). Its knots must then be bit-equal to A's
+/// inside its domain and its ends the snapped box's, else `None`.
 fn net_bound_over(
     net: &BSplineSurface,
     box_uv: &Extent2d,
     implicit: &Implicit,
 ) -> Result<Option<f64>> {
+    let Some(cut) = net_cut(net, box_uv) else {
+        return Ok(None);
+    };
+    // (borrowed: no knot fixup)
+    off_surface_bound(&BSplineSurface::from_nurb(cut, true), implicit, net)
+}
+
+/// [`net_bound_over`]'s sub-patch of `net` covering `box_uv`, its knots `net`'s own;
+/// `None` where there is none.
+fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
+    let nurb = net.gw_nurb()?;
     let natural = net.natural_uv_domain();
     let (n_lo, n_hi) = (natural.min(), natural.max());
-    // (`copy_sub_patch` snaps a bound to a knot within 1e-8: widen past it, and check)
+    // (the extraction snaps a bound to a knot within 1e-8: widen past it, and check)
     let widen = |a: f64| 2.0e-8 * (1.0 + a.abs());
     let (lo, hi) = (box_uv.min(), box_uv.max());
     let inside = n_lo.x - widen(n_lo.x) <= lo.x
@@ -939,7 +961,7 @@ fn net_bound_over(
         && hi.x <= n_hi.x + widen(n_hi.x)
         && hi.y <= n_hi.y + widen(n_hi.y);
     if !inside {
-        return Ok(None);
+        return None;
     }
     // (A's points are its surface's over its domain: the box is cut to the domain, the
     // hulls' errors may reach past it)
@@ -948,23 +970,57 @@ fn net_bound_over(
         Point2::new(hi.x.min(n_hi.x), hi.y.min(n_hi.y)),
     );
     if !(lo.x <= hi.x && lo.y <= hi.y) {
-        return Ok(None);
+        return None;
     }
-    let wide = Extent2d::from_bounds(
-        lo.x - widen(lo.x),
-        lo.y - widen(lo.y),
-        hi.x + widen(hi.x),
-        hi.y + widen(hi.y),
-    );
-    let Ok(sub) = net.copy_sub_patch(&wide) else {
-        return Ok(None);
+    let (_, _, r, s) = nurb.array_sizes();
+    let uk = nurb.u_knots().get(..=r)?;
+    let vk = nurb.v_knots().get(..=s)?;
+    // the widened box in the domain (as `copy_sub_patch` cut it), each end snapped as
+    // `extract_patch` snaps it: to the first of the knots `0..r` within its tolerance
+    let snap = |x: f64, knots: &[f64]| {
+        knots
+            .iter()
+            .take(knots.len().saturating_sub(1))
+            .find(|&&kn| x > kn - PATCH_SNAP_TOL && x < kn + PATCH_SNAP_TOL)
+            .map_or(x, |&kn| kn)
     };
-    let got = sub.natural_uv_domain();
-    let (g_lo, g_hi) = (got.min(), got.max());
-    if !(g_lo.x <= lo.x && g_lo.y <= lo.y && hi.x <= g_hi.x && hi.y <= g_hi.y) {
-        return Ok(None);
-    }
-    off_surface_bound(&sub, implicit, net)
+    let rect = Rectangle {
+        ul: snap((lo.x - widen(lo.x)).max(n_lo.x), uk),
+        ur: snap((hi.x + widen(hi.x)).min(n_hi.x), uk),
+        vb: snap((lo.y - widen(lo.y)).max(n_lo.y), vk),
+        vt: snap((hi.y + widen(hi.y)).min(n_hi.y), vk),
+    };
+    let cut = extract_patch(nurb, rect).ok()?;
+    let (_, _, cr, cs) = cut.array_sizes();
+    let (p, q) = cut.degrees();
+    let own = knots_are_nets(cut.u_knots().get(..=cr)?, uk, p, rect.ul, rect.ur)
+        && knots_are_nets(cut.v_knots().get(..=cs)?, vk, q, rect.vb, rect.vt);
+    let covers = rect.ul <= lo.x && rect.vb <= lo.y && hi.x <= rect.ur && hi.y <= rect.vt;
+    (own && covers).then_some(cut)
+}
+
+/// Whether the knots `cut` of a patch of degree `d` cut from a net with knots `net` over
+/// `[a, b]` are the net's own: `d + 1` of `a`, the net's knots strictly between `a` and
+/// `b` bit for bit, and `d + 1` of `b`.
+fn knots_are_nets(cut: &[f64], net: &[f64], d: usize, a: f64, b: f64) -> bool {
+    let ends = d.saturating_add(1);
+    let Some(inner) = cut.len().checked_sub(ends) else {
+        return false;
+    };
+    let (Some(head), Some(tail), Some(mid)) = (
+        cut.get(..ends),
+        cut.get(inner..),
+        cut.get(ends.min(inner)..inner),
+    ) else {
+        return false;
+    };
+    inner >= ends
+        && head.iter().all(|&k| k == a)
+        && tail.iter().all(|&k| k == b)
+        && mid
+            .iter()
+            .copied()
+            .eq(net.iter().copied().filter(|&k| a < k && k < b))
 }
 
 /// Whether edge `e`'s UV trim `trim` on `surface` meets the edge at parameter `t`: at an
@@ -1303,6 +1359,61 @@ mod tests {
         assert!((0.0..=1e-13).contains(&on), "{on:e}");
         let past = Extent2d::from_bounds(0.25, 0.25, 1.01, 0.75);
         assert_eq!(net_bound_over(&net, &past, &plane).unwrap(), None);
+    }
+
+    /// r4 B8: the sub-patch whose bound is taken is A's own surface. A cubic net in u with
+    /// an interior knot at 0.5 and a box starting 1.9e-8 past it: the widened end
+    /// (0.5 − 1.1e-8) is outside the extraction's snapping (1e-8) but within the knot
+    /// fixup's 1.2e-8, which `copy_sub_patch` ran and moved the knot by 1.1e-9 without
+    /// moving a control point. The cut keeps the knot 0.5 bit for bit; a box whose
+    /// widened end falls within the snapping starts at the knot exactly (no
+    /// reparametrisation); both cover their boxes and have a bound.
+    #[test]
+    fn the_cut_keeps_the_nets_knots() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+        let points: Vec<Point3> = (0..5)
+            .flat_map(|i| {
+                (0..2).map(move |j| {
+                    let x = f64::from(i) / 4.0;
+                    Point3::new(x, f64::from(j), 0.1 * (3.0 * x).sin())
+                })
+            })
+            .collect();
+        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[4, 1, 4],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 0.5, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        // past the snapping, inside the fixup's reach
+        let near = Extent2d::from_bounds(0.5 + 1.9e-8, 0.25, 0.9, 0.75);
+        let lo = near.min().x;
+        let wide = lo - 2.0e-8 * (1.0 + lo);
+        assert!(0.5 - wide > 1e-8 && 0.5 - wide < 1.2e-8, "{:e}", 0.5 - wide);
+        let cut = net_cut(&net, &near).unwrap();
+        let (_, _, r, _) = cut.array_sizes();
+        let u = &cut.u_knots()[..=r];
+        assert_eq!(u.iter().filter(|&&k| k == 0.5).count(), 1, "{u:?}");
+        assert!(u[0] <= lo && 0.9 <= u[r], "{u:?}");
+        assert!(net_bound_over(&net, &near, &plane).unwrap().is_some());
+        // within the snapping: the cut starts at the knot
+        let snapped = Extent2d::from_bounds(0.5 + 2.5e-8, 0.25, 0.9, 0.75);
+        let cut = net_cut(&net, &snapped).unwrap();
+        assert_eq!(cut.u_knots()[0], 0.5);
+        assert!(net_bound_over(&net, &snapped, &plane).unwrap().is_some());
     }
 
     /// The fixture of `tests/wr_614_coincident_strip_crossing.rs`
