@@ -747,7 +747,7 @@ mod tests {
         let full: Vec<f64> = knots
             .iter()
             .zip(mult)
-            .flat_map(|(&x, m)| std::iter::repeat(x).take(m))
+            .flat_map(|(&x, m)| std::iter::repeat_n(x, m))
             .collect();
         let mut pts = Vec::new();
         for i in 0..full.len() - 4 {
