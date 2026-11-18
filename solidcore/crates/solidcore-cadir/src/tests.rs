@@ -1067,6 +1067,35 @@ fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() 
     }
 }
 
+/// Vertices joined one after another (as many collapsed edges into one vertex from different
+/// ones join them: each end under its start) are walked to the vertex they are once: after one
+/// walk from the first, every one of them points straight at it, so no later walk is longer
+/// than a step, and the vertex found is the same.
+#[test]
+fn a_chain_of_joined_vertices_is_walked_once() {
+    let ir = cube();
+    let model = Model::of(&ir);
+    let mut b = Builder {
+        model: &model,
+        asm: Assembly::new(1e-6, None),
+        vertices: HashMap::new(),
+        joined: HashMap::new(),
+        edges: HashMap::new(),
+    };
+    let ids: Vec<String> = (0..64).map(|i| format!("v{i}")).collect();
+    for w in ids.windows(2) {
+        b.joined.insert(w[0].as_str(), w[1].as_str());
+    }
+    let last = ids[63].as_str();
+    assert_eq!(b.joined_to(ids[0].as_str()), last);
+    for id in &ids[..63] {
+        assert_eq!(b.joined.get(id.as_str()), Some(&last), "{id}");
+    }
+    assert_eq!(b.joined_to(ids[0].as_str()), last);
+    assert_eq!(b.joined_to(ids[31].as_str()), last);
+    assert_eq!(b.joined_to(last), last);
+}
+
 /// A coedge with a 3D curve of its own in place of its edge's refuses its region with the reason,
 /// rather than being built on the edge's curve.
 #[test]

@@ -389,15 +389,30 @@ impl<'a> Builder<'_, 'a, '_> {
         }
     }
 
-    /// The vertex `id` is one with ([`Builder::join_collapsed`]): itself, when none.
-    fn joined_to(&self, mut id: &'a str) -> &'a str {
+    /// The vertex `id` is one with ([`Builder::join_collapsed`]): itself, when none. Each vertex
+    /// on the way is pointed straight at it, so a later walk from any of them is one step: the
+    /// chain the joins build (an edge's end under its start, so many collapsed edges into one
+    /// vertex from different ones make a chain as long as their number) is walked once, not
+    /// once a join. The vertex found stays the one they all join.
+    fn joined_to(&mut self, id: &'a str) -> &'a str {
+        let mut root = id;
         for _ in 0..=self.joined.len() {
-            match self.joined.get(id) {
-                Some(&to) => id = to,
+            match self.joined.get(root) {
+                Some(&to) => root = to,
                 None => break,
             }
         }
-        id
+        let mut at = id;
+        for _ in 0..=self.joined.len() {
+            if at == root {
+                break;
+            }
+            match self.joined.insert(at, root) {
+                Some(next) => at = next,
+                None => break,
+            }
+        }
+        root
     }
 
     fn vertex(&mut self, id: &'a str) -> R<u32> {
