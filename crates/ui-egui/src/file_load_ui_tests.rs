@@ -1522,7 +1522,7 @@ fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
     let mut web = Win::new();
     // In millimetres, so the desktop's open asks no unit first.
     let units = json!({"units": "mm"});
-    web.app.open_path_with(&path, units.as_object().unwrap());
+    web.app.open_path_with(&path, units.as_object().unwrap()).unwrap();
     assert_eq!(web.app.session.model.state().bodies.len(), 1);
     assert_eq!(web.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
 
