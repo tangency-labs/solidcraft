@@ -74,6 +74,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
@@ -103,6 +104,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let catalog = host.command_catalog();
@@ -140,6 +142,72 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     m["runtime"]["permissions"] = json!({"command_groups":["file"]});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
 }
+/// A read-only folder must pass the importer's scope check without granting write access.
+/// Both the user's grant and the package's manifest must allow the intended operation.
+#[test]
+fn file_scopes_require_separate_read_and_write_approvals() {
+    let folder = solidcraft_io::vfs::temp_dir().join("sc-readonly-grant-18793");
+    let approved = vec![FileGrant { name: "data".into(), folder: folder.clone(), read: true, write: false }];
+    let manifest = vec![craft_plugin::FilePermission { name: "data".into(), read: true, write: false }];
+    assert_eq!(approved_file_folders(&approved, &manifest, false), vec![folder.clone()]);
+    assert!(approved_file_folders(&approved, &manifest, true).is_empty());
+
+    let mut more_grant = approved.clone();
+    more_grant[0].write = true;
+    assert!(approved_file_folders(&more_grant, &manifest, true).is_empty(), "a grant cannot override a read-only manifest");
+    let mut more_manifest = manifest.clone();
+    more_manifest[0].write = true;
+    assert!(approved_file_folders(&approved, &more_manifest, true).is_empty(), "the manifest cannot override read-only approval");
+    assert_eq!(approved_file_folders(&more_grant, &more_manifest, true), vec![folder.clone()]);
+    assert!(approved_file_folders(&more_grant, &[], false).is_empty(), "a missing manifest declaration confers no access");
+    assert!(approved_file_folders(&[], &more_manifest, false).is_empty(), "a missing user grant confers no access");
+
+    for command in ["file.insert_step", "file.insert_mesh", "file.insert_gerber", "file.gerber_files", "sketch.insert_dxf", "sketch.insert_svg"] {
+        assert!(input_only_command(command), "{command} reads its supplied file");
+    }
+    for command in ["file.save_as", "file.copy", "file.move", "file.trash", "file.export_step", "doc.open", "doc.recovery_discard", "library.export"] {
+        assert!(!input_only_command(command), "{command} needs the stricter write-capable scope");
+    }
+}
+
+/// Importing a STEP may change the design without modifying its source file. Even after this
+/// read-only command succeeds, write commands must not gain access to the same folder.
+#[test]
+fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-read-scope-{}", std::process::id()));
+    let read = root.join("read");
+    std::fs::create_dir_all(&read).unwrap();
+    let source_path = read.join("source.step");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+    source.execute("file.export_step", &json!({"path":source_path})).unwrap();
+    assert!(source_path.is_file());
+
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: Vec::new(),
+        file_read_folders: vec![read.clone()],
+        evaluation: None,
+    };
+    host.begin_transaction().unwrap();
+    let inserted = host.run_command("file.insert_step", &json!({"path":source_path}));
+    assert!(inserted.is_ok(), "read-only insert should work: {inserted:?}");
+    let output = read.join("forbidden.sc");
+    let write = host.run_command("file.save_as", &json!({"path":output}));
+    assert!(matches!(&write, Err(HostError::CommandFailed { .. })), "the same grant cannot save files: {write:?}");
+    assert!(!output.exists(), "no file was written under a read-only grant");
+    let output = read.join("forbidden.stl");
+    assert!(host.run_command("file.export_stl", &json!({"path":output})).is_err(), "export also requires write authority");
+    assert!(!output.exists());
+    assert!(source_path.exists(), "the imported STEP is unchanged");
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees_only_its_folders() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
@@ -152,6 +220,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     host.begin_transaction().unwrap();
@@ -183,6 +252,7 @@ fn a_command_in_another_spelling_is_never_granted() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     host.begin_transaction().unwrap();
@@ -713,6 +783,7 @@ mod native {
                     view: None,
                     groups: BTreeSet::new(),
                     file_folders: Vec::new(),
+                    file_read_folders: Vec::new(),
                     evaluation: None,
                 };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
@@ -1067,6 +1138,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let catalog = host.command_catalog();
@@ -1100,6 +1172,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     solidcraft_io::vfs::scoped(None, || {
