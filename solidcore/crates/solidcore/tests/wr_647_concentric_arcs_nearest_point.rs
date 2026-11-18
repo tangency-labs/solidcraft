@@ -1334,13 +1334,34 @@ fn wr_647_a_run_within_the_zero_resolved_by_the_tolerance_stays_a_range() {
         let h = 2.5e-5;
         let c = (0.85e-12 - dr) / (h * h);
         let curve = flat_then_bending(h, dr, c, 2.2e-2, &[0.2, 0.5 - h, 0.5 + h, 0.8]);
-        for (order, all, on_curve) in [
-            ("line, curve", intersect_at(&line, &curve, 1e-3), 1),
-            ("curve, line", intersect_at(&curve, &line, 1e-3), 0),
+        let k = kernel(false);
+        for (order, all, on_curve, first, second) in [
+            (
+                "line, curve",
+                intersect_at(&line, &curve, 1e-3),
+                1,
+                &line,
+                &curve,
+            ),
+            (
+                "curve, line",
+                intersect_at(&curve, &line, 1e-3),
+                0,
+                &curve,
+                &line,
+            ),
         ] {
+            // both parameters must give the contact at the origin: a wrong line parameter
+            // with the right curve parameter is a point 3 |dt| away
+            let near_origin = |c: &Curve, t: f64| {
+                c.evaluate_point(&k, t)
+                    .is_ok_and(|p| p.distance(Point3::new(0.0, 0.0, 0.0)) <= 1e-3)
+            };
             let point = matches!(all.as_slice(), [s]
                 if s.solution_type == SolutionType::SingleValue
-                    && (s.start.parameters[on_curve] - 0.5).abs() <= 1e-3);
+                    && (s.start.parameters[on_curve] - 0.5).abs() <= 1e-3
+                    && near_origin(first, s.start.parameters[0])
+                    && near_origin(second, s.start.parameters[1]));
             if !point {
                 lost.push(format!(
                     "h {h} dr {dr:e} tol 1e-3 ({order}), not one point: {all:?}"

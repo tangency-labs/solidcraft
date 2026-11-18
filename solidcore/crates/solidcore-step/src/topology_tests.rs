@@ -1435,6 +1435,164 @@ fn a_plate_with_a_through_hole() {
     }
 }
 
+/// [`cylinder`] with each rim circle from its vertex to a second VERTEX_POINT at the same point,
+/// as OpenCascade's booleans can write a hole's rim (tangency-labs/solidcraft#18784).
+fn cylinder_with_twin_rim_ends(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2]) -> Cyl {
+    let p = |h: f64| [c[0] + r, c[1], h];
+    let (v0, v1) = (w.vertex(p(z[0])), w.vertex(p(z[1])));
+    let circle = |w: &mut W, v: u64, h: f64| {
+        let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let end = w.vertex(p(h));
+        w.add(format!("EDGE_CURVE('',#{v},#{end},#{k},.T.)"))
+    };
+    let circles = [circle(w, v0, z[0]), circle(w, v1, z[1])];
+    let seam = w.line_edge((v0, p(z[0])), (v1, p(z[1])), true, 1.0);
+    let a = w.axis([c[0], c[1], 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    Cyl { circles, seam, surface }
+}
+
+/// A closed cylinder: its two caps (each bounded by one rim) and its side (rims and seam).
+fn closed_cylinder(twin_rim_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let c = if twin_rim_ends {
+        cylinder_with_twin_rim_ends(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    } else {
+        cylinder(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    };
+    let side_face = side(&mut w, &c, true);
+    let ob = w.oe(c.circles[0], false);
+    let bottom_bound = w.bound(&[ob], true, true);
+    let bottom_plane = w.plane([1.0, 2.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom = w.face(&[bottom_bound], bottom_plane, false);
+    let ot = w.oe(c.circles[1], true);
+    let top_bound = w.bound(&[ot], true, true);
+    let top_plane = w.plane([1.0, 2.0, 10.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let top = w.face(&[top_bound], top_plane, true);
+    let shell = closed_shell(&mut w, &[bottom, side_face, top]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    w.file(&[solid])
+}
+
+/// A cylinder whose rims are full circles each from one VERTEX_POINT to a second one at the same
+/// point (tangency-labs/solidcraft#18784): each rim is a full turn whose two ends are one vertex,
+/// so its caps' one-edge loops and its side's loop close, and it reads as the same closed solid
+/// as the cylinder whose rims have one vertex each.
+#[test]
+fn a_full_circle_edge_between_two_vertices_at_one_point_closes_its_loop() {
+    let (one, two) = (one_solid(&closed_cylinder(false)), one_solid(&closed_cylinder(true)));
+    assert!(!two.sheet);
+    assert_eq!(counts(&two.brep), [2, 1, 3, 3, 2]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    faces_away(&two.brep, 0, |p| [1.0, 2.0, p[2].clamp(1.0, 9.0)]);
+    for e in two.brep.edges.iter().filter(|e| matches!(e.curve, BCurve::Circle { .. })) {
+        let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
+        assert!((a1 - a0 - TAU).abs() < 1e-12, "a full turn: {a0} {a1}");
+        assert_eq!(e.vertices[0], e.vertices[1]);
+    }
+}
+
+/// A unit square sheet bounded by one closed edge on a closed polygon spline round it (its seam
+/// at (1, 0.5)), from the vertex there to itself, or with `twin_ends` to a second VERTEX_POINT at
+/// the same point.
+fn spline_outline(twin_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let start = [1.0, 0.5, 0.0];
+    let v = w.vertex(start);
+    let end = if twin_ends { w.vertex(start) } else { v };
+    let pts: Vec<u64> = [start, [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], start].iter().map(|p| w.pt(*p)).collect();
+    let c =
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',1,({}),.POLYLINE_FORM.,.T.,.F.,(2,1,1,1,1,2),(0.,1.,2.,3.,4.,5.),.UNSPECIFIED.)", list(&pts)));
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{c},.T.)"));
+    let oe = w.oe(e, true);
+    let bound = w.bound(&[oe], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&[bound], plane, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    w.file(&[model])
+}
+
+/// A closed spline edge written with two vertices at one point is read as the same edge written
+/// with one: the whole spline, not an empty piece of it between one point and itself.
+#[test]
+fn a_closed_spline_edge_between_two_vertices_at_one_point_is_its_one_vertex_edge() {
+    let (one, two) = (one_solid(&spline_outline(false)), one_solid(&spline_outline(true)));
+    assert_eq!(counts(&two.brep), [1, 1, 1, 1, 1]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    let (a, b) = (&one.brep.edges[0], &two.brep.edges[0]);
+    assert_eq!(a.curve, b.curve);
+    assert_eq!(a.interval, b.interval);
+    assert_eq!(b.vertices[0], b.vertices[1]);
+}
+
+/// A LINE edge between two vertices at one point is refused as the LINE edge with one vertex is:
+/// joining its ends never makes an edge of no length.
+#[test]
+fn a_line_edge_between_two_vertices_at_one_point_is_refused_as_a_closed_edge() {
+    for twin_ends in [false, true] {
+        let mut w = W::default();
+        let p = [1.0, 2.0, 3.0];
+        let v = w.vertex(p);
+        let end = if twin_ends { w.vertex(p) } else { v };
+        let (o, d) = (w.pt(p), w.dir([1.0, 0.0, 0.0]));
+        let vec = w.add(format!("VECTOR('',#{d},1.)"));
+        let line = w.add(format!("LINE('',#{o},#{vec})"));
+        let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{line},.T.)"));
+        let ex = w.file(&[e]);
+        with_builder(&ex, |b| {
+            let err = b.edge(e).err().unwrap_or_default();
+            assert!(err.contains("a closed edge on a line"), "twin ends {twin_ends}: {err}");
+        });
+    }
+}
+
+/// Two vertices at one point that are the two ends of a circle edge not read yet meet: a loop
+/// read before that edge joins them, as the edge itself would.
+#[test]
+fn the_two_ends_at_one_point_of_an_edge_read_later_meet() {
+    let mut w = W::default();
+    let p = [3.0, 0.0, 0.0];
+    let (v0, v1) = (w.vertex(p), w.vertex(p));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{v0},#{v1},#{k},.T.)"));
+    let ex = w.file(&[circle]);
+    with_builder(&ex, |b| {
+        let (a, z) = (b.vertex(v0).unwrap(), b.vertex(v1).unwrap());
+        assert!(b.meet(a, z).unwrap());
+        let (e, _) = b.edge(circle).unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_eq!(s, t);
+    });
+}
+
+/// A circle edge from A to a second vertex C at A's point, read after an earlier loop joined A
+/// with B, where B and C are the two ends of a LINE 1.5e-7 mm long (within their 1e-7 mm
+/// tolerances): the circle's two ends meet as any two vertices do, so they are not joined across
+/// the LINE, and the LINE keeps its two vertices.
+#[test]
+fn a_two_vertex_circle_never_joins_the_two_ends_of_a_line_read_after_it() {
+    let mut w = W::default();
+    let (a, c, bp) = ([0.0; 3], [0.0; 3], [1.5e-7, 0.0, 0.0]);
+    let (va, vb, vc) = (w.vertex(a), w.vertex(bp), w.vertex(c));
+    let k = w.circle([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{va},#{vc},#{k},.T.)"));
+    let line = w.line_edge((vb, bp), (vc, c), true, 1.0);
+    let ex = w.file(&[circle, line]);
+    with_builder(&ex, |b| {
+        let (ia, ib) = (b.vertex(va).unwrap(), b.vertex(vb).unwrap());
+        // An earlier loop meets A and B: they are apart by less than their tolerances.
+        assert!(b.meet(ib, ia).unwrap());
+        let _ = b.edge(circle);
+        let (e, _) = b.edge(line).unwrap();
+        b.join_vertices().unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_ne!(s, t, "the LINE keeps its two vertices");
+        let ic = b.vertex(vc).unwrap();
+        assert_ne!(b.find(ib), b.find(ic));
+    });
+}
+
 #[test]
 fn a_closed_shell_beside_open_shells_reads_each_open_shell_as_a_sheet() {
     // A closed shell beside two open ones: the closed shell is a solid body and each open shell a
