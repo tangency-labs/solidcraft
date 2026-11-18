@@ -26,10 +26,10 @@
     <text transform="matrix(1 0 0 1 673 186)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">cusp</tspan></text>
     <text transform="matrix(1 0 0 1 610 392)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">t1</tspan></text>
     <text transform="matrix(1 0 0 1 452 235)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">t2</tspan></text>
-    <text transform="matrix(1 0 0 1 470 428)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Seeded near a cusp, the tracer&apos;s solves land on t1 = t2,</tspan></text>
-    <text transform="matrix(1 0 0 1 470 446)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">and it traced each cusp line as a tangent curve.</tspan></text>
     <line id="leader" x1="592" y1="200" x2="612" y2="228" fill="none" stroke="#555555" stroke-width="0.75" stroke-miterlimit="10"/>
     <text transform="matrix(1 0 0 1 485 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">t1 = t2: every point</tspan></text>
     <text transform="matrix(1 0 0 1 485 195)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">solves the tracer&apos;s equations</tspan></text>
+    <text transform="matrix(1 0 0 1 470 428)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Seeded beside a fold, the tracer&apos;s solves can land on</tspan></text>
+    <text transform="matrix(1 0 0 1 470 446)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">t1 = t2 and trace the surface against itself.</tspan></text>
   </g>
 </svg>

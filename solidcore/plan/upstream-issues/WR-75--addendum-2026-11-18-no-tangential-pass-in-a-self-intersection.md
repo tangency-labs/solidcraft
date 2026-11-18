@@ -45,4 +45,4 @@ Not the fork's; a change to the opt-in `Kernel::fixes.ssi_tangent_curve_tracer` 
 ![Left: the folded ribbon seen from above, its path crossing itself once and turning back at two cusps. Right: the square of pairs of path parameters (t1, t2); the crossing is a pair off the diagonal t1 = t2, the cusps lie on the diagonal, where every point solves the tracer's equations](WR-75--addendum-2026-11-18-no-tangential-pass-in-a-self-intersection.svg)
 
 *Look at the cusps: they lie on the diagonal of the parameter square, where every pair is a
-solution, and the tracer's solves seeded beside them end there.*
+solution; a solve seeded beside a fold can end there.*
