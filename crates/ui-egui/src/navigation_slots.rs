@@ -63,6 +63,17 @@ pub(crate) const CATALOGUE: &[Slot] = &[
     slot!("orbit", Tool, "orbit", Some("view.tool"), orbit: true, pick: false),
     slot!("pan", Tool, "pan", Some("view.tool")),
     slot!("zoom", Tool, "zoom", Some(ZOOM_TOOL)),
+    Slot {
+        id: "sheet_zoom",
+        kind: NavigationKind::Menu,
+        icon: "zoom",
+        label: "ui.sheet_page.zoom",
+        description: "navbar.description.sheet_zoom",
+        command: None,
+        needs_orbit: false,
+        needs_pick: false,
+        value_icons: &[],
+    },
     slot!("spin", Toggle, "spin", Some("view.spin"), orbit: true, pick: false),
     slot!("fit", Action, "fit", Some("view.fit")),
     slot!("look_at", Action, "lookat", Some("view.normal_to"), orbit: true, pick: true),
@@ -82,7 +93,7 @@ pub(crate) const CATALOGUE: &[Slot] = &[
 static HOST: Catalogue = Catalogue {
     slots: CATALOGUE,
     default_bar: &["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "visual_style", "display"],
-    value_menus: &["selection_mode", "render_mode"],
+    value_menus: &["selection_mode", "render_mode", "sheet_zoom"],
     icon_menus: &["display"],
 };
 

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Renumber parts</title>
+  <path d="M12 10L39 10Q42 10 42 13L42 51Q42 54 39 54L12 54Q9 54 9 51L9 13Q9 10 12 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17 22L34 22M17 32L34 32M17 42L34 42" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M50 17L50 47M44 41L50 47L56 41" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

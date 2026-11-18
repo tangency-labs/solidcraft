@@ -36,6 +36,17 @@ pub(crate) fn ops<T>(call: &'static str, f: impl FnOnce() -> solidcore_ops::Resu
 /// [`ops`] for a call that reads the bodies `inputs`: should it fail while a dump folder is set,
 /// they are left there. They are the caller's bodies, not the copies a consuming call is handed.
 pub(crate) fn ops_on<T>(call: &'static str, inputs: super::dump::Inputs<'_>, f: impl FnOnce() -> solidcore_ops::Result<T>) -> Result<T> {
+    ops_as(call, inputs, error, f)
+}
+
+/// [`ops_on`] for a family whose refusals this crate has kinds of its own for: `kind` gives
+/// solidcore-ops' error as this crate's (the family's kinds, then [`error`] for the rest).
+pub(crate) fn ops_as<T>(
+    call: &'static str,
+    inputs: super::dump::Inputs<'_>,
+    kind: fn(&'static str, solidcore_ops::Error, Option<String>) -> Error,
+    f: impl FnOnce() -> solidcore_ops::Result<T>,
+) -> Result<T> {
     configured();
     let stop = crate::stop::token();
     if stop.as_ref().is_some_and(solidcore_ops::cancel::CancelToken::is_cancelled) {
@@ -51,7 +62,7 @@ pub(crate) fn ops_on<T>(call: &'static str, inputs: super::dump::Inputs<'_>, f: 
     };
     drop(in_flight);
     r.map_err(|e| {
-        let e = error(call, e, solidcore_ops::session::take_failure_detail());
+        let e = kind(call, e, solidcore_ops::session::take_failure_detail());
         // Stopped, it is no failure to look into.
         if !matches!(e, Error::Cancelled(_)) {
             super::dump::failed_ops(call, &e.to_string(), inputs);

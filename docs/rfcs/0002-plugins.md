@@ -82,7 +82,7 @@ World `craft:plugin@0.1.0`. The interface stays thin: a few typed functions plus
 
 **Binary-size trade-off.** wasmtime with Cranelift adds several MB to the app. wasmi is much smaller but runs core modules, not components. Options are wasmtime with Winch or Pulley, or accepting the size. Not decided.
 
-**Component size.** #4980 caps components at 16 MiB. A real converter measured 28 MB (built for size) to 42 MB. Compiling happens in the app's process with no sandbox limit on the compiler, and the project forbids `unsafe`, so compiled code cannot be cached (`Component::deserialize` is `unsafe`). One plugin per format avoids most of this.
+**Component size.** #4980 originally capped components at 16 MiB. A real converter measured 28 MB (built for size) to 42 MB. Compiling happens in the app's process with no sandbox limit on the compiler. Directly loading compiled code with `Component::deserialize` requires `unsafe`, which the project forbids. The host now keeps compiled components on disk through Wasmtime's safe cache API, and importers may be up to 64 MiB; see [Importers](../plugins.md#importers) for cache behavior and limits. One plugin per format reduces component size.
 
 Rhai was proposed instead. The comments favour one runtime, WebAssembly, for isolation and language choice.
 
@@ -136,6 +136,17 @@ Plugins will mostly be written by agents working from a spec, docs and the API, 
    - `plugin test` works the same for both.
 
 Plugin inputs are schemas (section 2), so the app draws the values and variables editor through the design-forms work in #15100. A user changes numbers without touching code.
+
+## 6c. Plugins as agent tools
+
+An installed plugin should be usable from the assistant chat and over MCP without opening it first: install a converter, then say "convert my file". Today `tools/list` is built from a fixed set of definitions (`crates/mcp/src/server.rs`, `tool_definitions_with`), and a plugin entry can only be reached through generic commands such as `plugin.run` or `doc.open`, so an agent can't discover what a plugin offers.
+
+1. **Every enabled plugin's entries are named tools.** Each entry appears in `tools/list` and in the assistant's tool list as `<plugin>.<entry>`, with the manifest's description and the entry's input schema (section 2), so the same strict argument checks apply as for engine commands. A disabled or uninstalled plugin's tools disappear from the next listing.
+2. **Importers and exporters get generated tools.** An importer slot appears as, for example, "Open .f3d files with Dutchman", taking a path and the slot's options; an exporter slot as "Save the design as .<ext> with <plugin>". The schema comes from the slot's declaration (RFC 0015 section 4).
+3. **Headless, under existing grants.** A tool call runs with none of the plugin's own dialogs, under the grants the plugin already has, and is journaled and undoable like any command (one call, one undo step). A `read` entry stays read-only in every way: the host refuses it both edit commands and the file-writing host imports (`write-file` and any later import that changes something outside the design), whatever folder grants the plugin holds, and the refusal is a structured error naming the import. The same check applies when a person runs the entry, so a tool call can't do more than the entry's declared effect.
+4. **The assistant's approval still applies.** When the in-app assistant calls a plugin tool, the call goes through the same chat approval gate as any other assistant tool call, at the confirmation level of the entry's effect: `edit` and above ask first. "Headless" means only that the plugin opens no dialog of its own; a plugin tool can never skip the assistant's approval.
+5. **A missing grant is an error, never a prompt.** If a call needs a grant the plugin doesn't have (a file outside its granted folders, a memory request above the approved limit), the tool returns a structured error naming the plugin, the grant and how to approve it (the app's approval screen, or `plugin.install --approve` / the stored-grant commands headlessly). Nothing waits for a hidden dialog.
+6. **The listing stays honest.** Plugin tools are marked as plugin tools (name prefix and a `plugin` field), so an agent and a person can tell them from built-in commands, and their descriptions reach agents as plugin text, as for panels in RFC 0015.
 
 ## 6b. Shared across Craft apps
 

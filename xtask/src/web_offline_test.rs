@@ -121,8 +121,105 @@ pub fn run_api(site: &str) -> Result<(), String> {
     println!("web-api-test: {result}");
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
+    println!("web-api-test: {}", drawing_test(&browser, server.port)?);
     Ok(())
 }
+
+/// The drawing milestone's plate (#4894 W23, acceptance case 84) made and checked by commands
+/// alone in a tab of its own, so the steps before leave nothing in it. Kept as a host keeps a
+/// design (`document.export`), the app started again in that tab and the design put back
+/// (`document.import`), its drawing reads and exports the same, byte for byte.
+fn drawing_test(browser: &Chrome, port: u16) -> Result<String, String> {
+    let mut tab = browser.new_tab()?;
+    tab.call("Page.bringToFront", json!({}))?;
+    tab.call("Emulation.setFocusEmulationEnabled", json!({"enabled": true}))?;
+    let made = start_and_run(&mut tab, port, "made", &Value::Null)?;
+    let kept = json!({"text": made["text"], "drawing": made["drawing"], "dimensions": made["dimensions"]});
+    let opened = start_and_run(&mut tab, port, "opened", &kept)?;
+    if let Some(key) = ["read", "svg", "png"].into_iter().find(|&key| opened[key] != made[key]) {
+        return Err(format!("web-api-test: the plate's drawing changed once the app started again: its {key}"));
+    }
+    Ok("the M2 plate's drawing made by commands, and the same SVG, PNG and dimensions after the app started again".into())
+}
+
+/// The app started afresh at `?drawing={step}`, then [`DRAWING_TEST`] run in it with `kept`.
+fn start_and_run(tab: &mut Cdp, port: u16, step: &str, kept: &Value) -> Result<Value, String> {
+    tab.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{port}{PREFIX}?drawing={step}")}))?;
+    let ready = format!("location.search === '?drawing={step}' && !!window.solidcraft && !document.getElementById('solidcraft_loading')");
+    wait_for(tab, &ready, &format!("the app starts ({step})"), |v| v == true)?;
+    tab.eval(&format!("{DRAWING_TEST}({PLATE}, {kept})"))
+}
+
+/// The script that models the plate and puts a top view at 1:2 on its A3 sheet.
+const PLATE: &str = include_str!("../../examples/acceptance/drawing_m2.json");
+
+/// With `kept` null: the plate made from [`PLATE`], the views projected below and right of its top
+/// view, and its length, width and first bore dimensioned. Else the design `kept.text` put back and
+/// its drawing `kept.drawing` opened. Then, as the engine's checkpoint test checks it
+/// (`drawing_export_tests.rs`): each dimension reads as the sheet shows it, and Sheet 1 exports as
+/// A3, 420 x 297 mm in SVG and 2481 x 1754 pixels in PNG at 150 dpi, with every view drawn and
+/// nothing out of date. Last the host keeps the design and says it saved it, so the next start
+/// has nothing to recover. Wasm aborts reject at once instead of leaving the reply unsettled.
+const DRAWING_TEST: &str = r#"(async (plate, kept) => {
+    const app = window.solidcraft;
+    const check = (condition, message) => { if (!condition) throw new Error(message); };
+    const crashed = new Promise((_, reject) => {
+        window.addEventListener('error', event => reject(event.error || new Error(event.message)), {once: true});
+    });
+    const run = (command, params) => Promise.race([app.execute(command, params), crashed]);
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    // Work left unsaved in another tab is kept for later, not recovered here.
+    if ((await app.request('ui.recover')).dialog) await app.request('ui.recover', {action: 'later'});
+    await app.request('ui.home', {open: false});
+    let drawing, dimensions;
+    if (kept === null) {
+        const made = await Promise.race([app.request('engine.script', plate), crashed]);
+        // The drawing the script left open, by its own list rather than by the script's order.
+        const open = (await run('drawing.list')).drawings.filter(d => d.open);
+        check(open.length === 1, 'the plate script leaves one drawing open, not ' + open.length);
+        drawing = open[0].id;
+        const top = made[made.length - 1];
+        const below = await run('drawing.view.projected', {parent: top.view, side: 'below'});
+        const right = await run('drawing.view.projected', {parent: top.view, side: 'right'});
+        // At 1:2, in sheet mm: length by width, length by thickness, thickness by width.
+        const views = [[top, [50, 40]], [below, [50, 10]], [right, [10, 40]]];
+        for (const [view, size] of views) {
+            const box = view.boundary_mm;
+            check(Math.abs(box.max[0] - box.min[0] - size[0]) < 1e-6 && Math.abs(box.max[1] - box.min[1] - size[1]) < 1e-6,
+                'view ' + view.view + ' is ' + JSON.stringify(box) + ', not ' + size);
+        }
+        dimensions = [];
+        for (const [kind, value] of [[{length: {edge: [50, 0, 20]}}, 100], [{length: {edge: [0, 40, 20]}}, 80], [{radial: {edge: [25, 20, 20]}}, 10]]) {
+            const added = await run('drawing.dimension.add', {view: top.view, kind});
+            check(Math.abs(added.value - value) < 1e-9, 'a dimension reads ' + added.value + ', not ' + value);
+            dimensions.push(added.dimension);
+        }
+    } else {
+        check((await app.request('document.import', {text: kept.text})).errors === 0, 'the kept design evaluates');
+        const listed = (await run('drawing.list')).drawings;
+        check(listed.some(d => d.id === kept.drawing && !d.open), 'the drawing comes back with its design, closed');
+        await run('drawing.open', {drawing: kept.drawing});
+        ({drawing, dimensions} = kept);
+    }
+    const read = [];
+    for (const dimension of dimensions) read.push((await run('drawing.dimension.inspect', {dimension})).text);
+    check(same(read, ['100.00', '80.00', 'Ø10.00']), 'the dimensions read ' + JSON.stringify(read));
+    // The text each dimension's group sets in the scene every export writes. Groups name their
+    // objects by number, past what a JavaScript number holds exactly, so they are matched as a set.
+    const groups = (await run('drawing.scene', {sheet: 'Sheet 1'})).scene.groups.filter(g => g.kind === 'dimension');
+    const shown = groups.map(g => g.items.filter(item => item.kind === 'text').map(item => item.text).join(''));
+    check(same([...shown].sort(), [...read].sort()), 'the sheet shows ' + JSON.stringify(shown));
+    const svg = await run('drawing.export', {sheet: 'Sheet 1'});
+    const png = await run('drawing.export', {sheet: 'Sheet 1', format: 'png', dpi: 150});
+    check(svg.svg.includes('width="420mm" height="297mm"'), 'the SVG is A3');
+    check(same(png.report.pixels, [2481, 1754]), 'the PNG is ' + JSON.stringify(png.report.pixels) + ' pixels');
+    // An export leaves out_of_date out of its reply when nothing is out of date.
+    check([svg, png].every(e => (e.out_of_date || []).length === 0 && e.views.length === 3 && e.views.every(v => v.status === 'drawn')),
+        'every view is drawn and nothing is out of date');
+    const exported = await app.request('document.export');
+    await app.request('document.saved', {revision: exported.revision});
+    return {drawing, dimensions, text: exported.text, read, svg: svg.svg, png: png.data};
+})"#;
 
 /// The app's mouse buttons follow the browser's: a chord leaves none held (a second button
 /// pressed while one is held fires `pointermove`, not `pointerdown`), and so do a drag let go
