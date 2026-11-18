@@ -1438,14 +1438,29 @@ fn text_key(text: &str) -> (u64, usize) {
     (h.finish(), text.len())
 }
 
-/// Keep `imp` in the recent imports (strongly only when `small`).
+/// Keep `imp` in the recent imports. The four-entry limit applies only to the strong
+/// references that retain small imports after their callers let go. Weak lookups for active
+/// imports must stay until their external owners release them, however many there are (#18814).
+fn remember_in(cache: &mut Vec<Recent>, key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
+    cache.retain(|r| r.key != key && r.import.strong_count() > 0);
+    cache.push(Recent { key, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
+    let mut small_kept = 0;
+    for recent in cache.iter_mut().rev() {
+        if recent._small.is_some() {
+            small_kept += 1;
+            if small_kept > 4 {
+                recent._small = None;
+            }
+        }
+    }
+    // Removing our last strong reference drops an otherwise unowned import. Externally held
+    // imports retain their weak entry, including the fifth and later imports of an assembly.
+    cache.retain(|r| r.import.strong_count() > 0);
+}
+
 fn remember(key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
     if let Ok(mut cache) = RECENT.lock() {
-        cache.retain(|r| r.key != key && r.import.strong_count() > 0);
-        cache.push(Recent { key, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
-        while cache.len() > 4 {
-            cache.remove(0);
-        }
+        remember_in(&mut cache, key, imp, small);
     }
 }
 

@@ -6251,6 +6251,45 @@ fn a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_t
     assert!(v > 0.0 && v < 36554.03, "{v}");
 }
 
+fn block_with_a_square_notch() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 25, "center": [0, 0, 12.5], "operation": "new", "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "NotchSketch1", "offset": 25}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 20], "corner": [2.4, 22.4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "NotchSketch1", "distance": 12.5, "direction": "negative", "operation": "cut", "targets": ["Base"]}),
+    );
+    s
+}
+
+/// #18545: the top loop of a block with a 4.8 mm square notch in an edge, chamfered 4 and 2 mm,
+/// failed inside the blend (status 1001): the notch's side walls are 2.4 mm long, too short for
+/// the 4 mm side. It is refused naming the largest scale of the two distances that builds
+/// (2.4 / 4 less one step, 0.599); that scale builds, and 2 by 1 mm builds as before.
+#[test]
+fn an_unequal_chamfer_too_large_for_a_notch_names_the_scale_that_fits() {
+    let edges =
+        json!([[30, -10, 25], [-30, 10, 25], [-15, -20, 25], [16.2, 20, 25], [-16.2, 20, 25], [2.4, 18.8, 25], [-2.4, 18.8, 25], [0, 17.6, 25]]);
+    let chamfer = |d1: f64, d2: f64| {
+        let mut s = block_with_a_square_notch();
+        s.execute("solid.chamfer", &json!({"edges": edges, "distance": d1, "distance2": d2, "body": "Base"})).map(|_| ()).map_err(|e| e.to_string())
+    };
+    assert_eq!(chamfer(2.0, 1.0), Ok(()));
+    let e = chamfer(4.0, 2.0).unwrap_err();
+    assert!(!e.contains("1001"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    let scale: f64 = e
+        .split_once("the largest that fits is ")
+        .and_then(|(_, rest)| rest.split_once(" times the distances given"))
+        .and_then(|(n, _)| n.parse().ok())
+        .unwrap_or_else(|| panic!("no scale named: {e}"));
+    assert!((scale - 0.599).abs() < 1e-9, "{e}");
+    assert_eq!(chamfer(4.0 * scale, 2.0 * scale), Ok(()), "the scale named builds");
+}
+
 #[test]
 fn fillet_fit_reduce_uses_the_largest_radius_that_fits() {
     // #293: 3.5 is too large for the 6 mm end faces of a 14 x 6 x 10 box; reduce gives 3 (a full

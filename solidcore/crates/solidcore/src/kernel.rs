@@ -645,34 +645,6 @@ pub struct UpstreamFixes {
     /// `sm_IsInterior`, `sm_AreOverlapping`, `sm_WhichPVToCombine`) (WR-662, #2009 group
     /// C; tangency-labs/smlib bcc6f01). Off by default for pinned parity.
     pub ssi_proto_topology_statuses_pass_on: bool,
-    /// `SmCone::CreateIsoCircleFromPoint` as the SolidCraft fork has it (WR-704;
-    /// tangency-labs/smlib 1279539, with 672a437's `SER` on the NURB conversion): the
-    /// circle's STEP height is the reference point's projection onto the axis clamped to
-    /// the cone's height interval, instead of the height an inversion of the point moved
-    /// onto the cone finds, and a failed NURB conversion is returned instead of read.
-    /// Past the apex end of a cone whose apex is an end (within the tolerance the call
-    /// accepts), that point is on the far nappe: the inversion mirrors it through the
-    /// apex and comes back with a height outside the cone, and the circle fails with
-    /// `SM_ERR`, failing `SmSphere::IntersectWithCone` for a sphere crossing the cone's
-    /// line just past its apex. Other points within the tolerance past an end also get
-    /// that end's circle. On an unbounded cone of negative semi-angle the fork's circle
-    /// is at the point's axial height over the cosine of the semi-angle, not at that
-    /// height; the WR record lists the cases this flag changes. Off by default for
-    /// pinned parity.
-    pub cone_iso_circle_at_axial_height: bool,
-    /// Unbounded `SmCone`s are parameterised as their NURB is (WR-713, #2313). The
-    /// unbounded constructor rotates the generator by a negative semi-angle too, not only
-    /// a positive one, and a cone of negative semi-angle runs from `-SM_INFINITE_PARAMETER`
-    /// up to its apex (above the origin) instead of from the apex up, so it is the cone
-    /// through its base circle, not a cylinder of the base radius cut off above the apex.
-    /// `ConvertUVFromSTEPToNURBS` and `ConvertUVFromNURBSToSTEP` map the height of an
-    /// inside-out unbounded cone onto its NURB's reversed height interval, as for a
-    /// bounded cone, instead of negating it: the NURB runs over the STEP heights
-    /// reversed, not over their negatives. Upstream's iso circle through a point at
-    /// height 1 on an inside-out unbounded cone is then near `SM_INFINITE_PARAMETER`,
-    /// its NURB-parameter points disagree with its NURB, and a negative-angle unbounded
-    /// cone holds none of its points below the apex. Off by default for pinned parity.
-    pub cone_unbounded_parameterized_as_nurb: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057). Curved pieces only: a straight interval along a straight edge is always classified, by a certificate on its two ends (the distance is affine along it), with or without this flag.
@@ -1075,6 +1047,14 @@ pub struct Kernel {
     /// ([`crate::blend::definition_check`]), for the check that every blend face is a
     /// definition. `None` (the default) marks and keeps nothing; it changes no result.
     pub blend_face_log: Option<crate::blend::definition_check::BlendFaceLog>,
+    /// Not upstream; diagnostic, tests only: while `Some`, each Coons corner patch made
+    /// tangent to its sides appends the record of its refinement (every candidate, its
+    /// stations and side angles, and the one kept), for tests that replay the choice.
+    /// No library code reads it. `None` (the default)
+    /// keeps nothing; it changes no result. A [`RefCell`] so the corner blend can append
+    /// through the `&Kernel` it takes (the kernel stays `Send`).
+    pub coons_tangency_log:
+        RefCell<Option<Vec<crate::nurbs::b_spline_surface_n_lib::p2::CoonsTangencyLog>>>,
     /// Not upstream: the profiler of the operations run on this kernel (feature
     /// `profile`; [`crate::profile`]). It only observes: no result reads it. Shared with
     /// the kernel copies an operation makes for its caches, which record into the same
@@ -1155,6 +1135,7 @@ impl Kernel {
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
+            coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),
             #[cfg(test)]
