@@ -1,5 +1,5 @@
+use crate::drawing::measure::{LinearDirection, Reading};
 use serde_json::json;
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::drawing_sheet::{Margins, Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::LineGroup;

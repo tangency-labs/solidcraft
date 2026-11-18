@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
 use super::*;
-use crate::drawing_view::{NamedView, basis_looking};
+use solidcraft_geom::drawing_view::{NamedView, basis_looking};
 
 use AngleFrom::{Edge, ModelAxis};
 use LinearDirection::{Aligned, Along, Horizontal, Vertical};

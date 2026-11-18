@@ -14,9 +14,10 @@ use solidcraft_doc::drawing::dimension::{
     Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, SetKind, Silhouette, Status, TextPlace,
     check_chain_length, check_set_targets,
 };
+use solidcraft_doc::drawing::line_maths::LineCoords;
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading};
 use solidcraft_doc::drawing::{ByNumber, Drawing, kept_by_number};
 use solidcraft_doc::ids;
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
 
 use solidcraft_geom::paper::Scene;
@@ -97,7 +98,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              radial dimension's, direction?: a chain's, a set's or a silhouettes one's, targets?: a set's {remove?: [numbers from 0, \
              each once], add?: [corners]}, taken out first, then added after the rest, the set kept as one dimension; a drag, instead \
              of offset_mm and text: text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: [x, y], a point its line, \
-             arc or leader passes through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
+             arc or leader (a set's nearest line or its leaders' end) passes through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
              {dimension, changed: [fields]}. What it measures stays, a set's targets aside: to measure something else, add a new \
              one; a set its view can't measure after the change, or a target on a part the view doesn't draw, is refused. One undo \
              step, none when nothing changes; no model is evaluated.",
@@ -515,7 +516,7 @@ fn drag_asked(set: &DimensionSet) -> Result<Option<Drag>> {
 /// inspect's layout and the sheet are. Refused in their words when its view isn't drawn or it has no
 /// place there, and when the drag can't place it.
 fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag) -> Result<(f64, TextPlace)> {
-    let dimension = d.dimension(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?;
+    let dimension = d.dimension(id).ok_or_else(|| no_dimension(EDIT, id))?;
     let read = crate::drawing_view::ViewSessions::new(s)
         .read_on(d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
         .map_err(|e| bad(EDIT, e.to_string()))?;
@@ -525,8 +526,9 @@ fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag) -> Result<(f64, 
     dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
         let words = match why {
             NotDragged::NoPlace => NO_PLACE,
-            NotDragged::ChainText => "a chain's texts sit on its members: drag its line",
+            NotDragged::MemberTexts => "a chain's or a set's texts sit on their members: drag its line",
             NotDragged::BetweenEnds => "the line between silhouettes or faces runs beyond their ends: drag it past one of them",
+            NotDragged::WithinSet => "a set's lines stand outside what it measures: drag past its outermost point on one side",
             NotDragged::TextWaits => TEXT_WAITS,
         };
         bad(EDIT, words)
@@ -549,14 +551,14 @@ fn diameter_by_default(points: &[Vec3]) -> bool {
 /// plane, at the depth of what it measures, asked of each shown body's B-rep exactly (inside or on
 /// its boundary is material). With material on both sides or neither, away from the middle of the
 /// view's model box; on that middle (a centre line, a symmetric pair) the fixed rule is +1, above
-/// or to the left ([`crate::drawing_dimension_paper::line_direction`]).
+/// or to the left ([`LineCoords::forward`]).
 fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearDirection, points: &[Vec3]) -> f64 {
     let (Ok(resolved), Ok(shown)) = (drawing.resolve_view(view), crate::drawing_view::shown(s)) else { return 1.0 };
     let basis = resolved.basis;
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return 1.0 };
     let (a, b) = (basis.to_local(*first), basis.to_local(*last));
     // The plane's directions are paper's: a view's paper map only scales and shifts.
-    let Some(n) = crate::drawing_dimension_paper::line_direction(direction, b - a).map(Vec2::perp) else { return 1.0 };
+    let Some(n) = LineCoords::forward(direction, b - a).map(|coords| coords.normal) else { return 1.0 };
     let middle = (a + b) * 0.5;
     let beside = (basis.x * n.x + basis.y * n.y) * (LOOK_PAST_MM / resolved.scale.value.factor());
     let at = (*first + *last) * 0.5;

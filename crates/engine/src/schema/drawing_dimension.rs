@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, MAX_SET_TARGETS, TextPlace};
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading, SilhouetteSide};
 
 use super::Point2;
 use super::drawing_view::ViewIdParam;
@@ -499,8 +499,8 @@ pub struct DimensionSet {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point2")]
     pub text_to_mm: Option<Point2>,
-    /// A drag: a point the dimension line passes through, as `text_to_mm`. It sets `offset_mm`, or a
-    /// radial one's `text`, which turns with its leader.
+    /// A drag: a point the dimension line passes through, as `text_to_mm` (a set's nearest line, or its
+    /// leaders' end). It sets `offset_mm`, or a radial one's `text`, which turns with its leader.
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point2")]
     pub line_through_mm: Option<Point2>,

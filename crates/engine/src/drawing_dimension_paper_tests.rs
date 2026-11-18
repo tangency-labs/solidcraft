@@ -1,7 +1,7 @@
 use solidcore_record::Vec3;
 use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, ModelPoint, Silhouette, Status};
+use solidcraft_doc::drawing::measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::Aabb2;
-use solidcraft_geom::drawing_measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{NamedView, Scale};
 use solidcraft_geom::paper::Scene;
 use solidcraft_geom::paper::line::LineGroup;
@@ -421,64 +421,6 @@ fn ordinate_numbers_that_would_overlap_move_apart_and_their_leaders_jog() {
     assert!(lines.iter().any(|l| l.len() == 2 && close(l[0].x, 0.0)), "the origin's has room: {lines:?}");
 }
 
-/// Texts at least `pitch` apart, moved as little as can be: those with room stay, those that would
-/// overlap move apart, centred on their ideal places, whatever their number.
-#[test]
-fn spread_moves_only_what_would_overlap() {
-    let pitch = 4.5;
-    assert_eq!(spread(&[], pitch), Vec::<f64>::new());
-    assert_eq!(spread(&[7.0], pitch), [7.0]);
-    assert_eq!(spread(&[0.0, 10.0, 30.0], pitch), [0.0, 10.0, 30.0], "room for all");
-    assert_eq!(spread(&[0.0, 1.0], pitch), [-1.75, 2.75], "a pair, about its middle");
-    assert_eq!(spread(&[5.0, 5.0, 5.0], pitch), [0.5, 5.0, 9.5], "three at one place");
-    // A block that grows into a neighbour takes it in: 0, 1 and 4 pool round 5/3.
-    let pooled = spread(&[0.0, 1.0, 4.0, 20.0], pitch);
-    let expected = [5.0 / 3.0 - pitch, 5.0 / 3.0, 5.0 / 3.0 + pitch, 20.0];
-    assert!(pooled.iter().zip(expected).all(|(a, b)| close(*a, b)), "{pooled:?}");
-    let all = spread(&[3.0; 65], pitch);
-    assert!(close(all.iter().sum::<f64>() / 65.0, 3.0) && all.windows(2).all(|w| close(w[1] - w[0], pitch)), "{all:?}");
-}
-
-/// Any places, in order, at any spacing: as many places come back, in the same order, at least the
-/// pitch apart, finite, each run of touching texts centred on its members' ideal places, and a text
-/// that touches none where it was.
-#[test]
-fn spread_fuzz_keeps_its_rules() {
-    let mut state = 0x1305_2c0d_u64;
-    let mut next = move || {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state
-    };
-    for round in 0..4000 {
-        let count = match round % 4 {
-            0 => 0,
-            1 => 1,
-            2 => 65,
-            _ => (next() % 12) as usize,
-        };
-        let pitch = [0.1, 1.0, 4.5, 30.0][(next() % 4) as usize];
-        let spacing = [0.0, 0.01, 1.0, 5.0, 50.0][(next() % 5) as usize];
-        let mut ideal: Vec<f64> = (0..count).map(|_| (next() % 1000) as f64 * spacing * 0.01 - 3.0).collect();
-        ideal.sort_by(f64::total_cmp);
-        let got = spread(&ideal, pitch);
-        assert_eq!(got.len(), ideal.len());
-        assert!(got.iter().all(|x| x.is_finite()), "{got:?}");
-        assert!(got.windows(2).all(|w| w[1] - w[0] >= pitch - 1e-9), "{ideal:?} -> {got:?}");
-        // Runs of texts that touch, each centred on its members' ideal places.
-        let mut from = 0;
-        for i in 1..=got.len() {
-            if i == got.len() || got[i] - got[i - 1] > pitch + 1e-9 {
-                let (a, b) = (&ideal[from..i], &got[from..i]);
-                let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
-                assert!((mean(a) - mean(b)).abs() < 1e-6, "{a:?} -> {b:?}");
-                from = i;
-            }
-        }
-    }
-}
-
 /// A chain as long as a chain goes, with tight spans between its points, stays in one group.
 #[test]
 fn a_chain_of_the_most_points_lays_out() {
@@ -597,7 +539,8 @@ fn a_cylinder_is_dimensioned_across_its_silhouettes() {
     assert!(close((tips[0].y - tips[1].y).abs(), 8.0), "{tips:?}");
 }
 
-/// What isn't found has no lines; a kind with the wrong number of points never lays out.
+/// What isn't found has no lines; a kind with the wrong number of points never lays out. A chain or a
+/// set of one point is a single point there, whichever way it runs: no layout, and no drag places it.
 #[test]
 fn a_dimension_with_no_points_has_no_lines() {
     let mut lost = read(&[], "");
@@ -615,6 +558,19 @@ fn a_dimension_with_no_points_has_no_lines() {
     assert!(laid(&dimension(chain, 10.0, TextPlace::Centred), &lost, &view_at("1:1")).is_none());
     let three = read(&[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]], "1");
     assert!(laid(&dimension(length(LinearDirection::Aligned), 1.0, TextPlace::Centred), &three, &view_at("1:1")).is_none());
+
+    let (frame, fonts, one) = (view_at("1:1"), PaperFonts::new("", "en", true), read(&[[5.0, 3.0]], "0"));
+    for direction in [LinearDirection::Horizontal, LinearDirection::Vertical, LinearDirection::Along(Vec2::new(1.0, 1.0))] {
+        for kind in [
+            DimensionKind::Chain { points: Vec::new(), direction },
+            DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction },
+            DimensionKind::Ordinate { origin: corner(), targets: Vec::new(), direction },
+        ] {
+            let d = dimension(kind, 10.0, TextPlace::Centred);
+            assert!(laid(&d, &one, &frame).is_none(), "{:?}", d.kind);
+            assert_eq!(dragged(&d, &one, &frame, &fonts, Drag::Line(Vec2::new(25.0, -12.0))), Err(NotDragged::NoPlace), "{:?}", d.kind);
+        }
+    }
 }
 
 /// A text's own place, far off the sheet's middle, moves the text and the arc it sits on, never the
@@ -870,7 +826,7 @@ fn off_the_line(layout: &Layout, p: Vec2) -> f64 {
 /// 30°, with its text of one line or two, at points either side of it; a cylinder and two faces either
 /// side of their ends, and refused between them; an angle's and a cone's arc round their vertex through
 /// the point; a radius's leader turned to it, the text as far out as before; a sphere's text; and a
-/// chain's line, whose text isn't dragged.
+/// chain's line, whose texts aren't dragged.
 #[test]
 fn a_dragged_dimension_lays_out_where_it_was_dragged() {
     let (frame, fonts) = (view_at("1:1"), PaperFonts::new("", "en", true));
@@ -937,7 +893,53 @@ fn a_dragged_dimension_lays_out_where_it_was_dragged() {
     let p = at(25.0, -12.0);
     let moved = after(&chain, &holes, Drag::Line(p));
     assert!(moved.arrows.len() == 6 && moved.arrows.iter().all(|(tip, _)| close(tip.y, p.y)), "{moved:?}");
-    assert_eq!(dragged(&chain, &holes, &frame, &fonts, Drag::Text(p)), Err(NotDragged::ChainText));
+    assert_eq!(dragged(&chain, &holes, &frame, &fonts, Drag::Text(p)), Err(NotDragged::MemberTexts));
+}
+
+/// A drag keeps the first side, positive then negative, whose offset is on it ([`side_of`]: -0.0 is on
+/// the positive side), and is refused when neither is.
+#[test]
+fn a_drag_keeps_the_first_side_its_offset_is_on() {
+    let kept = on_its_side(|side| Ok((-0.0 * side, TextPlace::Centred)), NotDragged::WithinSet);
+    assert_eq!(kept.map(|(offset, _)| (offset, offset.is_sign_negative())), Ok((0.0, true)), "-0.0 on the positive side");
+    let negative = on_its_side(|side| Ok((side - 3.0, TextPlace::Centred)), NotDragged::WithinSet);
+    assert_eq!(negative, Ok((-4.0, TextPlace::Centred)));
+    assert_eq!(on_its_side(|side| Ok((-side, TextPlace::Centred)), NotDragged::BetweenEnds), Err(NotDragged::BetweenEnds));
+}
+
+/// A set's line dragged through a point ([`dragged`]) runs through it past what it measures: a
+/// baseline's nearest member's line, above the holes or below them, and every ordinate leader's end.
+/// A point between the highest hole and the lowest is refused, as is a text drag, whose numbers sit
+/// on their members.
+#[test]
+fn a_sets_line_is_dragged_past_its_outermost_point() {
+    let (frame, fonts) = (view_at("1:1"), PaperFonts::new("", "en", true));
+    let member = |value: f64| Member { measured: Measured { value, foreshortened: false }, text: format!("{value:.2}") };
+    let mut holes = read(&[[0.0, 0.0], [10.0, 5.0], [30.0, 0.0], [60.0, 8.0]], "60");
+    holes.text = None;
+    holes.members = vec![member(10.0), member(30.0), member(60.0)];
+    let at = Vec2::new;
+    let baseline = DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let ordinate = DimensionKind::Ordinate { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let after = |kind: &DimensionKind, drag: Drag| {
+        let d = dimension(kind.clone(), 10.0, TextPlace::Centred);
+        let (offset_mm, text) = dragged(&d, &holes, &frame, &fonts, drag).unwrap_or_else(|why| panic!("{drag:?}: {why:?}"));
+        laid(&Dimension { offset_mm, text, ..d }, &holes, &frame).unwrap().group
+    };
+    // Above, 12 past the highest hole (y 8); below, 15 past the lowest (y 0).
+    for (p, above) in [(at(25.0, 20.0), true), (at(25.0, -15.0), false)] {
+        let tips = parts(&after(&baseline, Drag::Line(p))).1;
+        let heights = tips.iter().map(|tip| tip.y);
+        let nearest = if above { heights.fold(f64::INFINITY, f64::min) } else { heights.fold(f64::NEG_INFINITY, f64::max) };
+        assert!(tips.len() == 6 && close(nearest, p.y), "{p:?}: {tips:?}");
+        let leaders = parts(&after(&ordinate, Drag::Line(p))).0;
+        assert!(leaders.len() == 4 && leaders.iter().all(|l| l.last().is_some_and(|end| close(end.y, p.y))), "{p:?}: {leaders:?}");
+    }
+    for kind in [baseline, ordinate] {
+        let d = dimension(kind, 10.0, TextPlace::Centred);
+        assert_eq!(dragged(&d, &holes, &frame, &fonts, Drag::Line(at(25.0, 4.0))), Err(NotDragged::WithinSet));
+        assert_eq!(dragged(&d, &holes, &frame, &fonts, Drag::Text(at(25.0, 20.0))), Err(NotDragged::MemberTexts));
+    }
 }
 
 /// Any measured points and offsets, at the sizes and shapes that break layouts (zero spans, equal
@@ -994,24 +996,6 @@ fn hostile_points_and_offsets_never_panic() {
     }
 }
 
-/// A straight line inside a longer one along it is drawn by the longer one; a line that runs past
-/// its ends, beside it or across it isn't, and a bent line only by the same bent line.
-#[test]
-fn a_line_inside_a_longer_one_along_it_is_covered() {
-    let p = |x: f64, y: f64| Vec2::new(x, y);
-    let long = [p(0.0, 1.0), p(0.0, 20.0)];
-    assert!(covered(&[p(0.0, 1.0), p(0.0, 13.0)], &long));
-    assert!(covered(&[p(0.0, 20.0), p(0.0, 5.0)], &long), "either way round");
-    assert!(covered(&long, &long));
-    assert!(!covered(&[p(0.0, 1.0), p(0.0, 21.0)], &long), "past its end");
-    assert!(!covered(&[p(0.5, 1.0), p(0.5, 13.0)], &long), "beside it");
-    assert!(!covered(&[p(-1.0, 5.0), p(1.0, 5.0)], &long), "across it");
-    assert!(!covered(&long, &[p(0.0, 1.0), p(0.0, 13.0)]), "the shorter doesn't draw the longer");
-    let bent = [p(0.0, 0.0), p(5.0, 5.0), p(10.0, 0.0)];
-    assert!(covered(&bent, &bent) && !covered(&[p(0.0, 0.0), p(5.0, 5.0)], &bent));
-    assert!(!covered(&[p(0.0, 0.0), p(0.0, 0.0)], &[p(1.0, 0.0), p(1.0, 0.0)]), "two points apart");
-}
-
 /// A line inside a longer one along it leaves the longer one alone, whichever is drawn first: no
 /// layout sends the shorter one second today, so only this shows that order.
 #[test]
@@ -1021,7 +1005,7 @@ fn a_line_inside_a_longer_one_is_drawn_once_whichever_comes_first() {
     for order in [[long.clone(), short.clone()], [short, long.clone()]] {
         let mut drawn = Drawn::default();
         order.into_iter().for_each(|line| drawn.line(LineRole::Extension, line));
-        assert!(drawn.lines.len() == 1 && same_line(&drawn.lines[0], &long), "{:?}", drawn.lines);
+        assert_eq!(drawn.lines, std::slice::from_ref(&long));
         assert_eq!(drawn.laid.lines, [(LineRole::Extension, long.clone())], "the layout keeps the longer line too");
     }
 }
