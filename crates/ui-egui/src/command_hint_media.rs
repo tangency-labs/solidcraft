@@ -439,16 +439,16 @@ pub(crate) fn assert_test_poster_painted(ctx: &egui::Context, command: &str, dar
         .and_then(|slot| slot.texture)
         .expect("the command's decoded poster was uploaded")
         .id();
-    fn has_image(shape: &egui::Shape, texture: egui::TextureId, visible: egui::Rect) -> bool {
-        match shape {
-            egui::Shape::Mesh(mesh) => mesh.texture_id == texture && mesh.calc_bounds().intersect(visible).is_positive(),
-            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_image(shape, texture, visible)),
-            _ => false,
-        }
-    }
+    let primitives = ctx.tessellate(shapes.to_vec(), ctx.pixels_per_point());
     assert!(
-        shapes.iter().any(|shape| has_image(&shape.shape, texture, rect.intersect(shape.clip_rect))),
-        "{command}: tooltip painted the expected poster texture"
+        primitives.iter().any(|primitive| {
+            matches!(&primitive.primitive, egui::epaint::Primitive::Mesh(mesh)
+                if mesh.texture_id == texture
+                    && !mesh.indices.is_empty()
+                    && rect.expand(1.0).contains_rect(mesh.calc_bounds())
+                    && mesh.calc_bounds().intersect(primitive.clip_rect).is_positive())
+        }),
+        "{command}: tooltip painted the expected poster texture in {rect:?}"
     );
 }
 

@@ -9914,12 +9914,11 @@ mod tests {
 
     #[test]
     fn hint_capture_planes_stay_translucent_and_distinguish_picks() {
-        solidcraft_look::themes::install();
-        let monochrome = ["1-bit", "1-bit-dark"].map(|name| {
-            let theme = solidcraft_ui_kit::theme_files::builtin().iter().find(|theme| theme.id == name).unwrap();
-            solidcraft_ui_kit::theme_files::resolve(theme)
-        });
-        for t in [Tokens::light(), Tokens::dark()].into_iter().chain(monochrome) {
+        solidcraft_look::install_tables();
+        let sources: Vec<_> = solidcraft_look::themes::BUILTIN.iter().copied().filter(|(id, _)| matches!(*id, "1-bit" | "1-bit-dark")).collect();
+        assert_eq!(sources.len(), 2, "both 1-bit palettes are embedded");
+        let monochrome = solidcraft_ui_kit::theme_files::read_builtin(&sources).unwrap();
+        for t in [Tokens::light(), Tokens::dark()].into_iter().chain(monochrome.iter().map(solidcraft_ui_kit::theme_files::resolve)) {
             let (ordinary_fill, ordinary_edge) = construction_plane_capture_style(&t, false, false);
             assert!(ordinary_fill.a() > 0 && ordinary_fill.a() < 255);
             for (selected, hovered) in [(true, false), (false, true)] {
