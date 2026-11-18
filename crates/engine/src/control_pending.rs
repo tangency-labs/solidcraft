@@ -128,6 +128,7 @@ mod tests {
             ("app.quit", json!({})),
             ("document.import", json!({"text": "{}"})),
             ("document.saved", json!({"revision": 1})),
+            ("document.close", json!({"document_id": "current"})),
         ] {
             assert!(!reads_only(m, &p), "{m} {p}");
             assert_eq!(effect(m, &p), Effect::Changes, "{m} {p}");

@@ -81,14 +81,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
-    f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
     f.shell_edges_on_analytics_exact = true;
     f.fillet_patch_keeps_fillet_edges = true;
@@ -97,33 +95,23 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_knife_edge_rounds = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
-    f.box_face_failures_propagate = true;
-    f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
-    f.fillet_mitre_concave_face_corners = true;
-    f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
-    f.fillet_trim_status = true;
-    f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;
-    f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.corner_patch_face_side_twist = true;
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.geometric_g2_continuity = true;
-    f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
-    f.cone_iso_circle_at_axial_height = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
-    f.cone_unbounded_parameterized_as_nurb = true;
     f.keep_exact_pcurves = true;
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.

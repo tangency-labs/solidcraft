@@ -65,6 +65,15 @@ impl Group {
         collect(&self.rows, &mut all);
         all
     }
+
+    /// Does `test` hold for anything in the group, groups inside it included? Allocates nothing:
+    /// a search asks this of a group each frame.
+    pub fn any_entry(&self, test: &impl Fn(&Entry) -> bool) -> bool {
+        self.rows.iter().any(|r| match r {
+            Row::Item(e) => test(e),
+            Row::Group(g) => g.any_entry(test),
+        })
+    }
 }
 
 #[derive(Default)]

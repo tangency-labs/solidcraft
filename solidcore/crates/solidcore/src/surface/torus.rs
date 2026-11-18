@@ -1221,7 +1221,7 @@ impl Torus {
             [start_for_max_angle, vec_max],
             torus_z_axis,
             inside_out,
-            EFF_ZERO_DEG,
+            tube_ends_zero_deg(scaled_zero, min_rad),
         ) {
             Ok(ivl) => ivl,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -1474,7 +1474,7 @@ impl Torus {
             [start_for_max_angle, vec_max],
             torus_z_axis,
             inside_out,
-            EFF_ZERO_DEG,
+            tube_ends_zero_deg(scaled_zero, min_rad),
         )?;
 
         // define Torus domain
@@ -2003,10 +2003,36 @@ fn torus_gen_curve_interval(
     if high.abs() < zero_deg {
         high = 0.0;
     }
+    // (not upstream, solidcore#3339's S0049/S0332) ends that are one point within
+    // `zero_deg` close a whole turn exactly
+    if (high - low).abs() < zero_deg {
+        high = low;
+    }
     if high < low + zero_deg {
         high += 360.0;
     }
     Ok((low, high))
+}
+
+/// Not upstream (the Dutchman stress corpus S0049 and S0332): the angle, in degrees, within
+/// which a torus's generating circle's ends found from its NURB are one point. The ends
+/// carry the rounding of their coordinates, `scaled_zero` (the recogniser's length zero,
+/// grown with the points' size), which turns through `scaled_zero / minor` radians about a
+/// tube of radius `minor`; at least `SM_EFF_ZERO_DEG`. A thin tube far from the origin (r
+/// 0.05 mm at 1000 mm) has its closed ends ~1.6e-9 degrees apart: taken as not quite a turn,
+/// the torus's tube interval ended short of its generator's and the check refused it
+/// (`SmSurfOfRevolution` test #2, `SmTorus` test #2).
+fn tube_ends_zero_deg(scaled_zero: f64, minor: f64) -> f64 {
+    let turned = if minor > 0.0 {
+        (scaled_zero / minor).to_degrees()
+    } else {
+        0.0
+    };
+    if turned.is_finite() {
+        EFF_ZERO_DEG.max(turned)
+    } else {
+        EFF_ZERO_DEG
+    }
 }
 
 #[cfg(test)]
@@ -2629,6 +2655,45 @@ mod tests {
             let v = found.base.anal_uv_domain.v_interval();
             assert!(
                 (v.min() + 90.0).abs() < 1e-9 && (v.length() - 360.0).abs() < 1e-9,
+                "swap {swap}: tube interval {v:?}"
+            );
+        }
+    }
+
+    /// The Dutchman stress corpus S0049 and S0332: a circle r 0.05 swept a quarter turn round
+    /// an arc r 0.3 at z = 1000 is a torus whose NURB runs once round its tube. Its two tube
+    /// ends are one point but carry the rounding of coordinates near 1000, about 1.6e-9
+    /// degrees of a 0.05 tube; taken as not quite a turn, the tube interval ended short of its
+    /// generator's and the check refused the torus. The tube is a whole turn, exactly.
+    #[test]
+    fn a_thin_tube_far_from_the_origin_is_one_whole_turn() {
+        let frame = Axis2Placement::new(
+            Vec3::new(0.0, 0.3, 1000.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        let dom = Extent2d::from_bounds(0.0, -90.0, 90.0, 270.0);
+        for swap in [false, true] {
+            let k = Kernel::default();
+            let t = Torus::create_canonical(
+                &k,
+                &frame,
+                0.3,
+                0.05,
+                TorusOptions {
+                    swap_uv: swap,
+                    inside_out: false,
+                    circle_nurb: None,
+                },
+                Some(&dom),
+            )
+            .unwrap();
+            let found = Torus::is_nurb_surface_torus(&k, &plain(&t), 1.0)
+                .unwrap()
+                .expect("a torus");
+            let v = found.base.anal_uv_domain.v_interval();
+            assert!(
+                (v.length() - 360.0).abs() <= 1e-12 * 360.0,
                 "swap {swap}: tube interval {v:?}"
             );
         }

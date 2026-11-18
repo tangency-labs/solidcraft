@@ -53,17 +53,17 @@ pub enum IntersectFailure {
     /// has no direction.
     StepTangentTooShort,
     /// A surface/surface intersection found touching points only, farther from one of the
-    /// surfaces than the other surface's own tolerance (and than the caller's tolerance,
-    /// when it gave a larger one), but the other surface has points
+    /// surfaces than their default tolerance (and than the caller's tolerance, when it
+    /// gave a larger one), but the other surface has points
     /// strictly on both sides of the plane it was intersected with, over the plane's
     /// domain: the plane crosses it along curves the intersection missed. `tolerance` is the
-    /// approximation tolerance the intersection ran at; `surface_tolerance` is the other
-    /// surface's own default tolerance (a thousandth of its size, as the intersector takes
-    /// it from its first surface), the tolerance to intersect at instead.
+    /// approximation tolerance the intersection ran at; `surface_tolerance` is the
+    /// surfaces' default tolerance (the intersector's, the same in either order), the
+    /// tolerance the touching points had to be within.
     PointsWhereAPlaneCrosses {
         /// The approximation tolerance the intersection ran at.
         tolerance: f64,
-        /// The other surface's own default approximation tolerance.
+        /// The surfaces' default approximation tolerance.
         surface_tolerance: f64,
     },
     /// A stage of an intersection routine failed with no reason the kernel names: a defect
@@ -117,8 +117,8 @@ impl core::fmt::Display for IntersectFailure {
             } => write!(
                 f,
                 "the intersection found only touching points, but the plane crosses the other \
-                 surface: the tolerance {tolerance:e} is coarser than that surface, whose own is \
-                 {surface_tolerance:e}"
+                 surface: at the tolerance {tolerance:e} they lie farther from the surfaces than \
+                 their default tolerance {surface_tolerance:e}"
             ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
         }
