@@ -11578,10 +11578,8 @@ fn eval_feature_kind(
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
-                // This body's picks' own radii (each pick still has to resolve to one edge).
                 // This body's edges' own radii, found by their resolved points.
-                let each: Option<Vec<f64>> =
-                    each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(e)).map_or(r, |(_, x)| *x)).collect());
+                let each: Option<Vec<f64>> = each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(e)).map_or(r, |(_, x)| *x)).collect());
                 let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
                     .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
