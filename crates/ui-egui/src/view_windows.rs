@@ -2,7 +2,7 @@
 
 use egui::{Context, Ui, ViewportClass, ViewportCommand, ViewportId};
 use serde_json::{Value, json};
-use solidcraft_views::{DesignView, PopOut, ViewSet, WindowId, WindowLevel, WindowPlacement, WindowTarget};
+use solidcraft_views::{DesignView, PopOut, ViewSet, WindowId, WindowLevel, WindowOptions, WindowPlacement, WindowTarget};
 
 use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Menu, Surface};
 use crate::{SolveApp, documents};
@@ -13,6 +13,7 @@ pub(crate) struct Windows {
     render_open: bool,
     embedded: bool,
     painting: Option<WindowId>,
+    painting_options: Option<WindowOptions>,
     closing: Option<Option<u64>>,
     parked: Option<(u64, Vec<u64>)>,
     focus: Option<(u64, WindowId)>,
@@ -495,6 +496,11 @@ fn apply_move(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Val
     let tab = app.docs.active_tab();
     let indexed = matches!(target, WindowTarget::Existing { index: Some(_), .. });
     let moved = documents::move_view_to_window(app, view, target).map_err(|error| error.code().to_owned())?;
+    if moved.created
+        && let Some(window) = app.docs.views.window_mut(moved.window)
+    {
+        window.options = app.preferences.pop_out_window_defaults;
+    }
     if indexed {
         remember_local_reorder(app, moved.window);
     }
@@ -596,7 +602,11 @@ pub(crate) fn with_strip<T>(
     let ribbon = std::mem::replace(&mut app.ui.tab, documents::view_workspace(app.docs.views.active().kind).into());
     documents::show_active_look(app);
     app.view_windows.painting = Some(target);
+    app.view_windows.painting_options = Some(window.options);
     let result = action(app);
+    if let Some(options) = app.view_windows.painting_options.take() {
+        window.options = options;
+    }
     documents::park_active_look(app);
     app.ui.tab = ribbon;
     app.view_windows.painting = None;
@@ -670,9 +680,45 @@ pub(crate) fn show_clean(app: &mut SolveApp, ui: &mut Ui) {
     documents::sync_linked_active(app);
 }
 
+pub(crate) fn child_options(app: &SolveApp) -> WindowOptions {
+    app.view_windows.painting_options.unwrap_or_default()
+}
+
+fn options_command(app: &mut SolveApp, command: &str, request: Value) -> Result<Value, String> {
+    use solidcraft_engine::schema::tab_windows::{TabWindowOptionsReply, TabWindowSetOptionsParams};
+    let change: TabWindowSetOptionsParams = serde_json::from_value(request).map_err(|error| error.to_string())?;
+    let tab = app.docs.current_tab();
+    let window = change
+        .window
+        .or(app.view_windows.painting)
+        .or_else(|| app.view_windows.last_focus.filter(|(owner, _)| *owner == tab).map(|(_, id)| id))
+        .filter(|id| *id != 0)
+        .ok_or("window_not_found")?;
+    let current = if app.view_windows.painting == Some(window) {
+        app.view_windows.painting_options.as_mut()
+    } else {
+        app.docs.views.window_mut(window).map(|window| &mut window.options)
+    }
+    .ok_or("window_not_found")?;
+    if command == "tab.window.set_options" {
+        if let Some(card_headers) = change.card_headers {
+            current.card_headers = card_headers;
+        }
+        if let Some(keep_on_top) = change.keep_on_top {
+            current.keep_on_top = keep_on_top;
+        }
+    }
+    let options = *current;
+    if command == "window.options.use_as_default" {
+        app.preferences.pop_out_window_defaults = options;
+    }
+    serde_json::to_value(TabWindowOptionsReply::Current { window, options }).map_err(|error| error.to_string())
+}
+
 pub(crate) fn command(app: &mut SolveApp, command: &str, request: Value) -> Result<Value, String> {
     let id = request.get("window").and_then(Value::as_u64).and_then(|id| WindowId::try_from(id).ok()).unwrap_or_default();
     match command {
+        "tab.window.options" | "tab.window.set_options" | "window.options.use_as_default" => options_command(app, command, request),
         "tab.window.list" => {
             let clean = |id| app.view_windows.clean.contains(&(app.docs.current_tab(), id));
             let rows = std::iter::once(window_row(0, &app.docs.views, None, clean(0)))
@@ -1071,7 +1117,10 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         let Some(mut window) = app.docs.views.take_window(id) else { continue };
         let os_id = viewport_id(tab, id);
         let custom = !cfg!(target_os = "macos");
-        let mut builder = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom).with_min_inner_size([640.0, 420.0]);
+        let level = if window.options.keep_on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
+        let mut builder = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom)
+            .with_min_inner_size([640.0, 420.0])
+            .with_window_level(level);
         // The shared builder carries the main window's size. Only ask for a child size at startup,
         // so subsequent frames leave user resizing alone.
         builder.inner_size = None;
@@ -1175,6 +1224,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let ribbon = std::mem::replace(&mut app.ui.tab, documents::view_workspace(app.docs.views.active().kind).into());
             documents::show_active_look(app);
             app.view_windows.painting = Some(id);
+            app.view_windows.painting_options = Some(window.options);
             let revision = app.session.revision;
             let had_dialog = app.dialog.is_some();
             app.view_window_logic(ui.ctx());
@@ -1195,6 +1245,12 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             app.home.open = home;
             (app.custom_titlebar, app.integrated_titlebar) = decorations;
             app.view_windows.painting = None;
+            if let Some(options) = app.view_windows.painting_options.take() {
+                if options != window.options {
+                    ctx.request_repaint_of(ViewportId::ROOT);
+                }
+                window.options = options;
+            }
             app.view_windows.parked = None;
             app.view_windows.foreign_views.clear();
             app.view_windows.setup_snapshot = None;

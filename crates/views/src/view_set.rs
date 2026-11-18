@@ -114,6 +114,7 @@ impl WindowLevel {
 /// An arrangement of existing views in one window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowArrangement {
+    pub options: super::WindowOptions,
     pub views: Vec<u64>,
     pub active: Option<u64>,
     pub tiles: Option<Tiles>,
@@ -198,6 +199,7 @@ fn anchored_window_axis(wanted: f32, room: f32, snap: bool) -> f32 {
 /// A pop-out holds its own strip, active view and layout for this design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopOut {
+    pub options: super::WindowOptions,
     pub id: WindowId,
     pub level: WindowLevel,
     pub placement: Option<WindowPlacement>,
@@ -336,9 +338,16 @@ impl ViewSet {
         for (group, views) in assigned {
             let mut window = old.next().unwrap_or_else(|| {
                 let id = self.allocate_window_id();
-                PopOut { id, level: WindowLevel::ViewsOnly, placement: None, views: Self::strip(Vec::new(), 0, self.next_id, id) }
+                PopOut {
+                    options: super::WindowOptions::default(),
+                    id,
+                    level: WindowLevel::ViewsOnly,
+                    placement: None,
+                    views: Self::strip(Vec::new(), 0, self.next_id, id),
+                }
             });
             window.level = group.level;
+            window.options = group.options;
             if let Some(placement) = &group.placement {
                 window.placement = Some(placement.clone());
             }
@@ -463,7 +472,13 @@ impl ViewSet {
         };
         if created {
             let views = Self::strip(vec![moved], view, self.next_id, window);
-            self.put_window(PopOut { id: window, level: WindowLevel::ViewsOnly, placement: result.placement.clone(), views });
+            self.put_window(PopOut {
+                options: super::WindowOptions::default(),
+                id: window,
+                level: WindowLevel::ViewsOnly,
+                placement: result.placement.clone(),
+                views,
+            });
         } else {
             let strip = self.strip_mut(window).ok_or(MoveError::NoSuchWindow)?;
             let at = index.unwrap_or(strip.len()).min(strip.len());
@@ -1144,6 +1159,7 @@ impl ViewSet {
             "windows": self.windows.iter().map(|window| json!({
                 "id": window.id,
                 "level": window.level.key(),
+                "options": window.options,
                 "active": window.views.active,
                 "tiles": window.views.tiles().map(Tiles::to_json),
                 "placement": window.placement.as_ref().map(WindowPlacement::to_json),
@@ -1226,7 +1242,8 @@ impl ViewSet {
             let Some(views) = read_strip(id, item) else { continue };
             let level = item.get("level").and_then(Value::as_str).and_then(WindowLevel::from_key).unwrap_or_default();
             let placement = item.get("placement").and_then(WindowPlacement::from_json);
-            set.put_window(PopOut { id, level, placement, views });
+            let options = item.get("options").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
+            set.put_window(PopOut { options, id, level, placement, views });
         }
         for (owner, entry) in closed {
             let strip = set.windows.iter_mut().find(|window| window.id == owner).map_or(&mut set.closed, |window| &mut window.views.closed);
@@ -1578,12 +1595,14 @@ mod tests {
         assert_eq!(child.views.set_layout(Preset::SideBySide), 2);
         set.put_window(child);
         set.set_layout_padded(Preset::SideBySide);
+        set.window_mut(id).unwrap().options.card_headers = crate::CardHeaders::Hidden;
         let child = set.window(id).unwrap().clone();
         assert_eq!(set.close_window(id), Some(vec![2, other]));
         assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), [1, 2, other]);
         assert_eq!(set.tiles().unwrap().views(), [1, 2]);
         assert!(set.rename(2, "Returned name"));
         assert!(set.restore_window(child));
+        assert_eq!(set.window(id).unwrap().options.card_headers, crate::CardHeaders::Hidden);
         assert_eq!(set.views_of(id).unwrap().get(2).unwrap().name, "Returned name");
         assert_eq!(set.views_of(id).unwrap().tiles().unwrap().views(), [2, other]);
         assert!(set.check());
@@ -1610,8 +1629,13 @@ mod tests {
         let placement =
             WindowPlacement { display: Some("Display 2".into()), x: -25.0, y: 16.0, w: 700.0, h: 500.0, maximised: false, fullscreen: false };
         let id = set.move_to_window(2, WindowTarget::New { placement: Some(placement) }).unwrap().window;
+        let options = crate::WindowOptions { card_headers: crate::CardHeaders::Hover, keep_on_top: true };
+        set.window_mut(id).unwrap().options = options;
         let mut saved = set.to_json();
-        assert_eq!(ViewSet::from_json(&saved).unwrap().to_json(), saved);
+        let restored = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(restored.to_json(), saved);
+        assert_eq!(restored.window(id).unwrap().options, options);
+        saved["windows"][0].as_object_mut().unwrap().remove("options");
         saved["windows"][0]["active"] = json!(5);
         saved["windows"][0]["level"] = json!("unknown future mode");
         saved["windows"][0]["placement"]["h"] = json!(-5);
@@ -1620,6 +1644,7 @@ mod tests {
         assert_eq!(repaired.window_of(1), Some(0));
         assert_eq!(repaired.views_of(id).unwrap().active().id, 2);
         assert_eq!(repaired.window(id).unwrap().level, WindowLevel::ViewsOnly);
+        assert_eq!(repaired.window(id).unwrap().options, crate::WindowOptions::default());
         assert_eq!(repaired.window(id).unwrap().placement, None);
         assert!(repaired.check());
     }

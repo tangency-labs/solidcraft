@@ -15,7 +15,7 @@ use crate::schema::tab_views::{
 };
 use crate::schema::tab_windows::{
     TabViewMoveToWindowParams, TabWindowCleanParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply,
-    TabWindowMoveReply, TabWindowTarget,
+    TabWindowMoveReply, TabWindowOptionParams, TabWindowOptionsReply, TabWindowSetOptionsParams, TabWindowTarget,
 };
 use crate::{Result, Session};
 
@@ -34,6 +34,8 @@ const BESIDE_CONTRACT: TypedContract<TabViewBesideParams> = TypedContract::new()
 const NO_PARAMS_CONTRACT: TypedContract<TabViewNoParams> = TypedContract::new();
 const MOVE_TO_WINDOW_CONTRACT: TypedContract<TabViewMoveToWindowParams> = TypedContract::new();
 const WINDOW_ID_CONTRACT: TypedContract<TabWindowIdParams> = TypedContract::new();
+const WINDOW_OPTIONS_CONTRACT: TypedContract<TabWindowOptionParams> = TypedContract::new();
+const SET_WINDOW_OPTIONS_CONTRACT: TypedContract<TabWindowSetOptionsParams> = TypedContract::new();
 const WINDOW_LIST_CONTRACT: TypedContract<TabWindowListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -67,6 +69,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.window.clean", "Clean Window (Present)", crate::checked!("tab.window.clean", clean_window))
         .icon("panel_float").noundo().doc_only().key("F11").contract(&CLEAN_CONTRACT).output(output_schema_for::<TabWindowCleanParams>)
         .params("window?: id (default: last focused); on?: bool (default: toggle) → window, on; hide or restore window chrome; never opens a dialog"),
+    CommandSpec::new("tab.window.options", "Get Window Options", crate::checked!("tab.window.options", window_options))
+        .icon("panel_float").noundo().doc_only().read_only().contract(&WINDOW_OPTIONS_CONTRACT).output(output_schema_for::<TabWindowOptionsReply>)
+        .params("window?: pop-out id (default: current or last focused pop-out) → window, options"),
+    CommandSpec::new("tab.window.set_options", "Set Window Options", crate::checked!("tab.window.set_options", set_window_options))
+        .icon("panel_float").noundo().doc_only().contract(&SET_WINDOW_OPTIONS_CONTRACT).output(output_schema_for::<TabWindowOptionsReply>)
+        .params("window?: pop-out id; card_headers?: always|hover|hidden; keep_on_top?: bool → window, options"),
+    CommandSpec::new("window.options.use_as_default", "Use Window Options as Default", crate::checked!("window.options.use_as_default", default_window_options))
+        .icon("save").noundo().doc_only().contract(&WINDOW_OPTIONS_CONTRACT).output(output_schema_for::<TabWindowOptionsReply>)
+        .params("window?: pop-out id (default: current or last focused pop-out) → window, options; saves its options as the defaults for new pop-outs"),
     CommandSpec::new("tab.window.close", "Close Window", crate::checked!("tab.window.close", close_window))
         .icon("close").noundo().doc_only().contract(&WINDOW_ID_CONTRACT).output(output_schema_for::<TabWindowCloseReply>)
         .params("window: a pop-out id → returned: view ids sent back to the main window, in order"),
@@ -194,6 +205,25 @@ fn focus_window(_s: &mut Session, p: &Value) -> Result<Value> {
 fn clean_window(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "tab.window.clean";
     reply(cmd, parse::<TabWindowCleanParams>(cmd, p)?)
+}
+
+fn requested_window_options(cmd: &str, p: &Value) -> Result<Value> {
+    let requested: TabWindowOptionParams = parse(cmd, p)?;
+    let request = TabWindowSetOptionsParams { window: requested.window, card_headers: None, keep_on_top: None };
+    reply(cmd, TabWindowOptionsReply::Requested(request))
+}
+
+fn window_options(_s: &mut Session, p: &Value) -> Result<Value> {
+    requested_window_options("tab.window.options", p)
+}
+
+fn set_window_options(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "tab.window.set_options";
+    reply(cmd, TabWindowOptionsReply::Requested(parse(cmd, p)?))
+}
+
+fn default_window_options(_s: &mut Session, p: &Value) -> Result<Value> {
+    requested_window_options("window.options.use_as_default", p)
 }
 
 fn close_window(_s: &mut Session, p: &Value) -> Result<Value> {

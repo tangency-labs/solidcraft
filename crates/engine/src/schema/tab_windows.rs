@@ -3,6 +3,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use solidcraft_views::{CardHeaders, WindowOptions};
 
 /// The destination can be a new pop-out or the id of an open window.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -81,6 +82,34 @@ pub struct TabWindowCleanParams {
     /// True enters presentation mode. If omitted, toggle the current mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+}
+
+/// Select a pop-out. With no id, use the current or last focused pop-out.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowOptionParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
+}
+
+/// Update one or more of a pop-out's options.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowSetOptionsParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_headers: Option<CardHeaders>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_on_top: Option<bool>,
+}
+
+/// The checked request from the engine or the current state from its host.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum TabWindowOptionsReply {
+    Current { window: u32, options: WindowOptions },
+    Requested(TabWindowSetOptionsParams),
 }
 
 /// List the windows of the active design.
