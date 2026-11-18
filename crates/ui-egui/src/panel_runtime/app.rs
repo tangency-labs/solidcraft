@@ -950,7 +950,12 @@ impl AppPanelRuntime {
                 self.with_adapters(|runtime, _native, services| {
                     runtime.set_environment(environment, services.local)?;
                     runtime.update(services)
-                })
+                })?;
+                // Each panel's search box in its header, as its controller asks (#19042).
+                match &mut self.host {
+                    Some(host) => host.apply_header_searches(&self.runtime),
+                    None => Ok(()),
+                }
             })(),
             Err(reason) => {
                 // The provider still represents the previous context. Never

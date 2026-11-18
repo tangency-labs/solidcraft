@@ -126,6 +126,14 @@ pub enum LifecycleEvent {
     DestroyOwner,
 }
 
+/// A panel's search box in its header (#19042): `action` is the header action that opens it, hidden
+/// while it is open, and `open` the box's narrowest width while it is open (`None`: closed).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeaderSearch {
+    pub action: ControlId,
+    pub open: Option<f32>,
+}
+
 pub trait PanelController {
     /// Availability may depend on document/tool context, independent of visibility.
     fn availability(&self, owner: &ContentOwner, models: &dyn PanelModels) -> Availability;
@@ -175,6 +183,12 @@ pub trait PanelController {
     }
     /// Apply/Finish/Cancel/Stop stay explicit content actions, never layout mutations.
     fn action(&mut self, owner: &ContentOwner, action: &ControlId, services: &mut ContentServices<'_>) -> PanelResult<()>;
+    /// A search box that takes the title's place while open; the panel draws it in
+    /// `ContentSlot::Title`, or as its first body row when the title was not drawn
+    /// (`title_drawn`). The default has none.
+    fn header_search(&self) -> Option<HeaderSearch> {
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -648,6 +662,23 @@ impl PanelRuntime {
         self.require_live()?;
         let key = self.key(self.layout.layout().instance(instance)?)?;
         self.presentation(&key)
+    }
+    /// The header search of each open panel with a retained controller (`PanelController::header_search`),
+    /// checked: its action must be one of the kind's header actions, and its width finite, positive
+    /// and at most `MAX_LOGICAL`. This never creates, updates or renders a controller.
+    pub fn header_searches(&self) -> impl Iterator<Item = (&InstanceId, PanelResult<HeaderSearch>)> + '_ {
+        self.layout.layout().instances.iter().filter(|instance| !self.destroyed && instance.requested_open).filter_map(|instance| {
+            let search = self.controllers.get(&self.key(instance).ok()?)?.controller.header_search()?;
+            let declared = self.layout.registry().get(&instance.kind).is_ok_and(|spec| spec.header_actions.iter().any(|a| a.id == search.action));
+            let checked = if !declared {
+                Err(error(Rule::Capability, "header search action is not a header action of its panel"))
+            } else if search.open.is_some_and(|width| !width.is_finite() || width <= 0.0 || width > MAX_LOGICAL) {
+                Err(error(Rule::Bounds, "invalid header search width"))
+            } else {
+                Ok(search)
+            };
+            Some((&instance.id, checked))
+        })
     }
     pub fn instance_owner(&self, instance: &InstanceId) -> PanelResult<ContentOwner> {
         self.key(self.layout.layout().instance(instance)?).map(|key| key.owner)

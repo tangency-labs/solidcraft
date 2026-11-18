@@ -337,6 +337,30 @@ impl WorkspacePanelHost {
         }
     }
 
+    /// Applies each open panel's header search (`PanelRuntime::header_searches`): while its box is
+    /// open it takes the title's place and its action is hidden; closed, both come back. Only a
+    /// change touches the geometry. A refused search leaves its panel as it was; the first refusal
+    /// is returned once every other panel is applied.
+    pub(crate) fn apply_header_searches(&mut self, runtime: &PanelRuntime) -> PanelResult<()> {
+        let mut refused = Ok(());
+        for (instance, search) in runtime.header_searches() {
+            match search {
+                Ok(search) => {
+                    if self.options.geometry.header_content.get(instance).copied() != search.open {
+                        self.set_header_content(instance.clone(), search.open);
+                    }
+                    let hidden = self.options.geometry.hidden_header_actions.get(instance).is_some_and(|actions| actions.contains(&search.action));
+                    if hidden != search.open.is_some() {
+                        self.set_header_action_visible(instance.clone(), search.action, search.open.is_none());
+                    }
+                }
+                Err(reason) if refused.is_ok() => refused = Err(reason),
+                Err(_) => {}
+            }
+        }
+        refused
+    }
+
     pub(crate) fn set_live_drag(&mut self, enabled: bool) {
         self.live_drag = enabled;
         self.interaction.set_live_drag(enabled);
@@ -2898,10 +2922,26 @@ fn render_slot(
         reports,
     };
     let mut services = ContentServices { models: services.models, commands: &mut *services.commands, local: &mut local };
+    if slot == ContentSlot::Title {
+        let pass = child.ctx().cumulative_pass_nr();
+        child.ctx().data_mut(|data| data.insert_temp(title_drawn_id(&context.instance.0), pass));
+    }
     let result = frame_content.render(slot, &mut child, context, content, &mut services);
     if let Err(reason) = result {
         *failure = Some(reason);
     }
+}
+
+fn title_drawn_id(instance: &str) -> egui::Id {
+    egui::Id::unique(("panel_title_drawn", instance))
+}
+
+/// The panel `instance` drew its `ContentSlot::Title` this pass (the Title is drawn before the
+/// body). What the Title holds, such as a search box, then stays out of the body; a panel in a tab
+/// group has no Title, so it draws that in its body.
+pub fn title_drawn(ctx: &egui::Context, instance: &str) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<u64>(title_drawn_id(instance))) == Some(pass)
 }
 
 /// The render call supplies provenance directly; no previous-pass widget lookup

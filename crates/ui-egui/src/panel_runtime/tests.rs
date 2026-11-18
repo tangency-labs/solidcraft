@@ -14287,3 +14287,109 @@ fn header_content_takes_the_titles_place_after_the_grip() {
         raw.host.set_header_content(id("lone"), None);
     }
 }
+
+/// A test panel whose header search the test sets, with the `pulse` header action bound.
+struct SearchingController {
+    inner: Box<dyn PanelController>,
+    search: std::rc::Rc<std::cell::RefCell<Option<HeaderSearch>>>,
+}
+impl PanelController for SearchingController {
+    fn availability(&self, owner: &ContentOwner, models: &dyn PanelModels) -> Availability {
+        self.inner.availability(owner, models)
+    }
+    fn update(&mut self, owner: &ContentOwner, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        self.inner.update(owner, services)
+    }
+    fn presentation(&self) -> PanelPresentation {
+        let mut presentation = self.inner.presentation();
+        presentation.actions.push(RuntimeAction {
+            id: ControlId::new("pulse").unwrap(),
+            label: "search".into(),
+            enabled: true,
+            disabled_reason: None,
+            pressed: None,
+        });
+        presentation
+    }
+    fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {
+        self.inner.prepare_lifecycle(event)
+    }
+    fn lifecycle(&mut self, event: &LifecycleEvent) {
+        self.inner.lifecycle(event);
+    }
+    fn render(&mut self, slot: ContentSlot, ui: &mut egui::Ui, context: &PanelContext, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        self.inner.render(slot, ui, context, services)
+    }
+    fn action(&mut self, owner: &ContentOwner, action: &ControlId, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        self.inner.action(owner, action, services)
+    }
+    fn header_search(&self) -> Option<HeaderSearch> {
+        self.search.borrow().clone()
+    }
+}
+
+/// A panel's header search (#19042): open, its box takes the title's place and its action is
+/// hidden; closed, both come back. A search naming an action the panel does not declare, or a width
+/// that is not a finite positive size, is refused and changes nothing. A tab group keeps its tabs.
+#[test]
+fn a_panels_header_search_takes_the_titles_place_and_holds_its_action() {
+    let (mut h, _) = review_cohort_host(|_| {});
+    let search = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let create = fixture_controller_binding(&h.probe, false, Ownership::Application).create;
+    let shared = search.clone();
+    h.runtime
+        .register(
+            PanelKind::new("fixture.application").unwrap(),
+            ControllerBinding {
+                ownership: Ownership::Application,
+                create: Box::new(move |instance, owner| {
+                    Ok(Box::new(SearchingController { inner: create(instance, owner)?, search: shared.clone() }))
+                }),
+            },
+        )
+        .unwrap();
+    h.dispatch(vec![
+        fixture_open("fixture.application", "lone", "side", Zone::Right, 0).unwrap(),
+        Mutation::SetSize { section: section("side"), size: Size { width: 320.0, height: 300.0 } },
+    ])
+    .unwrap();
+    let mut raw = RawPanelHost::new(h, 1.0);
+    let card = |raw: &mut RawPanelHost| {
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        raw.host.frame().unwrap().layout.sections[0].clone()
+    };
+    let pulse = |c: &HostSection| c.actions.iter().any(|(action, _)| action.0 == "pulse");
+    let set = |open: Option<f32>| HeaderSearch { action: ControlId::new("pulse").unwrap(), open };
+    let c = card(&mut raw);
+    assert!(c.header_content.is_none() && pulse(&c), "no search: the title and the action");
+    *search.borrow_mut() = Some(set(Some(60.0)));
+    raw.host.apply_header_searches(&raw.content.runtime).unwrap();
+    let c = card(&mut raw);
+    assert!(c.header_content.is_some() && !pulse(&c), "open: the box in the title's place, its action hidden");
+    let other = HeaderSearch { action: ControlId::new("other").unwrap(), open: None };
+    for bad in [other, set(Some(f32::NAN)), set(Some(f32::INFINITY)), set(Some(0.0)), set(Some(-1.0)), set(Some(MAX_LOGICAL * 2.0))] {
+        *search.borrow_mut() = Some(bad.clone());
+        assert!(raw.host.apply_header_searches(&raw.content.runtime).is_err(), "{bad:?} is refused");
+        let c = card(&mut raw);
+        assert!(c.header_content.is_some() && !pulse(&c), "{bad:?} changes nothing");
+    }
+    *search.borrow_mut() = Some(set(None));
+    raw.host.apply_header_searches(&raw.content.runtime).unwrap();
+    let c = card(&mut raw);
+    assert!(c.header_content.is_none() && pulse(&c), "closed: the title and the action come back");
+    *search.borrow_mut() = Some(set(Some(60.0)));
+    raw.content
+        .dispatch(vec![
+            Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: id("peer"),
+                destination: Some(Destination::JoinTab { section: section("side"), index: 1 }),
+            },
+            Mutation::Activate { instance: id("lone") },
+        ])
+        .unwrap();
+    raw.host.apply_header_searches(&raw.content.runtime).unwrap();
+    let c = card(&mut raw);
+    assert!(c.tab_strip.is_some() && c.header_content.is_none(), "a group keeps its tabs; the panel draws the box in its body");
+}
