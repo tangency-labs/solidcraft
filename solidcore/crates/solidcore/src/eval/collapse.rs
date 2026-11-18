@@ -1274,9 +1274,10 @@ const RATIONAL_BOUND_LEVELS: u32 = 6;
 /// holds; the least found is returned.
 ///
 /// Refused where a weight of a piece is not certified positive (past the range a continued
-/// weight can reach zero), where a distance between the `R` is not finite (weights whose
-/// products underflow or overflow), where `across` is off its knot range or `along` is empty, and for
-/// knots with an empty span where one is needed or, along `d`, a multiplicity above the degree.
+/// weight can reach zero), where the weights' products leave the normal range (underflow) or
+/// a distance between the `R` is not finite (overflow), where `across` is off its knot range
+/// or `along` is empty, and for knots with an empty span where one is needed or, along `d`, a
+/// multiplicity above the degree.
 fn rational_partial_bound(
     s: &EvalSurface,
     d: usize,
@@ -1412,6 +1413,11 @@ fn rational_partial_bound(
             if !(low > 0.0 && high.is_finite()) {
                 return Err(refused("a weight of a rational net that is not positive"));
             }
+            // Every weight is at least `low`, so with `low * low` normal so are the weights'
+            // products below, and their rounding is the relative one `gamma` counts.
+            if !(low * low >= f64::MIN_POSITIVE) {
+                return Err(refused("weights of a rational net whose products underflow"));
+            }
             least = least.min(low);
             let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
             for r in all() {
@@ -1426,16 +1432,15 @@ fn rational_partial_bound(
                 .fold(0.0, f64::max);
             let at = |j: usize, kk: usize| rows.get(j).and_then(|r| r.get(kk)).copied();
             // |R_a − R_b| over every parameter across this span.
-            // Not finite where the weights' products underflow (0 / 0) or overflow (∞ − ∞) or
-            // the net's points overflow; a maximum would drop a NaN, so each term is refused
-            // before one sees it.
+            // Not finite where the weights' products overflow (∞ − ∞) or the net's points do; a
+            // maximum would drop a NaN, so each term is refused before one sees it.
             let finite = |x: f64| -> Result<f64, EvalError> {
                 if x.is_finite() {
                     Ok(x)
                 } else {
                     Err(refused(
                         "a distance on a rational net that is not finite (its weights' \
-                         products underflow or overflow, or its points overflow)",
+                         products or its points overflow)",
                     ))
                 }
             };
@@ -1593,7 +1598,7 @@ pub struct OntoKnots {
 /// direction, a rational pcurve with a weight that is not positive), and
 /// ([`EvalError::Invalid`]) for control points or a tolerance that are not finite, and for
 /// knots that do not fit their control points (on a rational net, also an inner knot along the
-/// move whose multiplicity is above the degree, where the surface may jump).
+/// move's direction whose multiplicity is above the degree, where the surface may jump).
 pub fn pcurve_onto_knots(
     s: &EvalSurface,
     pc: &Curve2,
