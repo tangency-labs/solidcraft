@@ -190,6 +190,22 @@ const FILE_COMMANDS: &[&str] = &[
     "timeline.export_script",
 ];
 
+/// Only reviewed input readers can access a folder granted for read without write.
+/// A new command defaults to needing both permissions until its file effects are audited.
+fn input_only_command(id: &str) -> bool {
+    matches!(id, "file.insert_step" | "file.insert_mesh" | "file.insert_gerber" | "file.gerber_files" | "sketch.insert_dxf" | "sketch.insert_svg")
+}
+
+/// Both the manifest and the user must approve a folder for the intended access.
+/// Writers retain the existing requirement that both read and write are approved.
+fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FilePermission], write: bool) -> Vec<PathBuf> {
+    granted
+        .iter()
+        .filter(|g| g.read && (!write || g.write) && requested.iter().any(|r| r.name == g.name && r.read && (!write || r.write)))
+        .map(|g| g.folder.clone())
+        .collect()
+}
+
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
 pub fn command_group(id: &str) -> Option<&'static str> {
     let family = id.split_once('.').map_or(id, |(family, _)| family);
@@ -307,18 +323,16 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             view: None,
             groups,
             file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
             evaluation: None,
         };
-        let file_folders = host
-            .granted_folders()
-            .into_iter()
-            .filter(|g| g.read && g.write && rt.permissions.files.iter().any(|r| r.name == g.name && r.read && r.write))
-            .map(|g| g.folder)
-            .collect();
+        let approved = host.granted_folders();
+        let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
+        let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
         // A long job runs for the user's job ceiling (Preferences › Plugins).
         let options = craft_plugin_wasm::RuntimeOptions { job_deadline_ms: host_limits.max_job_seconds.saturating_mul(1000), ..Default::default() };
         let (host, result) = craft_plugin_wasm::run_with_options(
-            SolidCraftHost { file_folders, ..host },
+            SolidCraftHost { file_folders, file_read_folders, ..host },
             &package.manifest,
             &package.component,
             entry,
@@ -372,6 +386,8 @@ pub struct SolidCraftHost {
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
+    /// Approved folders used only by known read-only input commands.
+    file_read_folders: Vec<PathBuf>,
     /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
     evaluation: Option<Box<Session>>,
 }
@@ -439,9 +455,13 @@ impl PluginHost for SolidCraftHost {
         {
             return Err(HostError::PermissionDenied { permission: format!("command {name} needs the `{group}` permission, which is not granted") });
         }
-        // Only a granted `file` or `doc` command reaches files, and only the folders granted for it.
+        // Read-only grants apply only to known input readers. File writers retain their
+        // previous read-and-write scope; unknown commands default to that stricter scope.
         let scope = match group {
-            Some("file" | "doc") => solidcraft_io::vfs::PathScope::new(self.file_folders.iter().cloned()),
+            Some("file" | "doc") => {
+                let folders = if input_only_command(name) { &self.file_read_folders } else { &self.file_folders };
+                solidcraft_io::vfs::PathScope::new(folders.iter().cloned())
+            }
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;

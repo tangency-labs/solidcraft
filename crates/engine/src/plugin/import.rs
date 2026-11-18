@@ -155,6 +155,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
             view: None,
             groups: BTreeSet::new(),
             file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
             evaluation: None,
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
