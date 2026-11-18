@@ -583,6 +583,7 @@ fn parallel_curved_import_keeps_face_colours_and_exact_display_meshes() {
                 opacity: 0.7,
                 faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.3], opacity: 0.5, name: None }],
                 name: None,
+                layer: None,
             }))
         })
         .collect();
@@ -4318,6 +4319,31 @@ fn an_invisibility_record_hides_its_styled_item_and_representation() {
     assert!(!shown.bodies[0].hidden);
 }
 
+/// The presentation layer a file puts a body on is read with it, whether the layer lists the
+/// solid, its styled item or its representation; a body on two layers is on the first, a blank
+/// layer name is no layer, and a body on none has none.
+#[test]
+fn a_body_is_read_with_the_layer_it_is_assigned_to() {
+    let layer_of = |extra: &str| {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += extra;
+        t += TAIL;
+        let imported = step_import(&t).unwrap();
+        assert_eq!(imported.bodies.len(), 1, "{:?}", imported.warnings);
+        imported.bodies[0].layer.clone()
+    };
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT('Frame/Rails','',(#101));\n").as_deref(), Some("Frame/Rails"));
+    assert_eq!(layer_of("#70=STYLED_ITEM('',(),#101);\n#80=PRESENTATION_LAYER_ASSIGNMENT('Styled','',(#70));\n").as_deref(), Some("Styled"));
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT('Represented','',(#60));\n").as_deref(), Some("Represented"));
+    let two = "#80=PRESENTATION_LAYER_ASSIGNMENT('First','',(#101));\n#81=PRESENTATION_LAYER_ASSIGNMENT('Second','',(#101));\n";
+    assert_eq!(layer_of(two).as_deref(), Some("First"));
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT(' ','',(#101));\n"), None);
+    assert_eq!(layer_of(""), None);
+}
+
 /// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the
 /// surface colour, whichever style the file lists first or last. The edge's colour once painted
 /// the whole solid, because the first colour found was taken.
@@ -5119,6 +5145,7 @@ fn the_checks_heal_a_shared_import_once_they_end() {
             file_faces: 8,
             refused: None,
             hidden: k > 1,
+            layer: None,
         })
         .collect();
     heals.apply(&mut bodies);

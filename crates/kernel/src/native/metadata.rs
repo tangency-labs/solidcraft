@@ -277,6 +277,7 @@ pub(super) fn apply(body: &mut Body, saved: w::Metadata) -> Result<()> {
             faces: p.faces.into_iter().map(|f| crate::FacePaint { face: f.face as usize, color: f.color, opacity: f.opacity, name: None }).collect(),
             // Colour names are not part of this record: the model cache keeps them beside it.
             name: None,
+            layer: None,
         })
     });
     body.splits = saved.boundaries.map(|s| std::sync::Arc::new(s.into_iter().map(|line| line.into_iter().map(p).collect()).collect()));

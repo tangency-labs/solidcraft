@@ -4432,7 +4432,9 @@ impl Document {
             let opacity = self.model_body_opacity(b) as f32;
             // The look's name goes with its colour (a STEP `COLOUR_RGB` name), so it comes back on import.
             let name = c.and_then(|_| self.model_display_look(b)).and_then(|l| l.file_name());
-            let paint = solidcraft_kernel::Paint { opacity, faces, name };
+            // The browser folder it sits in goes as its layer (a STEP layer), so it comes back as a folder.
+            let layer = self.model_body_folder(b);
+            let paint = solidcraft_kernel::Paint { opacity, faces, name, layer };
             if c != b.body.color() || b.body.paint() != Some(&paint) {
                 b.body = b.body.clone().with_color(c).with_paint(Some(paint));
             }

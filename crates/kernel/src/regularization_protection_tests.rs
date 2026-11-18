@@ -18,6 +18,7 @@ fn stamped_shell_keeps_authored_painted_and_split_boundaries() {
         opacity: 1.,
         faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
         name: None,
+        layer: None,
     }));
     let side = (0..stock.face_count()).find(|i| stock.planar_face(*i).is_some_and(|p| p.normal().dot(Vec3::X) > 0.999 && p.origin.x == 20.)).unwrap();
     let split = crate::split_faces(&stock, &[side], &crate::SplitTool::Plane(Plane { origin: Vec3::new(0., 0., 8.), ..Plane::XY })).unwrap();
@@ -57,6 +58,7 @@ fn protection_is_identity_and_survives_tool_operand_and_compounds() {
         opacity: 1.,
         faces: vec![FacePaint { face: 0, color: [0., 1., 0.], opacity: 1., name: None }],
         name: None,
+        layer: None,
     }));
     let cleared = protected.with_paint(None);
     assert!(!a.same(&cleared));

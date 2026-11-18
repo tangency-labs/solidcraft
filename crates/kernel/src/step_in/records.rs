@@ -199,6 +199,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             file_faces: part.file_faces,
             refused: None,
             hidden: r.hidden,
+            layer: None,
         });
     }
     Ok(StepImport {
@@ -320,7 +321,7 @@ fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
             Some(crate::FacePaint { face: i, color: p.color.map(unit), opacity: unit(p.opacity), name: p.name.clone() })
         })
         .collect();
-    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone() }
+    crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone(), layer: paint.layer.clone() }
 }
 
 /// A colour channel or an opacity from a file, kept in 0..1 (1 when it is not a number).

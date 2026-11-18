@@ -13,7 +13,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 |---|---|---|
 | `.sc` (versioned container or JSON design; `.solidcraft` files from earlier releases still open) | yes | yes |
 | `.json` (self-contained plain JSON design) | yes | yes |
-| STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
+| STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours, layers (as body folders) | AP242 with names, colours, the component tree and body folders (as layers) |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
 | FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
 | Rhino `.3dm` | solids, through cadmpeg | |
@@ -69,6 +69,12 @@ sub-assemblies become nested components, and a part used several times is one co
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
 and its parts don't move on their own. Right-click the component and choose **Placement → Unlock Contents** to
 joint the parts one by one. Undo removes a whole import in one step.
+
+Body folders travel through STEP as presentation layers. A STEP export puts each body in a folder
+on a layer named after the folder's path: a body in the folder Rails inside the folder Frame is
+on the layer `Frame/Rails`. A body in no folder is on no layer. When you insert or open a STEP
+file, each body on a layer goes into a folder of that name in its component's Bodies folder, and
+a `/` in the name nests the folders, so an exported design comes back with the same folders.
 
 A glTF file (`.glb`, or `.gltf` with the `.bin` files it names in the same folder) comes in the
 same way: its nodes become nested components, a mesh placed several times is one component with
