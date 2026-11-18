@@ -763,7 +763,9 @@ fn projection_links(geometry: Vec<solidcore_ops::conic_projection::Projection>) 
         .into_iter()
         .map(|g| {
             Ok(match g {
-                Projection::Segment(s) => link_geom(&s).ok_or_else(|| DocError::Invalid("exact edge degree is not supported by a sketch".into()))?,
+                Projection::Segment(s) => {
+                    LinkGeom::from_seg(&s).ok_or_else(|| DocError::Invalid("exact edge degree is not supported by a sketch".into()))?
+                }
                 Projection::Point(p) => LinkGeom::Point(p),
                 Projection::Line(a, b) => LinkGeom::Line(a, b),
                 Projection::Spline { spline, degree, implicit } => LinkGeom::Spline {
