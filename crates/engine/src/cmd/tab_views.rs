@@ -17,9 +17,12 @@ use crate::schema::tab_windows::{
     TabViewMoveToWindowParams, TabWindowCleanParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply,
     TabWindowMoveReply, TabWindowOptionParams, TabWindowOptionsReply, TabWindowSetOptionsParams, TabWindowTarget,
 };
+use crate::schema::tab_windows::{TabWindowDisplayParams, TabWindowRenameParams};
 use crate::{Result, Session};
 
 const COMPASS_CONTRACT: TypedContract<ViewCompassParams> = TypedContract::new();
+const WINDOW_RENAME_CONTRACT: TypedContract<TabWindowRenameParams> = TypedContract::new();
+const WINDOW_DISPLAY_CONTRACT: TypedContract<TabWindowDisplayParams> = TypedContract::new();
 const OPEN_CONTRACT: TypedContract<TabViewOpenParams> = TypedContract::new();
 const ID_CONTRACT: TypedContract<TabViewIdParams> = TypedContract::new();
 const CLOSE_GROUP_CONTRACT: TypedContract<TabViewCloseGroupParams> = TypedContract::new();
@@ -60,6 +63,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.view.move_to_window", "Move View to Window", crate::checked!("tab.view.move_to_window", move_to_window))
         .icon("panel_popout").noundo().doc_only().key("Ctrl+Alt+W").contract(&MOVE_TO_WINDOW_CONTRACT).output(output_schema_for::<TabWindowMoveReply>)
         .params("view: an open view id; window?: id or new (default); existing only: index?: insertion position (0 first); new only: display?: name or index, x?, y?, w?, h?: logical points, level?: views_only → view, window, created, from, closed_source, placement"),
+    CommandSpec::new("tab.window.rename", "Rename Window", crate::checked!("tab.window.rename", rename_window))
+        .icon("rename").noundo().doc_only().contract(&WINDOW_RENAME_CONTRACT).output(output_schema_for::<TabWindowRenameParams>)
+        .params("window: a pop-out id; name: new window name → window, name"),
+    CommandSpec::new("tab.window.move_to_display", "Move Window to Display", crate::checked!("tab.window.move_to_display", move_to_display))
+        .icon("window_other").noundo().doc_only().contract(&WINDOW_DISPLAY_CONTRACT).output(output_schema_for::<TabWindowDisplayParams>)
+        .params("window: a pop-out id; display: a zero-based display index → window, display"),
     CommandSpec::new("tab.window.list", "List Windows", crate::checked!("tab.window.list", list_windows))
         .icon("list").noundo().doc_only().read_only().contract(&WINDOW_LIST_CONTRACT).output(output_schema_for::<TabWindowListReply>)
         .params("no parameters → windows of the active design; main window is 0; read-only"),
@@ -119,6 +128,21 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn set_compass(_session: &mut Session, p: &Value) -> Result<Value> {
     let options = parse::<ViewCompassParams>("view.set_compass", p)?;
     serde_json::to_value(options).map_err(|error| bad("view.set_compass", error.to_string()))
+}
+
+fn rename_window(_session: &mut Session, p: &Value) -> Result<Value> {
+    let mut request = parse::<TabWindowRenameParams>("tab.window.rename", p)?;
+    let name = request.name.trim();
+    if name.is_empty() || name.chars().count() > MAX_NAME || name.chars().any(char::is_control) {
+        return Err(bad("tab.window.rename", "invalid window name"));
+    }
+    request.name = name.to_owned();
+    serde_json::to_value(request).map_err(|error| bad("tab.window.rename", error.to_string()))
+}
+
+fn move_to_display(_session: &mut Session, p: &Value) -> Result<Value> {
+    let request = parse::<TabWindowDisplayParams>("tab.window.move_to_display", p)?;
+    serde_json::to_value(request).map_err(|error| bad("tab.window.move_to_display", error.to_string()))
 }
 
 fn parse<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {

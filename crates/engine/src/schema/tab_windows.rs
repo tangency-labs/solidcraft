@@ -189,3 +189,19 @@ pub enum TabWindowCloseReply {
     Completed(TabWindowCloseResult),
     Requested(TabWindowIdParams),
 }
+
+/// Set a native view window's display name.
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowRenameParams {
+    pub window: u32,
+    pub name: String,
+}
+
+/// Move a native view window to a numbered display.
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowDisplayParams {
+    pub window: u32,
+    pub display: u32,
+}

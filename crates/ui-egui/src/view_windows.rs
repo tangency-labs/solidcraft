@@ -53,6 +53,7 @@ enum PendingAction {
     Close { view: u64 },
     Bring { source: WindowId, target: WindowId },
     Setup(crate::view_setups::DeferredSetup),
+    MoveToDisplay { window: WindowId, display: usize },
 }
 
 struct Host {
@@ -197,6 +198,14 @@ pub(crate) fn strip_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
 }
 
 pub(crate) fn window_name(app: &SolveApp, id: WindowId) -> String {
+    if let Some(name) = app.docs.views.views_of(id).and_then(ViewSet::window_name) {
+        return name.to_owned();
+    }
+    if app.view_windows.is_child()
+        && let Some(choice) = app.view_windows.choices.iter().find(|choice| choice.id == id)
+    {
+        return choice.name.clone();
+    }
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     if id == 0 {
         locale.text("view_tab.main_window").to_owned()
@@ -741,6 +750,27 @@ pub(crate) fn command(app: &mut SolveApp, command: &str, request: Value) -> Resu
                 Ok(json!({"window": key.1, "on": on}))
             })
         }
+        "tab.window.rename" => {
+            let name = request.get("name").and_then(Value::as_str).ok_or("invalid_window_name")?;
+            with_strip(app, Some(id), |app| {
+                if !app.docs.views.rename_window(name) {
+                    return Err("invalid_window_name".into());
+                }
+                Ok(json!({"window": id, "name": name}))
+            })
+        }
+        "tab.window.move_to_display" => {
+            let display = request.get("display").and_then(Value::as_u64).and_then(|index| usize::try_from(index).ok()).ok_or("no_such_display")?;
+            if app.view_windows.displays.get(display).is_none() {
+                return Err("no_such_display".into());
+            }
+            if app.view_windows.painting == Some(id) {
+                app.view_windows.pending_action = Some(PendingAction::MoveToDisplay { window: id, display });
+            } else {
+                move_to_display(app, id, display)?;
+            }
+            Ok(request)
+        }
         "tab.window.focus" => {
             focus(app, id)?;
             Ok(json!({"window":id}))
@@ -754,6 +784,25 @@ pub(crate) fn command(app: &mut SolveApp, command: &str, request: Value) -> Resu
         }
         _ => Err("no_such_window".into()),
     }
+}
+
+fn move_to_display(app: &mut SolveApp, id: WindowId, display: usize) -> Result<(), String> {
+    let window = app.docs.views.window(id).ok_or("window_not_found")?;
+    let existing = window.placement.as_ref();
+    let destination = crate::view_setups::Placement {
+        display: Some(display),
+        x: existing.map_or(24.0, |p| p.x),
+        y: existing.map_or(24.0, |p| p.y),
+        w: existing.map_or(850.0, |p| p.w),
+        h: existing.map_or(600.0, |p| p.h),
+        maximised: existing.is_some_and(|p| p.maximised),
+        fullscreen: existing.is_some_and(|p| p.fullscreen),
+    };
+    let placement = resolve_setup_placement(app, destination);
+    let window = app.docs.views.window_mut(id).ok_or("window_not_found")?;
+    window.placement = Some(placement);
+    app.view_windows.pending_child_placements.insert((app.docs.active_tab(), id));
+    Ok(())
 }
 
 fn restore_and_focus(ctx: &Context) {
@@ -953,6 +1002,106 @@ fn toast(app: &mut SolveApp, ctx: &Context) {
     }
 }
 
+fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Response, context_open: bool) {
+    use crate::ui_kit::window_options_menu::{self as kit, Action, CardHeaders, DisplayChoice, WindowMenu};
+    let options = child_options(app);
+    let card_headers = match options.card_headers {
+        solidcraft_views::CardHeaders::Always => CardHeaders::Always,
+        solidcraft_views::CardHeaders::Hover => CardHeaders::Hover,
+        solidcraft_views::CardHeaders::Hidden => CardHeaders::Hidden,
+    };
+    let current = app.view_windows.choices.iter().find(|choice| choice.id == id).and_then(|choice| choice.display.as_deref());
+    let labels: Vec<_> = app
+        .view_windows
+        .displays
+        .iter()
+        .enumerate()
+        .map(|(index, _)| solidcraft_ui_text::format("window_menu.display_number", &[("n", &(index + 1).to_string())]))
+        .collect();
+    let displays: Vec<_> = app
+        .view_windows
+        .displays
+        .iter()
+        .zip(&labels)
+        .enumerate()
+        .map(|(id, (display, name))| DisplayChoice { id, name, current: current == Some(display.name.as_str()) })
+        .collect();
+    let title = window_name(app, id);
+    let menu = WindowMenu { title: &title, displays: &displays, card_headers, keep_on_top: options.keep_on_top };
+    let Some(action) = kit::show(ui, anchor, context_open, &menu) else { return };
+    let (command, request) = match action {
+        Action::CardHeaders(headers) => {
+            let value = match headers {
+                CardHeaders::Always => "always",
+                CardHeaders::Hover => "hover",
+                CardHeaders::Hidden => "hidden",
+            };
+            ("tab.window.set_options", json!({"window": id, "card_headers": value}))
+        }
+        Action::KeepOnTop(on) => ("tab.window.set_options", json!({"window": id, "keep_on_top": on})),
+        Action::MoveToDisplay(display) => ("tab.window.move_to_display", json!({"window": id, "display": display})),
+        Action::UseAsDefault => ("window.options.use_as_default", json!({"window": id})),
+        Action::ReturnViews | Action::Close => ("tab.window.close", json!({"window": id})),
+        Action::Rename => {
+            start_window_rename(app, ui.ctx(), id);
+            return;
+        }
+    };
+    if let Err(error) = app.run(command, request) {
+        app.set_status(error, true);
+    }
+}
+
+fn window_rename_id(ctx: &Context) -> egui::Id {
+    egui::Id::unique(("view_window_rename", ctx.viewport_id()))
+}
+
+fn start_window_rename(app: &SolveApp, ctx: &Context, id: WindowId) {
+    let key = window_rename_id(ctx);
+    let name = window_name(app, id);
+    ctx.data_mut(|data| data.insert_temp(key, (name, true)));
+}
+
+fn show_window_rename(app: &mut SolveApp, ctx: &Context, id: WindowId) {
+    let key = window_rename_id(ctx);
+    let Some((mut name, first)) = ctx.data(|data| data.get_temp::<(String, bool)>(key)) else { return };
+    let modal = Container::new(ctx, Surface::Window).modal(key).show(ctx, |ui| {
+        ui.set_width(280.0);
+        ui.heading(app.tr("window_menu.rename"));
+        let field = ui.add(egui::TextEdit::singleline(&mut name).char_limit(solidcraft_views::MAX_NAME).hint_text(app.tr("window_menu.name")));
+        if first {
+            field.request_focus();
+        }
+        let keys = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        ui.horizontal(|ui| {
+            let cancel = crate::ui_kit::button(ui, app.tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked();
+            let apply = crate::ui_kit::button(ui, app.tr("ui.apply"), crate::ui_kit::Button::Enabled(!name.trim().is_empty())).clicked();
+            (cancel, apply || keys && !name.trim().is_empty())
+        })
+        .inner
+    });
+    let (cancel, submit) = modal.inner;
+    let saved = if submit {
+        match app.run("tab.window.rename", json!({"window": id, "name": name})) {
+            Ok(_) => true,
+            Err(error) => {
+                app.set_status(error, true);
+                false
+            }
+        }
+    } else {
+        false
+    };
+    let closed = modal.should_close() || cancel || saved;
+    ctx.data_mut(|data| {
+        if closed {
+            data.remove::<(String, bool)>(key);
+        } else {
+            data.insert_temp(key, (name, false));
+        }
+    });
+}
+
 fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if is_clean(app) {
@@ -973,30 +1122,25 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
                 let brand_end = crate::app_bar::paint_brand(ui.painter(), content, &solidcraft_look::glyphs::brand_mark, Some("SolidCraft"));
                 let menu = egui::Rect::from_center_size(egui::pos2(content.right() - 17.0, content.center().y), egui::Vec2::splat(26.0));
                 let menu_tip = app.tr("multi_window.window_menu");
-                Menu::button_with(
-                    ui,
-                    |ui, _| {
-                        let response = ui.interact(menu, ui.scope_id().with("view_window_menu"), egui::Sense::click());
-                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, menu_tip));
-                        if response.hovered() {
-                            ui.painter().rect_filled(menu, tokens.radius_sm, tokens.app_bar_hover_button);
-                        }
-                        if response.has_focus() {
-                            ui.painter().rect_stroke(menu, tokens.radius_sm, egui::Stroke::new(1.0, tokens.app_bar_text), egui::StrokeKind::Inside);
-                        }
-                        for x in [-4.0, 0.0, 4.0] {
-                            ui.painter().circle_filled(menu.center() + egui::vec2(x, 0.0), 1.25, tokens.app_bar_text);
-                        }
-                        response.backing_on_hover_text(menu_tip)
-                    },
-                    |ui| {
-                        ui.label(app.tr("multi_window.views_only"));
-                        if crate::ui_kit::menu::button(ui, app.tr("multi_window.return_views"), "").clicked() {
-                            let _ = app.run("tab.window.close", json!({"window":id}));
-                            ui.close();
-                        }
-                    },
-                );
+                let response = ui.interact(menu, ui.scope_id().with("view_window_menu"), egui::Sense::click());
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, menu_tip));
+                if response.hovered() || response.has_focus() {
+                    ui.painter().rect_filled(menu, tokens.radius_sm, tokens.app_bar_hover_button);
+                }
+                if response.has_focus() {
+                    ui.painter().rect_stroke(menu, tokens.radius_sm, egui::Stroke::new(1.0, tokens.app_bar_text), egui::StrokeKind::Inside);
+                }
+                for x in [-4.0, 0.0, 4.0] {
+                    ui.painter().circle_filled(menu.center() + egui::vec2(x, 0.0), 1.25, tokens.app_bar_text);
+                }
+                let context_open = ui.input(|input| {
+                    input.pointer.secondary_clicked()
+                        && input.pointer.interact_pos().is_some_and(|at| content.contains(at) && (at.x <= brand_end || menu.contains(at)))
+                });
+                if response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+                    start_window_rename(app, ui.ctx(), id);
+                }
+                window_menu(app, ui, id, response.backing_on_hover_text(menu_tip), context_open);
                 let mut left = brand_end + 12.0;
                 let right = menu.left() - 6.0;
                 let name = window_name(app, id);
@@ -1040,6 +1184,7 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
     app.resolve_fit(ui.ctx());
     documents::sync_linked_active(app);
     crate::shortcut_box::show(app, ui.ctx());
+    show_window_rename(app, ui.ctx(), id);
     crate::context_menu::show(app, ui.ctx());
     documents::sync_window_title(app, ui.ctx());
     if app.custom_titlebar {
@@ -1282,6 +1427,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 PendingAction::Move { view, target } => apply_move(app, view, target).map(|_| ()),
                 PendingAction::Focus { view, window } => focus_view(app, view, Some(window)).and_then(|()| focus(app, window)),
                 PendingAction::Close { view } => app.run("tab.view.close", json!({"id": view})).map(|_| ()),
+                PendingAction::MoveToDisplay { window, display } => move_to_display(app, window, display),
                 PendingAction::Bring { source, target } => apply_bring(app, source, target),
                 PendingAction::Setup(action) => {
                     if let Err(reason) = action.run(app) {
