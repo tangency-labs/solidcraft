@@ -3436,7 +3436,15 @@ impl SolveApp {
     /// A dropped CAD, mesh, drawing or point cloud (PLY, XYZ, PTS) file joins a design that has
     /// features or point clouds; otherwise it opens. A dropped PNG or JPEG is a canvas to place,
     /// not a design to open: it starts the Canvas tool with that image chosen (#13926).
+    /// A dropped ZIP goes through the plugin install review, which validates its contents
+    /// instead of trying to open it as a design (#18761).
     pub fn drop_path(&mut self, path: &str) {
+        if plugin_install::available()
+            && std::path::Path::new(path).extension().and_then(std::ffi::OsStr::to_str).is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+        {
+            plugin_install::review(self, path.to_string());
+            return;
+        }
         if sketch_tools::is_canvas_image(path) {
             sketch_tools::start_image_placement(self, "canvas.insert", path.to_string());
             return;
