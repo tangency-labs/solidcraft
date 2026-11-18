@@ -1550,7 +1550,7 @@ fn each_slot_reaches_its_own_reference() {
     let point =
         |name: &str| ModelPoint { body: "Box".into(), origin_feature: 1, edges: vec![format!("corner {name}")], centre: false, path: Vec::new() };
     let face = |name: &str| ModelFace { body: "Box".into(), origin_feature: 1, name: format!("face {name}"), path: Vec::new() };
-    let side = |name: &str| Silhouette { face: face(name), side: solidcraft_geom::drawing_measure::SilhouetteSide::Far };
+    let side = |name: &str| Silhouette { face: face(name), side: solidcraft_doc::drawing::measure::SilhouetteSide::Far };
     let (direction, reading) = (LinearDirection::Aligned, Reading::Projected);
     let (a, b) = (SlotParam::A, SlotParam::B);
     let mut kinds = [

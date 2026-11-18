@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, MAX_SET_TARGETS, TextPlace};
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading, SilhouetteSide};
 
 use super::Point2;
 use super::drawing_view::ViewIdParam;
