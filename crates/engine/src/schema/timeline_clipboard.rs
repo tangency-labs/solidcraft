@@ -410,7 +410,8 @@ pub struct ExportScriptResult {
     /// What the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face
     /// assignments…).
     pub omitted: Vec<String>,
-    /// The file written, or null.
+    /// The file written, as an absolute path (a relative `path` resolved against the folder
+    /// SolidCraft runs in), or null.
     pub path: Option<String>,
     /// With `path`: the size of the file written, in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -2825,10 +2825,8 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
                 if o.contains_key("created_bodies") {
                     o.remove("bodies");
                 }
-                for key in ["warning", "error"] {
-                    if o.get(key).is_some_and(Value::is_null) {
-                        o.remove(key);
-                    }
+                if o.get("warning").is_some_and(Value::is_null) {
+                    o.remove("warning");
                 }
                 for key in ["points", "curves", "constraints", "dimensions"] {
                     if o.get(key).is_some_and(|v| o.get("created").and_then(|c| c.get(key)) == Some(v)) {
@@ -2869,8 +2867,8 @@ fn compact_reply_counts_repeated_mesh_warnings() {
     assert_eq!(
         compact["warnings"],
         json!([
-            "130 faces short of the 25° smallest angle asked; the sharpest: 13.68° (Node: face 129)",
-            "2 faces whose shaping stopped at a bound with the 25° asked reached; the sharpest: 25.01° (Node: face 201)",
+            "130 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 13.68° (Node: face 129); bodies: Node (130)",
+            "2 faces whose shaping stopped at a bound (Points) with the 25° asked reached; the sharpest: smallest angle 25.01° (Node: face 201); bodies: Node (2)",
             "Node: face 7: its shared boundary was kept. Its triangles lie up to 1.200e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)",
             "Lid has a print face but was written as it lies",
         ]),
@@ -2879,6 +2877,12 @@ fn compact_reply_counts_repeated_mesh_warnings() {
     // One warning of each kind is left as it is, and nothing is counted.
     let few = json!({"warnings": ["Node: face 3: smallest angle 12.94°, short of the 25° asked (stopped by: Corner)", "something else"]});
     assert_eq!(crate::tools::compact(few.clone()), few);
+    // A null `error` stays, so a client can read it; a null `warning` goes.
+    let built = crate::tools::compact(json!({"feature": 1, "name": "Box1", "error": null, "warning": null}));
+    assert_eq!(built, json!({"feature": 1, "name": "Box1", "error": null}));
+    // A script reply without `bytes` (an older app) keeps the script: nothing says it was written.
+    let old_app = json!({"path": "s.json", "script": {"commands": []}, "steps": 0, "omitted": []});
+    assert_eq!(crate::tools::compact(old_app.clone()), old_app);
 }
 
 /// #18831: with `verbose: false`, a batch that adds parameters, builds a part and exports it

@@ -1933,8 +1933,8 @@ const COMPACT_LIST: usize = 20;
 /// A command's result without what the design already had (`execute` or `batch` with `verbose: false`): a
 /// feature's full body list (its created, changed and removed bodies stay), and the sketch ids
 /// a sketch command repeats outside `created`. Long `created` lists are counted instead of listed,
-/// and so are an export's repeated mesh warnings; a null `warning` or `error`, a `display_value`
-/// equal to `value` and a script already written to `path` are left out.
+/// and so are an export's repeated mesh warnings; a null `warning`, a `display_value` equal to
+/// `value` and a script already written to `path` are left out.
 pub(crate) fn compact(mut v: Value) -> Value {
     let Some(o) = v.as_object_mut() else { return v };
     if o.contains_key("created_bodies") {
@@ -1967,131 +1967,22 @@ pub(crate) fn compact(mut v: Value) -> Value {
         }
     }
     compact_moved_points(o);
-    compact_mesh_warnings(o);
-    // A step that built without a warning or an error says so by leaving them out.
-    for k in ["warning", "error"] {
-        if o.get(k).is_some_and(Value::is_null) {
-            o.remove(k);
-        }
+    crate::mesh_warnings::compact(o);
+    // A step that built without a warning says so by leaving it out. A null `error` stays: clients
+    // read `error` to tell a feature that failed from one that built.
+    if o.get("warning").is_some_and(Value::is_null) {
+        o.remove("warning");
     }
     // A number in its own unit that is the same as `value` (a new parameter in mm) says nothing more.
     if o.get("display_value").is_some_and(|d| d.as_f64().is_some() && o.get("value").and_then(Value::as_f64) == d.as_f64()) {
         o.remove("display_value");
     }
     // A script written to a file is in the file: the reply names the file and its size (#18831).
-    if o.get("path").is_some_and(Value::is_string) && o.get("script").is_some_and(Value::is_object) {
+    // An older app gives no size; its reply keeps the script, as the agent can't tell it was written.
+    if o.get("path").is_some_and(Value::is_string) && o.get("bytes").is_some_and(Value::is_u64) && o.get("script").is_some_and(Value::is_object) {
         o.remove("script");
     }
     v
-}
-
-/// A face or edge an export's mesh fell short on, from a mesh export's `warnings` line
-/// ("Body1: face 3: smallest angle 12.94°, short of the 25° asked (stopped by: Corner)").
-/// `kind` groups the lines one summary line stands for; `worst` is the value it reports
-/// (the smallest angle, or the largest distance off the surface or curve).
-struct MeshNote<'a> {
-    kind: MeshNoteKind,
-    body: &'a str,
-    item: String,
-    worst: f64,
-    /// The angle asked for (the short and bound kinds).
-    asked: &'a str,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MeshNoteKind {
-    ShortOfAngle,
-    BoundAngleReached,
-    OffSurface,
-    OffCurve,
-}
-
-/// The text between `start` and the next `end` after it in `s`.
-fn between<'a>(s: &'a str, start: &str, end: &str) -> Option<&'a str> {
-    s.split_once(start)?.1.split_once(end).map(|(t, _)| t)
-}
-
-/// `w` read as a mesh export warning, as `solidcraft_io` writes them; `None` for any other line,
-/// which a compact reply keeps as it is.
-fn mesh_note(w: &str) -> Option<MeshNote<'_>> {
-    // Led by its body's name, or not when the export named no body.
-    let (body, rest, edge) = if let Some(rest) = w.strip_prefix("face ") {
-        ("", rest, false)
-    } else if let Some(rest) = w.strip_prefix("edge ") {
-        ("", rest, true)
-    } else {
-        match (w.split_once(": face "), w.split_once(": edge ")) {
-            (Some((body, rest)), _) => (body, rest, false),
-            (None, Some((body, rest))) => (body, rest, true),
-            (None, None) => return None,
-        }
-    };
-    let (number_of, _) = rest.split_once(':')?;
-    let item = if edge { format!("edge {number_of}") } else { format!("face {number_of}") };
-    let number = |t: &str| t.trim().parse::<f64>().ok();
-    let (kind, worst, asked) = if edge {
-        (MeshNoteKind::OffCurve, number(between(rest, "lie up to ", " mm off the curve")?)?, "")
-    } else if rest.contains(", short of the ") {
-        (MeshNoteKind::ShortOfAngle, number(between(rest, "smallest angle ", "°")?)?, between(rest, "short of the ", "° asked")?)
-    } else if rest.contains("asked reached") {
-        (MeshNoteKind::BoundAngleReached, number(between(rest, "(smallest angle ", "°)")?)?, between(rest, "with the ", "° asked")?)
-    } else if rest.contains("off the surface") {
-        (MeshNoteKind::OffSurface, number(between(rest, "lie up to ", " mm off the surface")?)?, "")
-    } else {
-        return None;
-    };
-    Some(MeshNote { kind, body, item, worst, asked })
-}
-
-/// A mesh export's `warnings` in a compact reply (#18831): a curved part can leave a hundred
-/// faces short of the smallest angle, one line each. Two or more lines of one kind become one
-/// line with how many there were and the worst of them; `warning_count` keeps the number of
-/// lines the full reply has. Other warnings, and a kind with one line, stay as they are.
-fn compact_mesh_warnings(o: &mut Map<String, Value>) {
-    let Some(lines) = o.get("warnings").and_then(Value::as_array).cloned() else { return };
-    let notes: Vec<Option<MeshNote<'_>>> = lines.iter().map(|w| w.as_str().and_then(mesh_note)).collect();
-    let kinds = [MeshNoteKind::ShortOfAngle, MeshNoteKind::BoundAngleReached, MeshNoteKind::OffSurface, MeshNoteKind::OffCurve];
-    let count = |k: MeshNoteKind| notes.iter().flatten().filter(|n| n.kind == k).count();
-    if kinds.iter().all(|k| count(*k) < 2) {
-        return;
-    }
-    let total = lines.len();
-    let mut out: Vec<Value> = Vec::new();
-    let mut done = Vec::new();
-    for (line, note) in lines.iter().zip(&notes) {
-        let Some(n) = note.as_ref().filter(|n| count(n.kind) >= 2) else {
-            out.push(line.clone());
-            continue;
-        };
-        if done.contains(&n.kind) {
-            continue;
-        }
-        done.push(n.kind);
-        let same = notes.iter().flatten().filter(|m| m.kind == n.kind);
-        let worst = match n.kind {
-            MeshNoteKind::ShortOfAngle | MeshNoteKind::BoundAngleReached => same.min_by(|a, b| a.worst.total_cmp(&b.worst)),
-            MeshNoteKind::OffSurface | MeshNoteKind::OffCurve => same.max_by(|a, b| a.worst.total_cmp(&b.worst)),
-        };
-        let Some(w) = worst else { continue };
-        let c = count(n.kind);
-        let at = if w.body.is_empty() { w.item.clone() } else { format!("{}: {}", w.body, w.item) };
-        out.push(Value::String(match n.kind {
-            MeshNoteKind::ShortOfAngle => {
-                format!("{c} faces short of the {}° smallest angle asked; the sharpest: {:.2}° ({at})", w.asked, w.worst)
-            }
-            MeshNoteKind::BoundAngleReached => {
-                format!("{c} faces whose shaping stopped at a bound with the {}° asked reached; the sharpest: {:.2}° ({at})", w.asked, w.worst)
-            }
-            MeshNoteKind::OffSurface => {
-                format!("{c} faces whose triangles lie off the surface; the farthest: {:.3e} mm ({at})", w.worst)
-            }
-            MeshNoteKind::OffCurve => {
-                format!("{c} edges whose chords lie past the chord tolerance; the farthest: {:.3e} mm ({at})", w.worst)
-            }
-        }));
-    }
-    o.insert("warnings".into(), Value::Array(out));
-    o.insert("warning_count".into(), json!(total));
 }
 
 /// `sketch.move_points` answers one `{point, to, at, reached}` row per move (#15864). A compact
