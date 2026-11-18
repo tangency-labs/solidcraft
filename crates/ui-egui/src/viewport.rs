@@ -16082,6 +16082,41 @@ mod tests {
         }
     }
 
+    /// #17871: on Wayland a hi-res mouse wheel's scroll between two notches arrives as points
+    /// opened by a `Start`, and the wheel never sends an `End`. That bracket kept the view
+    /// "moving" for good, so the pick was never taken and a click selected nothing.
+    #[test]
+    fn a_wheel_zoom_on_wayland_leaves_clicks_selecting() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
+        h.call("ui.view", json!({"view": "fit"}));
+        h.app.ui.pick_bodies = true;
+        let p = h.app.viewport.rect.unwrap().center();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        let wheel = |phase, unit, y| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit,
+            delta: vec2(0.0, y),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        // Zoom in a notch and back out, as winit reports it on Wayland: a pixel scroll that
+        // starts, the notch in lines, then more pixels; no End.
+        for y in [1.0, -1.0] {
+            h.app.synthetic.push(wheel(egui::TouchPhase::Start, egui::MouseWheelUnit::Point, 4.0 * y));
+            h.frame();
+            h.app.synthetic.push(wheel(egui::TouchPhase::Move, egui::MouseWheelUnit::Line, y));
+            h.frame();
+            h.app.synthetic.push(wheel(egui::TouchPhase::Move, egui::MouseWheelUnit::Point, 4.0 * y));
+            h.frame();
+        }
+        h.frames(90);
+        assert!(!h.app.viewport.trackpad_gesture, "the wheel left no gesture open");
+        h.call("ui.move", json!({"x": p.x + 1.0, "y": p.y}));
+        h.call("ui.click", json!({"x": p.x + 1.0, "y": p.y}));
+        assert!(!h.app.session.selection.is_empty(), "a click after the wheel must select");
+    }
+
     #[test]
     fn floating_dialog_blocks_viewport_hover_and_clicks() {
         let mut h = crate::scenario::Harness::new();
