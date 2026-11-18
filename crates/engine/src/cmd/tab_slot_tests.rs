@@ -72,6 +72,20 @@ fn a_width_jitter_is_seeded_and_the_slots_follow_the_tabs() {
 }
 
 #[test]
+fn a_tip_chamfer_trims_the_tabs_and_not_the_slots() {
+    let mut s = fixture_f();
+    tab_slot(&mut s, json!({"tip_chamfer": 2})).unwrap();
+    // Three 20 x 6 tabs lose two 2 x 2 triangles each over the 6 deep plate: 3 x 24.
+    assert!((volume(&s, "Wall") - (45_360.0 - 72.0)).abs() < 1e-3);
+    assert!((volume(&s, "Bottom") - 93_745.68).abs() < 1e-3);
+    let mut s = fixture_f();
+    for (extra, words) in [(json!({"tip_chamfer": -1}), "tip_chamfer"), (json!({"tip_chamfer": 10}), "half the tab width")] {
+        let e = tab_slot(&mut s, extra).unwrap_err().to_string();
+        assert!(e.contains(words), "{e}");
+    }
+}
+
+#[test]
 fn a_tab_slot_refuses_what_cannot_be_cut() {
     let mut s = fixture_f();
     let n = s.doc.features.len();

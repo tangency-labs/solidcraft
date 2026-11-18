@@ -27,7 +27,7 @@ const MAX_SEED: f64 = 9_007_199_254_740_992.0;
 /// The clearance written when none is given.
 const DEFAULT_CLEARANCE: &str = "0.1 mm";
 
-const HELP: &str = "tab_plates: [plate] (the plates that get tabs; a plate is a body name or {body, near: [x,y,z], key?}, near choosing between several contact planes, key a whole number from 1 that names the plate's tabs or slots and is kept on an edit; plates without one get the next free key); slot_plates: [plate] (the plates that get slots); count?: expr (tabs per stretch, a whole number 1 to 100; default: as many as fit); spacing?: expr (centre to centre between tabs, instead of count); tab_width?: expr (default 3 x the tab plate's thickness); end_distance?: expr (from a stretch's end to the nearest tab; default the tab width); clearance?: expr (the room on every side of a tab in its slot; default 0.1 mm); protrusion?: expr (how far a tab stands out past the slot plate's far face; default 0); seed?: expr (whole number, default 1000; the same seed gives the same tab widths); width_jitter?: expr (vary each tab's width by up to this much either way, default 0 = off; not under a tenth of the tab width, never past the end distances, same layout on both plates); next_plate_key?: integer (the lowest key a new plate may get; stored by the feature so an edit never reuses a removed plate's key); name?. Every tab plate is tried against every slot plate; a pair that cannot be cut is skipped and named. A pair with a sheet metal plate waits for the sheet metal route, not built yet (sheet_route_not_built). Not for mesh bodies";
+const HELP: &str = "tab_plates: [plate] (the plates that get tabs; a plate is a body name or {body, near: [x,y,z], key?}, near choosing between several contact planes, key a whole number from 1 that names the plate's tabs or slots and is kept on an edit; plates without one get the next free key); slot_plates: [plate] (the plates that get slots); count?: expr (tabs per stretch, a whole number 1 to 100; default: as many as fit); spacing?: expr (centre to centre between tabs, instead of count); tab_width?: expr (default 3 x the tab plate's thickness); end_distance?: expr (from a stretch's end to the nearest tab; default the tab width); clearance?: expr (the room on every side of a tab in its slot; default 0.1 mm); protrusion?: expr (how far a tab stands out past the slot plate's far face; default 0); seed?: expr (whole number, default 1000; the same seed gives the same tab widths); width_jitter?: expr (vary each tab's width by up to this much either way, default 0 = off; not under a tenth of the tab width, never past the end distances, same layout on both plates); tip_chamfer?: expr (chamfers the two outer corners of each tab's free end so tabs enter the slots easily, default 0 = off; the slot is not chamfered; refused at half the tab width or more, or at the tab's length or more); next_plate_key?: integer (the lowest key a new plate may get; stored by the feature so an edit never reuses a removed plate's key); name?. Every tab plate is tried against every slot plate; a pair that cannot be cut is skipped and named. A pair with a sheet metal plate waits for the sheet metal route, not built yet (sheet_route_not_built). Not for mesh bodies";
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.tab_slot", "Tab and Slot", crate::checked!("solid.tab_slot", tab_slot))
     .icon("tab_slot")
@@ -36,7 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.tab_slot", "Tab 
     .params(HELP)];
 
 /// The expression keys of the feature, in the order the command reads them.
-const EXPR_KEYS: [&str; 8] = ["count", "spacing", "tab_width", "end_distance", "clearance", "protrusion", "seed", "width_jitter"];
+const EXPR_KEYS: [&str; 9] = ["count", "spacing", "tab_width", "end_distance", "clearance", "protrusion", "seed", "width_jitter", "tip_chamfer"];
 
 /// One plate as the stored pick (`{key?, body, near?}`). A `key` is the stored key Edit Feature
 /// sends back, so the plate keeps its names; a plate without one gets a new key later.
@@ -165,7 +165,7 @@ fn length_in(s: &Session, e: Option<&Expr>, key: &str, cmd: &str, least: f64, op
 /// nothing.
 pub(crate) fn check(s: &Session, st: &ModelState, kind: &FeatureKind) -> Result<()> {
     let cmd = "solid.tab_slot";
-    let FeatureKind::TabSlot { tab_plates, slot_plates, count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, .. } =
+    let FeatureKind::TabSlot { tab_plates, slot_plates, count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, tip_chamfer, .. } =
         kind
     else {
         return Ok(());
@@ -215,6 +215,13 @@ pub(crate) fn check(s: &Session, st: &ModelState, kind: &FeatureKind) -> Result<
     length_in(s, Some(clearance), "clearance", cmd, 0.0, false)?;
     length_in(s, protrusion.as_ref(), "protrusion", cmd, -MAX_LENGTH, false)?;
     length_in(s, width_jitter.as_ref(), "width_jitter", cmd, 0.0, false)?;
+    length_in(s, tip_chamfer.as_ref(), "tip_chamfer", cmd, 0.0, false)?;
+    if let (Some(c), Some(w)) = (tip_chamfer, tab_width) {
+        let (cv, wv) = (length_now(s, c, "tip_chamfer", cmd)?, length_now(s, w, "tab_width", cmd)?);
+        if cv > 0.0 && cv >= wv / 2.0 {
+            return Err(bad(cmd, format!("`tip_chamfer` must be less than half the tab width: {cv} mm against {wv} mm")));
+        }
+    }
     if let Some(e) = seed {
         let (vals, _) = s.doc.param_values();
         let n = solidcraft_doc::expr::eval_count(e, &vals).map_err(|err| bad(cmd, format!("seed: {err}")))?;

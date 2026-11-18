@@ -23,6 +23,7 @@ fn schemas_and_the_key_check_agree() {
             "spacing",
             "tab_plates",
             "tab_width",
+            "tip_chamfer",
             "width_jitter",
         ],
     );

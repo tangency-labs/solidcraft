@@ -59,6 +59,11 @@ pub struct TabSlotParams {
     /// the slots follow the tabs, so both plates carry the same layout.
     #[serde(default)]
     pub width_jitter: Option<LengthExpr>,
+    /// Chamfer the two outer corners of each tab's free end by this much, so the tabs enter the
+    /// slots easily. Default: 0 (off). The slot is not chamfered. Refused at half the tab width
+    /// or more, and at the tab's length or more.
+    #[serde(default)]
+    pub tip_chamfer: Option<LengthExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

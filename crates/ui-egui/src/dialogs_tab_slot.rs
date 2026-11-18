@@ -26,6 +26,8 @@ pub struct TabSlot {
     pub width_jitter: String,
     /// Seed of the width variation; empty is the default (1000).
     pub seed: String,
+    /// Tip Chamfer: the free end's two outer corners; empty is off.
+    pub tip_chamfer: String,
 }
 
 /// A new dialog's values: every field auto but the clearance, 0.1 mm in the design's unit.
@@ -57,6 +59,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [S
     enter |= tipped(ui, "ui.tab_slot.end_distance_tip", |ui| expr_row(ui, "ui.tab_slot.end_distance", &mut t.end_distance));
     enter |= tipped(ui, "ui.tab_slot.clearance_tip", |ui| expr_row(ui, "ui.tab_slot.clearance", &mut t.clearance));
     enter |= tipped(ui, "ui.tab_slot.protrusion_tip", |ui| expr_row(ui, "ui.tab_slot.protrusion", &mut t.protrusion));
+    enter |= tipped(ui, "ui.tab_slot.tip_chamfer_tip", |ui| expr_row(ui, "ui.tab_slot.tip_chamfer", &mut t.tip_chamfer));
     enter |= tipped(ui, "ui.tab_slot.width_jitter_tip", |ui| expr_row(ui, "ui.tab_slot.width_jitter", &mut t.width_jitter));
     enter |= tipped(ui, "ui.tab_slot.seed_tip", |ui| expr_row(ui, "ui.tab_slot.seed", &mut t.seed));
     if tipped(ui, "ui.tab_slot.new_seed_tip", |ui| action_row(ui, "tab_slot_new_seed", "ui.tab_slot.new_seed")) {
@@ -141,6 +144,7 @@ pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<St
         ("end_distance", t.end_distance.as_str()),
         ("clearance", t.clearance.as_str()),
         ("protrusion", t.protrusion.as_str()),
+        ("tip_chamfer", t.tip_chamfer.as_str()),
         ("width_jitter", t.width_jitter.as_str()),
         ("seed", t.seed.as_str()),
     ] {
@@ -169,6 +173,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         protrusion,
         seed,
         width_jitter,
+        tip_chamfer,
         ..
     } = kind
     else {
@@ -185,6 +190,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         clearance: clearance.as_str().to_string(),
         protrusion: text(protrusion),
         width_jitter: text(width_jitter),
+        tip_chamfer: text(tip_chamfer),
         seed: text(seed),
     };
     let mut extra = Map::new();
@@ -224,6 +230,9 @@ mod tests {
         (t.width_jitter, t.seed) = ("1.5 mm".into(), "42".into());
         let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
         assert_eq!((args["width_jitter"].as_str(), args["seed"].as_str()), (Some("1.5 mm"), Some("42")), "{args}");
+        t.tip_chamfer = "1 mm".into();
+        let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
+        assert_eq!(args["tip_chamfer"].as_str(), Some("1 mm"), "{args}");
         t.layout = 1;
         let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
         assert_eq!((args.get("count"), args["spacing"].as_str()), (None, Some("30 mm")), "{args}");
@@ -262,13 +271,14 @@ mod edit_tests {
             s.execute("solid.box", &p).unwrap();
         }
         let p = json!({"tab_plates": [{"body": "Wall", "near": [80, 33, 6]}], "slot_plates": ["Bottom"], "spacing": "40 mm", "tab_width": "12 mm",
-            "width_jitter": "2 mm", "seed": "7"});
+            "width_jitter": "2 mm", "seed": "7", "tip_chamfer": "1 mm"});
         s.execute("solid.tab_slot", &p).unwrap();
         let app = SolveApp::new(s, Services::default());
         let kind = app.session.doc.features.last().unwrap().kind.clone();
         let (Kind::TabSlot(t), mut inputs, extra) = for_feature(&app, &kind).unwrap() else { panic!("not a tab and slot") };
         assert_eq!((t.layout, t.spacing.as_str(), t.tab_width.as_str(), t.count.as_str()), (1, "40 mm", "12 mm", ""));
         assert_eq!((t.width_jitter.as_str(), t.seed.as_str()), ("2 mm", "7"));
+        assert_eq!(t.tip_chamfer, "1 mm");
         assert_eq!(inputs[0].items, vec![Sel::Body { name: "Wall".into() }]);
         let args = &commands(&app, &t, &inputs, &extra).unwrap()[0].1;
         assert_eq!(args["tab_plates"], json!([{"key": 1, "body": "Wall", "near": [80.0, 33.0, 6.0]}]), "{args}");

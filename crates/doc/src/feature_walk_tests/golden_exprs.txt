@@ -296,7 +296,8 @@ tab_slot
     Protrusion = tab_slot.protrusion (Length)
     Seed = tab_slot.seed (Unitless)
     Width Jitter = tab_slot.width_jitter (Length)
-  expressions: tab_slot.count, tab_slot.spacing, tab_slot.tab_width, tab_slot.end_distance, tab_slot.clearance, tab_slot.protrusion, tab_slot.seed, tab_slot.width_jitter
+    Tip Chamfer = tab_slot.tip_chamfer (Length)
+  expressions: tab_slot.count, tab_slot.spacing, tab_slot.tab_width, tab_slot.end_distance, tab_slot.clearance, tab_slot.protrusion, tab_slot.seed, tab_slot.width_jitter, tab_slot.tip_chamfer
 sheet_base
 sheet_contour
   inputs:

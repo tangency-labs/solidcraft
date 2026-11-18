@@ -1663,6 +1663,12 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Width Jitter")]
         width_jitter: Option<Expr>,
+        /// Chamfer on the two outer corners of each tab's free end, so the tabs enter the slots
+        /// easily (default 0: off). The slot is not chamfered. Under half the tab width and
+        /// under the tab's length.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tip Chamfer")]
+        tip_chamfer: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).

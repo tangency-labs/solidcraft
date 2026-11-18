@@ -44,7 +44,7 @@ pub(crate) fn joint_seed(seed: u64, (tab, slot): (u32, u32)) -> u64 {
 /// `joint_keys` are the tab and slot plates' keys: the joint's seed is hashed from the feature's
 /// seed and both, so adding or removing a joint does not reshuffle the others' widths.
 pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f64, t_slot: f64, joint_keys: (u32, u32)) -> Result<TabSlotSpec> {
-    let FeatureKind::TabSlot { count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, .. } = k else {
+    let FeatureKind::TabSlot { count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, tip_chamfer, .. } = k else {
         return Err(DocError::Invalid("not a tab and slot".into()));
     };
     let length = |e: &str, what: &str, least: f64| -> Result<f64> {
@@ -108,6 +108,10 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
         Some(e) => length(e, "width jitter", 0.0)?,
         None => 0.0,
     };
+    let tip_chamfer = match tip_chamfer {
+        Some(e) => length(e, "tip chamfer", 0.0)?,
+        None => 0.0,
+    };
     Ok(TabSlotSpec {
         layout,
         width,
@@ -118,6 +122,7 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
         overshoot: CUT_OVERSHOOT_PER_THICKNESS * t_slot,
         seed: joint_seed(seed, joint_keys),
         width_jitter,
+        tip_chamfer,
     })
 }
 
@@ -554,6 +559,14 @@ mod tests {
         assert!(spec(serde_json::json!({"clearance": "0.1", "seed": "1.5"})).is_err());
         assert!(spec(serde_json::json!({"clearance": "0.1", "seed": "-1"})).is_err());
         assert!(spec(serde_json::json!({"clearance": "0.1", "width_jitter": "-1"})).is_err());
+    }
+
+    #[test]
+    fn tab_slot_spec_of_takes_a_tip_chamfer() {
+        assert_eq!(spec(serde_json::json!({"clearance": "0.1"})).unwrap().tip_chamfer, 0.0);
+        let a = spec(serde_json::json!({"clearance": "0.1", "tip_chamfer": "1.5"})).unwrap();
+        assert_eq!(a.tip_chamfer, 1.5);
+        assert!(spec(serde_json::json!({"clearance": "0.1", "tip_chamfer": "-1"})).is_err());
     }
 
     #[test]
