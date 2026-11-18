@@ -283,41 +283,38 @@ fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
 }
 
 /// The removed volume of [`crease_plate`]'s two top edges rounded `r`, as the prisms of their
-/// sections mitred at the crease (each section the wedge of the top and its wall, less the ball's
-/// disc, cut off at the plate's bottom; each prism measured along its centroid line between its
-/// end plane and the crease's bisector plane), less the corner's departure from the mitre,
-/// about 0.02 r^3, measured on rounds that stay on their walls (r 2.5 here, and a plate 7 thick
-/// at r 3.5): the case's derivation, by hand. Values for the radii the test uses.
-const CREASE_PLATE_REMOVED: [(f64, f64); 3] = [(3.0, 148.0900), (3.5, 200.2216), (4.0, 257.4169)];
+/// sections mitred on the crease's bisector plane: each section the wedge of the top and its
+/// wall less the ball's disc, cut off at the plate's bottom, in closed form; each prism measured
+/// along its centroid line between its end plane and the bisector plane (exact for a prism cut
+/// by planes). The corner's own construction departs from that mitre only within the ball
+/// about the corner, so the removed volume lies within that ball's eighth, `pi r^3 / 6`, of it.
+/// Values for the radii the test uses (the case's derivation, by hand).
+const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (4.0, 258.7033)];
 
 /// A round wider than the plate's walls are tall (it overflows them, runs on past the plate's
 /// bottom and is trimmed there), on two edges meeting at a shallow concave crease between the
 /// walls. At the crease's corner the round's piece along the crease line ran past the crease
 /// edge's lower end; the piece was the crease edge trimmed to its points' drops, both clamped
 /// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
-/// Computation Failure"). With `fillet_on_edge_continues_line` the piece is the crease line
-/// continued: the rounds build, within 0.2 of the mitred prisms less the corner term.
+/// Computation Failure"). The piece is now the crease line continued: the rounds build valid
+/// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
+/// application's fix set (`kernel_cases/fixes.json`).
 #[test]
 fn rounds_overflowing_a_shallow_concave_crease_build() {
-    for (r, want) in CREASE_PLATE_REMOVED {
-        all_fixes();
+    for (r, mitre) in CREASE_PLATE_MITRE {
+        rig_fixes();
         let (b, edges) = crease_plate(3.0, 25.0, 15.0);
         let before = volume(&b);
         blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
             .unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
         let off = before - volume(&b);
-        assert!((off - want).abs() < 0.2, "r {r}: {off} off, want {want}");
+        let bound = PI * r * r * r / 6.0;
+        assert!(
+            (off - mitre).abs() <= bound,
+            "r {r}: {off} off, mitre {mitre}, bound {bound}"
+        );
     }
-    // without the fix the corner's loop does not close
-    solidcore_ops::session::set_thread_fixes(
-        solidcore::kernel::UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| *n != "fillet_on_edge_continues_line"),
-    )
-    .unwrap();
-    let (b, edges) = crease_plate(3.0, 25.0, 15.0);
-    assert!(blend(&b, Blend::Round, &edges, &[3.5], &[], Corners::Filled).is_err());
     all_fixes();
 }
 

@@ -252,10 +252,7 @@ fn first_uv<O: SolutionObject>(solutions: &SolutionArray<O>, op: &'static str) -
     Ok(Point2::new(s.start.param(0)?, s.start.param(1)?))
 }
 
-/// `SmCurve::DropPoint(ivl, pnt, NULL, dTol, NULL, bSuccess, dParam, dDist)` with the
-/// default `SM_SO_MINIMIZE`: the parameter when the call succeeds and finds a point,
-/// `None` otherwise ([`SolidError::Unported`] propagates).
-/// `fixes.fillet_on_edge_continues_line`: the segment from `start` to `end` when `curve`
+/// Not the fork's: the segment from `start` to `end` when `curve`
 /// (the side edge's) is a line, both points lie on its line within the edge's tolerance,
 /// and both lie at or past the same end of the edge, one past it, where their drops would
 /// both clamp to that end; `None` otherwise (the points drop onto the edge as upstream does).
@@ -267,6 +264,13 @@ fn continued_line_segment(
     start: Point3,
     end: Point3,
 ) -> Result<Option<Curve>> {
+    // every test below accepts only on a positive, finite result
+    if ![start.x, start.y, start.z, end.x, end.y, end.z]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return Ok(None);
+    }
     let Some(orig) = target.edge(orig_edge)?.curve.as_ref() else {
         return Ok(None);
     };
@@ -289,19 +293,22 @@ fn continued_line_segment(
     for (slot, p) in ts.iter_mut().zip([start, end]) {
         let t = (p - a).dot(d) / len2;
         let foot = a + d * t;
-        if (p - foot).length() > tol {
+        if !((p - foot).length() <= tol) || !t.is_finite() {
             return Ok(None);
         }
         *slot = t;
     }
     let past_high = ts.iter().all(|&t| t >= 1.0 - reach) && ts.iter().any(|&t| t > 1.0 + reach);
     let past_low = ts.iter().all(|&t| t <= reach) && ts.iter().any(|&t| t < -reach);
-    if !(past_high || past_low) || (end - start).length() <= tol {
+    if !(past_high || past_low) || !((end - start).length() > tol) {
         return Ok(None);
     }
     Ok(Some(Curve::from(Line::from_points(start, end, 3))))
 }
 
+/// `SmCurve::DropPoint(ivl, pnt, NULL, dTol, NULL, bSuccess, dParam, dDist)` with the
+/// default `SM_SO_MINIMIZE`: the parameter when the call succeeds and finds a point,
+/// `None` otherwise ([`SolidError::Unported`] propagates).
 fn drop_param(
     k: &Kernel,
     curve: &Curve,
@@ -1204,8 +1211,8 @@ impl FilletBrep {
     /// The rest of `CalcEdgeOnEdge` after the curve's copy: the trim between the end
     /// points' drops (on the joined curve's natural interval when `joined`, else on the
     /// original edge's interval), the reversal and the curve's setting. `continue_line`:
-    /// at a corner that is not a roll-over, where `fixes.fillet_on_edge_continues_line` may
-    /// continue a straight side edge past its end.
+    /// at a corner that is not a roll-over, where a straight side edge may be continued past its
+    /// end ([`continued_line_segment`]).
     fn finish_edge_on_edge(
         &mut self,
         k: &Kernel,
@@ -1223,9 +1230,9 @@ impl FilletBrep {
             .original_edge()
             .ok_or_else(|| nul("the fillet edge's original edge"))?;
 
-        // Not the fork's (`fixes.fillet_on_edge_continues_line`): on a straight side edge
+        // Not the fork's: on a straight side edge
         // continued past its end (a cliff overflow at a concave crease), the segment of its line
-        if !joined && continue_line && k.fixes.fillet_on_edge_continues_line {
+        if !joined && continue_line {
             if let Some(line) = continued_line_segment(
                 k,
                 target,
