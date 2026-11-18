@@ -1095,6 +1095,33 @@ fn a_coil_keeps_the_picked_world_direction_as_its_model_axis_moves() {
 }
 
 #[test]
+fn a_named_model_axis_keeps_its_edge_at_a_shared_vertex() {
+    use crate::construct::{GeoRef, model_axis};
+
+    let mut doc = Document::new("an edge at a box corner");
+    add_in(
+        &mut doc,
+        0,
+        "Box",
+        serde_json::json!({ "type": "box", "corner": ["0", "0", "0"], "length": "10", "width": "10", "height": "10", "operation": "new_body" }),
+    );
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    no_errors(&model);
+    let state = model.state();
+    let body = state.bodies.first().unwrap();
+    let mesh = body.mesh();
+    let (index, points) = mesh.edges.iter().enumerate().filter(|(_, points)| points.contains(&Vec3::ZERO)).nth(1).unwrap();
+    let (start, end) = (*points.first().unwrap(), *points.last().unwrap());
+    let expected = (end - start).normalized().unwrap();
+    let name = crate::naming::edge_names(body)[index].clone();
+    for at in [(start + end) * 0.5, Vec3::ZERO] {
+        let (_, direction) = model_axis(&state, &GeoRef::Edge { at, name: Some(name.clone()) }).unwrap();
+        assert!(direction.dot(expected).abs() >= 1. - 1e-9, "{at:?}: {direction:?} versus {expected:?}");
+    }
+}
+
+#[test]
 fn box_fillet_cut_timeline() {
     let (mut doc, _) = plate_doc();
     doc.add_feature(
@@ -2045,9 +2072,10 @@ fn fillet_edge_radii_default_to_none_round_trip_and_are_checked() {
     let mut m = Model::new();
     m.evaluate(&opened);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-    let spandrel = |r: f64| (1.0 - std::f64::consts::PI / 4.0) * r * r;
     let v = measure(&m.state().bodies[0].body).unwrap().volume;
-    let want = 12000.0 - 40.0 * (spandrel(1.0) + spandrel(2.0));
+    // A 40 x 30 x 10 block, two 40-long edges rounded at 1 and 2: each round of radius r on a
+    // 90 deg edge of length L removes (1 - pi/4) r^2 L, so 12000 - 40 (1 - pi/4) (1 + 4).
+    let want = 11957.07963267949;
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
     for (bad, says) in [
         (fillet(&["1"], false, Default::default()), "gives 1 radii for 2 picked edges"),

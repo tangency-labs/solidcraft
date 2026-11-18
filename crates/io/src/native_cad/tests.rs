@@ -415,9 +415,12 @@ fn same_bodies(a: &[(bool, usize, f64, [f64; 6])], b: &[(bool, usize, f64, [f64;
         })
 }
 
-/// The parts compared between the two routes: every FreeCAD and Rhino fixture.
+/// The parts compared between the two routes: every FreeCAD and Rhino fixture, and every
+/// step-conformance part decoded by cadmpeg's STEP decoder (as the cadmpeg STEP reader reads it),
+/// and the import kernel cases whose surfaces the records once read differently
+/// ([`KERNEL_CASES`]).
 fn compared_parts() -> Vec<(String, Vec<u8>)> {
-    [
+    let mut parts: Vec<(String, Vec<u8>)> = [
         ("block.FCStd", BLOCK_FCSTD),
         ("block.3dm", BLOCK_3DM),
         ("bracket.FCStd", BRACKET_FCSTD),
@@ -426,15 +429,28 @@ fn compared_parts() -> Vec<(String, Vec<u8>)> {
     ]
     .into_iter()
     .map(|(n, b)| (n.to_string(), b.to_vec()))
-    .collect()
+    .collect();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut steps: Vec<_> =
+        std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "step")).collect();
+    steps.sort();
+    assert!(steps.len() >= 17, "{} step-conformance parts", steps.len());
+    parts.extend(steps.iter().map(|p| (p.file_name().unwrap().to_string_lossy().to_string(), std::fs::read(p).unwrap())));
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    parts.extend(KERNEL_CASES.iter().map(|c| (format!("{c}.step"), std::fs::read(cases.join(c).join("input.step")).unwrap())));
+    parts
 }
 
-/// The compared parts whose bodies differ between the two routes, with why.
-const DIFFER: [(&str, &str); 0] = [];
+/// Import kernel cases on surfaces whose record form depends on the face, which the records route
+/// once refused: a SURFACE_OF_LINEAR_EXTRUSION of an ellipse across the ellipse's parameter origin
+/// (cadmpeg reads it as a procedural surface with no solved form), and a cone of nearly a right
+/// angle that is a plane.
+const KERNEL_CASES: [&str; 2] = ["3208-extruded-ellipse-face-over-parameter-seam", "4006-plane-written-as-cone-of-nearly-right-angle"];
 
 /// Reading the neutral model into records builds the bodies the STEP route built (cadmpeg's
 /// STEP writer, then our STEP reader): the same bodies, each as whole, with as many faces, the
-/// same volume and the same box, for every part in [`compared_parts`] but those in [`DIFFER`].
+/// same volume and the same box, for every part in [`compared_parts`], an assembly's parts at
+/// each of their placements.
 #[test]
 fn records_build_the_bodies_the_step_route_built() {
     let mut differ = Vec::new();
@@ -448,7 +464,68 @@ fn records_build_the_bodies_the_step_route_built() {
             differ.push(name.clone());
         }
     }
-    assert_eq!(differ, DIFFER.map(|(n, _)| n.to_string()), "parts whose bodies differ between the two routes");
+    assert!(differ.is_empty(), "parts whose bodies differ between the two routes: {differ:?}");
+}
+
+/// An assembly read through cadmpeg's STEP decoder has the product tree SolidCraft's own STEP
+/// reader gives it: the same products nested the same way, each placed in its parent, with its
+/// bodies, and each body under its products' names and its occurrence's. A part used twice is
+/// two bodies, one at each placement.
+#[test]
+fn an_assembly_read_into_records_has_the_tree_our_step_reader_gives_it() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    for (name, bodies) in [("cylinder_placed.step", 1), ("cylinder_twice.step", 2)] {
+        let bytes = std::fs::read(dir.join(name)).unwrap();
+        let ours = solidcraft_kernel::step_import(&String::from_utf8_lossy(&bytes)).unwrap();
+        let (theirs, warnings) = by_records(&neutral(&bytes, name));
+        let theirs = theirs.unwrap_or_else(|e| panic!("{name}: {e} {warnings:?}"));
+        assert_eq!(theirs.bodies.len(), bodies, "{name}");
+        assert_eq!(tree_of(&theirs), tree_of(&ours), "{name}");
+        assert!(same_bodies(&built(&theirs), &built(&ours)), "{name}: the bodies differ from our reader's");
+        // The same part placed twice is one part to the design, as with our reader.
+        let parts = |imp: &solidcraft_kernel::StepImport| imp.bodies.iter().map(|b| b.source_item).collect::<std::collections::BTreeSet<_>>().len();
+        assert_eq!(parts(&theirs), parts(&ours), "{name}: parts");
+    }
+}
+
+/// An import's product tree, one line a node: its depth and name, its placement in its parent
+/// (rounded to a micrometre), and each of its bodies' product path and occurrence.
+fn tree_of(imp: &solidcraft_kernel::StepImport) -> Vec<String> {
+    fn walk(nodes: &[solidcraft_kernel::StepNode], imp: &solidcraft_kernel::StepImport, depth: usize, out: &mut Vec<String>) {
+        for n in nodes {
+            let m: Vec<String> = n.transform.iter().flatten().map(|v| format!("{:.3}", v + 0.0)).collect();
+            let bodies: Vec<String> = n
+                .bodies
+                .iter()
+                .filter_map(|b| imp.bodies.get(*b))
+                .map(|b| format!("{}|{}", b.path.join("/"), b.instance.clone().unwrap_or_default()))
+                .collect();
+            out.push(format!("{depth} {} [{}] {bodies:?}", n.name, m.join(" ")));
+            walk(&n.children, imp, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&imp.tree, imp, 0, &mut out);
+    out
+}
+
+/// The import kernel cases read into records build what each case expects: one whole body, its
+/// faces and volume as `expected.json` gives them.
+#[test]
+fn kernel_cases_read_into_records_build_their_expected_bodies() {
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    for c in KERNEL_CASES {
+        let expected: serde_json::Value = serde_json::from_slice(&std::fs::read(cases.join(c).join("expected.json")).unwrap()).unwrap();
+        let ir = neutral(&std::fs::read(cases.join(c).join("input.step")).unwrap(), &format!("{c}.step"));
+        let (imp, warnings) = by_records(&ir);
+        let bodies = built(&imp.unwrap_or_else(|e| panic!("{c}: {e} {warnings:?}")));
+        assert_eq!(bodies.len(), 1, "{c}: {bodies:?} {warnings:?}");
+        let (whole, faces, volume, _) = bodies[0];
+        assert!(whole, "{c}: {warnings:?}");
+        assert_eq!(faces as u64, expected["faces"].as_u64().unwrap(), "{c}");
+        let want = expected["volume_mm3"].as_f64().unwrap();
+        assert!((volume - want).abs() < 1e-3 * want, "{c}: {volume} vs {want}");
+    }
 }
 
 /// What the STEP route did with what the records now leave out, each with the reason. A body placed
@@ -491,4 +568,58 @@ fn what_the_records_leave_out_the_step_route_imported_wrongly() {
     assert!(same_bodies(&built(&old.unwrap()), &round), "the STEP route imported the elliptical cone as the round one");
     let (_, warnings) = by_records(&ir);
     assert!(warnings.iter().any(|w| w.contains("an elliptical cone")), "{warnings:?}");
+}
+
+/// A component whose placement mirrors is left out with the reason, and the part's other
+/// placement still comes in.
+#[test]
+fn a_mirrored_component_is_left_out_with_why() {
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mut ir = neutral(&bytes, "cylinder_twice.step");
+    let mirror = cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap();
+    let leaf = ir.model.occurrences.iter_mut().find(|o| !matches!(o.parent, cadmpeg_ir::products::OccurrenceParent::Root {})).unwrap();
+    leaf.transform = mirror;
+    let records = cadir_records(&ir, "mirrored", "test");
+    assert_eq!(records.bodies.len(), 1, "{:?}", records.warnings);
+    assert!(records.warnings.iter().any(|w| w.contains("mirrors")), "{:?}", records.warnings);
+}
+
+/// A part whose every placement is left out (each mirrored, or the assembly that holds them)
+/// does not come in at all, rather than where its file defines it, which the warning would deny.
+#[test]
+fn a_part_whose_every_placement_is_left_out_does_not_come_in() {
+    use cadmpeg_ir::products::{Occurrence, OccurrenceParent};
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mirror = cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap();
+    let leaves = |o: &Occurrence| !matches!(o.parent, OccurrenceParent::Root {});
+    let root = |o: &Occurrence| matches!(o.parent, OccurrenceParent::Root {});
+    for (which, refused) in [("every placement", &leaves as &dyn Fn(&Occurrence) -> bool), ("the assembly", &root)] {
+        let mut ir = neutral(&bytes, "cylinder_twice.step");
+        for o in ir.model.occurrences.iter_mut().filter(|o| refused(o)) {
+            o.transform = mirror;
+        }
+        let (imp, warnings) = by_records(&ir);
+        let imp = imp.unwrap();
+        assert!(imp.bodies.is_empty(), "{which} mirrored: {} bodies", imp.bodies.len());
+        assert!(warnings.iter().any(|w| w.contains("mirrors")), "{which} mirrored: {warnings:?}");
+    }
+}
+
+/// Occurrences that contain each other end the walk with a warning, never a hang or a panic.
+#[test]
+fn occurrences_in_a_cycle_end_with_a_warning() {
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mut ir = neutral(&bytes, "cylinder_twice.step");
+    let ids: Vec<_> = ir.model.occurrences.iter().map(|o| o.id.clone()).collect();
+    // Each occurrence's parent the next: a cycle with no root, and one with the root kept.
+    for (k, o) in ir.model.occurrences.iter_mut().enumerate() {
+        o.parent = cadmpeg_ir::products::OccurrenceParent::Occurrence { occurrence: ids[(k + 1) % ids.len()].clone() };
+    }
+    let records = cadir_records(&ir, "cycle", "test");
+    assert!(solidcraft_kernel::records_import(&records).is_ok());
+    if let Some(first) = ir.model.occurrences.first_mut() {
+        first.parent = cadmpeg_ir::products::OccurrenceParent::Root {};
+    }
+    let records = cadir_records(&ir, "cycle", "test");
+    assert!(solidcraft_kernel::records_import(&records).is_ok(), "{:?}", records.warnings);
 }

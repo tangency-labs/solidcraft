@@ -288,6 +288,12 @@ pub struct CoilAxis(pub Value);
 impl<'de> Deserialize<'de> for CoilAxis {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(d)?;
+        if value.get("type").and_then(Value::as_str) == Some("placed_edge") {
+            return match geo_problem(&value) {
+                Some(why) => Err(D::Error::custom(why)),
+                None => Ok(Self(value)),
+            };
+        }
         match crate::cmd::axis_dir_form(&value) {
             Ok(_) => Ok(Self(value)),
             Err(_)
@@ -310,9 +316,21 @@ impl JsonSchema for CoilAxis {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let direction = generator.subschema_for::<AxisDir>();
         let reference = generator.subschema_for::<RevolveAxis>();
+        let point = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], or a named or picked axis in the same forms as Revolve.",
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
             "anyOf": [direction, {
+                "type": "object",
+                "properties": {
+                    "type": {"const": "placed_edge"},
+                    "body": {"type": "string"},
+                    "path": {"type": "array", "maxItems": solidcraft_doc::MAX_PLACEMENT_DEPTH + 1, "items": {"type": "integer", "minimum": 1}},
+                    "author_path": {"type": "array", "maxItems": solidcraft_doc::MAX_PLACEMENT_DEPTH + 1, "items": {"type": "integer", "minimum": 1}},
+                    "at": point,
+                    "name": {"type": "string"}
+                },
+                "required": ["type", "body", "path", "at", "name"]
+            }, {
                 "allOf": [reference, {"anyOf": [
                     {"type": "string", "minLength": 1, "pattern": not_blank_pattern()},
                     {"type": "object"}

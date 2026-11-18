@@ -41,6 +41,15 @@ pub enum GeoRef {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
+    /// An edge on one occurrence. The body name and pick point are in the definition's frame.
+    PlacedEdge {
+        body: crate::BodyName,
+        path: Vec<u64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        author_path: Vec<u64>,
+        at: Vec3,
+        name: String,
+    },
     /// A body face: the one named `name`, else the one at `at`.
     Face {
         at: Vec3,
@@ -344,9 +353,9 @@ fn edge_points(st: &ModelState, at: Vec3, name: &Option<String>) -> Result<Vec<V
 /// edge picked with a name is the edge the name finds, or the reference fails, asking for it to
 /// be picked again.
 fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec<Vec3>)> {
-    let mut at = at;
-    if let Some(n) = name {
-        at = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok()).ok_or_else(|| DocError::reselect(n.as_str()))?;
+    if let Some(name) = name {
+        let (body, hit) = named_edge(st, at, name).ok_or_else(|| DocError::reselect(name))?;
+        return Ok((body, hit.edge, indexed_edge_points(body, hit.edge).ok_or_else(|| DocError::reselect(name))?));
     }
     let mut best: Option<(f64, &ModelBody, usize, Vec<Vec3>)> = None;
     for b in bodies(st) {
@@ -363,6 +372,51 @@ fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<
         Some((d, b, i, pts)) if pts.len() >= 2 && d <= 1e-3 + 1e-2 * pts.iter().fold(0.0, |m: f64, p| m.max(p.len())).max(1.0) => Ok((b, i, pts)),
         _ => Err(bad(format!("no edge at {at:?}"))),
     }
+}
+
+fn named_edge<'a>(st: &'a ModelState, at: Vec3, name: &str) -> Option<(&'a ModelBody, crate::name_lookup::EdgeHit)> {
+    let mut named = bodies(st).filter_map(|body| crate::name_lookup::locate_edge(body, name, at).ok().map(|hit| (body, hit)));
+    let first = named.next()?;
+    // Older references have only a world point to distinguish placements of the same edge.
+    let on_edge = |(body, hit): &(&ModelBody, crate::name_lookup::EdgeHit)| {
+        let reach = (body.body.size() * 2e-3).max(1e-3);
+        kernel::edge_distance(&body.body, hit.edge, at).ok().flatten().is_some_and(|distance| distance <= reach)
+    };
+    if on_edge(&first) { Some(first) } else { named.find(on_edge).or(Some(first)) }
+}
+
+/// The body, edge index and current point of an edge found by its persistent name.
+pub fn named_edge_pick(st: &ModelState, at: Vec3, name: &str) -> Option<(String, usize, Vec3)> {
+    let (body, hit) = named_edge(st, at, name)?;
+    Some((body.name.clone(), hit.edge, hit.point))
+}
+
+fn indexed_edge_points(body: &ModelBody, index: usize) -> Option<Vec<Vec3>> {
+    let tolerance = (body.body.size() * 1e-3).max(1e-3);
+    body.body.edges(tolerance).ok()?.into_iter().nth(index).map(|edge| edge.points)
+}
+
+fn placed_edge<'a>(
+    doc: &Document,
+    st: &'a ModelState,
+    body: &str,
+    path: &[u64],
+    at: Vec3,
+    name: &str,
+) -> Result<(&'a ModelBody, crate::Mat, crate::name_lookup::EdgeHit)> {
+    let body = st.body(body).filter(|body| !body.body.is_mesh()).ok_or_else(|| DocError::reselect(name))?;
+    let frame = doc.path_transform(doc.model_body_component(body), path).ok_or_else(|| DocError::reselect(name))?;
+    let frame = doc.model_body_offset(body).map_or(frame, |offset| crate::mat_mul(&frame, offset));
+    let hit = crate::name_lookup::locate_edge(body, name, at).map_err(|_| DocError::reselect(name))?;
+    Ok((body, frame, hit))
+}
+
+/// The placed edge's world body name, edge index and current point for selection refill.
+pub fn placed_edge_pick(doc: &Document, st: &ModelState, geo: &GeoRef) -> Option<(String, usize, Vec3)> {
+    let GeoRef::PlacedEdge { body, path, at, name, .. } = geo else { return None };
+    let (body, frame, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name).ok()?;
+    let world_name = doc.world_body_name(st, &body.name, doc.model_body_component(body), path);
+    Some((world_name, hit.edge, crate::apply_point(&frame, hit.point)))
 }
 
 /// The closest point on a polyline to `target`, projecting onto each segment rather than
@@ -632,11 +686,15 @@ pub fn sketch_point_position(st: &ModelState, sketch: u64, point: &str) -> Optio
 
 /// An edge or face of the model as a line: along a straight edge, through the centre of a
 /// circular edge along its normal, or the axis of a cylinder, cone or torus face.
+fn line_of_edge(body: &ModelBody, index: usize, points: &[Vec3]) -> Result<(Vec3, Vec3)> {
+    as_line(points).or_else(|| edge_circle(body, index, points)).ok_or_else(|| bad("the edge is neither straight nor circular"))
+}
+
 fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     match g {
         GeoRef::Edge { at, name } => {
             let (b, i, pts) = edge_pick(st, *at, name)?;
-            as_line(&pts).or_else(|| edge_circle(b, i, &pts)).ok_or_else(|| bad("the edge is neither straight nor circular"))
+            line_of_edge(b, i, &pts)
         }
         GeoRef::Face { at, name } => {
             let (b, fi, _) = face_of(st, *at, name)?;
@@ -676,6 +734,20 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
                 ConstructGeom::Axis { origin, dir } => Ok((origin, dir)),
                 _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
             }
+        }
+        GeoRef::PlacedEdge { body, path, author_path, at, name } => {
+            let doc = doc.ok_or_else(|| bad("resolve the edge through its occurrence"))?;
+            let (body, frame, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name)?;
+            let points = indexed_edge_points(body, hit.edge).ok_or_else(|| DocError::reselect(name))?;
+            let (origin, direction) = line_of_edge(body, hit.edge, &points)?;
+            let author = if author_path.is_empty() {
+                doc.component_transform(component)
+            } else {
+                doc.path_transform(component, author_path).ok_or_else(|| DocError::reselect(name.as_str()))?
+            };
+            let inverse = crate::mat_inverse(&author).ok_or_else(|| bad("the feature's component frame is invalid"))?;
+            let direction = crate::apply_vector(&frame, direction).normalized().ok_or_else(|| bad("the axis has no direction"))?;
+            Ok((crate::apply_point(&inverse, crate::apply_point(&frame, origin)), crate::apply_vector(&inverse, canonical_dir(direction))))
         }
         // A construction axis by name: where it is on each evaluation, so what turns about it follows it.
         GeoRef::Axis { name } => crate::eval::construction_axis_in(doc, st, name, component),
@@ -1149,13 +1221,10 @@ impl GeoRef {
     /// edge or face that is gone.
     pub fn picked_point(&self, st: &ModelState) -> Option<Vec3> {
         match self {
-            GeoRef::Edge { at, name } => {
-                let on = match name.as_deref() {
-                    Some(n) => bodies(st).find_map(|b| crate::naming::find_edge(b, n, *at).ok())?,
-                    None => *at,
-                };
-                edge_pick(st, on, &None).ok().map(|_| on)
-            }
+            GeoRef::Edge { at, name } => match name.as_deref() {
+                Some(name) => named_edge(st, *at, name).map(|(_, hit)| hit.point),
+                None => edge_pick(st, *at, &None).ok().map(|_| *at),
+            },
             GeoRef::Face { at, name } => face_of(st, *at, name).ok().map(|(_, _, p)| p),
             _ => None,
         }

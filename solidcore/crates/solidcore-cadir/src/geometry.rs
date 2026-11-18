@@ -5,7 +5,9 @@
 //! and ellipse are at the angle `t` from the frame's reference direction (the major axis of an
 //! ellipse) about its axis, and a NURBS curve is on its own knots: the record's line through
 //! `origin` and `origin + direction`, and its circle, ellipse and spline, have the same `t`. A
-//! polyline is the degree-one spline on its own sample parameters.
+//! polyline is the degree-one spline on its own sample parameters; its chords stand within the
+//! chordal deflection its producer states of the curve they sample, which its edges' tolerances
+//! hold ([`curve_deviation`]).
 //!
 //! A surface need not keep its (u, v): the assembly makes every pcurve from the 3D edges. What
 //! a surface must keep is its side, so each comes back with whether the record's natural normal
@@ -17,7 +19,9 @@
 //! radius's magnitude, whose normal points out, so it is the opposite. A torus with a negative
 //! tube radius is the same surface with `v` moved by π, and its normal `∂u × ∂v` points away from
 //! the tube's centre for either sign, as the record's does: it keeps its side. A NURBS surface's oriented normal is opposite `Pu × Pv` when CADIR says
-//! `normal_reversed`. A procedural carrier is read by the solved form the producer cached.
+//! `normal_reversed`. A procedural carrier is read by the solved form the producer cached; where
+//! its construction states that cache a fit within a tolerance, the edges on it hold that
+//! tolerance, so the cache is not taken for the exact surface or curve.
 //!
 //! A cone, and a procedural linear sweep or revolution with no solved form cached, have a record
 //! form that depends on the face on them: each is read as its definition ([`FaceSurface::Swept`])
@@ -315,6 +319,29 @@ pub(crate) fn curve(g: &CurveGeometry) -> R<Option<Carrier>> {
         .solved()
         .ok_or_else(|| unsupported("a procedural curve without its solved form"))?;
     solved_curve(solved, 0)
+}
+
+/// How far, as its producer states it, a curve carrier may lie from the curve it stands for (mm):
+/// a polyline's chordal deflection, scaled with the placements it is under; 0 for any other.
+/// A procedural carrier's construction states its cache's fit apart ([`curve`] reads the cache).
+pub(crate) fn curve_deviation(g: &CurveGeometry) -> f64 {
+    let mut at = g.solved();
+    let mut scale = 1.0;
+    for _ in 0..=MAX_PLACEMENTS {
+        match at {
+            Some(SolvedCurveGeometry::Polyline(p)) => return scale * p.chordal_deflection().get(),
+            Some(SolvedCurveGeometry::Transformed(placed)) => {
+                // A placement that is not a similarity refuses the curve ([`curve`]).
+                match Similarity::of(placed.transform().rows3()) {
+                    Ok(s) => scale *= s.scale(),
+                    Err(_) => return 0.0,
+                }
+                at = Some(placed.basis());
+            }
+            _ => return 0.0,
+        }
+    }
+    0.0
 }
 
 /// An edge's carrier as the record takes it.

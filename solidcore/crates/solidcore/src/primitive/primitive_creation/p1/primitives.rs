@@ -1092,12 +1092,26 @@ fn arc_sweep_cylinder(
 ///   `ya` themselves: they are dot products of unit vectors that cancel when the tilt is
 ///   small, so their error is absolute, `|δ| <= γ₃ < 4 ε`, and unbounded relative to them.
 ///   Under `t² <= 1/4`, `|∂B/∂xa| + |∂B/∂ya| <= (1 + 0.77 + 0.45) + (1 + 0.58 + 0.34) < 5`,
-///   so that error moves `r B` by at most `20 ε r`. The derivation above also takes `X`,
-///   `Y`, `a` as exactly orthonormal and `X'`, `Y'` as exact. The stored axes are unit
-///   and orthogonal to within a few `ε` (built by `unitize` and cross products, as
-///   [`Vec3::make_unit_ortho_vectors`] builds `X'`, `Y'`), which moves `C(u)` and `C'(u)`
-///   by at most `16 ε r` each. With second-order terms, `64 ε r` covers these absolute
-///   errors, and it is added to the bound.
+///   so that error moves `r B` by at most `20 ε r`. `a` (unitized by the caller) and
+///   `X'`, `Y'` (built by `unitize` and cross products in
+///   [`Vec3::make_unit_ortho_vectors`]) are unit and orthogonal to within a few `ε`,
+///   which moves `C'(u)` by at most `16 ε r`. With second-order terms, `64 ε r` covers
+///   these absolute errors, and it is added to the bound.
+/// - Skew of the stored frame. The derivation takes `X`, `Y` as orthonormal, and a stored
+///   frame is not: [`Axis2Placement::set_canonical`] keeps `|X·Y|` up to `SM_EFF_ZERO` and
+///   `|X·X − 1|` up to `SM_EFF_ZERO / 100` (a circle's `is_arc` returns that frame), and a
+///   frame read from data may be anything. Let `X̂ = X / |X|` and `Ŷ` the unit part of `Y`
+///   square to it. With `s = |X·Y|`, `|X − X̂| <= |X·X − 1|` and
+///   `|Y − Ŷ| <= |Y·X̂| + ||Y − (Y·X̂) X̂| − 1| <= 2 s + |Y·Y − 1| + 4 s²` (for
+///   `|X| >= 1/2`). So `k = |X·X − 1| + |Y·Y − 1| + 2 s + 4 s²` bounds
+///   `|X − X̂| + |Y − Ŷ|`; its three dot products of near-unit vectors round by `γ₃ < 4 ε`
+///   each, so `k + 16 ε` is used. `X'` is the same for `X` and `X̂` (only its direction is
+///   used) and `Ŷ` gives the same `Z` direction, so `C'` is the squared circle of the
+///   orthonormal frame `X̂, Ŷ`. The fit's circle `C` moves from that frame's by at most
+///   `r k` (projection into `P` does not lengthen), and `xa`, `ya` from `X̂·a`, `Ŷ·a` by
+///   at most `k` together, which moves `r B` by at most `2.3 r k` (the largest single
+///   partial derivative above). `4 r k` is added; a frame with `k > 1e-6` keeps the
+///   fit's frame.
 ///
 /// A frame that fails either bound, or whose curve's kind has no certain hull, keeps the
 /// fit's frame, as upstream. A frame already exactly square is left as it is.
@@ -1138,7 +1152,19 @@ fn square_to_sweep(
         }
         axial = axial.max(off);
     }
-    let (xa, ya) = (frame.x_axis().dot(axis), frame.y_axis().dot(axis));
+    let (x, y) = (frame.x_axis(), frame.y_axis());
+    let s = x.dot(y).abs();
+    let skew = (x.dot(x) - 1.0).abs()
+        + (y.dot(y) - 1.0).abs()
+        + 2.0 * s
+        + 4.0 * s * s
+        + 16.0 * f64::EPSILON;
+    // A NaN keeps the fit's frame here too.
+    let near_orthonormal = skew <= 1e-6;
+    if !near_orthonormal {
+        return Ok(());
+    }
+    let (xa, ya) = (x.dot(axis), y.dot(axis));
     let t2 = xa * xa + ya * ya;
     // A tilt past 30° is never a fit's rounding; a NaN keeps the fit's frame too.
     let small = t2 <= 0.25;
@@ -1148,7 +1174,8 @@ fn square_to_sweep(
     let cx = (1.0 - xa * xa).sqrt();
     let m = (xa * ya).abs() / cx;
     let r = radius.abs();
-    let across = r * (t2 + m + m * m) * (1.0 + 16.0 * f64::EPSILON) + 64.0 * f64::EPSILON * r;
+    let across = (r * (t2 + m + m * m) + 4.0 * r * skew) * (1.0 + 16.0 * f64::EPSILON)
+        + 64.0 * f64::EPSILON * r;
     // As above, a NaN keeps the fit's frame.
     let within = axial + across <= zero;
     if !within {
@@ -1744,6 +1771,36 @@ mod tests {
     use super::*;
     use crate::topology::topology_traverser::Marks;
     use crate::topology::{Face, ShellId};
+
+    /// #18415 review: a circle's stored frame may be skewed (`set_canonical` keeps
+    /// `|X·Y|` up to `SM_EFF_ZERO`), which moves the circle by about `r |X·Y|`. That skew
+    /// is counted in the in-plane bound: a frame skewed by 1e-12 at radius 1000 (a move
+    /// of about 1e-9) stays as it is under a zero of 1e-9, where its orthonormal twin,
+    /// at the same tilt, is squared.
+    #[test]
+    fn square_to_sweep_counts_a_skewed_frame() {
+        let k = Kernel::default();
+        let r = 1000.0;
+        let flat = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let interval = crate::geom::extent1d::Extent1d::from_min_max(0.0, 10.0);
+        let curve = Curve::from(
+            Ellipse::create_canonical_circle(&k, &flat, r, Some(&interval), None).unwrap(),
+        );
+        let skewed = Axis2Placement::from_stored(Vec3::ZERO, Vec3::X, Vec3::new(1e-12, 1.0, 1e-15));
+        let square = Axis2Placement::from_stored(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 1.0, 1e-15));
+        assert_eq!(skewed.x_axis().dot(skewed.y_axis()), 1e-12);
+        assert!(skewed.z_axis() != Vec3::Z && square.z_axis() != Vec3::Z);
+        let mut kept = skewed;
+        square_to_sweep(&mut kept, &curve, r, Vec3::Z, 1e-9).unwrap();
+        assert_eq!(kept, skewed, "a skewed frame is squared");
+        let mut squared = square;
+        square_to_sweep(&mut squared, &curve, r, Vec3::Z, 1e-9).unwrap();
+        assert_eq!(
+            squared.z_axis(),
+            Vec3::Z,
+            "the orthonormal twin is not squared"
+        );
+    }
 
     fn plane_brep(angle: f64) -> Brep {
         let angle = angle.to_radians();

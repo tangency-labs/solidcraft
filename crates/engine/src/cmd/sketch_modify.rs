@@ -658,6 +658,9 @@ fn release_trim_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
         return Ok(Vec::new());
     }
     let id = curve.id.clone();
+    if let Some(curves) = sk.break_offset_topology(&id)? {
+        return Ok(curves);
+    }
     let family = |id: &String| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).and_then(|c| released_family(&c.kind));
     let line_or_arc = |id: &String| {
         sk.curve_index(id).and_then(|i| sk.curves.get(i)).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. }))
@@ -978,10 +981,7 @@ fn next_crossing(sk: &Sketch, path: &[Vec2], after: (usize, f64)) -> Option<(usi
 /// Whether trim may change curve `ci` (what [`curve_arg`] accepts, and not an infinite line).
 fn curve_ok(sk: &Sketch, ci: usize) -> bool {
     let Some(c) = sk.curves.get(ci) else { return false };
-    !c.infinite
-        && !sk.is_linked_curve(ci)
-        && !sk.freeform_offsets.iter().any(|offset| offset.output == c.id)
-        && !sk.offsets.iter().filter_map(|offset| offset.topology.as_ref()).any(|topology| topology.roles.iter().any(|role| role.output == c.id))
+    !c.infinite && !sk.is_linked_curve(ci) && !sk.freeform_offsets.iter().any(|offset| offset.output == c.id)
 }
 
 /// Where segment `a`–`b` crosses segment `c`–`d`: the parameter along `a`–`b` and the point.

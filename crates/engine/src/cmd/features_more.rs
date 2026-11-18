@@ -100,7 +100,12 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             && (v.as_str().is_some_and(|name| !name.trim().is_empty())
                 || v.is_object() && ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| v.get(*key).is_some()))
     });
-    let (axis, axis_ref) = if reference {
+    let (axis, axis_ref) = if let Some(value) = p.get("axis").filter(|axis| str_(axis, "type") == Some("placed_edge")) {
+        let geo = super::construct::geo(s, Some(value), cmd, "axis")?;
+        solidcraft_doc::construct::model_axis_in(Some(&s.placed_document()), &s.model.state(), &geo, s.active_component)
+            .map_err(|error| bad(cmd, format!("`axis`: {error}")))?;
+        (Vec3::Z, Some(solidcraft_doc::AxisRef::Model { geo }))
+    } else if reference {
         (Vec3::Z, Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
     } else {
         (axis_dir_param(p, cmd)?, None)

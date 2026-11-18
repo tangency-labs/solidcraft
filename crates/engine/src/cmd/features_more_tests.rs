@@ -535,6 +535,42 @@ fn rib_finds_a_tray_floor_whatever_the_tray_length() {
     }
 }
 
+/// A rib meets a face that curves across its thickness along both of its faces, not only on its
+/// mid plane (#18261). A tube (outside radius 10, bore 7) stands on a plate; a rib 12 thick on
+/// XZ runs from a line at x = 25 to the tube. On the mid plane the tube is at x = 10, at the
+/// rib's faces (y = ±6) at x = 8: a wall run to the mid plane's face, plus at most half the
+/// 3 mm tube wall, stopped at x = 8.5 and left a sliver of air at the rib's faces, wider the
+/// thicker the rib. The wall must close against the tube across its whole thickness, and still
+/// not come out into the bore.
+#[test]
+fn rib_meets_a_curved_face_across_its_whole_thickness() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 80, "height": 5, "corner": [-40, -40, 0], "body_name": "Seat"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 5], "axis": "Z", "operation": "join"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 7, "height": 40, "base": [0, 0, 5], "axis": "Z", "operation": "cut"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "R"}));
+    run(&mut s, "sketch.line", json!({"points": [[25, 5], [25, 35]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 12}));
+    assert_eq!(measure(&mut s)["body_count"], 1);
+    let class = |p: [f64; 3]| {
+        let bodies = &s.model.state().bodies;
+        bodies.iter().any(|b| b.body.classify_point(solidcore_record::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
+    };
+    // Just outside the tube (radius 10.03) near the rib's face, between the tube and where the
+    // old wall stopped: material now.
+    for z in [8.0, 20.0, 32.0] {
+        assert!(class([8.25, 5.7, z]), "a gap between the rib and the tube at z = {z}");
+        assert!(class([8.25, -5.7, z]), "a gap between the rib and the tube at z = {z}");
+    }
+    // The bore stays clear.
+    for p in [[6.5, 0.0, 20.0], [5.0, 4.0, 20.0], [0.0, 0.0, 20.0]] {
+        assert!(!class(p), "the rib came out into the bore at {p:?}");
+    }
+    // Beside the rib, outside the tube, nothing was added.
+    assert!(!class([8.25, 6.5, 20.0]));
+}
+
 #[test]
 fn rib_with_a_depth_and_web() {
     let mut s = bracket();

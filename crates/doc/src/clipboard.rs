@@ -225,6 +225,12 @@ fn remap_geo(
             }
         }
         GeoRef::Face { name: Some(n), .. } | GeoRef::Edge { name: Some(n), .. } => *n = remap_topology(n, ids, bodies),
+        GeoRef::PlacedEdge { path, author_path, name, .. } => {
+            *name = remap_topology(name, ids, bodies);
+            for path in [path, author_path].into_iter().filter(|path| !path.is_empty()) {
+                remap_occurrence_path(path, occurrences, doc)?;
+            }
+        }
         GeoRef::Vertex { edges: Some(names), .. } => {
             for n in names {
                 *n = remap_topology(n, ids, bodies);
@@ -288,12 +294,16 @@ fn remap_plane(
 /// copied tree is refused - the reference could not follow, and a dangling one would resolve
 /// against whatever then sits at those ids.
 fn remap_datum_path(d: &mut crate::construct::DatumRef, occurrences: &BTreeMap<u64, u64>, doc: &crate::Document) -> crate::Result<()> {
-    let last = d.path.last().copied().ok_or_else(|| crate::DocError::Invalid("a copied datum names no placement".into()))?;
+    remap_occurrence_path(&mut d.path, occurrences, doc)
+}
+
+fn remap_occurrence_path(path: &mut Vec<u64>, occurrences: &BTreeMap<u64, u64>, doc: &crate::Document) -> crate::Result<()> {
+    let last = path.last().copied().ok_or_else(|| crate::DocError::Invalid("a copied reference names no placement".into()))?;
     let new = occurrences
         .get(&last)
         .copied()
         .ok_or_else(|| crate::DocError::Invalid("the copied reference names a placement outside the copied tree".into()))?;
-    d.path = doc.occurrence_path(new).ok_or_else(|| crate::DocError::Invalid("the copied placement's path is broken".into()))?;
+    *path = doc.occurrence_path(new).ok_or_else(|| crate::DocError::Invalid("the copied placement's path is broken".into()))?;
     Ok(())
 }
 
