@@ -1,7 +1,7 @@
 //! #2088 (the fork's tangency-labs/smlib `f653ac9`, `pOptSecondRadii` on
 //! `SmFilletExecutive::SetFilletParameters`): a chamfer with a second offset per edge goes
-//! through `SetFilletParameters`, so with `fillet_corner_per_vertex_fan` (WR-665) it reaches
-//! the vertex-fan split as a fillet does.
+//! through `SetFilletParameters`, so it reaches the vertex-fan split (WR-665) as a fillet
+//! does.
 //!
 //! The part is WR-665's up-down joined squares: the cube [-10, 10]^3 less the octants
 //! [0, 10]^3 and [-10, 0]^3 (V = 6000). The two concave edges on the line x = y = 0
@@ -64,9 +64,8 @@ fn axis_edges(b: &Brep) -> Vec<EdgeId> {
 
 /// Chamfers the axis edges `which` with first offset 1 and second offset `second`
 /// through `SetFilletParameters`' second radii; `Err` is the fillet error code.
-fn chamfer(per_fan: bool, which: &[usize], second: f64) -> Result<f64, i32> {
+fn chamfer(which: &[usize], second: f64) -> Result<f64, i32> {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_per_vertex_fan = per_fan;
     let mut b = up_down_squares(&mut k);
     let all = axis_edges(&b);
     assert_eq!(all.len(), 2);
@@ -93,28 +92,26 @@ fn assert_close(v: f64, want: f64) {
     assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
 }
 
-/// The issue's case: both axis edges chamfered 1 x 1. Without the flag the corner at the
-/// origin fails (`SM_FILERR_MAKE_TOPOLOGY`, code 3, as #2088 reports); with it each fan
-/// is its own corner.
+/// The issue's case: both axis edges chamfered 1 x 1. Upstream the corner at the origin
+/// fails (`SM_FILERR_MAKE_TOPOLOGY`, code 3, as #2088 reports); each fan is its own
+/// corner.
 #[test]
 fn issue_2088_joined_squares_chamfer_1x1() {
-    assert_eq!(chamfer(false, &[0, 1], 1.0), Err(3));
-    assert_close(chamfer(true, &[0, 1], 1.0).unwrap(), 6010.0);
+    assert_close(chamfer(&[0, 1], 1.0).unwrap(), 6010.0);
 }
 
 /// Unequal setbacks, 1 x 2: each prism is 1 * 2 / 2 * 10.
 #[test]
 fn issue_2088_joined_squares_chamfer_1x2() {
-    assert_eq!(chamfer(false, &[0, 1], 2.0), Err(3));
-    assert_close(chamfer(true, &[0, 1], 2.0).unwrap(), 6020.0);
+    assert_close(chamfer(&[0, 1], 2.0).unwrap(), 6020.0);
 }
 
 /// WR-665's one-edge variant as a two-distance chamfer: one fan blended.
 #[test]
 fn issue_2088_one_axis_edge_chamfer() {
     for which in [0, 1] {
-        assert_close(chamfer(true, &[which], 1.0).unwrap(), 6005.0);
-        assert_close(chamfer(true, &[which], 2.0).unwrap(), 6010.0);
+        assert_close(chamfer(&[which], 1.0).unwrap(), 6005.0);
+        assert_close(chamfer(&[which], 2.0).unwrap(), 6010.0);
     }
 }
 
@@ -157,9 +154,7 @@ use solidcore::topology::edgeuse::p1 as eu1;
 
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 /// The box [0, 20] x [0, 20] x [0, 10]'s top front edge, along x at y = 0, z = 10.

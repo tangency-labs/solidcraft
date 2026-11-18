@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
-use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::history::{BodyHistory, FaceOrigin, History};
 
 use crate::SolvedSketch;
 
@@ -115,10 +115,11 @@ impl Lineage {
             .collect()
     }
 
-    /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
-    pub(crate) fn unnamed_faces(faces: usize) -> Lineage {
-        let faces = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
-        Lineage { history: History { operands: 1, faces, edges: Vec::new() }, operands: vec![Arc::new(Operand::Made(Vec::new()))] }
+    /// `tool`, a body the feature built whose faces have no role, with its faces and its edges: a
+    /// cut by it reports where its edges went, and a lineage without them could not take that in,
+    /// leaving the whole result to be named from geometry (a modelled Thread, #18460).
+    pub(crate) fn unnamed(tool: &Body) -> Lineage {
+        Lineage::of(tool, Operand::Made(vec![Vec::new(); tool.face_count()]))
     }
 
     /// The lineages of `pieces`, the lumps of `whole` (whose lineage is `lineage`): their faces
@@ -220,6 +221,9 @@ pub(crate) struct ProfileRoles<'a> {
     pub region: Option<&'a Region2>,
     /// The start and end caps' roles (`None`: not known).
     pub caps: [Option<String>; 2],
+    /// A second name each cap answers to (`None`: none), so a reference picked under the name the
+    /// cap had before the extrude's direction changed still finds it.
+    pub cap_synonyms: [Option<String>; 2],
     /// A thin wall: its sides lie off the sketch curves, and are named by the curve they run
     /// beside.
     pub thin: Option<&'a ThinWallRoles>,
@@ -265,7 +269,12 @@ impl<'a> ProfileRoles<'a> {
                 for origin in &face.origins {
                     let found = match *origin {
                         FaceOrigin::Profile { segment } => curve(segment),
-                        FaceOrigin::Cap { end } => self.caps.get(usize::from(end)).cloned().flatten().into_iter().collect(),
+                        FaceOrigin::Cap { end } => {
+                            let k = usize::from(end);
+                            let name = self.caps.get(k).cloned().flatten();
+                            // A cap with no name stays unknown; one with a name also answers to its synonym.
+                            name.into_iter().chain(self.cap_synonyms.get(k).cloned().flatten()).collect()
+                        }
                         _ => Vec::new(),
                     };
                     // One unknown origin leaves the face unknown: never a partial guess.
@@ -287,7 +296,7 @@ impl<'a> ProfileRoles<'a> {
     /// A body swept from a profile (revolve, sweep, loft): its sides named by the sketch curves,
     /// its caps `start` and `end`.
     pub fn swept(sketch: Option<&'a SolvedSketch>, region: Option<&'a Region2>) -> ProfileRoles<'a> {
-        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], thin: None }
+        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], cap_synonyms: [None, None], thin: None }
     }
 
     /// A tool built from the profile (and then moved, from `built`, when given), its faces named
@@ -431,6 +440,41 @@ pub(crate) fn cylinder_tool(body: Body) -> Traced {
                 [FaceOrigin::Cap { end }] => vec![if *end { "top" } else { "bottom" }.to_string()],
                 origins if !origins.is_empty() && origins.iter().all(|o| matches!(o, FaceOrigin::Profile { .. })) => vec!["side".to_string()],
                 _ => Vec::new(),
+            })
+            .collect()
+    });
+    Traced::made(body, roles)
+}
+
+/// A pipe swept from its circle (and, when hollow, the hole inside it), whose first
+/// `outer_segments` profile segments are the circle: its end faces `start` and `end`, as a
+/// sweep's caps are, its outside wall `side`, as a cylinder's is, and a hollow pipe's inside wall
+/// `inner` (#14897).
+pub(crate) fn pipe_tool(body: Body, outer_segments: usize) -> Traced {
+    let roles = body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|f| {
+                let mut roles: Vec<String> = Vec::new();
+                for origin in &f.origins {
+                    let role = match *origin {
+                        FaceOrigin::Cap { end } => {
+                            if end {
+                                "end"
+                            } else {
+                                "start"
+                            }
+                        }
+                        FaceOrigin::Profile { segment } if segment < outer_segments => "side",
+                        FaceOrigin::Profile { .. } => "inner",
+                        // One unknown origin leaves the face unknown: never a partial guess.
+                        _ => return Vec::new(),
+                    };
+                    if !roles.iter().any(|r| r == role) {
+                        roles.push(role.to_string());
+                    }
+                }
+                roles
             })
             .collect()
     });
@@ -744,9 +788,12 @@ fn order_legacy_family(bodies: &mut [crate::ModelBody], members: &[usize], doc: 
     if order.len() != names.len() {
         return;
     }
-    for (name, piece) in names.into_iter().zip(order) {
+    // The body a name past the first was split off moves with the name (see `order_lumps`).
+    let split_from: Vec<Option<String>> = members.iter().map(|i| bodies.get(*i).and_then(|b| b.split_from.clone())).collect();
+    for ((name, from), piece) in names.into_iter().zip(split_from).zip(order) {
         if let Some(b) = members.get(piece).and_then(|i| bodies.get_mut(*i)) {
             b.name = name;
+            b.split_from = from;
         }
     }
 }
@@ -790,8 +837,10 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         keys.sort();
         // A name moves with the feature it belongs to: in a cut's family the first name is the
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
-        // the `body_names` of the feature a body says made it (#10438).
-        let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
+        // the `body_names` of the feature a body says made it (#10438). So does the body a name
+        // past the first was split off, which gives that piece its material and look.
+        let names: Vec<(String, u64, Option<String>)> =
+            members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature, b.split_from.clone()))).collect();
         // The pieces take the family's places in that order too, so the state lists them as
         // their names run. The session pins a feature's body names in state order, and the next
         // evaluation hands them out in this order: listed in the kernel's order, the pieces
@@ -800,9 +849,10 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         if moved.len() != members.len() || names.len() != members.len() {
             continue;
         }
-        for ((mut b, (name, feature)), place) in moved.into_iter().zip(names).zip(&members) {
+        for ((mut b, (name, feature, split_from)), place) in moved.into_iter().zip(names).zip(&members) {
             b.name = name;
             b.feature = feature;
+            b.split_from = split_from;
             if let Some(slot) = bodies.get_mut(*place) {
                 *slot = b;
             }

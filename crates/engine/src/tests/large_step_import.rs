@@ -113,9 +113,10 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     let _ = std::fs::remove_file(path);
 }
 
-/// The largest files read (#4086). Over the default limits a STEP file and a design file are
-/// refused before anything is read, saying how to raise the limit; with the limits raised (the
-/// preference, or `--max-file-size` for one run, which wins) the same reads go ahead.
+/// The largest files read (#4086). Over the default limits a STEP file, a design file and a glTF
+/// file (#17446) are refused before anything is read, saying how to raise the limit; with the
+/// limits raised (the preference, or `--max-file-size` for one run, which wins) the same reads go
+/// ahead.
 #[test]
 fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     use solidcraft_io::limits::{self, FileLimits, GB, Kind, MB};
@@ -138,9 +139,10 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     };
     let step = sparse("big.step", 512 * MB + 1);
     let design = sparse("big.solidcraft", 256 * MB + 1);
+    let glb = sparse("big.glb", 512 * MB + 1);
     let mut s = Session::default();
     assert_eq!(limits::effective(), FileLimits::DEFAULT);
-    for path in [&step, &design] {
+    for path in [&step, &design, &glb] {
         let error = s.execute("doc.open", &json!({"path": path})).unwrap_err().to_string();
         assert!(error.contains("too large") && error.contains("Largest file to open") && error.contains("--max-file-size"), "{error}");
     }
@@ -151,6 +153,10 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     assert_eq!(solidcraft_kernel::step_max_bytes(), 1 << 30);
     assert!(limits::check(Kind::Step, 512 * MB + 1).is_ok());
     let error = s.execute("doc.open", &json!({"path": design})).unwrap_err().to_string();
+    assert!(!error.contains("too large"), "{error}");
+    // The glTF file follows the limit for STEP and import files: read, and refused only for not
+    // being a glTF file.
+    let error = s.execute("doc.open", &json!({"path": glb})).unwrap_err().to_string();
     assert!(!error.contains("too large"), "{error}");
     // The flag overrides the preference for the run, and the ceiling holds for both.
     limits::set_override(Some(2 * GB)).unwrap();

@@ -1,5 +1,6 @@
 //! The Mixed corner's exact piecewise-Bezier algebra in homogeneous coordinates
-//! (`x w, y w, z w, w`), and its faces' bicubically blended Coons patches in R^4.
+//! (`x w, y w, z w, w`), and its faces' Coons patches in R^4 (bicubically blended for
+//! rounds, [`coons_chamfer`] for chamfers).
 //!
 //! Upstream: none (pinned SMLib has no Mixed corner). The fork's
 //! `source/SMLib/src/SmBlendCornerMixed.cpp` (tangency-labs/smlib d443f10, branch
@@ -26,7 +27,8 @@
 //!
 //! Deviations: out-params are return values; an index the fork reads out of range (only
 //! on malformed data) is `SM_ERR`; a twist term names its side by an index into the
-//! caller's sides instead of a pointer. `sm_MxRoots` recurses at most 61 deep (its own
+//! caller's sides instead of a pointer. [`coons_chamfer`] is not the fork's, which takes
+//! the bilinear patch for every chamfer face. `sm_MxRoots` recurses at most 61 deep (its own
 //! `depth > 60` stop, as the fork; the Mixed corner, WR-697).
 
 use crate::error::{Result, SolidError};
@@ -1363,30 +1365,54 @@ pub fn coons(c0: &Side, c1: &Side, d0: &Side, d1: &Side) -> Result<Srf> {
     srf_sum(&srf_sum(&p1, &p2, 1.0)?, &p12, -1.0)
 }
 
-/// `sm_MxCoonsBilinear`: the bilinearly blended Coons patch of four sides (G0).
-pub fn coons_bilinear(c0: &Side, c1: &Side, d0: &Side, d1: &Side) -> Result<Srf> {
-    // crU[k](u) times (1 - v), v
-    let tensor = |mut u0: Crv, mut u1: Crv| -> Result<Srf> {
-        common(&mut u0, &mut u1)?;
-        let mut s = Srf {
-            du: u0.deg().ok_or_else(err)?,
-            dv: 1,
-            ub: u0.brk.clone(),
-            vb: vec![0.0, 1.0],
-            p: Vec::new(),
-        };
-        for i in 0..u0.seg.len() {
-            let mut pts = vec![V4::default(); (s.du + 1) * 2];
-            for a in 0..=s.du {
-                *gm(&mut pts, a * 2)? = *g(g(&u0.seg, i)?, a)?;
-                *gm(&mut pts, a * 2 + 1)? = *g(g(&u1.seg, i)?, a)?;
+/// `u0(u)` times `1 - v` plus `u1(u)` times `v`.
+fn tensor_linear(mut u0: Crv, mut u1: Crv) -> Result<Srf> {
+    common(&mut u0, &mut u1)?;
+    let mut s = Srf {
+        du: u0.deg().ok_or_else(err)?,
+        dv: 1,
+        ub: u0.brk.clone(),
+        vb: vec![0.0, 1.0],
+        p: Vec::new(),
+    };
+    for i in 0..u0.seg.len() {
+        let mut pts = vec![V4::default(); (s.du + 1) * 2];
+        for a in 0..=s.du {
+            *gm(&mut pts, a * 2)? = *g(g(&u0.seg, i)?, a)?;
+            *gm(&mut pts, a * 2 + 1)? = *g(g(&u1.seg, i)?, a)?;
+        }
+        s.p.push(pts);
+    }
+    Ok(s)
+}
+
+/// `c(u)` times the scalar curve `f(v)` (its first coordinate).
+fn tensor_scalar(c: &Crv, f: &Crv) -> Result<Srf> {
+    let mut s = Srf {
+        du: c.deg().ok_or_else(err)?,
+        dv: f.deg().ok_or_else(err)?,
+        ub: c.brk.clone(),
+        vb: f.brk.clone(),
+        p: Vec::new(),
+    };
+    for cs in &c.seg {
+        for fs in &f.seg {
+            let mut pts = Vec::new();
+            for q in cs {
+                for h in fs {
+                    pts.push(mul(*q, h[0]));
+                }
             }
             s.p.push(pts);
         }
-        Ok(s)
-    };
-    let p1 = tensor(c0.c.clone(), c1.c.clone())?;
-    let p2 = srf_transpose(&tensor(d0.c.clone(), d1.c.clone())?)?;
+    }
+    Ok(s)
+}
+
+/// `sm_MxCoonsBilinear`: the bilinearly blended Coons patch of four sides (G0).
+pub fn coons_bilinear(c0: &Side, c1: &Side, d0: &Side, d1: &Side) -> Result<Srf> {
+    let p1 = tensor_linear(c0.c.clone(), c1.c.clone())?;
+    let p2 = srf_transpose(&tensor_linear(d0.c.clone(), d1.c.clone())?)?;
     let p12 = Srf {
         du: 1,
         dv: 1,
@@ -1400,6 +1426,55 @@ pub fn coons_bilinear(c0: &Side, c1: &Side, d0: &Side, d1: &Side) -> Result<Srf>
         ]],
     };
     srf_sum(&srf_sum(&p1, &p2, 1.0)?, &p12, -1.0)
+}
+
+/// A chamfer's Coons patch of four sides (G0). Where `c1` and `d1` lie in a plane W
+/// (every control point within `tol`, the wall the corner's face runs into) that X, the
+/// corner `(0, 0)`, is off, it is blended across `v` with `phi(v)`, `d0`'s homogeneous
+/// distance from W over X's, instead of `1 - v`: then the patch's homogeneous distance from
+/// W is `phi(v)` times `c0`'s, to the distance of `c1` and `d1` from W (within `tol`), so
+/// the patch is on X's side of W where `c0` and `d0` are, read off their control points
+/// (#13755). Elsewhere [`coons_bilinear`].
+pub fn coons_chamfer(c0: &Side, c1: &Side, d0: &Side, d1: &Side, tol: f64) -> Result<Srf> {
+    let x = eval(&c0.c, 0.0)?;
+    let a = eval(&c0.c, 1.0)?;
+    let v = eval(&c1.c, 0.0)?;
+    let p = eval(&c1.c, 1.0)?;
+    let o = project(p);
+    let n = (project(v) - o).cross(project(a) - o);
+    let len = n.length();
+    let h = |q: V4| {
+        (n.x * (q[0] - q[3] * o.x) + n.y * (q[1] - q[3] * o.y) + n.z * (q[2] - q[3] * o.z)) / len
+    };
+    let on = |c: &Crv| {
+        c.seg
+            .iter()
+            .flatten()
+            .all(|q| q[3] > 0.0 && (h(*q) / q[3]).abs() <= tol)
+    };
+    let hx = h(eval(&d0.c, 0.0)?);
+    if !(len > 0.0 && on(&c1.c) && on(&d1.c) && (hx / x[3]).abs() > tol) {
+        return coons_bilinear(c0, c1, d0, d1);
+    }
+    // phi and 1 - phi on d0's Bernstein basis; phi ends at V, in W, at 0 exactly, so the
+    // patch keeps c1
+    let mut phi = map(&d0.c, |q| [h(q) / hx, 0.0, 0.0, 0.0]);
+    if let Some(e) = phi.seg.last_mut().and_then(|s| s.last_mut()) {
+        e[0] = 0.0;
+    }
+    let rest = map(&phi, |q| [1.0 - q[0], 0.0, 0.0, 0.0]);
+    let chord = |e0: V4, e1: V4| Crv {
+        brk: vec![0.0, 1.0],
+        seg: vec![vec![e0, e1]],
+    };
+    // phi (c0 - its chord) + (1 - phi) (c1 - its chord) + (1 - u) d0 + u d1
+    let p1 = srf_sum(
+        &tensor_scalar(&sum(&c0.c, &chord(x, a), 1.0, -1.0)?, &phi)?,
+        &tensor_scalar(&sum(&c1.c, &chord(v, p), 1.0, -1.0)?, &rest)?,
+        1.0,
+    )?;
+    let p2 = srf_transpose(&tensor_linear(d0.c.clone(), d1.c.clone())?)?;
+    srf_sum(&p1, &p2, 1.0)
 }
 
 /// `sm_MxSrfToBSpline`: the patches as one rational B-spline surface (`SM_ERR` where a

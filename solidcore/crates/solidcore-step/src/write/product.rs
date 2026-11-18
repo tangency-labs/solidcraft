@@ -59,6 +59,16 @@ pub struct ExportProduct<'a> {
     pub children: Vec<(usize, [[f64; 4]; 4], String)>,
 }
 
+/// STEP text with the exact correspondence from input faces to written entities.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Exported {
+    /// The complete Part 21 exchange structure.
+    pub text: String,
+    /// `ADVANCED_FACE` entity ids, indexed by input product, body and record face.
+    /// An unreachable product has no body maps; a face used by no shell has id 0.
+    pub face_ids: Vec<Vec<Vec<u64>>>,
+}
+
 /// Header fields. Each is written as given; an empty field is written as an empty string.
 #[derive(Clone, Debug, Default)]
 pub struct Header {
@@ -188,6 +198,15 @@ fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
 /// [`ExportError`]: nothing to write, a bad child reference, a recursive tree, a placement that
 /// is not rigid, or a body whose record the writer refuses.
 pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Result<String> {
+    products_with_face_ids(products, root, header).map(|written| written.text)
+}
+
+/// [`products`] with the written entity id of every input record face.
+///
+/// # Errors
+///
+/// As [`products`].
+pub fn products_with_face_ids(products: &[ExportProduct], root: usize, header: &Header) -> Result<Exported> {
     if products.is_empty() || root >= products.len() {
         return Err(ExportError::Nothing);
     }
@@ -298,6 +317,7 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
     let mut shape_rep = vec![0u64; products.len()];
     let mut product_ids = Vec::new();
     let mut styled = Vec::new();
+    let mut face_ids: Vec<Vec<Vec<u64>>> = products.iter().map(|_| Vec::new()).collect();
     for &(pi, p) in &reached {
         let name = product_name(p);
         let prod = w.add_distinct("PRODUCT", &[s(&name), s(&name), s(""), refs(&[pctx])]);
@@ -316,6 +336,7 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
             *slot = srep;
         }
         let (mut solids, mut sheets) = (Vec::new(), Vec::new());
+        let mut product_faces = Vec::new();
         for b in &p.bodies {
             let before = w.non_finite();
             let written = topology::brep(&mut GeomWriter::new(&mut w), b.record, &b.name)
@@ -335,8 +356,12 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
                     styled.push(style(&mut w, face, c));
                 }
             }
+            product_faces.push(written.faces);
             solids.extend(written.solids);
             sheets.extend(written.sheets);
+        }
+        if let Some(slot) = face_ids.get_mut(pi) {
+            *slot = product_faces;
         }
         for (kind, list) in [("ADVANCED_BREP_SHAPE_REPRESENTATION", solids), ("MANIFOLD_SURFACE_SHAPE_REPRESENTATION", sheets)] {
             if list.is_empty() {
@@ -393,7 +418,7 @@ pub fn products(products: &[ExportProduct], root: usize, header: &Header) -> Res
     text.push_str("FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }'));\nENDSEC;\nDATA;\n");
     text.push_str(&w.data());
     text.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
-    Ok(text)
+    Ok(Exported { text, face_ids })
 }
 
 /// A product's name as written: `Part` when it is blank.
@@ -480,10 +505,19 @@ fn style(w: &mut Writer, item: u64, colour: &Colour) -> u64 {
 ///
 /// As [`products`].
 pub fn bodies(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<String> {
+    bodies_with_face_ids(bodies, header).map(|written| written.text)
+}
+
+/// [`bodies`] with face entity ids under its one product, in input body order.
+///
+/// # Errors
+///
+/// As [`products`].
+pub fn bodies_with_face_ids(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<Exported> {
     let name =
         if header.file_name.is_empty() { "Part".to_string() } else { strip_suffix(strip_suffix(&header.file_name, ".step"), ".stp").to_string() };
     let p = ExportProduct { name, bodies, children: Vec::new() };
-    products(&[p], 0, header)
+    products_with_face_ids(&[p], 0, header)
 }
 
 /// `name` without every trailing `suffix`, compared without regard to ASCII case.
@@ -652,6 +686,38 @@ mod tests {
     }
     fn body<'a>(name: &str, record: &'a Brep) -> ExportBody<'a> {
         ExportBody { name: name.into(), record, color: None, faces: Vec::new() }
+    }
+
+    #[test]
+    fn face_ids_keep_product_body_and_record_order() {
+        let mut record = box_record();
+        let solidcore_record::brep::Shell::Faces { faces, .. } = &mut record.shells[0] else { panic!("box shell") };
+        faces.reverse();
+        let order: Vec<_> = faces.iter().map(|face| face.face as usize).collect();
+        let list = [
+            ExportProduct { name: "Unused".into(), bodies: vec![body("Unused", &record)], children: vec![] },
+            ExportProduct {
+                name: "Root".into(),
+                bodies: vec![body("First", &record), body("Second", &record)],
+                children: vec![(2, IDENTITY, String::new())],
+            },
+            ExportProduct { name: "Child".into(), bodies: vec![body("Third", &record)], children: vec![] },
+        ];
+        let written = products_with_face_ids(&list, 1, &Header::default()).unwrap();
+        assert_eq!(written.text, products(&list, 1, &Header::default()).unwrap());
+        assert_eq!(written.face_ids.iter().map(Vec::len).collect::<Vec<_>>(), vec![0, 2, 1]);
+        let ex = p21::parse(&written.text).unwrap();
+        let mut unique = std::collections::BTreeSet::new();
+        for ids in written.face_ids.iter().flatten() {
+            assert_eq!(ids.len(), 6);
+            for &id in ids {
+                assert!(unique.insert(id), "each body owns its written face");
+                assert_eq!(ex.get(id).unwrap().name(), "ADVANCED_FACE");
+            }
+            // Faces are written in shell traversal order, not record order.
+            let traversal: Vec<_> = order.iter().map(|&index| ids[index]).collect();
+            assert!(traversal.windows(2).all(|pair| pair[0] < pair[1]));
+        }
     }
 
     /// `levels` products in a chain, each placing the next twice (a shared child), the last
@@ -846,6 +912,22 @@ mod tests {
         let radii: Vec<f64> = torus.split(',').skip(2).filter_map(|v| v.trim().parse().ok()).collect();
         assert!(matches!(radii.as_slice(), [major, minor] if (major - 7.5).abs() < 1e-9 && (minor - 2.5).abs() < 1e-9), "{torus}");
         assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 1, "{text}");
+    }
+
+    /// A circle touching its revolution axis makes a horn torus: its NURBS must keep its pole,
+    /// even when the kernel proves the torus support. Only ring tori are promoted on export.
+    #[test]
+    fn a_horn_torus_keeps_its_spline_face() {
+        use solidcore_ops::sweep::{Curve, revolve};
+        use std::f64::consts::{FRAC_PI_2, TAU};
+
+        solidcore_ops::session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+        let profile = [Curve::Arc { center: [5.0, 0.0, 0.0], axis: [0.0, -1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: 5.0, start: 0.0, end: TAU }];
+        let horn = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], FRAC_PI_2, true).unwrap();
+        let text = solidcore_bodies(&[("Horn", &horn)], &Header::default()).unwrap();
+        assert!(!text.contains("TOROIDAL_SURFACE") && !text.contains("SURFACE_OF_REVOLUTION"), "{text}");
+        assert_eq!(text.matches("(BOUNDED_SURFACE()B_SPLINE_SURFACE(").count(), 1, "{text}");
+        assert_eq!(text.matches("ADVANCED_FACE(").count(), 3, "{text}");
     }
 
     /// A rounded rim whose round is bent off its torus by one control point is no quadric: its

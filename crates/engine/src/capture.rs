@@ -42,6 +42,40 @@ pub fn install(renderer: Arc<Renderer>) {
     if let Ok(mut r) = RENDERER.write() {
         *r = Some(renderer);
     }
+    coming(false);
+}
+
+/// Whether a renderer is being set up, and the waiters for it ([`wait_for_renderer`]).
+static COMING: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+
+/// The host is setting up a renderer that [`install`] will put in use (the desktop app compiles
+/// its pipelines beside the window while the start page already shows), or (`false`) gave up on
+/// it. Pictures drawn off the window thread meanwhile wait for it ([`wait_for_renderer`]).
+pub fn coming(on: bool) {
+    let (lock, ready) = &COMING;
+    if let Ok(mut c) = lock.lock() {
+        *c = on;
+    }
+    ready.notify_all();
+}
+
+/// For a thread drawing a picture: wait up to `within` for a renderer the host is still setting
+/// up ([`coming`]). → whether one is installed. Returns at once when none is coming, so it never
+/// waits where no renderer will be (a browser, a CLI without a GPU). Not for the window's thread.
+pub fn wait_for_renderer(within: Duration) -> bool {
+    let (lock, ready) = &COMING;
+    let Ok(mut c) = lock.lock() else { return installed().is_some() };
+    if *c && installed().is_none() {
+        let end = Instant::now() + within;
+        while *c && installed().is_none() {
+            let Some(left) = end.checked_duration_since(Instant::now()) else { break };
+            match ready.wait_timeout(c, left) {
+                Ok((next, _)) => c = next,
+                Err(_) => return installed().is_some(),
+            }
+        }
+    }
+    installed().is_some()
 }
 
 /// Pictures being drawn, and whether the process has stopped drawing them: a picture still on
@@ -174,6 +208,24 @@ mod tests {
         assert!(png.bytes.starts_with(b"\x89PNG"));
         assert_eq!(png.renderer, "cpu");
         assert_eq!((warning("cpu"), warning("gpu"), warning("gpu-software")), (Some(CPU_WARNING), None, None));
+    }
+
+    /// The desktop app shows its start page while its renderer is still being set up: a picture
+    /// asked for meanwhile, off the window's thread, waits for it instead of failing (#1210).
+    #[test]
+    fn a_picture_thread_waits_for_a_renderer_that_is_coming() {
+        coming(true);
+        let installer = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            install_test_renderer();
+        });
+        assert!(wait_for_renderer(Duration::from_secs(10)), "the renderer installed meanwhile is found");
+        installer.join().unwrap();
+        assert!(!*COMING.0.lock().unwrap(), "installing it ends the wait for everyone");
+        // Nothing coming: no wait at all, whatever is installed.
+        let t = Instant::now();
+        let _ = wait_for_renderer(Duration::from_secs(10));
+        assert!(t.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

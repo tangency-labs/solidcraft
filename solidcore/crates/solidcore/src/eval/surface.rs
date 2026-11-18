@@ -566,6 +566,45 @@ impl SurfaceEval {
         }
         Ok(self.collapse(uv, reach)?.flags())
     }
+
+    /// A certified bound on how far the surface moves per unit of parameter `d`, over the
+    /// points whose other parameter lies in `across`, or past an end of the range it reaches by
+    /// at most `beyond_across`, and whose `d` parameter is on the knot range or past it by at
+    /// most `beyond` ([`super::collapse::partial_bound`]); a polynomial spline's only, any other
+    /// surface refused.
+    pub fn partial_bound(
+        &self,
+        d: usize,
+        across: [f64; 2],
+        beyond: f64,
+        beyond_across: f64,
+    ) -> Result<f64, EvalError> {
+        match self {
+            SurfaceEval::Eval(e, _) => {
+                super::collapse::partial_bound(e, d, across, beyond, beyond_across)
+            }
+            _ => Err(EvalError::Unevaluable(
+                "a partial bound of a surface that is not a spline".into(),
+            )),
+        }
+    }
+
+    /// A pcurve whose control points run a little past the knot range put on it, with a
+    /// certified bound on how far that moves the surface under it, refused past `tolerance`
+    /// ([`super::collapse::pcurve_onto_knots`]); `None` when it is on the range. A polynomial
+    /// spline's only, any other surface refused.
+    pub fn pcurve_onto_knots(
+        &self,
+        pc: &Curve2,
+        tolerance: f64,
+    ) -> Result<Option<super::collapse::OntoKnots>, EvalError> {
+        match self {
+            SurfaceEval::Eval(e, _) => super::collapse::pcurve_onto_knots(e, pc, tolerance),
+            _ => Err(EvalError::Unevaluable(
+                "a pcurve onto the knot range of a surface that is not a spline".into(),
+            )),
+        }
+    }
 }
 
 /// A tensor spline's rows (`rows[i][j]`, i along u) as the evaluator's u-fastest array.

@@ -86,6 +86,86 @@ fn default_names_skip_names_in_use() {
     assert_eq!(names(&s), ["Arm:2", "Arm:3", "Arm:1"]);
 }
 
+#[test]
+fn ambiguous_motion_item_names_are_refused_without_changing_the_session() {
+    for (create, delete, key, kind, params) in [
+        ("contact.create", "contact.edit", "set", "contact set", json!({"occurrences": ["A", "B"]})),
+        ("motion.study", "motion.delete", "study", "motion study", json!({"steps": 10})),
+        ("explode.create", "explode.delete", "view", "exploded view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]})),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.create", json!({"name": name, "activate": false}));
+        }
+        let mut params = params;
+        params["name"] = json!("Shared");
+        let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
+        let second = run(&mut s, create, params)[key].as_u64().unwrap();
+        // Old files can already contain duplicate names; opening them must remain possible.
+        let mut s = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+        run(&mut s, "component.create", json!({"name": "Temporary", "activate": false}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(!s.redo.is_empty());
+        let mut deleting = deletion(delete, key, first);
+        deleting[key] = json!("Shared");
+        let (doc, undo, redo) = (s.doc.clone(), s.undo.len(), s.redo.len());
+        let error = s.execute(delete, &deleting).expect_err("an ambiguous name must not choose an item");
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{error}");
+        assert!(
+            error.to_string().contains(&format!("ambiguous {kind} `Shared`; matching IDs: {first}, {second}; use a numeric {kind} ID")),
+            "{error}"
+        );
+        assert_eq!(s.doc, doc, "{delete} changed the document");
+        assert_eq!((s.undo.len(), s.redo.len()), (undo, redo), "{delete} changed undo/redo");
+        run(&mut s, delete, deletion(delete, key, second));
+        // The remaining name is now unique, and still resolves normally.
+        run(&mut s, delete, deleting);
+    }
+}
+
+#[test]
+fn contact_and_exploded_view_ids_cannot_be_shadowed_by_names() {
+    for (create, delete, key, params) in [
+        ("contact.create", "contact.edit", "set", json!({"occurrences": ["A", "B"]})),
+        ("explode.create", "explode.delete", "view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]})),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.create", json!({"name": name, "activate": false}));
+        }
+        let mut named = params.clone();
+        named["name"] = json!("6");
+        let first = run(&mut s, create, named)[key].as_u64().unwrap();
+        let second = run(&mut s, create, params)[key].as_u64().unwrap();
+        assert_eq!(second, 6);
+        let mut deleting = deletion(delete, key, second);
+        deleting[key] = json!("6");
+        let before = s.doc.clone();
+        let error = s.execute(delete, &deleting).unwrap_err();
+        assert!(error.to_string().contains(&format!("matching IDs: {first}, {second}")), "{error}");
+        assert_eq!(s.doc, before);
+        run(&mut s, delete, deletion(delete, key, second));
+        // The numeric ID selected the second item, leaving the first numeric name available.
+        run(&mut s, delete, deleting);
+    }
+}
+
+#[test]
+fn motion_studies_keep_number_and_text_precedence_when_names_repeat() {
+    let mut s = Session::default();
+    let first = run(&mut s, "motion.study", json!({"name": "3", "steps": 10}))["study"].as_u64().unwrap();
+    let second = run(&mut s, "motion.study", json!({"name": "3", "steps": 20}))["study"].as_u64().unwrap();
+    let third = run(&mut s, "motion.study", json!({"name": "Target", "steps": 30}))["study"].as_u64().unwrap();
+    assert_eq!(third, 3);
+    let error = s.execute("motion.study", &json!({"study": "3", "steps": 40})).unwrap_err();
+    assert!(error.to_string().contains("matching IDs: 1, 2"), "{error}");
+    assert_eq!(run(&mut s, "motion.study", json!({"study": third, "steps": 40}))["study"], third);
+    run(&mut s, "motion.delete", json!({"study": second}));
+    assert_eq!(run(&mut s, "motion.study", json!({"study": "3", "steps": 50}))["study"], first);
+    run(&mut s, "motion.delete", json!({"study": first}));
+    assert_eq!(run(&mut s, "motion.study", json!({"study": "3", "steps": 60}))["study"], third);
+}
+
 /// Where B's corner (20, 0, 0) is now.
 fn b_x(s: &Session) -> f64 {
     super::world_point(s, occ(s, "B"), Vec3::new(20.0, 0.0, 0.0)).x

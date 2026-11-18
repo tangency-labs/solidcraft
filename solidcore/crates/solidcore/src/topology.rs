@@ -1162,12 +1162,20 @@ impl Brep {
         for (id, face) in self.faces.iter() {
             if let (Some(original), Ok(face_copy)) = (face.surface.as_ref(), copy.face_mut(id)) {
                 if let Some(surface) = face_copy.surface.as_mut() {
-                    surface.share_cache_slot_of(original);
-                    face::p2::RescueSurfaceOwner::new(original).restore(surface);
+                    Self::stand_surface_for(surface, original);
                 }
             }
         }
         copy
+    }
+
+    /// Makes `copy`, a copy ([`Clone`]) of the face surface `original`, stand for it as the
+    /// face surfaces of [`Brep::clone_sharing_surface_caches`] do: it shares `original`'s
+    /// cache slot and keeps its owner. What a query makes on the copy from `&self` (a NURB
+    /// a cone makes on first use) stays on the copy.
+    pub(crate) fn stand_surface_for(copy: &mut Surface, original: &Surface) {
+        copy.share_cache_slot_of(original);
+        face::p2::RescueSurfaceOwner::new(original).restore(copy);
     }
 
     /// A private copy of this B-rep that stands for the B-rep itself where upstream
@@ -1197,6 +1205,38 @@ impl Brep {
         for (id, edgeuse) in self.edgeuses.iter() {
             if let Some(curve) = edgeuse.uv_trim_curve.as_ref() {
                 copy.edgeuse_mut(id)?.uv_trim_curve = Some(curve.clone_for_evaluation()?);
+            }
+        }
+        Ok(copy)
+    }
+
+    /// A [`Brep::clone_standing_for_self`] to be edited as a trial of an operation on this
+    /// B-rep (not upstream): the same ids and geometry owners, but each face surface's
+    /// top-level cache slot is its own ([`Surface::detach_for_edit`]), holding a copy of
+    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its tree state and its
+    /// trimmed surface cache), so that the trial starts from this B-rep's cache state and
+    /// no cache built on the edited copy reaches this B-rep's face surfaces. Nested
+    /// surfaces (an offset's or a STEP surface's base) and the surfaces of edge curves
+    /// still share their slots.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Brep::clone_standing_for_self`] and of the cache copies (a trimmed
+    /// surface cache in use).
+    pub(crate) fn clone_for_trial(&self) -> Result<Self> {
+        let mut copy = self.clone_standing_for_self()?;
+        let ids: Vec<FaceId> = copy.faces.ids().collect();
+        for &id in &ids {
+            if let Some(surface) = copy.face_mut(id)?.surface.as_mut() {
+                surface.detach_for_edit();
+            }
+        }
+        for id in ids {
+            if let (Some(surface), Some(original)) = (
+                copy.face(id)?.surface.as_ref(),
+                self.face(id)?.surface.as_ref(),
+            ) {
+                surface.copy_cache_slot_of(original, Ok)?;
             }
         }
         Ok(copy)

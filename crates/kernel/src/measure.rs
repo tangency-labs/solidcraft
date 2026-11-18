@@ -1,6 +1,6 @@
 use serde::Serialize;
 use solidcore_record::Vec3;
-use solidcraft_geom::{Aabb3, MeshGeom};
+use solidcraft_geom::Aabb3;
 
 use crate::Result;
 use crate::body::Body;
@@ -56,21 +56,20 @@ const ACCURACY: f64 = solidcraft_smlib::MEASURE_ACCURACY;
 /// measured from its triangles, exactly.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
     let _span = solidcraft_profile::span("kernel", "measure");
-    if let Some((pos, tris)) = b.triangle_mesh() {
+    if let Some(mb) = &b.mesh {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
-        let m = b.mesh(&crate::MeshTolerance::chord(1.0))?;
-        let mm = m.measure();
-        let edges = b.mesh.as_ref().map(|m| m.edge_count()).unwrap_or(0);
-        let merged =
-            TopoCounts { faces: tris.len(), edges, vertices: pos.len(), face_types: [("mesh".to_string(), tris.len())].into_iter().collect() };
+        let (mm, bbox) = mb.measure();
+        let edges = mb.edge_count();
+        let (nf, nv) = (mb.face_count(), mb.vertex_count());
+        let merged = TopoCounts { faces: nf, edges, vertices: nv, face_types: [("mesh".to_string(), nf)].into_iter().collect() };
         return Ok(BodyMeasure {
             volume: mm.volume,
             area: mm.area,
             centroid: mm.centroid,
-            bbox: m.bounds(),
-            faces: tris.len(),
+            bbox,
+            faces: nf,
             edges,
-            vertices: pos.len(),
+            vertices: nv,
             shells: 1,
             merged,
             measured_by: "mesh",
@@ -78,7 +77,6 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         });
     }
     let m = measure_mass(b)?;
-    let topo = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
     Ok(BodyMeasure {
         volume: m.volume,
         area: m.area,
@@ -88,7 +86,7 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         edges: b.edge_count(),
         vertices: b.vertex_count(),
         shells: b.shell_count(),
-        merged: merged_topology(b, &topo)?,
+        merged: merged_topology(b)?,
         measured_by: m.measured_by,
         notes: m.notes,
     })
@@ -147,6 +145,22 @@ mod tests {
         let moved = transform(&post, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
         let b = moved.exact_bounds().unwrap();
         assert!((b.min.x - first.min.x - 5.0).abs() < 1e-9 && (b.max.x - first.max.x - 5.0).abs() < 1e-9, "{b:?} against {first:?}");
+    }
+
+    /// A tool whose vertices' box meets the body's is not apart from it, and neither exact box is
+    /// measured to show it (a pattern's every cut asked for its target's, ever more holes); tools
+    /// whose vertices' boxes do not meet are judged by the exact boxes, as before.
+    #[test]
+    fn a_tool_among_the_bodys_vertices_is_not_apart_without_measuring() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(200.0, 100.0, 1.0)).unwrap();
+        let pin = crate::box_solid(Vec3::new(4.0, 4.0, -2.0), Vec3::new(6.0, 6.0, 2.0)).unwrap();
+        assert!(!crate::apart(&plate, &pin).unwrap());
+        assert_eq!(*plate.bounds.lock().unwrap(), None);
+        assert_eq!(*pin.bounds.lock().unwrap(), None);
+        // Clear of the plate: the exact boxes show it, measured as before.
+        let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
+        assert!(crate::apart(&plate, &far).unwrap());
+        assert!(plate.bounds.lock().unwrap().is_some());
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
@@ -208,5 +222,123 @@ mod tests {
             let cone = measure(&revolved(&Plane { origin: at, ..Plane::XZ }, &frustum)).unwrap();
             assert!(rel(cone.volume, cone_volume) < 5e-4, "frustum at {at:?}: {} vs {cone_volume}", cone.volume);
         }
+    }
+
+    /// Adds a STEP entity and returns its id.
+    fn ent(ents: &mut Vec<String>, e: String) -> usize {
+        ents.push(e);
+        ents.len()
+    }
+
+    fn placement(ents: &mut Vec<String>, origin: [f64; 3], axis: [f64; 3], reference: [f64; 3]) -> usize {
+        let o = ent(ents, format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", origin[0], origin[1], origin[2]));
+        let z = ent(ents, format!("DIRECTION('',({:?},{:?},{:?}))", axis[0], axis[1], axis[2]));
+        let x = ent(ents, format!("DIRECTION('',({:?},{:?},{:?}))", reference[0], reference[1], reference[2]));
+        ent(ents, format!("AXIS2_PLACEMENT_3D('',#{o},#{z},#{x})"))
+    }
+
+    /// A 3 x 10 x 3 block (x 0..3, y 0..10, z 0..3) whose top is a cylinder of radius 10⁶ about an
+    /// axis along x, so the top bows up 12.5 nm; its top edges are arcs of full circles, as an
+    /// exporter writes a large-radius face. The loose box of such an arc holds the circle's whole
+    /// quarter spans, a million millimetres off. The centre of mass was z = 6.75, outside the block
+    /// (#17361): it is the block's, to the bow.
+    #[test]
+    fn a_large_radius_face_s_centre_of_mass_is_inside_the_body() {
+        let (l, w, h, r) = (3.0_f64, 10.0_f64, 3.0_f64, 1.0e6_f64);
+        let zc = h - r;
+        let zt = zc + (r * r - w * w / 4.0).sqrt();
+        let mut e = Vec::new();
+        let corners = [[0.0, 0.0, 0.0], [l, 0.0, 0.0], [l, w, 0.0], [0.0, w, 0.0], [0.0, 0.0, zt], [l, 0.0, zt], [l, w, zt], [0.0, w, zt]];
+        let mut v = Vec::new();
+        for c in corners {
+            let p = ent(&mut e, format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", c[0], c[1], c[2]));
+            v.push(ent(&mut e, format!("VERTEX_POINT('',#{p})")));
+        }
+        // edges by their vertices (1-based corners); the two arcs run from y = 10 to y = 0
+        let edge = |e: &mut Vec<String>, a: usize, b: usize, arc_at: Option<f64>| {
+            let curve = match arc_at {
+                Some(x) => {
+                    let ax = placement(e, [x, w / 2.0, zc], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+                    ent(e, format!("CIRCLE('',#{ax},{r:?})"))
+                }
+                None => {
+                    let (pa, pb) = (corners[a - 1], corners[b - 1]);
+                    let d = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                    let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                    let o = ent(e, format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", pa[0], pa[1], pa[2]));
+                    let dd = ent(e, format!("DIRECTION('',({:?},{:?},{:?}))", d[0] / n, d[1] / n, d[2] / n));
+                    let vec = ent(e, format!("VECTOR('',#{dd},1.0)"));
+                    ent(e, format!("LINE('',#{o},#{vec})"))
+                }
+            };
+            ent(e, format!("EDGE_CURVE('',#{},#{},#{curve},.T.)", v[a - 1], v[b - 1]))
+        };
+        let ends = [
+            (1, 2, None),
+            (2, 3, None),
+            (3, 4, None),
+            (4, 1, None),
+            (1, 5, None),
+            (2, 6, None),
+            (3, 7, None),
+            (4, 8, None),
+            (5, 6, None),
+            (7, 8, None),
+            (8, 5, Some(0.0)),
+            (7, 6, Some(l)),
+        ];
+        let mut edges = Vec::new();
+        for (a, b, arc) in ends {
+            edges.push(edge(&mut e, a, b, arc));
+        }
+        // each face: its loop (edge number, same sense) counter-clockwise about its outward normal
+        let face = |e: &mut Vec<String>, lp: &[(usize, bool)], surface: usize| {
+            let mut uses = Vec::new();
+            for &(i, same) in lp {
+                uses.push(format!("#{}", ent(e, format!("ORIENTED_EDGE('',*,*,#{},.{}.)", edges[i - 1], if same { "T" } else { "F" }))));
+            }
+            let lo = ent(e, format!("EDGE_LOOP('',({}))", uses.join(",")));
+            let bound = ent(e, format!("FACE_OUTER_BOUND('',#{lo},.T.)"));
+            ent(e, format!("ADVANCED_FACE('',(#{bound}),#{surface},.T.)"))
+        };
+        let plane = |e: &mut Vec<String>, o: [f64; 3], n: [f64; 3], x: [f64; 3]| {
+            let ax = placement(e, o, n, x);
+            ent(e, format!("PLANE('',#{ax})"))
+        };
+        let mut faces = Vec::new();
+        let s = plane(&mut e, [0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        faces.push(face(&mut e, &[(4, false), (3, false), (2, false), (1, false)], s));
+        let s = plane(&mut e, [0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+        faces.push(face(&mut e, &[(1, true), (6, true), (9, false), (5, false)], s));
+        let s = plane(&mut e, [0.0, w, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
+        faces.push(face(&mut e, &[(3, true), (8, true), (10, false), (7, false)], s));
+        let s = plane(&mut e, [0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        faces.push(face(&mut e, &[(5, true), (11, false), (8, false), (4, true)], s));
+        let s = plane(&mut e, [l, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        faces.push(face(&mut e, &[(2, true), (7, true), (12, true), (6, false)], s));
+        let ax = placement(&mut e, [0.0, w / 2.0, zc], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let s = ent(&mut e, format!("CYLINDRICAL_SURFACE('',#{ax},{r:?})"));
+        faces.push(face(&mut e, &[(9, true), (12, false), (10, true), (11, true)], s));
+        let list: Vec<String> = faces.iter().map(|f| format!("#{f}")).collect();
+        let shell = ent(&mut e, format!("CLOSED_SHELL('',({}))", list.join(",")));
+        let solid = ent(&mut e, format!("MANIFOLD_SOLID_BREP('Strip',#{shell})"));
+        ent(&mut e, format!("SHAPE_REPRESENTATION('',(#{solid}),$)"));
+        let mut text = String::from(
+            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n",
+        );
+        for (i, x) in e.iter().enumerate() {
+            text.push_str(&format!("#{}={x};\n", i + 1));
+        }
+        text.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
+
+        let imp = crate::step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap();
+        // The block less a sliver under the bow: its centre is (1.5, 5, 1.5) to the bow's height.
+        let bow = h - zt;
+        assert!(rel(m.volume, l * w * h) < bow, "volume {}", m.volume);
+        let off = m.centroid - Vec3::new(l / 2.0, w / 2.0, h / 2.0);
+        assert!(off.len() < bow, "centre of mass {:?}, off by {off:?}", m.centroid);
     }
 }

@@ -294,8 +294,10 @@ pub struct ExportResult {
     /// With `lay_on_print_faces` only: the bodies that were written laid on their print face.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub print_faces: Vec<String>,
-    /// With `lay_on_print_faces` only: a warning for each body that has a print face but was
-    /// written as it lies.
+    /// STL, OBJ and 3MF: a warning for each face the mesh path left short of its smallest angle
+    /// or chord tolerance (and each edge whose sampling stopped off it), led by its body's name.
+    /// With `lay_on_print_faces`, also one for each body that has a print face but was written
+    /// as it lies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -506,6 +508,18 @@ pub struct OpenParams {
     /// saved-model cache. Default: true.
     #[serde(default)]
     pub reuse_import: Option<bool>,
+    /// For a design: verify its signature (if it has one) and report it. Default: false: the
+    /// design opens without spending the time a full verification takes.
+    #[serde(default)]
+    pub verify: Option<bool>,
+    /// An installed importer plugin to open the file with, as `plugin_id.entry` (see `plugin.list`'s
+    /// `importers`). Default: SolidCraft's own reader when it reads the file, else the installed
+    /// importer that claims its extension.
+    #[serde(default)]
+    pub format: Option<String>,
+    /// For a file an importer plugin opens: its declared options. Default: its defaults.
+    #[serde(default)]
+    pub options: Option<Value>,
     /// For a point cloud, STL, OBJ or PLY file: the unit its coordinates are in, scaled to
     /// millimetres as it is read (refused for a 3MF or glTF file, which states its own; ignored
     /// for other files). Default: mm.
@@ -554,9 +568,93 @@ pub struct OpenedDesign {
     /// Only with `newer_file`: its notice, then a line for each part this version didn't read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<String>>,
+    /// With `verify: true`, when the file carries a signature: what verification found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SignatureReport>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What a signature check found: the reply of `file.verify`, and part of `doc.open`'s when it
+/// verified the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SignatureReport {
+    /// `unsigned`, `valid`, `not_covered`, `invalid` or `unsupported`.
+    pub status: String,
+    /// Why the signature is invalid or unsupported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Older records were dropped: the history is incomplete but the newest record names this
+    /// file's first record.
+    pub truncated: bool,
+    /// The records, oldest first; the last is the newest save.
+    pub records: Vec<SignatureRecord>,
+}
+
+/// One signed save, as a signature check reports it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SignatureRecord {
+    /// `ed25519` for a COSE record, `openpgp` for a GnuPG one.
+    pub method: String,
+    /// The OpenPGP signing key's fingerprint, or the COSE key's SHA-256, in hex.
+    pub key_id: String,
+    /// The OpenPGP key's primary user id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    /// The name the signer wrote, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// The signer's clock, in Unix seconds, if it wrote one; not authenticated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<u64>,
+    /// The design format that save wrote.
+    pub format: String,
+    /// This record covers the file's current content.
+    pub covered: bool,
+}
+
+/// `file.verify`'s parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct VerifyParams {
+    /// The design file to verify. Default: the design's current file.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// `file.verify`'s reply: the path checked and what verification found.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VerifyResult {
+    pub path: String,
+    #[serde(flatten)]
+    pub signature: SignatureReport,
+}
+
+/// `file.gpg_keys` takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GpgKeysParams {}
+
+/// `file.gpg_keys`'s reply: the GnuPG keys a save can sign with.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GpgKeysResult {
+    /// Whether GnuPG was found on this computer.
+    pub available: bool,
+    pub keys: Vec<GpgKeyInfo>,
+}
+
+/// One GnuPG secret key, as `file.gpg_keys` lists it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GpgKeyInfo {
+    /// The primary key's fingerprint, uppercase hex.
+    pub fingerprint: String,
+    /// The primary key's long key id.
+    pub key_id: String,
+    /// The primary user id.
+    pub user_id: String,
+    /// The secret key lives on an OpenPGP smartcard.
+    pub on_card: bool,
 }
 
 /// What `doc.open` says about a design a newer SolidCraft saved.
@@ -678,6 +776,12 @@ pub struct OpenedFile {
     /// when its solids came in as one Import feature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<String>,
+    /// A KiCad PCB opened from a project file: the board file that was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_path: Option<String>,
+    /// A KiCad PCB whose substrate came in as a solid rather than a mesh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_solid: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -695,6 +799,8 @@ pub enum OpenResult {
     PointCloud(OpenedPointCloud),
     /// A STEP, IGES, FreeCAD, Rhino or mesh file.
     File(OpenedFile),
+    /// A file an importer plugin made into a new, unsaved design, with its loss report.
+    Imported(crate::schema::plugin::ImportedDesign),
 }
 
 /// List the designs that apps which crashed, or closed with unsaved changes, autosaved. Nothing is

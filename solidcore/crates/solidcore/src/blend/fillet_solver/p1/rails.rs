@@ -218,6 +218,7 @@ pub(crate) trait RailOps {
             crate::blend::fillet_geom::p2::SrfSrfOptions {
                 skip_two_pnts_intersection: skip_two_points_intersection,
                 ref_point: reference_point,
+                closed_by_start_direction: false,
             },
         )
         .map(|curves| curves.curve_3d)
