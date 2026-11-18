@@ -7,6 +7,7 @@ mod app_icons;
 mod assets;
 mod book;
 mod external_corpus;
+mod fast;
 mod features;
 mod i18n;
 mod icons;
@@ -148,6 +149,17 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
+  fast [--base REF] [-p PACKAGE]... [--units ID,...] [--no-tests] [--list] [-- TEST ARGS]
+                  the check before a commit and a push: what the change touches, against REF
+                  (default origin/main; committed, uncommitted and untracked files). Formats,
+                  runs the quick checks of ci, workspace clippy, and the tests of the packages
+                  whose files changed (scripts/ci/affected.py --owners; heavy tests skipped).
+                  When solidcore/ code changed: clippy of the whole solidcore workspace, the
+                  tests of all its crates but goldens and solidcore-ops (those only when
+                  changed) and solidcore's wasm check; --units runs the goldens of those kernel
+                  units (a kernel change without it prints a hint). -p names the packages to
+                  test instead; --list only prints what would run. Every step runs; the failures
+                  are listed at the end. CI runs the full gate
   ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
                   ui-containers, mesh-decisions, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
@@ -194,6 +206,7 @@ fn main() -> ExitCode {
             test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
         }
         Some("ci") => cmd_ci(),
+        Some("fast") => fast::run(&root(), &rest),
         Some("plugin-examples") => plugin_examples::run(&root(), rest.contains(&"--run")),
         Some("wasm") => cmd_wasm(),
         Some("web-offline") => web_offline::run(&root(), rest.first().copied()),

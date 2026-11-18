@@ -2085,12 +2085,16 @@ fn length_drag<'a>(ui: &Ui, value: &'a mut f64, units: &str, decimals: u8) -> eg
 /// Small model-anchored value editor. Retains its focus ID and native hit height so it does
 /// not intercept nearby canvas picks; the owner keeps completion and selection handling.
 /// With `keep_tab` Tab stays with the field (the caller acts on it) instead of moving the
-/// keyboard to the next widget.
-pub fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, keep_tab: bool) -> Response {
+/// keyboard to the next widget. `hint` is a label shown, translated, while the field is empty
+/// (what stands in for a value there); `""` for none.
+pub fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, keep_tab: bool, hint: &str) -> Response {
     let t = Tokens::get();
     let width = grown_width(ui, value, &egui::TextStyle::Body.resolve(ui.style()), t.space_24 * 3.0);
     // At least that wide: in an area the space left is last frame's width, which can't grow.
     let mut edit = egui::TextEdit::singleline(value).id(id).desired_width(width).min_size(vec2(width, 0.0)).background_color(t.input_fill());
+    if !hint.is_empty() {
+        edit = edit.hint_text(solidcraft_ui_text::tr_label(hint).to_owned());
+    }
     if keep_tab {
         edit = edit.event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, ..Default::default() });
     }

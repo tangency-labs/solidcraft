@@ -2243,6 +2243,8 @@ impl FilletCorner {
 
         // get vertexuses for both origVertex and the remaining corner filletVertex
         let orig_vus = vertex::vertexuses(target, corner_vertex)?;
+        let pinch = self.kind == FilletCornerKind::NByTwo
+            && self.all_eus.as_ref().is_some_and(|all| all.len() == 2);
         let fil_vus = vertex::vertexuses(pseudo.brep(), fv0)?;
 
         // for every corner FilletVertex->Vertexuse - set its TsectPnt->UVPoint position
@@ -2287,6 +2289,39 @@ impl FilletCorner {
                     break;
                 }
             } // end iter every original vertex->Vertexuse
+
+            // Not upstream (#16654): two blends meeting alone at the vertex, their faces
+            // tangent there (`FilletCorner::create`'s Turn of two edges), shrink to it:
+            // their section there is the vertex on both faces, so the position on the
+            // other rail's face is the vertex's too (not left unset).
+            if pinch {
+                let other_srf = if rail_index == 0 {
+                    SrfIndex::Second
+                } else {
+                    SrfIndex::First
+                };
+                let fil_edge_use = fil_solver.edgeuse(0)?.ok_or_else(null)?;
+                let fil_edge = eu1::edge(target, fil_edge_use)?.ok_or_else(null)?;
+                let other_face = edge::faces(target, fil_edge, None)?
+                    .into_iter()
+                    .find(|&f| f != face);
+                for &vu in &orig_vus {
+                    let fu = vertexuse::faceuse(target, vu)?.ok_or_else(null)?;
+                    if other_face.is_some() && eu1::faceuse_face(target, fu)? == other_face {
+                        let uv = ignored(
+                            vertexuse::compute_uv_point(k, target, vu, true).map(Some),
+                            None,
+                        )?;
+                        if let Some(uv) = uv {
+                            *pseudo
+                                .fillet_vertexuse_mut(fil_vu)?
+                                .tsect_pnt_mut()
+                                .uv_pos_mut(other_srf) = uv;
+                        }
+                        break;
+                    }
+                }
+            }
         } // end iter every corner FilletVertex->Vertexuse updating UVPoint values
 
         // inform the public - corner is degenerate
