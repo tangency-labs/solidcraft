@@ -18,7 +18,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::curve::curve::p8::CurveIntersectOptions;
+use solidcore::curve::curve::p8::{meetings_lie_in_one_interval, CurveIntersectOptions};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::geom::extent1d::Extent1d;
@@ -840,6 +840,105 @@ fn wr_647_an_exact_overlap_with_a_conic_stays_a_range() {
                 covered,
                 "lift {lift}: the overlap s in [1, 2] is lost: {all:?}"
             );
+        }
+    }
+}
+
+/// A rational quadratic spline (knots 0, 1, 2, 3) whose middle span is exactly the
+/// `theta` degree arc of [`floor_circle`] about its lowest point (weights 1, cos of half
+/// `theta`, 1), and whose outer spans run back along the arc's end tangents by `ell` and
+/// leave the circle's plane by `lift` at their inner controls and 4 `lift` at the ends
+/// (review r5's probe).
+fn arc_spline_of(theta: f64, ell: f64, lift: f64) -> Curve {
+    let h = (theta / 2.0).to_radians();
+    let (a0, a1) = (
+        -std::f64::consts::FRAC_PI_2 - h,
+        -std::f64::consts::FRAC_PI_2 + h,
+    );
+    let on = |a: f64| Point3::new(0.5 + a.cos(), 1.0 + a.sin(), 0.0);
+    let (p2, p4) = (on(a0), on(a1));
+    let back = Vec3::new(a0.sin(), -a0.cos(), 0.0);
+    let ahead = Vec3::new(-a1.sin(), a1.cos(), 0.0);
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let pts = [
+        p2 + back * ell + z * (4.0 * lift),
+        p2 + back * (ell / 2.0) + z * lift,
+        p2,
+        Point3::new(0.5, 1.0 - 1.0 / h.cos(), 0.0),
+        p4,
+        p4 + ahead * (ell / 2.0) + z * lift,
+        p4 + ahead * ell + z * (4.0 * lift),
+    ];
+    let w = [1.0, 1.0, 1.0, h.cos(), 1.0, 1.0, 1.0];
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &pts,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[3, 2, 2, 3],
+            knots: &[0.0, 1.0, 2.0, 3.0],
+            knot_type: KnotType::default(),
+            weights: Some(&w),
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// Review r5: exact overlaps with a planar conic shorter than a tenth of the shorter curve
+/// (30 degrees with outer spans 3 long, 10 and 5 degrees with outer spans 1 long) are
+/// overlaps too, not one meeting: a range must still cover s in [1, 2] (main's answer),
+/// both ways round, at a tolerance where the stretch reaches past the overlap. No length
+/// decides it: the exact curves coincide over the arc.
+#[test]
+fn wr_647_short_exact_overlaps_with_a_conic_stay_ranges() {
+    let k = Kernel::default();
+    let circle = floor_circle(&k);
+    for (theta, ell) in [(30.0, 3.0), (10.0, 1.0), (5.0, 1.0)] {
+        for lift in [1e-3, 1e-4] {
+            let s = arc_spline_of(theta, ell, lift);
+            for i in 0..=20 {
+                let p = s.evaluate_point(&k, 1.0 + f64::from(i) / 20.0).unwrap();
+                let rho = ((p.x - 0.5).powi(2) + (p.y - 1.0).powi(2)).sqrt();
+                let off = ((rho - 1.0).powi(2) + p.z * p.z).sqrt();
+                assert!(
+                    off <= 1e-15,
+                    "{theta} degrees, lift {lift}: the middle span is off the circle by {off:e}"
+                );
+            }
+            // the band certificate refuses the overlap itself, either way round
+            let whole = (
+                circle.natural_interval().min(),
+                circle.natural_interval().max(),
+            );
+            assert!(!meetings_lie_in_one_interval(
+                &circle,
+                whole,
+                &s,
+                (0.0, 3.0)
+            ));
+            assert!(!meetings_lie_in_one_interval(
+                &s,
+                (0.0, 3.0),
+                &circle,
+                whole
+            ));
+            for (all, side) in [
+                (intersect_at(&circle, &s, 1e-2), 1),
+                (intersect_at(&s, &circle, 1e-2), 0),
+            ] {
+                let covered = all.iter().any(|x| {
+                    x.solution_type == SolutionType::RangeOfValues && {
+                        let (a, b) = (x.start.parameters[side], x.end.parameters[side]);
+                        a.min(b) <= 1.0 && 2.0 <= a.max(b)
+                    }
+                });
+                assert!(
+                    covered,
+                    "{theta} degrees, lift {lift}: the overlap s in [1, 2] is lost: {all:?}"
+                );
+            }
         }
     }
 }

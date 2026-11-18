@@ -104,8 +104,9 @@
 //!   one interval of rounding size; [`curves_meet_at_most_once`]; or
 //!   [`meetings_lie_in_one_interval`]: a curve leaving a planar conic's plane, whose
 //!   meetings with the conic lie in one interval within the bands of the conic's plane and
-//!   of its quadratic, shorter than the run `classify_ranges` keeps as a range: a tenth of
-//!   the shorter curve), and for a curve against itself not on a fold. A touch the bounds
+//!   of its quadratic, over which the exact curves meet only at isolated points: a
+//!   derivative of the offset from the plane or of the quadratic keeps one sign over every
+//!   piece of it), and for a curve against itself not on a fold. A touch the bounds
 //!   do not certify (two curved curves passing neither through each other nor across a
 //!   conic's plane, a planar spline met within its plane's band, an exact overlap with a
 //!   conic over an arc) keeps its ranges (a
@@ -2438,8 +2439,9 @@ impl Curve {
     ///   ([`touch_is_alone`]: one straight curve, the other's second derivative across it
     ///   of one sign; [`curves_meet_at_most_once`]; or [`meetings_lie_in_one_interval`]: a
     ///   planar conic and a curve whose meetings with it lie in one interval, within the
-    ///   bands of the conic's plane and quadratic, shorter than a tenth of the shorter curve,
-    ///   the run `classify_ranges` keeps as a range); else (an exact overlap, also with a
+    ///   bands of the conic's plane and quadratic, over which the exact curves meet only at
+    ///   isolated points, the bounded form of `classify_ranges`' diverging gap); else (an
+    ///   exact overlap, also with a
     ///   conic over an arc, two touches, a planar
     ///   spline met twice within its plane's band) the stretch keeps its ranges. So does a curve
     ///   against itself whose touch is where it folds back onto itself. Curves that come
@@ -2786,12 +2788,13 @@ impl Curve {
                 // whose second derivative across it keeps one sign over the stretch;
                 // [`curves_meet_at_most_once`], for curves that pass through each other in
                 // space with both ends of the stretch on one side, as a line through a
-                // space curve; or [`meeting_clusters`], for a curve leaving a planar
-                // conic's plane on either side of the touch, as a section of a surface
-                // tangent to that plane along the conic, and staying within the conic's
-                // quadratic band in the plane between its meetings, over an interval that
-                // `classify_ranges` would not keep as a range: an exact overlap with the
-                // conic over an arc is that long and stays a range);
+                // space curve; or [`meetings_lie_in_one_interval`], for a curve leaving a
+                // planar conic's plane on either side of the touch, as a section of a
+                // surface tangent to that plane along the conic, and staying within the
+                // conic's quadratic band in the plane between its meetings, over an
+                // interval on which the exact curves meet only at isolated points: an
+                // exact overlap with the conic over an arc is not certified and stays a
+                // range);
                 // else the stretch may hold more than that one contact (an exact
                 // overlap, a fitted copy touching its edge where the fit is exact, two
                 // touches) and keeps its ranges
@@ -2803,13 +2806,7 @@ impl Curve {
                     stretches.1,
                     [touch[0], touch[1]],
                 )? || curves_meet_at_most_once(k, self, stretches.0, other, stretches.1)
-                    || self.meetings_cluster_is_short(
-                        k,
-                        other,
-                        interval,
-                        other_interval,
-                        stretches,
-                    )?)
+                    || meetings_lie_in_one_interval(self, stretches.0, other, stretches.1))
                 {
                     continue;
                 }
@@ -2835,47 +2832,6 @@ impl Curve {
             sols.remove_at(i, 1);
         }
         Ok(())
-    }
-
-    /// For the touch of [`Curve::contacts_seen_through_tolerance`]: whether
-    /// [`meeting_clusters`] certifies, either way round, that every meeting over the
-    /// stretches lies in one parameter interval of one curve that is *not* a large
-    /// interval by [`Curve::classify_ranges`]' own rule: its `approximate_length` is below
-    /// one tenth of the shorter curve's (over `interval` and `other_interval`, as there).
-    /// A run the curves may share that long (an exact overlap with a conic, leaving its
-    /// plane on both sides) is what that rule keeps as a coincidence range, so it is not
-    /// one touch; equality or a NaN refuses.
-    fn meetings_cluster_is_short(
-        &self,
-        k: &Kernel,
-        other: &Self,
-        interval: &Extent1d,
-        other_interval: &Extent1d,
-        stretches: ((f64, f64), (f64, f64)),
-    ) -> Result<bool> {
-        let clusters = meeting_clusters(self, stretches.0, other, stretches.1);
-        if clusters.iter().all(Option::is_none) {
-            return Ok(false);
-        }
-        let this_length = self.approximate_length(k, interval, 5, false)?.0;
-        let other_length = other.approximate_length(k, other_interval, 5, false)?.0;
-        let large = min2(this_length, other_length) / 10.0;
-        for (cluster, curve) in clusters.into_iter().zip([other, self]) {
-            let Some((lo, hi)) = cluster else {
-                continue;
-            };
-            let length = if hi > lo {
-                curve
-                    .approximate_length(k, &Extent1d::from_min_max(lo, hi), 5, false)?
-                    .0
-            } else {
-                0.0
-            };
-            if above(large, length) {
-                return Ok(true);
-            }
-        }
-        Ok(false)
     }
 
     /// The range solution check of [`Curve::global_curve_intersect`]: ranges with
@@ -4147,20 +4103,25 @@ struct BandPiece {
 /// Where the other curve's weight `w` is below `w_max`, the band in distance is wider by
 /// `w_max / w` (plane) or `(w_max / w)²` (quadric). The certificate stays sound, since every
 /// meeting is still inside both bands. But "the curves do not part" between meetings then
-/// holds only at that wider scale. Every caller also bounds the cluster's length
-/// ([`meeting_clusters`]).
+/// holds only at that wider scale.
 ///
-/// The interval is not always a point-sized cluster: a curve lying on the conic over an
-/// arc and leaving its plane on both sides is certified too, with the overlap as its
-/// interval. The touch takes the certificate only where that interval is short
-/// (`Curve::meetings_cluster_is_short`) and otherwise keeps the overlap as a range.
+/// The bands alone do not make the interval a touch: a curve lying on the conic over an
+/// arc and leaving its plane on both sides has its meetings in one interval too, the
+/// overlap. So the interval (cut at the knots, halved as needed) must also show, piece by
+/// piece, that the exact curves meet only at isolated points of it: `g` or `w² G` along
+/// the other curve has a derivative of some order `k` (the value itself included) whose
+/// Bernstein coefficients (forward differences, each past its rounding) keep one sign over
+/// the piece, so it has at most `k` zeros there. An exact overlap has `g` and `w² G` zero
+/// over a run, every coefficient within its rounding, and gets no certificate (it stays a
+/// range). No length threshold is involved.
 ///
 /// `false` (no certificate) for a planar curve that is not a conic, a curve kind
 /// [`StretchSpline::of`] does not take (a stretch over more than [`MAX_BAND_PIECES`]
 /// control points, not [`MAX_STRETCH_POINTS`]: the work here grows only with their count),
 /// a planar curve whose control points span no plane, a weight of the other curve not
 /// positive, more than [`MAX_BAND_PIECES`] pieces or [`MAX_SUBDIVISION_LEVELS`] halvings
-/// in either labelling, or a NaN.
+/// in either labelling or in the isolation check, a piece of the interval over which `g`
+/// and `w² G` are both zero within rounding, or a NaN.
 pub fn meetings_lie_in_one_interval(
     a: &Curve,
     a_stretch: (f64, f64),
@@ -4175,9 +4136,9 @@ pub fn meetings_lie_in_one_interval(
 /// The certificates of [`meetings_lie_in_one_interval`] with the interval they prove:
 /// `[on b (a the planar conic), on a (b the planar conic)]`, each the parameter interval
 /// of that curve holding every meeting (`(lo, lo)` for none), or `None` without that
-/// certificate. The interval is a cluster only where it is short: an exact overlap with the
-/// conic (the other curve on it over an arc, leaving its plane on both sides) is certified
-/// too, with the whole overlap as its interval, and the caller keeps such a run as a range.
+/// certificate. An exact overlap with the conic (the other curve on it over an arc, leaving
+/// its plane on both sides) is not certified: the exact curves must meet only at isolated
+/// points of the interval.
 pub fn meeting_clusters(
     a: &Curve,
     a_stretch: (f64, f64),
@@ -4264,7 +4225,7 @@ fn meetings_in_one_interval_against(
         return None;
     }
     // g over the stretch: its Bernstein coefficients over a piece, each (value, error)
-    let offsets = |&(span, t0, t1): &PieceSpan| -> Option<BandPiece> {
+    let plane_coefficients = |&(span, t0, t1): &PieceSpan| -> Option<Coefficients> {
         let mut coef: Coefficients = Vec::new();
         for (x, w, ex, ew) in spline.homogeneous_piece(span, t0, t1)? {
             let d = x - p0 * w;
@@ -4272,8 +4233,10 @@ fn meetings_in_one_interval_against(
                 (n_length * (ex + p0.length() * ew) + offset_rounding(d, x, w)) * (1.0 + gamma(8));
             coef.push((n.dot(d), e));
         }
-        band_label(&coef, band)
+        Some(coef)
     };
+    let offsets =
+        |piece: &PieceSpan| -> Option<BandPiece> { band_label(&plane_coefficients(piece)?, band) };
     let start = spline.cut(o_stretch.0, o_stretch.1, 1, |_, j, t0, t1| {
         Some((j, t0, t1))
     })?;
@@ -4325,11 +4288,11 @@ fn meetings_in_one_interval_against(
     if !quadric_band.is_finite() {
         return None;
     }
-    let quadric = |&(span, t0, t1): &PieceSpan| -> Option<BandPiece> {
-        band_label(
-            &conic_coefficients(forms, &spline.homogeneous_piece(span, t0, t1)?)?,
-            quadric_band,
-        )
+    let quadric_coefficients = |&(span, t0, t1): &PieceSpan| -> Option<Coefficients> {
+        conic_coefficients(forms, &spline.homogeneous_piece(span, t0, t1)?)
+    };
+    let quadric = |piece: &PieceSpan| -> Option<BandPiece> {
+        band_label(&quadric_coefficients(piece)?, quadric_band)
     };
     let labelled = label_band_pieces(core, quadric)?;
     let within: Vec<BandPiece> = labelled.iter().map(|&(_, l)| l).collect();
@@ -4342,13 +4305,68 @@ fn meetings_in_one_interval_against(
     // the cluster: from the first to the last piece not past the quadric's band (none: no
     // meeting at all)
     let near = |&&((_, t0, t1), l): &&(PieceSpan, BandPiece)| (!l.outside).then_some((t0, t1));
-    match (
+    let (Some((lo, _)), Some((_, hi))) = (
         labelled.iter().find_map(|p| near(&p)),
         labelled.iter().rev().find_map(|p| near(&p)),
-    ) {
-        (Some((lo, _)), Some((_, hi))) => Some((lo, hi)),
-        _ => Some((o_stretch.0, o_stretch.0)),
+    ) else {
+        return Some((o_stretch.0, o_stretch.0));
+    };
+    // the cluster is a touch, not a run the curves share: over every piece of it (cut at
+    // the knots, halved as needed) the exact offset g or the exact w² G along the other
+    // curve has a derivative of some order k (0 included) whose Bernstein coefficients
+    // keep one sign, each past its rounding. That derivative has no zero on the piece, so
+    // (Rolle) g or w² G has at most k zeros there: the exact curves meet at isolated
+    // points of the cluster only. An exact overlap (g and w² G zero over a run) has every
+    // such coefficient within its rounding and is refused: it stays a range.
+    let pieces = spline.cut(lo, hi, 1, |_, j, t0, t1| Some((j, t0, t1)))?;
+    let isolated = |piece: &PieceSpan| -> Option<Option<()>> {
+        let (g, h) = (plane_coefficients(piece)?, quadric_coefficients(piece)?);
+        if some_derivative_keeps_one_sign(&g) || some_derivative_keeps_one_sign(&h) {
+            return Some(Some(()));
+        }
+        // zero within rounding: halving cannot certify it
+        if within_rounding(&g) && within_rounding(&h) {
+            return None;
+        }
+        Some(None)
+    };
+    // a piece of no length holds no run
+    halve_until(
+        pieces.into_iter().filter(|&(_, t0, t1)| t0 < t1).collect(),
+        isolated,
+    )?;
+    Some((lo, hi))
+}
+
+/// For [`meetings_lie_in_one_interval`]: whether the Bernstein coefficients (each `(value,
+/// error)`) of a polynomial over a piece, or of one of its derivatives (their forward
+/// differences, up to the degree), are all past their rounding on one side of zero. Then
+/// that derivative of order `k` has no zero on the piece and the polynomial at most `k`.
+/// A NaN fails.
+fn some_derivative_keeps_one_sign(coef: &[(f64, f64)]) -> bool {
+    let mut level: Coefficients = coef.to_vec();
+    while !level.is_empty() {
+        if level.iter().all(|&(c, e)| c - e > 0.0) || level.iter().all(|&(c, e)| c + e < 0.0) {
+            return true;
+        }
+        // the forward differences, each with the bound of `band_label`'s slope
+        level = level
+            .windows(2)
+            .filter_map(|pair| match pair {
+                [(c0, e0), (c1, e1)] => Some((
+                    c1 - c0,
+                    (e0 + e1 + gamma(1) * (c0.abs() + c1.abs())) * (1.0 + gamma(2)),
+                )),
+                _ => None,
+            })
+            .collect();
     }
+    false
+}
+
+/// Every coefficient within its rounding of zero (a NaN fails).
+fn within_rounding(coef: &[(f64, f64)]) -> bool {
+    coef.iter().all(|&(c, e)| c.abs() <= e)
 }
 
 /// For [`meetings_lie_in_one_interval`]: the label of a piece from the Bernstein
@@ -4397,16 +4415,27 @@ fn label_band_pieces(
     start: Vec<PieceSpan>,
     classify: impl Fn(&PieceSpan) -> Option<BandPiece>,
 ) -> Option<Vec<(PieceSpan, BandPiece)>> {
+    halve_until(start, |piece| {
+        let found = classify(piece)?;
+        Some((found.inside || found.outside || found.slope != 0).then_some(found))
+    })
+}
+
+/// The pieces `start` (in parameter order), each halved until `settle` settles it
+/// (`Some(Some(label))`; `Some(None)`: halve it), with their labels. `None` past
+/// [`MAX_SUBDIVISION_LEVELS`] halvings or [`MAX_BAND_PIECES`] pieces, a piece too short to
+/// halve, or a piece `settle` refuses (`None`).
+fn halve_until<T>(
+    start: Vec<PieceSpan>,
+    settle: impl Fn(&PieceSpan) -> Option<Option<T>>,
+) -> Option<Vec<(PieceSpan, T)>> {
     // each certified (`Ok`) or to be halved (`Err`)
-    let label =
-        |piece: PieceSpan| -> Option<core::result::Result<(PieceSpan, BandPiece), PieceSpan>> {
-            let found = classify(&piece)?;
-            Some(if found.inside || found.outside || found.slope != 0 {
-                Ok((piece, found))
-            } else {
-                Err(piece)
-            })
-        };
+    let label = |piece: PieceSpan| -> Option<core::result::Result<(PieceSpan, T), PieceSpan>> {
+        Some(match settle(&piece)? {
+            Some(found) => Ok((piece, found)),
+            None => Err(piece),
+        })
+    };
     let mut pieces = start.into_iter().map(label).collect::<Option<Vec<_>>>()?;
     if pieces.len() > MAX_BAND_PIECES {
         return None;
