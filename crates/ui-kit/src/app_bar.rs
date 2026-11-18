@@ -23,13 +23,13 @@ const TABS_KEPT: f32 = 124.0;
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
 const DESIGN_PILL_HEIGHT: f32 = 30.0;
-const DESIGN_GROUP_BACKING_HEIGHT: f32 = VIEW_HEIGHT + 2.0;
+const DESIGN_GROUP_BACKING_HEIGHT: f32 = 27.0;
 const PILL_RADIUS: u8 = 8;
 /// The room a pill keeps right of its views: the +, a separator, the close button and its padding.
 const PILL_AFTER: f32 = 63.0;
 /// A view's sub-tab: its height, corner radius, label size, the gap between sub-tabs and the
 /// longest label drawn before it is cut.
-const VIEW_HEIGHT: f32 = 24.0;
+const VIEW_HEIGHT: f32 = 22.0;
 const VIEW_RADIUS: u8 = 5;
 const VIEW_FONT: f32 = 12.5;
 const VIEW_GAP: f32 = 2.0;
