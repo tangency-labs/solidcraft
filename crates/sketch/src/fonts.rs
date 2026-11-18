@@ -139,6 +139,25 @@ pub fn font_data_styled(name: Option<&str>, bold: bool, italic: bool) -> Result<
     Ok((data, italic && !face_italic))
 }
 
+/// The face a saved text is set in (#19230). A saved design is not a choice of font: when this
+/// computer lacks the text's font, or its bold face, the text is not lost but set in what is here
+/// (the regular face of its font, else the built-in font in the text's slant) and the note says
+/// so. The text keeps the font it names, so it is set in it again where that font is installed.
+pub fn font_data_saved(name: Option<&str>, bold: bool, italic: bool) -> Result<((FontData, bool), Option<String>)> {
+    let first = match font_data_styled(name, bold, italic) {
+        Ok(found) => return Ok((found, None)),
+        Err(e) => e,
+    };
+    let trimmed = name.map(str::trim).unwrap_or("");
+    let builtin = trimmed.is_empty() || normalize(trimmed) == normalize(DEFAULT_FONT_FAMILY);
+    let which = if builtin { "the built-in font".to_string() } else { format!("the font `{trimmed}`") };
+    if bold && let Ok(regular) = font_data_styled(name, false, italic) {
+        return Ok((regular, Some(format!("{which} has no bold face here: the text is set in its regular face"))));
+    }
+    let fallback = font_data_styled(None, false, italic)?;
+    Ok((fallback, Some(format!("{first}; the text is set in the built-in font until {which} is installed"))))
+}
+
 /// Bold on a variable face's weight axis: 700 (the weight fonts name Bold), within the axis, when
 /// the axis reaches past semibold from a lighter default. None for a face with no such axis.
 fn variable_bold(data: &FontData) -> Option<f32> {
