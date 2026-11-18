@@ -18,6 +18,8 @@ pub(crate) struct Ask {
     /// `plugin.install`'s dry-run reply.
     pub(crate) plugin: Value,
     pub(crate) grants: solidcraft_engine::plugin::Grants,
+    /// A downloaded update of an installed plugin (`plugin_updates`).
+    pub(crate) update: bool,
 }
 
 /// Whether this build installs plugins: the browser has no plugins folder.
@@ -49,7 +51,7 @@ pub(crate) fn review(app: &mut SolveApp, path: String) {
 /// A checked package from the install command, with initially unfilled host folder paths.
 pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
     let permissions = plugin.get("permissions");
-    let grants = solidcraft_engine::plugin::Grants {
+    let mut grants = solidcraft_engine::plugin::Grants {
         package_hash: None,
         command_groups: list(permissions.and_then(|p| p.get("command_groups"))).into_iter().collect(),
         folders: permissions
@@ -67,7 +69,16 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
         input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
     };
-    app.plugin_install.ask = Some(Ask { path, plugin, grants });
+    let update = match crate::plugin_updates::prepare(app, &path, &plugin, &mut grants) {
+        None => false,
+        Some(Ok(())) => true,
+        Some(Err(error)) => {
+            let name = text(&plugin, "name");
+            app.set_status(format("plugin_update.failed", &[("plugin", &name), ("error", &error)]), true);
+            return;
+        }
+    };
+    app.plugin_install.ask = Some(Ask { path, plugin, grants, update });
 }
 
 /// The memory the plugin asks for, in MiB, when that is more than the user's ceiling for plugins:
@@ -133,8 +144,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (name, version, summary) = (text(plugin, "name"), text(plugin, "version"), text(plugin, "description"));
     let replaces = plugin.get("replaces").and_then(Value::as_str).map(str::to_string);
     let lines = permission_lines(plugin);
-    let title = tr("plugin_install.title").to_string();
-    let (install, cancel) = (tr("plugin_install.install").to_string(), tr("plugin_install.cancel").to_string());
+    let title = tr(if ask.update { "plugin_update.title" } else { "plugin_install.title" }).to_string();
+    let install = tr(if ask.update { "plugin_update.update" } else { "plugin_install.install" }).to_string();
+    let cancel = tr("plugin_install.cancel").to_string();
     let valid = crate::plugins::valid_grants(&ask.grants) && !crate::plugins::busy(app);
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_plugin_install"), "import", &title)
         .tone(if replaces.is_some() { ui_kit::Tone::Warning } else { ui_kit::Tone::Info })
@@ -221,7 +233,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// Installs the reviewed `.zip` with only the permissions and host folders shown in the question.
-fn install_now(app: &mut SolveApp, ask: &Ask) {
+pub(crate) fn install_now(app: &mut SolveApp, ask: &Ask) {
     let replace = ask.plugin.get("replaces").is_some_and(Value::is_string);
     let folders: Vec<Value> = ask
         .grants

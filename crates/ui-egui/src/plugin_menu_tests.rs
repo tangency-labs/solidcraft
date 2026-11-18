@@ -264,6 +264,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         groups: BTreeSet::new(),
         entries,
         images: Default::default(),
+        updates: None,
     }
 }
 

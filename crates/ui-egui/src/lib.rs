@@ -242,6 +242,7 @@ mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 mod plugin_slots;
+pub(crate) mod plugin_updates;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
@@ -668,6 +669,8 @@ pub struct SolveApp {
     pub(crate) easyprint: easyprint_ui::State,
     /// Install plugin…: the plugin waiting for the user's answer.
     pub(crate) plugin_install: plugin_install::State,
+    /// Plugin updates found at start, and the one being downloaded or reviewed.
+    pub(crate) plugin_updates: plugin_updates::State,
     /// What an importer plugin could not carry over from the file it just opened.
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -1043,6 +1046,7 @@ impl SolveApp {
             slicer_wait: None,
             easyprint: Default::default(),
             plugin_install: Default::default(),
+            plugin_updates: Default::default(),
             import_report: None,
             saving: None,
             verifying: None,
@@ -3940,6 +3944,7 @@ impl SolveApp {
         recovery_ui::tick(self);
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
+        plugin_updates::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);
