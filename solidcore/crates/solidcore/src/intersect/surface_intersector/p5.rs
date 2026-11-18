@@ -71,6 +71,11 @@
 //!   pass through after the tangent nodes are added (`super::singular_splits`); the
 //!   SolidCraft fork's tangency-labs/smlib@3c9d1d3. Always on (once the opt-in
 //!   `ssi_split_curves_at_singular_points`).
+//! - **Tangential curves (WR-75, #395; opt-in `ssi_tangent_curve_tracer`).** After the
+//!   interior curves, the SolidCraft fork's tangential curve pass traces the curves along
+//!   which the surfaces touch and the crossing branches through their contact points
+//!   (`super::tangent_curves`). Not in a self intersection (#18930), where the surface
+//!   touches itself everywhere at equal parameters.
 //! - **Empty trace (WR-80).** A curve is traced back the other way
 //!   ([`SurfaceIntersector::trace_back`], part 4) only when `TraceCurve` produced
 //!   points. Upstream also reverses the empty curve of a trace
@@ -793,11 +798,14 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         self.find_interior_curves(k, &mut interior)?;
 
         // not upstream (WR-75, opt-in; the fork's FindTangentCurves): trace the
-        // tangential curves the marcher above cannot follow
+        // tangential curves the marcher above cannot follow. Not in a self intersection
+        // (#18930): there every point of the surface solves the tracer's equations with
+        // itself at the same parameters (S(x) - S(x) = 0, n = n), so the tracer's solves
+        // land on that trivial solution and it traces the surface against itself.
         let mut tangent_nodes = Vec::new();
-        if k.fixes.ssi_tangent_curve_tracer {
+        let seeds = core::mem::take(&mut self.tangent_curve_seeds);
+        if k.fixes.ssi_tangent_curve_tracer && !self.base.doing_self_intersection {
             let size = crate::math::min2(root1.size().length(), root2.size().length());
-            let seeds = core::mem::take(&mut self.tangent_curve_seeds);
             let mut curves = TsectCurves {
                 curves_3d: core::mem::take(&mut interior.curves_3d),
                 uv_curves: [
