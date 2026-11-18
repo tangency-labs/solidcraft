@@ -22,6 +22,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::ZONE_TOL_3D;
+use solidcore::mass::enclosure::enclose_volume;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
@@ -31,6 +32,7 @@ use solidcore::surface::cone::Cone;
 use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, Kernel, Vec3};
@@ -471,22 +473,74 @@ fn sagitta(r: f64, theta: f64) -> f64 {
 /// A segment whose width is under the zone tolerance is a sliver: its arc and chord are one
 /// edge within the zone at each end of the sweep, and its caps are no faces, so the body is
 /// the wall and the chord's face on four edges (the two merged ends and the two swept
-/// vertices' lines). Its volume is checked against `want` by the integrator (see below).
-fn assert_sliver(k: &mut Kernel, b: &mut Brep, r: f64, theta: f64, want: f64, case: &str) {
+/// vertices' lines). Its volume is checked against `want` by a certified enclosure and by
+/// the integrator (see below). `chord_normal` is the profile's in-plane normal to its chord;
+/// the check turns `b`, so it takes it.
+fn assert_sliver(
+    k: &mut Kernel,
+    mut b: Brep,
+    r: f64,
+    theta: f64,
+    chord_normal: Vec3,
+    want: f64,
+    case: &str,
+) {
     assert!(sagitta(r, theta) < ZONE_TOL_3D, "{case}: not a sliver");
-    assert_eq!(counts(b), [2, 4, 4], "{case}: {:?}", kinds(b));
+    assert_eq!(counts(&b), [2, 4, 4], "{case}: {:?}", kinds(&b));
     // MEASURED, not certified: `brep_volume` at its finest accuracy agrees with the closed
     // form to 8.3e-6 (short arc), 4.9e-7 (tilt 1e-3) and 4.9e-5 (tilt 1e-2) relative, the
     // same at every requested accuracy from 1e-2 to 1e-8 (the merged ends leave no caps, so
     // its residual is not the requested accuracy). 1e-3 keeps a 20x margin over the worst
     // and still fails a volume of 0, twice `want`, or a tilted row without its strip term
-    // (which is 98% of `want` there). A certified `enclose_volume` is no check here: at a
-    // zone-band width it holds 0, and asking it for less exhausts its cell budget first.
-    let volume = integrated_volume(k, b);
+    // (which is 98% of `want` there).
+    let volume = integrated_volume(k, &mut b);
     assert!(
         (volume - want).abs() <= 1e-3 * want,
         "{case}: volume {volume:e}, want {want:e}"
     );
+    // PROVEN: a certified enclosure of the volume holds `want` and is at most 5e-2 `want`
+    // wide, so it excludes 0, twice `want` and a tilted row without its strip term. The
+    // enclosure is the flux of (0, 0, z - z0), so its gap (strip) cells are bounded by
+    // |z - z0| times their area. In the sweep's frame z runs the whole sweep, the volume sits
+    // in the merged ends and that bound alone is wider than `want`: the enclosure holds 0.
+    // An exact axis permutation (rows of 0 and 1, a rigid turn) first puts the axis nearest
+    // the chord normal on z, so the strips span only the sagitta. MEASURED: asked for
+    // 5e-2 `want`, it stops at that width within 16 cells, holding [0.99990, 1.00011] (short
+    // arc), [0.99780, 1.00220] (tilt 1e-3) and [0.98714, 1.01296] (tilt 1e-2) times `want`;
+    // a tighter width only spends the cell budget for little gain (2.5e-2 at 131072 cells
+    // for tilt 1e-2).
+    let [nx, ny, nz] = [
+        chord_normal.x.abs(),
+        chord_normal.y.abs(),
+        chord_normal.z.abs(),
+    ];
+    let to_z = if nx >= ny && nx >= nz {
+        // x -> z, y -> x, z -> y
+        [
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+        ]
+    } else if ny >= nz {
+        // x -> y, y -> z, z -> x
+        [
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+        ]
+    } else {
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ]
+    };
+    let [r0, r1, r2] = to_z;
+    transform_matrix(k, &mut b, &[r0, r1, r2, [0.0, 0.0, 0.0, 1.0]], false).unwrap();
+    let e = enclose_volume(k, &mut b, 5e-2 * want).unwrap();
+    // written so that a NaN end or width fails
+    let holds = e.lo <= want && want <= e.hi && e.width() <= 5e-2 * want;
+    assert!(holds, "{case}: want {want:e} not enclosed by {e:?}");
 }
 
 /// Review r2 of SolidCraft #17462: a short arc that really lies in a plane tilted by `tilt`
@@ -531,9 +585,9 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
         let theta = span.to_radians();
         let want = c * distance * segment_area(r, theta)
             + c * s * r * theta.sin() * distance * distance / 2.0;
-        if sagitta(r, theta) < ZONE_TOL_3D {
-            assert_sliver(&mut k, &mut b, r, theta, want, &case);
-        } else {
+        // a sliver is checked last: its check turns the body
+        let sliver = sagitta(r, theta) < ZONE_TOL_3D;
+        if !sliver {
             assert_eq!(counts(&b), [4, 6, 4], "{case}: {:?}", kinds(&b));
             // MEASURED, not certified: the r 50 row agrees to 2.1e-14 and the r 1000 row to
             // 4.2e-9, a 2.4x margin under 1e-8. That is the integrator's requested accuracy,
@@ -560,6 +614,12 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
                 along.abs() < 1e-9,
                 "{case}: {p:?} is {along:e} off the base edge's plane"
             );
+        }
+        if sliver {
+            // the chord's normal in the profile's plane: the arc's middle direction
+            let normal =
+                frame.x_axis() * (theta / 2.0).cos() + frame.y_axis() * (theta / 2.0).sin();
+            assert_sliver(&mut k, b, r, theta, normal, want, &case);
         }
     }
 }
@@ -614,7 +674,7 @@ fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direc
 
     let ends = arc.ends(&k).unwrap();
     let chord = seg(ends.end, ends.start);
-    let mut b = create_linear_sweep(
+    let b = create_linear_sweep(
         &mut k,
         &[Some(&arc), Some(&chord)],
         Vec3::new(0.0, 0.0, 1.0),
@@ -626,7 +686,6 @@ fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direc
     // The segment swept square to its plane; 8.4e-8 wide, a sliver.
     let (r, theta) = (88.295_980_686, 0.005_f64.to_radians());
     let want = segment_area(r, theta) * 53.0;
-    assert_sliver(&mut k, &mut b, r, theta, want, "short arc");
     let (placement, radius) = the_cylinder(&b);
     let axis = placement.z_axis();
     assert!(
@@ -646,6 +705,11 @@ fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direc
             );
         }
     }
+    // last, as its check turns the body; the chord's normal is the arc's middle direction
+    // (`short_arc`'s start angle plus half its sweep)
+    let middle = -1.4235 + theta / 2.0;
+    let chord_normal = Vec3::new(middle.cos(), middle.sin(), 0.0);
+    assert_sliver(&mut k, b, r, theta, chord_normal, want, "short arc");
 }
 
 /// Review of SolidCraft #17462: a profile that really leans across the sweep, by more than
