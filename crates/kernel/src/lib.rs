@@ -231,6 +231,7 @@ pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, sp
 pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
+pub use step_in::records::{ImportRecords, RecordBody, import_trims, records_import, records_import_shared, records_text};
 pub use step_in::{
     ImportChecks, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
     step_import_shared, step_orientation_errors, step_validate,
@@ -247,7 +248,7 @@ pub use surfaces::{
     stitch, sweep_sheet, sweep_sheet_point_path_with, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
-pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
+pub use topo::{CylinderFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
 pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};

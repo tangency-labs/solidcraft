@@ -16,6 +16,7 @@
 
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
+use solidcore::boolean::operand_tolerances::matched_tolerances;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::primitive_creation::p1::Boolean2d;
@@ -156,7 +157,8 @@ pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Resu
         let [a, b] = &both;
         let mut operands = [take(a), take(b)];
         let expect = expect_of(k, &mut operands, contract)?;
-        let [(ca, _), (cb, _)] = operands;
+        let [(mut ca, _), (mut cb, _)] = operands;
+        matched_tolerances(k, &mut ca, &mut cb)?;
         let mut r = sm::boolean(k, ca, cb, operation(op))?.result;
         after_boolean(k, &mut r)?;
         finished(k, r, expect, contract)
@@ -198,7 +200,9 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
             let mut it = level.into_iter();
             while let Some(a) = it.next() {
                 match it.next() {
-                    Some(b) => {
+                    Some(mut b) => {
+                        let mut a = a;
+                        matched_tolerances(k, &mut a, &mut b)?;
                         let mut r = sm::boolean(k, a, b, BooleanOperation::Union)?.result;
                         if contract == Contract::Proved {
                             after_boolean(k, &mut r)?;
@@ -279,13 +283,14 @@ pub fn imprint_with(body: Body, tool: Body, contract: Contract) -> Result<(Body,
     let mut before = [0; 3];
     let d = run_taking("SmApiBooleanWithOptions", &operands(&both), |k| {
         let [body, tool] = &both;
-        let ((mut a, proof), (t, _)) = (take(body), take(tool));
+        let ((mut a, proof), (mut t, _)) = (take(body), take(tool));
         before = counts(&a);
         // an imprint under the default contract needs only faces left of its result
         let expect = match contract {
             Contract::Closed => Expect::FACES,
             Contract::Proved => Expect::under(k, &mut a, proof, contract)?,
         };
+        matched_tolerances(k, &mut a, &mut t)?;
         let options = MergeOptions::new(false, true, false, false, true);
         let r = sm::boolean_with_options(k, a, t, BooleanOperation::Imprint, options)?.result;
         finished(k, r, expect, contract)

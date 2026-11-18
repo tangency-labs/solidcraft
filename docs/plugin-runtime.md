@@ -126,8 +126,7 @@ the user grants it, as folders are:
 A manifest that lists a grouped command without its group is refused when it is read. A refused
 call is a typed `permission_denied` error naming the group, and it poisons the transaction like
 any other refusal. Ungrouped commands run under an empty file scope, so even a feature that names
-an external font or linked design gets no file access. A granted `file` or `doc` command runs with
-a scope of exactly the approved folders that the manifest requests for both read and write.
+an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete.
 `plugin.install` validates its optional `approve` object against the manifest and stores grants
 by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
 `read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
@@ -156,8 +155,9 @@ the bindings by the version the component's imports and exports name, so plugins
 A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design
 (`plugin_data` in the design, base64 by `<plugin-id>/<path>` in a plain JSON design). SolidCraft
 keeps those files and saves them back byte for byte whether or not the plugin is installed;
-opening a design never needs, loads or runs a plugin. Plugins cannot read or write this data yet:
-the `storage` capability adds that.
+opening a design never needs, loads or runs a plugin. A plugin with the `storage@0.1` capability
+reads and writes its own folder through the `storage.*` commands (see
+[Plugins](plugins.md#plugin-data-in-a-design)); nothing else changes it.
 
 `model.mesh {body, tolerance?}` is a general read-only input boundary. Tolerance is a finite positive
 number in millimetres (default 0.05). It returns `body`, its owning `component`,
@@ -288,8 +288,8 @@ model data or package paths.
 Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)).
 There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
 network integration, persistent guest store, signed index, custom panels or plugin-supplied icons.
-The WIT has no persistent store interface yet (`storage` arrives later; designs already keep
-`plugins/<plugin-id>/` data untouched). `manifest()` is not used.
+A plugin keeps data in a design through the `storage.*` commands, not a WIT interface of its own.
+`manifest()` is not used.
 
 ## Author an original plugin
 

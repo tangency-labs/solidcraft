@@ -1958,3 +1958,24 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     let _ = placed.body.record();
     assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
 }
+
+/// Review of #18732: a per-edge fillet whose picks include a smooth edge (dropped, with a note)
+/// copies each remaining edge at its own radius. A 60 x 40 x 30 block, its top front edge rounded
+/// r 5 first; then a per-edge fillet of that round's lower tangent edge (smooth, dropped) at 1 and
+/// the bottom front edge at 2, mirrored onto the bottom back edge. Each round of radius r on a
+/// 90 deg edge of length L removes (1 - pi/4) r^2 L: 72000 - 60 (1 - pi/4) (25 + 4 + 4). Copying
+/// each edge at its position among the picks gave the copy the dropped pick's radius, 1.
+#[test]
+fn a_mirror_of_a_per_edge_fillet_with_a_dropped_smooth_pick_keeps_each_edges_radius() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.fillet", json!({"body": "Box", "edges": [[30, 0, 30]], "radius": 5}));
+    run(
+        &mut s,
+        "solid.fillet",
+        json!({"body": "Box", "edges": [[30, 0, 25], [30, 0, 0]], "radius": 1, "edge_radii": [1, 2], "tangent_chain": false, "name": "Each"}),
+    );
+    run(&mut s, "solid.mirror", json!({"features": ["Each"], "plane": {"origin": [0, 20, 0], "normal": [0, 1, 0]}}));
+    let v = volume(&mut s);
+    assert!((v - 71575.08836352694).abs() < 1e-6 * v, "{v}");
+}

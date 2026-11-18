@@ -2186,6 +2186,31 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.fillet";
     let picks = edge_points(s, p, cmd)?;
+    // Each picked edge's own radius, in the order of `edges` (all rounded in one blend).
+    let mut edge_radii = Vec::new();
+    if let Some(list) = p.get("edge_radii") {
+        let list = list.as_array().ok_or_else(|| bad(cmd, "`edge_radii` is a list of radii, one per picked edge in the order of `edges`"))?;
+        for r in list {
+            let r = match r {
+                Value::String(x) => x.clone(),
+                Value::Number(n) => n.to_string(),
+                _ => return Err(bad(cmd, "an edge radius is a number or an expression")),
+            };
+            check_expr(s, &r, Kind::Length, cmd, "edge radius")?;
+            edge_radii.push(Expr::from(r));
+        }
+        if edge_radii.len() != picks.points.len() {
+            return Err(bad(
+                cmd,
+                format!(
+                    "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                    edge_radii.len(),
+                    picks.points.len()
+                ),
+            ));
+        }
+    }
+    // `radius` stays the fillet's nominal radius (the first edge's, with `edge_radii`).
     let radius = req_expr(cmd, p, "radius")?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
     let style = match str_(p, "type").map(str::to_ascii_lowercase).as_deref() {
@@ -2284,6 +2309,12 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     if !turn.is_mitre() && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty()) {
         return Err(bad(cmd, solidcraft_doc::SWEPT_TAKES));
     }
+    let tangent_chain = bool_(p, "tangent_chain").unwrap_or(true);
+    if !edge_radii.is_empty()
+        && (!style.is_constant() || !fit.is_exact() || !corner.is_rolling() || !setbacks.is_empty() || !turn.is_mitre() || tangent_chain)
+    {
+        return Err(bad(cmd, solidcraft_doc::EDGE_RADII_TAKE));
+    }
     let mut out = add_feature(
         s,
         p,
@@ -2296,7 +2327,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             corner,
             setbacks,
             turn,
-            tangent_chain: bool_(p, "tangent_chain").unwrap_or(true),
+            tangent_chain,
+            edge_radii,
         },
     )?;
     // The radii the fillet used, when `fit: reduce` reduced it.
@@ -4821,6 +4853,90 @@ mod corner_tests {
         let e = s.execute("solid.fillet", &json!({"edges": rim, "radius": 1, "turn": "swept"})).unwrap_err().to_string();
         eprintln!("swept along a pocket's rim: {e}");
         assert!(e.contains("swept corner at (") && e.contains("round that edge at a radius of at least 1 first"), "{e}");
+    }
+
+    /// `solid.fillet edge_radii: [r, ...]`: each picked edge at its own radius in one blend. On a
+    /// 40 x 30 x 10 box, the two long top edges at 1 and 3 each take the spandrel (1 - π/4) r²
+    /// along their 40, exactly as two single fillets do; two top edges meeting at a corner at 1
+    /// and 3 make one valid solid, removing more than the larger round alone and less than both
+    /// rounds' full lengths. The radii are saved (and nothing is written without them), reopen to
+    /// the same body, and are refused with another option, the wrong count or chained edges.
+    #[test]
+    fn each_picked_edge_takes_its_own_radius_in_one_fillet() {
+        let plate = || {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"}));
+            s
+        };
+        let measured = |s: &Session| {
+            let body = s.world_state().unwrap().body("B").unwrap().body.clone();
+            assert!(body.validity().is_empty(), "{:?}", body.validity());
+            solidcraft_kernel::measure(&body).unwrap()
+        };
+        let near = |v: f64, want: f64| (v - want).abs() < 1e-6 * want;
+        // Two parallel edges, two radii, one call.
+        let mut both = plate();
+        let reply = run(
+            &mut both,
+            "solid.fillet",
+            &json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, "3 mm"], "tangent_chain": false}),
+        );
+        assert_eq!(reply["warning"], json!(null), "{reply}");
+        let one_call = measured(&both).volume;
+        // each round of radius r on a 90 deg edge of length L removes (1 - pi/4) r^2 L:
+        // 12000 - 40 (1 - pi/4) (1 + 9)
+        assert!(near(one_call, 11914.15926535898), "{one_call}");
+        // The same as two single fillets.
+        let mut twice = plate();
+        run(&mut twice, "solid.fillet", &json!({"edges": [[20, 0, 10]], "radius": 1}));
+        run(&mut twice, "solid.fillet", &json!({"edges": [[20, 30, 10]], "radius": 3}));
+        assert!(near(one_call, measured(&twice).volume), "{one_call} vs {}", measured(&twice).volume);
+        // Saved with the feature, and reopened to the same body.
+        let json = both.doc.to_json();
+        assert!(json.contains("\"edge_radii\""), "{json}");
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&json).unwrap());
+        assert_eq!(measured(&reopened).volume.to_bits(), one_call.to_bits(), "reopened to another body");
+        assert!(!twice.doc.to_json().contains("edge_radii"), "written without per-edge radii");
+        // Two edges meeting at the corner (40, 0, 10), at 1 and 3.
+        let mut corner = plate();
+        let reply = run(
+            &mut corner,
+            "solid.fillet",
+            &json!({"edges": [[20, 0, 10], [40, 15, 10]], "radius": 1, "edge_radii": [1, 3], "tangent_chain": false}),
+        );
+        assert_eq!(reply["warning"], json!(null), "{reply}");
+        let v = measured(&corner).volume;
+        eprintln!("corner at 1 and 3: volume {v:.6}");
+        // between the r 3 round alone, 12000 - 30 (1 - pi/4) 9, and both rounds whole,
+        // 12000 - 40 (1 - pi/4) - 30 (1 - pi/4) 9
+        assert!(v < 11942.05750411731 && v > 11933.473430653208, "{v}");
+        // Refusals: another style or option, the wrong count, chained edges, a non-length.
+        let picks = json!([[20, 0, 10], [20, 30, 10]]);
+        let mut s = plate();
+        for extra in [
+            json!({"type": "chord"}),
+            json!({"fit": "reduce"}),
+            json!({"corner": "g2"}),
+            json!({"turn": "swept"}),
+            json!({"setbacks": [{"vertex": [0, 0, 10], "distance": 2}]}),
+            json!({"tangent_chain": true}),
+            json!({}),
+        ] {
+            let mut p = json!({"edges": picks, "radius": 1, "edge_radii": [1, 3], "tangent_chain": false});
+            for (k, v) in extra.as_object().unwrap() {
+                p[k] = v.clone();
+            }
+            if extra.as_object().unwrap().is_empty() {
+                p.as_object_mut().unwrap().remove("tangent_chain");
+            }
+            let e = s.execute("solid.fillet", &p).unwrap_err().to_string();
+            assert!(e.contains(solidcraft_doc::EDGE_RADII_TAKE), "{extra}: {e}");
+        }
+        let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "edge_radii": [1], "tangent_chain": false})).unwrap_err().to_string();
+        assert!(e.contains("gives 1 radii for 2 picked edges"), "{e}");
+        let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "edge_radii": 1, "tangent_chain": false})).unwrap_err().to_string();
+        assert!(e.contains("one per picked edge"), "{e}");
+        assert!(s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "edge_radii": [1, "30 deg"], "tangent_chain": false})).is_err());
     }
 }
 #[cfg(test)]
