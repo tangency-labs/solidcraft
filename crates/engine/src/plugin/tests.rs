@@ -22,7 +22,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
                 json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
             ),
         ] {
-            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), error };
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), exporting: false, error };
             let original = failure.text();
             let explained = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure))).to_string();
             assert!(explained.starts_with(&original), "{explained}");
@@ -31,6 +31,7 @@ fn named_tool_refusals_keep_plugin_file_and_budget_details() {
         let failure = PluginFailure {
             plugin: "Sample".into(),
             file: file.map(String::from),
+            exporting: false,
             error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
         };
         let original = failure.text();
@@ -344,6 +345,7 @@ fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
     let failure = |file: &str, reason: &str| PluginFailure {
         plugin: "Sample".into(),
         file: Some(file.into()),
+        exporting: false,
         error: craft_plugin::HostError::Unsupported { reason: reason.into() },
     };
     assert_eq!(failure("part{reason}.smp", "no {file} solids").text(), "Sample does not support part{reason}.smp: no {file} solids");
