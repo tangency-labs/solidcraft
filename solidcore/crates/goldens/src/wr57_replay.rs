@@ -12,7 +12,9 @@
 //!
 //! For each moved row, [`DATA`] holds, from main's run of the case ([`MAIN_COMMIT`]) and
 //! this branch's:
-//! - the FNV-1a hash of main's encoded row;
+//! - the FNV-1a hash of main's encoded row, as main's run encodes it (its bits, not main's
+//!   committed `expected/` text, which the goldens keep where values agree within 1e-9:
+//!   for 7 `fillet_executive_p3` rows the two differ);
 //! - main's call count, and a hash of main's call sequence (seam, inputs and a digest of
 //!   the surface, call by call: [`fold_call`]);
 //! - every call whose answer differs, as `(call, main's answer)`, and a hash of this
@@ -23,7 +25,8 @@
 //!    there must be the taped ones; every call's seam, inputs and surface, and the count,
 //!    must be main's), the encoded row hashes to main's row, and each substituted call is
 //!    certified (`cert`): this branch's answer is proven no worse than main's, or main's
-//!    is proven wrong, with the rounding charged; the classes are counted per unit and the
+//!    is proven wrong, with the rounding charged (proven given the evaluation's rounding
+//!    bound, [`crate::certify::evaluation_slack`], itself ARGUED); the classes are counted per unit and the
 //!    counts asserted;
 //! 2. as is, the encoded row equals the committed golden line.
 //!
@@ -179,10 +182,18 @@ fn surface_digest(s: &Surface) -> u64 {
     h
 }
 
-/// Folds one call (seam, input count, inputs, the surface's digest) into `h`.
-fn fold_call(h: u64, seam: Seam, input: &[u64], surface: u64) -> u64 {
+/// Folds one call (seam, input count, inputs, the surface's digest, and for a maximize
+/// one word more) into `h`.
+fn fold_call(h: u64, seam: Seam, input: &[u64], surface: u64, farthest: bool) -> u64 {
     let h = fold(h, &[u64::from(seam == Seam::Invert), input.len() as u64]);
-    fold(fold(h, input), &[surface])
+    let h = fold(fold(h, input), &[surface]);
+    // (a maximize call folds one word more, so it never matches a closest-point call's
+    // tape; a closest-point call's hash is the one main's tape was recorded with)
+    if farthest {
+        fold(h, &[2])
+    } else {
+        h
+    }
 }
 
 /// Folds one answer (its words, or its error's message) into `h`.
@@ -236,7 +247,7 @@ fn substituted(u: &dyn UnitDiff, case: &Case, subs: &[(u32, Ans)], certify: bool
             let i = s.calls;
             s.calls += 1;
             let sd = surface_digest(c.surface);
-            s.call_hash = fold_call(s.call_hash, c.seam, c.input, sd);
+            s.call_hash = fold_call(s.call_hash, c.seam, c.input, sd, c.farthest);
             match tape.get(&i) {
                 Some(&main) => {
                     s.now_hash = fold_answer(s.now_hash, &c.own);

@@ -149,6 +149,17 @@ impl Bits for SingularityInversion {
     }
 }
 
+/// An outermost seam call under way: the seam's count of calls goes back down when it
+/// ends, also by a panic in the function or the hook, so a panicking call does not
+/// silence the hook for the kernel's later calls.
+struct Outermost<'a>(&'a AtomicU32);
+
+impl Drop for Outermost<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// Runs `f`, a call of `seam` on `surface` with `input`, through `k`'s hook. With no hook,
 /// or inside another seam call, it only runs `f`.
 ///
@@ -172,6 +183,7 @@ pub(crate) fn wrap<T: Bits>(
         return f();
     }
     seam_state.depth.fetch_add(1, Ordering::Relaxed);
+    let outermost = Outermost(&seam_state.depth);
     let own = f().map(|t| t.to_bits());
     let answer = match hook.lock() {
         Ok(mut h) => h(Call {
@@ -187,7 +199,7 @@ pub(crate) fn wrap<T: Bits>(
             reason: "the hook panicked on an earlier call",
         }),
     };
-    seam_state.depth.fetch_sub(1, Ordering::Relaxed);
+    drop(outermost);
     answer.and_then(|b| {
         T::from_bits(&b).ok_or(SolidError::InvalidInput {
             operation: "surface::surface::replay::wrap",

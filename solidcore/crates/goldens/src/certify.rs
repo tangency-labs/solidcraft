@@ -266,8 +266,10 @@ pub(crate) fn distance(k: &Kernel, surface: &Surface, p: Point3, uv: Point2) -> 
     let q = surface.evaluate_point(k, uv).ok()?;
     let d = solidcore::geom::certified::distance(q, p);
     let slack = evaluation_slack_at(k, surface, uv)?;
-    let lo = d.value - d.bound - slack;
-    let hi = d.value + d.bound + slack;
+    // (outward rounded: each sum moved one ulp outward, as `solidcore`'s p8 `enclose`)
+    let reach = (d.bound + slack).next_up();
+    let lo = (d.value - reach).next_down();
+    let hi = (d.value + reach).next_up();
     (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
 }
 

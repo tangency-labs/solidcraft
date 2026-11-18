@@ -29,6 +29,10 @@
 //!
 //! A call none of these proves is classed `ARGUED ...` and listed; a call proven worse is
 //! classed `FAULT ...`, which fails the replay.
+//!
+//! "Proven" here means proven given the bound on the rounding of a surface point's
+//! evaluation ([`crate::certify::evaluation_slack`], a standard-model bound from the
+//! NURBS net), which is itself ARGUED, not proven; the other roundings are charged.
 
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
