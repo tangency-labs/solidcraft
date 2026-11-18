@@ -995,15 +995,18 @@ mod tests {
     #[test]
     fn a_single_face_sheet_that_crosses_the_body_splits_it() {
         use crate::{PathPiece, PointPath, SweepControl};
-        let ring = |z: &dyn Fn(usize) -> f64| -> Vec<Vec3> {
-            (0..=8)
-                .map(|i| {
-                    let t = std::f64::consts::TAU * (i % 8) as f64 / 8.0;
-                    Vec3::new(20.0 * t.cos(), 20.0 * t.sin(), z(i % 8))
-                })
-                .collect()
-        };
-        let wavy = ring(&|i| if i % 2 == 0 { 9.0 } else { 4.0 });
+        let d = 20.0 / std::f64::consts::SQRT_2;
+        let wavy = vec![
+            Vec3::new(20.0, 0.0, 9.0),
+            Vec3::new(d, d, 4.0),
+            Vec3::new(0.0, 20.0, 9.0),
+            Vec3::new(-d, d, 4.0),
+            Vec3::new(-20.0, 0.0, 9.0),
+            Vec3::new(-d, -d, 4.0),
+            Vec3::new(0.0, -20.0, 9.0),
+            Vec3::new(d, -d, 4.0),
+            Vec3::new(20.0, 0.0, 9.0),
+        ];
         let path = PointPath { pieces: vec![PathPiece::Spline { fit: wavy, reversed: false }] };
         let flat_at = Plane { origin: Vec3::new(0.0, 0.0, 9.0), x: Vec3::X, y: Vec3::Y };
         let radial = vec![Seg2::Line { a: Vec2::new(15.0, 0.0), b: Vec2::new(25.0, 0.0) }];
