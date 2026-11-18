@@ -32,7 +32,6 @@ use solidcore::{Kernel, Point3};
 const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 
 fn sc_fixes(k: &mut Kernel) {
-    k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
@@ -60,7 +59,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.box_face_failures_propagate = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {

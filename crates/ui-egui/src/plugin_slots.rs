@@ -240,6 +240,7 @@ impl RibbonGroup {
                     name: &entry.label,
                     icon: "prefs_plugins",
                     size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
+                    planned: false,
                     enabled: true,
                     pressed: false,
                     exit: false,

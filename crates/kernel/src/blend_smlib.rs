@@ -482,9 +482,7 @@ mod imp {
                         beside = format!("{beside}: {}", why.words_for(kind));
                     }
                     let fits = match kind {
-                        solidcraft_smlib::FitKind::Scale => {
-                            format!("the largest that fits is {} times the distances given", crate::blend::trimmed_mm(size))
-                        }
+                        solidcraft_smlib::FitKind::Scale => crate::blend::scale_fit_note(size),
                         kind => crate::blend::largest_fit_note(kind.word(), size),
                     };
                     KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))

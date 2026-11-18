@@ -418,6 +418,44 @@ fn each_plugin_entry_has_its_own_dialog_with_its_own_values() {
     assert_eq!(h.app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["hex"]);
 }
 
+/// A reopened plugin command keeps its window position within the design. Another entry gets
+/// a separate window, while the serial id of each new run still changes (#18684).
+#[test]
+fn plugin_dialog_reopen_remembers_dragged_window_position() {
+    let mut h = crate::scenario::Harness::new();
+    assert!(!h.app.preferences.plugin_remember_dialog_position);
+    h.app.preferences.plugin_remember_dialog_position = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![entry("spur", "edit", json!([])), entry("hex", "edit", json!([]))])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    let (first_serial, first_id) = (dialog.id, dialog_window_id(dialog, true));
+    assert_ne!(dialog_window_id(dialog, false), first_id, "opt-out uses the old serial-based identity");
+    let first = h.ctx.memory(|m| m.area_rect(first_id)).expect("window is placed");
+    let header = crate::scenario::rect_of("dialog:header").unwrap();
+    let from = egui::pos2(header.left() + 48.0, header.center().y);
+    h.call("ui.drag", json!({"x0":from.x,"y0":from.y,"x1":from.x-105.0,"y1":from.y+55.0,"steps":8}));
+    h.frames(5);
+    let dragged = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((dragged.min - first.min).length() > 30.0, "drag moved the window: {first:?} -> {dragged:?}");
+
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "Cancel closes the old instance");
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let reopened = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(reopened.id, first_serial, "a new run gets a new serial");
+    assert_eq!(dialog_window_id(reopened, true), first_id, "the command's window keeps its egui identity");
+    let again = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((again.min - dragged.min).length() <= 2.0, "reopening keeps the moved position: {dragged:?} -> {again:?}");
+
+    open_entry(&mut h.app, 0, 1);
+    let other = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(dialog_window_id(other, true), first_id, "a different entry has its own position");
+}
+
 /// A 20 x 20 x 10 box in the home view, with a plugin whose one command has [`pick_schema`].
 fn box_and_pick_plugin() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();

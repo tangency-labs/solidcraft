@@ -164,7 +164,7 @@ fn fix_for(field: &str) -> String {
     };
     if field == "capabilities" {
         return format!(
-            "List the capabilities the plugin uses: \"commands@0.1\" for a command plugin, \"formats@0.1\" for an importer (with \"evaluate@0.1\" to check its result). This SolidCraft serves {}.",
+            "List the capabilities the plugin uses: \"commands@0.2\" for a command plugin, \"formats@0.2\" for an importer (with \"evaluate@0.2\" to check its result). This SolidCraft serves {}, and still runs plugins built for 0.1.",
             served()
         );
     }
@@ -321,7 +321,7 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
             Severity::Warning,
             "runtime.limits.memory_mib",
             format!("asks for {} MiB of memory, over the app's ceiling of {} MiB", runtime.limits.memory_mib, ceilings.max_memory_mib),
-            "Install asks the user to approve the extra memory; a plugin copied in by hand runs only once the user raises the ceiling.",
+            "Install asks the user to allow the extra memory; a plugin copied in by hand runs only once the user raises Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file).",
         ));
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]

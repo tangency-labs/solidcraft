@@ -601,12 +601,7 @@ impl EmbossFace {
 
     /// Resolve this exact placement without expanding every assembly instance.
     pub fn body_frame(&self, doc: &Document, body: &crate::ModelBody) -> Result<crate::Mat> {
-        let owner = doc.model_body_component(body);
-        let mut frame = Self::component_frame(doc, owner, &self.path)?;
-        if let Some(offset) = doc.model_body_offset(body) {
-            frame = crate::mat_mul(&frame, offset);
-        }
-        Ok(frame)
+        doc.body_frame_at(body, &self.path)
     }
 
     /// Resolve one saved component path without expanding other occurrences.
@@ -3729,6 +3724,12 @@ pub struct Document {
     /// it saves.
     #[serde(default, skip_serializing_if = "Visibility::is_empty")]
     pub visibility: Visibility,
+    /// The design's drawings (#3890), by name, then id ([`crate::drawing::in_design`]), each behind
+    /// its own `Arc`, so an undo step shares every drawing it didn't change. Each is read by its own
+    /// family's rules ([`crate::format::read`]), never as a field of the design; a container keeps
+    /// each in its own entry.
+    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
+    pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
@@ -4032,6 +4033,7 @@ impl Document {
             named_views: Vec::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
+            drawings: Vec::new(),
             plugin_data: Default::default(),
         }
     }
@@ -4173,28 +4175,37 @@ impl Document {
         *self == normalized
     }
 
-    /// Only part properties changed (the fields `with_part_properties_of` names): nothing to
-    /// evaluate. The same whole-Document proof as [`Document::differs_only_in_render`].
+    /// Only part properties changed (the fields `with_part_properties_of` names), and perhaps
+    /// drawings with them, as placing a parts list saves its numbers: nothing to evaluate. The
+    /// same whole-Document proof as [`Document::differs_only_in_render`].
     pub fn differs_only_in_part_properties(&self, previous: &Document) -> bool {
         previous.with_part_properties_of(self).is_some_and(|normalized| normalized == *self)
     }
 
     /// This design with `other`'s part properties, or `None` when they are this design's
     /// already (then nothing is copied). The part properties are the fields that change no
-    /// geometry: the design's metadata, and each component's metadata and free properties. A
-    /// field that joins them is compared and copied here, and nowhere else.
+    /// geometry: the design's metadata, each component's metadata and free properties, each
+    /// placement's bill of materials type and the saved item numbers. A field that joins them is
+    /// compared and copied here, and nowhere else.
     fn with_part_properties_of(&self, other: &Document) -> Option<Document> {
         let same = self.metadata == other.metadata
-            && self.components.iter().zip(&other.components).all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties);
+            && self.components.iter().zip(&other.components).all(|(c, o)| c.metadata == o.metadata && c.properties == o.properties)
+            && self.occurrences.iter().zip(&other.occurrences).all(|(c, o)| c.bom_type == o.bom_type)
+            && self.assembly.item_numbers == other.assembly.item_numbers;
         if same {
             return None;
         }
         let mut out = self.clone();
         out.metadata.clone_from(&other.metadata);
-        // Paired by position: if the components themselves differ, so do the designs.
+        out.assembly.item_numbers.clone_from(&other.assembly.item_numbers);
+        out.drawings.clone_from(&other.drawings);
+        // Paired by position: if the components or placements themselves differ, so do the designs.
         for (c, o) in out.components.iter_mut().zip(&other.components) {
             c.metadata.clone_from(&o.metadata);
             c.properties.clone_from(&o.properties);
+        }
+        for (c, o) in out.occurrences.iter_mut().zip(&other.occurrences) {
+            c.bom_type = o.bom_type;
         }
         Some(out)
     }
@@ -4209,6 +4220,32 @@ impl Document {
         let mut normalized = previous.clone();
         normalized.appearances = self.appearances.clone();
         *self == normalized
+    }
+
+    /// Only drawings changed: nothing to evaluate, as a drawing reads the model and never changes
+    /// it. The same whole-Document proof as [`Document::differs_only_in_render`]; a model edit
+    /// shares every drawing's `Arc`, so it costs nothing here.
+    pub fn differs_only_in_drawings(&self, previous: &Document) -> bool {
+        let shared =
+            self.drawings.len() == previous.drawings.len() && self.drawings.iter().zip(&previous.drawings).all(|(a, b)| std::sync::Arc::ptr_eq(a, b));
+        if shared || self.drawings == previous.drawings {
+            return false;
+        }
+        let mut normalized = previous.clone();
+        normalized.drawings = self.drawings.clone();
+        *self == normalized
+    }
+
+    /// The design's drawing `id`.
+    pub fn drawing(&self, id: u64) -> Option<&std::sync::Arc<crate::drawing::Drawing>> {
+        self.drawings.iter().find(|d| d.id == id)
+    }
+
+    /// Put `drawing` in, in place of the one with its id if there is one, in the drawings' order.
+    pub fn put_drawing(&mut self, drawing: std::sync::Arc<crate::drawing::Drawing>) {
+        self.drawings.retain(|d| d.id != drawing.id);
+        self.drawings.push(drawing);
+        crate::drawing::sort(&mut self.drawings);
     }
 
     /// The colour a body is shown and exported in (sRGB as 0–1 fractions): its appearance,
@@ -4325,12 +4362,12 @@ impl Document {
     }
 
     pub fn legacy_body_component(&self, body: &str, feature: u64) -> u64 {
-        self.body_components.get(body).copied().unwrap_or_else(|| self.feature(feature).map(|f| f.component).unwrap_or(0))
+        self.legacy_body_component_with(body, feature, |f| self.feature(f).map(|f| f.component))
     }
 
     /// Ownership in this evaluated timeline state, rather than a later transfer.
     pub fn model_body_component(&self, body: &crate::ModelBody) -> u64 {
-        if body.transferred || body.source_name.is_some() { body.component } else { self.legacy_body_component(&body.name, body.feature) }
+        self.model_body_component_with(body, |f| self.feature(f).map(|f| f.component))
     }
 
     /// [`Document::model_body_component`] of every body of `state`, in its order, with the
@@ -4355,22 +4392,41 @@ impl Document {
     /// in one pass: the timeline is looked up once, not once per body.
     pub fn body_owners(&self, state: &crate::ModelState) -> std::collections::HashSet<u64> {
         let features: std::collections::HashMap<u64, u64> = self.features.iter().rev().map(|f| (f.id, f.component)).collect();
-        state
-            .bodies
-            .iter()
-            .map(|b| {
-                if b.transferred || b.source_name.is_some() {
-                    b.component
-                } else {
-                    self.body_components.get(&b.name).copied().unwrap_or_else(|| features.get(&b.feature).copied().unwrap_or(0))
-                }
-            })
-            .collect()
+        state.bodies.iter().map(|b| self.model_body_component_with(b, |f| features.get(&f).copied())).collect()
+    }
+
+    /// [`Document::model_body_component`]'s rule, written once: a body the evaluation transferred,
+    /// or placed from a source, keeps the component it was given; any other is
+    /// [`Document::legacy_body_component`]'s. `feature_component` finds a feature's component:
+    /// the timeline for one body, a map built once for many ([`Document::body_owners`]).
+    fn model_body_component_with(&self, body: &crate::ModelBody, feature_component: impl FnOnce(u64) -> Option<u64>) -> u64 {
+        if body.transferred || body.source_name.is_some() {
+            body.component
+        } else {
+            self.legacy_body_component_with(&body.name, body.feature, feature_component)
+        }
+    }
+
+    /// [`Document::legacy_body_component`]'s rule, written once: the component the body was moved
+    /// to, else its feature's, else the root.
+    fn legacy_body_component_with(&self, body: &str, feature: u64, feature_component: impl FnOnce(u64) -> Option<u64>) -> u64 {
+        self.body_components.get(body).copied().unwrap_or_else(|| feature_component(feature).unwrap_or(0))
     }
 
     /// Recorded transfers already converted geometry into the new local frame.
     pub fn model_body_offset(&self, body: &crate::ModelBody) -> Option<&crate::Mat> {
         if body.transferred { None } else { self.body_offsets.get(&body.name) }
+    }
+
+    /// The frame `body`'s geometry is in, placed through the occurrence path `path` (empty: its
+    /// component's own placement): the placement, then the body's offset. One placement, without
+    /// expanding every assembly instance.
+    pub fn body_frame_at(&self, body: &crate::ModelBody, path: &[u64]) -> Result<crate::Mat> {
+        let mut frame = EmbossFace::component_frame(self, self.model_body_component(body), path)?;
+        if let Some(offset) = self.model_body_offset(body) {
+            frame = crate::mat_mul(&frame, offset);
+        }
+        Ok(frame)
     }
 
     /// Add a component under `parent` and return its id.

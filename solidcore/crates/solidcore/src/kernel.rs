@@ -557,8 +557,6 @@ upstream_fixes! {
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
 pub struct UpstreamFixes {
-    /// `SmFilletGeom::Trim` returns the first curve/surface trim or interval-intersection error instead of dropping it and continuing with an unset interval (WR-604, #483). Earlier successful edits remain; off by default for pinned C++ parity.
-    pub fillet_trim_status: bool,
     /// `SmCurve::ComputeCrvsNormal` uses the sampled polygon's area vector, so a
     /// concave planar loop's normal follows its orientation and its taper drafts
     /// in the requested direction (WR-587, #1776). An open chain closes by its chord.
@@ -640,16 +638,6 @@ pub struct UpstreamFixes {
     /// removes it, so the trim passes the check (#2129). Off by default for pinned SMLib
     /// compatibility.
     pub bspline_trim_preserves_uv_spans: bool,
-    /// Extrusions, revolutions, sweeps, lofts and the station sweeps (`SmPrimitiveCreation`,
-    /// `SmTopologySweep`, the translational and rotational sweep geometry and `SM_API`'s
-    /// primitive wrappers) pass on the statuses SMLib drops: a failed evaluation, copy,
-    /// transform, trim, reparameterization, knot or degree edit, face or edge construction,
-    /// stitch or orientation returns its error instead of the sweep carrying on with an
-    /// unset value and reporting success (WR-662, #2009 group C; tangency-labs/smlib
-    /// c8f6a31). Complements the path-curve statuses pivot selection and path extension
-    /// always return (#483), and the planar-path sweep and profile placement statuses
-    /// that always return (WR-632). Off by default for pinned parity.
-    pub sweep_statuses_pass_on: bool,
     /// Surface/surface intersection and proto-topology pass on the statuses SMLib drops;
     /// where a helper answers a question it answers "no" when a point it compares cannot
     /// be evaluated, instead of comparing unset values (`IsPointOnCurve`, `AddStartPoint`'s
@@ -685,12 +673,6 @@ pub struct UpstreamFixes {
     /// its NURB-parameter points disagree with its NURB, and a negative-angle unbounded
     /// cone holds none of its points below the apex. Off by default for pinned parity.
     pub cone_unbounded_parameterized_as_nurb: bool,
-    /// The fillet executive, solvers, corners and geometry pass on the statuses SMLib
-    /// drops: a failed solver load, orientation, list edit, copy, trim, interval edit,
-    /// evaluation, knot edit or split-face update returns its error instead of the fillet
-    /// carrying on and reporting success (WR-661, #2009 group B; tangency-labs/smlib
-    /// 873c7c9, 66b02de, 9b7cd48). Off by default for pinned parity.
-    pub fillet_statuses_pass_on: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057). Curved pieces only: a straight interval along a straight edge is always classified, by a certificate on its two ends (the distance is affine along it), with or without this flag.
@@ -729,8 +711,6 @@ pub struct UpstreamFixes {
     pub point_class_gap_3d_propagates_no_drop_error: bool,
     /// `SmFilletIntersector::ComputeNextPoint`, where the solver's offsets change along the trace (`OffsetRadiiCanChange`, a variable round), solves the fillet at the span's five test shares (a step of that share from its start) and rejects the span where a solution's contact lies farther than the approximation tolerance from its Hermite rail. Upstream tests only that the rails lie on the base surfaces, which on a plane every uv curve does, so the step grows to the angle tolerance and the rails cut across the radius law between the traced points (a cubic-law round on planar faces removes the wrong volume, its surface off the law's circle) (WR-646, #1989; the fork's tangency-labs/smlib@4438859).
     pub fillet_variable_span_follows_fillet: bool,
-    /// `SmPrimitiveCreation::CreateBox` returns the status of each face it makes (a plane that cannot be made, a face whose making fails even after the face was made, such as a box far smaller than the tolerance whose top face closes up on its bottom one) and of its `StitchAndOrient`, and makes no face on a side of zero extent. Upstream drops every one of those statuses and returns success with whatever faces were made (WR-596; the fork's tangency-labs/smlib@0df62c8, 35008b1 and 449c81c, `AddBoxFace`).
-    pub box_face_failures_propagate: bool,
     /// `SmCurve::SimpleCoincidenceChecker` returns a candidate coincidence range whose curves'
     /// separation points to opposite sides at its two ends (both separations longer than
     /// `SM_EFF_ZERO` scaled by the ends' size) as the one crossing `LocalCurveIntersect`
