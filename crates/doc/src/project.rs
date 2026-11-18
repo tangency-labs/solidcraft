@@ -1490,9 +1490,10 @@ pub(crate) fn relay_path_texts(sk: &mut Sketch) -> Vec<String> {
         .collect();
     let mut warn = Vec::new();
     for (id, source) in texts {
-        match sk.text_source_geometry(&source) {
-            Ok(geom) if geom.is_empty() => warn.push(format!("the {} makes no outline", source.describe())),
-            Ok(geom) => {
+        match sk.saved_text_source_geometry(&source) {
+            Ok((geom, _)) if geom.is_empty() => warn.push(format!("the {} makes no outline", source.describe())),
+            // (A missing font was told when the links were set, before the solve.)
+            Ok((geom, _)) => {
                 if let Err(e) = sk.update_link(&id, &geom) {
                     warn.push(format!("{}: {e}", source.describe()));
                 }
@@ -1561,11 +1562,13 @@ fn refresh_links_in(
             named_vertex = Some((body, hit.vertex, hit.point));
         }
         let resolved = if matches!(source, LinkSource::Text { .. }) {
-            // A text needs nothing outside its sketch; one on a path follows a curve of it.
-            sk.text_source_geometry(&source).map_err(DocError::from).and_then(|geom| {
+            // A text needs nothing outside its sketch; one on a path follows a curve of it. One
+            // whose font this computer lacks is set in another, and the sketch says so (#19230).
+            sk.saved_text_source_geometry(&source).map_err(DocError::from).and_then(|(geom, note)| {
                 if geom.is_empty() {
                     return Err(DocError::Invalid(format!("the {} makes no outline", source.describe())));
                 }
+                warn.extend(note.map(|note| format!("{}: {note}", source.describe())));
                 Ok(Resolved {
                     geom,
                     wires: Vec::new(),
