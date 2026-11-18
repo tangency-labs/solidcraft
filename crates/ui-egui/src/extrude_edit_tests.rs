@@ -237,14 +237,18 @@ fn profile_invert_retains_the_resolved_sketch_after_clearing_all() {
         "the next inversion reselects the original sketch, not the later one"
     );
 
-    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch: later, index: 0 }];
+    // Picking and deselecting B leaves no profile in the input. The next inversion must
+    // still use B, not the previously inverted A.
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Profile { sketch: later, index: 0 });
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Profile { sketch: later, index: 0 }]);
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Profile { sketch: later, index: 0 });
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "the second pick deselects B");
     h.frames(2);
-    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
     assert_eq!(
         h.app.dialog.as_ref().unwrap().inputs[0].items,
         vec![Sel::Profile { sketch: later, index: 0 }],
-        "an explicit pick moves the inversion context to the new sketch"
+        "an explicit pick followed by deselection retains the new sketch for inversion"
     );
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);

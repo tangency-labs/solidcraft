@@ -1954,6 +1954,14 @@ impl Dialog {
         if self.take_extrude_target(s, &sel) {
             return;
         }
+        // A deliberate profile pick changes the sketch Invert operates on, even when this
+        // same pick toggles the last profile off. A cleared input cannot identify that sketch.
+        if self.active == 0
+            && matches!(self.kind, Kind::Extrude { .. })
+            && let Sel::Profile { sketch, .. } = &sel
+        {
+            self.profile_invert_sketch = Some(*sketch);
+        }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
         }
