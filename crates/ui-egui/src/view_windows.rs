@@ -241,6 +241,7 @@ pub(crate) struct DragSource {
 pub(crate) struct DragWindow {
     placement: WindowPlacement,
     pub(crate) outline: egui::Rect,
+    pub(crate) scale: f32,
     pub(crate) label: String,
 }
 
@@ -297,7 +298,7 @@ pub(crate) fn drag_window(
         maximised: false,
         fullscreen: false,
     };
-    Some(DragWindow { placement, outline, label })
+    Some(DragWindow { placement, outline, scale, label })
 }
 
 pub(crate) fn drop_new_window(app: &mut SolveApp, view: u64, target: DragWindow) -> Result<(), String> {
@@ -608,29 +609,37 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
             let rect = ui.max_rect();
             let titlebar = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
             let action = titlebar.show(ui, rect, |ui, content| {
-                let left = content.left() + 12.0;
-                ui.painter().text(
-                    egui::pos2(left, content.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    "SolidCraft",
-                    egui::FontId::proportional(tokens.font_body),
-                    tokens.app_bar_text,
+                let brand_end = crate::app_bar::paint_brand(ui.painter(), content, &solidcraft_look::glyphs::brand_mark, Some("SolidCraft"));
+                let menu = egui::Rect::from_center_size(egui::pos2(content.right() - 17.0, content.center().y), egui::Vec2::splat(26.0));
+                let menu_tip = app.tr("multi_window.window_menu");
+                Menu::button_with(
+                    ui,
+                    |ui, _| {
+                        let response = ui.interact(menu, ui.scope_id().with("view_window_menu"), egui::Sense::click());
+                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, menu_tip));
+                        if response.hovered() {
+                            ui.painter().rect_filled(menu, tokens.radius_sm, tokens.app_bar_hover_button);
+                        }
+                        if response.has_focus() {
+                            ui.painter().rect_stroke(menu, tokens.radius_sm, egui::Stroke::new(1.0, tokens.app_bar_text), egui::StrokeKind::Inside);
+                        }
+                        for x in [-4.0, 0.0, 4.0] {
+                            ui.painter().circle_filled(menu.center() + egui::vec2(x, 0.0), 1.25, tokens.app_bar_text);
+                        }
+                        response.backing_on_hover_text(menu_tip)
+                    },
+                    |ui| {
+                        ui.label(app.tr("multi_window.views_only"));
+                        if crate::ui_kit::menu::button(ui, app.tr("multi_window.return_views"), "").clicked() {
+                            let _ = app.run("tab.window.close", json!({"window":id}));
+                            ui.close();
+                        }
+                    },
                 );
-                let right = content.right() - 30.0;
-                let mut menu = ui.new_child(
-                    egui::UiBuilder::new().max_rect(egui::Rect::from_min_max(egui::pos2(right + 2.0, content.top() + 3.0), content.right_bottom())),
-                );
-                let out = Menu::button(&mut menu, "⋯", |ui| {
-                    let selected = app.tr("multi_window.views_only");
-                    ui.label(selected);
-                    if crate::ui_kit::menu::button(ui, app.tr("multi_window.return_views"), "").clicked() {
-                        let _ = app.run("tab.window.close", json!({"window":id}));
-                        ui.close();
-                    }
-                });
-                out.response.backing_on_hover_text(app.tr("multi_window.window_menu"));
-                if right > left + 72.0 {
-                    documents::tabs(app, ui, rect, left + 72.0, right);
+                let left = brand_end + 12.0;
+                let right = menu.left() - 6.0;
+                if right > left {
+                    documents::tabs(app, ui, rect, left, right);
                 }
             });
             if let Some(action) = action {
@@ -895,6 +904,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
     let root_focus = tool_tab.or(returned_focus_tab);
     documents::select_tab(app, root_focus.unwrap_or(root));
     app.home.open = root_focus.is_none() && root_home;
+    crate::view_window_drag::show_native_preview(app, ctx);
     for host in old {
         ctx.send_viewport_cmd_to(viewport_id(host.tab, host.id), ViewportCommand::Close);
         retired.extend(host.viewport.window_scene_slots());

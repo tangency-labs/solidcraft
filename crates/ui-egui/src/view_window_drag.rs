@@ -30,6 +30,7 @@ struct Drag {
     keyboard: Option<usize>,
     target: Option<Target>,
     pointer: Pos2,
+    screen: Option<Screen>,
 }
 
 struct Flight {
@@ -185,9 +186,7 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
         && drag.viewport != viewport
         && slot.viewport == viewport
     {
-        let pointer = screen.local(
-            state.strips.iter().find(|strip| strip.viewport == drag.viewport).map_or(drag.pointer, |strip| strip.screen.desktop(drag.pointer)),
-        );
+        let pointer = drag.screen.map_or(slot.center, |source| screen.local(source.desktop(drag.pointer)));
         paint_tab(ctx, &drag.view, drag.origin, *slot, pointer, label);
     }
     if let Some(flight) = &state.flight
@@ -266,12 +265,13 @@ fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool)
         keyboard: keyboard.then_some(0),
         target: None,
         pointer: origin.center(),
+        screen: Screen::current(ctx),
     })
 }
 
 fn take_target(app: &SolveApp, ctx: &Context, drag: &Drag, pointer: Pos2) -> Option<Target> {
     let client = ctx.viewport_rect();
-    let desktop = Screen::current(ctx).map(|screen| screen.desktop(pointer));
+    let desktop = Screen::current(ctx).or(drag.screen).map(|screen| screen.desktop(pointer));
     let previous = match &drag.target {
         Some(Target::Strip { slot, .. }) => Some(*slot),
         _ => None,
@@ -340,6 +340,7 @@ pub(crate) fn route(app: &mut SolveApp, ctx: &Context, view: u64, origin: Rect, 
     clear_old_slot(ctx, drag.target.as_ref(), next.as_ref());
     drag.target = next;
     drag.pointer = pointer;
+    drag.screen = Screen::current(ctx).or(drag.screen);
     if released {
         finish(app, ctx, drag);
     } else {
@@ -510,6 +511,85 @@ fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
     }
 }
 
+fn native_preview_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("view_drag_native_preview")
+}
+
+fn native_preview_window<'a>(ctx: &Context, drag: &'a Drag) -> Option<(&'a DragWindow, Option<&'static str>)> {
+    if !cfg!(target_os = "windows") || ctx.embed_viewports() || drag.keyboard.is_some() || drag.screen.is_none() {
+        return None;
+    }
+    match &drag.target {
+        Some(Target::Window { window, refusal }) => Some((window, *refusal)),
+        _ => None,
+    }
+}
+
+fn native_preview_scale(ctx: &Context) -> Option<f32> {
+    ctx.input(|input| {
+        input.raw.viewports.get(&native_preview_id()).and_then(|info| info.native_pixels_per_point).filter(|scale| scale.is_finite() && *scale > 0.0)
+    })
+}
+
+/// The source retains pointer capture. The preview is a top-level surface with no controls
+/// or focus, sized and positioned from the same desktop rectangle as the drop command.
+pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
+    let Some(drag) = app.view_window_drag.drag.as_ref() else { return };
+    let Some((window, refusal)) = native_preview_window(ctx, drag) else { return };
+    let id = native_preview_id();
+    let native_scale = native_preview_scale(ctx);
+    let pixels_per_point = native_scale.unwrap_or(window.scale) * ctx.zoom_factor();
+
+    let position = (window.outline.min.to_vec2() / pixels_per_point).to_pos2();
+    let size = window.outline.size() / pixels_per_point;
+    let ready = native_scale.is_some();
+    let builder = egui::ViewportBuilder::default()
+        .with_title("SolidCraft")
+        .with_decorations(false)
+        .with_resizable(false)
+        .with_active(false)
+        .with_taskbar(false)
+        .with_always_on_top()
+        .with_position(position)
+        .with_inner_size(size)
+        .with_visible(ready);
+    if !ready {
+        // Negotiate the native surface in a hidden deferred viewport first. Keep
+        // the source-window preview if the integration cannot make this window.
+        ctx.show_viewport_deferred(id, builder, |_, _| {});
+        ctx.request_repaint_after(std::time::Duration::from_millis(32));
+        return;
+    }
+    let picture = drag.picture.lock().ok().and_then(|image| image.clone());
+    let blocked = refusal.is_some();
+    let label = refusal.unwrap_or(&window.label);
+    let pointer = drag.screen.map(|screen| screen.desktop(drag.pointer));
+    ctx.show_viewport_immediate(id, builder, |ui, class| {
+        if class == egui::ViewportClass::EmbeddedWindow {
+            return;
+        }
+        let ctx = ui.ctx();
+        let client = ctx.viewport_rect();
+        if !client.is_positive() {
+            return;
+        }
+        let p = painter(ctx).with_clip_rect(client);
+        let t = Tokens::get();
+        p.rect_filled(client, 0, t.app_bar);
+        let ink = if blocked { t.error } else { t.accent };
+        draw_shape(
+            ctx,
+            &p,
+            &drag.view,
+            client.shrink(2.0),
+            GhostStyle { form: Form::Window, tilt: 0.0, detail: 1.0, ink, shadow: false },
+            picture.as_ref(),
+        );
+        let point = pointer.and_then(|point| Screen::current(ctx).map(|screen| screen.local(point))).unwrap_or(client.left_top() + vec2(24.0, 14.0));
+        paint_hint(&p, client, &drag.view, point, Some(label), blocked);
+    });
+}
+
 fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
     update_slot(ctx, drag.target.as_ref(), drag.origin.width());
     // Native readback uses the frame that requested it. Paint the ghost starting
@@ -530,6 +610,10 @@ fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
             paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Dock { dock, attraction: *attraction, displaced });
         }
         Some(Target::Window { window, refusal }) => {
+            if native_preview_window(ctx, drag).is_some() && native_preview_scale(ctx).is_some() {
+                ctx.request_repaint_of(egui::ViewportId::ROOT);
+                return;
+            }
             let rect = Screen::current(ctx).map(|screen| Rect::from_min_max(screen.local(window.outline.min), screen.local(window.outline.max)));
             let label = refusal.unwrap_or(&window.label);
             paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Window { rect, label, blocked: refusal.is_some() });
@@ -922,6 +1006,37 @@ mod tests {
         let order: Vec<_> = app.docs.views.views().iter().map(|view| view.id).collect();
         assert_eq!(order, [second, first]);
         assert!(!keyboard_active(&app, &ctx));
+    }
+
+    #[test]
+    fn an_external_pointer_targets_the_secondary_strip_before_a_new_window() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+        let viewport = egui::ViewportId::from_hash_of("secondary");
+        let screen = Screen { origin: pos2(1100.0, 80.0), pixels_per_point: 1.5 };
+        app.view_window_drag.strips.push(Strip {
+            viewport,
+            tab: app.docs.current_tab(),
+            window: 1,
+            screen,
+            zone: ViewDropZone { document: 0, rect: Rect::from_min_max(pos2(100.0, 0.0), pos2(300.0, 30.0)), view_centres: vec![(0, 145.0)] },
+            count: 1,
+            name: "Secondary".into(),
+        });
+        let ctx = Context::default();
+        let source = Screen { origin: pos2(40.0, 60.0), pixels_per_point: 1.0 };
+        let origin = Rect::from_min_size(pos2(200.0, 4.0), vec2(70.0, 24.0));
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
+        let _ = ctx.run_ui(raw, |ui| {
+            let ctx = ui.ctx();
+            let mut drag = begin(&app, ctx, view, origin, false).unwrap();
+            drag.screen = Some(source);
+            let pointer = source.local(screen.desktop(pos2(200.0, 20.0)));
+            assert!(!ctx.viewport_rect().contains(pointer));
+            let target = take_target(&app, ctx, &drag, pointer).unwrap();
+            assert_eq!(target.viewport(drag.viewport), viewport);
+            assert!(matches!(target, Target::Strip { slot: Slot { window: 1, index: 1, .. }, blocked: false, .. }));
+        });
     }
 
     #[test]
