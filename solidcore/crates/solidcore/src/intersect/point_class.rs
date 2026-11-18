@@ -135,11 +135,11 @@
 //!   solution is tested; upstream looks it up once the fast drop found solutions, also
 //!   when the domain filter then removed them all (that lookup's side effects are not
 //!   made here then).
-//! - **`GetGap3d` failure (WR-58).** With a surface and no single drop point, upstream
-//!   returns `SM_ERR` (`1001.0`) *as the gap value* and ignores failing statuses along the
-//!   surface-drop path; [`PointClassification::gap_3d`] matches that by default, and with
-//!   `Kernel::fixes.point_class_gap_3d_propagates_no_drop_error` returns `Err(SM_ERR)` and
-//!   propagates object-point, surface-drop, and surface-evaluation errors instead.
+//! - **`GetGap3d` without a drop point (WR-58).** With a surface and no single drop point,
+//!   upstream returns `SM_ERR` (`1001.0`) *as the gap value* and ignores failing statuses
+//!   along the surface-drop path; [`PointClassification::gap_3d`] answers with the stored
+//!   gap there (the in-surface measure needs a drop point and is not defined) and passes
+//!   object-point, surface-drop, and surface-evaluation errors on.
 //! - **Topology members.** `GetCurveObject`, `IsConnectedTo`, `ComputePointParameters`,
 //!   `FindObjPoint3d` and `SmTol::GetZoneTol3d` of a vertex, edge, edge use, face, loop,
 //!   vertex use or loop use call the ported topology members (`SmEdge::GetCurve` /
@@ -158,7 +158,7 @@
 //!   (`harness/callgraph`) and not ported.
 
 use crate::curve::curve::p2::Curve;
-use crate::error::{ignored_or_pass_on, EntityRef, Result, SolidError, SM_ERR};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::labels::{FACE_TYPE, SPACE_BEND_TYPE, SPACE_UNBEND_TYPE};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -236,7 +236,6 @@ pub struct CombineBrep<'a, 'env, O> {
     pub notifications: &'a mut edge::NotifyEnv<'env>,
 }
 
-const OP_GAP: &str = "intersect::point_class::PointClassification::gap_3d";
 const OP_COMPUTE: &str = "intersect::point_class::PointClassification::compute_point_parameters";
 const OP_FIND: &str = "intersect::point_class::PointClassification::find_obj_point_3d";
 const OP_MERGE: &str = "intersect::point_class::PointClassification::merge_into_object";
@@ -799,21 +798,20 @@ impl<O: ClassObject> PointClassification<O> {
     }
 
     /// The gap between the classified point and the object (`GetGap3d`): the stored
-    /// gap for `opt_surface = None`, else the length of the gap component tangent to
-    /// `opt_surface` at the object point's drop point on it. Upstream returns
-    /// `SM_ERR` (as a value) when the object point has no single drop point on the
-    /// surface, even at a hundred times the object's zone tolerance; so does this by
-    /// default. With
-    /// [`UpstreamFixes::point_class_gap_3d_propagates_no_drop_error`](crate::kernel::UpstreamFixes::point_class_gap_3d_propagates_no_drop_error)
-    /// enabled (WR-58), returns [`SM_ERR`] as an [`Err`] and propagates object-point,
-    /// surface-drop, and surface-evaluation failures instead.
+    /// gap for `opt_surface = None`, else the length of the component tangent to
+    /// `opt_surface` of the offset from the object point's drop point on it to the object
+    /// point (not zero where the object point lies beside the surface's boundary, or
+    /// beside its face's trim when the surface belongs to a face that tests its drops).
+    /// That measure needs a single drop point, found at the object's zone tolerance or at a
+    /// hundred times it; without one it is not defined, and the answer is the stored gap,
+    /// as for `opt_surface = None`. Upstream returns `SM_ERR` there *as the gap value*
+    /// (1001.0), which its callers read as a huge gap (WR-58).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] (`SM_ERR`) or the underlying evaluation/solve error
-    /// when `Kernel::fixes.point_class_gap_3d_propagates_no_drop_error` is enabled and
-    /// no single drop point is found; [`SolidError::Unported`] for unported surface or
-    /// topology callees.
+    /// Those of the object point, the surface drop and the surface evaluation (upstream
+    /// ignores them and measures from an undefined point, WR-58);
+    /// [`SolidError::Unported`] for unported surface or topology callees.
     pub fn gap_3d(
         &self,
         k: &Kernel,
@@ -825,54 +823,37 @@ impl<O: ClassObject> PointClassification<O> {
             return Ok(self.gap_3d);
         };
 
-        let propagate = k.fixes.point_class_gap_3d_propagates_no_drop_error;
-
         // else - in surface gaps
         // Get Object Point
         let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
-        let obj_pt_3d = ignored_or_pass_on(self.find_obj_point_3d(k, geometry), propagate)?
-            .unwrap_or(Vec3::UNDEF);
+        let obj_pt_3d = self.find_obj_point_3d(k, geometry)?;
         let obj_zone_tol_3d = self.obj_zone_tol_3d(k, geometry)?;
 
         // find SurfaceDropPt for ObjPt
         let owner = owner_face(geometry, surface);
-        let mut solutions = ignored_or_pass_on(
-            surface_global_point_solve(k, surface, owner, &uv_domain, obj_pt_3d, obj_zone_tol_3d),
-            propagate,
-        )?
-        .unwrap_or_default();
+        let mut solutions =
+            surface_global_point_solve(k, surface, owner, &uv_domain, obj_pt_3d, obj_zone_tol_3d)?;
 
         // when a distinct solution was not found
         if solutions.len() != 1 {
             // find point/face->surface intersection point to 100 * face->Tolerance
-            solutions = ignored_or_pass_on(
-                surface_global_point_solve(
-                    k,
-                    surface,
-                    owner,
-                    &uv_domain,
-                    obj_pt_3d,
-                    zone_tol3d(k, obj_zone_tol_3d * 100.0),
-                ),
-                propagate,
-            )?
-            .unwrap_or_default();
-
-            // still no solutions - return an error
-            if solutions.len() != 1 {
-                if propagate {
-                    return Err(SolidError::intersect_failed(OP_GAP, "no single nearest point on the face's surface was found within 100 times its tolerance"));
-                }
-                return Ok(f64::from(SM_ERR));
-            }
+            solutions = surface_global_point_solve(
+                k,
+                surface,
+                owner,
+                &uv_domain,
+                obj_pt_3d,
+                zone_tol3d(k, obj_zone_tol_3d * 100.0),
+            )?;
         }
 
-        let first = solutions.first().ok_or_else(|| unresolved(OP_GAP))?;
+        // still no single drop point: no in-surface measure, the stored gap answers
+        let [first] = solutions.as_slice() else {
+            return Ok(self.gap_3d);
+        };
         let uv = Point2::new(first.param(0)?, first.param(1)?);
-        let surf_pt_3d =
-            ignored_or_pass_on(surface.evaluate_point(k, uv), propagate)?.unwrap_or(Vec3::UNDEF);
-        let surf_norm = ignored_or_pass_on(surface_evaluate_normal(k, surface, uv), propagate)?
-            .unwrap_or(Vec3::UNDEF);
+        let surf_pt_3d = surface.evaluate_point(k, uv)?;
+        let surf_norm = surface_evaluate_normal(k, surface, uv)?;
 
         let gap_3d = obj_pt_3d - surf_pt_3d;
         let in_surf_gap_3d = gap_3d - gap_3d.dot(surf_norm) * surf_norm;
@@ -2749,6 +2730,7 @@ pub const fn space_unbend_is_kind_of(t: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR;
     use crate::math::Vec2;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::surface::plane::Plane;
