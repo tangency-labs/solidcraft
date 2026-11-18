@@ -848,8 +848,13 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
         // box selection and a pre-selection reach them the way a click already does.
         Sel::SketchPoint { .. } => a & (selection::POINTS | selection::SKETCH_POINTS) != 0,
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
-        Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
+        Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
     }
+}
+
+/// Feature forms that keep a saved whole-sketch selection until it is edited.
+fn tracks_profile_selection(kind: &Kind) -> bool {
+    matches!(kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Primitive { cmd: "solid.coil", .. })
 }
 
 /// Feature forms that take a whole sketch through their profile input in the Browser.
@@ -1467,8 +1472,8 @@ impl Dialog {
 
     /// Extrude and Revolve take the sketch they start from (#14128). Coil can opt in.
     pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64, coil_use_sketch_profile: bool) {
-        let takes_sketch = matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. })
-            || (coil_use_sketch_profile && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }));
+        let coil = coil_use_sketch_profile && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let takes_sketch = coil || matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. });
         if !takes_sketch {
             return;
         }
@@ -1476,7 +1481,7 @@ impl Dialog {
         if let Some(inp) = self.inputs.first_mut()
             && inp.items.is_empty()
         {
-            inp.items = single_profile(s, sketch);
+            inp.items = if coil { drawn_sketch_selection(s, sketch) } else { single_profile(s, sketch) };
             self.advance();
         }
     }
@@ -1915,10 +1920,7 @@ impl Dialog {
         {
             return false;
         }
-        let profiles: Vec<Sel> = crate::open_meshing::session_world(s)
-            .sketch(id)
-            .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
-            .unwrap_or_default();
+        let profiles = drawn_sketch_selection(s, id);
         let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
             return false;
@@ -1975,7 +1977,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -2053,7 +2055,7 @@ impl Dialog {
             *sketch = None;
             self.extra.remove("path");
         }
-        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if self.active == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
@@ -2218,7 +2220,7 @@ impl Dialog {
         if empty && self.listed == Some(i) {
             self.listed = None;
         }
-        if i == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+        if i == 0 && tracks_profile_selection(&self.kind) {
             self.profile_selection_changed = true;
         }
         self.list_hover = None;
@@ -2407,6 +2409,13 @@ fn drawn_profiles(ss: &solidcraft_engine::doc::SolvedSketch) -> Vec<usize> {
         })
         .map(|(i, _)| i)
         .collect()
+}
+
+fn drawn_sketch_selection(s: &Session, sketch: u64) -> Vec<Sel> {
+    crate::open_meshing::session_world(s)
+        .sketch(sketch)
+        .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch, index }).collect())
+        .unwrap_or_default()
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else
@@ -3377,6 +3386,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         // stands for. Where it is tells two picks on one body apart.
         Sel::Vertex { body, point } if !body.is_empty() => format!("{body} · {}", crate::snap_wake::label(*point)),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
+        Sel::Drawing { object, .. } => format!("Drawing object {object}"),
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
         Sel::Vertex { point, .. } => {

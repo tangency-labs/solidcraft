@@ -1566,14 +1566,39 @@ fn coil_fills_profiles_from_whole_sketches_only_when_enabled() {
     assert!(d.pick_sketch(&h.app.session, sketch, true));
     assert_eq!(d.inputs[0].items.profiles().len(), 2);
 
-    let single = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
-    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[2,2]})).unwrap();
-    h.app.run("sketch.finish", json!({})).unwrap();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    d.take_sketch_profile(&h.app.session, single, false);
+    d.take_sketch_profile(&h.app.session, sketch, false);
     assert!(d.inputs[0].items.is_empty());
-    d.take_sketch_profile(&h.app.session, single, true);
-    assert_eq!(d.inputs[0].items.profiles(), vec![(single, 0)]);
+    d.take_sketch_profile(&h.app.session, sketch, true);
+    assert_eq!(d.inputs[0].items.profiles(), profiles);
+}
+
+#[test]
+fn coil_edits_keep_whole_sketch_profiles_until_the_user_picks_them_explicitly() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[9,-0.5],"p1":[10,0.5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let feature =
+        h.app.run("solid.coil", json!({"sketch":sketch,"profiles":"all","axis":"Y","pitch":8,"revolutions":2})).unwrap()["feature"].as_u64().unwrap();
+    let s = &h.app.session;
+    let profile = Sel::Profile { sketch, index: 0 };
+    let edit_profiles = |d: &Dialog| apply_commands(&h.app, d).unwrap()[0].1["params"]["profiles"].clone();
+    let mut d = for_feature(&h.app, feature, None).unwrap();
+    assert_eq!(edit_profiles(&d), json!("all"));
+
+    d.active = 0;
+    d.pick(s, profile.clone());
+    assert_eq!(edit_profiles(&d), json!([0]));
+
+    let mut d = for_feature(&h.app, feature, None).unwrap();
+    d.active = 0;
+    d.take_box(s, vec![profile.clone()], false);
+    assert_eq!(edit_profiles(&d), json!([0]));
+
+    let mut d = for_feature(&h.app, feature, None).unwrap();
+    d.remove_listed(s, 0, &profile);
+    assert!(d.profile_selection_changed);
 }
 
 #[test]

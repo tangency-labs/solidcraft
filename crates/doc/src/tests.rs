@@ -1917,6 +1917,7 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
         transform: IDENTITY,
         grounded: false,
         expressed_moves: Vec::new(),
+        bom_type: None,
     });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
@@ -1990,6 +1991,7 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
             name: format!("P{id}"),
             transform: IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         });
     }

@@ -1229,7 +1229,7 @@ impl Lit {
                 Sel::Plane { name } => Thing::Plane(name.clone()),
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
-                Sel::Occurrence { .. } => continue,
+                Sel::Occurrence { .. } | Sel::Drawing { .. } => continue,
             };
             selected.insert(thing);
         }
@@ -1442,6 +1442,20 @@ fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
+    if crate::drawing_workspace::active(app) {
+        let top = ui.cursor().top();
+        let inset = egui::Margin::symmetric(Tokens::get().space_8 as i8, 0);
+        let output = egui::Frame::NONE
+            .inner_margin(inset)
+            .show(ui, |ui| {
+                present(app, ui, acts, (true, shrink_height), |app, rows, _| {
+                    crate::drawing_workspace::browser::show(app, rows);
+                })
+            })
+            .inner;
+        crate::panel_runtime::report_content_extent(ui, top, output.content_height, true);
+        return;
+    }
     prepare_model(app);
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);

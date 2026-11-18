@@ -208,6 +208,9 @@ mod blend_dialog_tests;
 #[cfg(test)]
 mod boundary_dialog_tests;
 pub(crate) mod display_lod;
+pub mod drawing_jobs;
+pub mod drawing_sheet_page;
+pub mod drawing_workspace;
 pub(crate) mod edge_detail;
 #[cfg(test)]
 mod file_load_ui_tests;
@@ -671,8 +674,11 @@ pub struct SolveApp {
     saving: Option<save_job::Saving>,
     /// A signature check running on a worker (see [`verify_job`]).
     verifying: Option<verify_job::Verifying>,
+    /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
+    drawing_job: Option<drawing_jobs::Drawing>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
+    pub drawing_workspace: drawing_workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
     /// The joint dialogs' picked and hovered snaps ([`dialogs_assembly::picked_snap`]).
@@ -758,7 +764,8 @@ pub struct SolveApp {
     /// `None`: it waits as long as it takes (headless use, tests). The desktop app sets it.
     pub apply_off_thread: Option<std::time::Duration>,
     /// One bounded native render proof/retirement owner, independent of tab state.
-    pub(crate) render_preparation: render_workspace::prepare::State,
+    /// Boxed: about 60 KB, a quarter of the app, which tests keep on the stack several times over.
+    pub(crate) render_preparation: Box<render_workspace::prepare::State>,
     /// Tests: work started off the window thread (a feature's evaluation, a Properties
     /// measurement) waits for this before it reports done.
     #[cfg(test)]
@@ -1039,8 +1046,10 @@ impl SolveApp {
             import_report: None,
             saving: None,
             verifying: None,
+            drawing_job: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
+            drawing_workspace: Default::default(),
             tool: None,
             dialog: None,
             snaps: Default::default(),
@@ -1563,6 +1572,7 @@ impl SolveApp {
             timeline::request_playback(self, action)?;
             return Ok(reply);
         }
+        let params = if id == "drawing.create" { prefs::new_drawing_params(self, params) } else { params };
         let t0 = now_ms();
         let revision = self.session.revision;
         if matches!(id, "render.lights.solo" | "render.lights.mute") {
@@ -1922,6 +1932,7 @@ impl SolveApp {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
+                    drawing_workspace::reset_document(self);
                     dim_view::cancel();
                     self.bom = None;
                     design_properties::close_object(self);
@@ -2174,6 +2185,17 @@ impl SolveApp {
         timeline::stop_playback(self);
         // A file is loading: the design waits for it.
         if self.file_load_holds() || self.file_picker.is_some() {
+            return;
+        }
+        if drawing_workspace::start(self, id) {
+            return;
+        }
+        if drawing_workspace::active(self)
+            && !id.starts_with("drawing.")
+            && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
+            && !matches!(id, "view.fit" | "view.home" | "view.tool" | "view.tool.zoom")
+        {
+            self.set_status(self.tr_label("Return to Design to use this command.").to_string(), true);
             return;
         }
         if id != "occurrence.move" {
@@ -3456,6 +3478,10 @@ impl SolveApp {
             self.flat_view.fitted = false;
             return;
         }
+        if drawing_workspace::active(self) {
+            drawing_sheet_page::fit(self);
+            return;
+        }
         if render_workspace::active(self) {
             self.cancel_view_animation();
             match solidcraft_engine::product_scene::extract(&self.session) {
@@ -3647,6 +3673,10 @@ impl SolveApp {
             self.animate_view("fit");
             return;
         }
+        if drawing_workspace::active(self) {
+            drawing_sheet_page::fit(self);
+            return;
+        }
         if render_workspace::active(self) {
             // The Render preview frames its product scene (see `fit_view`).
             self.fit_view();
@@ -3682,6 +3712,13 @@ impl SolveApp {
 
     /// Animated view changes for the axis view and navigation bar.
     pub fn animate_view(&mut self, v: &str) {
+        if drawing_workspace::active(self) && !dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
+            drawing_sheet_page::fit(self);
+            return;
+        }
+        if drawing_workspace::active(self) && !(dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home")) {
+            return;
+        }
         if matches!(v, "fit" | "home") {
             let _ = self.run(if v == "fit" { "view.fit" } else { "view.home" }, json!({}));
         } else if let Some(view) = StandardView::parse(v) {
@@ -3701,6 +3738,11 @@ impl SolveApp {
         // The flat pattern is a 2D view: Fit and Home frame it, and the Design camera stays put.
         if dialogs_sheet::flat_active(self) {
             self.flat_view.fitted = false;
+            return;
+        }
+        // The sheet page: Fit and Home both show the whole sheet.
+        if drawing_workspace::active(self) {
+            drawing_sheet_page::fit(self);
             return;
         }
         if render_workspace::active(self) {
@@ -4196,7 +4238,17 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        if render_workspace::active(self) {
+        drawing_workspace::reconcile(self);
+        if drawing_workspace::active(self) {
+            if dialogs_sheet::flat_active(self) {
+                // This is the existing source manufacturing inspector, not a drawing scene.
+                viewport::show(self, ui);
+            } else {
+                // The model view is not drawn, so no shown dimension can be double-clicked.
+                dim_view::set_model_drawn(Vec::new());
+                drawing_workspace::show(self, ui);
+            }
+        } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
