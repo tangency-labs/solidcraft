@@ -296,7 +296,7 @@ registration or native panel window.
 Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups
 of two), `collapsed` (four full-width collapsed headers), `floating` (four in-app floating
 sections), `overflow` (24 instances), and `pinned` (an outer pinned Right section
-plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), `inline` (one editable total row), and `surfaces` (mixed tab and explicit surface policies). Only `surfaces` opts out of compatibility opaque presentation. Requested opacity is `1 - translucency_percent / 100`; the override never changes saved preferences. The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
+plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), `inline` (one editable total row), `surfaces` (mixed tab and explicit surface policies), and `search` (synthetic rows narrowed by the shared search box, one panel alone and two in a tab group). Only `surfaces` opts out of compatibility opaque presentation. Requested opacity is `1 - translucency_percent / 100`; the override never changes saved preferences. The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
 controller state across hiding and moves. Services keep ticking while content is
 hidden. Apply/Finish/Cancel are synthetic actions; the Session is never passed to
 their command sink. The editor's cancellation guard checkbox can refuse explicit

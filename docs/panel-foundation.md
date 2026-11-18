@@ -389,8 +389,10 @@ animation completes immediately; layout, semantics and focus never wait for it.
 `ui.panel_fixture` is authenticated, off by default, and refuses to replace another
 runtime. Presets: `docks`, `tabs`, `collapsed`, `floating`, `overflow` (24 instances),
 `pinned`, `columns` (three independent Left columns), `stack_tabs`, `content_fill`
-(short Content versus Fill), `inline` (one editable total row), and `surfaces`
-(declared surface preferences with the existing synthetic bodies). The old `rails`
+(short Content versus Fill), `inline` (one editable total row), `surfaces`
+(declared surface preferences with the existing synthetic bodies), and `search`
+(synthetic rows narrowed by the shared search box: one panel alone with the box in
+its header, two in a tab group with it in the body). The old `rails`
 preset is replaced by `collapsed`; it is not an alias to the retired experience.
 The optional `remember:true` enable parameter attaches the application preference
 catalogue for isolated restart review. A restart must explicitly enable the same
