@@ -46,8 +46,11 @@
 //! between the toes and at each toe a concave arc of radius `r`, tangent to the chord's line
 //! at its outer end and to the convex arc at the toe. The crest height is `h`, the blend runs
 //! `o` past each toe. With half the chord `a` and `x = a + o`: `R + r = (x² + h²) / 2h`,
-//! `R = a (R + r) / x`. `o = 0` is the plain convex face. The blend runs along the chord's line,
-//! so it assumes the part's outer faces lie on it (plates in one plane, toes at one height).
+//! `R = a (R + r) / x`. `o = 0` is the plain convex face. Every arc is a polyline arc, the
+//! chord between its ends and its bulge (`prism::path_export::bulge_arc`); none is more than
+//! half a circle, so a convex face higher than half the distance between its toes is refused.
+//! The blend runs along the chord's line, so it assumes the part's outer faces lie on it
+//! (plates in one plane, toes at one height).
 //!
 //! **Penetration depth `s`.** Where the plates' outer faces are parallel (a butt joint,
 //! [`GrooveSection::plate_normal`] given), `s` is measured square to the plates from the face
@@ -76,6 +79,7 @@ use std::f64::consts::TAU;
 
 use crate::error::{Failure, Fit, FitMeasure, Reason, Result, SolidError};
 use crate::math::{Point2, Vec2};
+use crate::prism::path_export::{bulge_arc, Vertex};
 use crate::prism::profile::{check_regions, Loop2, ProfileRefusal, Region2, Seg2};
 
 pub use crate::error::weld::{WeldFailure, WeldSide};
@@ -205,8 +209,9 @@ pub struct GrooveWeld {
 /// [`SolidError::InvalidInput`] for walls that are empty, not lines and arcs, not connected,
 /// not finite, that do not run away from the face, that cross each other, a plates' normal
 /// that is not finite or points into the plates, or a contour or depth that is not finite and
-/// positive. A concave contour that would cross a wall is refused with the deepest that
-/// builds ([`WeldFailure::ConcaveFaceCrossesWall`], its [`Fit`]).
+/// positive, or a convex contour higher than half the distance between its toes. A concave
+/// contour that would cross a wall (or dip past half a circle) is refused with the deepest
+/// that builds ([`WeldFailure::ConcaveFaceCrossesWall`], its [`Fit`]).
 pub fn fill(section: &GrooveSection, options: &FillOptions) -> Result<GrooveWeld> {
     check_input(section, options)?;
     match build(section, options)? {
@@ -332,11 +337,17 @@ fn build(
         }
     }
     if through && !cut {
-        bottom = closure(rb, lb, second(options));
+        bottom = match closing(rb, lb, second(options))? {
+            Ok(path) => path,
+            Err(crossing) => return Ok(Err(crossing)),
+        };
     }
 
     // the loop, clockwise: face, right wall down, bottom, left wall up
-    let face = closure(l0, r0, options.face);
+    let face = match closing(l0, r0, options.face)? {
+        Ok(path) => path,
+        Err(crossing) => return Ok(Err(crossing)),
+    };
     let mut segs = face.clone();
     segs.extend(right_wall);
     segs.extend(bottom.clone());
@@ -577,8 +588,9 @@ fn deepest_points(s: &Seg2, dir: Vec2) -> Vec<Point2> {
     out
 }
 
-/// The path from `p` to `q` closing one side of the weld, its outside on the left of the run.
-fn closure(p: Point2, q: Point2, contour: Contour) -> Vec<Seg2> {
+/// The path from `p` to `q` closing one side of the weld, its outside on the left of the run;
+/// `None` for a convex or concave arc past half a circle.
+fn closure(p: Point2, q: Point2, contour: Contour) -> Option<Vec<Seg2>> {
     let chord = q - p;
     let c = chord.length();
     let e = chord * (1.0 / c);
@@ -586,15 +598,15 @@ fn closure(p: Point2, q: Point2, contour: Contour) -> Vec<Seg2> {
     let m = (p + q) * 0.5;
     let a = 0.5 * c;
     match contour {
-        Contour::Flat => vec![Seg2::Line { a: p, b: q }],
-        Contour::Convex { height } => vec![sagitta_arc(p, q, height)],
-        Contour::Concave { depth } => vec![sagitta_arc(p, q, -depth)],
+        Contour::Flat => Some(vec![Seg2::Line { a: p, b: q }]),
+        Contour::Convex { height } => sagitta_arc(p, q, height).map(|arc| vec![arc]),
+        Contour::Concave { depth } => sagitta_arc(p, q, -depth).map(|arc| vec![arc]),
         Contour::ConvexBlended {
             height: h,
             overlap: o,
         } => {
             if o <= 0.0 {
-                return vec![sagitta_arc(p, q, h)];
+                return sagitta_arc(p, q, h).map(|arc| vec![arc]);
             }
             let x = a + o;
             let sum = (x * x + h * h) / (2.0 * h);
@@ -606,46 +618,56 @@ fn closure(p: Point2, q: Point2, contour: Contour) -> Vec<Seg2> {
             let inflect = |c_blend: Point2| c_main + (c_blend - c_main) * (big / sum);
             let (i_left, i_right) = (inflect(c_left), inflect(c_right));
             let (t_left, t_right) = (at(-x, 0.0), at(x, 0.0));
-            vec![
+            Some(vec![
                 Seg2::Line { a: p, b: t_left },
-                arc_about(c_left, t_left, i_left, true),
-                arc_about(c_main, i_left, i_right, false),
-                arc_about(c_right, i_right, t_right, true),
+                arc_about(c_left, t_left, i_left, true)?,
+                arc_about(c_main, i_left, i_right, false)?,
+                arc_about(c_right, i_right, t_right, true)?,
                 Seg2::Line { a: t_right, b: q },
-            ]
+            ])
         }
     }
 }
 
 /// The arc from `p` to `q` whose middle stands `sagitta` off the chord, on the left of the run
-/// when positive, on its right when negative.
-fn sagitta_arc(p: Point2, q: Point2, sagitta: f64) -> Seg2 {
-    let chord = q - p;
-    let a = 0.5 * chord.length();
-    let n = left_normal(chord * (1.0 / (2.0 * a)));
-    let h = sagitta.abs();
-    let r = (a * a + h * h) / (2.0 * h);
-    let m = (p + q) * 0.5;
-    // the centre lies off the middle on the chord's other side from the crest, or on its
-    // side when the arc is more than half a circle (h > a)
-    let center = m + n * (sagitta - sagitta.signum() * r);
-    // bulging left of the run, the centre is on its right: the arc turns clockwise
-    arc_about(center, p, q, sagitta < 0.0)
+/// when positive, on its right when negative: the polyline arc of bulge `-2 sagitta / chord`
+/// (`prism::path_export::bulge_arc`; a positive bulge turns counter-clockwise, bulging right
+/// of the run). `None` past half a circle (`|sagitta|` more than half the chord).
+fn sagitta_arc(p: Point2, q: Point2, sagitta: f64) -> Option<Seg2> {
+    let bulge = -2.0 * sagitta / (q - p).length();
+    bulge_arc(Vertex { at: p, bulge }, q)
 }
 
-/// The arc about `center` from `p` to `q`, counter-clockwise when `ccw`.
-fn arc_about(center: Point2, p: Point2, q: Point2, ccw: bool) -> Seg2 {
-    let (dp, dq) = (p - center, q - center);
-    let start = dp.y.atan2(dp.x);
-    let end = dq.y.atan2(dq.x);
-    let turn = (end - start).rem_euclid(TAU);
-    let sweep = if ccw { turn } else { turn - TAU };
-    Seg2::Arc {
-        center,
-        radius: dp.length(),
-        start,
-        sweep,
+/// One face's closure, or why there is none: a concave arc past half a circle crosses the
+/// walls (the caller sizes it), a convex one is refused.
+fn closing(
+    p: Point2,
+    q: Point2,
+    contour: Contour,
+) -> Result<std::result::Result<Vec<Seg2>, Crossing>> {
+    match closure(p, q, contour) {
+        Some(path) => Ok(Ok(path)),
+        None if matches!(contour, Contour::Concave { .. }) => Ok(Err(Crossing)),
+        None => Err(SolidError::invalid_input(
+            OP,
+            "a convex face higher than half the distance between its toes",
+        )),
     }
+}
+
+/// The arc about `center` from `p` to `q`, counter-clockwise when `ccw`, as the polyline arc
+/// of its bulge `tan(sweep / 4)`; `None` past half a circle.
+fn arc_about(center: Point2, p: Point2, q: Point2, ccw: bool) -> Option<Seg2> {
+    let (dp, dq) = (p - center, q - center);
+    let turn = (dq.y.atan2(dq.x) - dp.y.atan2(dp.x)).rem_euclid(TAU);
+    let sweep = if ccw { turn } else { turn - TAU };
+    bulge_arc(
+        Vertex {
+            at: p,
+            bulge: (sweep / 4.0).tan(),
+        },
+        q,
+    )
 }
 
 /// `chain` up to where it first reaches `s` below the line through `origin` square to `up`,

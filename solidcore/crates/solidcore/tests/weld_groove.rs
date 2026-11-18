@@ -602,6 +602,11 @@ fn bad_walls_contours_and_depths_are_refused_as_invalid_input() {
             face: Contour::Concave { depth: -1.0 },
             ..ok.clone()
         },
+        // a convex face more than half a circle (half the toe distance is 3.96)
+        Case {
+            face: Contour::Convex { height: 4.5 },
+            ..ok.clone()
+        },
         Case {
             second_face: Some(Contour::ConvexBlended {
                 height: 1.0,
@@ -812,4 +817,30 @@ fn a_plates_normal_that_is_not_finite_or_points_into_the_plates_is_refused() {
     })
     .unwrap();
     assert_eq!(one_plane, chord);
+}
+
+#[test]
+fn a_concave_face_past_half_a_circle_is_refused_with_the_half_circle() {
+    // a square groove 6 wide: its walls stand square to the face, so the deepest concave face
+    // that builds is the half circle, 3 deep
+    let w = Case {
+        face: Contour::Concave { depth: 4.0 },
+        ..weld(
+            vec![line(p(-3.0, 0.0), p(-3.0, -6.0))],
+            vec![line(p(3.0, 0.0), p(3.0, -6.0))],
+        )
+    };
+    let err = run(&w).unwrap_err();
+    let SolidError::Failed(failure) = &err else {
+        panic!("not a typed refusal: {err:?}");
+    };
+    assert_eq!(
+        failure.reason,
+        Reason::Weld(WeldFailure::ConcaveFaceCrossesWall {
+            side: WeldSide::Face,
+            depth: 4.0,
+        })
+    );
+    let fit = err.fit().unwrap().size;
+    assert!((fit - 3.0).abs() < 1e-3, "fit {fit}");
 }
