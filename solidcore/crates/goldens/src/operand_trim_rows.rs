@@ -1072,8 +1072,10 @@ mod trim_blocks {
         assert_eq!(BREP_P7.len(), 6);
     }
 
-    /// The `topology.brep_p10` subdivide cases the trim drop moves (two rows, plus two that
-    /// move below the comparison tolerance): their faces' surfaces changed kind in the
+    /// The `topology.brep_p10` subdivide cases the trim drop moves (two rows, plus one that
+    /// moves below the comparison tolerance; `subdivide_sphere_cinf`, also below it, is no
+    /// longer here: since the merge of main e35bc3930 it makes no trim, and its 32 values that
+    /// differ from main's are 1-ulp moves): their faces' surfaces changed kind in the
     /// separating cut, so this branch keeps no trim on them (`brep::p9`'s
     /// `drop_face_trims`), where main kept the old ones. Nothing but the trim blocks moved,
     /// and the trims made again from the edges where a caller asks for them lie on their
@@ -1082,9 +1084,9 @@ mod trim_blocks {
     fn brep_p10_rows_are_certified() {
         let (trims, made) = certify(&crate::units::topology_brep_p10::Runner, BREP_P10, true);
         eprintln!("{} cases, {trims} trims, {made} made again", BREP_P10.len());
-        assert_eq!(BREP_P10.len(), 4);
-        // the dropped trims were made again and certified (the two rows; the other two
-        // cases keep every trim)
+        assert_eq!(BREP_P10.len(), 3);
+        // the dropped trims were made again and certified (the two rows; the other case
+        // keeps every trim)
         assert!(made > 0, "no dropped trim was made again");
     }
 

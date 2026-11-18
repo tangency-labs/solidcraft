@@ -8,7 +8,7 @@
 //!
 //! The Boolean copied the cut box's trims: its faces at x = 15 and y = 30 carry the exact
 //! degree-1 B-spline trims `SwapUV` mirrors onto them, the other walls lines (since
-//! solidcraft#17896 a plane keeps MakeFace's exact UV line for a line edge instead, but a
+//! solidcraft#17896 a plane keeps `MakeFace`'s exact UV line for a line edge instead, but a
 //! lone box still mixes the two, as below). WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
 //! parameter interval past its ends, but a B-spline trim clamps the parameter to its own
 //! interval, so one wall's rail met the pocket's vertical edge past the floor and the

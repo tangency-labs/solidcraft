@@ -95,7 +95,7 @@ fn corner_fillet_tolerances(drop: bool) -> Vec<f64> {
         .collect()
 }
 
-/// tangency-labs/solidcraft#17896: on a plane, MakeFace's trim of a line edge is already
+/// tangency-labs/solidcraft#17896: on a plane, `MakeFace`'s trim of a line edge is already
 /// the exact UV line, so the union keeps it rather than copying the box's degree-1
 /// B-spline trim (ends an ulp off). With the copy, the fillet's corner drop split and
 /// raised edge 28 and its vertices to 1.0356e-4; without it every tolerance is the one

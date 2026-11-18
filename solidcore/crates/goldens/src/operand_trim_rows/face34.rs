@@ -63,35 +63,10 @@ pub(crate) type FalsePositive = (
     &'static [(u64, f64)],
 );
 
-/// `single_face_fillet1019_6`: test #34 flags edges e21/e24 (feature body: e5/e8), whose
-/// geometry is main's bit for bit; e24's tolerance is 1.49e-3 here, 2.89e-3 on main (raised
-/// there by the lazy trim refit ratchet, #18162). The check's verdict on this pair flips
-/// with the tolerance (#18212); every range it reports lies in their shared vertex's end
-/// contact (the ranges reach about 1.16 times e24's tolerance from the vertex, so not into
-/// its tolerance ball, but the edges meet at about 38 degrees).
-pub(crate) const FALSE_POSITIVES: &[FalsePositive] = &[
-    (
-        "single_face_fillet1019_6",
-        "base_",
-        FACE34,
-        "#18212",
-        MAIN_PAIR,
-    ),
-    (
-        "single_face_fillet1019_6",
-        "feature0_",
-        FACE34,
-        "#18212",
-        MAIN_PAIR,
-    ),
-];
-
-/// Main's (7d4445c0c) e21/e24 of `single_face_fillet1019_6` (feature body e5/e8; the same
-/// in both): fingerprints and tolerances, printed by a probe of main's run.
-const MAIN_PAIR: &[(u64, f64)] = &[
-    (0xaa7a_061f_eace_f5cb, 1e-5),
-    (0xac8c_7098_86bb_e5e9, 0.002889251575298435),
-];
+/// The level 2 lines certified false positives. None since the merge of main (e35bc3930):
+/// `single_face_fillet1019_6`'s test #34 line (#18212, edges e21/e24 and e5/e8) is gone from
+/// both of its bodies, as on main.
+pub(crate) const FALSE_POSITIVES: &[FalsePositive] = &[];
 
 /// FNV-1a over the curve's type code, its NURBS degree, count, knots and homogeneous control
 /// points and the interval's ends, each as its bits.

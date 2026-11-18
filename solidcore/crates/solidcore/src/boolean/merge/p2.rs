@@ -1053,7 +1053,10 @@ fn copy_uv_trim_curves_of_other_face(
         fu2
     };
     let plane = matches!(
-        brep.face(new_face)?.surface.as_ref().map(|s| s.kind()),
+        brep.face(new_face)?
+            .surface
+            .as_ref()
+            .map(crate::surface::surface::p2::Surface::kind),
         Some(SurfaceKind::Plane(_))
     );
     let other_uses = eu::faceuse_edgeuses(other, other_fu, false, None)?;

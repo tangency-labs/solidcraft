@@ -10,6 +10,5 @@ const BREP_P7: &[Row] = &[
 const BREP_P10: &[Row] = &[
     Row { case: "subdivide_surf_rev_cinf", new: 0xbbcb681d9b5349cf, main: 0x4ebb76ea0a4f0728 },
     Row { case: "subdivide_nurb_nurb_2_cinf", new: 0x013c48aac41f0f4b, main: 0xa468f57fc9417b1b },
-    Row { case: "subdivide_sphere_cinf", new: 0x8d68627f0f462171, main: 0xc0a6b0fd29f5b577 },
     Row { case: "subdivide_cylinder_face0_cinf", new: 0xce63a6e25941af74, main: 0x65e91f61256bb2d0 },
 ];
