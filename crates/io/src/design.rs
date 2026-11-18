@@ -778,6 +778,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
         provenance::read_chain(&mut self.reader)
     }
 
+    /// Whether both model-cache entries were included. Only the container directory is
+    /// inspected, so this never decodes or evaluates geometry (#18815).
+    pub fn has_model_cache(&self) -> bool {
+        native_cache::ENTRIES.iter().all(|entry| self.reader.has_part(entry))
+    }
+
     /// The saved model, when this build wrote it for exactly this document.
     pub fn geometry(&mut self) -> Option<solidcraft_doc::SavedModel> {
         let document = self.reader.document(16 << 20).ok()?;
@@ -1686,11 +1692,13 @@ mod tests {
         let doc = document();
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
+        assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache(), "the omitted cache is observable without decoding");
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
     }
 
     /// Opening a design with its model validates its document once, where the document is read

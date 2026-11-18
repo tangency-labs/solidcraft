@@ -1467,23 +1467,38 @@ fn text_key(text: &str) -> (u64, usize) {
     (h.finish(), text.len())
 }
 
-/// Keep `imp`, read healing its parts or not (`heal`), in the recent imports (strongly only when
-/// `small`).
+/// Keep `imp`, read healing its parts or not (`heal`), in the recent imports. The four-entry
+/// limit applies only to the strong references that retain small imports after their callers let
+/// go. Weak lookups for active imports must stay until their external owners release them,
+/// however many there are (#18814).
+fn remember_in(cache: &mut Vec<Recent>, key: (u64, usize), heal: bool, imp: &Arc<StepImport>, small: bool) {
+    cache.retain(|r| (r.key, r.heal) != (key, heal) && r.import.strong_count() > 0);
+    cache.push(Recent { key, heal, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
+    let mut small_kept = 0;
+    for recent in cache.iter_mut().rev() {
+        if recent._small.is_some() {
+            small_kept += 1;
+            if small_kept > 4 {
+                recent._small = None;
+            }
+        }
+    }
+    // Removing our last strong reference drops an otherwise unowned import. Externally held
+    // imports retain their weak entry, including the fifth and later imports of an assembly.
+    cache.retain(|r| r.import.strong_count() > 0);
+}
+
 fn remember(key: (u64, usize), heal: bool, imp: &Arc<StepImport>, small: bool) {
     #[cfg(test)]
     let _others = recent_for_tests::wait();
     if let Ok(mut cache) = RECENT.lock() {
-        cache.retain(|r| (r.key, r.heal) != (key, heal) && r.import.strong_count() > 0);
-        cache.push(Recent { key, heal, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
-        while cache.len() > 4 {
-            cache.remove(0);
-        }
+        remember_in(&mut cache, key, heal, imp, small);
     }
 }
 
 /// Tests that assert what the cache of recent reads holds: under `cargo test` the tests of
-/// this crate run as threads of one process and share [`RECENT`], whose oldest entry goes when
-/// a fifth comes. While a test holds [`recent_for_tests::hold`], reads on other threads wait to
+/// this crate run as threads of one process and share [`RECENT`], which lets go of the oldest
+/// small import when a fifth comes. While a test holds [`recent_for_tests::hold`], reads on other threads wait to
 /// be remembered, so nothing the test remembered is pushed out; its own reads (remembered on its
 /// own thread) go on. Under nextest each test is its own process.
 #[cfg(test)]

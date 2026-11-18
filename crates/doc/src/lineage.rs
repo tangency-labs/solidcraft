@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
-use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::history::{BodyHistory, FaceOrigin, History};
 
 use crate::SolvedSketch;
 
@@ -115,10 +115,11 @@ impl Lineage {
             .collect()
     }
 
-    /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
-    pub(crate) fn unnamed_faces(faces: usize) -> Lineage {
-        let faces = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
-        Lineage { history: History { operands: 1, faces, edges: Vec::new() }, operands: vec![Arc::new(Operand::Made(Vec::new()))] }
+    /// `tool`, a body the feature built whose faces have no role, with its faces and its edges: a
+    /// cut by it reports where its edges went, and a lineage without them could not take that in,
+    /// leaving the whole result to be named from geometry (a modelled Thread, #18460).
+    pub(crate) fn unnamed(tool: &Body) -> Lineage {
+        Lineage::of(tool, Operand::Made(vec![Vec::new(); tool.face_count()]))
     }
 
     /// The lineages of `pieces`, the lumps of `whole` (whose lineage is `lineage`): their faces

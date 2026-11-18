@@ -79,8 +79,14 @@ fn manifest() -> Manifest {
     .unwrap()
 }
 fn component(code: &str) -> Vec<u8> {
-    let (package, version) = API.split_once('@').unwrap();
+    let (_, version) = API.split_once('@').unwrap();
+    component_for(version, code)
+}
+/// The command fixture built against WIT `version`: 0.1.0 has no `unsupported`.
+fn component_for(version: &str, code: &str) -> Vec<u8> {
+    let (package, _) = API.split_once('@').unwrap();
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version).replace("\r\n", "\n");
+    let template = if version == "0.1.0" { template.replace(r#" (case "unsupported" string)"#, "") } else { template };
     let original = "      call $box\n      call $box\n";
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
@@ -99,8 +105,8 @@ fn edit_commands_commit_as_one_transaction_and_instances_are_fresh() {
 fn traps_runaway_loops_memory_and_swallowed_failures_rollback() {
     for (code, diagnostic) in [
         ("call $box unreachable", "trap=UnreachableCodeReached"),
-        ("call $box (loop $forever br $forever)", "trap=OutOfFuel"),
-        ("call $box i32.const 10000 memory.grow drop", "memory"),
+        ("call $box (loop $forever br $forever)", "used all 100000 fuel it asks for and was stopped"),
+        ("call $box i32.const 10000 memory.grow drop", "needed more than the 1 MiB of memory it asks for and was stopped"),
         ("call $box i32.const 8 i32.const 1 i32.store", "entry result is not JSON"),
         (
             "call $box i32.const 2048 i32.const 11 i32.const 1024 i32.const 33 i32.const 0 call $run i32.const 0 i32.const 0 i32.store i32.const 4 i32.const 1024 i32.store i32.const 8 i32.const 33 i32.store",
@@ -176,14 +182,54 @@ fn a_component_for_another_api_version_is_refused_in_plain_words() {
     let (package, version) = API.split_once('@').unwrap();
     let source = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     let (prefix, _) = source.rsplit_once(')').unwrap();
-    let source = format!("{prefix}\n(import \"{package}/storage@0.2.0\" (instance))\n)");
+    let source = format!("{prefix}\n(import \"{package}/storage@0.9.0\" (instance))\n)");
     let mut app = App::default();
     let failure = run(&mut app, &manifest(), &wat::parse_str(source).unwrap(), "make", &json!({})).unwrap_err();
     assert!(
-        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.2.0")) && reason.contains("update")),
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0")) && reason.contains("update")),
         "{failure}"
     );
-    assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+    // Refused while the component is checked, before any transaction starts: nothing to roll back.
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 0, 0, 0));
+    // A component naming two versions the host runs is refused too: it was built against neither.
+    let source = format!("{prefix}\n(import \"{package}/storage@0.1.0\" (instance))\n)");
+    let failure = run(&mut App::default(), &manifest(), &wat::parse_str(source).unwrap(), "make", &json!({})).unwrap_err();
+    assert!(matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains("mixes")), "{failure}");
+    // A version named inside an exported instance counts like one at the top.
+    let source = format!(
+        "{prefix}\n(instance $inner)\n(instance $compat (export \"{package}/storage@0.9.0\" (instance $inner)))\n(export \"compat\" (instance $compat))\n)"
+    );
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0"))),
+        "{failure}"
+    );
+    // Past 4096 exports the scan stops with an error rather than leave the rest unread.
+    let exports: String = (0..4097).map(|i| format!("(export \"e{i}\" (instance $inner))\n")).collect();
+    let source = format!("{prefix}\n(instance $inner)\n{exports})");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert_eq!(failure, HostError::LimitExceeded { limit: "plugin export interface count or depth".into() });
+    // Below our scan budget, Wasmtime's own instance-index limit still becomes a host limit.
+    let exports: String = (0..1001).map(|i| format!("(export \"e{i}\" (instance $inner))\n")).collect();
+    let source = format!("{prefix}\n(instance $inner)\n{exports})");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(matches!(&failure, HostError::LimitExceeded { limit } if limit.contains("instances count exceeds limit")), "{failure}");
+    // An unsupported interface after those aliases is refused before validation hits that limit.
+    let source = format!("{prefix}\n(instance $inner)\n{exports}(export \"{package}/storage@0.9.0\" (instance $inner)))");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0")) && reason.contains("update")),
+        "{failure}"
+    );
+}
+#[test]
+fn a_command_plugin_built_against_wit_0_1_still_runs() {
+    let mut app = App::default();
+    run(&mut app, &manifest(), &component_for("0.1.0", "call $box call $box"), "make", &json!({})).unwrap();
+    assert_eq!((app.value, app.commits), (2, 1));
+    let failure = run(&mut app, &manifest(), &component_for("0.1.0", "call $box (loop $forever br $forever)"), "make", &json!({})).unwrap_err();
+    assert_eq!(failure, HostError::Exhausted { limit: "fuel".into(), allowed: 100_000 });
+    assert_eq!((app.value, app.rollbacks), (2, 1));
 }
 #[test]
 fn a_component_is_checked_against_its_world_without_running_it() {
@@ -208,7 +254,10 @@ fn a_component_is_checked_against_its_world_without_running_it() {
         check(&manifest(), &with_import("wasi:http/types@0.2.0")).unwrap_err(),
         HostError::PermissionDenied { permission: "network import is forbidden: wasi:http/types@0.2.0".into() }
     );
-    assert!(matches!(check(&manifest(), &with_import(&format!("{package}/storage@0.2.0"))), Err(HostError::UnsupportedCapability { .. })));
+    assert!(matches!(check(&manifest(), &with_import(&format!("{package}/storage@0.9.0"))), Err(HostError::UnsupportedCapability { .. })));
+    // A component built against 0.1 checks against the 0.1 world it runs in.
+    check(&manifest(), &component_for("0.1.0", "call $box")).unwrap();
+    check(&importer_manifest(false), &importer_component_for("0.1.0")).unwrap();
     let mut net = manifest();
     net.runtime.as_mut().unwrap().permissions.net = true;
     assert_eq!(check(&net, &component("call $box")).unwrap_err(), HostError::PermissionDenied { permission: "net".into() });
@@ -316,7 +365,7 @@ fn epoch_interrupt_is_distinct_from_fuel_exhaustion_in_diagnostics() {
     let failure = run.call(&mut store, ()).unwrap_err();
     let remaining = store.get_fuel().unwrap();
     assert!(remaining > 0);
-    let message = execution_error(&failure, Some(remaining), &limits).to_string();
+    let message = execution_error(&failure, Some(remaining), &limits, 512 * 1024).to_string();
     assert!(message.contains("trap=Interrupt"), "{message}");
     assert!(!message.contains("OutOfFuel"), "{message}");
     assert!(message.contains(&format!("fuel_remaining={remaining}")), "{message}");
@@ -440,6 +489,27 @@ fn component_file_writes_are_denied_without_a_host_grant() {
         assert_eq!(failure, HostError::PermissionDenied { permission: "files.write:project".into() });
         assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (7, 1, 0, 1));
     }
+}
+
+#[test]
+fn a_read_entry_is_refused_write_file_even_with_a_write_grant() {
+    let root = std::env::temp_dir().join(format!("craft-plugin-read-entry-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    let target = root.join("secret.txt");
+    std::fs::write(&target, b"original").unwrap();
+    let mut manifest = manifest();
+    let runtime = manifest.runtime.as_mut().unwrap();
+    runtime.entries[0].effect = Effect::Read;
+    runtime.permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
+    // The guest ignores the refusal and returns normally: the call still fails, naming the import.
+    let failure = run(&mut app, &manifest, &files_component(true, true), "make", &json!({})).unwrap_err();
+    assert_eq!(failure, craft_plugin::read_entry_refusal("write-file"));
+    assert!(failure.to_string().contains("write-file"), "{failure}");
+    assert_eq!(std::fs::read(&target).unwrap(), b"original");
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing is staged");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -661,12 +731,21 @@ fn importer_manifest(input_folder: bool) -> Manifest {
     .unwrap()
 }
 fn importer_component() -> Vec<u8> {
-    let (package, version) = API.split_once('@').unwrap();
-    wat::parse_str(include_str!("../importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap()
+    importer_component_for(API.split_once('@').unwrap().1)
+}
+/// The importer fixture built against WIT `version`: 0.1.0 has no `unsupported`.
+fn importer_component_for(version: &str) -> Vec<u8> {
+    let (package, _) = API.split_once('@').unwrap();
+    let source = include_str!("../importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
+    wat::parse_str(source).unwrap()
 }
 fn import(manifest: &Manifest, path: PathBuf, input_folder: bool) -> Result<crate::Imported> {
+    import_with(&importer_component(), manifest, path, input_folder)
+}
+fn import_with(component: &[u8], manifest: &Manifest, path: PathBuf, input_folder: bool) -> Result<crate::Imported> {
     let request = crate::ImportRequest { path, input_folder };
-    crate::run_import(App::default(), manifest, &importer_component(), "convert", &json!({}), &request).1
+    crate::run_import(App::default(), manifest, component, "convert", &json!({}), &request).1
 }
 fn import_folder(files: &[(&str, &[u8])]) -> PathBuf {
     let root = std::env::temp_dir().join(format!("craft-plugin-import-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -708,7 +787,35 @@ fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works(
     let manifest = importer_manifest(false);
     let failure = import(&manifest, root.join("trap.smp"), false).unwrap_err();
     assert!(matches!(&failure, HostError::Trap { reason } if reason.contains("UnreachableCodeReached")), "{failure}");
-    assert!(matches!(import(&manifest, root.join("loop.smp"), false), Err(HostError::LimitExceeded { .. })));
+    assert_eq!(import(&manifest, root.join("loop.smp"), false).unwrap_err(), HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 });
     assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine");
+    // With fuel to spare, the time limit stops it, and says how long that was.
+    let mut slow = importer_manifest(false);
+    let limits = &mut slow.runtime.as_mut().unwrap().limits;
+    (limits.fuel, limits.deadline_ms) = (1 << 40, 50);
+    assert_eq!(import(&slow, root.join("loop.smp"), false).unwrap_err(), HostError::Exhausted { limit: "deadline_ms".into(), allowed: 50 });
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn an_importer_says_a_valid_file_is_not_supported() {
+    let root = import_folder(&[("sketch.smp", b"U"), ("broken.smp", b"I")]);
+    let failure = import(&importer_manifest(false), root.join("sketch.smp"), false).unwrap_err();
+    assert_eq!(failure, HostError::Unsupported { reason: "the model has no solids".into() });
+    assert_eq!(failure.to_string(), "not supported: the model has no solids");
+    let failure = import(&importer_manifest(false), root.join("broken.smp"), false).unwrap_err();
+    assert_eq!(failure, HostError::InvalidInput { field: "file".into(), reason: "the model has no solids".into() });
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn an_importer_built_against_wit_0_1_still_runs() {
+    let root = import_folder(&[("bracket.smp", b"design bytes"), ("broken.smp", b"I"), ("loop.smp", b"L")]);
+    let old = importer_component_for("0.1.0");
+    let imported = import_with(&old, &importer_manifest(false), root.join("bracket.smp"), false).unwrap();
+    assert_eq!((imported.design.as_slice(), imported.report.summary.as_str()), (&b"design bytes"[..], "Copied the file"));
+    // Its errors read as they did: 0.1 had only invalid-input for a file it could not convert.
+    let failure = import_with(&old, &importer_manifest(false), root.join("broken.smp"), false).unwrap_err();
+    assert_eq!(failure, HostError::InvalidInput { field: "file".into(), reason: "the model has no solids".into() });
+    let failure = import_with(&old, &importer_manifest(false), root.join("loop.smp"), false).unwrap_err();
+    assert_eq!(failure, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 });
     std::fs::remove_dir_all(root).unwrap();
 }
