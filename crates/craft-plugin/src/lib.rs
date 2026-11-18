@@ -33,6 +33,20 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
+mod input;
+pub use input::{check_input, strict_input_schema};
+
+/// The host imports that change something outside the design. A `read` entry is refused every
+/// one of them, whatever folders its plugin was granted, as it is refused edit commands.
+pub const WRITING_IMPORTS: &[&str] = &["write-file"];
+
+/// The refusal of a writing host import to a `read` entry: it names the import.
+pub fn read_entry_refusal(import: &str) -> HostError {
+    HostError::PermissionDenied { permission: format!("{READ_ENTRY_IMPORT}{import}") }
+}
+/// How [`read_entry_refusal`]'s permission starts; the import's name follows it.
+pub const READ_ENTRY_IMPORT: &str = "read entry may not use the host import ";
+
 /// Failures are actionable data at the app boundary, including failures before instantiation.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]

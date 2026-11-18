@@ -492,6 +492,27 @@ fn component_file_writes_are_denied_without_a_host_grant() {
 }
 
 #[test]
+fn a_read_entry_is_refused_write_file_even_with_a_write_grant() {
+    let root = std::env::temp_dir().join(format!("craft-plugin-read-entry-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    let target = root.join("secret.txt");
+    std::fs::write(&target, b"original").unwrap();
+    let mut manifest = manifest();
+    let runtime = manifest.runtime.as_mut().unwrap();
+    runtime.entries[0].effect = Effect::Read;
+    runtime.permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
+    // The guest ignores the refusal and returns normally: the call still fails, naming the import.
+    let failure = run(&mut app, &manifest, &files_component(true, true), "make", &json!({})).unwrap_err();
+    assert_eq!(failure, craft_plugin::read_entry_refusal("write-file"));
+    assert!(failure.to_string().contains("write-file"), "{failure}");
+    assert_eq!(std::fs::read(&target).unwrap(), b"original");
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing is staged");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn staged_file_writes_publish_after_commit_and_disappear_after_traps_or_commit_failure() {
     let root = std::env::temp_dir().join(format!("craft-plugin-staged-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
     std::fs::create_dir_all(&root).unwrap();
