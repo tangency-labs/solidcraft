@@ -247,6 +247,10 @@ pub struct OffsetExecutive {
     /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
     /// `resolve_crossing_loops` resolves when they have one loop.
     pub(super) inverted_faces: BTreeSet<FaceId>,
+    /// Not in the fork (solidcore#3329): each wall carried on past a region of a face its
+    /// loops wind round the other way within a wall, and the strip that carries it on
+    /// (`resolve_crossing_loops`); the merge does not intersect the two.
+    pub(super) wall_extensions: Vec<(FaceId, FaceId)>,
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): the original edge
     /// uses whose edge `EdgeuseOffset` could not mate (`MateEdges` failed); the merge
     /// intersects their faces' offsets as upstream does, not taking them as mated.
@@ -311,6 +315,7 @@ impl OffsetExecutive {
             collapsed_faces: Vec::new(),
             collapsed_displacements: Vec::new(),
             inverted_faces: BTreeSet::new(),
+            wall_extensions: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
@@ -641,6 +646,7 @@ impl OffsetExecutive {
         self.faceuse_extension_reaches.clear();
         self.edge_bounds.clear();
         self.crossing_edgeuses.clear();
+        self.wall_extensions.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -2002,6 +2008,11 @@ impl OffsetExecutive {
                     }
                 }
             }
+        }
+        // (not in the fork, solidcore#3329) a wall and the strip carrying it on share a
+        // surface
+        for &(wall, strip) in &self.wall_extensions {
+            relate_surface_pair(result, &mut no_ssi, wall, strip)?;
         }
         self.clear_relations();
         // Shrink the geometry - this helps some for self intersections
