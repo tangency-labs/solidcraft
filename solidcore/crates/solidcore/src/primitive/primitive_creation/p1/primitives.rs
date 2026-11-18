@@ -41,6 +41,14 @@
 //! tangency-labs/smlib fd59111): [`PrimitiveCreation::create_linear_sweep`] tests a profile curve for an arc
 //! to the zero an `SmCylinder`'s own check holds its generating curve to (`arc_zero`),
 //! not to the B-rep's tolerance.
+//! Not upstream (SolidCraft #17462): a cylinder [`PrimitiveCreation::create_linear_sweep`]
+//! makes from an arc within the B-rep's tolerance of square to the sweep has the sweep
+//! direction as its axis and its origin in the profile's plane (`square_to_sweep`), not
+//! the arc fit's normal, which a very short arc leaves off the sweep, when the squared
+//! circle is certified to stay within the arc zero of the circle the arc test accepted:
+//! the convex hull of the profile's control points close to that plane, and the circle's
+//! in-plane change, `r (t² + |xa ya| / cx + ...)` plus its rounding, within what is
+//! left. Otherwise the fit's frame stays, as upstream.
 //! Not upstream (WR-596; the fork's tangency-labs/smlib 0df62c8, 35008b1, 449c81c):
 //! [`PrimitiveCreation::create_box`] returns each face's and the stitch's status and skips
 //! sides of zero extent, as the fork's `AddBoxFace` does; upstream drops them and returns
@@ -1044,6 +1052,140 @@ fn arc_sweep_cylinder(
     Ok(Some(cylinder))
 }
 
+/// Not upstream (#17462): turn an arc's frame, already within the B-rep's tolerance of
+/// square to the sweep, exactly square to it, so the cylinder swept from it is the
+/// translation surface the sweep defines, when that squared circle is certified to stay on
+/// the profile. The frame of a short arc fitted from a planar curve is ill-conditioned: a
+/// few hundredths of a degree of arc leave its normal up to `5e-8` off the plane's, and a
+/// cylinder on that normal leans across the sweep, its far edge `distance` times that off
+/// the swept curve and its rows no translates of each other.
+///
+/// Z becomes `sweep_dir` (or its negation `a`, keeping the frame's sense, so the arc's
+/// angles still run the same way), X the old X's component across it, normalised, and the
+/// origin moves along `a` into the plane `P` square to it through the curve's start. The
+/// squared circle `C'` keeps the radius `r` and the angles of the fit's circle `C`. A point
+/// `p` of the profile is then off `C'` by at most its offset along `a` from `P` plus the
+/// in-plane distance between `C'(u)` and the projection of `C(u)` into `P`, on top of the
+/// profile's own distance from `C` that the fit already accepted. Both terms must be
+/// within `zero`, the arc zero the curve was fitted to, together:
+///
+/// - Along `a`: the convex hull of the curve's control points
+///   ([`Curve::piece_hull_points`]) holds the curve, so the largest offset of a hull point
+///   from `P` bounds it. Each point and the reference point `q` carry a coordinate error
+///   bound `e`, `e_q`, worth `(e + e_q) * s` along `a` with `s = |ax| + |ay| + |az|`; the
+///   subtraction and the dot product round by at most `γ₄ (|p|∞ + |q|∞) s`, `γ₄ ≤ 4 ε`.
+///   A profile that really leans across the sweep (up to `2 r` times the tilt over a whole
+///   circle, which the caller's `distance * tilt` check does not bound) fails here.
+/// - In `P`: with `xa = X·a`, `ya = Y·a` (`xa² + ya² = t²`, `t = |Z × a|`), the projections
+///   of `X` and `Y` into `P` are `X_p` (length `cx = √(1 − xa²)`, along X') and `Y_p`, whose
+///   components along X' and Y' are `m = −xa·ya / cx` and `n`, `n² = 1 − ya² − m²`. Then
+///   `|C'(u) − proj C(u)| = r |cos u (X' − X_p) + sin u (Y' − Y_p)|
+///   ≤ r (|X' − X_p| + |Y' − Y_p|) ≤ r ((1 − cx) + |m| + (1 − n))
+///   ≤ r (xa² + |m| + ya² + m²) = r (t² + |m| + m²)`, using `1 − √(1 − w) ≤ w`. A short arc
+///   tilted about its chord stays within `zero` of `P` along `a` while missing `C'` by about
+///   `r t² / 2` across it, so this term is checked on its own.
+/// - Rounding of the in-plane term. Only `t² <= 1/4` is considered (a larger tilt is
+///   never a fit's rounding; it keeps the fit's frame), so `|xa|, |ya| <= 1/2`,
+///   `cx >= √3/2` and `|m| <= 0.29`. The terms of `B = t² + |m| + m²` are non-negative,
+///   so the few products, the quotient and the sums that form it from the computed `xa`
+///   and `ya` round by a relative `(1 + 16 ε)`. That does not cover the error of `xa` and
+///   `ya` themselves: they are dot products of unit vectors that cancel when the tilt is
+///   small, so their error is absolute, `|δ| <= γ₃ < 4 ε`, and unbounded relative to them.
+///   Under `t² <= 1/4`, `|∂B/∂xa| + |∂B/∂ya| <= (1 + 0.77 + 0.45) + (1 + 0.58 + 0.34) < 5`,
+///   so that error moves `r B` by at most `20 ε r`. `a` (unitized by the caller) and
+///   `X'`, `Y'` (built by `unitize` and cross products in
+///   [`Vec3::make_unit_ortho_vectors`]) are unit and orthogonal to within a few `ε`,
+///   which moves `C'(u)` by at most `16 ε r`. With second-order terms, `64 ε r` covers
+///   these absolute errors, and it is added to the bound.
+/// - Skew of the stored frame. The derivation takes `X`, `Y` as orthonormal, and a stored
+///   frame is not: [`Axis2Placement::set_canonical`] keeps `|X·Y|` up to `SM_EFF_ZERO` and
+///   `|X·X − 1|` up to `SM_EFF_ZERO / 100` (a circle's `is_arc` returns that frame), and a
+///   frame read from data may be anything. Let `X̂ = X / |X|` and `Ŷ` the unit part of `Y`
+///   square to it. With `s = |X·Y|`, `|X − X̂| <= |X·X − 1|` and
+///   `|Y − Ŷ| <= |Y·X̂| + ||Y − (Y·X̂) X̂| − 1| <= 2 s + |Y·Y − 1| + 4 s²` (for
+///   `|X| >= 1/2`). So `k = |X·X − 1| + |Y·Y − 1| + 2 s + 4 s²` bounds
+///   `|X − X̂| + |Y − Ŷ|`; its three dot products of near-unit vectors round by `γ₃ < 4 ε`
+///   each, so `k + 16 ε` is used. `X'` is the same for `X` and `X̂` (only its direction is
+///   used) and `Ŷ` gives the same `Z` direction, so `C'` is the squared circle of the
+///   orthonormal frame `X̂, Ŷ`. The fit's circle `C` moves from that frame's by at most
+///   `r k` (projection into `P` does not lengthen), and `xa`, `ya` from `X̂·a`, `Ŷ·a` by
+///   at most `k` together, which moves `r B` by at most `2.3 r k` (the largest single
+///   partial derivative above). `4 r k` is added; a frame with `k > 1e-6` keeps the
+///   fit's frame.
+///
+/// A frame that fails either bound, or whose curve's kind has no certain hull, keeps the
+/// fit's frame, as upstream. A frame already exactly square is left as it is.
+fn square_to_sweep(
+    frame: &mut Axis2Placement,
+    curve: &Curve,
+    radius: f64,
+    sweep_dir: Vec3,
+    zero: f64,
+) -> Result<()> {
+    let z = frame.z_axis();
+    let axis = if sweep_dir.dot(z) < 0.0 {
+        -sweep_dir
+    } else {
+        sweep_dir
+    };
+    if z == axis {
+        return Ok(());
+    }
+    let Some(hull) = curve.piece_hull_points(&curve.natural_interval()) else {
+        return Ok(());
+    };
+    let Some(&(on_plane, e_q)) = hull.first() else {
+        return Ok(());
+    };
+    let spread = axis.x.abs() + axis.y.abs() + axis.z.abs();
+    let max_abs = |p: Vec3| p.x.abs().max(p.y.abs()).max(p.z.abs());
+    let gamma4 = 4.0 * f64::EPSILON;
+    let mut axial = 0.0_f64;
+    for &(p, e) in &hull {
+        let off = (p - on_plane).dot(axis).abs()
+            + (e + e_q) * spread
+            + gamma4 * (max_abs(p) + max_abs(on_plane)) * spread;
+        // Written so that a NaN (in `off` or `zero`) keeps the fit's frame.
+        let within = off <= zero;
+        if !within {
+            return Ok(());
+        }
+        axial = axial.max(off);
+    }
+    let (x, y) = (frame.x_axis(), frame.y_axis());
+    let s = x.dot(y).abs();
+    let skew = (x.dot(x) - 1.0).abs()
+        + (y.dot(y) - 1.0).abs()
+        + 2.0 * s
+        + 4.0 * s * s
+        + 16.0 * f64::EPSILON;
+    // A NaN keeps the fit's frame here too.
+    let near_orthonormal = skew <= 1e-6;
+    if !near_orthonormal {
+        return Ok(());
+    }
+    let (xa, ya) = (x.dot(axis), y.dot(axis));
+    let t2 = xa * xa + ya * ya;
+    // A tilt past 30° is never a fit's rounding; a NaN keeps the fit's frame too.
+    let small = t2 <= 0.25;
+    if !small {
+        return Ok(());
+    }
+    let cx = (1.0 - xa * xa).sqrt();
+    let m = (xa * ya).abs() / cx;
+    let r = radius.abs();
+    let across = (r * (t2 + m + m * m) + 4.0 * r * skew) * (1.0 + 16.0 * f64::EPSILON)
+        + 64.0 * f64::EPSILON * r;
+    // As above, a NaN keeps the fit's frame.
+    let within = axial + across <= zero;
+    if !within {
+        return Ok(());
+    }
+    let origin = frame.origin();
+    let origin = origin + axis * (on_plane - origin).dot(axis);
+    frame.set_step_canonical(origin, axis, frame.x_axis())
+}
+
 /// Not upstream (WR-576, #1507): the zero a
 /// linear sweep tests a profile curve's arc to, the one an `SmCylinder`'s own check holds
 /// its generating curve to: `SM_EFF_ZERO * 1000 * (1 + the largest coordinate of the
@@ -1126,6 +1268,7 @@ impl PrimitiveCreation {
                         && angle > 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
+                        square_to_sweep(&mut frame, curve, radius, sweep_dir, arc_zero(k, curve)?)?;
                         if sweep_dir.dot(frame.z_axis()) < 0.0 {
                             frame.rotate_about_axis_at_point(
                                 180.0 * core::f64::consts::PI / 180.0,
@@ -1152,6 +1295,7 @@ impl PrimitiveCreation {
                         && angle <= 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
+                        square_to_sweep(&mut frame, curve, radius, sweep_dir, arc_zero(k, curve)?)?;
                         if let Some(cylinder) =
                             arc_sweep_cylinder(k, frame, radius, (start, end), sweep_dir, distance)?
                         {
@@ -1627,6 +1771,36 @@ mod tests {
     use super::*;
     use crate::topology::topology_traverser::Marks;
     use crate::topology::{Face, ShellId};
+
+    /// #18415 review: a circle's stored frame may be skewed (`set_canonical` keeps
+    /// `|X·Y|` up to `SM_EFF_ZERO`), which moves the circle by about `r |X·Y|`. That skew
+    /// is counted in the in-plane bound: a frame skewed by 1e-12 at radius 1000 (a move
+    /// of about 1e-9) stays as it is under a zero of 1e-9, where its orthonormal twin,
+    /// at the same tilt, is squared.
+    #[test]
+    fn square_to_sweep_counts_a_skewed_frame() {
+        let k = Kernel::default();
+        let r = 1000.0;
+        let flat = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let interval = crate::geom::extent1d::Extent1d::from_min_max(0.0, 10.0);
+        let curve = Curve::from(
+            Ellipse::create_canonical_circle(&k, &flat, r, Some(&interval), None).unwrap(),
+        );
+        let skewed = Axis2Placement::from_stored(Vec3::ZERO, Vec3::X, Vec3::new(1e-12, 1.0, 1e-15));
+        let square = Axis2Placement::from_stored(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 1.0, 1e-15));
+        assert_eq!(skewed.x_axis().dot(skewed.y_axis()), 1e-12);
+        assert!(skewed.z_axis() != Vec3::Z && square.z_axis() != Vec3::Z);
+        let mut kept = skewed;
+        square_to_sweep(&mut kept, &curve, r, Vec3::Z, 1e-9).unwrap();
+        assert_eq!(kept, skewed, "a skewed frame is squared");
+        let mut squared = square;
+        square_to_sweep(&mut squared, &curve, r, Vec3::Z, 1e-9).unwrap();
+        assert_eq!(
+            squared.z_axis(),
+            Vec3::Z,
+            "the orthonormal twin is not squared"
+        );
+    }
 
     fn plane_brep(angle: f64) -> Brep {
         let angle = angle.to_radians();

@@ -1170,7 +1170,6 @@ mod tests {
         h.app.ui.tab = "SURFACE".into();
         let before = h.app.session.doc.clone();
         let revision = h.app.session.revision;
-        h.app.preferences.drawings_preview = true;
         h.call("ui.workspace", json!({"workspace":"drawing"}));
         h.frames(4);
         assert_eq!(visible_tabs(&h.app), DRAWING_TABS);
@@ -1231,7 +1230,6 @@ mod tests {
     fn drawing_search_and_panels_work_from_the_keyboard() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         h.call("ui.workspace", json!({"workspace":"drawing"}));
         h.app.run("drawing.create", json!({})).unwrap();
         h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();
@@ -1262,6 +1260,56 @@ mod tests {
         assert!(!drawing_inspector_visible(&h), "Escape closes Sheet Settings");
         assert_eq!(h.app.session.doc, before);
         assert_eq!(h.app.session.revision, revision);
+    }
+
+    /// Ctrl+Z and Ctrl+Y (Cmd on macOS) undo and redo the open drawing's steps and leave the
+    /// model's steps alone; a focused text field keeps the keys for itself. With no drawing open
+    /// they do nothing, so the design behind the empty Drawing page never changes.
+    #[test]
+    fn drawing_undo_and_redo_keys_act_on_the_open_drawing_only() {
+        fn sheets(h: &mut crate::scenario::Harness) -> usize {
+            h.app.run("drawing.inspect", json!({})).unwrap()["sheets"].as_array().map_or(0, Vec::len)
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.frames(3);
+        let model = h.app.session.doc.clone();
+        let steps = h.app.session.undo.len();
+        // One key at a time: Ctrl+Y after a wrong Ctrl+Z would put the design back.
+        for key in ["Z", "Y"] {
+            h.step(&json!({"key":key,"cmd":true})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.session.doc, model, "Ctrl+{key} on the empty Drawing page leaves the design alone");
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), (steps, 0), "Ctrl+{key}");
+        }
+
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();
+        h.frames(3);
+        let added = sheets(&mut h);
+        h.step(&json!({"key":"S"})).unwrap();
+        h.step(&json!({"text":"x"})).unwrap();
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(2);
+        assert_eq!(sheets(&mut h), added, "Ctrl+Z in the search field stays the field's");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(2);
+        assert_eq!(sheets(&mut h), added - 1, "Ctrl+Z undoes the drawing's last step");
+        h.step(&json!({"key":"Y","cmd":true})).unwrap();
+        h.frames(2);
+        assert_eq!(sheets(&mut h), added, "Ctrl+Y redoes it");
+        for _ in 0..2 {
+            h.step(&json!({"key":"Z","cmd":true})).unwrap();
+            h.frames(2);
+        }
+        assert_eq!(sheets(&mut h), added - 1, "the drawing has no older step");
+        assert_eq!(h.app.session.undo.len(), steps + 1, "the model's steps stay, New Drawing's too");
+        assert!(h.app.session.open_drawing.is_some());
     }
 
     #[test]

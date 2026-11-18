@@ -772,14 +772,14 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cadmpeg-codec-freecad"
-version = "0.6.7"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fe0ed1935ace2c203b87107a064818dec2bb2ec2f250c4ad121767f3da75d1b"
+checksum = "e1471cfda38efa118fc045973b7ffc0a33b62968960677d37b3e94d3b771a210"
 dependencies = [
  "cadmpeg-container",
  "cadmpeg-core",
  "cadmpeg-ir",
- "roxmltree 0.21.1",
+ "roxmltree",
  "serde",
  "serde_json",
  "tempfile",
@@ -788,16 +788,16 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-codec-rhino"
-version = "0.6.7"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd2b76bd1d9301c949fbd731fd22cff9d37d10d1f481c754b557c2187bd0171"
+checksum = "dc9f134b98b6cb4aa9b32237596d4db9ad657c1b81c05265841447b4d164ba83"
 dependencies = [
  "cadmpeg-container",
  "cadmpeg-core",
  "cadmpeg-ir",
  "crc32fast",
  "flate2",
- "roxmltree 0.21.1",
+ "roxmltree",
  "serde",
  "serde_json",
  "sha1 0.11.0",
@@ -807,9 +807,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-codec-step"
-version = "0.6.7"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3cbce33ed681a28b62d8b01ae64cca2b01f11f31b9a3e5e2455b9ffde915712"
+checksum = "02968bddd3770292f0b8bca2de8c309358021028ab54df817951bdd462e8de97"
 dependencies = [
  "base64 0.23.1",
  "cadmpeg-container",
@@ -819,14 +819,13 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "zip",
 ]
 
 [[package]]
 name = "cadmpeg-container"
-version = "0.6.7"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03f0d1c22b875294c5fbf4a4738aec8f8c0a4ad035eb28ece404f1dec21f371a"
+checksum = "f4ba0d9c310f46c3c626b1ec5b9e1a4db113eb711b65cd4ee4b41b53ac7742b1"
 dependencies = [
  "cadmpeg-core",
  "crc32fast",
@@ -836,14 +835,15 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-core"
-version = "0.6.7"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "795bdc6e2a10ecc0627138874c17e2948a3925cd22c6c6b0c2e4f6621d92f89c"
+checksum = "5f5b7d2834b48bd9929f8428bd511ca5e03d331d36e5f4fbcf20e93fde8e3498"
 dependencies = [
  "flate2",
  "memchr",
- "roxmltree 0.21.1",
+ "roxmltree",
  "ruzstd",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -851,12 +851,14 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-ir"
-version = "0.6.7"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5592036516aaf2574b159a86a3d1ae872dc245261de86e4c0ce6773fed00a249"
+checksum = "8f7ea9d8e4e61ef5a2d607d76eafd58f51813170090f89049d9ce0eedb733691"
 dependencies = [
  "base64 0.23.1",
  "cadmpeg-core",
+ "libm",
+ "schemars",
  "serde",
  "serde-value",
  "serde_json",
@@ -865,10 +867,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "cadmpeg-registry"
-version = "0.6.7"
+name = "cadmpeg-measure"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc163233d5f664337267192848505854de6aeed4843181adf87f58baddcee9a0"
+checksum = "3e891c8e87b0b0c1b8eabde1deb75351d9f51367c54368fd40637ff4151774bf"
+dependencies = [
+ "cadmpeg-core",
+ "cadmpeg-ir",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "cadmpeg-registry"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b101aa07edb4e12a2b0afcf7d5583793ebd45a131422b956a4fd2f7bd22a275a"
 dependencies = [
  "cadmpeg-codec-freecad",
  "cadmpeg-codec-rhino",
@@ -876,7 +890,9 @@ dependencies = [
  "cadmpeg-container",
  "cadmpeg-core",
  "cadmpeg-ir",
+ "cadmpeg-measure",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "toml",
 ]
@@ -1330,7 +1346,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "schemars",
  "serde",
@@ -1340,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin-wasm"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "cap-std",
  "craft-plugin",
@@ -3112,7 +3128,7 @@ dependencies = [
  "image-webp",
  "moxcms",
  "num-traits",
- "png 0.18.1",
+ "png",
  "tiff",
  "zune-core",
  "zune-jpeg",
@@ -3130,9 +3146,9 @@ dependencies = [
 
 [[package]]
 name = "imagesize"
-version = "0.13.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edcd27d72f2f071c64249075f42e205ff93c9a4c5f6c6da53e79ed9f9832c285"
+checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "indexmap"
@@ -3382,17 +3398,6 @@ name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
-
-[[package]]
-name = "kurbo"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c62026ae44756f8a599ba21140f350303d4f08dcdcc71b5ad9c9bb8128c13c62"
-dependencies = [
- "arrayvec",
- "euclid",
- "smallvec",
-]
 
 [[package]]
 name = "kurbo"
@@ -3673,7 +3678,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
- "png 0.18.1",
+ "png",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
 ]
@@ -4431,7 +4436,7 @@ checksum = "839c8299360d2e998bdb106dc0a6cd71dcc5f4df51df1b620361bf50e283cca6"
 dependencies = [
  "bytemuck",
  "color",
- "kurbo 0.13.1",
+ "kurbo",
  "linebender_resource_handle",
  "smallvec",
 ]
@@ -4642,19 +4647,6 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
-
-[[package]]
-name = "png"
-version = "0.17.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
-dependencies = [
- "bitflags 1.3.2",
- "crc32fast",
- "fdeflate",
- "flate2",
- "miniz_oxide 0.8.9",
-]
 
 [[package]]
 name = "png"
@@ -5115,15 +5107,16 @@ checksum = "51743d3e274e2b18df81c4dc6caf8a5b8e15dbe799e0dca05c7617380094e884"
 
 [[package]]
 name = "resvg"
-version = "0.45.1"
+version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8928798c0a55e03c9ca6c4c6846f76377427d2c1e1f7e6de3c06ae57942df43"
+checksum = "77bb4b284cf8a5c8ae721594af53387fb755d2196fddb32b2acfb4fa9251fa0c"
 dependencies = [
+ "bytemuck",
  "log",
  "pico-args",
  "rgb",
  "svgtypes",
- "tiny-skia 0.11.4",
+ "tiny-skia",
  "usvg",
 ]
 
@@ -5215,12 +5208,6 @@ dependencies = [
  "typeid",
  "unicode-ident",
 ]
-
-[[package]]
-name = "roxmltree"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "roxmltree"
@@ -5945,6 +5932,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-cadir"
+version = "0.1.0"
+dependencies = [
+ "cadmpeg-ir",
+ "solidcore",
+ "solidcore-ops",
+ "solidcore-record",
+ "solidcore-step",
+]
+
+[[package]]
 name = "solidcore-convert"
 version = "0.1.0"
 dependencies = [
@@ -5995,7 +5993,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -6039,11 +6037,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "image",
  "log",
@@ -6061,11 +6059,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-color"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 
 [[package]]
 name = "solidcraft-control"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -6074,7 +6072,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-control-egui"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "egui",
  "image",
@@ -6084,7 +6082,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6093,11 +6091,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-display-units"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "log",
  "serde",
@@ -6121,7 +6119,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-dynamics"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -6132,13 +6130,13 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
  "image",
  "log",
- "png 0.18.1",
+ "png",
  "resvg",
  "schemars",
  "serde",
@@ -6156,9 +6154,10 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
+ "solidcraft-ui-text",
  "solidcraft-viewport",
  "thiserror 2.0.21",
- "tiny-skia 0.12.0",
+ "tiny-skia",
  "toml_edit",
  "wat",
  "web-time",
@@ -6166,7 +6165,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-format"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "serde_json",
  "sha2 0.10.9",
@@ -6175,7 +6174,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -6188,7 +6187,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "image",
  "log",
@@ -6213,7 +6212,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-io"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -6231,7 +6230,7 @@ dependencies = [
  "log",
  "pdf-writer",
  "pgp",
- "png 0.18.1",
+ "png",
  "quick-xml",
  "rand 0.8.8",
  "rustix 1.1.6",
@@ -6240,6 +6239,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
@@ -6253,14 +6253,14 @@ dependencies = [
  "solidcraft-testkit",
  "tempfile",
  "thiserror 2.0.21",
- "tiny-skia 0.12.0",
+ "tiny-skia",
  "trash",
  "zip",
 ]
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "log",
  "proptest",
@@ -6281,19 +6281,19 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-look"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "egui",
  "log",
  "solidcraft-theme",
  "solidcraft-ui-kit",
- "tiny-skia 0.12.0",
+ "tiny-skia",
  "toml",
 ]
 
 [[package]]
 name = "solidcraft-mcp"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "image",
  "serde_json",
@@ -6307,14 +6307,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp-server"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "serde_json",
  "web-time",
@@ -6322,12 +6322,12 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-render"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "flate2",
  "image",
  "moxcms",
- "png 0.18.1",
+ "png",
  "rayon",
  "robust",
  "serde",
@@ -6345,7 +6345,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "harfrust",
  "serde",
@@ -6360,7 +6360,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "flate2",
  "log",
@@ -6374,18 +6374,18 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "solidcraft-testkit"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 
 [[package]]
 name = "solidcraft-theme"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "egui",
  "serde",
@@ -6395,7 +6395,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "arboard",
  "egui",
@@ -6429,7 +6429,7 @@ dependencies = [
  "solidcraft-viewport-egui",
  "solidcraft-viewport-gpu",
  "syn 2.0.119",
- "tiny-skia 0.12.0",
+ "tiny-skia",
  "ttf-parser",
  "wat",
  "web-time",
@@ -6439,7 +6439,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-kit"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "arboard",
  "egui",
@@ -6456,20 +6456,20 @@ dependencies = [
  "solidcraft-viewport-egui",
  "solidcraft-viewport-gpu",
  "syn 2.0.119",
- "tiny-skia 0.12.0",
+ "tiny-skia",
  "web-time",
 ]
 
 [[package]]
 name = "solidcraft-ui-registry"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "solidcraft-ui-text"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "log",
  "serde_json",
@@ -6479,7 +6479,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "image",
  "serde",
@@ -6491,7 +6491,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-egui"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -6502,7 +6502,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-gpu"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "log",
  "naga",
@@ -6518,7 +6518,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "eframe",
  "egui",
@@ -6647,11 +6647,11 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "svgtypes"
-version = "0.15.3"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68c7541fff44b35860c1a7a47a7cadf3e4a304c457b58f9870d9706ece028afc"
+checksum = "9f12b12995e3638c70618c1facb1ce65302f6a6f706b675f07c58a5d7391120e"
 dependencies = [
- "kurbo 0.11.3",
+ "kurbo",
  "siphasher",
 ]
 
@@ -6804,21 +6804,6 @@ dependencies = [
 
 [[package]]
 name = "tiny-skia"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83d13394d44dae3207b52a326c0c85a8bf87f1541f23b0d143811088497b09ab"
-dependencies = [
- "arrayref",
- "arrayvec",
- "bytemuck",
- "cfg-if",
- "log",
- "png 0.17.16",
- "tiny-skia-path 0.11.4",
-]
-
-[[package]]
-name = "tiny-skia"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47ffee5eaaf5527f630fb0e356b90ebdec84d5d18d937c5e440350f88c5a91ea"
@@ -6828,18 +6813,8 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "log",
- "tiny-skia-path 0.12.0",
-]
-
-[[package]]
-name = "tiny-skia-path"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c9e7fc0c2e86a30b117d0462aa261b72b7a99b7ebd7deb3a14ceda95c5bdc93"
-dependencies = [
- "arrayref",
- "bytemuck",
- "strict-num",
+ "png",
+ "tiny-skia-path",
 ]
 
 [[package]]
@@ -7171,24 +7146,21 @@ checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "usvg"
-version = "0.45.1"
+version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80be9b06fbae3b8b303400ab20778c80bbaf338f563afe567cf3c9eea17b47ef"
+checksum = "bdb896f04730b97805bbc3191fc57e4bf03face0f14577dd42e783c4d8c98802"
 dependencies = [
- "base64 0.22.1",
  "data-url",
- "flate2",
  "imagesize",
- "kurbo 0.11.3",
+ "kurbo",
  "log",
  "pico-args",
- "roxmltree 0.20.0",
+ "roxmltree",
  "simplecss",
  "siphasher",
  "strict-num",
  "svgtypes",
- "tiny-skia-path 0.11.4",
- "xmlwriter",
+ "tiny-skia-path",
 ]
 
 [[package]]
@@ -8568,14 +8540,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
-name = "xmlwriter"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
-
-[[package]]
 name = "xtask"
-version = "0.44.0"
+version = "0.45.0-rc.3"
 dependencies = [
  "flate2",
  "proc-macro2",
