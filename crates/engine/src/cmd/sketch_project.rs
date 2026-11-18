@@ -39,8 +39,8 @@ const BREAK_LINK_CONTRACT: TypedContract<SketchBreakLinkParams> = TypedContract:
 const AUTO_PROJECT_CONTRACT: TypedContract<AutoProjectParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.project", "Project", crate::checked!("sketch.project", project_cmd)).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).contract(&PROJECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
-        concat!(refs_doc!(), "; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
+    CommandSpec::new("sketch.project", "Project", crate::checked!("sketch.project", project_cmd)).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).in_sketch_part().contract(&PROJECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
+        concat!(refs_doc!(), "; in a drawing view's sketch, refs: [{edge: [x,y,z], path?}]: edges the view draws, linked by name and read where the view draws them; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
     ),
     CommandSpec::new("sketch.intersect", "Intersect", crate::checked!("sketch.intersect", intersect_cmd)).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).contract(&INTERSECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
         concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
@@ -541,6 +541,9 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         Some(Value::Bool(value)) => *value,
         Some(_) => return Err(bad(cmd, "`construction` must be a boolean")),
     };
+    if s.open_drawing.is_some() {
+        return project_view_edges(s, &refs, construction, projection_link, cmd);
+    }
     let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
     let (out, present) = sketch_store::update(s, id, |s, doc, sk| {
@@ -577,6 +580,74 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         Ok((out, present))
     })?;
     reply(cmd, ProjectResult { links: out, already_projected: present, created: None, param_warnings: Vec::new() })
+}
+
+/// Project in a drawing's sketch (#5425). In a view's sketch each reference is an edge the view draws,
+/// picked on the design as `drawing.dimension.add` picks one ([`view_edge_ref`]): it is linked by the
+/// name a dimension saves and read on the session the view draws from, so it follows its edge where
+/// the view draws it. An edge already projected is skipped, as in a model sketch. A sheet's own sketch
+/// has no model to project from.
+fn project_view_edges(s: &mut Session, refs: &[Value], construction: bool, projection_link: bool, cmd: &str) -> Result<Value> {
+    let entry = sketch_store::sheet_target(s, &Value::Null, cmd)?;
+    let Some(view) = entry.owner.view() else {
+        return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
+    };
+    let d = s.drawing(cmd)?.clone();
+    let edges = {
+        let mut sessions = crate::drawing_view::ViewSessions::new(s);
+        let from = super::drawing_sketch::link_source(s, &mut sessions, &d, view).map_err(|why| bad(cmd, why))?;
+        let mut edges = Vec::new();
+        for v in refs {
+            let pick = view_edge_ref(v).map_err(|why| bad(cmd, why))?;
+            super::drawing_view::check_drawn(&d, view, [pick.path.as_slice()], cmd)?;
+            let edge = s.doc.edge_reference(&s.model, &pick.pick, &pick.path).map_err(|e| bad(cmd, e.to_string()))?;
+            let curves = from.doc.view_edge_curves(&from.model, &d, view, &edge).map_err(|status| {
+                let (word, why, _) = super::drawing_dimension::status_words(status);
+                bad(cmd, format!("{}: {}", edge.to_source().describe(), why.unwrap_or_else(|| word.into())))
+            })?;
+            edges.push((edge, curves));
+        }
+        edges
+    };
+    let mut present = Vec::new();
+    let (out, _) = sketch_store::edit_sheet(s, &Value::Null, cmd, |sk, _| {
+        let mut out = Vec::new();
+        for (edge, curves) in edges {
+            if sk.link_geometry_present(&curves) {
+                present.push(edge.to_source().describe());
+                continue;
+            }
+            let l = sk.add_link(LinkKind::Project, edge.to_source(), &curves)?;
+            let (curves, points) = link_parts(sk, &l);
+            if construction {
+                mark_construction(sk, &l);
+            }
+            let mut result = ProjectedLink { link: Some(l.clone()), curves, points };
+            if !projection_link {
+                result.link = None;
+                sk.break_link(&l)?;
+            }
+            out.push(result);
+        }
+        if out.is_empty() {
+            return Err(bad(cmd, format!("already projected into this sketch: {}", present.join(", "))));
+        }
+        Ok(out)
+    })?;
+    reply(cmd, ProjectResult { links: out, already_projected: present, created: None, param_warnings: Vec::new() })
+}
+
+/// A view sketch's reference: an edge its view draws, `{edge: [x, y, z], path?}` (a point on the edge
+/// in the design's frame, and the occurrences its body is placed through), read by the rules
+/// `drawing.dimension.add` reads an edge by.
+fn view_edge_ref(v: &Value) -> std::result::Result<crate::schema::drawing_dimension::EdgeParam, String> {
+    let form = "a view's sketch projects the edges its view draws: {edge: [x, y, z], path?}";
+    let at = v.get("edge").filter(|_| v.get("body").is_none_or(|body| body == "")).ok_or(form)?;
+    let mut pick = serde_json::Map::from_iter([("point".to_string(), at.clone())]);
+    if let Some(path) = v.get("path") {
+        pick.insert("path".into(), path.clone());
+    }
+    serde_json::from_value(Value::Object(pick)).map_err(|e| format!("{form}: {e}"))
 }
 
 fn project_cmd(s: &mut Session, p: &Value) -> Result<Value> {

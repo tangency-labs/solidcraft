@@ -4391,3 +4391,209 @@ fn sheet_sketch_creation_reserves_current_and_retired_image_ids() {
         }
     }
 }
+
+/// A parameter `Len` of 80 mm; a box `Box`, `Len` x 40 x 30 mm from the origin; a drawing of it, open,
+/// with its front view at 1:2; and a sketch on that view, being edited. The front view looks along +Y:
+/// its plane's x is the model's x and its y the model's z, from the model's origin. The session, the
+/// drawing, the view and the sketch.
+fn view_sketch_of_a_box() -> (Session, u64, u64, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Len", "expression": "80 mm"}));
+    run(&mut s, "solid.box", json!({"length": "Len", "width": 40, "height": 30, "body_name": "Box"}));
+    let sheet = run(&mut s, "drawing.create", json!({}))["sheets"][0]["id"].clone();
+    let view = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "front", "scale": "1:2", "position_mm": [200, 150]}))["view"].clone();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": view}));
+    let id = |v: &Value| ids::decode(v.as_str().unwrap()).unwrap();
+    (s, id(&made["drawing"]), id(&view), id(&made["sketch"]))
+}
+
+/// Link `link` of sketch `sketch` in the drawing open, as the drawing holds it: its line's two ends,
+/// lower first, to a micrometre, and whether it is lost.
+fn linked_line(s: &Session, sketch: u64, link: &str) -> ([[f64; 2]; 2], bool) {
+    let d = open_one(s);
+    let sk = &d.sheet_sketch(sketch).unwrap().sketch;
+    let curve = &sk.curves[sk.link_curves(link)[0]];
+    let solidcraft_sketch::CurveKind::Line { a, b } = curve.kind else { panic!("{curve:?} is a line") };
+    let um = |i: usize| [sk.points[i].pos.x, sk.points[i].pos.y].map(|v| (v * 1000.0).round() / 1000.0 + 0.0);
+    let (a, b) = (um(a), um(b));
+    let ends = if (a[1], a[0]) <= (b[1], b[0]) { [a, b] } else { [b, a] };
+    (ends, sk.link(link).unwrap().lost)
+}
+
+/// `change` run on the model, with the drawing open closed first and opened again after; a sketch
+/// being edited is finished first.
+fn with_the_model(s: &mut Session, change: impl FnOnce(&mut Session)) {
+    if s.active_sheet_sketch.is_some() {
+        run(s, "sketch.finish", json!({}));
+    }
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(s, "drawing.close", json!({}));
+    change(s);
+    run(s, "drawing.open", drawing);
+}
+
+/// `drawing.sketch.inspect`'s first link of sketch `sketch`.
+fn first_link(s: &mut Session, sketch: u64) -> Value {
+    run(s, "drawing.sketch.inspect", json!({"sketch": ids::encode(sketch)}))["links"][0].clone()
+}
+
+/// Project in a view's sketch (#5425): the box's right edge comes in as a line at x 80, named as a
+/// drawing dimension names an edge, in one undo step. When `Len` becomes 90 the line follows to x 90
+/// within that model change's own undo step, and a point made coincident with its top end follows too.
+/// A fillet on the edge loses it: the line stays where it last was, the link says why, and the sketch
+/// is still drawn, with the linked line left off paper and the free point's line on it; reading it
+/// changes nothing. Undoing the fillet finds the edge again.
+#[test]
+fn view_edge_follows_the_model_and_keeps_its_line_when_lost() {
+    let (mut s, d, _, sketch) = view_sketch_of_a_box();
+    let steps = s.undo.len();
+    let made = run(&mut s, "sketch.project", json!({"refs": [{"edge": [80, 0, 15]}]}));
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    let link = made["links"][0]["link"].as_str().unwrap().to_string();
+    let at = |x: f64| [[x, 0.0], [x, 30.0]];
+    assert_eq!(linked_line(&s, sketch, &link), (at(80.0), false));
+    let source = &open_one(&s).sheet_sketch(sketch).unwrap().sketch.link(&link).unwrap().source.clone();
+    assert!(matches!(source, solidcraft_sketch::LinkSource::ViewEdge { body, .. } if body == "Box"), "{source:?}");
+    let top = {
+        let d = open_one(&s);
+        let sk = &d.sheet_sketch(sketch).unwrap().sketch;
+        sk.link_points(&link).into_iter().map(|p| &sk.points[p]).find(|p| (p.pos.x - 80.0).hypot(p.pos.y - 30.0) < 1e-6).unwrap().id.clone()
+    };
+    run(&mut s, "sketch.line", json!({"points": [[100, 30], [120, 30]]}));
+    run(&mut s, "sketch.point", json!({"point": [100, 30], "id": "pin", "connect": false}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "pin", "b": top}));
+    let pin = |s: &Session| {
+        let d = open_one(s);
+        let sk = &d.sheet_sketch(sketch).unwrap().sketch;
+        sk.points[sk.resolve_point("pin").unwrap()].pos
+    };
+    assert!((pin(&s).x - 80.0).hypot(pin(&s).y - 30.0) < 1e-6, "{:?}", pin(&s));
+
+    with_the_model(&mut s, |s| {
+        let steps = s.undo.len();
+        run(s, "parameters.change", json!({"name": "Len", "expression": "90 mm"}));
+        assert_eq!(s.undo.len(), steps + 1, "the link follows in the model change's own step");
+        let before = s.undo.last().unwrap().doc.drawing(d).unwrap().sheet_sketch(sketch).unwrap().sketch.clone();
+        assert_ne!(before, s.doc.drawing(d).unwrap().sheet_sketch(sketch).unwrap().sketch, "undoing the step takes the link back too");
+    });
+    assert_eq!(linked_line(&s, sketch, &link), (at(90.0), false));
+    assert!((pin(&s).x - 90.0).hypot(pin(&s).y - 30.0) < 1e-6, "{:?}", pin(&s));
+    assert_eq!(first_link(&mut s, sketch)["status"], "ok");
+
+    with_the_model(&mut s, |s| {
+        run(s, "solid.fillet", json!({"body": "Box", "radius": 4, "edges": [[90, 0, 15]]}));
+    });
+    let (doc, dirty) = (s.doc.clone(), s.is_dirty());
+    assert_eq!(linked_line(&s, sketch, &link), (at(90.0), true), "the line stays where it last was");
+    let lost = first_link(&mut s, sketch);
+    assert_eq!((&lost["link"], &lost["status"]), (&json!(link), &json!("lost")), "{lost}");
+    assert!(lost["why"].as_str().is_some_and(|why| !why.is_empty()), "{lost}");
+    let sheet = open_one(&s).sheets[0].id;
+    let scene = crate::drawing_scene::build(&s, &open_one(&s), sheet).unwrap();
+    let state = scene.sketches.iter().find(|state| state.sketch == sketch).unwrap();
+    assert_eq!(state.status.name(), "drawn", "{state:?}");
+    let group = scene.scene.groups.iter().find(|group| group.object == sketch).unwrap();
+    assert_eq!(group.items.len(), 1, "only the free line is printed: {group:?}");
+    assert!(Arc::ptr_eq(&s.doc, &doc) && s.is_dirty() == dirty, "reading changes nothing");
+
+    with_the_model(&mut s, |s| {
+        run(s, "edit.undo", json!({}));
+    });
+    assert_eq!(linked_line(&s, sketch, &link), (at(90.0), false), "found again");
+}
+
+/// A notch cut through the box's top front edge splits it in two: its link reads ambiguous, lists both
+/// pieces as candidates, and keeps its line; with the notch undone it is one edge again.
+#[test]
+fn view_edge_split_by_a_cut_is_ambiguous_and_keeps_its_line() {
+    let (mut s, _, _, sketch) = view_sketch_of_a_box();
+    let link = run(&mut s, "sketch.project", json!({"refs": [{"edge": [40, 0, 30]}]}))["links"][0]["link"].as_str().unwrap().to_string();
+    let top = [[0.0, 30.0], [80.0, 30.0]];
+    assert_eq!(linked_line(&s, sketch, &link), (top, false));
+    with_the_model(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 10, "width": 5, "height": 5, "corner": [35, -1, 26], "operation": "cut", "targets": ["Box"]}));
+    });
+    assert_eq!(linked_line(&s, sketch, &link), (top, true));
+    let split = first_link(&mut s, sketch);
+    assert_eq!(split["status"], "ambiguous", "{split}");
+    let candidates = split["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2, "{split}");
+    assert!(candidates.iter().all(|c| c["edge"]["body"] == "Box"), "{split}");
+    with_the_model(&mut s, |s| {
+        run(s, "edit.undo", json!({}));
+    });
+    assert_eq!(linked_line(&s, sketch, &link), (top, false));
+}
+
+/// On an exploded view a link reads its edge where that view draws it, as the view's dimensions do: the
+/// Bolt's left edge, x 0 from z 20 to 30 as the design places it, is 50 mm higher on a view of
+/// exploded view Apart, which lifts the Bolt 50 mm.
+#[test]
+fn view_edge_on_an_exploded_view_reads_where_the_view_draws_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    let bolt = run(&mut s, "component.create", json!({"name": "Bolt"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 20], "body_name": "Cube"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Nut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 20], "body_name": "Nut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
+    let sheet = run(&mut s, "drawing.create", json!({}))["sheets"][0]["id"].clone();
+    for (exploded, at, z) in [("assembled", [100, 150], 20.0), ("Apart", [300, 150], 70.0)] {
+        let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": at, "exploded": exploded});
+        let view = run(&mut s, "drawing.view.base", p)["view"].clone();
+        let sketch = ids::decode(run(&mut s, "drawing.sketch.create", json!({"owner": view}))["sketch"].as_str().unwrap()).unwrap();
+        let made = run(&mut s, "sketch.project", json!({"refs": [{"edge": [0, 0, 25], "path": [bolt]}]}));
+        let line = linked_line(&s, sketch, made["links"][0]["link"].as_str().unwrap());
+        assert_eq!(line, ([[0.0, z], [0.0, z + 10.0]], false), "{exploded}");
+        run(&mut s, "sketch.finish", json!({}));
+    }
+}
+
+/// What a view's sketch can't link to is refused with its reason, changing nothing: an edge the view
+/// sees end on, a reference that isn't an edge, a sheet's own sketch, a view of a design file the
+/// drawing can't read yet, a section view's cut edges, and a flat pattern view, whose lines aren't
+/// the model's whatever the edge's path.
+#[test]
+fn view_edge_refusals() {
+    let refuses = |s: &mut Session, refs: Value, why: &str| {
+        let (doc, steps) = (s.doc.clone(), s.undo.len());
+        let e = refused(s, "sketch.project", json!({"refs": [refs]}));
+        assert!(e.contains(why), "{refs}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &doc) && s.undo.len() == steps, "{refs}: nothing changed");
+    };
+    let (mut s, d, view, _) = view_sketch_of_a_box();
+    refuses(&mut s, json!({"edge": [80, 20, 30]}), "isn't parallel to this view");
+    for not_an_edge in [json!("origin"), json!({"body": "Box"}), json!({"edge": [80, 0, 15], "body": "Box"})] {
+        refuses(&mut s, not_an_edge, "projects the edges its view draws");
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let sheet = ids::encode(open_one(&s).sheets[0].id);
+    run(&mut s, "drawing.sketch.create", json!({"owner": sheet}));
+    refuses(&mut s, json!({"edge": [80, 0, 15]}), "not supported yet: model projection in a sheet sketch");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let line = json!({"kind": "full", "points": [[40.0, -10.0], [40.0, 40.0]], "arrows": "right"});
+    let section =
+        run(&mut s, "drawing.view.section", json!({"parent": ids::encode(view), "line": line, "place": {"at": [320.0, 150.0]}}))["view"].clone();
+    run(&mut s, "drawing.sketch.create", json!({"owner": section}));
+    refuses(&mut s, json!({"edge": [80, 0, 15]}), "not supported yet: a link to a section view's edges");
+    run(&mut s, "sketch.finish", json!({}));
+
+    // A file can name another design's file as the view's source; a drawing can't read one yet.
+    let mut linked = (*open_one(&s)).clone();
+    linked.sources[0].path = Some("other.solidcraft".into());
+    s.doc_mut().put_drawing(Arc::new(linked));
+    run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(view)}));
+    refuses(&mut s, json!({"edge": [80, 0, 15]}), "not supported yet: reading a linked design");
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.open_drawing, Some(d));
+
+    let mut s = crate::drawing_scene::tests::plate();
+    let flat = run(&mut s, "drawing.view.flat", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [300, 150]}))["view"].clone();
+    run(&mut s, "drawing.sketch.create", json!({"owner": flat}));
+    for edge in [json!({"edge": [50, 0, 2]}), json!({"edge": [50, 0, 2], "path": []})] {
+        refuses(&mut s, edge, "a flat pattern view draws its body's flat");
+    }
+}

@@ -100,7 +100,7 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
 
 /// Each kind's paint band, drawn for a view and drawn for the sheet itself: borders, images, views,
 /// the views' annotations, tables, the sheet's own annotations, then the title block over them all.
-/// A note is the one kind drawn for either, so tables paint between a view's notes and the sheet's.
+/// A note and a sketch are the kinds drawn for either, so tables paint between a view's and the sheet's.
 #[test]
 fn each_kind_paints_in_its_band() {
     use ObjectKind::*;
@@ -115,7 +115,7 @@ fn each_kind_paints_in_its_band() {
         (Balloon, 3, 3),
         (PartsList, 4, 4),
         (RevisionTable, 4, 4),
-        (Sketch, 5, 5),
+        (Sketch, 3, 5),
         (TitleBlock, 6, 6),
     ] {
         assert_eq!((kind.band(DrawnFor::View), kind.band(DrawnFor::Sheet)), (for_view, for_sheet), "{kind:?}");

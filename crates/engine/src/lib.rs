@@ -1424,6 +1424,23 @@ impl Session {
         Ok(out)
     }
 
+    /// The model, or a drawing, changed from `previous`: view sketches' links follow it in the same
+    /// step ([`cmd::follow_view_links`]; `model` when the model may have changed). Only the drawings
+    /// and the world cache's document key change; nothing is evaluated.
+    fn follow_view_links(&mut self, previous: &Arc<Document>, model: bool) {
+        let changed = cmd::follow_view_links(self, previous, model);
+        if changed.is_empty() {
+            return;
+        }
+        let before = self.doc.clone();
+        let mut doc = (*self.doc).clone();
+        for drawing in changed {
+            doc.put_drawing(drawing);
+        }
+        self.doc = Arc::new(doc);
+        self.refresh_render(&before);
+    }
+
     /// Source parameters can change a paper sketch without editing its record.
     /// Retention snapshots join that same model command, never a new Drawing
     /// undo step. Prepare every replacement before publishing any of them.
@@ -2202,6 +2219,7 @@ impl Session {
                         self.redo.retain(|step| step.part != part);
                     }
                     let pin = outermost && live_edit.is_none() && !render_only;
+                    let follow = outermost && live.is_none() && live_edit.is_none() && self.replacements == replacements;
                     match live_edit {
                         Some(edit) => {
                             let sketch = edit.sketch;
@@ -2211,6 +2229,9 @@ impl Session {
                         None if render_only => self.refresh_render(&previous_doc),
                         None if display_only => self.refresh_display(),
                         None => self.refresh_from(&previous_doc, matches!(spec.id, "edit.undo" | "edit.redo")),
+                    }
+                    if follow && !display_only {
+                        self.follow_view_links(&previous_doc, !render_only);
                     }
                     // A row the change added takes its item number in the same undo step; numbers
                     // draw nothing, so the model and the placed world stay.

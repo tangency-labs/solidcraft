@@ -708,7 +708,7 @@ fn draw_sketch(s: &Session, drawing: &Drawing, record: &SheetSketch) -> DrawnSke
     };
     let width_mm = LineKind::Visible.width_mm(line_group.unwrap_or(drawing.line_group));
     let result =
-        drawing.solve_sheet_sketch(&s.doc, id).map_err(|e| bad(CMD, e.to_string())).and_then(|solved| sketch::paper_group(&solved, width_mm));
+        drawing.solve_sheet_sketch(&s.doc, None, id).map_err(|e| bad(CMD, e.to_string())).and_then(|solved| sketch::paper_group(&solved, width_mm));
     match result {
         Ok(group) => DrawnSketch { group: Some(group), status: SketchStatus::Drawn, view },
         Err(e) => DrawnSketch {

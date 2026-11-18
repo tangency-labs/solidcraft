@@ -4690,7 +4690,7 @@ fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.solve";
     if s.open_drawing.is_some() {
         let entry = sketch_store::sheet_target(s, p, cmd)?;
-        let solved = s.drawing(cmd)?.solve_sheet_sketch(&s.doc, entry.sketch)?;
+        let solved = s.drawing(cmd)?.solve_sheet_sketch(&s.doc, None, entry.sketch)?;
         let profiles = solidcraft_sketch::find_drawn_profiles(&solved.sketch).len();
         return Ok(json!({
             "status": solved.report.status,

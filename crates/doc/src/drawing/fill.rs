@@ -262,7 +262,7 @@ impl Drawing {
     /// Strict, complete profile search of this prospective drawing's own sketch.
     /// Never substitutes the design's previously published drawing record.
     fn fill_profiles(&self, design: &Document, sketch: u64) -> Result<Vec<Profile>> {
-        let solved = self.solve_sheet_sketch(design, sketch)?;
+        let solved = self.solve_sheet_sketch(design, None, sketch)?;
         require(solved.sketch.equations.is_empty(), || {
             format!(
                 "sheet fill: drawing {} sketch {} equation metadata is not supported by exact paper conversion",

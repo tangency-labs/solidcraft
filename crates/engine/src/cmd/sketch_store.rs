@@ -49,7 +49,7 @@ pub(super) fn read(doc: &Document, id: u64) -> Result<&Sketch> {
 pub(super) fn read_for_command(s: &Session, p: &Value, cmd: &str) -> Result<Sketch> {
     if s.open_drawing.is_some() {
         let entry = sheet_target(s, p, cmd)?;
-        return Ok(s.drawing(cmd)?.solve_sheet_sketch(&s.doc, entry.sketch)?.sketch);
+        return Ok(s.drawing(cmd)?.solve_sheet_sketch(&s.doc, None, entry.sketch)?.sketch);
     }
     Ok(read(&s.doc, target(s, p, cmd)?)?.clone())
 }
@@ -123,14 +123,14 @@ pub(super) fn edit_sheet<T>(
 ) -> Result<(T, Option<crate::schema::frame::SketchSolve>)> {
     let entry = sheet_target(s, p, cmd)?;
     let design = s.doc.clone();
-    let mut candidate = s.drawing(cmd)?.solve_sheet_sketch(&design, entry.sketch)?.sketch;
+    let mut candidate = s.drawing(cmd)?.solve_sheet_sketch(&design, None, entry.sketch)?.sketch;
     let mut source = (*design).clone();
     let out = change(&mut candidate, &mut source)?;
     if source != *design {
         return Err(bad(cmd, "a sheet sketch cannot change the source design or its parameters"));
     }
     let solved = s.edit_drawing(cmd, |drawing| {
-        let (_, solved) = drawing.edit_sheet_sketch(&design, entry.sketch, |sketch| {
+        let (_, solved) = drawing.edit_sheet_sketch(&design, None, entry.sketch, |sketch| {
             *sketch = candidate;
             Ok(())
         })?;

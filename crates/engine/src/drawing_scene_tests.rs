@@ -408,6 +408,7 @@ fn sheet_sketch_strokes_refuse_hostile_geometry_without_a_polyline_fallback() {
     add(|s| s.sketch.curves[0].infinite = true);
     add(|s| s.sketch.view.three_d = true);
     add(|s| s.sketch.curves[0].link = Some("unresolved".into()));
+    add(|s| s.sketch.points[1].link = Some("unresolved".into()));
     add(|s| {
         s.sketch.equations.push(solidcraft_sketch::EquationCurve {
             curve: s.sketch.curves[0].id.clone(),

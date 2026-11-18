@@ -20,7 +20,8 @@ use crate::Result;
 use crate::params::bad;
 
 /// Printable curves in authored order, in physical paper millimetres. Construction geometry
-/// (including infinite construction lines) is excluded independently of editor visibility.
+/// (including infinite construction lines) is excluded independently of editor visibility, and so
+/// are a view sketch's linked curves, which lie on its view's own lines.
 /// Centerline styling is not representable by a paper stroke yet, and is explicitly refused.
 /// The caller supplies the paper line width; no drawing or model display scale is applied. A view's
 /// sketch comes out in its view plane's own coordinates, and [`through`] puts it on paper.
@@ -144,14 +145,10 @@ fn check(solved: &SolvedSheetSketch) -> Result<Vec<(usize, usize)>> {
     if sk.points.len() > MAX_POINTS || sk.curves.len() > MAX_CURVES || sk.constraints.len() > MAX_CONSTRAINTS {
         return Err(error(solved, None, "sheet sketch array limit exceeded"));
     }
-    if !sk.links.is_empty()
-        || !sk.patterns.is_empty()
-        || !sk.offsets.is_empty()
-        || !sk.freeform_offsets.is_empty()
-        || !sk.wires.is_empty()
-        || !sk.equations.is_empty()
-    {
-        return Err(error(solved, None, "not supported yet: sheet sketch links, patterns, offsets, 3D wires or equation curves"));
+    // A view sketch's links to its view's edges come through the drawing's solve boundary, which
+    // admits them only there; their curves lie on the view's own lines and are never printed.
+    if !sk.patterns.is_empty() || !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty() || !sk.wires.is_empty() || !sk.equations.is_empty() {
+        return Err(error(solved, None, "not supported yet: sheet sketch patterns, offsets, 3D wires or equation curves"));
     }
     if sk.view.three_d || sk.view.slice {
         return Err(error(solved, None, "model-only sketch view is not a sheet sketch"));
@@ -160,11 +157,13 @@ fn check(solved: &SolvedSheetSketch) -> Result<Vec<(usize, usize)>> {
     if origin.id != "origin" || origin.pos != Vec2::ZERO || !origin.fixed || origin.link.is_some() || origin.exprs.is_some() {
         return Err(error(solved, None, "point zero must be the fixed local origin"));
     }
+    // A linked point or curve names one of its sketch's links, as the record requires.
+    let names_no_link = |link: &Option<String>| link.as_deref().is_some_and(|id| sk.link(id).is_none());
     let mut ids = BTreeSet::new();
     for point in &sk.points {
         identity(solved, &mut ids, &point.id)?;
-        if !point.pos.is_finite() || point.pos.x.abs() >= MAX_COORD || point.pos.y.abs() >= MAX_COORD || point.link.is_some() {
-            return Err(error(solved, Some(&point.id), "point is nonfinite, out of range or linked"));
+        if !point.pos.is_finite() || point.pos.x.abs() >= MAX_COORD || point.pos.y.abs() >= MAX_COORD || names_no_link(&point.link) {
+            return Err(error(solved, Some(&point.id), "point is nonfinite, out of range or names no link of its sketch"));
         }
     }
     for constraint in &sk.constraints {
@@ -178,11 +177,11 @@ fn check(solved: &SolvedSheetSketch) -> Result<Vec<(usize, usize)>> {
     let mut printable = Vec::new();
     for (index, curve) in sk.curves.iter().enumerate() {
         identity(solved, &mut ids, &curve.id)?;
-        if curve.link.is_some() {
-            return Err(error(solved, Some(&curve.id), "not supported yet: linked sheet sketch curve"));
-        }
         if curve.centerline {
             return Err(error(solved, Some(&curve.id), "not supported yet: paper centerline styling"));
+        }
+        if names_no_link(&curve.link) {
+            return Err(error(solved, Some(&curve.id), "curve names no link of its sketch"));
         }
         if curve.infinite && !(curve.construction && matches!(curve.kind, CurveKind::Line { .. })) {
             return Err(error(solved, Some(&curve.id), "only a construction line can be infinite"));
@@ -191,7 +190,7 @@ fn check(solved: &SolvedSheetSketch) -> Result<Vec<(usize, usize)>> {
         if entities > MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS {
             return Err(error(solved, Some(&curve.id), "sheet sketch entity limit exceeded"));
         }
-        if curve.construction {
+        if curve.construction || curve.link.is_some() {
             continue;
         }
         if let CurveKind::Conic { rho, .. } = curve.kind

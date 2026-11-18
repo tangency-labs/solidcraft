@@ -333,36 +333,7 @@ impl crate::Document {
         let owner = owners.next().ok_or_else(|| invalid("the containing design has no such drawing"))?;
         require(owners.next().is_none(), || "sheet sketch owner id is ambiguous in this design".into())?;
         owner.validate()?;
-        owner.solve_sheet_sketch(self, sketch)
-    }
-}
-
-impl Drawing {
-    /// Resolve one admitted record against the read-only source design. Checks
-    /// owner identities, cumulative budgets and this payload, not every unrelated
-    /// payload. File reads/saves and Session::edit_drawing validate the whole drawing.
-    /// A view sketch's links keep their last curves ([`Drawing::solve_sheet_sketch_on`] follows them).
-    pub fn solve_sheet_sketch(&self, design: &crate::Document, sketch: u64) -> Result<SolvedSheetSketch> {
-        self.solve_sheet_sketch_on(design, None, sketch)
-    }
-
-    /// Stage an atomic edit of one sketch on this drawing, without writing to the
-    /// source Document. Commands call this inside Session::edit_drawing, the one
-    /// publication/whole-drawing validation boundary. A library caller adopting
-    /// this drawing must likewise validate it before publishing the complete record.
-    ///
-    /// Failed callbacks, unsafe candidates and solve failures leave self unchanged.
-    /// Only the selected record is checked deeply here; unchanged Arcs are NOT a
-    /// certificate that other records are valid. Their validation is never skipped
-    /// by the outer publication boundary or the file reader/writer. A view sketch's links keep
-    /// their last curves ([`Drawing::edit_sheet_sketch_on`] follows them).
-    pub fn edit_sheet_sketch<T>(
-        &mut self,
-        design: &crate::Document,
-        sketch: u64,
-        change: impl FnOnce(&mut Sketch) -> Result<T>,
-    ) -> Result<(T, SolvedSheetSketch)> {
-        self.edit_sheet_sketch_on(design, None, sketch, change)
+        owner.solve_sheet_sketch(self, None, sketch)
     }
 }
 
@@ -418,21 +389,49 @@ impl crate::Document {
             })
             .collect())
     }
+
+    /// The curves a link to `edge` makes in a sketch of view `view` of `drawing`, read as
+    /// [`Self::refresh_view_links`] reads each link's, or why there are none (on a view that draws no
+    /// model edges, its reason).
+    pub fn view_edge_curves(
+        &self,
+        model: &crate::Model,
+        drawing: &Drawing,
+        view: u64,
+        edge: &ModelEdge,
+    ) -> std::result::Result<Vec<solidcraft_sketch::LinkGeom>, Status> {
+        let basis = drawing.resolve_view(view).map_err(|e| Status::Unmeasurable(e.to_string()))?.basis;
+        if let Some(why) = drawing.view(view).and_then(|view| view.kind.no_model_edges()) {
+            return Err(Status::Unmeasurable(why.into()));
+        }
+        Lookup::new(self, model).view_edge(edge, &basis)
+    }
 }
 
 impl Drawing {
-    /// [`Drawing::solve_sheet_sketch`], with a view sketch's links first followed to their edges
-    /// on `model` (`design`'s). Without a model they keep their last curves.
-    pub fn solve_sheet_sketch_on(&self, design: &crate::Document, model: Option<&crate::Model>, sketch: u64) -> Result<SolvedSheetSketch> {
+    /// Resolve one admitted record against the read-only source design. Checks
+    /// owner identities, cumulative budgets and this payload, not every unrelated
+    /// payload. File reads/saves and Session::edit_drawing validate the whole drawing.
+    /// With `model` (`design`'s), a view sketch's links are first followed to their edges;
+    /// without, they keep the curves the record holds.
+    pub fn solve_sheet_sketch(&self, design: &crate::Document, model: Option<&crate::Model>, sketch: u64) -> Result<SolvedSheetSketch> {
         self.validate_structure()?;
         check_budget(self.sketches.iter().map(AsRef::as_ref))?;
         let original = self.sheet_sketch(sketch).ok_or_else(|| invalid("the selected drawing has no such sheet sketch"))?;
         solve_record(design, model, self, original, (**original).clone())
     }
 
-    /// [`Drawing::edit_sheet_sketch`], with a view sketch's links followed to their edges on
-    /// `model` (`design`'s) before the solve.
-    pub fn edit_sheet_sketch_on<T>(
+    /// Stage an atomic edit of one sketch on this drawing, without writing to the
+    /// source Document. Commands call this inside Session::edit_drawing, the one
+    /// publication/whole-drawing validation boundary. A library caller adopting
+    /// this drawing must likewise validate it before publishing the complete record.
+    ///
+    /// Failed callbacks, unsafe candidates and solve failures leave self unchanged.
+    /// Only the selected record is checked deeply here; unchanged Arcs are NOT a
+    /// certificate that other records are valid. Their validation is never skipped
+    /// by the outer publication boundary or the file reader/writer. With `model`, a view
+    /// sketch's links are followed to their edges before the solve, as [`Self::solve_sheet_sketch`].
+    pub fn edit_sheet_sketch<T>(
         &mut self,
         design: &crate::Document,
         model: Option<&crate::Model>,

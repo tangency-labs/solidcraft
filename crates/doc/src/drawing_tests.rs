@@ -1374,7 +1374,7 @@ fn edit_sheet_fixture<T>(
         return Err(DocError::Invalid("ambiguous drawing".into()));
     }
     let mut next = (**owner).clone();
-    let out = next.edit_sheet_sketch(doc, sketch, change)?;
+    let out = next.edit_sheet_sketch(doc, None, sketch, change)?;
     next.validate()?;
     if next != **owner {
         doc.put_drawing(Arc::new(next));
@@ -1616,7 +1616,7 @@ fn staged_sheet_sketch_edit_changes_only_the_given_drawing_not_the_source_design
     let mut staged = (**doc.drawing(id).unwrap()).clone();
     let old_record = staged.sheet_sketch(41).unwrap().clone();
     let (_, solved) = staged
-        .edit_sheet_sketch(&doc, 41, |sketch| {
+        .edit_sheet_sketch(&doc, None, 41, |sketch| {
             sketch.constraints[0].param = None;
             sketch.constraints[0].kind.set_value(60.0);
             Ok(())
@@ -1653,7 +1653,7 @@ fn staged_sheet_sketch_edit_checks_the_cumulative_entity_cap_before_solving() {
     let original = d.clone();
     let record = d.sheet_sketch(1000).unwrap().clone();
     let e = d
-        .edit_sheet_sketch(&crate::Document::default(), 1000, |sketch| {
+        .edit_sheet_sketch(&crate::Document::default(), None, 1000, |sketch| {
             sketch.add_point(solidcore_record::Vec2::new(3.0, 4.0), Some("over_cap"))?;
             Ok(())
         })
@@ -1689,7 +1689,7 @@ fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
     d.validate().unwrap();
     let before = d.clone();
     let e = d
-        .edit_sheet_sketch(&crate::Document::default(), 41, |sketch| {
+        .edit_sheet_sketch(&crate::Document::default(), None, 41, |sketch| {
             sketch.constraints.push(Constraint { id: "budget_h703".into(), kind: K::Horizontal { l: line }, param: None, driven: false, text: None });
             assert_eq!(sketch.constraints.len(), 707);
             assert_eq!(4 * sketch.constraints.len().pow(2) + sketch.constraints.len() - 1, 2_000_102);
@@ -1710,7 +1710,7 @@ fn staged_sheet_sketch_edit_refuses_an_invalid_original_before_running_the_callb
     let before = d.clone();
     let mut called = false;
     assert!(
-        d.edit_sheet_sketch(&doc, 41, |_| {
+        d.edit_sheet_sketch(&doc, None, 41, |_| {
             called = true;
             Ok(())
         })
@@ -2034,7 +2034,7 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
         };
         assert!(drawing.validate().unwrap_err().to_string().contains(expected));
         assert!(drawing.to_json().unwrap_err().to_string().contains(expected));
-        assert!(drawing.solve_sheet_sketch(&crate::Document::default(), 41).unwrap_err().to_string().contains(expected));
+        assert!(drawing.solve_sheet_sketch(&crate::Document::default(), None, 41).unwrap_err().to_string().contains(expected));
         let raw = serde_json::to_value(&drawing).unwrap();
         assert!(refusal(&raw).contains(expected));
     }
@@ -2129,10 +2129,10 @@ fn a_view_edge_follows_its_model_and_keeps_its_line_when_lost() {
     // Len 90: solved on the model, the line is at x = 90; read without one, where it was stored.
     doc.set_param("Len", "90", Some("mm"), None).unwrap();
     model.evaluate(&doc);
-    let solved = d.solve_sheet_sketch_on(&doc, Some(&model), VIEW_SKETCH).unwrap();
+    let solved = d.solve_sheet_sketch(&doc, Some(&model), VIEW_SKETCH).unwrap();
     assert_eq!(linked_line(&solved.sketch, &link), [Vec2::new(90.0, 0.0), Vec2::new(90.0, 30.0)]);
-    assert_eq!(linked_line(&d.solve_sheet_sketch(&doc, VIEW_SKETCH).unwrap().sketch, &link)[0], Vec2::new(80.0, 0.0));
-    let (_, edited) = d.edit_sheet_sketch_on(&doc, Some(&model), VIEW_SKETCH, |_| Ok(())).unwrap();
+    assert_eq!(linked_line(&d.solve_sheet_sketch(&doc, None, VIEW_SKETCH).unwrap().sketch, &link)[0], Vec2::new(80.0, 0.0));
+    let (_, edited) = d.edit_sheet_sketch(&doc, Some(&model), VIEW_SKETCH, |_| Ok(())).unwrap();
     assert_eq!(linked_line(&edited.sketch, &link)[0], Vec2::new(90.0, 0.0));
     assert_eq!(linked_line(&view_sketch(&d), &link)[0], Vec2::new(90.0, 0.0), "an edit keeps what its links read");
 
@@ -2145,7 +2145,7 @@ fn a_view_edge_follows_its_model_and_keeps_its_line_when_lost() {
     assert_eq!(states[0].status, dimension::Status::Suppressed);
     assert!(sketch.link(&link).unwrap().lost);
     assert_eq!(linked_line(&sketch, &link), [Vec2::new(90.0, 0.0), Vec2::new(90.0, 30.0)]);
-    let solved = d.solve_sheet_sketch_on(&doc, Some(&model), VIEW_SKETCH).unwrap();
+    let solved = d.solve_sheet_sketch(&doc, Some(&model), VIEW_SKETCH).unwrap();
     assert_eq!(linked_line(&solved.sketch, &link)[0], Vec2::new(90.0, 0.0));
     assert!(solved.sketch.link(&link).unwrap().lost);
 
