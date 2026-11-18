@@ -157,10 +157,12 @@ pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) ->
 }
 
 /// `point` under `matrix` (the row-vector convention above: `p·A + t`), through
-/// [`Transform::transform_point`].
+/// [`Transform::transform_points`].
 pub fn apply_point(matrix: &Matrix, point: [f64; 3]) -> [f64; 3] {
-    let p = Transform { m: *matrix }.transform_point(vec3(point));
-    [p.x, p.y, p.z]
+    let mut points = [point];
+    Transform { m: *matrix }.transform_points(&mut points);
+    let [p] = points;
+    p
 }
 
 /// The corners of a picture pinned to points of a plane, in that plane's coordinates, through
@@ -185,14 +187,15 @@ pub fn picture_frame(
     Some(corners.map(|p| [p.x, p.y]))
 }
 
+/// A quad's unit normal, its corners lifted along that normal and its corners lifted against it,
+/// as [`lifted_quad`] returns them.
+pub type LiftedQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
+
 /// A quad lifted `lift` clear of its own plane on both sides, through
 /// [`solidcore::math::lifted_quad`]: the quad's unit normal (bottom edge cross left edge), its
 /// corners moved `lift` along that normal and its corners moved `lift` against it. `None` for
 /// numbers not finite or corners with no area.
-pub fn lifted_quad(
-    corners: [[f64; 3]; 4],
-    lift: f64,
-) -> Option<([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4])> {
+pub fn lifted_quad(corners: [[f64; 3]; 4], lift: f64) -> Option<LiftedQuad> {
     let (n, front, back) = solidcore::math::lifted_quad(corners.map(vec3), lift)?;
     let arr = |p: Vec3| [p.x, p.y, p.z];
     Some((arr(n), front.map(arr), back.map(arr)))
