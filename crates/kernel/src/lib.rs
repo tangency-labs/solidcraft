@@ -61,6 +61,8 @@ mod issue_1080_tests;
 #[cfg(test)]
 mod issue_12126_tests;
 #[cfg(test)]
+mod issue_13455_tests;
+#[cfg(test)]
 mod issue_1510_tests;
 #[cfg(test)]
 mod issue_2005_tests;
@@ -162,15 +164,15 @@ pub mod watch;
 
 pub use blend::{
     ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edge_middles, blend_edges, chamfer, chamfer_carrying_face, chamfer_max,
-    chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners,
-    fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note, named_fit,
-    names_largest_fit, smooth_picks, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
+    chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, chamfer_sides_max_why, fillet, fillet_each, fillet_g2, fillet_g2_corners,
+    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note,
+    named_fit, names_largest_fit, scale_fit_note, smooth_picks, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
     Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
-    MeshTolerance, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, placed_mesh,
+    MeshTolerance, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, lazy_moves_made, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -219,17 +221,19 @@ pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
-pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
+pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use solidcraft_smlib::hold_a_kernel;
+pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, split_faces, split_faces_with_map};
 pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
+pub use step_in::records::{ImportRecords, RecordBody, records_import, records_import_shared, records_text};
 pub use step_in::{
-    ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
+    ImportChecks, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
     step_import_shared, step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
@@ -247,7 +251,7 @@ pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
-pub use validation::{KeptCheck, Validation, check_kept, detach_kept, validating};
+pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};
 pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -266,6 +270,10 @@ pub enum KernelError {
     /// A lip's band that leaves no sound face beside it.
     #[error("the operation failed: raising a band: {0}")]
     Lip(#[from] LipRefusal),
+    /// A repair that has nothing it can do: the part needs none, or SMLib's check fails it for
+    /// what the repair does not fix.
+    #[error("the operation failed: {0}")]
+    Repair(#[from] RepairRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

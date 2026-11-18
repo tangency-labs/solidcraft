@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.drawing_note_add": "Add Note",
+    "cmd.drawing_note_edit": "Edit Note",
+    "cmd.drawing_note_inspect": "Inspect Note"
+  },
+  "ar": {
+    "cmd.drawing_note_add": "إضافة ملاحظة",
+    "cmd.drawing_note_edit": "تحرير الملاحظة",
+    "cmd.drawing_note_inspect": "فحص الملاحظة"
+  },
+  "de": {
+    "cmd.drawing_note_add": "Hinweis hinzufügen",
+    "cmd.drawing_note_edit": "Hinweis bearbeiten",
+    "cmd.drawing_note_inspect": "Hinweis prüfen"
+  },
+  "he": {
+    "cmd.drawing_note_add": "הוספת הערה",
+    "cmd.drawing_note_edit": "עריכת הערה",
+    "cmd.drawing_note_inspect": "בדיקת הערה"
+  },
+  "ja": {
+    "cmd.drawing_note_add": "注記を追加",
+    "cmd.drawing_note_edit": "注記を編集",
+    "cmd.drawing_note_inspect": "注記を確認"
+  },
+  "ko": {
+    "cmd.drawing_note_add": "주석 추가",
+    "cmd.drawing_note_edit": "주석 편집",
+    "cmd.drawing_note_inspect": "주석 확인"
+  },
+  "vi": {
+    "cmd.drawing_note_add": "Thêm ghi chú",
+    "cmd.drawing_note_edit": "Sửa ghi chú",
+    "cmd.drawing_note_inspect": "Kiểm tra ghi chú"
+  },
+  "zh": {
+    "cmd.drawing_note_add": "添加注释",
+    "cmd.drawing_note_edit": "编辑注释",
+    "cmd.drawing_note_inspect": "检查注释"
+  }
+}
