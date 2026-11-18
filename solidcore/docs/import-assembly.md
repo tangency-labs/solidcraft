@@ -50,6 +50,8 @@ The STEP reader reads its own surfaces of linear extrusion and of revolution, an
    - from the closed form, where the geometry has one;
    - from the trims, otherwise;
    - from the edge's own angle and height, on a face that winds more than one turn about its axis.
+
+   A spline face's pcurves that end a little past the patch's knot range are put on it where that moves the surface within their edges' tolerance. Where it would move it more, the patch is continued instead to reach them: each end span's polynomial (homogeneous, so a rational patch keeps its shape) is taken over a longer interval, by at most 5% of that span. The patch is the same surface on its old range, so the pcurves stay as they are. A direction the patch closes in, or a weight that would not stay positive, is not continued.
 7. Picks the outer loops, and turns over a face whose outer loop runs clockwise about its side.
 8. Joins loops of one face that touch at one vertex into one loop through it (`assembly/touching.rs`): a hole whose rim touches the face's outer edge at one point, or two holes that touch. The kernel takes no face whose loops share a vertex ([validity-and-tolerances.md](validity-and-tolerances.md) §4), and the one loop bounds the same region with the same edges and vertices. Loops that touch at two vertices or as a ring (they cut the face in two), or three or more at one vertex, are left as written, and a note names the face and the point.
 9. Raises edge and vertex tolerances to the gaps the geometry measurably has.

@@ -543,3 +543,95 @@ fn a_line_edges_length_does_not_depend_on_its_parameter_scale() {
         assert!(asm.add_edge_on(1, line, [a, b]).is_ok(), "a line to {end}");
     }
 }
+
+/// A half cylinder of radius 1 (two rational quarter arcs along u, z along v from 0 to 1).
+fn half_cylinder() -> BSurface {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let arc = [([1.0, 0.0], 1.0), ([1.0, 1.0], w), ([0.0, 1.0], 1.0), ([-1.0, 1.0], w), ([-1.0, 0.0], 1.0)];
+    let homogeneous = arc.iter().map(|&([x, y], w)| vec![[x * w, y * w, 0.0, w], [x * w, y * w, w, w]]).collect();
+    BSurface::RationalSpline { u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], homogeneous }
+}
+
+/// A bicubic patch with a single interior knot along each direction, its points off any plane.
+fn bicubic() -> BSurface {
+    let points =
+        (0..5).map(|i| (0..5).map(|j| [f64::from(i), f64::from(j), (f64::from(i) * 0.7).sin() + (f64::from(j) * 1.3).cos()]).collect()).collect();
+    let knots = vec![0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0, 1.0];
+    BSurface::Spline { u_knots: knots.clone(), v_knots: knots, points }
+}
+
+fn knot_range(s: &BSurface) -> [[f64; 2]; 2] {
+    let (u, v, n, m) = match s {
+        BSurface::Spline { u_knots, v_knots, points } => (u_knots, v_knots, points.len(), points.first().map_or(0, Vec::len)),
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.len(), homogeneous.first().map_or(0, Vec::len)),
+        _ => panic!("a spline"),
+    };
+    let (p, q) = (u.len() - n - 1, v.len() - m - 1);
+    [[u[p], u[n]], [v[q], v[m]]]
+}
+
+/// Every point of `a` over `range` is `b`'s at the same parameters.
+fn same_over(a: &BSurface, b: &BSurface, range: [[f64; 2]; 2]) {
+    let (ea, eb) = (SurfaceEval::new(a).unwrap(), SurfaceEval::new(b).unwrap());
+    for i in 0..=20 {
+        for j in 0..=20 {
+            let u = range[0][0] + (range[0][1] - range[0][0]) * f64::from(i) / 20.0;
+            let v = range[1][0] + (range[1][1] - range[1][0]) * f64::from(j) / 20.0;
+            let (p, q) = (ea.point([u, v]).unwrap(), eb.point([u, v]).unwrap());
+            assert!(crate::vec::Vec3Geom::len(p - q) < 1e-12, "({u}, {v}): {p:?} against {q:?}");
+        }
+    }
+}
+
+#[test]
+fn a_patch_whose_trims_run_past_it_is_continued_to_them_unchanged_on_its_range() {
+    let s = half_cylinder();
+    let need = [[-0.03, 2.04], [-0.01, 1.02]];
+    let longer = extend::extended(&s, need, 1e-6).expect("continued");
+    let range = knot_range(&longer);
+    assert!(range[0][0] <= -0.03 && range[0][1] >= 2.04 && range[1][0] <= -0.01 && range[1][1] >= 1.02, "{range:?}");
+    same_over(&s, &longer, [[0.0, 2.0], [0.0, 1.0]]);
+    // Past the old range the rational arcs continue on the circle: still on the cylinder.
+    let e = SurfaceEval::new(&longer).unwrap();
+    for uv in [[-0.03, 0.5], [2.04, -0.01], [2.02, 1.02]] {
+        let p = e.point(uv).unwrap();
+        assert!(((p.x * p.x + p.y * p.y).sqrt() - 1.0).abs() < 1e-12, "{uv:?}: {p:?}");
+    }
+    // A patch with single interior knots: each end span made one segment first.
+    let s = bicubic();
+    let longer = extend::extended(&s, [[-0.01, 1.02], [0.0, 1.025]], 1e-6).expect("continued");
+    let range = knot_range(&longer);
+    assert!(range[0][0] <= -0.01 && range[0][1] >= 1.02 && range[1][1] >= 1.025, "{range:?}");
+    same_over(&s, &longer, [[0.0, 1.0], [0.0, 1.0]]);
+}
+
+#[test]
+fn a_patch_is_not_continued_far_round_where_it_closes_or_where_its_trims_are_on_it() {
+    let s = bicubic();
+    // On the range: nothing to do.
+    assert!(extend::extended(&s, [[0.1, 0.9], [0.0, 1.0]], 1e-6).is_none());
+    // Past by more than MAX_EXTENSION of the end span (0.6 long here): refused.
+    assert!(extend::extended(&s, [[0.0, 1.0 + 0.6 * extend::MAX_EXTENSION * 1.5], [0.0, 1.0]], 1e-6).is_none());
+    // A full cylinder closes along u: a trim past that range wraps round, it is not continued.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let ring = [
+        ([1.0, 0.0], 1.0),
+        ([1.0, 1.0], w),
+        ([0.0, 1.0], 1.0),
+        ([-1.0, 1.0], w),
+        ([-1.0, 0.0], 1.0),
+        ([-1.0, -1.0], w),
+        ([0.0, -1.0], 1.0),
+        ([1.0, -1.0], w),
+        ([1.0, 0.0], 1.0),
+    ];
+    let homogeneous = ring.iter().map(|&([x, y], w)| vec![[x * w, y * w, 0.0, w], [x * w, y * w, w, w]]).collect();
+    let cylinder = BSurface::RationalSpline {
+        u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        homogeneous,
+    };
+    assert!(extend::extended(&cylinder, [[0.0, 4.01], [0.0, 1.0]], 1e-6).is_none());
+    // Along v it does not close: continued there.
+    assert!(extend::extended(&cylinder, [[0.0, 4.0], [0.0, 1.01]], 1e-6).is_some());
+}

@@ -40,6 +40,7 @@ use crate::geom::P3;
 use crate::read::R;
 use crate::topology::swept::Extent;
 
+mod extend;
 mod frames;
 pub(crate) mod seams;
 mod touching;
@@ -204,6 +205,8 @@ pub struct Assembly<'t> {
     /// The faces whose loops touch and are left as written: each one's origin and the first
     /// vertex they touch at.
     pub(crate) loops_left_touching: Vec<(u64, P3)>,
+    /// Spline patches continued past their knot range to their face's trims ([`extend`]).
+    pub(crate) patches_extended: usize,
     /// Edges added with their vertices at the other ends of their intervals, turned round
     /// ([`Assembly::add_edge`]).
     pub(crate) edges_turned: usize,
@@ -236,6 +239,7 @@ impl<'t> Assembly<'t> {
             inner_loops_turned: 0,
             loops_joined: 0,
             loops_left_touching: Vec::new(),
+            patches_extended: 0,
             edges_turned: 0,
             splines_closed: 0,
             points_unfolded: 0,
@@ -669,6 +673,9 @@ impl<'t> Assembly<'t> {
                 "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
                 self.poles_made_exact, self.tol
             ));
+        }
+        if self.patches_extended > 0 {
+            notes.push(format!("{} spline patches continued past their knot range to their faces' trims", self.patches_extended));
         }
         if self.inner_loops_turned > 0 {
             notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
@@ -1292,10 +1299,11 @@ impl<'t> Assembly<'t> {
             Some((f, d, e)) => (Some(f), Some(d), Some(e)),
             None => (None, None, None),
         };
-        let surface = form.clone().unwrap_or_else(|| label.clone());
+        let mut surface = form.clone().unwrap_or_else(|| label.clone());
         // A face that winds round its axis more than a turn is on a form that does not close:
         // no analytic surface has it (SMLib's cylinder is one turn), so it is a spline face.
         let wound = extent.is_some_and(crate::kernel::form::winds);
+        let mut extended = false;
         // How far each edge lies off this surface, so its closed form is checked at that.
         self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
@@ -1357,6 +1365,13 @@ impl<'t> Assembly<'t> {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             onto_knots(&surface, &tolerances, &mut pcs);
+            // Pcurves still past the range (moving them would move the surface more than their
+            // edges' tolerance) are on the patch continued to reach them ([`extend`]).
+            if let Some(longer) = extend::extended(&surface, pcurve_box(&pcs), tol) {
+                surface = longer;
+                extended = true;
+                self.patches_extended += 1;
+            }
         }
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
@@ -1435,7 +1450,7 @@ impl<'t> Assembly<'t> {
             (None, _) => 0,
         };
         face.outer = positions.get(outer).copied();
-        if wound {
+        if wound || extended {
             face.surface = surface.clone();
         }
         let can_turn = matches!(
@@ -1864,8 +1879,8 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
 /// tolerance that edge has on this patch. The kernel moves the control points and proves the
 /// bound, along u and v at once ([`SurfaceEval::pcurve_onto_knots`]); the gap to the edge is then
 /// measured and covered (`raise_edges`). A pcurve it refuses (farther past, past both ranges of
-/// a rational patch, or on a closed patch) is left as it is, for the record check to refuse. The
-/// number of moves made.
+/// a rational patch, or on a closed patch) is left as it is: the patch is continued to reach it
+/// where it can be ([`extend`]), else the record check refuses it. The number of moves made.
 pub(crate) fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut [Vec<Curve2>]) -> usize {
     let Ok(on) = SurfaceEval::new(surface) else { return 0 };
     let mut moved = 0;
@@ -1878,6 +1893,25 @@ pub(crate) fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut 
         }
     }
     moved
+}
+
+/// The parameter box around every pcurve's control points (`[[u_lo, u_hi], [v_lo, v_hi]]`): a
+/// pcurve lies within it. Empty (lows above highs) where there are none.
+pub(crate) fn pcurve_box(pcs: &[Vec<Curve2>]) -> [[f64; 2]; 2] {
+    let mut out = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
+    for c in pcs.iter().flatten() {
+        let pts: Vec<[f64; 2]> = match c {
+            Curve2::Spline { points, .. } => points.clone(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().filter(|h| h[2] > 0.0).map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+        };
+        for p in pts {
+            for (o, x) in out.iter_mut().zip(p) {
+                o[0] = o[0].min(x);
+                o[1] = o[1].max(x);
+            }
+        }
+    }
+    out
 }
 
 /// The parameter box around every pcurve's control points, padded a little, within the
