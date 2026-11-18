@@ -2261,7 +2261,8 @@ fn merge_turn(undo: &mut Vec<solidcraft_engine::Snapshot>, turn: &Turn) -> usize
 }
 
 /// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
-/// `label`; how many steps it took in (0: none were made, or the history no longer reaches that far).
+/// `label`; how many steps it took in (0: none were made, the history no longer reaches that far, or
+/// they changed several parts of the design, whose steps are each undone in their own part).
 fn merge_undo(
     undo: &mut Vec<solidcraft_engine::Snapshot>,
     start_doc: &Arc<solidcraft_engine::doc::Document>,
@@ -2283,6 +2284,10 @@ fn merge_undo(
     let Some(first) = first.filter(|&f| f < undo.len()) else {
         return 0;
     };
+    let part = undo.get(first).map(|s| s.part);
+    if undo.iter().skip(first).any(|s| Some(s.part) != part) {
+        return 0;
+    }
     let steps = undo.len() - first;
     // The merged step brings back the section as it was before the first step that changed it.
     let section = undo.get(first..).and_then(|merged| merged.iter().find_map(|s| s.section.clone()));
@@ -2320,6 +2325,8 @@ fn pump_tools(app: &mut SolveApp) {
             refuse(req, error);
             continue;
         }
+        // What runs after the gate is what the gate decided on: the registered command ids.
+        gate::canonicalize(&req.method, &mut req.params);
         let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());
@@ -2338,12 +2345,8 @@ fn pump_tools(app: &mut SolveApp) {
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);
         let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
-        let plugin_run = req
-            .params
-            .get("command")
-            .or_else(|| req.params.get("id"))
-            .and_then(Value::as_str)
-            .is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"));
+        // Plugin runs, named tools and importers ask in every mode, alone or as a batch step.
+        let plugin_run = gate::runs_plugin(&req.method, &req.params) || crate::plugins::runs_plugin_code(&app.session, &req.method, &req.params);
         let verdict = match gate::request(&req.method, &req.params, undo_left) {
             gate::Verdict::Ask(_) if !plugin_run && (mode == agents::Mode::All || always) => gate::Verdict::Run { change: true },
             gate::Verdict::Run { change: true } if mode == agents::Mode::Ask && !always => {
@@ -2378,6 +2381,8 @@ fn pump_tools(app: &mut SolveApp) {
                 app.agent_chat.notice(trf("ui.agent_chat_refused", &[("reason", &e)]), false);
                 refuse(req, e);
             }
+            // A mistyped id: the agent hears what the engine would have said, and nothing runs.
+            gate::Verdict::Unknown(e) => refuse(req, e),
         }
     }
     app.agent_chat.tools_rx = Some(rx);

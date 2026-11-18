@@ -12,6 +12,8 @@
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
 //!   for a host that keeps the files itself (#8517)
+//! - document.close {document_id?}: close the active clean design, refusing unsaved changes
+//!   or a tab switched since document.revision (#18781); the last tab becomes blank.
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -37,8 +39,8 @@
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
 //! - `ui.shortcut {command, key?, slot?, replace?}`: a command's keys, or bind one ("" clears)
 //! - `ui.help {item?: about|updates|shortcuts|report}`: the Help menu; returns the version and diagnostics
-//! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
-//!   length_decimals, angle_decimals); returns them all
+//! - `ui.prefs {...}`: the preferences (default_units, default_projection, nav, zoom_reverse,
+//!   orbit_around, msaa, length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
 //! - `ui.recover {action?: recover|discard|later, id?}`: the "Recover unsaved design?" prompt
 //! - `ui.agent_cursor {show?, speed?: 1–5 (times) | "instant", follow_camera?}`: the agent cursor
@@ -672,6 +674,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "document.export" => wrap(crate::documents::export(app)),
         "document.import" => wrap(crate::documents::import(app, p)),
         "document.saved" => wrap(crate::documents::saved(app, p)),
+        "document.close" => wrap(crate::documents::close_clean(app, p)),
         // The connection already counts as subscribed (`DocumentWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
@@ -688,7 +691,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.operations" => wrap(crate::operations::control(app, p)),
         "ui.home" => with(p, |q| ui_home(app, q)),
         "ui.set" => ui_set(app, p),
-        "ui.view" => with(p, |q| ui_view(app, q)),
+        "ui.view" => with(p, |q| ui_view(app, ctx, q)),
         "ui.camera" => wrap(camera(app, p)),
         "ui.palette" => ui_palette(app, p),
         "ui.start" => with(p, |q| ui_start(app, q)),
@@ -971,14 +974,25 @@ fn ui_browser(app: &SolveApp) -> Outcome {
     }))
 }
 
-/// `ui.workspace {workspace?}`: enter the design or render workspace; returns the one shown.
+/// `ui.workspace {workspace?}`: enter the design, render or drawing workspace; returns the one shown.
 fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
     if let Some(w) = q.workspace
-        && let Err(e) = crate::render_workspace::enter(app, w == params::Workspace::Render)
+        && let Err(e) = crate::workspace::enter(app, w.as_str())
     {
         return err(e);
     }
-    ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
+    ok(json!({"workspace":current_workspace(app)}))
+}
+
+/// The workspace shown: drawing, render or design.
+fn current_workspace(app: &SolveApp) -> &'static str {
+    if crate::drawing_workspace::active(app) {
+        "drawing"
+    } else if crate::render_workspace::active(app) {
+        "render"
+    } else {
+        "design"
+    }
 }
 
 /// `ui.agent_cursor {show?, speed?, follow_camera?}`: the agent cursor's settings.
@@ -1003,6 +1017,7 @@ fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
 fn ui_inspect(app: &SolveApp) -> Outcome {
     ok(json!({
         "render": crate::render_workspace::inspect_state(app),
+        "sheet_page": crate::drawing_sheet_page::inspect(app),
         "ui": ui_state(app),
         "visibility": app.session.visibility,
         "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
@@ -1017,6 +1032,10 @@ fn ui_inspect(app: &SolveApp) -> Outcome {
         "frame_ms": app.frame_ms,
         "draw": app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|d| json!({
             "draw_calls": d.draw_calls, "triangles": d.triangles, "line_segments": d.line_segments, "supersampled": d.supersampled,
+            "gpu": d.gpu.map(|g| json!({
+                "span_us": g.span_us, "slowest": g.slowest, "slowest_us": g.slowest_us, "passes": g.passes,
+                "each": g.passes().iter().map(|(label, us)| json!({"pass": label, "us": us})).collect::<Vec<_>>(),
+            })),
         }))),
         "adapter": app.viewport.adapter,
         "file_busy": app.file_load.busy(),
@@ -1122,10 +1141,17 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
                     v.hidden_folders.push(SKETCHES_FOLDER.to_string());
                 }
             }
-            if crate::workspace::render_tab(&u.tab) != crate::render_workspace::active(app)
-                && let Err(e) = crate::render_workspace::enter(app, crate::workspace::render_tab(&u.tab))
+            let destination = if crate::workspace::drawing_tab(&u.tab) {
+                "drawing"
+            } else if crate::workspace::render_tab(&u.tab) {
+                "render"
+            } else {
+                "design"
+            };
+            if destination != current_workspace(app)
+                && let Err(error) = crate::workspace::enter(app, destination)
             {
-                return err(e);
+                return err(error);
             }
             u.ribbon_context = app.ui.ribbon_context.clone();
             app.ui = u;
@@ -1137,8 +1163,20 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `ui.view {view, animate?}`: a standard view, snapped or animated.
-fn ui_view(app: &mut SolveApp, q: params::View) -> Outcome {
+fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome {
     let v = q.view.as_str();
+    if crate::drawing_workspace::active(app) {
+        if crate::dialogs_sheet::flat_active(app) && matches!(v, "fit" | "home") {
+            app.flat_view.fitted = false;
+            return ok(json!({"flat_pattern":true,"fitted":false}));
+        }
+        match v {
+            "fit" | "home" => crate::drawing_sheet_page::fit(app),
+            "actual_size" => crate::drawing_sheet_page::actual_size(app, ctx),
+            _ => return err(format!("unknown drawing view `{v}`")),
+        };
+        return ok(json!({"sheet_page": true}));
+    }
     // A name it doesn't know is refused before the view changes at all.
     if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
         return err(format!("unknown view `{v}`"));
@@ -2365,6 +2403,57 @@ mod tests {
             out.textures_delta.clear();
         }
         assert!(app.synthetic.is_empty());
+    }
+
+    /// The control bridge closes clean designs only, without discarding unsaved work (#18781).
+    #[test]
+    fn document_close_refuses_dirty_or_switched_tabs_and_keeps_other_designs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let empty = h.call("document.close", json!({}));
+        assert_eq!(empty["ok"], false, "{empty}");
+        assert_eq!(h.app.docs.count(), 1);
+
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let first = h.app.session.document_id.clone();
+        let old = h.app.session.doc.to_json();
+        for bad in [json!({"document_id":"different"}), json!({"force":true}), json!({"document_id":7}), json!([])] {
+            let reply = h.call("document.close", bad);
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.session.document_id, first);
+            assert_eq!(h.app.session.doc.to_json(), old);
+        }
+        let reply = h.call("document.close", json!({"document_id":first}));
+        assert_eq!(reply["ok"], false, "unsaved design is preserved: {reply}");
+        assert!(reply["error"].as_str().unwrap().contains("unsaved"));
+        assert!(h.app.docs.closing.is_none(), "no interactive prompt blocks an agent");
+        assert_eq!(h.app.session.doc.to_json(), old);
+
+        let path = h.dir.join("close-safe.solidcraft");
+        h.app.run("file.save_as", json!({"path": path.to_string_lossy()})).unwrap();
+        assert!(!h.app.session.is_dirty());
+        let reply = h.call("document.close", json!({"document_id":first}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["closed_document_id"], first);
+        assert_ne!(reply["result"]["document_id"], first);
+        assert_eq!(reply["result"]["documents"], 1);
+        assert!(crate::documents::active_is_blank(&h.app));
+        assert!(h.app.docs.closing.is_none());
+        assert!(path.exists(), "closing never deletes the saved file");
+
+        h.app.run("solid.box", json!({"length":3,"width":4,"height":5,"body_name":"Keep"})).unwrap();
+        h.app.run("file.save_as", json!({"path": h.dir.join("keep.solidcraft").to_string_lossy()})).unwrap();
+        let kept = h.app.session.document_id.clone();
+        let unchanged = h.app.session.doc.to_json();
+        let new = h.call("ui.documents", json!({"action":"new"}));
+        assert_eq!(new["result"]["documents"].as_array().unwrap().len(), 2);
+        assert_ne!(h.app.session.document_id, kept);
+        let closed = h.call("document.close", json!({}));
+        assert_eq!(closed["ok"], true, "{closed}");
+        assert_eq!(closed["result"]["document_id"], kept);
+        assert_eq!(h.app.session.doc.to_json(), unchanged, "the other tab is unchanged");
+        assert_eq!(h.app.docs.count(), 1);
+        assert!(crate::control_job::changes_the_design("document.close"), "it must wait for computation");
     }
 
     /// #6646: `document.revision` names the active design and what it holds. The revision moves on

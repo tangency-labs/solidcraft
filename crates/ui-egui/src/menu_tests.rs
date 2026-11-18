@@ -667,6 +667,56 @@ fn component_menu_activates_grounds_and_pastes() {
     assert_eq!(app.session.doc.components.len(), 2);
 }
 
+/// The Browser's Hide action takes every selected component or placement rather than only
+/// the row under the pointer. Each action uses one visibility command (#18716).
+#[test]
+fn browser_hide_applies_to_selected_components_and_occurrences() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (name, x) in [("Base", 0), ("Lid", 25)] {
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+    }
+    for name in ["Base", "Lid"] {
+        app.run("component.from_bodies", json!({"bodies":[name]})).unwrap();
+    }
+    let ids: Vec<u64> = app.session.doc.components.iter().map(|c| c.id).collect();
+    assert_eq!(ids.len(), 2);
+    let (a, b) = (ids[0], ids[1]);
+    app.tree.picked_components = ids;
+    let bodies = crate::browser::selected_component_bodies(&app, a);
+    assert_eq!(bodies.len(), 2);
+
+    let menu = Target::Component { id: a };
+    let hide = find(&context_menu::items(&app, &menu), "Show/Hide");
+    let listed: Vec<String> = serde_json::from_value(hide.params.as_ref().unwrap()["bodies"].clone()).unwrap();
+    assert_eq!(listed.len(), 2, "the menu acts on both components");
+    let before = app.session.undo.len();
+    context_menu::run_item(&mut app, &hide, pos2(0.0, 0.0));
+    assert!(bodies.iter().all(|body| app.session.visibility.hidden_bodies.contains(body)), "{:?}", app.session.visibility.hidden_bodies);
+    assert_eq!(app.session.undo.len(), before + 1, "the batch is one undo step");
+
+    // The same selection rule applies to instances, whose paths distinguish copies.
+    let paths: Vec<Vec<u64>> = [a, b].into_iter().map(|id| app.session.doc.first_path(id)).collect();
+    app.run("select.set", json!({"items":paths.iter().map(|path| json!({"type":"occurrence","path":path})).collect::<Vec<_>>()})).unwrap();
+    assert_eq!(crate::browser::selected_occurrence_paths(&app, &paths[0]), paths);
+    let row = Target::Occurrence { path: paths[0].clone() };
+    let hide = find(&context_menu::items(&app, &row), "Show/Hide");
+    assert_eq!(hide.params.as_ref().unwrap()["paths"], json!(paths));
+    context_menu::run_item(&mut app, &hide, pos2(0.0, 0.0));
+    assert!(paths.iter().all(|path| app.session.occurrence_hidden(path)));
+
+    // An empty component can still open the Show/Hide action when a populated component
+    // is selected with it. The batch target set, not the clicked row, enables it.
+    let empty = app.run("component.create", json!({"name":"Empty"})).unwrap()["component"].as_u64().unwrap();
+    app.tree.picked_components = vec![empty, a];
+    let empty_menu = Target::Component { id: empty };
+    let item = find(&context_menu::items(&app, &empty_menu), "Show/Hide");
+    assert!(item.enabled, "a selected populated component provides a visibility target");
+    assert_eq!(item.params.as_ref().unwrap()["bodies"], json!(["Base"]));
+
+    // Clicking a row outside the selection does not change the selected rows.
+    assert_eq!(crate::browser::selected_occurrence_paths(&app, &[u64::MAX]), vec![vec![u64::MAX]]);
+}
+
 #[test]
 fn move_shortcut_uses_the_selected_nested_instance_and_pending_position() {
     let mut app = SolveApp::new(Session::default(), Services::default());
@@ -1403,6 +1453,24 @@ fn v_with_a_menu_open_shows_or_hides_what_the_menu_is_for() {
     // With no menu open, V still flips the selection.
     press_v(&mut h);
     assert!(h.app.session.visibility.hidden_bodies.contains(&b), "V without a menu acts on the selection");
+}
+
+#[test]
+fn view_ribbon_save_view_keeps_the_screen_camera() {
+    use solidcraft_viewport::UpAxis;
+
+    let mut app = sample_app();
+    app.cam.roll = 0.45;
+    app.cam.up = UpAxis::Y;
+    let before = app.cam;
+    app.start("view.save");
+    assert_eq!(app.session.doc.named_views.len(), 1, "the ribbon command saved the view");
+    assert_eq!(app.session.doc.named_views[0].roll, before.roll);
+    assert_eq!(app.session.doc.named_views[0].up, before.up);
+
+    app.cam.set_view(solidcraft_viewport::StandardView::Top);
+    crate::browser::restore_view(&mut app, "Named View1");
+    assert_eq!(app.cam_anim.map(|animation| animation.to), Some(before));
 }
 
 #[test]

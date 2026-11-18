@@ -98,8 +98,12 @@ There are five:
 - *inseparable*, something made as one piece (welded, glued, riveted and so on): one row; of
   what it holds, only the purchased components are listed, and only in a list of every part.
 
+One occurrence can have a type of its own, which replaces its component's for that occurrence
+only.
+
 - **In SolidCraft:** the `bom_type` part property, which `component.metadata.set` changes and
-  `component.metadata` reads; the `bom_type` of each `assembly.bom` row.
+  `component.metadata` reads; `occurrence.bom_type` and an occurrence's `bom_type` design-file
+  key; the `bom_type` of each `assembly.bom` row.
 - **Don't use:** BOM structure, item type, kind; made (for *normal*: it reads as "already
   made").
 - **Elsewhere:** BOM structure, BOM type.
@@ -316,6 +320,32 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### item number
+
+The number that names a row of a bill of materials, the one a parts list and a balloon show.
+
+Until a bill of materials view is numbered, it is the row's place in the list and can change.
+Once the view is numbered it is saved with the row, kept when the row's part number changes, and
+a new row takes the next number at its level. A row listed under another reads as both numbers
+(2.1).
+
+- **In SolidCraft:** each `assembly.bom` row's `item`, with `provisional`, `locked` and
+  `duplicate`; `assembly.bom.renumber` and `assembly.bom.item.set`; the design file's
+  `assembly.item_numbers`.
+- **Don't use:** position, balloon number, find number; index.
+- **Elsewhere:** item number, item, find number, balloon number.
+- **For translators:** a label, not a quantity or a count; not a part number.
+
+### leader
+
+The line from a note to what it points at on the model. It is worked out from where that thing is
+now and is never saved: if the thing is lost, the note stays and has no leader.
+
+- **In SolidCraft:** `drawing.note.inspect`'s `point`, where the leader ends.
+- **Don't use:** arrow (the end of the line, on a balloon or a dimension); pointer.
+- **Elsewhere:** leader, leader line.
+- **For translators:** a drawn line; not a person who leads.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -345,6 +375,18 @@ them. The *first moments* are the mass times the centre of mass.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
 
+### note
+
+Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
+with a leader. A note on a view moves with the view.
+
+- **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
+  `notes`.
+- **Don't use:** comment (that is for people working on a design); annotation (the wider kind of
+  thing that includes dimensions and symbols).
+- **Elsewhere:** note, general note, text.
+- **For translators:** text printed on the drawing; not a remark to a colleague.
+
 ### occurrence
 
 One placed copy of a component inside its parent component.
@@ -353,7 +395,8 @@ A component can have several occurrences. Moving an occurrence moves only that c
 component changes every copy. The browser names occurrences with a number, such as `Bolt M20:3`.
 
 - **In SolidCraft:** `occurrence.copy`, `occurrence.move`, `occurrence.drag`, `occurrence.ground`,
-  `occurrence.properties`; the `occurrences` design-file key; the `path` of occurrence ids.
+  `occurrence.properties`, `occurrence.bom_type`; the `occurrences` design-file key; the `path` of
+  occurrence ids.
 - **Don't use:** instance, placement.
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
@@ -435,6 +478,20 @@ at Z = 0, with the centre of mass over the origin; the design itself does not mo
 - **Don't use:** bottom face, base face (both say where a face is now, not where it is printed).
 - **Elsewhere:** place on face, lay flat, bed face.
 - **For translators:** the face the part stands on while it prints, not the printer's bed.
+
+### quantity
+
+What one placement of a component means in a bill of materials: a number of pieces or a length.
+
+Without one, a placement is one piece and its row's count says it all. With one, a row adds up its
+placements: a 2.5 m cable placed three times is 7.5 m. It is an expression, so it can follow the
+design's parameters.
+
+- **In SolidCraft:** the `bom_quantity` part property, which `component.metadata.set` and
+  `component.create` set; each `assembly.bom` row's `quantity` and `quantity_unit`.
+- **Don't use:** amount, count (for a quantity).
+- **Elsewhere:** quantity, BOM quantity, base quantity.
+- **For translators:** not a count of placements (`count`).
 
 ### reference edge
 
@@ -587,6 +644,18 @@ and the MCP camera take in radians.
 - **Don't use:** camera angles, view rotation.
 - **Elsewhere:** view orientation, azimuth and elevation.
 - **For translators:** the view's pitch is a tilt, not a thread's or a pattern's pitch.
+
+### virtual component
+
+A component with no geometry, listed in bills of materials with its quantity: grease, paint, a
+label, packaging.
+
+It holds no bodies, sketches or components and can't be the active component.
+
+- **In SolidCraft:** the `virtual` part property; `component.create {virtual: true}`.
+- **Don't use:** phantom (a phantom has no row), reference, empty component.
+- **Elsewhere:** virtual component, virtual part, non-geometric part.
+- **For translators:** not a *bill of materials type*.
 
 ### web browser
 

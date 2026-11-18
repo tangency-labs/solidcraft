@@ -585,7 +585,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let plane = solidcore_record::Plane::from_normal(base, n)?;
         reference_height(app, d, "To Object", &plane, base)
     });
-    let all_span = if matches!(d.kind, Kind::Extrude { all: true, .. }) {
+    let all_on = matches!(d.kind, Kind::Extrude { all: true, .. });
+    let all_span = if all_on {
         dir.and_then(|n| {
             let state = crate::open_meshing::session_world(&app.session);
             let plane = match d.inputs.first()?.items.first()? {
@@ -874,6 +875,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         _ => Vec::new(),
     };
     let section = matches!(d.kind, Kind::Section { .. });
+    // With To Object picked the box holds To Offset, which is used, whatever All says: the
+    // engine takes To Object first.
+    let names_all = all_on && !d.inputs.iter().any(|input| input.label == "To Object");
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -951,8 +955,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     };
     let box_at = clear_of_dialog(rect, place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
-    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), BoxPlace { dialog: None, ..place });
-    if *value != before
+    // Extent Type All (#18765): the depth of the Distance kept from before is not what the
+    // extrude reaches, so the field is empty and its hint names the extent. Text typed there is
+    // the new Distance. Like any empty box it has no number to step (Up, Down, the wheel).
+    let shows_all = names_all && *value == before;
+    let select_all = focus || *value != before;
+    let mut typed = String::new();
+    let shown = if shows_all { &mut typed } else { &mut *value };
+    let hint = if shows_all { "All" } else { "" };
+    value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
+    // Spaces alone are not an entry: the field has the keyboard as the dialog opens.
+    let entered = !typed.trim().is_empty();
+    if entered {
+        value.clone_from(&typed);
+    }
+    // A text typed that equals the kept Distance ends All too.
+    if (*value != before || entered)
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
@@ -1029,10 +1047,11 @@ fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, 
     value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);
 }
 
-/// [`value_box`] with a note after the field (a pull's step size).
-fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>, place: BoxPlace) {
+/// [`value_box`] with a note after the field (a pull's step size) and a `hint` for the empty
+/// field (`""` for none).
+fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, hint: &str, note: Option<&str>, place: BoxPlace) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
-    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note, place);
+    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), (hint, note), place);
 }
 
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
@@ -1048,10 +1067,11 @@ pub(crate) fn value_box_in(
     keep_tab: bool,
     place: BoxPlace,
 ) -> Option<egui::Rect> {
-    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), None, place)
+    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), ("", None), place)
 }
 
-/// [`value_box_in`] with a short dimmed note after the field (a pull's step size).
+/// [`value_box_in`] with a short dimmed note after the field (a pull's step size) and a hint
+/// shown in the field while it is empty.
 fn value_box_full(
     ui: &mut egui::Ui,
     (area, id): (egui::Id, egui::Id),
@@ -1059,7 +1079,7 @@ fn value_box_full(
     value: &mut String,
     (at, pivot): (Pos2, egui::Align2),
     (select_all, keep_tab): (bool, bool),
-    note: Option<&str>,
+    (hint, note): (&str, Option<&str>),
     place: BoxPlace,
 ) -> Option<egui::Rect> {
     // Off in Preferences: the value is typed in the command window only (#9479).
@@ -1094,7 +1114,7 @@ fn value_box_full(
                 ui.label(
                     egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption),
                 );
-                let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
+                let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab, hint);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
                     r.request_focus();

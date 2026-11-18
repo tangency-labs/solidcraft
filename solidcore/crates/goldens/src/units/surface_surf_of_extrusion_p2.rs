@@ -1633,6 +1633,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::geom::extent2d::Extent2d;
     use solidcore::math::EFF_ZERO_SQRT;
     use std::collections::BTreeMap;
 
@@ -1998,6 +1999,700 @@ mod tests {
                 .iter()
                 .any(|((o, k), _)| o == op && !k.starts_with("deferred"));
             assert!(compared, "{op} is never compared");
+        }
+    }
+
+    /// The extrusion and plane of a generated case whose extrusion lies in the plane:
+    /// the extrusion, its domain, the plane and its domain, and the case's tolerance.
+    fn coincident_plane_case(
+        k: &Kernel,
+        name: &str,
+    ) -> (SurfOfExtrusion, Extent2d, Plane, Extent2d, Option<f64>) {
+        let case = crate::case::regression_case(&Runner, name);
+        let Inputs::Op { src, op } = case.parse().unwrap() else {
+            panic!("{name}: expected an operation");
+        };
+        let s = rust_src(k, &src)
+            .unwrap()
+            .unwrap_or_else(|_| panic!("{name}: the extrusion builds"));
+        let natural = s.base().natural_uv_domain();
+        match &*op {
+            OpIn::Plane {
+                plane,
+                dom,
+                other_dom,
+                tol,
+            } => {
+                let pl = rust_plane(plane);
+                let od = other_dom.map_or_else(|| pl.natural_uv_domain(), dom4);
+                (s, dom.map_or(natural, dom4), pl, od, *tol)
+            }
+            OpIn::Global {
+                target: TargetIn::Plane { plane, .. },
+                dom,
+                other_dom,
+                tol,
+                ..
+            } => {
+                let pl = rust_plane(plane);
+                let od = other_dom.map_or_else(|| pl.natural_uv_domain(), dom4);
+                (s, dom.map_or(natural, dom4), pl, od, *tol)
+            }
+            _ => panic!("{name}: expected a plane intersection"),
+        }
+    }
+
+    /// The end points of every curve, in a fixed order (for comparing two answers).
+    fn curve_ends(k: &Kernel, r: &ExtrusionIntersection) -> Vec<[f64; 6]> {
+        let mut ends: Vec<[f64; 6]> = r
+            .curves_3d
+            .iter()
+            .map(|c| {
+                let ivl = c.natural_interval();
+                let a = c.evaluate(k, ivl.min(), 0, true, true).unwrap()[0];
+                let b = c.evaluate(k, ivl.max(), 0, true, true).unwrap()[0];
+                let (a, b) = if (a.x, a.y, a.z) <= (b.x, b.y, b.z) { (a, b) } else { (b, a) };
+                [a.x, a.y, a.z, b.x, b.y, b.z]
+            })
+            .collect();
+        ends.sort_by(|p, q| p.partial_cmp(q).unwrap());
+        ends
+    }
+
+    /// gen0355 (a bounded plane overlapping part of the extrusion) and gen0970 (an
+    /// unbounded plane): the extrusion lies in the plane, and the special case used to
+    /// answer `needs_more` with no curve, leaving the general intersector a τ-dependent
+    /// answer. It now answers the coincident patch's boundary: `RegionBoundary` curves
+    /// in the plane, inside its domain, forming closed loops, the same for every τ.
+    #[test]
+    fn extrusion_in_plane_answers_its_coincident_patch() {
+        use solidcore::surface::surface::p2::TsectCurveType;
+        for name in ["gen0355", "gen0970"] {
+            let k = Kernel::default();
+            let (s, d, pl, od, tol) = coincident_plane_case(&k, name);
+            let r = s.intersect_with_plane(&k, &d, &pl, &od, tol).unwrap();
+            assert!(!r.needs_more_intersections, "{name}: answered");
+            assert!(!r.curves_3d.is_empty(), "{name}: some boundary");
+            assert_eq!(r.curve_types.len(), r.curves_3d.len(), "{name}");
+            assert_eq!(r.deviations.len(), r.curves_3d.len(), "{name}");
+            assert!(
+                r.curve_types.contains(&TsectCurveType::RegionBoundary),
+                "{name}: {:?}",
+                r.curve_types
+            );
+            let n = pl.position().z_axis();
+            let o = pl.position().origin();
+            let mut ends = Vec::new();
+            for (c, t) in r.curves_3d.iter().zip(&r.curve_types) {
+                let ivl = c.natural_interval();
+                for i in 0..=8 {
+                    let p = c
+                        .evaluate(&k, ivl.min() + ivl.length() * f64::from(i) / 8.0, 0, true, true)
+                        .unwrap()[0];
+                    let scale = 1.0 + p.max_dimension() + o.max_dimension();
+                    assert!(n.dot(p - o).abs() <= 1e-9 * scale, "{name}: in the plane");
+                    let uv = pl.project_point_to_uv_domain(p);
+                    assert!(
+                        od.u_interval().min() - 1e-9 * scale <= uv.x
+                            && uv.x <= od.u_interval().max() + 1e-9 * scale
+                            && od.v_interval().min() - 1e-9 * scale <= uv.y
+                            && uv.y <= od.v_interval().max() + 1e-9 * scale,
+                        "{name}: inside the plane's domain"
+                    );
+                }
+                if *t == TsectCurveType::RegionBoundary {
+                    for t in [ivl.min(), ivl.max()] {
+                        ends.push(c.evaluate(&k, t, 0, true, true).unwrap()[0]);
+                    }
+                }
+            }
+            // every boundary end meets another boundary's end: the loops close
+            for (i, p) in ends.iter().enumerate() {
+                let scale = 1.0 + p.max_dimension();
+                let met = ends
+                    .iter()
+                    .enumerate()
+                    .any(|(j, q)| j != i && (*p - *q).length() <= 1e-9 * scale);
+                assert!(met, "{name}: open boundary end {p:?}");
+            }
+            // τ-independent. The special case caps τ at 1e-6, so these are five
+            // distinct effective tolerances (larger values would all act as 1e-6).
+            let first = curve_ends(&k, &r);
+            for t in [1e-6, 1e-7, 1e-8, 1e-9, 1e-10] {
+                let rt = s.intersect_with_plane(&k, &d, &pl, &od, Some(t)).unwrap();
+                assert_eq!(rt.curve_types, r.curve_types, "{name}: types at τ = {t}");
+                let other = curve_ends(&k, &rt);
+                assert_eq!(other.len(), first.len(), "{name}: τ = {t}");
+                for (a, b) in first.iter().zip(&other) {
+                    for (x, y) in a.iter().zip(b) {
+                        assert!(
+                            (x - y).abs() <= 1e-9 * (1.0 + x.abs().max(y.abs())),
+                            "{name}: τ = {t}: {a:?} vs {b:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The rows this change moved, answered: the special case declined
+    /// (`needs_more`, no curve) where the extrusion lies in the plane, and now answers
+    /// the coincident region's boundary (an empty one where the region misses the
+    /// plane's domain).
+    const COINCIDENT_ROWS: [&str; 12] = [
+        "gen0158",
+        "gen0163",
+        "gen0301",
+        "gen0355",
+        "gen0404",
+        "gen0566",
+        "gen0576",
+        "gen0654",
+        "gen0666",
+        "gen0787",
+        "gen0970",
+        "line_plane_containing",
+    ];
+
+    /// Rows whose extrusion lies in the plane but whose region no certificate covers
+    /// (a folded generator swept a finite length inside the domain): the special case
+    /// still declines, as upstream.
+    const DECLINED_ROWS: [&str; 3] = ["gen0260", "gen1043", "gen1048"];
+
+    /// The plane's UV frame of a case: `E` in UV, `mu` across the sweep and `nu`
+    /// along it (in units of the extrusion parameter), for UV points.
+    struct TestFrame {
+        eu: f64,
+        ew: f64,
+    }
+
+    impl TestFrame {
+        fn new(pl: &Plane, e: Vec3) -> TestFrame {
+            let pos = *pl.position();
+            let sc = pl.uv_scale();
+            TestFrame {
+                eu: pos.x_axis().dot(e) / sc.x,
+                ew: pos.y_axis().dot(e) / sc.y,
+            }
+        }
+        fn mu(&self, p: Point2) -> f64 {
+            -self.ew * p.x + self.eu * p.y
+        }
+        fn nu(&self, p: Point2) -> f64 {
+            (self.eu * p.x + self.ew * p.y) / (self.eu * self.eu + self.ew * self.ew)
+        }
+    }
+
+    /// The Euclidean control points of `c` over `ivl` (positive weights asserted:
+    /// the curve lies in their convex hull).
+    fn net_3d(k: &Kernel, c: &solidcore::curve::curve::Curve, ivl: Extent1d) -> Vec<Vec3> {
+        net_canon(k, c, ivl).control_points
+    }
+
+    /// The canonical form of `c` trimmed to `ivl` (positive weights asserted).
+    fn net_canon(
+        k: &Kernel,
+        c: &solidcore::curve::curve::Curve,
+        ivl: Extent1d,
+    ) -> solidcore::nurbs::b_spline_curve::p2::CurveCanonical {
+        use solidcore::curve::curve::CurveKind;
+        use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+        let mut piece = c.clone();
+        let mut t = ivl;
+        piece.trim(k, &mut t, TrimMode::Silent).unwrap();
+        let base = match piece.kind() {
+            CurveKind::BSpline(b) => b.clone(),
+            CurveKind::Line(l) => l.base().clone(),
+            CurveKind::Ellipse(e) => e.base().clone(),
+            CurveKind::Hyperbola(h) => h.base().clone(),
+            CurveKind::Parabola(p) => p.base().clone(),
+            _ => panic!("an unexpected curve kind"),
+        };
+        let canon = base.canonical().unwrap();
+        assert!(canon.weights.iter().all(|w| *w > 0.0));
+        canon
+    }
+
+    /// The UV images of [`net_3d`].
+    fn net_uv(k: &Kernel, c: &solidcore::curve::curve::Curve, ivl: Extent1d, pl: &Plane) -> Vec<Point2> {
+        net_3d(k, c, ivl)
+            .into_iter()
+            .map(|p| pl.project_point_to_uv_domain(p))
+            .collect()
+    }
+
+    /// Brackets the least of `f(C(s))` over `ivl` without sampling for acceptance:
+    /// the lower bound is the least over the control points of a subdivision (convex
+    /// hull), the upper bound the least evaluated value; the piece with the lowest
+    /// hull bound is split until the bracket is within `width`.
+    fn bracket_min(
+        k: &Kernel,
+        gen: &solidcore::curve::curve::Curve,
+        ivl: Extent1d,
+        pl: &Plane,
+        f: &dyn Fn(Point2) -> f64,
+        width: f64,
+    ) -> (f64, f64) {
+        let at = |s: f64| f(pl.project_point_to_uv_domain(gen.evaluate(k, s, 0, true, true).unwrap()[0]));
+        let hull_min = |iv: Extent1d| {
+            net_uv(k, gen, iv, pl)
+                .into_iter()
+                .map(f)
+                .fold(f64::INFINITY, f64::min)
+        };
+        let mut pieces = vec![(hull_min(ivl), ivl)];
+        let mut upper = at(ivl.min()).min(at(ivl.max()));
+        for _ in 0..4000 {
+            pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (lo, iv) = pieces[0];
+            if upper - lo <= width {
+                return (lo, upper);
+            }
+            pieces.remove(0);
+            let m = iv.mid();
+            upper = upper.min(at(m));
+            for half in [Extent1d::from_min_max(iv.min(), m), Extent1d::from_min_max(m, iv.max())] {
+                pieces.push((hull_min(half), half));
+            }
+        }
+        panic!("no bracket within {width}");
+    }
+
+    /// The domain box cut to `alpha <= mu <= beta` (test-side Sutherland-Hodgman).
+    fn slab_polygon(od: &Extent2d, f: &TestFrame, alpha: f64, beta: f64) -> Vec<Point2> {
+        let mut poly = vec![
+            Point2::new(od.u_interval().min(), od.v_interval().min()),
+            Point2::new(od.u_interval().max(), od.v_interval().min()),
+            Point2::new(od.u_interval().max(), od.v_interval().max()),
+            Point2::new(od.u_interval().min(), od.v_interval().max()),
+        ];
+        for (bound, above) in [(alpha, true), (beta, false)] {
+            let inside = |p: Point2| if above { f.mu(p) >= bound } else { f.mu(p) <= bound };
+            let mut next = Vec::new();
+            for i in 0..poly.len() {
+                let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+                if inside(p) {
+                    next.push(p);
+                }
+                if inside(p) != inside(q) {
+                    let t = (bound - f.mu(p)) / (f.mu(q) - f.mu(p));
+                    next.push(Point2::new(p.x + t * (q.x - p.x), p.y + t * (q.y - p.y)));
+                }
+            }
+            poly = next;
+        }
+        poly
+    }
+
+    /// Asserts the answer's curves are exactly `expected` UV segments, each once
+    /// (ends within `1e-9` relative, straight), so no curve repeats or overlaps and
+    /// none is missing.
+    fn assert_uv_segments(k: &Kernel, name: &str, r: &ExtrusionIntersection, pl: &Plane, expected: &[(Point2, Point2)]) {
+        let near = |a: Point2, b: Point2| {
+            (a - b).length() <= 1e-9 * (1.0 + a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs()))
+        };
+        let got: Vec<(Point2, Point2)> = r
+            .curves_3d
+            .iter()
+            .map(|c| {
+                let ivl = c.natural_interval();
+                let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(k, t, 0, true, true).unwrap()[0]);
+                let (a, b) = (ev(ivl.min()), ev(ivl.max()));
+                // straight: every control point on the chord (the convex hull), to the
+                // rounding of points at their coordinates' scale (claim precision: the
+                // answer's segments are degree 1 with two control points, the chord's
+                // ends, so `off` is the rounding of a 2x2 cross product of projected
+                // points, a few gamma(1) of the coordinates; measured 0)
+                let chord = b - a;
+                let len = chord.length();
+                assert!(len > 0.0, "{name}: a segment of no length");
+                for q in net_uv(k, c, ivl, pl) {
+                    let scale = 1.0 + a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs());
+                    let off = (chord.x * (q.y - a.y) - chord.y * (q.x - a.x)).abs() / len;
+                    let t = (chord.x * (q.x - a.x) + chord.y * (q.y - a.y)) / (len * len);
+                    let along = (-1e-12..=1.0 + 1e-12).contains(&t);
+                    assert!(off <= 1e-13 * scale && along, "{name}: a straight segment");
+                }
+                (a, b)
+            })
+            .collect();
+        assert_eq!(got.len(), expected.len(), "{name}: {got:?} vs {expected:?}");
+        let mut used = vec![false; got.len()];
+        for &(p, q) in expected {
+            let hit = got.iter().enumerate().position(|(i, &(a, b))| {
+                !used[i] && ((near(a, p) && near(b, q)) || (near(a, q) && near(b, p)))
+            });
+            let i = hit.unwrap_or_else(|| panic!("{name}: missing {p:?}-{q:?} in {got:?}"));
+            used[i] = true;
+        }
+    }
+
+    /// Certifies every moved row's answer as the boundary of the coincident region
+    /// `R = I ∩ D` (`I` the generator swept over `V`, `D` the plane's domain), with
+    /// no sampled acceptance. Every row's generator lies in the plane over its whole
+    /// interval (control points within `1e-12`, convex hull), and the row is one of:
+    /// - **empty**: the domain is apart from the surface (the UV box of its control
+    ///   net, or across the sweep), so `R` is empty and so is the answer;
+    /// - **slab**: every `nu` of `D` cut to the slab `alpha <= mu <= beta` lies within
+    ///   `[nu_max + vmin, nu_min + vmax]` (`nu` bounded on the control points), so `R`
+    ///   is that convex polygon. `alpha`, `beta` (the generator's extremes of `mu`)
+    ///   are bracketed by subdivision hulls and evaluated values, and the answer must
+    ///   be exactly the polygon's edges, each once;
+    /// - **quad**: `mu` is monotone on the control polygon (variation diminishing:
+    ///   every slice of `I` is one interval) and both copies' control points lie in
+    ///   `D`, so `R = I`, bounded by the two copies and the two end directrices; the
+    ///   answer must be exactly those four curves.
+    #[test]
+    fn moved_coincident_rows_are_certified() {
+        use solidcore::surface::surface::p2::TsectCurveType;
+        let mut forms = BTreeMap::new();
+        for name in COINCIDENT_ROWS {
+            let k = Kernel::default();
+            let (s, d, pl, od, tol) = coincident_plane_case(&k, name);
+            let r = s.intersect_with_plane(&k, &d, &pl, &od, tol).unwrap();
+            assert!(!r.needs_more_intersections, "{name}: answered");
+            assert!(
+                r.curve_types.iter().all(|t| *t == TsectCurveType::RegionBoundary),
+                "{name}: {:?}",
+                r.curve_types
+            );
+            let n = pl.position().z_axis();
+            let o = pl.position().origin();
+            let gen = s.gen_curve().unwrap();
+            let e = s.extrusion_vector();
+            // the generator's parameter is the surface's v when its UV are swapped
+            let (s_ivl, v_ivl) = if s.swap_uv() {
+                (d.v_interval(), d.u_interval())
+            } else {
+                (d.u_interval(), d.v_interval())
+            };
+            let (vmin, vmax) = (v_ivl.min(), v_ivl.max());
+            // the generator lies in the plane over its whole interval (the solver's
+            // profile certificate, `plane_patch::certify_in_plane`, admits a control
+            // point within SM_EFF_ZERO = 1e-12 of the net's coordinates; the pin
+            // restates it at the scale of the point and the origin; measured 2.6e-16)
+            for p in net_3d(&k, gen, s_ivl) {
+                let bound = 1e-12 * (1.0 + p.max_dimension() + o.max_dimension());
+                assert!(n.dot(p - o).abs() <= bound, "{name}: generator off the plane");
+            }
+            // and so does the sweep (the sweep certificate: |n . E| within
+            // SM_EFF_ZERO |E|; measured 4e-16)
+            assert!(n.dot(e).abs() <= 1e-12 * e.length(), "{name}: sweep off the plane");
+            let f = TestFrame::new(&pl, e);
+            let net = net_uv(&k, gen, s_ivl, &pl);
+
+            if r.curves_3d.is_empty() {
+                let net3 = nurb_surface(&s).unwrap();
+                let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+                let (_, _, cps) = net3.control_points().unwrap();
+                for c in &cps {
+                    let w = if c.w == NOW { 1.0 } else { c.w };
+                    let p = Vec3::new(c.x / w, c.y / w, c.z / w);
+                    let uv = pl.project_point_to_uv_domain(p);
+                    lo = [lo[0].min(uv.x), lo[1].min(uv.y)];
+                    hi = [hi[0].max(uv.x), hi[1].max(uv.y)];
+                }
+                let apart = hi[0] < od.u_interval().min()
+                    || lo[0] > od.u_interval().max()
+                    || hi[1] < od.v_interval().min()
+                    || lo[1] > od.v_interval().max();
+                // or apart across the sweep: mu(S(s, v)) = mu(C(s)), so the
+                // generator's control net bounds the whole surface's mu range
+                let (glo, ghi) = net
+                    .iter()
+                    .map(|p| f.mu(*p))
+                    .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)));
+                let corners = slab_polygon(&od, &f, f64::MIN, f64::MAX);
+                let (dlo, dhi) = corners
+                    .iter()
+                    .map(|p| f.mu(*p))
+                    .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)));
+                let margin = 1e-9 * (1.0 + glo.abs().max(ghi.abs()).max(dlo.abs()).max(dhi.abs()));
+                let across = ghi + margin < dlo || glo - margin > dhi;
+                assert!(apart || across, "{name}: an empty answer over the domain");
+                forms.insert(name, "empty");
+                continue;
+            }
+
+            // the quad: monotone mu, both copies in the domain
+            let mus: Vec<f64> = net.iter().map(|p| f.mu(*p)).collect();
+            let rising = mus.windows(2).all(|w| w[1] >= w[0]) && mus[0] < mus[mus.len() - 1];
+            let falling = mus.windows(2).all(|w| w[1] <= w[0]) && mus[0] > mus[mus.len() - 1];
+            // a flat stretch (along the sweep) is bounded by its copies only while they
+            // do not overlap: every run of flat steps spans less nu than the sweep
+            let mut flats_short = true;
+            let mut run_lo_hi: Option<(f64, f64)> = None;
+            for (i, p) in net.iter().enumerate() {
+                let nu = f.nu(*p);
+                let in_run = i > 0 && mus[i] == mus[i - 1];
+                run_lo_hi = match (run_lo_hi, in_run) {
+                    (Some((a, b)), true) => Some((a.min(nu), b.max(nu))),
+                    _ => Some((nu, nu)),
+                };
+                let (a, b) = run_lo_hi.unwrap();
+                flats_short &= !in_run || b - a < vmax - vmin;
+            }
+            let in_dom = |p: Point2| {
+                let slack = 1e-12 * (1.0 + p.x.abs().max(p.y.abs()));
+                od.u_interval().min() - slack <= p.x
+                    && p.x <= od.u_interval().max() + slack
+                    && od.v_interval().min() - slack <= p.y
+                    && p.y <= od.v_interval().max() + slack
+            };
+            let e_uv = Point2::new(f.eu, f.ew);
+            let copies_inside = net
+                .iter()
+                .all(|p| in_dom(*p + e_uv * vmin) && in_dom(*p + e_uv * vmax));
+            if (rising || falling) && flats_short && copies_inside {
+                assert_eq!(r.curves_3d.len(), 4, "{name}");
+                let ends: Vec<Point2> = [s_ivl.min(), s_ivl.max()]
+                    .iter()
+                    .map(|&t| pl.project_point_to_uv_domain(gen.evaluate(&k, t, 0, true, true).unwrap()[0]))
+                    .collect();
+                let mut straight = Vec::new();
+                let mut copies = Vec::new();
+                for c in &r.curves_3d {
+                    let ivl = c.natural_interval();
+                    let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(&k, t, 0, true, true).unwrap()[0]);
+                    let (a, b, m) = (ev(ivl.min()), ev(ivl.max()), ev(ivl.mid()));
+                    let scale = 1.0 + a.x.abs().max(a.y.abs());
+                    if ((a + b) / 2.0 - m).length() <= 1e-9 * scale && ((b - a).length() - (e_uv * (vmax - vmin)).length()).abs() <= 1e-9 * scale {
+                        straight.push(c);
+                    } else {
+                        copies.push(c);
+                    }
+                }
+                let expected: Vec<(Point2, Point2)> = ends
+                    .iter()
+                    .map(|&p| (p + e_uv * vmin, p + e_uv * vmax))
+                    .collect();
+                let directrices = ExtrusionIntersection {
+                    curves_3d: straight.into_iter().cloned().collect(),
+                    ..Default::default()
+                };
+                assert_uv_segments(&k, name, &directrices, &pl, &expected);
+                // the copies: the generator's net translated by v E
+                assert_eq!(copies.len(), 2, "{name}");
+                let mut seen = Vec::new();
+                for c in copies {
+                    let cn = net_uv(&k, c, c.natural_interval(), &pl);
+                    assert_eq!(cn.len(), net.len(), "{name}");
+                    let v = f.nu(cn[0]) - f.nu(net[0]);
+                    let v = if (v - vmin).abs() <= (v - vmax).abs() { vmin } else { vmax };
+                    for (q, p) in cn.iter().zip(&net) {
+                        let x = *p + e_uv * v;
+                        assert!((*q - x).length() <= 1e-9 * (1.0 + x.x.abs().max(x.y.abs())), "{name}: copy at {v}");
+                    }
+                    seen.push(v);
+                }
+                seen.sort_by(f64::total_cmp);
+                assert_eq!(seen, vec![vmin, vmax], "{name}");
+                forms.insert(name, "quad");
+                continue;
+            }
+
+            // the slab: alpha and beta bracketed; the cover; the polygon's edges
+            let span = net
+                .iter()
+                .map(|p| f.mu(*p).abs())
+                .fold(1.0_f64, f64::max);
+            let width = 1e-12 * span;
+            let (alo, ahi) = bracket_min(&k, gen, s_ivl, &pl, &|p| f.mu(p), width);
+            let (bnlo, bnhi) = bracket_min(&k, gen, s_ivl, &pl, &|p| -f.mu(p), width);
+            let (alpha, beta) = ((alo + ahi) / 2.0, -(bnlo + bnhi) / 2.0);
+            let poly = slab_polygon(&od, &f, alpha, beta);
+            assert!(poly.len() >= 3, "{name}: the slab meets the domain");
+            let (nlo, nhi) = net
+                .iter()
+                .map(|p| f.nu(*p))
+                .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)));
+            for p in &poly {
+                let slack = 1e-12 * (1.0 + f.nu(*p).abs() + nlo.abs().max(nhi.abs()) + vmin.abs().max(vmax.abs()));
+                assert!(f.nu(*p) - nhi >= vmin - slack && f.nu(*p) - nlo <= vmax + slack, "{name}: the cover");
+            }
+            let expected: Vec<(Point2, Point2)> = (0..poly.len())
+                .map(|i| (poly[i], poly[(i + 1) % poly.len()]))
+                .filter(|(a, b)| (*a - *b).length() > 1e-9 * (1.0 + a.x.abs().max(a.y.abs())))
+                .collect();
+            assert_uv_segments(&k, name, &r, &pl, &expected);
+            // the matching above is relative to the points' scale (about 1e6 on the
+            // unbounded planes); pin the fold lines' mu, and the side pieces' fixed
+            // coordinate, to the solver's error terms and the rounding of evaluating
+            // and projecting points at the coordinates' scale (u = eps / 2,
+            // gamma(n) = n u / (1 - n u)):
+            // - mu = dmu . (X - O) with dmu = (eu dw - ew du) (the solver's frame);
+            // - a control value of a range piece (`plane_patch::net_points` and
+            //   `Affine::at`): the piece's net is within the convex hull of the
+            //   generator's (homogeneous points and weights are convex combinations),
+            //   so its error is at most
+            //   E = |dmu|_1 (gamma(6p + 4) (max w |P|_1 + |P|_1 max w) / min w
+            //       + (gamma(8) + gamma(1)) (|P|_1 + |O|_1));
+            // - the solver's fold value is an evaluation within its bracket width
+            //   (`plane_patch::extreme_width`: 1e-12 max |mu| + 2 E) above the true
+            //   extreme, the test's alpha within half its bracket (lower hull value,
+            //   upper evaluation);
+            // - an evaluation of the generator (the solver's and the bracket's, de
+            //   Boor with at most 3p operations per coordinate), its projection to UV
+            //   (a subtraction, a dot product of three and a division) and its mu (two
+            //   products and a sum) is within |dmu|_1 gamma(3p + 16) (|P|_1 + |O|_1);
+            // - a fold line's end X is its stored control point (a clamped end), placed
+            //   at the solver's mu on a side (the free coordinate: three operations),
+            //   mapped to space (three), projected back (four) and its mu taken (two):
+            //   within |dmu|_1 gamma(12) (|X|_1 + |O|_1)
+            let gamma = |n: f64| {
+                let u = f64::EPSILON / 2.0;
+                n * u / (1.0 - n * u)
+            };
+            let canon = net_canon(&k, gen, s_ivl);
+            let deg = canon.degree as f64;
+            let w_of = |i: usize| canon.weights.get(i).copied().unwrap_or(1.0);
+            let (w_min, w_max, hom_max, p_max) = canon.control_points.iter().enumerate().fold(
+                (f64::MAX, 0.0_f64, 0.0_f64, 0.0_f64),
+                |(lo, hi, h, m), (i, p)| {
+                    let n1 = p.x.abs() + p.y.abs() + p.z.abs();
+                    (lo.min(w_of(i)), hi.max(w_of(i)), h.max(w_of(i) * n1), m.max(n1))
+                },
+            );
+            let pos = *pl.position();
+            let sc = pl.uv_scale();
+            let dmu = pos.y_axis() * (f.eu / sc.y) - pos.x_axis() * (f.ew / sc.x);
+            let dmu1 = dmu.x.abs() + dmu.y.abs() + dmu.z.abs();
+            let o1 = o.x.abs() + o.y.abs() + o.z.abs();
+            let value_err = dmu1
+                * (gamma(6.0 * deg + 4.0) * (hom_max + p_max * w_max) / w_min
+                    + (gamma(8.0) + gamma(1.0)) * (p_max + o1));
+            let mu_scale = net.iter().map(|p| f.mu(*p).abs()).fold(0.0_f64, f64::max) + value_err;
+            let solver_width = 1e-12 * mu_scale + 2.0 * value_err;
+            let half_brackets = [(ahi - alo) / 2.0, (bnhi - bnlo) / 2.0];
+            let mut on_bounds = [0, 0];
+            for c in &r.curves_3d {
+                let ivl = c.natural_interval();
+                let ev3 = |t: f64| c.evaluate(&k, t, 0, true, true).unwrap()[0];
+                let (a3, b3) = (ev3(ivl.min()), ev3(ivl.max()));
+                let (a, b) = (pl.project_point_to_uv_domain(a3), pl.project_point_to_uv_domain(b3));
+                let coords = a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs());
+                let round = 1e-14 * coords;
+                let x1 = [a3, b3]
+                    .iter()
+                    .map(|p| p.x.abs() + p.y.abs() + p.z.abs())
+                    .fold(0.0_f64, f64::max);
+                let gen_round = dmu1 * gamma(3.0 * deg + 16.0) * (p_max + o1);
+                let end_round = dmu1 * gamma(12.0) * (x1 + o1);
+                for (i, bound) in [alpha, beta].into_iter().enumerate() {
+                    let close = |p: Point2| (f.mu(p) - bound).abs() <= 1e-6 * (1.0 + bound.abs()) + round;
+                    if close(a) && close(b) {
+                        let tight = half_brackets[i] + solver_width + 2.0 * gen_round + end_round;
+                        assert!(
+                            (f.mu(a) - bound).abs() <= tight && (f.mu(b) - bound).abs() <= tight,
+                            "{name}: a fold line off mu = {bound}"
+                        );
+                        on_bounds[i] += 1;
+                    }
+                }
+                for (fixed, sides) in [
+                    ((a.x, b.x), [od.u_interval().min(), od.u_interval().max()]),
+                    ((a.y, b.y), [od.v_interval().min(), od.v_interval().max()]),
+                ] {
+                    for side in sides {
+                        let close = |x: f64| (x - side).abs() <= 1e-6 * (1.0 + side.abs());
+                        if close(fixed.0) && close(fixed.1) {
+                            // claim precision: the solver snaps a side piece's fixed
+                            // coordinate to the side (`plane_patch::side_point`), so it
+                            // is off only by mapping the end to space and projecting it
+                            // back (gamma(8) of the coordinates); measured 2.8e-14 abs
+                            let tight = 1e-12 * (1.0 + side.abs()) + round;
+                            assert!(
+                                (fixed.0 - side).abs() <= tight && (fixed.1 - side).abs() <= tight,
+                                "{name}: a side piece off its side {side}"
+                            );
+                        }
+                    }
+                }
+            }
+            let expected_on = |bound: f64| {
+                expected
+                    .iter()
+                    .filter(|(a, b)| {
+                        let close = |p: Point2| (f.mu(p) - bound).abs() <= 1e-6 * (1.0 + bound.abs()) + 1e-14 * p.x.abs().max(p.y.abs());
+                        close(*a) && close(*b)
+                    })
+                    .count()
+            };
+            assert_eq!(on_bounds, [expected_on(alpha), expected_on(beta)], "{name}");
+            assert!(on_bounds.iter().sum::<usize>() >= 1, "{name}: no fold line pinned");
+            forms.insert(name, "slab");
+        }
+        // every moved row is certified, in the form its geometry takes
+        let expected = [
+            ("gen0158", "empty"),
+            ("gen0163", "slab"),
+            ("gen0301", "quad"),
+            ("gen0355", "slab"),
+            ("gen0404", "empty"),
+            ("gen0566", "empty"),
+            ("gen0576", "slab"),
+            ("gen0654", "slab"),
+            ("gen0666", "slab"),
+            ("gen0787", "slab"),
+            ("gen0970", "slab"),
+            ("line_plane_containing", "quad"),
+        ];
+        assert_eq!(forms, expected.into_iter().collect::<BTreeMap<_, _>>());
+    }
+
+    /// gen0355, the row #18179 needs: a bounded plane over part of an infinite
+    /// zigzag extrusion. Its region is the strip between the generator's extremes
+    /// across the sweep (a polyline: attained at control points), not the lines at
+    /// its ends inside the strip.
+    #[test]
+    fn gen0355_answers_the_strip_between_its_extremes() {
+        let k = Kernel::default();
+        let (s, d, pl, od, tol) = coincident_plane_case(&k, "gen0355");
+        let r = s.intersect_with_plane(&k, &d, &pl, &od, tol).unwrap();
+        let n = pl.position().z_axis();
+        let e = s.extrusion_vector();
+        let m = n.cross(e) / e.length();
+        let gen = s.gen_curve().unwrap();
+        assert!(!s.swap_uv());
+        // a polyline: its extremes across the sweep are at its control points
+        let net: Vec<f64> = net_3d(&k, gen, d.u_interval()).iter().map(|p| m.dot(*p)).collect();
+        let (lo, hi) = net.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+        // the hull bounds are attained: both are values of the generator at its
+        // breakpoints, so they are its exact extremes
+        let ivl = d.u_interval();
+        let at: Vec<f64> = (0..=4)
+            .map(|i| m.dot(gen.evaluate(&k, ivl.min() + ivl.length() * f64::from(i) / 4.0, 0, true, true).unwrap()[0]))
+            .collect();
+        for x in [lo, hi] {
+            assert!(at.iter().any(|y| (x - y).abs() <= 1e-12 * (1.0 + x.abs())), "{x} in {at:?}");
+        }
+        // (the strip's ends, as measured in review)
+        assert!((lo - 1.3668).abs() < 1e-4 && (hi - 2.9180).abs() < 1e-4, "{lo} {hi}");
+        let mut long = Vec::new();
+        for c in &r.curves_3d {
+            let ivl = c.natural_interval();
+            let a = c.evaluate(&k, ivl.min(), 0, true, true).unwrap()[0];
+            let b = c.evaluate(&k, ivl.max(), 0, true, true).unwrap()[0];
+            if (b - a).length() > 10.0 {
+                assert!((m.dot(a) - m.dot(b)).abs() <= 1e-9 * (1.0 + a.max_dimension()));
+                long.push(m.dot(a));
+            }
+        }
+        long.sort_by(f64::total_cmp);
+        assert_eq!(long.len(), 2, "{long:?}");
+        assert!((long[0] - lo).abs() <= 1e-9 * (1.0 + lo.abs()), "{long:?} vs {lo}");
+        assert!((long[1] - hi).abs() <= 1e-9 * (1.0 + hi.abs()), "{long:?} vs {hi}");
+    }
+
+    /// Rows outside both certificates keep upstream's answer (`needs_more`, no curve).
+    #[test]
+    fn rows_beyond_the_certificates_decline() {
+        for name in DECLINED_ROWS {
+            let k = Kernel::default();
+            let (s, d, pl, od, tol) = coincident_plane_case(&k, name);
+            let r = s.intersect_with_plane(&k, &d, &pl, &od, tol).unwrap();
+            assert!(r.needs_more_intersections, "{name}");
+            assert!(r.curves_3d.is_empty(), "{name}");
         }
     }
 }

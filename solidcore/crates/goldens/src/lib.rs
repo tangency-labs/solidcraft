@@ -37,6 +37,7 @@ pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
 pub mod step;
+pub(crate) mod tolsub;
 pub mod util;
 
 pub use case::{Case, CaseContext, CaseSource};

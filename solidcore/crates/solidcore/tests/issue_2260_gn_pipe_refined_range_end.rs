@@ -47,7 +47,6 @@ use solidcore::Kernel;
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
     "boolean_vertex_by_best_crossing",
-    "box_face_failures_propagate",
     "bspline_trim_preserves_uv_spans",
     "classify_edge_interval",
     "corner_patch_face_side_twist",
@@ -63,9 +62,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_overlapping_bands",
-    "fillet_statuses_pass_on",
     "fillet_trace_reaches_rails",
-    "fillet_trim_status",
     "fillet_variable_span_follows_fillet",
     "found_torus_sphere_keep_tested_nurb",
     "geometric_g2_continuity",
@@ -82,12 +79,9 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "revolve_analytic_profile_faces",
     "shell_edges_on_analytics_exact",
     "simple_coincidence_crossing_is_point",
-    "ssi_low_angle_start_on_probation",
     "ssi_proto_topology_statuses_pass_on",
     "ssi_tangent_curve_tracer",
-    "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
-    "sweep_statuses_pass_on",
     "uv_trim_corner_end_points_only",
 ];
 
