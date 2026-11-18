@@ -415,7 +415,7 @@ fn edge_circle(b: &ModelBody, index: usize, pts: &[Vec3]) -> Option<(Vec3, Vec3)
 }
 
 /// The most edge names a vertex reference keeps.
-const MAX_VERTEX_EDGES: usize = 16;
+pub(crate) const MAX_VERTEX_EDGES: usize = 16;
 
 /// Where the edges named `names` meet: the end every one of them has, nearest `at` (two edges
 /// between the same two vertices share both). `None` when an edge is gone or they share no end.
@@ -447,17 +447,32 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
         return None;
     }
     let ends: Vec<[Vec3; 2]> = found.into_iter().map(|(_, _, ends)| ends).collect();
-    let (first, rest) = ends.split_first()?;
-    let tol = |p: Vec3| 1e-6 * (1.0 + p.len());
-    first
-        .iter()
-        .copied()
-        .filter(|p| p.is_finite() && rest.iter().all(|e| e.iter().any(|q| q.dist(*p) <= tol(*p))))
-        .min_by(|p, q| p.dist(at).total_cmp(&q.dist(at)))
+    shared_ends(&ends).into_iter().min_by(|p, q| p.dist(at).total_cmp(&q.dist(at)))
+}
+
+/// How near two points of a body are the same point: a millionth of their distance from the
+/// origin, and at least a millionth of a millimetre.
+pub(crate) fn point_tolerance(p: Vec3) -> f64 {
+    1e-6 * (1.0 + p.len())
+}
+
+/// Where edges meet: the ends in `ends[0]` that every other list in `ends` has too (to
+/// [`point_tolerance`]), each once. Empty when they share none.
+pub(crate) fn shared_ends<E: AsRef<[Vec3]>>(ends: &[E]) -> Vec<Vec3> {
+    let tol = point_tolerance;
+    let Some((first, rest)) = ends.split_first() else { return Vec::new() };
+    let mut shared: Vec<Vec3> = Vec::new();
+    for p in first.as_ref().iter().copied() {
+        let everywhere = rest.iter().all(|e| e.as_ref().iter().any(|q| q.dist(p) <= tol(p)));
+        if p.is_finite() && everywhere && !shared.iter().any(|q| q.dist(p) <= tol(p)) {
+            shared.push(p);
+        }
+    }
+    shared
 }
 
 /// A polyline that is straight: its line.
-fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
+pub(crate) fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
     let (a, b) = (*pts.first()?, *pts.last()?);
     let d = (b - a).normalized()?;
     let len = (b - a).len();
@@ -465,7 +480,7 @@ fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
 }
 
 /// A polyline on a circle: (centre, unit normal, radius).
-fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
+pub(crate) fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
     let n = pts.len();
     if n < 4 {
         return None;

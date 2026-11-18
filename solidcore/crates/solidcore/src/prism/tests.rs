@@ -1420,6 +1420,28 @@ fn a_region_reaches_along_a_direction_as_far_as_its_outer_loop() {
     assert_eq!(Region2::default().extent_along(x, 1e-9), None);
 }
 
+#[test]
+fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
+    let sweep = super::profile::counterclockwise_sweep;
+    let center = Point2::new(0.0, 0.0);
+    let x = Point2::new(1.0, 0.0);
+    let y = Point2::new(0.0, 1.0);
+    assert_eq!(sweep(center, x, y), Some(FRAC_PI_2));
+    assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
+    assert_eq!(sweep(center, x, x), Some(0.0));
+    for delta in [0.5e-12_f64, 1e-12, 2e-12] {
+        let end = Point2::new(delta.cos(), delta.sin());
+        assert_eq!(sweep(center, x, end), Some(delta));
+        let start = Point2::new(-1.0, delta / 2.0);
+        let end = Point2::new(-1.0, -delta / 2.0);
+        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        assert_eq!(sweep(center, start, end), Some(expected));
+        assert!(expected > 0.0 && expected < 3e-12);
+    }
+    assert_eq!(sweep(center, center, x), None);
+    assert_eq!(sweep(center, x, Point2::new(f64::NAN, 0.0)), None);
+}
+
 mod recognition {
     use super::*;
     use crate::geom::certified::{next_down, next_up};

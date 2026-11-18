@@ -585,7 +585,9 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        active_sheet_sketch: None,
         pending_moves: Default::default(),
+        part: None,
         visibility: Default::default(),
         section: None,
     };
@@ -609,6 +611,11 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
     let gone = UndoMark { depth: 3, top: Some(Box::new(snap(&doc(8)))) };
     assert_eq!(merge_undo(&mut undo, &doc(9), &gone, "Agent"), 0);
+    assert_eq!(undo.len(), 5);
+    // A drawing's step among the model's: each part keeps its own steps.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    undo[3].part = Some(7);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
     assert_eq!(undo.len(), 5);
     // A turn that made no step leaves the user's own last step alone, though a section step
     // keeps the design it began with.

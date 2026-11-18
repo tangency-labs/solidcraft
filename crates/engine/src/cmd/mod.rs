@@ -39,17 +39,38 @@ mod construct;
 mod construct_auto;
 mod delete;
 pub(crate) mod diagnostics;
+mod drawing;
+mod drawing_balloon;
+mod drawing_check;
+mod drawing_dimension;
+mod drawing_export;
+mod drawing_fill;
+mod drawing_image;
+mod drawing_model_dimensions;
+mod drawing_note;
+mod drawing_revision;
+mod drawing_scene;
+mod drawing_sheet;
+mod drawing_sketch;
+mod drawing_symbol;
+mod drawing_table;
+mod drawing_ui;
+mod drawing_view;
 mod edit;
 mod face;
 mod features;
 mod features_more;
 mod join_pieces;
 mod tab_slot;
+pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
 pub(crate) use component::follow_expressed_moves;
+pub(crate) use component::{path_ids, refuse_filled_virtual};
+pub(crate) use config::put_row;
 pub use construct::picked_plane_refs;
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
 pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
 pub use design_link::{LinkProblem, LinkState};
+pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
@@ -134,7 +155,7 @@ mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
     DxfCurves, DxfText, FlangeType, ThenStep, bend_table_format, dxf_curves, dxf_layers, dxf_note_height, dxf_text, flange_edge, flange_edge_list,
-    flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points, sheet_rule_name, then_list,
+    flange_position, flange_type, flat_reply, fold_points, fold_position, perforation_pattern, sheet_points, sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
@@ -182,6 +203,20 @@ pub type LiveRun = fn(&mut Session, &Value) -> Result<(Value, Option<crate::Live
 pub type Enabled = fn(&Session) -> std::result::Result<(), String>;
 pub type SchemaFn = fn() -> schemars::Schema;
 
+/// The part of the design a command works on (#3890): the model (most commands), the open
+/// drawing, or either (files, undo, selection, diagnostics, choosing a drawing).
+/// [`CommandSpec::allowed`] checks it before the command's own `enabled`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Model,
+    Drawing,
+    /// A shared sketch tool: model or the explicitly active sheet sketch.
+    Sketch,
+    Any,
+    /// Either, and what it changes is a step of the part open: a delete of what is selected.
+    Open,
+}
+
 pub struct CommandSpec {
     pub id: &'static str,
     pub label: &'static str,
@@ -212,6 +247,8 @@ pub struct CommandSpec {
     pub contract: Option<&'static dyn crate::schema::Contract>,
     /// The JSON Schema of a successful result; `None` until described.
     pub output: Option<SchemaFn>,
+    /// The part of the design it works on: the model unless it says otherwise.
+    pub part: Part,
 }
 
 impl CommandSpec {
@@ -233,6 +270,7 @@ impl CommandSpec {
             planned: None,
             contract: None,
             output: None,
+            part: Part::Model,
         }
     }
     /// Not built yet; `issue` tracks building it.
@@ -290,10 +328,45 @@ impl CommandSpec {
         self.undoable = false;
         self
     }
-    /// Run inside another command: when it is enabled, its `run` (the caller's command owns the
+    /// Works with a drawing open or with none.
+    pub const fn any_part(mut self) -> Self {
+        self.part = Part::Any;
+        self
+    }
+    /// Works with a drawing open or with none, and its undo step belongs to whichever is open.
+    pub const fn open_part(mut self) -> Self {
+        self.part = Part::Open;
+        self
+    }
+    /// Works on the open drawing.
+    pub const fn in_drawing(mut self) -> Self {
+        self.part = Part::Drawing;
+        self
+    }
+    /// Uses the shared sketch tool on its active model or explicit sheet receiver.
+    pub const fn in_sketch_part(mut self) -> Self {
+        self.part = Part::Sketch;
+        self
+    }
+    /// Whether the command can run in `s` now: on the part open, and enabled. The one check
+    /// running a command, running it inside another and listing it make.
+    pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
+        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+            return Err("finish or cancel the sheet sketch before switching drawings".into());
+        }
+        match (self.part, s.open_drawing.is_some()) {
+            (Part::Model, true) => Err("a drawing is open: close it to change the model (drawing.close)".into()),
+            (Part::Drawing, false) => Err("open a drawing first (drawing.open, or drawing.create)".into()),
+            (Part::Sketch, true) if !s.active_sheet_sketch.as_ref().is_some_and(|entry| Some(entry.drawing) == s.open_drawing) => {
+                Err("a drawing is open: enter a sheet sketch first (drawing.sketch.create or drawing.sketch.edit)".into())
+            }
+            _ => (self.enabled)(s),
+        }
+    }
+    /// Run inside another command: when it is allowed, its `run` (the caller's command owns the
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
-        (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
+        self.allowed(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
         let r = (self.run)(s, p);
         // A parameter error that did not name the command names it here (see `Session::execute`).
         match r {
@@ -305,10 +378,10 @@ impl CommandSpec {
     /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
     /// the message can tell it from a failure of the command itself.
     pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
-        (self.enabled)(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
+        self.allowed(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
-        let e = (self.enabled)(s);
+        let e = self.allowed(s);
         CommandInfo {
             id: self.id,
             label: self.label,
@@ -344,7 +417,11 @@ pub fn always(_: &Session) -> std::result::Result<(), String> {
 }
 
 pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
-    if s.active_sketch.is_some() { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
+    let active = match s.open_drawing {
+        Some(drawing) => s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.drawing == drawing),
+        None => s.active_sketch.is_some(),
+    };
+    if active { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
 }
 
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
@@ -426,8 +503,25 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(tab_views::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
+    v.extend(drawing::COMMANDS.iter());
+    v.extend(drawing_balloon::COMMANDS.iter());
+    v.extend(drawing_check::COMMANDS.iter());
+    v.extend(drawing_image::COMMANDS.iter());
+    v.extend(drawing_note::COMMANDS.iter());
+    v.extend(drawing_symbol::COMMANDS.iter());
+    v.extend(drawing_dimension::COMMANDS.iter());
+    v.extend(drawing_model_dimensions::COMMANDS.iter());
+    v.extend(drawing_export::COMMANDS.iter());
+    v.extend(drawing_fill::COMMANDS.iter());
+    v.extend(drawing_revision::COMMANDS.iter());
+    v.extend(drawing_table::COMMANDS.iter());
+    v.extend(drawing_scene::COMMANDS.iter());
+    v.extend(drawing_sheet::COMMANDS.iter());
+    v.extend(drawing_sketch::COMMANDS.iter());
+    v.extend(drawing_view::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
+    v.extend(drawing_ui::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
     v

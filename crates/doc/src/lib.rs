@@ -10,6 +10,7 @@ pub mod appearance_pack;
 mod assembly;
 mod body_transfer;
 mod body_transfer_sheet;
+pub mod bom;
 mod browser_tree;
 pub mod newer_file;
 pub mod pbr_appearance;
@@ -27,6 +28,7 @@ pub mod display_quality;
 pub mod display_units;
 mod document;
 pub mod drawing;
+pub mod drawing_view;
 pub mod end_cap;
 mod eval;
 pub mod expr;
@@ -95,8 +97,8 @@ pub mod tolerance;
 
 pub use assembly::{
     BomType, ExpressedAt, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence,
-    WorldNames, apply_point, apply_vector, capture_sketch_plane_placement, is_identity, is_placement, map_point_expr, map_vector_expr, mat_inverse,
-    mat_mul, reframe_plane_placements, rigid,
+    WorldNames, apply_point, apply_vector, capture_sketch_plane_placement, is_identity, is_placement, map_plane, map_point_expr, map_vector_expr,
+    mat_inverse, mat_mul, mat_volume_scale, reframe_plane_placements, rigid,
 };
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};

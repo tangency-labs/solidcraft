@@ -126,6 +126,8 @@ const ANSWERED_ON_A_COPY: &[&str] =
 const READ_ON_A_COPY: &[&str] = &[
     "model.mesh",
     "plugin.inspect",
+    // Compiles the package's component to check it: tens of seconds for a large importer.
+    "plugin.check",
     "inspect.measure",
     "document.inspect",
     "inspect.clearance",
@@ -844,6 +846,9 @@ impl SolveApp {
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
+                // After the new geometry is in the live session, including a run that did not
+                // change the document. `accept_computed` does not copy the camera.
+                self.apply_plugin_view(&reply);
                 Ok(reply)
             });
             let result = self.command_completed("plugin.run", result);
@@ -925,6 +930,29 @@ impl SolveApp {
                 }
                 Err(TryRecvError::Empty) => i += 1,
             }
+        }
+    }
+
+    /// Move the camera the way the matching button does, for the last view command the plugin called.
+    fn apply_plugin_view(&mut self, reply: &Value) {
+        let Some(kind) = reply.get("view").and_then(|view| view.get("kind")).and_then(Value::as_str) else { return };
+        match kind {
+            "fit" | "home" => {
+                let id = if kind == "home" { "view.home" } else { "view.fit" };
+                let _ = self.command_completed(id, Ok(json!({})));
+            }
+            "camera" => {
+                let Some(value) = reply.pointer("/view/camera").filter(|value| !value.is_null()) else { return };
+                let Ok(camera) = serde_json::from_value::<solidcraft_viewport::Camera>(value.clone()) else { return };
+                self.session.camera = Some(camera);
+                self.follow_view_request(true);
+            }
+            "navigate" => {
+                if let Some(inner) = reply.pointer("/view/reply").cloned() {
+                    let _ = self.command_completed("view.navigate", Ok(inner));
+                }
+            }
+            _ => {}
         }
     }
 }

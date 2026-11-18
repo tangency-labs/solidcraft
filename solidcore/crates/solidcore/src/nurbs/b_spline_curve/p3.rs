@@ -2897,6 +2897,131 @@ mod tests {
         }
     }
 
+    /// A trim on the boundary of the sphere's domain: a cubic run 3 % of the way down a
+    /// meridian from either pole (v from an end of its range), at mid longitude and on
+    /// either side of the seam, and one along the seam on either side of the domain, clear
+    /// of the poles. Each image is an arc of a great circle of the r 6 ball, so the bound
+    /// clears the radius 3 and does not clear 12.
+    ///
+    /// The top of each range is the knot 1. A piece's range, taken from its power
+    /// coefficients alone, passed that knot by the rounding of the trim's evaluation in
+    /// intervals (1.0000000000000235 for the piece 0 to 0.25 of the trim from the top pole
+    /// at mid longitude, against the 1.0000000000000142 the knot range's slack allows), at
+    /// every halving: no
+    /// piece that touched the top of a range was enclosed, and the trims that end on the top
+    /// pole or lie on the seam's top side did not clear any radius. The range of the span's
+    /// control points, which is exact, holds the piece too.
+    #[test]
+    fn a_trim_on_the_boundary_of_a_sphere_s_domain_clears_the_radius_of_its_image() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let (top, bottom) = (dom.max().y, dom.min().y);
+        let meridian = |u: f64, from: f64, to: f64| {
+            let at = |f: f64| [u, from + f * (to - from)];
+            uv_bezier(&[at(0.0), at(1.0 / 3.0), at(2.0 / 3.0), at(1.0)])
+        };
+        let mut trims = Vec::new();
+        for u in [dom.min().x, dom.min().x + 0.7 * w, dom.max().x] {
+            trims.push((
+                meridian(u, top, top - 0.03 * h),
+                format!("from the top pole at u {u}"),
+            ));
+            trims.push((
+                meridian(u, bottom, bottom + 0.03 * h),
+                format!("from the bottom pole at u {u}"),
+            ));
+        }
+        for u in [dom.min().x, dom.max().x] {
+            trims.push((
+                meridian(u, bottom + 0.2 * h, bottom + 0.7 * h),
+                format!("along the seam at u {u}"),
+            ));
+        }
+        for (trim, what) in &trims {
+            let clears = |tol| radius_clears_on_surface(&k, trim, &surface, 0.0, 1.0, tol);
+            assert!(clears(3.0).unwrap(), "{what}");
+            assert!(!clears(12.0).unwrap(), "{what}");
+        }
+    }
+
+    /// A trim that runs into a sphere's pole off the meridian it ends on, as the trace's
+    /// trim does where its end is moved onto a pole beside the seam: the straight trim from
+    /// the corner of the domain where the seam's top side meets the top pole, `(u, v)` =
+    /// `(u_max - a s, v_max - b s)`. With the longitude `λ` and the angle from the pole `φ`,
+    /// its image `R (sin φ cos λ, sin φ sin λ, cos φ)` arrives at the pole with
+    /// `λ = λ0 + α φ + O(φ²)`, where its curvature is `sqrt(1 + 4 α²) / R` (the normal
+    /// curvature `1 / R` and the geodesic curvature `2 α / R`: at `φ = 0` the image's first
+    /// derivative in `φ` is `R e(λ0)` and its second is `2 R α e'(λ0) - R z`). The sphere's
+    /// net is four quarter turns in u and two in v, rational quadratics with the weights
+    /// 1, `1/√2`, 1, whose angle runs at `√2` per quarter at their ends: `dλ/du = 4√2 / w`
+    /// and `dφ/dv = 2√2 / h` at that corner, so `α = 2 (a / w) / (b / h)`.
+    ///
+    /// For `α = 1` (a radius of `6/√5`, 2.68) and `α = 600` over a trim 1.7e-4 long (5.0e-3:
+    /// the shape of the trim of a ball cut 1e-6 off its pole with its seam turned 0.02 rad),
+    /// the bound clears half the radius at the pole over the whole trim and does not clear
+    /// twice it. Away from the pole the image bends less: with `x = α sin φ` the geodesic
+    /// curvature of `λ = λ0 + α φ` is `α cos φ (2 + x²) / (R (1 + x²)^(3/2))`, which falls
+    /// as `φ` grows (ARGUED for the trim here, whose `λ` and `φ` are not linear in `s`; the
+    /// test asserts the verdicts). Neither cleared any radius before the control points'
+    /// range was taken: the piece at the corner was never enclosed.
+    #[test]
+    fn a_trim_into_a_sphere_pole_beside_the_seam_clears_the_radius_of_its_image() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        for (alpha, b) in [(1.0, 0.03), (600.0, 1e-5)] {
+            let a = 0.5 * alpha * b;
+            let at = |s: f64| [dom.max().x - a * w * s, dom.max().y - b * h * s];
+            let trim = uv_bezier(&[at(0.0), at(1.0 / 3.0), at(2.0 / 3.0), at(1.0)]);
+            let radius = 6.0 / (1.0 + 4.0 * alpha * alpha).sqrt();
+            let clears = |tol| radius_clears_on_surface(&k, &trim, &surface, 0.0, 1.0, tol);
+            assert!(clears(0.5 * radius).unwrap(), "α {alpha}: {radius}");
+            assert!(!clears(2.0 * radius).unwrap(), "α {alpha}: {radius}");
+        }
+    }
+
+    /// The sliver certificate on the boundary of the sphere's domain. A cubic with a
+    /// zero-speed start (`P0 = P1`) on a pole or on the seam, running 2 % of the way along
+    /// its meridian: its first 1e-7 of parameter moves 3e-16 in (u, v), a sliver within
+    /// `STRETCH_SLIVER_ULPS ε |P|_max`, and its first 1e-3 moves 3e-8, which is not one.
+    /// The verdicts are the same on the bottom pole, off the boundary, on the top pole and
+    /// on the seam's top side. The last two (v or u at the knot 1) were never certified:
+    /// the sliver's range passed that knot by the rounding of its coefficients, and no
+    /// Jacobian was enclosed.
+    #[test]
+    fn a_sliver_on_the_boundary_of_a_sphere_s_domain_is_certified() {
+        let k = Kernel::default();
+        let (surface, dom) = sphere();
+        let (w, h) = (dom.max().x - dom.min().x, dom.max().y - dom.min().y);
+        let (mid, top, bottom) = (dom.min().x + 0.7 * w, dom.max().y, dom.min().y);
+        for (what, u, v, dv) in [
+            ("on the bottom pole", mid, bottom, 0.01 * h),
+            ("off the boundary", mid, bottom + 0.6 * h, 0.01 * h),
+            ("on the top pole", mid, top, -0.01 * h),
+            (
+                "on the top pole beside the seam",
+                dom.max().x,
+                top,
+                -0.01 * h,
+            ),
+            (
+                "on the seam's top side",
+                dom.max().x,
+                bottom + 0.6 * h,
+                0.01 * h,
+            ),
+        ] {
+            let pts = [[u, v], [u, v], [u, v + dv], [u, v + 2.0 * dv]];
+            let trim = uv_bezier(&pts);
+            let p_max = pts.iter().fold(0.0_f64, |m, p| m.max(p[0].hypot(p[1])));
+            let length = STRETCH_SLIVER_ULPS * f64::EPSILON * p_max;
+            let sliver = |hi| sliver_within(&k, &trim, &surface, 0.0, hi, length);
+            assert!(sliver(1e-7).unwrap(), "{what}");
+            assert!(!sliver(1e-3).unwrap(), "{what}");
+        }
+    }
+
     /// A real cusp near a pole is still reported: a quadratic trim turning sharply in
     /// (u, v), 1.5 % of the way from the sphere's pole, where the surface is regular. Its
     /// turn, `(-e, h) (0, -h) (e, h)` about its apex with `e = 1e-5` and `h = 2e-3` of the
