@@ -33,7 +33,9 @@
 //! the choice of asking again are `MarkusReichart`'s on #2926). Analytic faces are left as
 //! they were.
 
-use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+use crate::blend::fillet_section::certificate::{
+    curve_derivs_over, curve_derivs_over_about, NurbsCurve,
+};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
 use crate::curve::curve::CurveKind;
@@ -1833,16 +1835,49 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
 }
 
 /// The edge point and tangent over the parameters `s`, each with its rate (from the
-/// curve's derivatives to order 2 enclosed over `s`, [`curve_derivs_over`]); `None` where
-/// no piece of the curve covers `s`.
+/// curve's derivatives to order 2 enclosed over `s`, [`curve_derivs_over`], about a point
+/// near `s`, [`curve_derivs_over_about`]); `None` where no piece of the curve covers `s`.
+///
+/// Over a range the derivatives are enclosed about the curve's point at its middle, which
+/// is added back to the point: a rational edge's enclosures are of the size of the edge
+/// near `s`, not of its distance from the origin, which the quotient's weight terms
+/// would otherwise carry into every derivative.
 fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
-    let ders = match curve_derivs_over(cn, s, 2, None) {
-        Ok(d) => d,
-        Err(e @ SolidError::Cancelled { .. }) => return Err(e),
-        Err(_) => return Ok(None),
+    let enclosed = |found: Result<Vec<V3<Ivl>>>| match found {
+        Ok(d) => Ok(Some(d)),
+        Err(e @ SolidError::Cancelled { .. }) => Err(e),
+        Err(_) => Ok(None),
     };
-    let (Some(&d0), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+    // at a single parameter the enclosures are the rounding's only
+    if s.lo >= s.hi {
+        let Some(ders) = enclosed(curve_derivs_over(cn, s, 2, None))? else {
+            return Ok(None);
+        };
+        let (Some(&d0), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+            return Ok(None);
+        };
+        return Ok(Some((Dv::of(d0, d1), Dv::of(d1, d2))));
+    }
+    let Some(middle) = enclosed(curve_derivs_over(cn, Ivl::from(s.mid()), 0, None))? else {
         return Ok(None);
+    };
+    let Some(c) = middle.first().map(|p| [p.x.mid(), p.y.mid(), p.z.mid()]) else {
+        return Ok(None);
+    };
+    if !c.iter().all(|x| x.is_finite()) {
+        return Ok(None);
+    }
+    let Some(ders) = enclosed(curve_derivs_over_about(cn, s, 2, None, c))? else {
+        return Ok(None);
+    };
+    let [cx, cy, cz] = c;
+    let (Some(&moved), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+        return Ok(None);
+    };
+    let d0 = V3 {
+        x: moved.x + Ivl::from(cx),
+        y: moved.y + Ivl::from(cy),
+        z: moved.z + Ivl::from(cz),
     };
     Ok(Some((Dv::of(d0, d1), Dv::of(d1, d2))))
 }
@@ -4593,6 +4628,57 @@ mod tests {
     #[test]
     fn a_half_spherical_bored_slab_drafts_five_degrees_to_its_closed_form_volume() {
         spherical_bored_slab_draft_volume(true, 5.0);
+    }
+
+    /// A 1000 x 200 x 1 plate about the origin less a blind hole r 0.2, 0.4 deep, at
+    /// (`x`, 0), its top face offset 0.4 (the stress corpus's S0475): the plate grows to
+    /// 1.4 and the hole to 0.8 deep, `V = 1000 · 200 · 1.4 − π 0.2² 0.8`, with the faces,
+    /// edges and vertices it had (the box's 6, 12 and 8, the hole's wall and floor, its
+    /// two rims and seam and their two vertices). The reach of the top's rim is bounded
+    /// from the rim's enclosures over pieces of it, a rational circle 0.2 across hundreds
+    /// from the origin.
+    fn plate_with_hole_offset(x: f64) {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::mass::integrator::properties::brep_volume_default;
+        use crate::offset::offset_faces::OffsetFacesExecutive;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::surface::plane::Plane;
+        let mut k = Kernel::default();
+        let plate =
+            create_box(&mut k, Point3::new(-500.0, -100.0, 0.0), 1000.0, 200.0, 1.0).unwrap();
+        let hole = create_cylinder(&mut k, Point3::new(x, 0.0, 0.6), 0.2, 1.4).unwrap();
+        let mut b = boolean_difference(&mut k, plate, hole).unwrap();
+        let top: Vec<FaceId> = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| {
+                let face = b.face(f).unwrap();
+                let s = face.surface.as_ref().unwrap();
+                s.is_kind_of(Plane::TYPE).unwrap()
+                    && (s.evaluate_point(&k, face.uv_domain.mid()).unwrap().z - 1.0).abs() < 1e-9
+            })
+            .collect();
+        assert_eq!(top.len(), 1);
+        let mut ex = OffsetFacesExecutive::new();
+        let made = ex.offset_faces(&mut k, &mut b, &top, 0.4);
+        assert!(made.is_ok(), "x {x}: {made:?}");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        assert_eq!(bp1::faces(&b, None).unwrap().len(), 8, "x {x}");
+        assert_eq!(b.edges().ids().count(), 15, "x {x}");
+        assert_eq!(bp1::vertices(&b, None).unwrap().len(), 10, "x {x}");
+        let volume = brep_volume_default(&k, &mut b, 1e-7).unwrap();
+        let expected = 1000.0 * 200.0 * 1.4 - core::f64::consts::PI * 0.04 * 0.8;
+        assert!(
+            (volume - expected).abs() < 1e-6,
+            "x {x}: {volume} against {expected}"
+        );
+    }
+
+    #[test]
+    fn a_plate_top_offset_beside_a_small_hole_far_from_the_origin_moves() {
+        for x in [-200.0, -300.0, -490.0] {
+            plate_with_hole_offset(x);
+        }
     }
 
     #[test]

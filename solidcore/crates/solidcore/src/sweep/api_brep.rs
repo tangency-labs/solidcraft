@@ -964,8 +964,7 @@ pub fn non_manifold_sweep(
         .unitize()
         .map_err(|_| SolidError::invalid_input(OP_NON_MANIFOLD, "zero sweep direction"))?
         * sweep_dist;
-    let mut translation = TranslationalSweepGeometry::new(sweep_vec);
-    translation.base.statuses_pass_on = k.fixes.sweep_statuses_pass_on;
+    let translation = TranslationalSweepGeometry::new(sweep_vec);
     let geometry = SweepGeometry::Translation(translation);
     non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
 }
@@ -999,8 +998,7 @@ pub fn non_manifold_rotational_sweep(
             "selection entry not live topology of the B-rep",
         ));
     }
-    let mut rotation = RotationalSweepGeometry::new(base_pt, axis, angle_deg, ZONE_TOL_3D);
-    rotation.base.statuses_pass_on = k.fixes.sweep_statuses_pass_on;
+    let rotation = RotationalSweepGeometry::new(base_pt, axis, angle_deg, ZONE_TOL_3D);
     let geometry = SweepGeometry::Rotation(rotation);
     non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
 }
@@ -1129,21 +1127,39 @@ mod tests {
         let ok = [Some(&c), Some(&l)];
         let z = Vec3::new(0.0, 0.0, 1.0);
         let o = Point3::new(0.0, 0.0, 0.0);
-        // the copies are made and the sweep runs (topology.brep_p4 is ported)
-        let b = create_linear_sweep(&mut k, &ok, z, 10.0, true).expect("linear sweep");
-        assert_eq!(
-            (
-                b.face_list().len(),
-                b.edge_list().len(),
-                b.vertex_list().len()
-            ),
-            (2, 7, 6)
-        );
-        // no profile curves: a successful empty sweep, as upstream
-        let b = create_linear_sweep(&mut k, &[], z, 10.0, true).expect("empty sweep");
-        assert!(b.face_list().is_empty());
-        assert!(b.edge_list().is_empty());
-        assert!(b.vertex_list().is_empty());
+        // the copies are made and the sweep runs (topology.brep_p4 is ported). The circle and
+        // the line bound no planar region, so the start cap cannot be made: upstream went on
+        // to the two open walls, the fork returns the cap's failure (c8f6a31, the curve
+        // `CreateLinearSweep`'s `SER( pBrep->CreatePlanarFacesWith3DCurves(m_pRegion,
+        // cr3DCurves, dTol, sStartFaces) )`). The capped body asked for does not exist: the
+        // line is open (its ends differ) and lies inside the circle, so its swept wall is a
+        // fin with a free edge inside the cylinder that no cap closes off. Main returned the
+        // two uncapped walls (2, 7, 6) as a success.
+        // (both centred on the origin: the circle's radius is its start's distance from it)
+        let tolerance = crate::topology::brep::p3::new_brep(
+            &mut k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .expect("brep")
+        .tolerance();
+        let radius = c
+            .evaluate_point(&k, c.natural_interval().min())
+            .expect("circle start")
+            .length();
+        let ends = l.natural_interval();
+        let start = l.evaluate_point(&k, ends.min()).expect("start");
+        let end = l.evaluate_point(&k, ends.max()).expect("end");
+        assert!((end - start).length() > tolerance, "an open line");
+        for p in [start, end] {
+            assert!(p.length() < radius - tolerance, "{p:?} inside the circle");
+        }
+        let e = create_linear_sweep(&mut k, &ok, z, 10.0, true).expect_err("no cap");
+        assert_eq!(e.sm_status(), Some(1001), "{e:?}");
+        // no profile curves and caps: no cap can be made either; upstream returned a
+        // successful empty sweep, the fork returns the cap's failure (the same `SER`)
+        let e = create_linear_sweep(&mut k, &[], z, 10.0, true).expect_err("empty sweep");
+        assert_eq!(e.sm_status(), Some(1001), "{e:?}");
         assert!(invalid(&create_linear_sweep(
             &mut k,
             &[Some(&c), None],
@@ -1266,11 +1282,12 @@ mod tests {
         assert!(invalid(&create_pipe_sweep(&mut k, 1.0, None, true)));
         assert!(invalid(&create_pipe_sweep(&mut k, 0.0, Some(&p), true)));
         assert!(invalid(&create_pipe_sweep(&mut k, -1.0, Some(&p), false)));
-        // a NaN radius passes the API's validation; upstream returns an empty B-rep
-        let b = create_pipe_sweep(&mut k, f64::NAN, Some(&p), false).expect("nan pipe");
-        assert!(b.face_list().is_empty());
-        assert!(b.edge_list().is_empty());
-        assert!(b.vertex_list().is_empty());
+        // a NaN radius passes the API's validation, and the profile circle refuses it:
+        // upstream swept the missing circle to an empty B-rep, the fork returns the
+        // circle's failure (c8f6a31, `CreatePipeSweep`'s `SER( SmCircle::CreateCanonical(
+        // *pContext, sPlace, dPipeRadius, pCircle, &sDomain ) )`)
+        let e = create_pipe_sweep(&mut k, f64::NAN, Some(&p), false).expect_err("nan pipe");
+        assert_eq!(e.sm_status(), Some(1001), "{e:?}");
         let b = create_pipe_sweep(&mut k, 1.0, Some(&p), false).expect("pipe");
         assert_eq!(b.face_list().len(), 1);
         let capped = create_pipe_sweep(&mut k, 1.0, Some(&p), true).expect("capped pipe");

@@ -465,6 +465,9 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
 /// `sketch.constraint.coincident` on 3D refs: two drawn 3D points, or a 3D point and a drawn 3D
 /// line (the point on the line). `None` when neither operand is 3D, for the planar command.
 pub(super) fn coincident_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<Value>> {
+    if s.open_drawing.is_some() {
+        return Ok(None);
+    }
     let a = p.get("a").and_then(Value::as_str).map(str::to_string);
     let b = p.get("b").and_then(Value::as_str).map(str::to_string);
     let (Some(a), Some(b)) = (a, b) else { return Ok(None) };
@@ -499,6 +502,9 @@ fn is_3d(sk: &solidcraft_sketch::Sketch, r: &str) -> bool {
 /// `sketch.constraint.fix` on 3D refs: each 3D point (or every fit point of a drawn 3D curve)
 /// held where it is, or released. `None` when no ref is 3D, for the planar command.
 pub(super) fn fix_3d(s: &mut Session, p: &Value, cmd: &str, refs: &[String], want: Option<bool>) -> Result<Option<Value>> {
+    if s.open_drawing.is_some() {
+        return Ok(None);
+    }
     let id = sketch_store::target(s, p, cmd)?;
     let sk = sketch_store::read(&s.doc, id)?;
     let three: Vec<bool> = refs.iter().map(|r| is_3d(sk, r)).collect();
@@ -637,6 +643,9 @@ pub(super) fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::
 /// parallel: or a line and an origin plane, `xy`, `yz` or `xz`). `None` when neither operand is
 /// 3D, for the planar command.
 pub(super) fn relation_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<Constrained>> {
+    if s.open_drawing.is_some() {
+        return Ok(None);
+    }
     let a = p.get("a").and_then(Value::as_str).map(str::to_string);
     let b = p.get("b").and_then(Value::as_str).map(str::to_string);
     let (Some(a), Some(b)) = (a, b) else { return Ok(None) };
@@ -707,6 +716,9 @@ fn on_plane(s: &mut Session, p: &Value) -> Result<Value> {
 /// (or along X, Y or Z only), the angle between two drawn 3D lines, or a drawn 3D arc's radius.
 /// `None` when no entity is 3D, for the planar command.
 pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<DimensionResult>> {
+    if s.open_drawing.is_some() {
+        return Ok(None);
+    }
     let ents: Vec<String> =
         p.get("entities").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect();
     // A sketch that cannot be found is the planar command's to report, in its own order.
@@ -913,6 +925,9 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
 /// again, with a parameter of the value it measures; one the other 3D constraints already
 /// determine stays driven. `None` when `cid` is not a 3D constraint, for the planar command.
 pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str, want: Option<bool>) -> Result<Option<Value>> {
+    if s.open_drawing.is_some() {
+        return Ok(None);
+    }
     let id = sketch_store::target(s, p, cmd)?;
     let sk = sketch_store::read(&s.doc, id)?;
     let Some(c) = sk.wire_constraints.iter().find(|c| c.id == cid).cloned() else { return Ok(None) };

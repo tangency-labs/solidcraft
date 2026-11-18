@@ -399,15 +399,32 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
+            let drawing = crate::drawing_workspace::active(app);
             let mut v = vec![
-                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering { "" } else { "current" }),
+                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing {
+                    ""
+                } else {
+                    "current"
+                }),
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
                     .on(crate::render_workspace::entry_open(app)),
             ];
-            for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", ""), ("Drawing", "ws_drawing")] {
+            for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", "")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
+            }
+            // Drawings are a preview, turned on in Preferences > Design; off, Drawing stays
+            // "coming later" as before.
+            if crate::drawing_workspace::enabled(app) {
+                v.push(
+                    act("ui.workspace.drawing", "Drawing", "ws_drawing")
+                        .with(json!({"workspace":"drawing"}))
+                        .key(if drawing { "current" } else { "UI preview" })
+                        .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
+                );
+            } else {
+                v.push(act("ui.workspace", "Drawing", "ws_drawing").key("coming later").on(false));
             }
             v
         }
@@ -1027,6 +1044,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         entries.insert(0, Item::heading("Shared child: edits affect all copies of its parent"));
     }
     let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
+    let selected_paths = crate::browser::selected_occurrence_paths(app, path);
+    let show_selected = selected_paths.iter().all(|path| app.session.occurrence_hidden(path));
     // The component's menu asks its first placement; this row may be another one.
     let movable = !placement.grounded && app.session.held_by_rigid_group(placement.occurrence).is_none();
     each_item(&mut entries, &mut |item: &mut Item| match item.id.as_str() {
@@ -1057,7 +1076,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         "ui.delete" => item.params = Some(json!({"occurrences": [placement.occurrence]})),
         "ui.hide" | "ui.show" => {
             item.id = "browser.visibility".into();
-            item.params = Some(json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
+            item.params = Some(json!({"visible": show_selected, "paths": selected_paths}));
             item.enabled = true;
         }
         "ui.isolate" => {
@@ -1134,7 +1153,8 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let occ = doc.occurrence_of(id);
     let active = app.session.active_component == id;
     let bodies = component_bodies(app, id);
-    let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+    let visibility_bodies = crate::browser::selected_component_bodies(app, id);
+    let hidden = !visibility_bodies.is_empty() && visibility_bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let names = json!(bodies);
     // The clipboard: Copy takes the selection (the row right-clicked); Paste puts what was copied
     // inside this component (never a component inside itself or what it holds); Paste New pastes
@@ -1239,7 +1259,12 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
     v.push(Item::sep());
-    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(
+        act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
+            .key("V")
+            .with(json!({ "bodies": visibility_bodies }))
+            .on(!visibility_bodies.is_empty()),
+    );
     if bodies_hidden(app) {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }
@@ -1953,11 +1978,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
-        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
-            if let Some(workspace) = p.get("workspace").and_then(Value::as_str)
-                && let Err(e) = crate::render_workspace::enter(app, workspace == "render")
-            {
-                app.set_status(e, true);
+        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
+            let result = p.get("workspace").and_then(Value::as_str).map_or(Ok(()), |workspace| crate::workspace::enter(app, workspace));
+            if let Err(error) = result {
+                app.set_status(error, true);
             }
         }
         "ui.findJoint" => {

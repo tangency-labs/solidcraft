@@ -941,7 +941,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
-        effect: Effect::Edit,
+        effect: Effect::Open,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
