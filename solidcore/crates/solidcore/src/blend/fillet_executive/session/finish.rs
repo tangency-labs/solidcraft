@@ -855,8 +855,8 @@ impl FilletSession<'_> {
     fn raise_fillet_tolerances_to_measured_gaps(&mut self, k: &Kernel) -> Result<()> {
         let faces_before = std::mem::take(&mut self.objects.faces_before);
         let target = &mut *self.objects.target;
-        let mut edges = std::collections::BTreeSet::new();
-        let mut vertices = std::collections::BTreeSet::new();
+        let mut edges = BTreeSet::new();
+        let mut vertices = BTreeSet::new();
         for f in p1::faces(target, None)? {
             if faces_before.contains(&f) {
                 continue;
