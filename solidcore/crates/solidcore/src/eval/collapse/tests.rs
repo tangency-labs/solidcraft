@@ -1244,7 +1244,7 @@ fn a_rational_net_whose_weight_products_underflow_or_overflow_is_refused() {
         let scaled = pcurve_onto_knots(&patch(scale), &past_u(), 1.0);
         assert!(
             matches!(scaled, Err(EvalError::Unevaluable(_))),
-            "{scale}: {scaled:?}"
+            "{scale:e}: {scaled:?}"
         );
     }
 }
