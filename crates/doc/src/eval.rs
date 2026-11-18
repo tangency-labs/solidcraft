@@ -9890,6 +9890,21 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                     _ => *p = hit.pick_point(input, *p),
                 }
             }
+            // A deleted face is picked by its point as well: when its name is gone (a design saved by
+            // an older version names merged faces differently), the face is the one face of the same
+            // body that holds the point. With none, or with several (the point on an edge they share),
+            // nothing is deleted: the feature asks for the face to be picked again (#14206).
+            None if matches!(f.kind, FeatureKind::DeleteFace { .. }) => {
+                let mut holders = state
+                    .bodies
+                    .iter()
+                    .filter(|b| !b.body.is_mesh() && f.kind.face_body().is_none_or(|name| b.name == name))
+                    .flat_map(|b| crate::appearance::faces_within(b, *p, b.body.size() * 1e-3 + 1e-6));
+                if holders.next().is_none() || holders.next().is_some() {
+                    return Err(DocError::reselect(n.as_str()));
+                }
+                notes.push(format!("face `{n}` is no longer named so: the one face at [{}, {}, {}] is used", p.x, p.y, p.z));
+            }
             None => return Err(DocError::reselect(n.as_str())),
         }
     }
