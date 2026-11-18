@@ -1,9 +1,9 @@
 //! The view strip's per-window layout menu. The app bar owns the popup and its dismissal.
 
+use crate::BackingTooltipExt as _;
 use crate::app_bar::{TabMenuRow, TabStrip, layout_name, paint_layout_glyph, paint_view_glyph};
 use crate::choice::{Segments, segmented};
 use crate::menu::{Menu, MenuItem};
-use crate::{BackingTooltipExt as _, Button};
 use egui::{Align2, Color32, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 use solidcraft_ui_text::{format as message, tr, tr_label};
@@ -158,7 +158,7 @@ fn view_chip(ui: &mut Ui, view: &LayoutView) {
     let width = (text.size().x + 30.0).min(ui.available_width()).max(24.0);
     let (rect, response) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
     let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_filled(rect, 10, t.chip);
+    painter.rect_filled(rect, 10, t.panel_header);
     let icon = Rect::from_center_size(pos2(rect.left() + 12.0, rect.center().y), vec2(12.0, 12.0));
     paint_view_glyph(&painter, icon, &view.kind, view.accent);
     painter.text(pos2(icon.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, &view.name, font, t.text);
@@ -169,15 +169,19 @@ fn window_block(ui: &mut Ui, data: &LayoutMenu, window: &LayoutWindow) -> Option
     let t = Tokens::get();
     let local = window.id == data.window;
     let title = if local { tr("view_layout.this_window") } else { &window.name };
-    let detail = if local && window.id == 0 { Some(tr("view_layout.main")) } else { window.display.as_deref() };
+    let detail = if local { Some(window.name.as_str()) } else { window.display.as_deref() };
     let mut picked = None;
     ui.push_id(window.id, |ui| {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             let (icon, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-            paint_view_glyph(ui.painter(), icon, "window", t.text_dim);
-            let title_width = if local { ui.available_width() } else { (ui.available_width() - 145.0).max(80.0) };
-            ui.allocate_ui_with_layout(vec2(title_width, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            paint_view_glyph(ui.painter(), icon, crate::icons::window_icon(local), t.text_dim);
+            let show = tr("view_layout.show");
+            let bring = tr("view_layout.bring");
+            let action_width =
+                crate::icon_label_width(ui, show, None, false) + crate::icon_label_width(ui, bring, None, false) + 3.0 * ui.spacing().item_spacing.x;
+            let title_width = if local { ui.available_width() } else { (ui.available_width() - action_width).max(0.0) };
+            ui.allocate_ui_with_layout(vec2(title_width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(egui::RichText::new(title).font(crate::type_face::semibold(13.0)).color(t.text)).truncate())
                     .backing_on_hover_text(title);
                 if let Some(detail) = detail {
@@ -186,10 +190,10 @@ fn window_block(ui: &mut Ui, data: &LayoutMenu, window: &LayoutWindow) -> Option
             });
             if !local {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add_enabled_ui(window.id != 0, |ui| crate::button(ui, tr("view_layout.bring"), Button::Primary)).inner.clicked() {
+                    if crate::icon_label_action(ui, bring, None, window.id != 0, false).clicked() {
                         picked = Some(format!("win.bring.{}", window.id));
                     }
-                    if crate::button(ui, tr("view_layout.show"), Button::Small).clicked() {
+                    if crate::icon_label_action(ui, show, None, true, false).clicked() {
                         picked = Some(format!("win.focus.{}", window.id));
                     }
                 });
@@ -286,7 +290,9 @@ pub(crate) fn show(ui: &mut Ui, strip: &TabStrip, data: &LayoutMenu, opened: u64
         picked = camera_link(ui, data).or(picked);
     }
     Menu::separator(ui);
-    let detach_row = flags.detach.then(|| flyout_row(ui, "layout.detach", tr("view_layout.detach"), "window", "", Flyout::Detach, &mut open));
+    let detach_row = flags
+        .detach
+        .then(|| flyout_row(ui, "layout.detach", tr("view_layout.detach"), crate::icons::window_icon(false), "", Flyout::Detach, &mut open));
     if action(ui, "layout.reset", tr("view_layout.reset"), "", "", None).clicked() {
         picked = Some("layout.reset".into());
     }

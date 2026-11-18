@@ -833,8 +833,19 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
                         }
                     },
                 );
-                let left = brand_end + 12.0;
+                let mut left = brand_end + 12.0;
                 let right = menu.left() - 6.0;
+                let name = window_name(app, id);
+                let font = crate::ui_kit::type_face::semibold(tokens.font_small);
+                let name = ui.painter().layout_no_wrap(name, font, tokens.app_bar_text);
+                let width = 16.0 + tokens.space_6 + name.size().x;
+                if right - left >= width + 200.0 {
+                    let icon = egui::Rect::from_center_size(egui::pos2(left + 8.0, content.center().y), egui::Vec2::splat(16.0));
+                    crate::ui_kit::icons::paint_ink(ui.painter(), icon, crate::ui_kit::icons::window_icon(true), tokens.app_bar_text);
+                    let at = egui::pos2(icon.right() + tokens.space_6, content.center().y - name.size().y / 2.0);
+                    ui.painter().galley(at, name, tokens.app_bar_text);
+                    left += width + tokens.space_12;
+                }
                 if right > left {
                     documents::tabs(app, ui, rect, left, right);
                 }

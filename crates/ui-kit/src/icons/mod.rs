@@ -92,7 +92,7 @@ pub fn clear_texture_cache(ctx: &egui::Context) {
 #[derive(Default)]
 struct CacheEntries {
     palette: Option<Palette>,
-    textures: HashMap<(&'static str, Look, u32, Finish), TextureHandle>,
+    textures: HashMap<(&'static str, Look, u32, Finish, bool), TextureHandle>,
 }
 
 /// Draw palette-owned icon artwork with an explicit opacity (0 to 1).
@@ -109,6 +109,11 @@ pub fn paint_on(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f
 /// Monochrome flat controls on the application bar use its text token exactly.
 pub fn paint_app_bar(p: &Painter, r: Rect, name: &str, opacity: f32) {
     paint_with_ink(p, r, name, Some(true), opacity, Some(solidcraft_theme::Tokens::get().app_bar_text), Mirror::None);
+}
+
+/// A window icon is relative to the window presenting it.
+pub const fn window_icon(current: bool) -> &'static str {
+    if current { "window_here" } else { "window_other" }
 }
 
 /// Paint a single-colour icon in `ink`.
@@ -176,9 +181,16 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
         entries.palette = palette;
     }
     let map = &mut entries.textures;
-    let key = (resolved.master, look, px, finish);
+    let window_small = matches!(resolved.master, "window_here" | "window_other") && side <= 12.0;
+    let key = (resolved.master, look, px, finish, window_small);
     if let std::collections::hash_map::Entry::Vacant(slot) = map.entry(key) {
-        let Some(doc) = doc_for(resolved.master, px) else { return };
+        // These two masters use their heavier artwork only in tight logical slots.
+        let artwork_size = match resolved.master {
+            "window_here" | "window_other" if side <= 12.0 => 12,
+            "window_here" | "window_other" => 25,
+            _ => px,
+        };
+        let Some(doc) = doc_for(resolved.master, artwork_size) else { return };
         let pm = if finish == Finish::Danger { render_tinted(doc, look, px) } else { render(doc, look, px) };
         let Some(pm) = pm else { return };
         let mut image = egui::ColorImage::from_rgba_premultiplied([px as usize, px as usize], pm.data());
