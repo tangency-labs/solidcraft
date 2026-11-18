@@ -237,6 +237,31 @@ fn a_copy_shown_before_its_parts_other_copies_is_still_drawn_as_an_instance() {
     assert!(repeated_copy(&app, &shown.bodies[0]), "drawn as an instance of its part, as opening counted it");
 }
 
+/// The mesher working ahead of the first frames also works out each body's box, which framing
+/// the view reads for every body once they are all shown: on the window thread, a placed copy's box
+/// moved every point of its part's mesh (a second for a hundred copies of a large assembly).
+#[test]
+fn opening_works_out_each_placed_copys_box_off_the_window_thread() {
+    let mut s = solidcraft_engine::Session::default();
+    let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap()["component"].clone();
+    s.execute("solid.cylinder", &json!({"base":[0,0,0],"radius":5,"height":20})).unwrap();
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    for k in 1..=3 {
+        s.execute("occurrence.copy", &json!({"component":part,"translate":[0,40 * k,0]})).unwrap();
+    }
+    let world = s.world_state().unwrap();
+    assert!(world.bodies.iter().all(|b| !b.mesh_bounds_made()));
+    let repeated = crate::open_meshing::repeated_parts(&world);
+    let q = solidcraft_engine::doc::display_quality::DisplayQuality::Normal;
+    for b in &world.bodies {
+        crate::open_meshing::warm(b, false, false, &repeated, q);
+    }
+    assert!(world.bodies.iter().all(|b| b.mesh_bounds_made()), "every body's box, ahead of framing");
+    // A world state built again from the same placements keeps them.
+    let again = s.world_state().unwrap();
+    assert!(again.bodies.iter().all(|b| b.mesh_bounds_made()));
+}
+
 fn wireframe_cylinder() -> SolveApp {
     let mut s = solidcraft_engine::Session::default();
     s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();

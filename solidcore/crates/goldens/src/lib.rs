@@ -44,12 +44,25 @@ pub(crate) mod tolsub;
 pub mod util;
 #[cfg(test)]
 mod wr493_rows;
+#[cfg(test)]
+mod wr57_replay;
 
 pub use case::{Case, CaseContext, CaseSource};
 pub use compare::{compare, AbsFloor, CaseDiff, Mismatch, REL_TOL};
 pub use output::{Deferred, Output, Topology};
 pub use rng::Rng;
 pub use runner::{RunOptions, UnitDiff};
+
+/// A runner's kernel: [`solidcore::Kernel::default`]. In this crate's tests it also
+/// carries the WR-57 substitution replay's seam while a `wr57_replay` test has one
+/// installed on this thread (the seam state is the kernel's; the runners make their own
+/// kernels, so they take it from here).
+pub(crate) fn runner_kernel() -> solidcore::Kernel {
+    let k = solidcore::Kernel::default();
+    #[cfg(test)]
+    let k = wr57_replay::with_seam(k);
+    k
+}
 
 /// Error from the harness itself (bad fixture, missing file, ...), as opposed
 /// to an operation's error.

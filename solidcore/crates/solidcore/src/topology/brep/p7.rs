@@ -1207,6 +1207,7 @@ pub fn make_face_with_curve_owners(
         crv_on_surf,
         this_face,
         &[],
+        false,
         curve_owners,
         env,
     )
@@ -1228,6 +1229,12 @@ pub fn make_face_with_curve_owners(
 /// gate checks the body. Crate-private for that reason: nothing outside the crate can make
 /// a face whose edges end off their vertices.
 ///
+/// (not upstream) With `keep_uv_curves` the UV curves given also become the edge uses' UV
+/// trim curves, as with curves on surface, while the 3D curves are lifted from them as
+/// without: a face rebuilt on its own surface from its own loops keeps its trim curves
+/// instead of having them dropped again later, which at a pole can end them at another
+/// parameter than the given one (every parameter there lifts to the one point).
+///
 /// # Errors
 /// As [`make_face_with_curves`].
 #[allow(clippy::too_many_arguments)]
@@ -1242,6 +1249,7 @@ pub(crate) fn make_face_with_curve_owners_at_vertices(
     crv_on_surf: Option<bool>,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
     vertex_slots: &[usize],
+    keep_uv_curves: bool,
     curve_owners: &mut Vec<Option<EdgeId>>,
     env: &mut ed::NotifyEnv<'_>,
 ) -> Result<NewFace> {
@@ -1258,6 +1266,7 @@ pub(crate) fn make_face_with_curve_owners_at_vertices(
         crv_on_surf,
         this_face,
         vertex_slots,
+        keep_uv_curves,
         curve_owners,
         &mut ed::NotifyState::from_env(env),
         &mut out,
@@ -1351,6 +1360,7 @@ fn make_face_with_curves_impl(
         crv_on_surf,
         this_face,
         &[],
+        false,
         curve_owners,
         state,
         &mut out,
@@ -1385,6 +1395,7 @@ pub(crate) fn make_face_with_curves_transfer(
         crv_on_surf,
         this_face,
         &[],
+        false,
         &mut Vec::new(),
         &mut ed::NotifyState::from_env(env),
         out,
@@ -1404,6 +1415,7 @@ fn make_face_with_curves_transfer_impl(
     crv_on_surf: Option<bool>,
     this_face: &dyn Fn(FaceId) -> ObjectRef,
     vertex_slots: &[usize],
+    keep_uv_curves: bool,
     curve_owners: &mut Vec<Option<EdgeId>>,
     state: &mut ed::NotifyState<'_>,
     out: &mut NewFace,
@@ -1826,8 +1838,9 @@ fn make_face_with_curves_transfer_impl(
     result?;
     made.status?;
 
-    // with curves on surface: make the UV trim curves from the given UV curves
-    if crv_on_surf {
+    // with curves on surface (or, not upstream, when the caller keeps its UV curves): make
+    // the UV trim curves from the given UV curves
+    if crv_on_surf || keep_uv_curves {
         let face = out.face.ok_or_else(|| null("no new face"))?;
         // (upstream loops over cpOptUVCurves->GetSize(): a null array is dereferenced)
         let uv: Vec<Curve> = uv_curves
@@ -3155,6 +3168,7 @@ mod tests {
                 None,
                 &face_ref,
                 vertex_slots,
+                false,
                 &mut owners,
                 &mut env,
             )

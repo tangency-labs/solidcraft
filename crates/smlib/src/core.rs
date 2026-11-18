@@ -81,7 +81,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.fillet_point_step_per_point = true;
@@ -107,7 +106,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.geometric_g2_continuity = true;
-    f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;

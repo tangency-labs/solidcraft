@@ -1796,7 +1796,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
 /// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
-/// that fillet's result (the other 28 are unchanged there). The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// that fillet's result (the other 28 are unchanged there). Entry 14 (`bottle` e8 r0.1) is #18401's:
+/// that PR moves this fillet's digest and mass in their last bits, and its tree before
+/// #18230 makes the same digest and mass bit for bit. The 19 equal digests (`0x30d463838d7fca03`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
 /// same body and status.
 const FILLET_MAIN: [u64; 29] = [
@@ -1814,7 +1816,7 @@ const FILLET_MAIN: [u64; 29] = [
     0x30d463838d7fca03,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
-    0xef8776a78d7d7cbb,
+    0x7442b43a428ea1ca,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
@@ -1834,8 +1836,8 @@ const FILLET_MAIN: [u64; 29] = [
 /// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
-/// with the mass integrator's knot-line split, which moved that row since; its entries are
-/// classified against a certified enclosure in goldens'
+/// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
+/// since; its entries are classified against a certified enclosure in goldens'
 /// `mass_knot_line_moved_rows_are_classified`.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
@@ -1895,15 +1897,15 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
             0x40408bcce093b407,
             0x402621896ddff25f,
             0x402621896ddff25f,
-            0x3f10d1d4e45e472f,
-            0x3f13efa0c2fbea39,
+            0x3f10d1d4e45e4676,
+            0x3f13efa0c2fbe9dc,
             0x4000a10fe9b1ffd5,
             0x4050316570dd030e,
             0x4050a9c381d79ffa,
             0x40151aaab4b869fc,
-            0x3f6aed519268c01a,
-            0x3f66b6ad970f613a,
-            0xbf3c98793964b0c2,
+            0x3f6aed519268bff5,
+            0x3f66b6ad970f60ae,
+            0xbf3c98793964b142,
         ],
     ),
 ];

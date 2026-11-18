@@ -187,7 +187,7 @@ pub(crate) fn edgeuse_case(
     use crate::own_builder::{counts, failed_output, Built, Conventions};
     use crate::units::topology_edgeuse_p1::ImportTypes;
     let conv = &Conventions::EDGEUSE_GRAPH;
-    let k = &mut Kernel::default();
+    let k = &mut crate::runner_kernel();
     Ok(
         match brep_in_order(k, src, validate_only, init_gaps, conv)? {
             Built::Brep(b) => Ok((counts(&b), *b, ImportTypes::default())),

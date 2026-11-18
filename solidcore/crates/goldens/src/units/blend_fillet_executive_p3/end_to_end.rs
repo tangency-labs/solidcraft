@@ -332,7 +332,7 @@ impl RealSolid {
         let Some(select) = self.select else {
             return Ok(self.edges.clone());
         };
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let [x, y, z] = self.dimensions.unwrap_or_default();
         let body = solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, x, y, z)?;
         let mut picked = Vec::new();
@@ -1380,7 +1380,7 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
     if !matches!(example, 0..=6) {
         return Ok(None);
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut run = || -> SolidResult<Vec<f64>> {
         let (dx, dy, dz) = if example < 2 {
             (5.0, 10.0, 15.0)
@@ -1452,7 +1452,7 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
 pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     input.validate()?;
     if let Some(shell) = input.shell {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         return match shell_rust(&mut k, input, shell) {
             Ok(values) => Ok(super::with_point_step(
                 shell_output(&values)?,
@@ -1464,7 +1464,7 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
             },
         };
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let body = build(&mut k, input)?;
     match run_rust(&mut k, body, input) {
         Ok(values) => {
@@ -1524,7 +1524,7 @@ fn surface_surface_output(values: &[f64]) -> Result<Output, HarnessError> {
 /// result B-rep is recorded as the shim records it.
 pub(super) fn surface_surface_rust(input: &SurfaceSurface) -> Result<Output, HarnessError> {
     contract::validate_surface_surface(&input.wire()).map_err(|e| HarnessError::new(e.to_string()))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut run = || -> SolidResult<Vec<f64>> {
         let surface = |c: &[[f64; 3]; 4]| {
             solidcore::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(

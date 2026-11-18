@@ -832,7 +832,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(HarnessError::new("short executive record"));
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     k.context.set_doing_boolean(*prior_boolean != 0.0);
     let mut b = solidcore::topology::Brep::new();
     // Apply SmZoneTol3d's default-sentinel/fabs conversion, then write the member.

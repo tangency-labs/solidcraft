@@ -19,7 +19,6 @@ fn plate_sheet() -> (Harness, String) {
     let front = front["view"].as_str().unwrap().to_owned();
     h.app.run("drawing.view.projected", json!({"parent": front, "side": "right"})).unwrap();
     h.app.run("drawing.dimension.add", json!({"view": front, "kind": {"length": {"edge": [50, 0, 20]}}})).unwrap();
-    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     settle(&mut h);
     (h, front)
@@ -38,6 +37,27 @@ fn note_tool_places_text_on_the_active_sheet() {
     let drawing = h.app.session.drawing("drawing.inspect").unwrap();
     let note = &drawing.notes[0];
     assert_eq!(note.content.0, vec![solidcraft_engine::geom::cell::Part::Text("Deburr all edges".to_owned())]);
+}
+
+#[test]
+fn dimension_tool_places_a_view_edge_length() {
+    let (mut h, front) = plate_sheet();
+    let existing = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let screen = |x: f32, y: f32| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x / 420.0, paper.bottom() - paper.height() * y / 297.0]
+    };
+    h.step(&json!({"click": screen(140.0, 175.0)})).unwrap();
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), 1);
+    h.frames(4);
+    h.step(&json!({"click": screen(140.0, 163.0)})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    assert_eq!(drawing.dimensions.len(), 2);
+    let placed = drawing.dimensions.iter().find(|dimension| dimension.id != existing).unwrap();
+    assert_eq!(solidcraft_engine::doc::ids::encode(placed.view), front);
+    assert!((placed.offset_mm.abs() - 12.0).abs() < 0.75, "offset was {} mm", placed.offset_mm);
 }
 
 /// Frames until no view or dimension is waiting to be drawn.
@@ -374,7 +394,6 @@ fn a_single_sheet_sketch_is_painted_when_its_last_step_finishes() {
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     let drawing = h.app.run("drawing.create", json!({})).unwrap();
-    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     h.frames(2);
     let made = h.app.run("drawing.sketch.create", json!({"owner": drawing["sheets"][0]["id"]})).unwrap();
@@ -432,7 +451,6 @@ fn a_views_state_is_in_words() {
 fn no_drawing_open_shows_the_note() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     h.frames(2);
     assert_eq!(page(&mut h), Value::Null);
