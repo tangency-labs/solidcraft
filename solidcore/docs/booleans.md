@@ -497,6 +497,24 @@ Read with the tolerance the vertex had when the circle was asked (1e-5), the two
 second edges and the two slivers of the box face between them (5.5e-10 each) faces of the
 intersection and the difference, whose edges the face check takes for coincident.
 
+**An edge in a face, off it by more than the zone tolerance.** An edge of one operand can lie in
+a face of the other within its own tolerance but further than the system zone tolerance from it:
+a revolved tool's rim (radius 2.1000073) in a 2.1 mm hole's wall, the revolve axis 1.2e-5 off the
+hole's, so the rim is 4.6e-6 to 1.9e-5 from the wall (#17527). Both of the tool's faces at the rim
+meet the wall along it, each in a curve of its own (the disc's plane in the wall's circle, the
+cone's in a marched curve), and their proto edges overlap. `ResolveOverlappingProtoEdges` replaces
+the overlapping ones with the rim's own curve classified against the wall. Upstream classifies it
+within the proto topology's tolerance, half the zone tolerance, where the rim lies in the wall
+nowhere: the overlapping pieces were deleted, nothing replaced them, and the cut failed in
+`make_faceuse`. The rim is now classified within its own tolerance where that is the larger, as
+the face pairs classified it. The replacement then holds every piece of the rim in the wall, so
+a piece of the same rim and wall that the overlap test (ends dropped within the zone tolerance)
+did not find goes with the group too; left beside its replacement, it was imprinted twice and the
+rim was related to both copies ("another entity is already related to the other one";
+`absorb_pieces_of_edge_in_face`, `proto_topology/p3.rs`). A rim further off than its tolerance
+somewhere is still not one edge with the wall: with the axis 1.3e-5 off, the cut leaves a sliver
+face that fails the check.
+
 **Seams and poles.** A tolerance band says where a boundary of material may lie. A seam (an edge
 with the same face on both sides: `face_on_both_sides`, `topology/edge.rs`) and a pole (a vertex
 all of whose edges are such seams: `inside_face`, `topology/vertex.rs`) bound no material: they
