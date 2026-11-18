@@ -359,7 +359,8 @@ impl eframe::App for App {
     /// Pointer motion over a still 3D view that lights up nothing new paints no frame: the view
     /// would draw the same picture again (`viewport::follow_pointer_without_frame`, which keeps
     /// the hover at the pointer). The motion still reaches the next frame. Any other event keeps
-    /// eframe's answer.
+    /// eframe's answer, as does every event of another window (eframe asks about the main
+    /// window's alone).
     fn repaint_on_window_event(&mut self, event: &winit::event::WindowEvent) -> Option<bool> {
         let winit::event::WindowEvent::CursorMoved { position, .. } = event else {
             return None;
