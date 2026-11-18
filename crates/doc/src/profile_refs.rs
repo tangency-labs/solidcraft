@@ -597,9 +597,7 @@ mod tests {
     fn whole_source_accepts_many_spline_holes_within_curve_budget() {
         let profile = |count: usize, edges: usize| WholeProfileBoundary {
             outer: vec!["outer".to_string()],
-            holes: (0..count)
-                .map(|i| (0..edges).map(|edge| format!("h{i:04}-{edge:03}")).collect())
-                .collect(),
+            holes: (0..count).map(|i| (0..edges).map(|edge| format!("h{i:04}-{edge:03}")).collect()).collect(),
         };
         assert_eq!(WHOLE_MAX_HOLES, 128, "the drawing-fill hole cap stays unchanged");
         for count in [128, 129, 707, MAX_MODEL_WHOLE_HOLES] {
