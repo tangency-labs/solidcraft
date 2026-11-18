@@ -596,6 +596,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             offset_start,
             symmetric_offset,
             all,
+            all2,
+            to_offset2,
             thin,
             wall,
             wall_side,
@@ -657,7 +659,22 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 enter |= expr_row(ui, "To Offset", to_offset);
             }
             if two_sided(*direction) {
-                enter |= expr_row(ui, "Distance 2", distance2);
+                // The second side takes the extent types of the first (#18691).
+                let cur2 = if object_on(&d.inputs, TO_OBJECT2) { 1 } else { usize::from(*all2) * 2 };
+                let mut ext2 = cur2;
+                form_row(ui, "ui.extrude_extent_type_2", |ui| {
+                    combo(ui, "ex_ext2", &["Distance", "To Object", "All"], &mut ext2);
+                    *all2 = ext2 == 2;
+                    set_object(&mut d.inputs, &mut d.active, TO_OBJECT2, ext2 == 1);
+                });
+                match ext2 {
+                    0 => enter |= expr_row(ui, "Distance 2", distance2),
+                    1 => enter |= expr_row(ui, "ui.extrude_to_offset_2", to_offset2),
+                    _ => {}
+                }
+            } else {
+                *all2 = false;
+                set_object(&mut d.inputs, &mut d.active, TO_OBJECT2, false);
             }
             // A choice made by hand sticks, the shown one included (#6901): Extrude's own choice
             // stops before the next frame makes it.

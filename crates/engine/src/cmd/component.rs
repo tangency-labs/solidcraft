@@ -1843,7 +1843,7 @@ pub fn pin_picked_placements(s: &Session, kind: &mut FeatureKind) {
 pub fn pin_picked_placements_in(s: &Session, kind: &mut FeatureKind, own: u64, state: &solidcraft_doc::ModelState) {
     let FeatureKind::Extrude { extent, .. } = kind else { return };
     extent.picked_placements.clear();
-    if (extent.to.is_none() && extent.from.is_none()) || s.doc.occurrences.is_empty() {
+    if (extent.to.is_none() && extent.from.is_none() && extent.to2.is_none()) || s.doc.occurrences.is_empty() {
         return;
     }
     let doc = s.design_document();

@@ -906,6 +906,28 @@ fn with_extent_all_the_value_box_has_no_number_to_step() {
     }
 }
 
+/// Two Sides gives the second side the extent types of the first (#18691): its own Extent Type
+/// row, a To Object input for it, and an edit that keeps what was saved.
+#[test]
+fn two_sides_second_side_has_its_own_extent_type() {
+    for (second, all2, to2) in [(json!({"through_all2":true}), true, false), (json!({"to2":[5,5,-20],"to_offset2":"2 mm"}), false, true)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,-30],"body_name":"Floor"})).unwrap();
+        let mut params = json!({"distance":"5 mm","distance2":"3 mm","operation":"join","targets":["Floor"]});
+        params.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        let mut h = make_in(h, params);
+        open(&mut h);
+        assert!(h.widget("Extent Type 2").is_some(), "the second side's Extent Type row");
+        let d = h.app.dialog.as_ref().unwrap();
+        let crate::dialogs::Kind::Extrude { all2: shown_all2, .. } = &d.kind else { panic!("extrude") };
+        assert_eq!(*shown_all2, all2);
+        assert_eq!(d.inputs.iter().any(|i| i.label == crate::dialogs::TO_OBJECT2), to2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        let saved = extent(&h);
+        assert_eq!((saved.through_all2, saved.to2.is_some()), (all2, to2), "OK keeps the second side's extent");
+    }
+}
+
 /// Distance 2's box in the view stays while its text does not evaluate, so a cleared box or a
 /// `-` typed first can be finished there.
 #[test]

@@ -70,9 +70,12 @@ fn schemas_and_the_key_check_agree() {
             "thickness2",
             "thin",
             "through_all",
+            "through_all2",
             "to",
+            "to2",
             "to_body_apart",
             "to_offset",
+            "to_offset2",
             "touching",
         ],
     );
