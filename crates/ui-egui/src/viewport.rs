@@ -262,8 +262,8 @@ pub struct ViewportState {
     /// view's centre (`navigation::view_middle`)), chosen when it begins.
     pub orbit_pivot: Option<Vec3>,
     /// The point to mark while an orbit or a continuous orbit turns about the origin or the model
-    /// point under the cursor (Preferences: Mark the orbit point); drawn as the 3D mouse's ball
-    /// and let go with the orbit's other points (#17474).
+    /// point under the cursor (Preferences: Mark the orbit point); drawn as a small screen-sized
+    /// dot, like a sketch point, and let go with the orbit's other points (#17474).
     pub orbit_mark: Option<Vec3>,
     /// Where the view-centre orbit pivot (the camera's target while that is `None`) was on screen
     /// when the orbit chose it; the pivot is kept while it stays there (#16091).
@@ -8726,15 +8726,19 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
 }
 
 /// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
-/// The point the 3D mouse (#7435) or an orbit about the origin or the cursor's point (#17474) is
-/// turning the view around, as a faint ball, so the user sees what the turn holds still. Lighter,
-/// smaller discs stacked toward the top left give it its shading.
+/// The point the 3D mouse is turning the view around, as a faint ball, so the user sees what the
+/// turn holds still (#7435). Lighter, smaller discs stacked toward the top left give it its shading.
+/// An orbit about the origin or the cursor's point (#17474) marks its point as a small dot instead,
+/// the size of a sketch point whatever the zoom.
 fn paint_device_pivot(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    let Some(p) = app.viewport.device_pivot.or(app.viewport.orbit_mark).and_then(|p| proj.to_screen(p)) else { return };
     let t = Tokens::get();
-    painter.circle(p, 8.0, t.accent.gamma_multiply(0.18), Stroke::new(1.0, t.accent.gamma_multiply(0.5)));
-    painter.circle_filled(p + vec2(-1.5, -1.5), 5.0, t.accent.gamma_multiply(0.2));
-    painter.circle_filled(p + vec2(-2.5, -2.5), 2.5, t.accent.gamma_multiply(0.3));
+    if let Some(p) = app.viewport.device_pivot.and_then(|p| proj.to_screen(p)) {
+        painter.circle(p, 8.0, t.accent.gamma_multiply(0.18), Stroke::new(1.0, t.accent.gamma_multiply(0.5)));
+        painter.circle_filled(p + vec2(-1.5, -1.5), 5.0, t.accent.gamma_multiply(0.2));
+        painter.circle_filled(p + vec2(-2.5, -2.5), 2.5, t.accent.gamma_multiply(0.3));
+    } else if let Some(p) = app.viewport.orbit_mark.and_then(|p| proj.to_screen(p)) {
+        painter.circle(p, 3.5, t.sketch, Stroke::new(1.0, Color32::WHITE.gamma_multiply(0.8)));
+    }
 }
 
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {

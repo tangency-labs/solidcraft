@@ -1070,7 +1070,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `logo_accent` (bool, default false: the application bar's logo in shades of the theme's accent instead of the theme's logo colours)
 - `look_at_anim`
 - `look_at_speed`
-- `mark_orbit_point` (default true: while an orbit turns about the origin or the model point under the cursor (`orbit_around` `origin` or `cursor`), a faint ball marks that point; false draws nothing)
+- `mark_orbit_point` (default true: while an orbit turns about the origin or the model point under the cursor (`orbit_around` `origin` or `cursor`), a small dot, like a sketch point, marks that point; false draws nothing)
 - `max_design_file_mb` (default 256): the largest design file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `maya_horizontal_zoom`: Maya Alt+right drag zooms horizontally (right in, left out), default `true`; `false` restores vertical drag zoom. Other presets and the fixed Zoom tool are unchanged.
