@@ -47,7 +47,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.join_touching_loops = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
@@ -58,7 +57,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_tangent_curve_tracer = true;
 }
 

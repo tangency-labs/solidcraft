@@ -281,6 +281,11 @@ impl<H: PluginHost> files::Host for State<H> {
         Ok(bytes)
     }
     fn write_file(&mut self, grant: String, path: String, data: Vec<u8>) -> std::result::Result<(), PluginError> {
+        // A read entry stays read-only in every way: no file write, whatever folders are granted.
+        if self.effect == Effect::Read {
+            self.check()?;
+            return Err(self.fail(craft_plugin::read_entry_refusal("write-file")));
+        }
         self.file_path(&grant, &path, true)?;
         let path: PathBuf = Path::new(&path).components().collect();
         if data.len() > MAX_JSON_BYTES {

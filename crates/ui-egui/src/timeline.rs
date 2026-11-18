@@ -422,7 +422,7 @@ pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Op
     match sel {
         Sel::Feature { id } => Some(*id),
         Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {
-            doc.features.iter().find(|f| f.kind.is_construction() && crate::browser::construction_sel(f) == *sel).map(|f| f.id)
+            doc.features.iter().find(|f| f.kind.is_construction() && solidcraft_engine::browser_find::construction_sel(f) == *sel).map(|f| f.id)
         }
         _ => None,
     }
@@ -431,7 +431,7 @@ pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Op
 /// What the 3D view lights for a selected construction feature: the plane, axis or point
 /// itself, picked by name. `None` for any other feature.
 pub(crate) fn viewport_sel_of_feature(doc: &Document, id: u64) -> Option<solidcraft_engine::Sel> {
-    doc.feature(id).filter(|f| f.kind.is_construction()).map(crate::browser::construction_sel)
+    doc.feature(id).filter(|f| f.kind.is_construction()).map(solidcraft_engine::browser_find::construction_sel)
 }
 
 /// The selected timeline features, in timeline order.
@@ -751,7 +751,8 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
 /// said on the status line, once per import, in history order. While a check runs the window
 /// looks again a few times a second.
 pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
-    app.session.model.settle_import_checks();
+    // Parts the checks healed: the import is its healed bodies from now on.
+    app.session.settle_import_checks();
     for id in app.session.model.take_import_notices() {
         if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
             app.set_status(summary, false);

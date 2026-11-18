@@ -110,9 +110,12 @@ A cloud keeps at most `max_points` points (5,000,000 unless asked, at most 20,00
 file is thinned evenly, one point in *n*, and the result says how many were kept. Thinning would
 cut a file's edges and faces, so a thinned file leaves them out, with a warning; raise `max_points`
 to keep them. A cloud holds at most 20,000,000 segments and as many triangles. Files up to
-1 GiB are read. The points are stored single precision relative to the cloud's first point (kept
-double precision), so a scan far from the origin keeps its detail; they travel inside the design
-file as a binary part (12 bytes a point, 3 more with colours).
+1 GiB are read; a larger one is read when the limit for STEP and import files is raised
+(Preferences › General › Largest file to open, or `--max-file-size`), and a file over the limit is
+refused before it is read, saying how to raise it. The points are stored single precision relative
+to the cloud's first point (kept double precision), so a scan far from the origin keeps its
+detail; they travel inside the design file as a binary part (12 bytes a point, 3 more with
+colours).
 
 ## Deviation from a body
 

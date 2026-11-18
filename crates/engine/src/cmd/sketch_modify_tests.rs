@@ -6005,6 +6005,50 @@ fn trim_cuts_a_piece_of_an_offset_copy_made_from_several_curves() {
     assert!((gap(&s) - 3.0).abs() < 1e-7, "{}", gap(&s));
 }
 
+#[test]
+fn trim_offset_circle_and_source_releases_association_and_cuts() {
+    let mut s = new_sketch();
+    let circle = run(&mut s, "sketch.circle.two_point", json!({"p0": [0, 0], "p1": [20, 0]}));
+    let c = ids(&circle["curves"])[0].clone();
+    let offset = run(&mut s, "sketch.offset", json!({"curves": [c], "distance": "2 mm"}));
+    let copy = ids(&offset["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-10, 5], [30, 5]], "connect": false, "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[-10, -5], [30, -5]], "connect": false, "infer": false}));
+    let r1 = s.execute("sketch.trim", &json!({"curve": c, "at": [10, 10]}));
+    assert!(r1.is_ok(), "trimming offset circle source succeeds: {r1:?}");
+    let r2 = s.execute("sketch.trim", &json!({"curve": copy, "at": [10, 12]}));
+    assert!(r2.is_ok(), "trimming offset circle copy succeeds: {r2:?}");
+}
+
+#[test]
+fn trim_topology_offset_copy_and_source_releases_association_and_cuts() {
+    // Trimming the copy releases the association and cuts the piece
+    let mut s = new_sketch();
+    let rect = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 10]}));
+    let rect_curves = ids(&rect["curves"]);
+    let offset = run(&mut s, "sketch.offset", json!({"curves": rect_curves, "distance": "2 mm"}));
+    let copy = ids(&offset["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [20, 0]], "connect": false, "infer": false}));
+    let r = s.execute("sketch.trim", &json!({"curve": copy, "at": [12, 5]}));
+    assert!(r.is_ok(), "trimming offset copy succeeds: {r:?}");
+    let r = r.unwrap();
+    assert_eq!(r["sketch"]["solved"], json!(true));
+    assert!(sketch(&s).offsets.is_empty(), "offset association was released");
+
+    // Trimming the source of a topology offset also cleanly releases and cuts
+    let mut s = new_sketch();
+    let rect = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 10]}));
+    let rect_curves = ids(&rect["curves"]);
+    let src = rect_curves[0].clone();
+    run(&mut s, "sketch.offset", json!({"curves": rect_curves, "distance": "2 mm"}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [20, 0]], "connect": false, "infer": false}));
+    let r = s.execute("sketch.trim", &json!({"curve": src, "at": [10, 5]}));
+    assert!(r.is_ok(), "trimming offset source succeeds: {r:?}");
+    let r = r.unwrap();
+    assert_eq!(r["sketch"]["solved"], json!(true));
+    assert!(sketch(&s).offsets.is_empty(), "offset association was released");
+}
+
 /// All pick orders retain driving distances through repeated trims, dragging, parameter edits and native reload.
 #[test]
 fn trim_keeps_offset_distances_driving_after_trims_drag_and_reopen() {

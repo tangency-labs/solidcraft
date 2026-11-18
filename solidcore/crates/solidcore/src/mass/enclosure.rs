@@ -241,7 +241,8 @@ pub fn moment_centre(k: &Kernel, b: &mut Brep) -> Result<Point3> {
 
 /// An enclosure of `quantity` of the closed body `b` at most `width` wide, as
 /// [`enclose_volume`] refines it (the [`VolumeEnclosure`] then holds that quantity, not
-/// the volume, unless it is the volume).
+/// the volume, unless it is the volume). [`Quantity::Area`] also takes a sheet body: a
+/// face void on both sides has an area, though it bounds no volume or moment.
 ///
 /// # Errors
 ///
@@ -267,7 +268,9 @@ pub fn enclose_quantity(
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `width` wide, as
 /// [`enclose_quantity`] refines [`Quantity::Area`] (an area is its faces' alone, so any set
-/// of faces has one; a face listed twice counts twice).
+/// of faces has one; a face listed twice counts twice). A sheet's face, void on both sides,
+/// is measured from its upward use; its area, like any face's, is positive whichever of its
+/// uses is upward.
 ///
 /// # Errors
 ///
@@ -380,7 +383,8 @@ pub struct MassEnclosure {
 /// [`MassEnclosure`] of the closed body `b`: the area, the volume and each moment about
 /// [`moment_centre`] enclosed ([`enclose_quantity`]) at most `rel` of its scale wide (the
 /// area's, the volume's, and the volume times the box's half diagonal to the moment's
-/// degree), then shifted to the origin in interval arithmetic.
+/// degree), then shifted to the origin in interval arithmetic. The area stage takes a
+/// sheet's faces too ([`enclose_quantity`]); the volume stage still refuses them.
 ///
 /// # Errors
 ///
@@ -1243,13 +1247,17 @@ impl<'a> Work<'a> {
             }
         };
         let (mu, mm) = (material(up)?, material(mate)?);
-        if mu == mm {
+        // a sheet's face (void on both sides) has an area but bounds no material: its
+        // area is measured from its upward use (the integrand `|S_u x S_v|`, with the
+        // loops walked as that use's orientation gives, is positive either way)
+        let sheet_area = self.weight.is_area() && !mu && !mm;
+        if mu == mm && !sheet_area {
             return Err(SolidError::invalid_input(
                 OP,
                 "a face whose sides are not one material region and one void",
             ));
         }
-        let fu = if mu { up } else { mate };
+        let fu = if mu || sheet_area { up } else { mate };
         let sign = if b.faceuse(fu)?.orientation == OrientType::Same {
             -1.0
         } else {
@@ -2491,6 +2499,61 @@ mod tests {
         assert!(!done(Ivl::new(1.0, f64::INFINITY)));
         assert!(!done(Ivl::new(f64::NEG_INFINITY, -1.0)));
         assert!(!done(Ivl::new(f64::NAN, 1.0)));
+    }
+
+    /// A sheet's faces, void on both sides, have area enclosures, positive whichever use
+    /// of each face is upward, face by face and over the whole sheet, though they bound no
+    /// volume: the volume is still refused.
+    #[test]
+    fn a_sheet_face_has_an_area_enclosure() {
+        use crate::primitive::api_curves::create_line_segment;
+        let mut k = Kernel::default();
+        // a 3 x 3 square and, apart from it, a 2 x 2 one: areas 9 and 4
+        let squares = [(0.0, 3.0), (4.0, 2.0)];
+        let mut curves: Vec<crate::curve::curve::Curve> = Vec::new();
+        for (x0, s) in squares {
+            let pts = [[x0, 0.0], [x0 + s, 0.0], [x0 + s, s], [x0, s]];
+            for i in 0..4 {
+                let (a, c) = (pts[i], pts[(i + 1) % 4]);
+                curves.push(
+                    create_line_segment(Point3::new(a[0], a[1], 0.0), Point3::new(c[0], c[1], 0.0))
+                        .unwrap()
+                        .into(),
+                );
+            }
+        }
+        let mut b = crate::primitive::api_trim_ops::create_planar_faces(&mut k, &curves).unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 2);
+        let holds = |e: &VolumeEnclosure, a: f64| {
+            assert!(
+                e.lo > 0.0 && e.lo <= a && a <= e.hi,
+                "[{}, {}] for {a}",
+                e.lo,
+                e.hi
+            );
+            assert!(e.hi - e.lo <= 1e-8 * a, "[{}, {}] for {a}", e.lo, e.hi);
+        };
+        for flip in [None, Some(0), Some(1)] {
+            if let Some(i) = flip {
+                crate::topology::face::p1::flip_face_orientation(&mut b, faces[i]).unwrap();
+            }
+            let mut areas = [0.0; 2];
+            for (i, &f) in faces.iter().enumerate() {
+                let e = enclose_face_area_relative(&k, &mut b, &[f], 1e-9).unwrap();
+                areas[i] = (e.lo + e.hi) / 2.0;
+                let a = if (areas[i] - 9.0).abs() < 1.0 {
+                    9.0
+                } else {
+                    4.0
+                };
+                holds(&e, a);
+            }
+            assert!((areas[0] - areas[1]).abs() > 1.0, "{areas:?}");
+            let whole = enclose_quantity(&k, &mut b, Quantity::Area, 1e-8).unwrap();
+            holds(&whole, 13.0);
+        }
+        assert!(enclose_volume(&k, &mut b, 1e-6).is_err());
     }
 
     /// The cylinder r 2, h 5, its side moved along x by `shift`.
