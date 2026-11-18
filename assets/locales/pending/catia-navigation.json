@@ -1,0 +1,52 @@
+{
+  "en": {
+    "nav.catia.label": "CATIA",
+    "nav.catia.help": "Middle drag pans; hold middle and hold left or right to orbit; press and release that side button with middle still held to zoom; Shift+middle orbits and Ctrl+middle zooms; middle double-click fits, a middle click centres the view",
+    "nav.chord.side": "Left/Right",
+    "nav.chord.hold": "held",
+    "nav.chord.tap": "tap"
+  },
+  "zh": {
+    "nav.catia.label": "CATIA",
+    "nav.catia.help": "中键拖动平移；按住中键再按住左键或右键旋转；中键不放、单击并松开该侧键后拖动缩放；Shift+中键旋转、Ctrl+中键缩放；双击中键全景，单击中键把所指处移到视图中心",
+    "nav.chord.side": "左/右键",
+    "nav.chord.hold": "按住",
+    "nav.chord.tap": "单击"
+  },
+  "zh-TW": {
+    "nav.catia.label": "CATIA",
+    "nav.catia.help": "中鍵拖曳平移；按住中鍵再按住左鍵或右鍵旋轉；中鍵不放、單擊並放開該側鍵後拖曳縮放；Shift+中鍵旋轉、Ctrl+中鍵縮放；雙擊中鍵全景，單擊中鍵將所指處移到視圖中心",
+    "nav.chord.side": "左/右鍵",
+    "nav.chord.hold": "按住",
+    "nav.chord.tap": "單擊"
+  },
+  "ja": {
+    "nav.catia.label": "CATIA",
+    "nav.catia.help": "中ボタンのドラッグで移動、中ボタンを押しながら左または右ボタンを押し続けると回転、その側ボタンを押して離す（中ボタンは押したまま）とズーム。Shift+中ボタンで回転、Ctrl+中ボタンでズーム。中ボタンのダブルクリックで全体表示、シングルクリックで指定点をビューの中心へ",
+    "nav.chord.side": "左/右",
+    "nav.chord.hold": "押し続け",
+    "nav.chord.tap": "クリック"
+  },
+  "ar": {
+    "nav.catia.label": "CATIA",
+    "nav.catia.help": "سحب الزر الأوسط يحرك العرض؛ اضغط الزر الأوسط مع الاستمرار على الزر الأيسر أو الأيمن للتدوير؛ اضغط ذلك الزر الجانبي وأفلته مع بقاء الأوسط مضغوطًا للتكبير؛ Shift+الأوسط للتدوير وCtrl+الأوسط للتكبير؛ النقر المزدوج على الأوسط يملأ العرض، والنقر الأحادي يُرجع المكان المحدد إلى مركز العرض",
+    "nav.chord.side": "يسار/يمين",
+    "nav.chord.hold": "مضغوطًا",
+    "nav.chord.tap": "نقرة"
+  },
+  "he": {
+    "nav.catia.label": "CATIA",
+    "nav.catia.help": "גרירת הכפתור האמצעי מזיזה את התצוגה; החזקת האמצעי עם לחיצה ממושכת על השמאלי או הימני מסובבת; לחיצה ושחרור של אותו כפתור צד כשהאמצעי עדיין לחוץ מקרבת; Shift+אמצעי מסובב ו-Ctrl+אמצעי מקרב; לחיצה כפולה על האמצעי מתאימה את התצוגה, ולחיצה בודדת מביאה את הנקודה שנבחרה למרכז התצוגה",
+    "nav.chord.side": "שמאל/ימין",
+    "nav.chord.hold": "לחוץ",
+    "nav.chord.tap": "הקשה"
+  },
+  "vi": {
+    "nav.catia.label": "CATIA",
+    "nav.catia.help": "Kéo nút giữa để pan; giữ nút giữa rồi giữ nút trái hoặc phải để xoay; nhấn và thả nút bên đó trong khi vẫn giữ nút giữa để thu phóng; Shift+nút giữa xoay và Ctrl+nút giữa thu phóng; nhấp đúp nút giữa để vừa khung, nhấp một lần đưa điểm đã chọn về giữa khung nhìn",
+    "nav.chord.side": "Trái/Phải",
+    "nav.chord.hold": "giữ",
+    "nav.chord.tap": "nhấp"
+  }
+}
+

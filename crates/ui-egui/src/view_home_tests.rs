@@ -86,6 +86,11 @@ fn middle_double_click_goes_home_in_every_preset() {
 #[test]
 fn middle_drags_and_single_clicks_do_not_go_home() {
     for preset in crate::prefs::NAV_PRESETS.iter().map(|p| p.id) {
+        // A chord whose anchor click recentres the view (CATIA) makes a single middle click move
+        // the camera on purpose; the catia_navigation_bindings scenario covers it.
+        if crate::prefs::nav_preset(preset).chord.is_some_and(|chord| chord.recentre) {
+            continue;
+        }
         let mut h = Harness::new();
         h.call("ui.prefs", json!({"nav": preset}));
         moved_block(&mut h);

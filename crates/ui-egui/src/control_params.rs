@@ -180,7 +180,7 @@ pub(crate) struct Click {
     pub double: bool,
 }
 
-/// `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, alt?, steps?, hold?, hold_end?, via?}`.
+/// `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, alt?, steps?, hold?, hold_end?, via?, chord?, chord_tap?}`.
 #[derive(Deserialize)]
 pub(crate) struct Drag {
     pub x0: f64,
@@ -200,6 +200,14 @@ pub(crate) struct Drag {
     /// Points `[x, y]` the pointer passes through; one that is not a pair of numbers is skipped.
     #[serde(default)]
     pub via: Vec<Value>,
+    /// A second button held down with the first for the whole drag (CATIA's middle plus a side
+    /// button, which turns the view).
+    #[serde(default)]
+    pub chord: Option<Button>,
+    /// The same button pressed and let go at once, which changes gear to zoom while the first
+    /// button stays down.
+    #[serde(default)]
+    pub chord_tap: Option<Button>,
 }
 
 impl Drag {

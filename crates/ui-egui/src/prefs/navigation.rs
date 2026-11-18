@@ -51,6 +51,19 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
             (keys.into_iter().map(str::to_owned).collect::<Vec<_>>(), solidcraft_ui_text::tr(action).to_string())
         })
         .collect();
+    // A two-button preset (CATIA) reads as two extra rows: the anchor plus a side button, held or
+    // tapped. A plain binding table cannot show them, and they are what the preset is chosen for.
+    if let Some(chord) = chord_anchor(app) {
+        let button = match chord.anchor {
+            NavButton::Left => "prefs.button_left",
+            NavButton::Middle => "prefs.button_middle",
+            NavButton::Right => "prefs.button_right",
+        };
+        let anchor = app.tr(button).to_owned();
+        let side = app.tr("nav.chord.side").to_owned();
+        gestures.insert(0, (vec![anchor.clone(), side.clone(), app.tr("nav.chord.hold").to_owned()], app.tr("prefs.gesture_orbit").to_owned()));
+        gestures.insert(1, (vec![anchor, side, app.tr("nav.chord.tap").to_owned()], app.tr("prefs.gesture_zoom").to_owned()));
+    }
     gestures.extend([
         (
             vec![app.tr("prefs.wheel").to_owned()],
