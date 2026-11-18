@@ -50,6 +50,7 @@ pub(super) struct Counts {
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
     pub tight_boxes: usize,
+    pub mesh_boxes: usize,
 }
 
 thread_local! {
@@ -78,6 +79,7 @@ thread_local! {
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
             tight_boxes: 0,
+            mesh_boxes: 0,
         })
     };
 }
@@ -3154,4 +3156,23 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert_eq!(st.bodies.len(), 1);
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
+}
+
+/// A join of bodies that are apart finds it by the boxes of their meshes, not by the
+/// kernel's tight boxes: measuring the tight box of a body with many faces costs the
+/// kernel minutes (#18821: 678 s for the combine of the cup of the report, against
+/// 0.8 s for the join). The bodies are joined apart all the same.
+#[test]
+fn a_join_of_bodies_that_are_all_apart_measures_their_mesh_boxes() {
+    let (model, combine, work) = boxes_joined(12, 5.0);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.result(combine));
+    assert_eq!(work.joined_apart, 1, "{work:?}");
+    // The bodies' mesh boxes, and no tight box.
+    assert_eq!(work.mesh_boxes, 12, "{work:?}");
+    assert_eq!(work.tight_boxes, 0, "{work:?}");
+    // The bodies are one body of several pieces, as they were.
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!((st.bodies[0].body.lumps().unwrap().len(), st.bodies[0].body.face_count()), (12, 72));
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 96.0).abs() < 1e-9);
 }

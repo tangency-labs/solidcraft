@@ -2117,6 +2117,8 @@ pub(super) fn apart_by_mesh(bodies: &[Body]) -> bool {
     for body in bodies {
         let tolerance = kernel::MeshTolerance { chord: (body.size() * 1e-3).max(1e-3), angle: Some(kernel::DISPLAY_ANGLE) };
         let Ok(mesh) = body.mesh(&tolerance) else { return false };
+        #[cfg(test)]
+        cost_tests::count(|c| c.mesh_boxes += 1);
         let box_of = mesh.bounds();
         if box_of.is_empty() || !box_of.min.is_finite() || !box_of.max.is_finite() {
             return false;
