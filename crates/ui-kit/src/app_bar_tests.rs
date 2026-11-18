@@ -25,7 +25,6 @@ struct BarRig {
     width: f32,
     name: &'static str,
     time: std::cell::Cell<f64>,
-    screen_height: f32,
     out: std::cell::RefCell<Option<BarOut>>,
 }
 
