@@ -4115,7 +4115,10 @@ fn curve_speed_bound(spline: &StretchSpline) -> Option<(f64, f64, f64)> {
     if !(w_min > 0.0 && w_min.is_finite() && w_max.is_finite()) {
         return None;
     }
-    let speed = (x_speed + length * w_speed) / w_min * (1.0 + gamma(8));
+    // each coefficient bound takes about 9 roundings (the length, two error adds, the
+    // product, the knot difference and the quotient) and the sum, product and quotient
+    // here 4 more
+    let speed = (x_speed + length * w_speed) / w_min * (1.0 + gamma(16));
     (speed.is_finite() && size.is_finite()).then_some((speed, size, w_max))
 }
 
