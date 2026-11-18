@@ -572,6 +572,38 @@ impl ExecutiveAccess<Handle> for Access {
             allow_spine_edges,
         ))
     }
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        corners: &[Handle],
+    ) -> SolidResult<StitchAttempt> {
+        // (the fixture's handles name no corners) with no corner there is no patch face,
+        // and the patch callback keeps the default choice for every glued pair
+        if !corners.is_empty() {
+            return missing();
+        }
+        ExecutiveAccess::stitch_faces(self, k, brep, tolerance, None, false)
+    }
+    // (the fixture's handles name no solvers) with no blend, none takes a face
+    fn solvers_faces_outlast(&mut self, _: &mut Kernel, solvers: &[Handle]) -> SolidResult<bool> {
+        if !solvers.is_empty() {
+            return missing();
+        }
+        Ok(true)
+    }
+    // (the fixture's handles name no solvers) with no blend, no bands overlap
+    fn solvers_bands_clear_other_rails(
+        &mut self,
+        _: &mut Kernel,
+        solvers: &[Handle],
+    ) -> SolidResult<bool> {
+        if !solvers.is_empty() {
+            return missing();
+        }
+        Ok(true)
+    }
     fn editing_enabled(&self, brep: Handle) -> SolidResult<bool> {
         self.breps
             .get(brep.0)
