@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("id?: the view (default: the active view) → id; moves the view to another desktop window of the live design; never opens a dialog"),
     CommandSpec::new("tab.view.move_to_window", "Move View to Window", crate::checked!("tab.view.move_to_window", move_to_window))
         .icon("panel_popout").noundo().doc_only().key("Ctrl+Alt+W").contract(&MOVE_TO_WINDOW_CONTRACT).output(output_schema_for::<TabWindowMoveReply>)
-        .params("view: an open view id; window?: id or new (default); new only: display?: name or index, x?, y?, w?, h?: logical points, level?: views_only → view, window, created, from, closed_source, placement"),
+        .params("view: an open view id; window?: id or new (default); existing only: index?: insertion position (0 first); new only: display?: name or index, x?, y?, w?, h?: logical points, level?: views_only → view, window, created, from, closed_source, placement"),
     CommandSpec::new("tab.window.list", "List Windows", crate::checked!("tab.window.list", list_windows))
         .icon("list").noundo().doc_only().read_only().contract(&WINDOW_LIST_CONTRACT).output(output_schema_for::<TabWindowListReply>)
         .params("no parameters → windows of the active design; main window is 0; read-only"),
@@ -119,6 +119,9 @@ fn move_to_window(_s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "display, geometry and level require window: new"));
         }
     } else {
+        if p.get("index").is_some() {
+            return Err(bad(cmd, "index requires an existing window id"));
+        }
         request.level = Some(request.level.unwrap_or_default());
     }
     if [request.x, request.y].into_iter().flatten().any(|coord| !coord.is_finite())
