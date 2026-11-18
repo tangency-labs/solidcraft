@@ -11731,14 +11731,47 @@ fn eval_feature_kind(
                 return Ok(()); // the pieces were all joined back into the body they are part of
             }
             let op = if *operation == Operation::NewBody { Operation::Join } else { *operation };
-            // #15913: a join of a surface body fails deep in the kernel or swallows the surface; refuse it here, by name.
-            if op == Operation::Join {
-                let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| b.is_surface()));
-                if let Some(name) = surface {
-                    return Err(DocError::Invalid(format!(
-                        "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
-                    )));
+            // #15913, #18708: booleans require closed solids: an open tool body (or open target)
+            // fails deep in kernel export with cryptic errors or swallows surfaces. Refuse it here,
+            // naming the offending body in user terms before attempting the boolean.
+            match op {
+                Operation::Join => {
+                    let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| !b.is_closed()));
+                    if let Some(name) = surface {
+                        return Err(DocError::Invalid(format!(
+                            "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
+                        )));
+                    }
                 }
+                Operation::Cut => {
+                    if let Some(tb) = st.body(target)
+                        && !tb.is_closed()
+                    {
+                        return Err(DocError::Invalid(format!(
+                            "{target} is a surface body, and a cut needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
+                        )));
+                    }
+                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                        return Err(DocError::Invalid(format!(
+                            "\"{name}\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+                        )));
+                    }
+                }
+                Operation::Intersect => {
+                    if let Some(tb) = st.body(target)
+                        && !tb.is_closed()
+                    {
+                        return Err(DocError::Invalid(format!(
+                            "{target} is a surface body, and an intersect needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
+                        )));
+                    }
+                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                        return Err(DocError::Invalid(format!(
+                            "\"{name}\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+                        )));
+                    }
+                }
+                _ => {}
             }
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {
