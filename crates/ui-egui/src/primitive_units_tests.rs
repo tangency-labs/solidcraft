@@ -522,6 +522,45 @@ fn editing_a_coil_keeps_its_explicit_world_axis_and_saved_base() {
     assert_eq!(command(&d)["base"], json!([0.0, 0.0, 0.0]));
 }
 
+#[test]
+fn editing_a_coil_can_replace_a_deleted_sketch_axis() {
+    let mut h = design("mm");
+    let sketch = h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[30,0],[30,10]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let saved_axis = json!({"sketch":sketch,"curve":"l1"});
+    let id = h.app.run("solid.coil", json!({"axis":saved_axis,"diameter":20,"section_size":1,"revolutions":1,"pitch":8})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::SketchCurve { id: "l1".into(), sketch: Some(sketch) }]);
+
+    h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
+    h.app.run("sketch.delete", json!({"entities":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_eq!(crate::scenario::count_of("dialog:selection:Axis:filled"), Some(0.0));
+    assert!(h.widget(&saved_axis.to_string()).is_none());
+    let mut d = h.app.dialog.take().expect("Edit Coil opens with a broken axis");
+    assert!(d.inputs[1].items.is_empty());
+    assert_eq!(d.extra["axis"], saved_axis);
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["params"]["axis"], saved_axis);
+
+    d.active = 1;
+    d.pick(&h.app.session, solidcraft_engine::Sel::Axis { name: "Z".into() });
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["params"]["axis"], json!({"type":"world","axis":"Z"}));
+    h.app.dialog = Some(d);
+    h.frames(2);
+    ok(&mut h);
+    assert!(matches!(
+        &h.app.session.doc.feature(id).unwrap().kind,
+        solidcraft_engine::doc::FeatureKind::Coil {
+            axis_ref: Some(solidcraft_engine::doc::AxisRef::World { axis }), ..
+        } if axis == "Z"
+    ));
+}
+
 /// #3271: cover secondary and optional lengths as well as each tool's primary canvas value.
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {

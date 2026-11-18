@@ -971,6 +971,44 @@ fn a_coil_on_a_world_axis_rebuilds_in_its_moved_component_frame() {
 }
 
 #[test]
+fn a_coil_rebuilds_when_its_construction_axis_component_moves() {
+    let mut doc = Document::new("coil on another component's axis");
+    let owner = doc.add_component(Some("Axis part"), 0).unwrap();
+    let consumer = doc.add_component(Some("Coil part"), 0).unwrap();
+    add_in(
+        &mut doc,
+        owner,
+        "Winding axis",
+        serde_json::json!({
+            "type": "construction_axis", "def": {"type": "two_points",
+                "a": {"type": "point", "p": [0, 0, 0]}, "b": {"type": "point", "p": [0, 0, 1]}}
+        }),
+    );
+    add_in(
+        &mut doc,
+        consumer,
+        "Coil",
+        serde_json::json!({
+            "type": "coil", "base": ["0", "0", "0"], "axis": [0, 0, 1],
+            "axis_ref": {"type": "construction", "name": "Winding axis"},
+            "diameter": "40", "section_size": "2", "pitch": "8", "turns": "2", "operation": "new_body"
+        }),
+    );
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    no_errors(&model);
+    let before = model.state().bodies[0].body.exact_bounds().unwrap();
+    doc.occurrences.iter_mut().find(|o| o.component == owner).unwrap().transform = rigid(Vec3::new(12., 0., 0.), Vec3::ZERO, Vec3::Z, 0.);
+    model.evaluate(&doc);
+    no_errors(&model);
+    let after = model.state().bodies[0].body.exact_bounds().unwrap();
+    assert_eq!(model.last_recomputed, 1, "only the Coil should rebuild");
+    assert!((after.min.x - before.min.x - 12.).abs() < 1e-6, "{before:?} -> {after:?}");
+    assert!((after.max.x - before.max.x - 12.).abs() < 1e-6, "{before:?} -> {after:?}");
+}
+
+#[test]
 fn box_fillet_cut_timeline() {
     let (mut doc, _) = plate_doc();
     doc.add_feature(

@@ -3434,6 +3434,21 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
     }
 }
 
+/// A saved Coil sketch line that could not refill its pick. Keep it in the command parameters
+/// until the user supplies a replacement, while presenting empty controls for the axis.
+fn unresolved_coil_axis(d: &Dialog, s: &Session) -> bool {
+    if !matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) || d.inputs.get(1).is_none_or(|input| !input.items.is_empty()) {
+        return false;
+    }
+    let Some(FeatureKind::Coil { axis_ref: Some(AxisRef::SketchLine { curve, sketch }), .. }) =
+        d.editing.and_then(|(id, _)| s.doc.feature(id)).map(|f| &f.kind)
+    else {
+        return false;
+    };
+    let owner = sketch.map(Value::from);
+    d.extra.get("axis").is_some_and(|axis| axis.get("curve").and_then(Value::as_str) == Some(curve.as_str()) && axis.get("sketch") == owner.as_ref())
+}
+
 /// An explicit axis as its dialog holds it, in the world: the origin evaluated with the
 /// parameters (an untouched axis is restored as saved, expressions included:
 /// `solidcraft_engine::frames::to_local`). An origin that cannot be evaluated is kept as saved.
@@ -3475,8 +3490,10 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut toggle_list: Option<usize> = None;
     let mut hovered: Option<(usize, Sel)> = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
+    let unresolved_axis = unresolved_coil_axis(d, s);
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
-        let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let stored_reference =
+            stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty() && !(i == 1 && unresolved_axis));
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active && !text_focus;
@@ -8378,20 +8395,29 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("base".into(), pt_expr(base));
             d.extra.insert("axis".into(), pt3(axis.0));
             if let Some(reference) = axis_ref {
-                if let Some(pick) = axis_reference_pick(s, reference, sketch.map(|id| id.0)) {
-                    let axis = coil_axis_param(app, &pick, sketch.map(|id| id.0)).ok()?;
-                    if let Some(input) = d.inputs.get_mut(1) {
-                        input.items = vec![pick];
+                let profile_sketch = sketch.map(|id| id.0);
+                let pick = axis_reference_pick(s, reference, profile_sketch);
+                let (axis, pick) = match (reference, pick) {
+                    (AxisRef::SketchLine { curve, sketch }, pick) => {
+                        // A deleted line leaves the field empty so a new pick can replace the saved reference.
+                        let axis = match sketch {
+                            Some(owner) => json!({"sketch": owner, "curve": curve}),
+                            None => json!({"curve": curve}),
+                        };
+                        let pick = pick.filter(|pick| coil_axis_param(app, pick, profile_sketch).is_ok());
+                        (axis, pick)
                     }
-                    d.extra.insert("axis".into(), axis);
-                } else {
-                    let value = match reference {
-                        AxisRef::Line { origin, dir } => line_axis_value(s, &feature_frame(s, f.component), origin, dir.0),
-                        AxisRef::Model { geo } => serde_json::to_value(geo).ok()?,
-                        _ => return None,
-                    };
-                    d.extra.insert("axis".into(), value);
+                    (_, Some(pick)) => (coil_axis_param(app, &pick, profile_sketch).ok()?, Some(pick)),
+                    (AxisRef::Line { origin, dir }, None) => (line_axis_value(s, &feature_frame(s, f.component), origin, dir.0), None),
+                    (AxisRef::Model { geo }, None) => (serde_json::to_value(geo).ok()?, None),
+                    _ => return None,
+                };
+                if let Some(pick) = pick
+                    && let Some(input) = d.inputs.get_mut(1)
+                {
+                    input.items = vec![pick];
                 }
+                d.extra.insert("axis".into(), axis);
             }
             if *reversed {
                 d.extra.insert("reversed".into(), json!(true));

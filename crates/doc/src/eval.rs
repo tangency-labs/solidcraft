@@ -3127,9 +3127,18 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
         }
     }
-    // The assembly's origin axis has a fixed world placement, as seen from the Coil's component.
-    if f.component != 0 && matches!(f.kind, FeatureKind::Coil { axis_ref: Some(AxisRef::World { .. }), .. }) {
-        reads.components.insert(0);
+    if let FeatureKind::Coil { axis_ref: Some(axis), .. } = &f.kind {
+        // The Coil reads the axis in its own frame, using the same owner as axis evaluation.
+        let owner = match axis {
+            AxisRef::World { .. } => Some(0),
+            AxisRef::Construction { name } => {
+                st.and_then(|st| st.construct.iter().find(|c| c.name == *name)).map(|c| doc.feature(c.feature).map_or(0, |feature| feature.component))
+            }
+            _ => None,
+        };
+        if let Some(owner) = owner.filter(|owner| *owner != f.component) {
+            reads.components.insert(owner);
+        }
     }
     let path = match &f.kind {
         FeatureKind::Sweep { path_sketch, .. }
