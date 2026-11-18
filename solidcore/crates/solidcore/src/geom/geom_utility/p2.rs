@@ -1250,8 +1250,7 @@ pub fn evaluate_curve_continuity(
         && second1.distance(second2) < param_eff_zero * (1.0 + second12_max);
     // (as upstream's condition, NaN included)
     if !c2
-        && (!in_tol(curvature1 - curvature2, gap_tol)
-            || rad_to_deg(ang_rad) > continuity_angle_deg)
+        && (!in_tol(curvature1 - curvature2, gap_tol) || rad_to_deg(ang_rad) > continuity_angle_deg)
     {
         return Ok(kind);
     }
