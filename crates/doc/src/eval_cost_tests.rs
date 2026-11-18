@@ -22,8 +22,9 @@ use crate::*;
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
 /// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
-/// direction, joins made of bodies that are all apart without running the kernel's union, and the
-/// holes whose tools were built (not moved from another copy's).
+/// direction, joins made of bodies that are all apart without running the kernel's union, the
+/// holes whose tools were built (not moved from another copy's), the tight boxes the kernel was
+/// asked for, and the bodies' mesh boxes.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -48,6 +49,7 @@ pub(super) struct Counts {
     pub thread_cuts: usize,
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
+    pub tight_boxes: usize,
 }
 
 thread_local! {
@@ -75,6 +77,7 @@ thread_local! {
             thread_cuts: 0,
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
+            tight_boxes: 0,
         })
     };
 }
@@ -3098,4 +3101,40 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert_eq!(st.bodies.len(), 1);
     assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 1);
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
+}
+
+/// A cut measures the tight box of its tool, not of the body it cuts (#18821): the
+/// kernel takes minutes to work out the tight box of a body with many faces (347 s for
+/// the cup of the report), against 30 s for the cut the box was measured for. The body a
+/// cut cannot reach is found by the box its mesh holds, which costs a meshing.
+#[test]
+fn a_cut_measures_the_tight_box_of_its_tool_only() {
+    let mut doc = Document::new("a cut");
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::ZERO),
+        length: "20".into(),
+        width: "20".into(),
+        height: "20".into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    doc.add_feature(kind, None).unwrap();
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(5.0, 5.0, -1.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "22".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
+    // The tool's tight box, and no other: the body's box is its mesh's.
+    assert_eq!(work.tight_boxes, 1, "{work:?}");
+    // The cut is made all the same.
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 2000.0)).abs() < 1e-6);
 }
