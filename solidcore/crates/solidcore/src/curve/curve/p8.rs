@@ -4572,8 +4572,9 @@ mod tests {
         let k = Kernel::default();
         let line = polyline(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]);
         // (s, dr + c (s² - s + 1/4))
-        let parabola =
-            |dr: f64, c: f64| power_bezier(&[[0.0, dr + 0.25 * c, 0.0], [1.0, -c, 0.0], [0.0, c, 0.0]]);
+        let parabola = |dr: f64, c: f64| {
+            power_bezier(&[[0.0, dr + 0.25 * c, 0.0], [1.0, -c, 0.0], [0.0, c, 0.0]])
+        };
         let whole = (0.0, 1.0);
         let flat = parabola(5e-13, 1e-12);
         for s in [0.0, 0.5, 1.0] {
