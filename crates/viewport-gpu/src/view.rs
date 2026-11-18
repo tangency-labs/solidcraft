@@ -245,8 +245,10 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 /// [`MAX_SECTION_PLANES`] planes, 6 more `vec4`s (the last carries the ambient occlusion
 /// radius), the 8 analysis colours, their flags, the depth direction, the model matrix, the two
 /// whole-body highlight colours, the section hatch colours, the product lights (a flag and
-/// count, then 21 lights of 4 `vec4`s), each section plane's hatch and the sky (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 480 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
+/// count, then 21 lights of 4 `vec4`s), the inverse of the view-projection matrix, each section
+/// plane's hatch and the sky (`uniform_bytes`).
+const UNIFORM_SIZE: u64 =
+    480 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16 + 64;
 
 /// The identity, column-major: a scene drawn where it was built.
 const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -5138,7 +5140,8 @@ fn local_direction(model: &[[f32; 4]; 4], d: [f32; 3]) -> [f32; 3] {
 }
 
 fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool, model: [[f32; 4]; 4]) -> Vec<u8> {
-    let mut v: Vec<f32> = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed).iter().flatten().copied().collect();
+    let gpu_vp = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed);
+    let mut v: Vec<f32> = gpu_vp.iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
     v.extend(cb.clip.iter().flatten());
@@ -5171,6 +5174,9 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
         let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
     }
+    // The view-projection's inverse, to find a pixel's point in the world from its depth
+    // (`fs_ao_term_screen`).
+    v.extend(inverse(gpu_vp).iter().flatten());
     let vp = solidcraft_viewport::Mat4(cb.view_proj.map(|c| c.map(f64::from)));
     for (c, hatch) in cb.clip.iter().zip(cb.clip_hatch) {
         let n = Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
@@ -5179,6 +5185,38 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     }
     v.extend(cb.sky.map(|value| if value.is_finite() { value } else { 0.0 }));
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// The inverse of a 4 × 4 matrix (by columns), worked out in `f64`; zero where it has none.
+fn inverse(m: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    // A matrix's columns read as rows are its transpose, whose inverse read back as rows is the
+    // inverse's columns: rows or columns, the same steps give the answer laid out as given.
+    let mut a: [[f64; 8]; 4] = std::array::from_fn(|r| {
+        std::array::from_fn(|c| {
+            if c < 4 {
+                f64::from(m[r][c])
+            } else if c - 4 == r {
+                1.0
+            } else {
+                0.0
+            }
+        })
+    });
+    for col in 0..4 {
+        let Some(pivot) = (col..4).max_by(|&x, &y| a[x][col].abs().total_cmp(&a[y][col].abs())) else { return [[0.0; 4]; 4] };
+        if !a[pivot][col].is_normal() {
+            return [[0.0; 4]; 4];
+        }
+        a.swap(col, pivot);
+        let p = a[col][col];
+        a[col].iter_mut().for_each(|x| *x /= p);
+        let row = a[col];
+        for (_, other) in a.iter_mut().enumerate().filter(|(r, _)| *r != col) {
+            let f = other[col];
+            other.iter_mut().zip(row).for_each(|(x, y)| *x -= f * y);
+        }
+    }
+    std::array::from_fn(|r| std::array::from_fn(|c| a[r][c + 4] as f32))
 }
 
 /// The shader's analysis colours (`ana_c`: draft positive, between, negative; reachable,
@@ -5500,6 +5538,31 @@ mod tests {
         let previous = super::frame_key(&frame);
         frame.product_lights = Some(Vec::new());
         assert_ne!(super::frame_key(&frame), previous);
+    }
+
+    /// The uniform carries the inverse of the view-projection it carries, just before the planes'
+    /// hatch: the ambient occlusion finds a pixel's point in the world from its depth with it.
+    #[test]
+    fn the_uniform_carries_the_inverse_of_its_view_projection() {
+        let mut f = cached_frame();
+        f.view_proj = solidcraft_viewport::Camera::default().view_proj(1.5, 40.0).to_f32();
+        for reversed in [false, true] {
+            let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, reversed);
+            let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+            let at = v.len() - 4 - 4 * super::MAX_SECTION_PLANES - 16;
+            let vp: [[f32; 4]; 4] = std::array::from_fn(|c| std::array::from_fn(|r| v[4 * c + r]));
+            let inv: [[f32; 4]; 4] = std::array::from_fn(|c| std::array::from_fn(|r| v[at + 4 * c + r]));
+            for (c, column) in inv.iter().enumerate() {
+                for r in 0..4 {
+                    let product: f32 = vp.iter().zip(column).map(|(vp_column, x)| vp_column[r] * x).sum();
+                    let want = if r == c { 1.0 } else { 0.0 };
+                    assert!((product - want).abs() < 1e-4, "reversed {reversed}: (vp · inv)[{r}][{c}] = {product}");
+                }
+            }
+        }
+        // A matrix with no inverse gives zeros, never infinities.
+        assert_eq!(super::inverse([[0.0; 4]; 4]), [[0.0; 4]; 4]);
+        assert_eq!(super::inverse([[1.0, 0.0, 0.0, 0.0], [2.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]), [[0.0; 4]; 4]);
     }
 
     /// The uniform fills the shader's `U` exactly, the section's planes and their hatch included.
