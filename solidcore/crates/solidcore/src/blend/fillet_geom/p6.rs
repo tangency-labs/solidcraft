@@ -257,8 +257,8 @@ fn first_uv<O: SolutionObject>(solutions: &SolutionArray<O>, op: &'static str) -
 /// `None` otherwise ([`SolidError::Unported`] propagates).
 /// `fixes.fillet_on_edge_continues_line`: the segment from `start` to `end` when `curve`
 /// (the side edge's) is a line, both points lie on its line within the edge's tolerance,
-/// and one lies past the edge's own ends; `None` otherwise (the points drop onto the edge
-/// as upstream does).
+/// and both lie at or past the same end of the edge, one past it, where their drops would
+/// both clamp to that end; `None` otherwise (the points drop onto the edge as upstream does).
 fn continued_line_segment(
     k: &Kernel,
     target: &Brep,
@@ -282,19 +282,21 @@ fn continued_line_segment(
     if len2 <= tol * tol {
         return Ok(None);
     }
-    let mut past = false;
-    for p in [start, end] {
+    // both points at or past the same end, one of them past it: their drops would both clamp
+    // to that end
+    let reach = tol / len2.sqrt();
+    let mut ts = [0.0f64; 2];
+    for (slot, p) in ts.iter_mut().zip([start, end]) {
         let t = (p - a).dot(d) / len2;
         let foot = a + d * t;
         if (p - foot).length() > tol {
             return Ok(None);
         }
-        let reach = tol / len2.sqrt();
-        if t < -reach || t > 1.0 + reach {
-            past = true;
-        }
+        *slot = t;
     }
-    if !past || (end - start).length() <= tol {
+    let past_high = ts.iter().all(|&t| t >= 1.0 - reach) && ts.iter().any(|&t| t > 1.0 + reach);
+    let past_low = ts.iter().all(|&t| t <= reach) && ts.iter().any(|&t| t < -reach);
+    if !(past_high || past_low) || (end - start).length() <= tol {
         return Ok(None);
     }
     Ok(Some(Curve::from(Line::from_points(start, end, 3))))
@@ -1003,7 +1005,7 @@ impl FilletBrep {
             .ok_or_else(|| nul("the original edge's curve"))?;
         let new_3d_curve = copy_as_b_spline(k, orig_curve)?
             .ok_or_else(|| nul("the original curve's B-spline copy"))?;
-        self.finish_edge_on_edge(k, e, target, new_3d_curve, false)
+        self.finish_edge_on_edge(k, e, target, new_3d_curve, false, false)
     }
 
     /// [`Self::calc_edge_on_edge`] of an edge of a corner at `corner_vertex` (the fork's
@@ -1196,12 +1198,14 @@ impl FilletBrep {
             joined = true;
             break;
         }
-        self.finish_edge_on_edge(k, e, target, new_3d_curve, joined)
+        self.finish_edge_on_edge(k, e, target, new_3d_curve, joined, !roll_over)
     }
 
     /// The rest of `CalcEdgeOnEdge` after the curve's copy: the trim between the end
     /// points' drops (on the joined curve's natural interval when `joined`, else on the
-    /// original edge's interval), the reversal and the curve's setting.
+    /// original edge's interval), the reversal and the curve's setting. `continue_line`:
+    /// at a corner that is not a roll-over, where `fixes.fillet_on_edge_continues_line` may
+    /// continue a straight side edge past its end.
     fn finish_edge_on_edge(
         &mut self,
         k: &Kernel,
@@ -1209,6 +1213,7 @@ impl FilletBrep {
         target: &Brep,
         mut new_3d_curve: Curve,
         joined: bool,
+        continue_line: bool,
     ) -> Result<()> {
         let nul = |what| SolidError::blend_missing(OP_ON_EDGE, what);
         // get filletEdge vertices
@@ -1220,7 +1225,7 @@ impl FilletBrep {
 
         // Not the fork's (`fixes.fillet_on_edge_continues_line`): on a straight side edge
         // continued past its end (a cliff overflow at a concave crease), the segment of its line
-        if !joined && k.fixes.fillet_on_edge_continues_line {
+        if !joined && continue_line && k.fixes.fillet_on_edge_continues_line {
             if let Some(line) = continued_line_segment(
                 k,
                 target,

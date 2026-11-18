@@ -32,9 +32,7 @@ use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
-use solidcore_ops::boolean::boolean;
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
-use solidcore_ops::BooleanOp;
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
     make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
@@ -257,9 +255,13 @@ fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
     let outer = make_box([-l, -d, -200.0], [2.0 * l, d - c, 400.0]).unwrap();
     let turned = make_box([0.0, -d, -200.0], [2.0 * l, d - c + 10.0, 400.0]).unwrap();
     turned.transform(&about_z(-k, [0.0, -d, 0.0])).unwrap();
-    let outer = boolean(outer, turned, BooleanOp::Union).unwrap().unwrap();
+    let outer = solidcore_ops::boolean::boolean(outer, turned, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
     let keep = make_box([-l, -d - 40.0, -200.0], [2.0 * l, d + 40.0 - c, 400.0]).unwrap();
-    let outer = boolean(outer, keep, BooleanOp::Intersect).unwrap().unwrap();
+    let outer = solidcore_ops::boolean::boolean(outer, keep, solidcore_ops::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
     let slab = make_box([-271.5, -271.5, -t], [543.0, 543.0, t]).unwrap();
     slab.transform(&[
         [a.cos(), 0.0, -a.sin(), 0.0],
@@ -268,7 +270,9 @@ fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
         [0.0, 0.0, 0.0, 1.0],
     ])
     .unwrap();
-    let b = boolean(slab, outer, BooleanOp::Intersect).unwrap().unwrap();
+    let b = solidcore_ops::boolean::boolean(slab, outer, solidcore_ops::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
     let top = |x: f64| -x * a.tan();
     let (xl, xr) = (-l / 2.0, l / 2.0 * k.cos());
     let edges = [
