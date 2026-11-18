@@ -1356,6 +1356,7 @@ enum EditorSurface {
     Shell,
 }
 
+/// Draw a table editor with the requested surface and space reserved for an in-field control.
 fn cell_editor_frame(
     ui: &mut Ui,
     id: egui::Id,
@@ -1504,6 +1505,7 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
     response
 }
 
+/// Keep wrapped editing visually multiline while storing every pasted line ending as one space.
 struct SingleLineBuffer<'a>(&'a mut String);
 
 impl egui::TextBuffer for SingleLineBuffer<'_> {
