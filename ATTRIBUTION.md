@@ -1009,11 +1009,12 @@ crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
 into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
 
-## FreeCAD and Rhino import library
+## FreeCAD, Rhino and OpenUSD library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
-0.6.7 (Apache-2.0), linked as the crates `cadmpeg-core`, `cadmpeg-ir`, `cadmpeg-registry`,
-`cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino` and `cadmpeg-codec-step`
+FreeCAD `.FCStd` and Rhino `.3dm` files are read, and OpenUSD files read and written, with
+[cadmpeg](https://github.com/cadmpeg/cadmpeg) 0.6.12 (Apache-2.0), linked as the crates `cadmpeg-core`,
+`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino`,
+`cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
 codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is
