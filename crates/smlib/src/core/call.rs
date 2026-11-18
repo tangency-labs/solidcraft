@@ -83,11 +83,7 @@ pub(crate) fn error(call: &'static str, e: solidcore_ops::Error, detail: Option<
         Ops::Empty => Error::Empty,
         Ops::NotSolid => Error::NotSolid,
         Ops::Exception => Error::Exception,
-        // stopped by the time budget of the operation's rigor: a failure that says so, not a stop
-        Ops::Cancelled => match solidcore_ops::rigor::out_of_time() {
-            Some(budget) => Error::Solidcore(format!("{call}: {}", Ops::OutOfTime { budget })),
-            None => Error::Cancelled(call),
-        },
+        Ops::Cancelled => Error::Cancelled(call),
         Ops::Internal(what) => Error::Internal(what),
         e => Error::Solidcore(match detail {
             Some(kernel) => format!("{call}: {kernel}"),

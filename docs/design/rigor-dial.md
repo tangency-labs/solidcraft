@@ -76,7 +76,7 @@ reads the knobs it supports and ignores the others.
 | Knob | Read by, in this PR | Next |
 |---|---|---|
 | Certification | booleans (`boolean`, `boolean_under`, `boolean_certified`) | fillet/chamfer (`Blend::contract`), sweeps, offsets: they already take a `Contract` |
-| Time | every call in the scope; booleans return `OutOfTime`, and SolidCraft's ops wrapper reports any other call the budget stopped | every family, through the session (see open question 1) |
+| Time | every call in the scope; the session returns `OutOfTime` for any call the budget stopped | SolidCraft's wrapper needs its own `OutOfTime` arm (see open question 1) |
 | Accuracy | none (recorded only) | fits: sweep/loft sampling and chord, blend certificate tolerance |
 | Effort | none (recorded only) | certificate halvings (`nurbs::certificate::MAX_HALVINGS`), offset reach halvings, solver iterations |
 
@@ -87,10 +87,16 @@ family with no Off mode of its own runs it as `Contract::Closed` (`Certify::cont
 
 `within` starts a deadline: a `CancelToken` that a watch thread cancels when the budget runs
 out, joined with any token the application already has (`cancel::within`). Kernel loops already
-poll the token. When the call stops, the session rolls back its edits and returns `Cancelled`,
-the same as for any other cancel. `rigor::checked` turns that into
-`Error::OutOfTime { budget }`, unless the application cancelled the work itself. A
-user-initiated stop stays `Cancelled`.
+poll the token. The session (`session::run_with`) handles the stop the same way as any other
+cancel: it rolls back the call's edits, drops a kernel the call stopped part way, runs no failure
+callback and leaves no failure detail. The only difference is the error value. At both places a
+call can stop (refused before it runs, and stopped part way), the session passes `Cancelled`
+through `rigor::checked`, which gives `Error::OutOfTime { budget }` when this scope's deadline
+fired and the application did not cancel the work itself. Outside every rigor scope the value is
+exactly `Cancelled`, and a stop the user starts stays `Cancelled`. Two session tests check both
+places: `outside_a_rigor_a_stop_is_cancelled_at_both_sites` and
+`within_a_rigor_a_spent_budget_is_out_of_time_at_both_sites`. The session's module doc states the
+rule under **Stops**.
 
 - A zero budget is spent before the first call, which gives a deterministic test.
 - Where no thread can start (wasm without threads), the budget is not enforced. The call runs to
@@ -228,13 +234,15 @@ A user's own Stop stays a stop and is not reported as a failure.
 
 ## Open questions for jyviko
 
-1. **Session-level `OutOfTime`.** Right now only booleans call `rigor::checked`. For every other
-   call, SolidCraft's ops wrapper (`crates/smlib/src/core/call.rs`) asks `rigor::out_of_time()`
-   and turns the stop into a failure. For example, the operand copy before a cut can be the call
-   the budget stops. Changing two lines in `session::run_with` would give every family
-   `OutOfTime` from ops itself: both `Err(Cancelled)` returns would go through `rigor::checked`,
-   and the wrapper's mapping could go. Should it live in the session? I left the session alone in
-   this PR while the ops migration is in flight.
+1. **SolidCraft's wrapper needs an `OutOfTime` arm.** ops now returns `OutOfTime` from the
+   session for every family. SolidCraft's ops wrapper (`call::error` in
+   `crates/smlib/src/core/call.rs`) maps `Cancelled` to its own `Cancelled(call)` and skips the
+   failure dump. Today any other variant, `OutOfTime` included, is dumped and worded as a kernel
+   failure. **Before any SolidCraft call uses a budget, `call::error` needs an `OutOfTime` arm**
+   that words it as "ran out of time" and does not dump it. This PR does not add that arm,
+   because `call.rs` is in open work. For now, the app's feature test reads the catch-all wording
+   (`SmApiBrepCopy: ran out of time: …`). No saved design uses a budget until the panel lands,
+   because legacy has none.
 2. **Is `Certify::Off` wanted?** Off accepts any boolean result with faces. That is fast, but it
    can let a non-closed result through without saying so. One option: keep Off only for preview
    evaluations (sketch-live, drag), and make the lowest saved stop Closed.
@@ -259,9 +267,11 @@ A user's own Stop stays a stop and is not reported as a failure.
 ## What this PR has
 
 - `solidcore-ops`: `rigor.rs` (the type, the table, the scope, the deadline, `checked`),
-  `Error::OutOfTime`, booleans reading the rigor, and tests in `rigor/tests.rs`.
+  `Error::OutOfTime`, the session returning it at both stop sites (with its module-doc rule and
+  two session tests), booleans reading the certification, and tests in `rigor/tests.rs`.
 - `crates/doc`: `rigor.rs` (records, resolve, inherit and override, default change), the
   `Document::rigor` field, the feature fingerprint, evaluation inside the feature's rigor, the
   pending format file, and tests in `rigor/tests.rs`.
-- Not included: the panel UI, commands and schemas for setting rigor, and the families other
-  than booleans.
+- Not included: the panel UI, commands and schemas for setting rigor, SolidCraft's wrapper arm
+  for `OutOfTime` (open question 1), and the families other than booleans reading certification,
+  accuracy and effort.

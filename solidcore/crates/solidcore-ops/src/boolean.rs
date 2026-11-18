@@ -141,7 +141,8 @@ fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
 /// along an edge or at a vertex are closed).
 ///
 /// Within a rigor ([`crate::rigor::within`]) the boolean is certified as the rigor says
-/// ([`boolean_certified`]) and a call its time budget stopped gives [`Error::OutOfTime`].
+/// ([`boolean_certified`]), and a call its time budget stopped gives [`Error::OutOfTime`] (the
+/// session's, as every call's).
 /// Outside every rigor scope, or within [`Rigor::LEGACY`], it is exactly the call it was.
 ///
 /// # Errors
@@ -149,7 +150,7 @@ fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
 pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
     match rigor::current() {
         None => boolean_with(a, b, op, Contract::Closed),
-        Some(r) => rigor::checked(boolean_certified(a, b, op, r.certify)),
+        Some(r) => boolean_certified(a, b, op, r.certify),
     }
 }
 

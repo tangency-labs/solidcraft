@@ -618,6 +618,94 @@ fn a_result_finished_after_the_cancel_is_not_returned() {
     assert_eq!(r, Ok(true), "the token is off the kernel after the call");
 }
 
+/// Outside every rigor scope a stop is exactly `Cancelled` at both of the session's stops: a
+/// call refused before it runs and one stopped part way.
+#[test]
+fn outside_a_rigor_a_stop_is_cancelled_at_both_sites() {
+    all_fixes();
+    assert!(crate::rigor::current().is_none());
+    let token = CancelToken::new();
+    token.cancel();
+    let r: Result<()> = crate::cancel::within(&token, || run("refused", |_| Ok(())));
+    assert_eq!(r, Err(Error::Cancelled));
+    let token = CancelToken::new();
+    let r: Result<()> = crate::cancel::within(&token, || {
+        run("stopped part way", |k| {
+            token.cancel();
+            k.check_cancelled("session::tests")
+        })
+    });
+    assert_eq!(r, Err(Error::Cancelled));
+}
+
+/// Within a rigor, a call its time budget stopped is `OutOfTime`, before it runs and part way,
+/// and otherwise a stop like a cancel: the edit put back, nothing handed to the failure
+/// callback, no failure detail, the kernel replaced.
+#[test]
+fn within_a_rigor_a_spent_budget_is_out_of_time_at_both_sites() {
+    in_own_process(
+        "session::tests::within_a_rigor_a_spent_budget_is_out_of_time_at_both_sites",
+        || {
+            use std::time::Duration;
+            all_fixes();
+            let spent = crate::Rigor {
+                time: Some(Duration::ZERO),
+                ..crate::Rigor::LEGACY
+            };
+            let ran = Cell::new(false);
+            let r: Result<()> = crate::rigor::within(&spent, || {
+                run("never runs", |_| {
+                    ran.set(true);
+                    Ok(())
+                })
+            });
+            assert_eq!(
+                r,
+                Err(Error::OutOfTime {
+                    budget: Duration::ZERO
+                })
+            );
+            assert!(!ran.get());
+
+            let reported: Arc<Mutex<Vec<String>>> = Arc::default();
+            let seen = Arc::clone(&reported);
+            set_failure_hook(Some(Arc::new(move |f: &Failure<'_>| {
+                seen.lock().unwrap().push(f.call.to_owned());
+            })));
+            let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+            let before = points(&b);
+            let room = crate::Rigor {
+                time: Some(Duration::from_secs(600)),
+                ..crate::Rigor::LEGACY
+            };
+            let r: Result<()> = crate::rigor::within(&room, || {
+                with_body("out of time part way", &b, |k, br| {
+                    let v = br.vertex_list()[0];
+                    br.vertex_mut(v)?.point = solidcore::Vec3::new(9.0, 9.0, 9.0);
+                    k.upstream_ub_passed.push("marker");
+                    crate::rigor::spend_budget();
+                    k.check_cancelled("session::tests")
+                })
+            });
+            set_failure_hook(None);
+            assert_eq!(
+                r,
+                Err(Error::OutOfTime {
+                    budget: Duration::from_secs(600)
+                })
+            );
+            assert_eq!(before, points(&b), "the edit was put back");
+            assert!(reported.lock().unwrap().is_empty(), "a stop is no failure");
+            assert_eq!(take_failure_detail(), None);
+            let fresh = run("after", |k| {
+                Ok(k.upstream_ub_passed.is_empty() && k.cancel.is_none())
+            })
+            .unwrap();
+            assert!(fresh, "the kernel was replaced and carries no token");
+        },
+    );
+}
+
 /// Runs `f` on another thread and gives its answer: a failure here rather than a test that hangs
 /// when `f` waits for a call that does not end. The limit is no measure of speed: `f` is free to
 /// take all of it, and only a wait with no end fails.

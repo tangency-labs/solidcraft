@@ -20,14 +20,14 @@
 //!
 //! **How a family reads it.** An application runs an operation's calls [`within`] its rigor,
 //! as it runs them within a [`crate::cancel::CancelToken`]. The scope applies the time budget
-//! to every call in it; each family reads the knobs it has ([`current`]) and gives
-//! [`Error::OutOfTime`] for a call the budget stopped ([`checked`]). The families that read
-//! each knob so far:
+//! to every call in it, and the session gives [`Error::OutOfTime`] for a call the budget
+//! stopped ([`crate::session`], [`checked`]); each family reads the other knobs it has
+//! ([`current`]). The families that read each knob so far:
 //!
 //! | knob | read by |
 //! |---|---|
 //! | certification | [`crate::boolean`] (union, subtract, intersect) |
-//! | time | every call in the scope; [`Error::OutOfTime`] from [`crate::boolean`] |
+//! | time | every call in the scope ([`Error::OutOfTime`] from the session) |
 //! | accuracy | none yet (recorded, not applied) |
 //! | effort | none yet (recorded, not applied) |
 //!
@@ -38,8 +38,7 @@
 //! them [`current`] and runs each [`within`] it.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::body::Contract;
@@ -267,8 +266,9 @@ impl Rigor {
 #[derive(Clone)]
 struct Scope {
     rigor: Rigor,
-    /// The deadlines over the scope, innermost last: each its budget and whether it fired.
-    deadlines: Vec<(Duration, Arc<AtomicBool>)>,
+    /// The deadlines over the scope, innermost last: each its budget and its token, cancelled
+    /// when the budget is spent and only then.
+    deadlines: Vec<(Duration, CancelToken)>,
     /// The application's own token over the scope as it began: a cancellation of it is the
     /// application's, never a deadline's.
     outer: Option<CancelToken>,
@@ -281,7 +281,6 @@ thread_local! {
 /// A running time budget: cancels its token when the budget is spent, unless dropped first.
 struct Deadline {
     token: CancelToken,
-    fired: Arc<AtomicBool>,
     /// Dropped to tell the watch its scope ended.
     done: Option<mpsc::Sender<()>>,
     watch: Option<std::thread::JoinHandle<()>>,
@@ -293,31 +292,26 @@ impl Deadline {
     /// end, which is the answer without a budget, never another one.
     fn start(budget: Duration) -> Deadline {
         let token = CancelToken::new();
-        let fired = Arc::new(AtomicBool::new(false));
         if budget.is_zero() {
-            fired.store(true, Ordering::Relaxed);
             token.cancel();
             return Deadline {
                 token,
-                fired,
                 done: None,
                 watch: None,
             };
         }
         let (done, ended) = mpsc::channel::<()>();
-        let (t, f) = (token.clone(), Arc::clone(&fired));
+        let t = token.clone();
         let watch = std::thread::Builder::new()
             .name("solidcore-ops rigor deadline".into())
             .spawn(move || {
                 if let Err(mpsc::RecvTimeoutError::Timeout) = ended.recv_timeout(budget) {
-                    f.store(true, Ordering::Relaxed);
                     t.cancel();
                 }
             })
             .ok();
         Deadline {
             token,
-            fired,
             done: Some(done),
             watch,
         }
@@ -358,7 +352,7 @@ pub fn within<R>(rigor: &Rigor, f: impl FnOnce() -> R) -> R {
             .unwrap_or_default()
     });
     if let (Some(d), Some(budget)) = (&deadline, rigor.time) {
-        deadlines.push((budget, Arc::clone(&d.fired)));
+        deadlines.push((budget, d.token.clone()));
     }
     let scope = Scope {
         rigor: *rigor,
@@ -390,13 +384,13 @@ pub fn out_of_time() -> Option<Duration> {
         }
         s.deadlines
             .iter()
-            .find(|(_, fired)| fired.load(Ordering::Relaxed))
+            .find(|(_, token)| token.is_cancelled())
             .map(|(budget, _)| *budget)
     })
 }
 
-/// `r` with a [`Error::Cancelled`] a spent budget caused given as [`Error::OutOfTime`]: what a
-/// family returns for a call it ran within a rigor.
+/// `r` with a [`Error::Cancelled`] a spent budget caused given as [`Error::OutOfTime`]: what the
+/// session returns for a call stopped within a rigor. Outside every rigor scope `r` as it is.
 ///
 /// # Errors
 /// `r`'s error, [`Error::OutOfTime`] in place of a deadline's cancellation.
@@ -408,6 +402,17 @@ pub fn checked<T>(r: Result<T>) -> Result<T> {
         },
         r => r,
     }
+}
+
+/// Spends the innermost budget over this thread's ops calls at once, as its watch does when it
+/// runs out: for the tests of a call a budget stops part way.
+#[cfg(test)]
+pub(crate) fn spend_budget() {
+    CURRENT.with(|c| {
+        if let Some((_, token)) = c.borrow().as_ref().and_then(|s| s.deadlines.last()) {
+            token.cancel();
+        }
+    });
 }
 
 #[cfg(test)]

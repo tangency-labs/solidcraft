@@ -29,6 +29,11 @@
 //!   call cancelled part way. A call that only reads a body never leaves it unusable: it reads it
 //!   under its own guard ([`read_body`]) or measures a copy ([`measure_body`]). A call that edits
 //!   a body and panics puts it back as it came in ([`with_body`]).
+//! - **Stops:** a call stopped by a cancel, before it runs or part way, fails with
+//!   [`Error::Cancelled`]; one stopped by the time budget of the rigor it runs within
+//!   ([`crate::rigor::within`]) fails with [`Error::OutOfTime`] instead, and outside every rigor
+//!   scope always with [`Error::Cancelled`]. Either is a stop, not a failure: no result, the
+//!   kernel of a call stopped part way dropped, nothing handed to the failure callback.
 //! - **Failures:** an application may install a callback ([`set_failure_hook`]) that is handed a
 //!   failed call's name, why it failed and its input bodies as binary `.smb` bytes, written on
 //!   the call's kernel (a fresh one after a panic) from bodies no panic left half-edited. The
@@ -447,7 +452,7 @@ fn run_with<T: Answer>(
     // Cancelled already: refused before it waits for the kernel.
     let token = crate::cancel::current();
     if token.as_ref().is_some_and(CancelToken::is_cancelled) {
-        return Err(Error::Cancelled);
+        return crate::rigor::checked(Err(Error::Cancelled));
     }
     let mut k = take();
     start_clean(&mut k);
@@ -499,7 +504,7 @@ fn run_with<T: Answer>(
     let (r, fit) = match caught {
         // Cancelled during the call: no result, even one the kernel finished first, and a
         // kernel whose caches it may have left half-built is not used again.
-        Ok(_) if stopped => (Err(Error::Cancelled), false),
+        Ok(_) if stopped => (crate::rigor::checked(Err(Error::Cancelled)), false),
         Ok(Ok(v)) => (Ok(v), true),
         Ok(Err(e)) => {
             DETAIL.with(|d| d.replace(Some(e.to_string())));
@@ -516,9 +521,10 @@ fn run_with<T: Answer>(
         k = take();
     }
     k.cancel = None;
-    // A cancellation is the application's own: no failure to report.
+    // A cancellation is the application's own, and a spent time budget a stop: no failure to
+    // report.
     let why = match &r {
-        Err(Error::Cancelled) => None,
+        Err(Error::Cancelled | Error::OutOfTime { .. }) => None,
         Ok(v) => v.refusal(),
         Err(e) => Some(e.to_string()),
     };
