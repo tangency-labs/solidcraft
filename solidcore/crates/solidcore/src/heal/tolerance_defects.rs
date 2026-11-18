@@ -1270,7 +1270,7 @@ mod tests {
     /// one root lookup every vertex on the walk points at the root, which is unchanged.
     #[test]
     fn a_root_lookup_compresses_the_chain_it_walks() {
-        let n = 1000;
+        let n: usize = 1000;
         let mut parent: Vec<usize> = (0..n).map(|i| i.saturating_sub(1)).collect();
         assert_eq!(root(&mut parent, n - 1), 0);
         assert!(
