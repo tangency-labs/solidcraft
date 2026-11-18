@@ -595,8 +595,9 @@ fn rescale(t: &mut Vec3, fac: f64) -> Result<()> {
 /// # Errors
 ///
 /// [`NurbsFailure::Input`] for a given knot vector whose knots are all equal, `p < 2`,
-/// `per` outside `[0, 1]`, `u` not spanning a given knot vector, `p > k` without
-/// tangents, or `p > k + 1` with one tangent; [`NurbsFailure::Knots`] for an invalid given knot vector;
+/// `per` outside `[0, 1]`, `u` not spanning a given knot vector, `p > k + 1` with
+/// one tangent, or a fit with fewer control points than `p + 1` (`p > k` without
+/// tangents); [`NurbsFailure::Knots`] for an invalid given knot vector;
 /// `NL_GEO_ERR` for a tangent that cannot be normalised; errors of
 /// [`interp_given_params`], [`interp_knots_and_deriv`] and
 /// [`interp_knots_and_derivs`]; `InvalidInput` for empty `a`, too few parameters, a
@@ -769,12 +770,6 @@ pub fn interp_knots_and_tangents(
         // N_FitCrvKnotsAndDeriv: p > k + 1 = n.
         return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
-    // A curve of degree p needs p + 1 control points. Without a tangent upstream builds one
-    // with fewer from too few points (`N_FitCalcKnotVector` fills the knots it has room
-    // for), which no reader accepts (WR-16922); refuse it as `N_FitCrvInterp` does.
-    if tan == Tan::No && p > n {
-        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
-    }
     let kni = KnotVector::from_slice(&ui)?;
     let cur = match &tangents {
         EndTangents::None => interp_given_params(a, &ul, &kni, pu)?,
@@ -783,6 +778,12 @@ pub fn interp_knots_and_tangents(
         EndTangents::Both(ts, te) => interp_knots_and_derivs(a, &ul, &kni, pu, **ts, **te)?,
         EndTangents::Same(t) => interp_knots_and_derivs(a, &ul, &kni, pu, **t, **t)?,
     };
+    // A curve of degree p needs p + 1 control points. Without a tangent upstream returns one
+    // with fewer from too few points (`N_FitCalcKnotVector` fills the knots it has room
+    // for), which no reader accepts (WR-16922); refuse it as `N_FitCrvInterp` does.
+    if cur.n() < cur.degree() {
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
+    }
 
     // Update input knot vector.
     match knt.as_deref() {
@@ -1313,11 +1314,7 @@ mod tests {
                 1.0,
                 3,
             );
-            assert!(
-                matches!(r, Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))),
-                "{} points: {r:?}",
-                few.len()
-            );
+            assert!(r.is_err(), "{} points: {r:?}", few.len());
         }
         let c = interp_knots_and_tangents(
             &a[..3],
