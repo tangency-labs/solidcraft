@@ -132,10 +132,13 @@ name (or "Default") and Choose… and Clear buttons:
 ```
 
 `file` is optional for a chosen texture: it is the picture used until the person picks one, and
-a chosen picture that cannot be read or decoded falls back to it. A texture needs `file`,
+a chosen picture that cannot be read or decoded falls back to it, with one status line naming it. A texture needs `file`,
 `choose`, or both. The pictures are kept in the preferences as `background_shader_pictures`
-(`"plugin/shader/<texture index>"` to an absolute path, at most 64 entries, paths of at most 1024
-characters), and `ui.prefs` sets them the same way. Choosing a picture loads the background again.
+(`"plugin/shader/<texture name>"` to an absolute path, at most 64 entries, paths of at most 1024
+characters), and `ui.prefs` sets them the same way. A picture belongs to the texture's name, so
+reordering the textures in an update keeps each picture with its texture. Choosing a picture loads
+the background again. Removing a plugin, or deleting its folder, drops its pictures; turning it
+off keeps them.
 Older hosts refuse the `choose` field, as they refuse any unknown manifest field.
 
 ## What a shader can use

@@ -89,7 +89,7 @@ pub struct Plugin {
     pub(crate) swatches: crate::plugin_images::Swatches,
     /// Its view backgrounds (`shaders@0.1`): the preference's key, `id/shader`, and the name.
     pub shaders: Vec<(String, String)>,
-    /// Its textures a person chooses (`choose` in the manifest): `plugin/shader/<index>` and the label.
+    /// Its textures a person chooses (`choose` in the manifest): `plugin/shader/<texture name>` and the label.
     pub pictures: Vec<(String, String)>,
 }
 
@@ -179,8 +179,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
             shader
                 .textures
                 .iter()
-                .enumerate()
-                .filter_map(|(i, texture)| texture.choose.as_ref().map(|label| (format!("{}/{}/{i}", parsed.id, shader.id), label.clone())))
+                .filter_map(|texture| texture.choose.as_ref().map(|label| (format!("{}/{}/{}", parsed.id, shader.id, texture.name), label.clone())))
         })
         .collect();
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
@@ -438,6 +437,8 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
                 }
             }
             if job.command == "plugin.remove" {
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin_shaders::drop_pictures(app, id);
                 app.preferences.disabled_plugins.remove(id);
                 app.session.disabled_plugins.remove(id);
             }
@@ -1102,6 +1103,39 @@ mod tests {
         assert!(h.app.plugin_install.ask.is_none());
     }
 
+    /// Removing a plugin drops the pictures chosen for its backgrounds; turning it off keeps them.
+    #[test]
+    fn removing_a_plugin_drops_its_chosen_pictures_and_turning_it_off_keeps_them() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.join("controlled-packages"));
+        let path = package(&h, "controlled-plugin");
+        let (request, installed) = crate::control::ControlRequest::new(
+            "engine.execute",
+            json!({"command":"plugin.install","params":{"path":zip_package(&path),"approve":{"command_groups":["file"]}},"allow_paths":[h.dir]}),
+        );
+        assert!(request.ticket.take());
+        assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
+        tick(&mut h.app, &h.ctx, true);
+        assert_eq!(installed.recv().unwrap()["ok"], true);
+        let picked = h.dir.join("a.png").to_string_lossy().into_owned();
+        for key in ["controlled-plugin/own/picture", "other/own/picture"] {
+            h.app.preferences.background_shader_pictures.insert(key.into(), picked.clone());
+        }
+        h.app.preferences.disabled_plugins.insert("controlled-plugin".into());
+        assert_eq!(h.app.preferences.background_shader_pictures.len(), 2, "turning it off keeps the pictures");
+        let (request, removed) = crate::control::ControlRequest::new(
+            "engine.execute",
+            json!({"command":"plugin.remove","params":{"id":"controlled-plugin"},"allow_paths":[h.dir]}),
+        );
+        assert!(request.ticket.take());
+        assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
+        tick(&mut h.app, &h.ctx, true);
+        assert_eq!(removed.recv().unwrap()["ok"], true);
+        let kept: Vec<&String> = h.app.preferences.background_shader_pictures.keys().collect();
+        assert_eq!(kept, ["other/own/picture"], "removal drops only that plugin's pictures");
+    }
+
     #[test]
     fn plugins_install_keeps_grant_changes_made_while_package_job_runs() {
         use serde_json::json;
@@ -1469,15 +1503,18 @@ mod tests {
             let picked = picked.clone();
             Box::pin(async move { Some(picked) })
         }));
-        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/0:choose");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/picture:choose");
         // The picked file arrives through the app's own tick, which the page frame does not run.
         for _ in 0..3 {
             crate::file_picker::tick(&mut h.app, &ctx);
             page_frame(&mut h.app, &ctx, &dir, vec![]);
         }
-        assert_eq!(h.app.preferences.background_shader_pictures.get("own/own/0"), Some(&h.dir.join("picked.png").to_string_lossy().into_owned()));
-        assert!(crate::scenario::handle_at("prefs:background_picture:own/own/0:clear").is_some(), "a chosen picture can be cleared");
-        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/0:clear");
+        assert_eq!(
+            h.app.preferences.background_shader_pictures.get("own/own/picture"),
+            Some(&h.dir.join("picked.png").to_string_lossy().into_owned())
+        );
+        assert!(crate::scenario::handle_at("prefs:background_picture:own/own/picture:clear").is_some(), "a chosen picture can be cleared");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/picture:clear");
         assert!(h.app.preferences.background_shader_pictures.is_empty(), "Clear takes the shipped picture back");
     }
 

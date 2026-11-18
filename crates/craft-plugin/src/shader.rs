@@ -81,7 +81,7 @@ fn plain_file(name: &str, extensions: &[&str]) -> bool {
 
 /// A WGSL identifier the host does not reserve: lowercase, digits and `_`, not starting with
 /// `sc_` or a digit, at most 32 characters.
-fn texture_name(name: &str) -> bool {
+pub fn texture_name(name: &str) -> bool {
     (1..=32).contains(&name.len())
         && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
         && name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
