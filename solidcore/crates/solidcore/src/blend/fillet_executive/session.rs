@@ -5851,6 +5851,20 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                         }
                         let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
+                        // Not the fork's (#18823): rail `b`'s band ends where its kept part
+                        // ends, at the sections its corners placed, not at its edge's ends.
+                        // Where a tangent chain's blends meet, the shared section crosses the
+                        // chain where the rail crosses the seam between the faces, which can
+                        // lie well before the edges' common vertex: the next blend's band
+                        // then runs on beside the end of this blend's edge. A sample whose
+                        // nearest point of rail `b` is an end of its kept part lies past that
+                        // section, beside the band. A closed rail (both ends one point) has
+                        // no such end.
+                        let band_ends_b = [
+                            curve_b.evaluate_point(k, kept_b.min())?,
+                            curve_b.evaluate_point(k, kept_b.max())?,
+                        ];
+                        let band_has_ends = (band_ends_b[0] - band_ends_b[1]).length() > tol;
                         // Not the fork's (#18178): where the kept rails cross on the face they
                         // share. The samples alone can step over a short overlap (two chamfers
                         // at a narrow place, where one's corner mitre reaches a few hundredths
@@ -5947,6 +5961,13 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 || (e - edge_end_b).length() <= tol
                             {
                                 continue;
+                            }
+                            if band_has_ends
+                                && (on_rail.parameter <= kept_b.min()
+                                    || on_rail.parameter >= kept_b.max()
+                                    || band_ends_b.iter().any(|&q| (r - q).length() <= tol))
+                            {
+                                continue; // past the section that ends the band
                             }
                             let mut chord = e - r;
                             let width = chord.length();
