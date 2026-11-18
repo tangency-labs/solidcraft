@@ -78,8 +78,13 @@
 //! point and within `SM_EFF_ZERO m` of each other (`m` their largest coordinate), a
 //! gap the boundary always closed to. The slab's polygon merges such neighbours
 //! until none is left (`close_ring`: it stays closed), and a monotone region drops
-//! such a segment (`segment`). A bound that is too large can thus only drop what
-//! `SM_EFF_ZERO m` allowed anyway, and one that is too small only keeps an edge.
+//! such a segment (`segment`). Each merge removes a vertex within `SM_EFF_ZERO m`
+//! of the vertex it merges into, but merges chain: a removed vertex lies within
+//! `(n - 1) SM_EFF_ZERO m` of the polygon (n <= 6), which is also the most a removed
+//! edge can be off, so an overestimated bound can drop an edge main kept. The
+//! region stays sound: the ring is a sub-polygon of the convex cut polygon, and the
+//! cover check on its vertices certifies what is emitted. A bound that is too small
+//! only keeps an edge.
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result};
@@ -228,8 +233,11 @@ fn net_points(piece: &Curve) -> Option<Net> {
 ///
 /// Only evaluations at parameters in `[lo, hi]` are bounded, so only the control
 /// points they read count: those whose basis support `[T_i, T_(i+p+1)]` meets
-/// `[lo, hi]` (closed, a superset of the span's `p + 1`; an out-of-bounds
-/// evaluation past an end reads that end's span, whose points meet it too). A line
+/// `[lo, hi]` (closed, a superset of the span's `p + 1`). `[lo, hi]` is clamped to
+/// `[T_0, T_last]`, not to the valid domain `[T_p, T_n]`: for a clamped knot vector
+/// the two agree, but for an unclamped (periodic-style) one an evaluation outside
+/// the domain reads an end span with points not counted here, an underestimate,
+/// which only keeps an edge. A line
 /// (evaluated analytically) or a knot vector of unexpected length counts every
 /// control point. `None` for non-finite data or a non-positive weight among the
 /// points counted.
@@ -243,7 +251,7 @@ fn gen_eval_err(gen: &Curve, lo: f64, hi: f64) -> Option<f64> {
     }
     let local =
         !matches!(gen.kind(), CurveKind::Line(_)) && n.checked_add(p + 1) == Some(knots.len());
-    // (`[lo, hi]` clamped into the knots: past an end, the end span is read)
+    // (`[lo, hi]` clamped into `[T_0, T_last]`; see the doc for unclamped knots)
     let (lo, hi) = match (knots.first(), knots.last()) {
         (Some(&t0), Some(&t1)) => (lo.min(t1).max(t0), hi.max(t0).min(t1)),
         _ => (lo, hi),
@@ -817,7 +825,9 @@ fn one_point(a: &Vertex, b: &Vertex) -> bool {
 /// within `SM_EFF_ZERO m` (`m` the ends' largest coordinate), a gap the boundary
 /// always closed to. So an error bound decides only between keeping an edge (at
 /// least `SM_EFF_ZERO` long, which builds) and dropping one within that gap: an
-/// underestimate keeps an edge, an overestimate drops nothing beyond it.
+/// underestimate keeps an edge. Each call is capped at `SM_EFF_ZERO m`, but chained
+/// merges in `close_ring` can remove a vertex up to `(n - 1) SM_EFF_ZERO m` from the
+/// polygon (n <= 6), so an overestimate can drop an edge main kept, by at most that.
 fn merges(a: &Vertex, b: &Vertex) -> bool {
     let d = a.p.distance(b.p);
     let m = a.p.max_dimension().max(b.p.max_dimension());
