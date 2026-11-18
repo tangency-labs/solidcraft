@@ -28,8 +28,15 @@
 //! contact (a plane's signed side, a general surface's certified distance bound over the
 //! face's UV box less the cell's ball radius). Nothing unproved is ever accepted.
 //!
-//! Deviations: no recursion; at most 255 curve cells and twelve halvings per branch (a cell is split only while its
-//! ball is not proved clear, so the cells gather where the curve passes near the face). A kind
+//! Deviations: no recursion; at most 4096 curve-cell nodes — every node popped from the
+//! stack counts, so a completed binary subdivision carries at most 2048 leaves — and
+//! sixteen halvings per branch (a cell is split only while its ball is not proved clear,
+//! so the cells gather where the curve passes near the face). The budget is a resource
+//! limit, not a claim: an exhausted budget proves nothing. A long edge skimming close
+//! above a trimmed region (a thin large offset top over its kept seam: `wr_534`'s far moved
+//! top, #18524's spline extrusion) certifies in 1023 nodes and 9 halvings
+//! (`a_long_edge_skimming_close_above_a_trimmed_region_is_proved_clear` measures it); the
+//! 255-node budget refused those clear edges. A kind
 //! without an enclosure, a nonfinite enclosure, or an exhausted budget proves nothing.
 //! NURBS degree is at most 18 here: the factorials in `curve_derivs_over` are then exact
 //! binary64 integers. Lines are evaluated on their definition, not a rounded fitted form.
@@ -106,8 +113,8 @@ pub(crate) fn all_clear(kernel: &Kernel, kept: &[KeptEdge], moved: &[MovedFace])
     }
     Ok(true)
 }
-const MAX_DEPTH: usize = 12;
-const MAX_CELLS: usize = 255;
+const MAX_DEPTH: usize = 16;
+const MAX_CELLS: usize = 4096;
 
 pub(crate) enum EnclosedCurve<'a> {
     Line(&'a Line),
@@ -1390,6 +1397,31 @@ mod tests {
         }
     }
 
+    /// A long edge skimming close above a trimmed region certifies clear only after many
+    /// cells (the ball of every cell must fit under the clearance): the 255-cell budget
+    /// gave up on this shape and the kept-edge gate refused a clear edge (`wr_534`'s far
+    /// moved top, #18524's spline extrusion). A distance inside the tolerance band is
+    /// never certified.
+    #[test]
+    fn a_long_edge_skimming_close_above_a_trimmed_region_is_proved_clear() {
+        let k = Kernel::default();
+        let plane = floor();
+        let face = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let skimming = Curve::from(Line::from_points(
+            Point3::new(-0.5, 0.0, 1.0e-3),
+            Point3::new(0.5, 0.0, 1.0e-3),
+            3,
+        ));
+        assert!(separated(&k, &skimming, &interval, &plane, Some(&face), 1.0e-7).unwrap());
+        let within_band = Curve::from(Line::from_points(
+            Point3::new(-0.5, 0.0, 1.0e-8),
+            Point3::new(0.5, 0.0, 1.0e-8),
+            3,
+        ));
+        assert!(!separated(&k, &within_band, &interval, &plane, Some(&face), 1.0e-7).unwrap());
+    }
+
     #[test]
     fn a_crossing_contact_or_tolerance_band_is_never_certified_clear() {
         let k = Kernel::default();
@@ -1835,7 +1867,14 @@ mod tests {
     /// both tolerance regimes — across the gap zone separation-by-T alone cannot cover
     /// (the measured `s_sep`, the smallest s from which the strict predicate proves
     /// [s, 1] separated, is 1.507e-3 at 5 degrees, 1.241e-4 at the named angle and
-    /// 2.007e-5 at 89 degrees: every one of them past the tolerance).
+    /// 2.005e-5 at 89 degrees: every one of them past the tolerance). The widths are the
+    /// strict predicate's capability at its curve-cell budget (`MAX_CELLS`/`MAX_DEPTH`),
+    /// measured on the kept-edge gate's budget: at 255 nodes and twelve halvings the
+    /// shallow-angle proofs were truncated (1.507e-3 at 5 degrees, 1.241e-4 at the named
+    /// angle, 2.007e-5 at 89 degrees), and the gate's own needs (`wr_534`'s far moved top
+    /// skimming its kept edges) raised the budget to 4096 nodes and sixteen halvings; the
+    /// shallow widths shrink toward the geometric gap — every proof still certified — and
+    /// 89 degrees is unchanged to three digits (it was never budget-bound).
     #[test]
     fn endpoint_contact_is_proved_from_shallow_to_steep_angles() {
         let k = Kernel::default();
@@ -1906,9 +1945,9 @@ mod tests {
         }
         // the gap-zone widths, measured on the strict predicate by bisection
         for (label, deg, measured) in [
-            ("5deg", Some(5.0_f64), 1.507e-3),
-            ("named", None, 1.241e-4),
-            ("89deg", Some(89.0), 2.007e-5),
+            ("5deg", Some(5.0_f64), 3.099e-4),
+            ("named", None, 4.031e-5),
+            ("89deg", Some(89.0), 2.005e-5),
         ] {
             let curve = Curve::from(Line::from_points(a, a + dir_at(deg), 3));
             let separated_from = |lo: f64| {
