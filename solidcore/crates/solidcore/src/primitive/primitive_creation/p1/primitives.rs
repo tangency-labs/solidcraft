@@ -45,10 +45,10 @@
 //! makes from an arc within the B-rep's tolerance of square to the sweep has the sweep
 //! direction as its axis and its origin in the profile's plane (`square_to_sweep`), not
 //! the arc fit's normal, which a very short arc leaves off the sweep, when the squared
-//! circle is certified to stay within the arc zero of the profile: the convex hull of the
-//! profile's control points close to that plane, and the circle's in-plane change,
-//! `r (t² + |xa ya| / cx + ...)`, within what is left. Otherwise the fit's frame stays,
-//! as upstream.
+//! circle is certified to stay within the arc zero of the circle the arc test accepted:
+//! the convex hull of the profile's control points close to that plane, and the circle's
+//! in-plane change, `r (t² + |xa ya| / cx + ...)` plus its rounding, within what is
+//! left. Otherwise the fit's frame stays, as upstream.
 //! Not upstream (WR-596; the fork's tangency-labs/smlib 0df62c8, 35008b1, 449c81c):
 //! [`PrimitiveCreation::create_box`] returns each face's and the stitch's status and skips
 //! sides of zero extent, as the fork's `AddBoxFace` does; upstream drops them and returns
@@ -1083,8 +1083,21 @@ fn arc_sweep_cylinder(
 ///   ≤ r (|X' − X_p| + |Y' − Y_p|) ≤ r ((1 − cx) + |m| + (1 − n))
 ///   ≤ r (xa² + |m| + ya² + m²) = r (t² + |m| + m²)`, using `1 − √(1 − w) ≤ w`. A short arc
 ///   tilted about its chord stays within `zero` of `P` along `a` while missing `C'` by about
-///   `r t² / 2` across it, so this term is checked on its own. It is computed with a few
-///   operations on numbers below 1 and `r`, so `(1 + 16 ε)` covers its rounding.
+///   `r t² / 2` across it, so this term is checked on its own.
+/// - Rounding of the in-plane term. Only `t² <= 1/4` is considered (a larger tilt is
+///   never a fit's rounding; it keeps the fit's frame), so `|xa|, |ya| <= 1/2`,
+///   `cx >= √3/2` and `|m| <= 0.29`. The terms of `B = t² + |m| + m²` are non-negative,
+///   so the few products, the quotient and the sums that form it from the computed `xa`
+///   and `ya` round by a relative `(1 + 16 ε)`. That does not cover the error of `xa` and
+///   `ya` themselves: they are dot products of unit vectors that cancel when the tilt is
+///   small, so their error is absolute, `|δ| <= γ₃ < 4 ε`, and unbounded relative to them.
+///   Under `t² <= 1/4`, `|∂B/∂xa| + |∂B/∂ya| <= (1 + 0.77 + 0.45) + (1 + 0.58 + 0.34) < 5`,
+///   so that error moves `r B` by at most `20 ε r`. The derivation above also takes `X`,
+///   `Y`, `a` as exactly orthonormal and `X'`, `Y'` as exact. The stored axes are unit
+///   and orthogonal to within a few `ε` (built by `unitize` and cross products, as
+///   [`Vec3::make_unit_ortho_vectors`] builds `X'`, `Y'`), which moves `C(u)` and `C'(u)`
+///   by at most `16 ε r` each. With second-order terms, `64 ε r` covers these absolute
+///   errors, and it is added to the bound.
 ///
 /// A frame that fails either bound, or whose curve's kind has no certain hull, keeps the
 /// fit's frame, as upstream. A frame already exactly square is left as it is.
@@ -1118,18 +1131,27 @@ fn square_to_sweep(
         let off = (p - on_plane).dot(axis).abs()
             + (e + e_q) * spread
             + gamma4 * (max_abs(p) + max_abs(on_plane)) * spread;
-        // A NaN keeps the fit's frame.
-        if off.is_nan() || off > zero {
+        // Written so that a NaN (in `off` or `zero`) keeps the fit's frame.
+        let within = off <= zero;
+        if !within {
             return Ok(());
         }
         axial = axial.max(off);
     }
     let (xa, ya) = (frame.x_axis().dot(axis), frame.y_axis().dot(axis));
     let t2 = xa * xa + ya * ya;
+    // A tilt past 30° is never a fit's rounding; a NaN keeps the fit's frame too.
+    let small = t2 <= 0.25;
+    if !small {
+        return Ok(());
+    }
     let cx = (1.0 - xa * xa).sqrt();
     let m = (xa * ya).abs() / cx;
-    let across = radius.abs() * (t2 + m + m * m) * (1.0 + 16.0 * f64::EPSILON);
-    if across.is_nan() || axial + across > zero {
+    let r = radius.abs();
+    let across = r * (t2 + m + m * m) * (1.0 + 16.0 * f64::EPSILON) + 64.0 * f64::EPSILON * r;
+    // As above, a NaN keeps the fit's frame.
+    let within = axial + across <= zero;
+    if !within {
         return Ok(());
     }
     let origin = frame.origin();
