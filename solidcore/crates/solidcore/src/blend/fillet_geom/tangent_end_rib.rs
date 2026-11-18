@@ -212,9 +212,15 @@ pub struct TangentEndRib {
     /// from the rib of the surfaces as the kernel evaluates them, at the same parameter (the
     /// 3D curve's point, a UV curve's point on its surface), at most the tolerance. A blend
     /// inside a scope that answers by its net is that net; one evaluated by its definition
-    /// is the definition. `None` where a face is not enclosed (a STEP, offset,
-    /// curve-bounded or in-volume face, or a definition of contact order 2): the rib is then
-    /// built as upstream builds it, on its spans' midpoints, and makes no claim.
+    /// is the definition. `None` where the rib makes no claim:
+    ///
+    /// - a face is not enclosed (a STEP, offset, curve-bounded or in-volume face, or a
+    ///   definition of contact order 2): the rib is built as upstream builds it, on its
+    ///   spans' midpoints;
+    /// - the faces are enclosed, but near the tangent end, `[0, t*]`, the rib is not bounded
+    ///   within the tolerance (the certificate's graded pieces stop being enclosed at `t*`):
+    ///   every other part of the rib is certified within the tolerance as for `Some`, and
+    ///   `[0, t*]` carries no claim.
     pub bound: Option<f64>,
 }
 
@@ -233,7 +239,9 @@ pub struct TangentEndRib {
 /// #17744: upstream compares the span's midpoint with the exact point there; the certificate
 /// bounds every parameter of the span, `certificate`, and the largest bound is
 /// [`TangentEndRib::bound`]; where a face is not enclosed, the span's midpoint is compared
-/// as upstream). For odd `k` past 1 (the fork's tangency-labs/smlib@cd47efd) the
+/// as upstream; where only the tangent end's piece `[0, t*]` is not bounded, the first span
+/// is compared at its midpoint as upstream, the rest certified, and the rib has no bound).
+/// For odd `k` past 1 (the fork's tangency-labs/smlib@cd47efd) the
 /// curves have zero speed at the tangent end: their first derivative there is zero
 /// (the first two control points coincide) and their second the exact
 /// `2 (s1 - s0) dX/ds`, `X` the fillet surface along its section, both interpolated as
@@ -625,6 +633,8 @@ pub fn tangent_end_rib(
         let mut solved = true;
         let mut off: Vec<(usize, f64, Point2, Point3)> = Vec::new();
         let mut bound = 0.0_f64;
+        // the tangent end's span certified down to t* only: [0, t*] carries no claim
+        let mut open = false;
         for jj in 0..spans {
             if !(zero_speed || off.is_empty()) {
                 break;
@@ -642,6 +652,7 @@ pub fn tangent_end_rib(
             let t = 0.5 * (t0 + t1);
             let alpha = 0.5 * (a0 + a1);
             let uv = Point2::new(0.5 * (e0.x + e1.x), 0.5 * (e0.y + e1.y));
+            let mut upstream_check = rib.is_none();
             if let Some(rib) = &rib {
                 let ends = ((t0, [a0, e0.x, e0.y]), (t1, [a1, e1.x, e1.y]));
                 let within = if jj == 0 {
@@ -650,18 +661,28 @@ pub fn tangent_end_rib(
                 } else {
                     rib.span_bound(&rib_newton, ends.0, ends.1, approx_tol)?
                 };
-                if let Some(d) = within.filter(|&d| d <= approx_tol) {
-                    bound = bound.max(d);
-                    continue;
+                match within {
+                    certificate::Bound::Within(d) if d <= approx_tol => {
+                        bound = bound.max(d);
+                        continue;
+                    }
+                    // certified down to t*; more stations do not move t*: the span is
+                    // compared at its midpoint as upstream compares it (inside the
+                    // certified part), and the rib makes no claim
+                    certificate::Bound::Open => {
+                        open = true;
+                        upstream_check = true;
+                    }
+                    _ => {}
                 }
             }
             let Some((alpha, uv, exact)) = solve(t, alpha, uv)? else {
                 solved = false;
                 break;
             };
-            // a face not enclosed: upstream's check, the span's midpoint against the
-            // exact rib point there
-            if rib.is_none() {
+            // a face not enclosed, or the tangent end's span open: upstream's check, the
+            // span's midpoint against the exact rib point there
+            if upstream_check {
                 let on_3d = c3d.evaluate_point(t)?;
                 let on_fil_uv = c_fil.evaluate_point(t)?;
                 let on_end_uv = c_end.evaluate_point(t)?;
@@ -690,7 +711,7 @@ pub fn tangent_end_rib(
                 curve_3d: c3d,
                 fillet_uv: c_fil,
                 end_uv: c_end,
-                bound: rib.is_some().then_some(bound),
+                bound: (rib.is_some() && !open).then_some(bound),
             });
         }
 

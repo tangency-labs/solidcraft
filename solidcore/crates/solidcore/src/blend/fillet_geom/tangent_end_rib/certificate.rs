@@ -31,8 +31,9 @@
 //! so that the bound is against the definition, with nothing added for its net.
 //!
 //! The tangent end's span is graded toward it and closed by a bound without the Jacobian
-//! ([`Rib::first_span_bound`], [`Rib::near_bound`]). Every loop over pieces, grades, ring
-//! boxes and widenings polls the kernel's cancellation.
+//! ([`Rib::first_span_bound`], [`Rib::near_bound`]); where that bound is not within the
+//! tolerance, the part it covers, `[0, t*]`, carries no claim ([`Bound::Open`]). Every
+//! loop over pieces, grades, ring boxes and widenings polls the kernel's cancellation.
 
 use core::cell::RefCell;
 
@@ -78,6 +79,24 @@ const OP: &str = "blend::fillet_geom::tangent_end_rib::certificate";
 
 /// A Newton root of the rib `(alpha, u, v)` at `t` from a guess, or `None`.
 pub(super) type Solve<'a> = dyn Fn(f64, [f64; 3]) -> Result<Option<[f64; 3]>> + 'a;
+
+/// What the certificate says of a span ([`Rib::span_bound`], [`Rib::first_span_bound`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Bound {
+    /// Certified: the largest distance of the curves from the rib, within the tolerance.
+    Within(f64),
+    /// The curves are off: a piece end farther from the rib than the tolerance, or a piece
+    /// bounded only over it after the last halving. More stations move the curves.
+    Over,
+    /// The rib is not enclosed over a piece (its root, path or derivatives: Krawczyk's
+    /// test does not contract there), a property of the faces that more stations do not
+    /// change.
+    Unenclosed,
+    /// The first span only: its graded pieces are certified down to `t*`, where they stop
+    /// unenclosed, and `[0, t*]` is not bounded within the tolerance. `[0, t*]` carries no
+    /// claim (the maintainer's answer on #18674).
+    Open,
+}
 
 /// A face of the rib as the certificate encloses it: the surface the kernel evaluates.
 pub(super) enum Face<'f> {
@@ -610,18 +629,18 @@ impl Rib<'_, '_> {
     }
 
     /// The certified bound of the span `[t0, t1]` (the roots `y0`, `y1` at its stations)
-    /// within `tol`, or `None` where it is over `tol` or not bounded (module docs): a piece
-    /// not bounded within `tol` is halved, at most `LEVELS` times. `solve` finds the roots
-    /// inside it.
+    /// within `tol` (module docs): a piece not bounded within `tol` is halved, at most
+    /// `LEVELS` times; [`Bound::Over`] or [`Bound::Unenclosed`] where one is not bounded
+    /// within it after that. `solve` finds the roots inside it.
     pub(super) fn span_bound(
         &self,
         solve: &Solve<'_>,
         (t0, y0): (f64, [f64; 3]),
         (t1, y1): (f64, [f64; 3]),
         tol: f64,
-    ) -> Result<Option<f64>> {
+    ) -> Result<Bound> {
         let (Some(a), Some(b)) = (self.end_at(t0, y0)?, self.end_at(t1, y1)?) else {
-            return Ok(None);
+            return Ok(Bound::Unenclosed);
         };
         // a piece end off the rib by more than tol: no finer cut bounds the span
         let off = |e: &End| {
@@ -637,7 +656,7 @@ impl Rib<'_, '_> {
         while let Some((a, b, depth)) = pieces.pop() {
             self.kernel.check_cancelled(OP)?;
             if off(&a) || off(&b) {
-                return Ok(None);
+                return Ok(Bound::Over);
             }
             let mut guess = a.y;
             for (g, &bi) in guess.iter_mut().zip(&b.y) {
@@ -649,31 +668,35 @@ impl Rib<'_, '_> {
                 Some(d) if d <= tol => worst = worst.max(d),
                 _ if depth < LEVELS => {
                     let Some(m) = self.end_at(t, mid)? else {
-                        return Ok(None);
+                        return Ok(Bound::Unenclosed);
                     };
                     pieces.push((m, b, depth + 1));
                     pieces.push((a, m, depth + 1));
                 }
-                _ => return Ok(None),
+                Some(_) => return Ok(Bound::Over),
+                None => return Ok(Bound::Unenclosed),
             }
         }
-        Ok(Some(worst))
+        Ok(Bound::Within(worst))
     }
 
-    /// The certified bound of the first span `[0, t1]` (the root `y1` at `t1`, `p` at the
-    /// tangent end), or `None` (#17744). Its pieces are graded geometrically toward the
-    /// tangent end, `[t/2, t]`, each bounded as a span ([`Self::span_bound`]): the Jacobian
-    /// is singular at the tangent end, and over `[t/2, t]` its least singular value changes
-    /// by the same factor at every depth, so a piece needs as many halvings at every depth.
-    /// The pieces go on while they are certified, down to `t*`, the last one's lower end;
-    /// `[0, t*]` is bounded without the Jacobian ([`Self::near_bound`]).
+    /// The certificate of the first span `[0, t1]` (the root `y1` at `t1`, `p` at the
+    /// tangent end) (#17744). Its pieces are graded geometrically toward the tangent end,
+    /// `[t/2, t]`, each bounded as a span ([`Self::span_bound`]): the Jacobian is singular
+    /// at the tangent end, and over `[t/2, t]` its least singular value changes by the
+    /// same factor at every depth, so a piece needs as many halvings at every depth. A
+    /// piece over the tolerance ends the span as [`Bound::Over`], to be refined. The pieces
+    /// go on while they are certified, down to `t*`, the lower end of the last one, where
+    /// the rib stops being enclosed (more stations do not move `t*`); `[0, t*]` is bounded
+    /// without the Jacobian ([`Self::near_bound`]), and where that bound is not within the
+    /// tolerance the span is [`Bound::Open`]: `[0, t*]` carries no claim.
     pub(super) fn first_span_bound(
         &self,
         solve: &Solve<'_>,
         p: [f64; 3],
         (t1, y1): (f64, [f64; 3]),
         tol: f64,
-    ) -> Result<Option<f64>> {
+    ) -> Result<Bound> {
         // the offsets from the tangent end grow as t^m: alpha ~ s^(k/2), s ~ t or t^2
         let m = if self.odd { self.order } else { self.order / 2 }.max(1);
         let mut worst = 0.0_f64;
@@ -685,23 +708,23 @@ impl Rib<'_, '_> {
             for (g, &h) in guess.iter_mut().zip(&hi_y) {
                 *g += (h - *g) * 0.5_f64.powi(i32::try_from(m).unwrap_or(1));
             }
-            let lo_y = solve(lo_t, guess)?;
-            let bound = match lo_y {
-                Some(lo_y) => self.span_bound(solve, (lo_t, lo_y), (hi_t, hi_y), tol)?,
-                None => None,
+            let Some(lo_y) = solve(lo_t, guess)? else {
+                break;
             };
-            match (lo_y, bound) {
-                (Some(lo_y), Some(b)) => {
+            match self.span_bound(solve, (lo_t, lo_y), (hi_t, hi_y), tol)? {
+                Bound::Within(b) => {
                     worst = worst.max(b);
                     hi_t = lo_t;
                     hi_y = lo_y;
                 }
-                _ => break,
+                Bound::Over => return Ok(Bound::Over),
+                Bound::Unenclosed | Bound::Open => break,
             }
         }
-        Ok(self
-            .near_bound(p, (hi_t, hi_y), tol)?
-            .map(|near| worst.max(near)))
+        Ok(match self.near_bound(p, (hi_t, hi_y), tol)? {
+            Some(near) if near <= tol => Bound::Within(worst.max(near)),
+            _ => Bound::Open,
+        })
     }
 
     /// The tangent end's frame: the fillet surface's point `S(sigma0, alpha0)` and the end
@@ -856,8 +879,8 @@ impl Rib<'_, '_> {
     ///   the separation's root in its box (the one root there), that is the end surface
     ///   meets the section only once near the tangent end (it is one-to-one there). Where the ring holds a sign change, `A` is doubled
     ///   (the gap `½ Δκ (A² − a(t*)²) − θ A` grows with it), at most [`WIDENINGS`] times,
-    ///   while `|S_alpha| A` is within `tol`; where `Δκ` vanishes it never clears, and the
-    ///   span is refused.
+    ///   while `|S_alpha| A` is within `tol`; where `Δκ` vanishes it never clears, and
+    ///   `[0, t*]` is not bounded ([`Bound::Open`]).
     /// - **The curves against known functions** ([`Self::near_errors`]): each curve's 3D
     ///   image against `S(sigma(t), alpha0)` at the same `t`, plus `|S_alpha| A`. No unknown
     ///   is enclosed and no Jacobian is inverted there.
