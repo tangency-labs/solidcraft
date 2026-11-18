@@ -11,6 +11,10 @@
 //!   its own parameterisation and rebuilds them from the 3D edges.
 //! - Every end value (edge intervals, face domains) is already in the flat arrays' units, radians
 //!   for angles; the C side converts them to SMLib's own pointwise.
+//!
+//! Solids touching each other along an edge or at a vertex keep a copy each of what they share in
+//! the record (`crate::export`). [`arrays`] sends the copies as they are; a boolean's operand goes
+//! through [`arrays_touching`], which gives them back to SMLib shared (`touching`).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -85,7 +89,21 @@ fn z_axis(f: &b::Frame) -> [f64; 3] {
 pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
     solidcore_ops::record_check::validate_built(brep).map_err(|e| Unsupported::Invalid(e.0))?;
     let brep = analytic::analytic(brep)?;
-    laid_out(brep.as_ref(), trusted, true, &HashSet::new())
+    laid_out(brep.as_ref(), trusted, true, &HashSet::new(), &[])
+}
+
+/// [`arrays`] for a boolean's operand: solids the record keeps apart where they touch each other
+/// (each with its own copy of the edges and vertices they share) go to SMLib touching, sharing
+/// them, as SMLib's own boolean makes them (`touching`). `None` where the record has no such
+/// copies.
+pub fn arrays_touching(brep: &b::Brep, trusted: bool) -> R<Option<Arrays>> {
+    if !touching::may_share(brep) {
+        return Ok(None);
+    }
+    solidcore_ops::record_check::validate_built(brep).map_err(|e| Unsupported::Invalid(e.0))?;
+    let brep = analytic::analytic(brep)?;
+    let Some(glued) = touching::shared(brep.as_ref())? else { return Ok(None) };
+    laid_out(&glued.brep, trusted, true, &HashSet::new(), &glued.joined).map(Some)
 }
 
 /// [`arrays`] with every surface as the record holds it: a round face truck holds as a rational
@@ -94,19 +112,49 @@ pub fn arrays(brep: &b::Brep, trusted: bool) -> R<Arrays> {
 /// surfaces. A revolution is still refused (SMLib has no such surface).
 pub fn arrays_keeping_splines(brep: &b::Brep, trusted: bool) -> R<Arrays> {
     solidcore_ops::record_check::validate_built(brep).map_err(|e| Unsupported::Invalid(e.0))?;
-    laid_out(brep, trusted, false, &HashSet::new())
+    laid_out(brep, trusted, false, &HashSet::new(), &[])
 }
 
 /// The flat arrays of a record whose uses in `bare` (face, loop, position) go without their
 /// UV trims, for SMLib to make (their pcurves in the record are not read): what
 /// [`crate::pcurves`] hands SMLib. Not validated, as its bare uses have no pcurves.
 pub(crate) fn arrays_with_bare_uses(brep: &b::Brep, bare: &HashSet<(u32, u32, u32)>) -> R<Arrays> {
-    laid_out(brep, true, true, bare)
+    laid_out(brep, true, true, bare, &[])
+}
+
+/// Each runtime shell of a region, as the positions in its `shells` of the record shells it is
+/// made of. Each record shell is one, except on the empty side of solids that touch each other:
+/// SMLib keeps the space round them as one runtime shell, so the record shells `joined` pairs
+/// (see [`touching`]) are one there. In the order of each one's first record shell, so a bounded
+/// region's outer shell stays first.
+fn runtime_shells(shells: &[u32], material: bool, joined: &[(u32, u32)]) -> Vec<Vec<usize>> {
+    let mut label: Vec<usize> = (0..shells.len()).collect();
+    if !material {
+        for &(s, t) in joined {
+            let (Some(p), Some(q)) = (shells.iter().position(|&x| x == s), shells.iter().position(|&x| x == t)) else { continue };
+            let (Some(&lp), Some(&lq)) = (label.get(p), label.get(q)) else { continue };
+            let (keep, gone) = (lp.min(lq), lp.max(lq));
+            for l in &mut label {
+                if *l == gone {
+                    *l = keep;
+                }
+            }
+        }
+    }
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (k, &l) in label.iter().enumerate() {
+        match groups.iter_mut().find(|(g, _)| *g == l) {
+            Some((_, members)) => members.push(k),
+            None => groups.push((l, vec![k])),
+        }
+    }
+    groups.into_iter().map(|(_, members)| members).collect()
 }
 
 /// The flat arrays; `analytic`: a plane on any axes goes as SMLib's plane (else, off unit
-/// orthogonal axes, as the bilinear patch it is). The uses in `bare` go without UV trims.
-fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, u32, u32)>) -> R<Arrays> {
+/// orthogonal axes, as the bilinear patch it is). The uses in `bare` go without UV trims. The
+/// shells `joined` pairs are one runtime shell on their empty side ([`runtime_shells`]).
+fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, u32, u32)>, joined: &[(u32, u32)]) -> R<Arrays> {
     let mut a = Arrays::default();
 
     // Regions and shells. Each region gets its own copy of each shell it lists.
@@ -114,28 +162,33 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
         brep.regions.iter().enumerate().skip(1).filter_map(|(r, region)| region.shells.first().map(|&s| (s, r))).collect();
     let listed = |s: u32| brep.regions.iter().filter(|r| r.shells.contains(&s)).count();
     for (r, region) in brep.regions.iter().enumerate() {
-        a.i(flat::REGION_SHELL_COUNT).push(int(region.shells.len())?);
+        let runtime = runtime_shells(&region.shells, r > 0 && !region.void, joined);
+        a.i(flat::REGION_SHELL_COUNT).push(int(runtime.len())?);
         // SMLib marks the infinite region as a void.
         a.i(flat::REGION_TYPE).push(i64::from(r == 0 || region.void));
-        for (k, &s) in region.shells.iter().enumerate() {
-            let Some(b::Shell::Faces { faces, wires }) = brep.shells.get(s as usize) else {
-                return Err(Unsupported::NotYet("wire and vertex shells"));
-            };
-            if !wires.is_empty() {
-                return Err(Unsupported::NotYet("wire edges embedded in a shell"));
+        for members in runtime {
+            let mut uses: Vec<(u32, bool)> = Vec::new();
+            for k in members {
+                let s = region.shells.get(k).copied().ok_or(Unsupported::Invalid("region shell"))?;
+                let Some(b::Shell::Faces { faces, wires }) = brep.shells.get(s as usize) else {
+                    return Err(Unsupported::NotYet("wire and vertex shells"));
+                };
+                if !wires.is_empty() {
+                    return Err(Unsupported::NotYet("wire edges embedded in a shell"));
+                }
+                if listed(s) == 2 {
+                    // A closed shell: the outward normals (out of the material) point into the
+                    // region that is not material. As the outer shell of region r (k == 0) the
+                    // shell encloses r; as an inner shell r lies outside it.
+                    let inside = enclosed_by.get(&s).copied().ok_or(Unsupported::Invalid("closed shell encloses no region"))?;
+                    let inside_is_void = brep.regions.get(inside).is_some_and(|e| e.void);
+                    let normals_into_this = if k == 0 && r > 0 { inside_is_void } else { !inside_is_void };
+                    uses.extend(faces.iter().map(|f| (f.face, f.forward == normals_into_this)));
+                } else {
+                    // An open shell lies in one region and holds both sides of each face.
+                    uses.extend(faces.iter().flat_map(|f| [(f.face, true), (f.face, false)]));
+                }
             }
-            let uses: Vec<(u32, bool)> = if listed(s) == 2 {
-                // A closed shell: the outward normals (out of the material) point into the
-                // region that is not material. As the outer shell of region r (k == 0) the shell
-                // encloses r; as an inner shell r lies outside it.
-                let inside = enclosed_by.get(&s).copied().ok_or(Unsupported::Invalid("closed shell encloses no region"))?;
-                let inside_is_void = brep.regions.get(inside).is_some_and(|e| e.void);
-                let normals_into_this = if k == 0 && r > 0 { inside_is_void } else { !inside_is_void };
-                faces.iter().map(|f| (f.face, f.forward == normals_into_this)).collect()
-            } else {
-                // An open shell lies in one region and holds both sides of each face.
-                faces.iter().flat_map(|f| [(f.face, true), (f.face, false)]).collect()
-            };
             a.i(flat::SHELL_FACEUSE_COUNT).push(int(uses.len())?);
             a.i(flat::SHELL_WIRE_EDGE_COUNT).push(0);
             a.i(flat::SHELL_POINT_TYPE).push(0);
@@ -663,6 +716,7 @@ fn curve(a: &mut Arrays, c: &b::Curve) -> R<()> {
 }
 
 mod analytic;
+mod touching;
 
 #[cfg(test)]
 mod tests;
@@ -702,6 +756,17 @@ impl crate::Brep {
         let r = arrays(brep, trusted).map_err(crate::Error::Record).and_then(|a| crate::Brep::from_arrays(&a)).and_then(|body| body.adopt(brep));
         crate::trace::imported(&r, brep, trusted, false);
         r
+    }
+
+    /// [`crate::Brep::from_record`] for a boolean's operand, through [`arrays_touching`]: solids
+    /// the record keeps apart where they touch each other go to SMLib sharing what they touch
+    /// along, as SMLib's own boolean makes them. `None` where the record has nothing to share:
+    /// [`crate::Brep::from_record`] is the operand.
+    pub fn from_record_touching(brep: &b::Brep, trusted: bool) -> crate::Result<Option<crate::Brep>> {
+        let Some(a) = arrays_touching(brep, trusted).map_err(crate::Error::Record)? else { return Ok(None) };
+        let r = crate::Brep::from_arrays(&a).and_then(|body| body.adopt(brep));
+        crate::trace::imported(&r, brep, trusted, false);
+        r.map(Some)
     }
 
     /// [`crate::Brep::from_record`] through [`arrays_keeping_splines`].

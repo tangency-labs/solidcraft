@@ -134,6 +134,10 @@ fn a_freecad_history_comes_in_as_editable_features() {
     run(&mut d, "file.insert_step", json!({"path": path}));
     run(&mut d, "file.insert_step", json!({"path": path}));
     assert_eq!(body_names(&d), ["Bracket", "Bracket (2)"]);
+    // Both files have sketches called Profile and HoleSketch: the second file's are numbered, not refused.
+    let sketches: Vec<&str> =
+        d.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).map(|f| f.name.as_str()).collect();
+    assert_eq!(sketches, ["Profile", "HoleSketch", "Profile (2)", "HoleSketch (2)"]);
     assert!((volume(&mut d) - 2.0 * expected).abs() < 0.1, "each copy's pocket and fillet act on its own body");
 
     let mut d = Session::default();
@@ -169,6 +173,7 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
         pattern_names_in_order: false,
         inserted: false,
         link_faces: Vec::new(),
+        link_threads: Vec::new(),
         touching: solidcraft_doc::Touching::Separate,
         kind: solidcraft_doc::FeatureKind::Sketch {
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },

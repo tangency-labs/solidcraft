@@ -69,13 +69,15 @@ fn default_lists_every_field_off_in_declaration_order() {
 #[test]
 fn one_flag_on_is_exactly_that_entry() {
     let mut newest = UpstreamFixes::default();
-    newest.face_points_span_domain = true;
-    assert_eq!(turned_on(&newest), ["face_points_span_domain"]);
+    newest.brep_ray_classifies_current_trims = true;
+    assert_eq!(turned_on(&newest), ["brep_ray_classifies_current_trims"]);
     assert_eq!(listed(&newest), debug_fields(&newest));
 
+    // the first field by name, so retiring whichever flag is first needs no edit here
     let mut first = UpstreamFixes::default();
-    first.plane_recognition_origin_after_axes = true;
-    assert_eq!(turned_on(&first), ["plane_recognition_origin_after_axes"]);
+    let name = UpstreamFixes::NAMES[0];
+    *first.flag_mut(name).expect("a field name") = true;
+    assert_eq!(turned_on(&first), [name]);
     assert_eq!(listed(&first), debug_fields(&first));
 }
 

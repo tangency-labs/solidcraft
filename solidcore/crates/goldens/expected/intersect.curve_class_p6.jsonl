@@ -4426,9 +4426,9 @@
 {"case":"scale_k3_4_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6.000000000000071e+20,6.000000000000071e+20,4.2300000000000706e+22]],"n":142}}}
 {"case":"scale_k3_4_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6.000000000000071e+20,6.000000000000071e+20,4.2300000000000706e+22]],"n":142}}}
 {"case":"scale_k3_5_0.25_0.75","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[1.2000000000114373e+21,1.2000000000114373e+21,1.6140000000177837e+23],[3500000003.000001,3500000003.000001,33000000045.0]],"n":272}}}
-{"case":"scale_k3_5_0.999999999999_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6.00000000007e+20,6.00000000007e+20,4.23000000007065e+22]],"n":142}}}
+{"case":"scale_k3_5_0.999999999999_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[9.000000000130001e+20,9.000000000130001e+20,9.2100000001708e+22]],"n":207}}}
 {"case":"scale_k3_5_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6.00000000007e+20,6.00000000007e+20,4.23000000007065e+22]],"n":142}}}
-{"case":"scale_k3_5_0_0.000000000001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6.00000000007e+20,6.00000000007e+20,4.23000000007065e+22]],"n":142}}}
+{"case":"scale_k3_5_0_0.000000000001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[9.00000000007e+20,9.00000000007e+20,9.210000000116151e+22]],"n":207}}}
 {"case":"scale_k3_5_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6.00000000007e+20,6.00000000007e+20,4.23000000007065e+22]],"n":142}}}
 {"case":"scale_k3_5_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6.00000000007e+20,6.00000000007e+20,4.23000000007065e+22]],"n":142}}}
 {"case":"scale_k4_0_0.25_0.75","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[6e+20,6e+20,4.23e+22]],"n":142}}}

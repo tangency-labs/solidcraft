@@ -38,8 +38,6 @@ impl FilletSession<'_> {
     /// Those of the topology queries and of [`outline_supports`].
     pub(super) fn end_round_on_outline(&mut self, k: &Kernel) -> Result<()> {
         let lone = k.fixes.fillet_round_ends_on_outline
-            && k.fixes.fillet_cliff_overflow
-            && k.fixes.fillet_refuse_rails_leaving_faces
             && k.fixes.fillet_exact_round_classes
             && self.executive.solvers.len() == 1;
         if !lone {

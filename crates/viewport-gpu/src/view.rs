@@ -13,6 +13,7 @@ use solidcraft_viewport::vec::Vec3Ops;
 use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;
+pub use solidcraft_viewport::MAX_SECTION_PLANES;
 
 use crate::environment::Environment;
 use crate::pbr;
@@ -20,10 +21,13 @@ use crate::pbr;
 mod ao;
 pub use ao::GroundAo;
 mod clouds;
+mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
 mod oit;
+mod pass_times;
+pub use pass_times::PassTimes;
 mod product_highlights;
 #[cfg(not(target_arch = "wasm32"))]
 pub use msaa_check::MsaaCheck;
@@ -237,11 +241,12 @@ fn octahedral6(n: [f32; 3]) -> u32 {
     let q = |v: f32| ((v.clamp(-1.0, 1.0) + 1.0) * 31.0).round() as u32 + 1;
     (q(y).min(63) << 6) | q(x).min(63)
 }
-/// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
-/// occlusion radius), the 8 analysis colours, their flags, the depth direction, the model
-/// matrix, the two whole-body highlight colours, then the section hatch colours, the product
-/// lights, and the sky (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 480 + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
+/// The shader's `U`: the view-projection matrix, 3 `vec4`s, the section's
+/// [`MAX_SECTION_PLANES`] planes, 6 more `vec4`s (the last carries the ambient occlusion
+/// radius), the 8 analysis colours, their flags, the depth direction, the model matrix, the two
+/// whole-body highlight colours, the section hatch colours, the product lights (a flag and
+/// count, then 21 lights of 4 `vec4`s), each section plane's hatch and the sky (`uniform_bytes`).
+const UNIFORM_SIZE: u64 = 480 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 * solidcraft_viewport::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
 
 /// The identity, column-major: a scene drawn where it was built.
 const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -274,6 +279,12 @@ pub struct DrawStats {
     /// The device refused the memory for a frame (#7296): the view is drawn at a lower
     /// resolution, or with its see-through surfaces sorted.
     pub lowered: bool,
+    /// Asked by the UI: time the view's render passes on the GPU (the frame-rate readout is on).
+    /// Kept as it is when a frame publishes what it drew.
+    pub time_passes: bool,
+    /// The GPU time of the view's passes in a recent frame, while `time_passes` and where the
+    /// device has timestamp queries.
+    pub gpu: Option<PassTimes>,
 }
 
 /// What the last scene change uploaded to the GPU, in bytes: what an edit costs beyond the CPU
@@ -311,6 +322,11 @@ impl Tally {
         self.triangles.set(self.triangles.get().saturating_add(u64::from(vertices / 3) * u64::from(instances)));
     }
 
+    /// Triangles an indirect draw drew (its call counted on its own, [`Tally::call`]).
+    fn add_triangles(&self, n: u64) {
+        self.triangles.set(self.triangles.get().saturating_add(n));
+    }
+
     /// A draw call of `n` line segments.
     fn segments(&self, n: u32) {
         self.call();
@@ -323,13 +339,7 @@ impl Tally {
     }
 
     fn stats(&self) -> DrawStats {
-        DrawStats {
-            draw_calls: self.calls.get(),
-            triangles: self.triangles.get(),
-            line_segments: self.segments.get(),
-            supersampled: false,
-            lowered: false,
-        }
+        DrawStats { draw_calls: self.calls.get(), triangles: self.triangles.get(), line_segments: self.segments.get(), ..DrawStats::default() }
     }
 }
 
@@ -607,6 +617,9 @@ pub struct GpuScene {
     pub hover_blocks: Vec<BlockTris>,
     /// Whole selected bodies, as `hover_blocks`, in the selection colour.
     pub selected_blocks: Vec<BlockTris>,
+    /// Hovered faces of opaque bodies in their own palette slots (the model's colour and
+    /// finish for each face): lit over the model like a whole hovered body, tinted by the hover.
+    pub hover_faces: Vec<u8>,
     /// Whole highlighted bodies the model builds in its blocks but does not draw opaque (faded
     /// context, see-through): every one of their vertices drawn again, in this scene's palette,
     /// whose entries for their faces hold the highlight colour. No triangle is copied.
@@ -720,16 +733,17 @@ pub struct BlockTris {
 }
 
 /// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
-/// three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides the
-/// edge, a dimmed line.
+/// up to three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides
+/// the edge, a dimmed line. A style left out (`None`) is not drawn: a hovered body has no dimmed
+/// line, a selected body's hidden edges (a preference) only that one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LitEdges {
     /// The block's key ([`SceneBlock::key`]).
     pub block: u64,
     pub lines: std::ops::Range<u32>,
-    pub halo: u32,
-    pub core: u32,
-    pub hidden: u32,
+    pub halo: Option<u32>,
+    pub core: Option<u32>,
+    pub hidden: Option<u32>,
 }
 
 /// The largest palette index a lit line can name: its style rides in the draw's first vertex,
@@ -1031,6 +1045,10 @@ impl GpuScene {
         self.open_tris.extend_from_slice(&c.0.to_le_bytes());
         self.open_tris.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
+    /// A vertex of a hovered face (see [`GpuScene::hover_faces`]).
+    pub fn hover_face_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
+        push_tri(&mut self.hover_faces, p, n, c, NO_VALUE);
+    }
     /// A vertex of the ground-plane shadow (see [`GpuScene::shadow`]).
     pub fn shadow_tri(&mut self, p: [f32; 3], c: PaletteIndex) {
         for v in p.iter().chain(&[0.0; 3]) {
@@ -1196,8 +1214,11 @@ pub struct Frame {
     pub back: [f32; 3],
     /// Viewport size in physical pixels.
     pub size_px: [f32; 2],
-    /// Section cut: (normal, d); fragments with normal·p > d are hidden. A zero normal: none.
-    pub clip: [f32; 4],
+    /// Section cut: up to [`MAX_SECTION_PLANES`] planes (normal, d), the first ones; fragments
+    /// with normal·p > d for any one are hidden. A zero normal: no plane (the first: no section).
+    pub clip: [[f32; 4]; MAX_SECTION_PLANES],
+    /// Each clip plane's hatch, an index into `solidcraft_viewport::SECTION_HATCH_ANGLES`.
+    pub clip_hatch: [usize; MAX_SECTION_PLANES],
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
     /// Canvases and decals.
@@ -1374,6 +1395,7 @@ struct Batch {
 }
 
 /// A chunk of planned bodies on the GPU: their evaluated mesh and a colour per vertex.
+#[derive(Clone)]
 struct PlannedDraw {
     mesh: Arc<crate::GpuMesh>,
     colors: wgpu::Buffer,
@@ -1394,6 +1416,7 @@ impl PlannedDraw {
 }
 
 /// An [`InstancedMesh`]'s triangles on the GPU (kept while its key comes back).
+#[derive(Clone)]
 enum SharedGpu {
     /// Shared vertices and their indices.
     Indexed { vertices: wgpu::Buffer, indices: wgpu::Buffer, count: u32 },
@@ -1501,8 +1524,11 @@ pub fn placed_box_in_view(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f
 }
 
 /// One level of an [`InstancedDraw`]: its triangles and the placements drawn from it.
+#[derive(Clone)]
 struct LevelDraw {
     tris: Arc<SharedGpu>,
+    /// The triangles `tris` were uploaded from (the indirect arena's, [`indirect`]).
+    src: Arc<SharedTris>,
     flat: bool,
     /// How far it strays from the full triangles (mm; 0 for them).
     error: f32,
@@ -1513,6 +1539,7 @@ struct LevelDraw {
 
 /// An [`InstancedMesh`] on the GPU: its triangles and coarser levels (shared with the next scene
 /// while they come back), and the placements in view, each drawn from its level.
+#[derive(Clone)]
 struct InstancedDraw {
     look: InstanceLook,
     /// Its triangles enclose a volume ([`InstancedMesh::closed`]).
@@ -1578,6 +1605,7 @@ enum ClassGpu {
 
 /// A scene block on the GPU, with the bytes it was uploaded from. Each artifact is kept while
 /// its `Arc` comes back, so an opacity class change uploads nothing for a class drawn by runs.
+#[derive(Clone)]
 struct BlockGpu {
     bytes: Arc<BlockBytes>,
     vertices: Option<wgpu::Buffer>,
@@ -1732,16 +1760,17 @@ fn lit_lines(
     p: &wgpu::RenderPipeline,
     blocks: &std::collections::HashMap<u64, BlockGpu>,
     edges: &[LitEdges],
-    style: fn(&LitEdges) -> u32,
+    style: fn(&LitEdges) -> Option<u32>,
     tally: &Tally,
 ) {
-    if edges.is_empty() {
+    if edges.iter().all(|e| style(e).is_none()) {
         return;
     }
     pass.set_pipeline(p);
     for e in edges {
+        let Some(style) = style(e) else { continue };
         let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
-        let first = style(e).saturating_mul(6);
+        let first = style.saturating_mul(6);
         // The block's lines may span several buffers: each draws its share of the range.
         let mut at = 0u32;
         for (buffer, count) in &batch.parts {
@@ -1768,6 +1797,7 @@ fn joined<'a>(blocks: impl Iterator<Item = &'a Option<Batch>>, own: Option<Batch
 
 /// A scene's palette on the GPU: an `Rg32Uint` texture (colour, hatch), [`PALETTE_WIDTH`]
 /// entries to a row.
+#[derive(Clone)]
 struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
@@ -1839,7 +1869,7 @@ fn palette_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rg32Uint,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
 }
@@ -1958,14 +1988,17 @@ const CHUNK_SPLIT: u64 = 4;
 const MAX_CHUNK_BODIES: usize = 128;
 
 /// A block's see-through triangles as the global glass stream took them ([`Batches::glass_from`]).
+#[derive(Clone)]
 struct GlassSource {
     key: u64,
     vertices: Arc<Vec<u8>>,
     glass: Arc<Vec<std::ops::Range<u32>>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Batches {
+    /// The last scene upload failed (and was logged): a retry that fails again is not.
+    upload_failed: bool,
     /// What the last scene taken uploaded.
     uploads: UploadStats,
     /// The blocks' see-through triangles the global glass stream was assembled from (block key,
@@ -1981,6 +2014,8 @@ struct Batches {
     tris: Option<Batch>,
     /// [`GpuScene::open_tris`].
     open_tris: Option<Batch>,
+    /// [`GpuScene::hover_faces`].
+    hover_faces: Option<Batch>,
     ground_ao: Option<Batch>,
     ground_input: Option<GroundAo>,
     pbr: Option<Batch>,
@@ -2002,6 +2037,8 @@ struct Batches {
     guide_lines: Option<Batch>,
     planned: Vec<PlannedDraw>,
     instanced: Vec<InstancedDraw>,
+    /// `instanced` drawn by indirect draws, where the device can ([`indirect`]).
+    indirect: Option<indirect::Indirect>,
     /// Whole highlighted bodies redrawn from `planned` (the scene's own plans are not used).
     hover_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     selected_planned: Vec<Arc<solidcore_tess::TessPlan>>,
@@ -2029,7 +2066,10 @@ struct Batches {
 
 impl Batches {
     /// Upload a new scene. Planned bodies not yet on the GPU are evaluated there: their
-    /// dispatches go into `encoder`, ahead of this frame's render pass.
+    /// dispatches go into `encoder`, ahead of this frame's render pass. The new scene is built
+    /// into a copy and swapped in only when every buffer uploaded: when the device refuses one
+    /// (out of memory), the previous picture stays, the scene is put back to be retried (unless
+    /// a newer one was published meanwhile), the failure is logged once, and the reason returned.
     fn take(
         &mut self,
         device: &wgpu::Device,
@@ -2040,15 +2080,15 @@ impl Batches {
         slot: &SceneSlot,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
-    ) {
-        self.take_sharing(device, queue, uniform, bgl, key, slot, tess, oit_available, None);
+    ) -> Result<(), String> {
+        self.take_sharing(device, queue, uniform, bgl, key, slot, tess, oit_available, None)
     }
 
     /// [`Batches::take`], taking over the blocks, evaluated chunks and instanced triangles the
     /// scene shares with `donor` (another scene drawn in the same frame) instead of uploading and
     /// evaluating them again: a dragged component's bodies move between the model scene and the
     /// moving layer. `uniform` is the one the scene's palette is bound with (the layer has its
-    /// own).
+    /// own). The donor gives them up only when the upload succeeded.
     fn take_sharing(
         &mut self,
         device: &wgpu::Device,
@@ -2059,34 +2099,66 @@ impl Batches {
         slot: &SceneSlot,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
+        donor: Option<&mut Batches>,
+    ) -> Result<(), String> {
+        if self.key == Some(key) {
+            return Ok(());
+        }
+        let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) else { return Ok(()) };
+        let _ = take_upload_failure();
+        let mut next = self.clone();
+        let mut taken = donor.as_deref().cloned();
+        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut());
+        match take_upload_failure() {
+            None => {
+                next.upload_failed = false;
+                *self = next;
+                if let (Some(d), Some(t)) = (donor, taken) {
+                    *d = t;
+                }
+                Ok(())
+            }
+            Some(reason) => {
+                if !self.upload_failed {
+                    log::error!("scene upload failed, keeping the previous picture: {reason}");
+                }
+                self.upload_failed = true;
+                if let Ok(mut pending) = slot.lock()
+                    && pending.is_none()
+                {
+                    *pending = Some(sc);
+                }
+                Err(reason)
+            }
+        }
+    }
+
+    fn upload_scene(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        uniform: &wgpu::Buffer,
+        bgl: &Group0,
+        key: u64,
+        sc: &GpuScene,
+        tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
+        oit_available: bool,
         mut donor: Option<&mut Batches>,
     ) {
-        if self.key == Some(key) {
-            return;
-        }
-        if let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) {
+        {
             self.uploads = UploadStats::default();
-            let palette = sc.palette.clone();
-            let mut written = 0;
-            match self.palette.take() {
-                Some(mut p) => {
-                    p.update(device, queue, uniform, bgl, palette, &mut written);
-                    self.palette = Some(p);
-                }
-                None => self.palette = Some(PaletteGpu::new(device, queue, uniform, bgl, palette, &mut written)),
-            }
-            self.uploads.palette = written;
             self.planned = match tess {
                 Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
             self.instanced = self.instanced(device, &sc.instanced, donor.as_deref());
-            self.hover_planned = sc.hover_planned;
-            self.selected_planned = sc.selected_planned;
-            self.hover_blocks = sc.hover_blocks;
-            self.selected_blocks = sc.selected_blocks;
-            self.recoloured = sc.recoloured;
-            self.lit_edges = sc.lit_edges;
+            self.indirect = if indirect::supported(device) { indirect::Indirect::new(device, &self.instanced, self.indirect.as_ref()) } else { None };
+            self.hover_planned = sc.hover_planned.clone();
+            self.selected_planned = sc.selected_planned.clone();
+            self.hover_blocks = sc.hover_blocks.clone();
+            self.selected_blocks = sc.selected_blocks.clone();
+            self.recoloured = sc.recoloured.clone();
+            self.lit_edges = sc.lit_edges.clone();
             self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref());
             self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref());
             let mut kept = std::mem::take(&mut self.blocks);
@@ -2119,6 +2191,7 @@ impl Batches {
             self.ground_input = sc.ground_ao;
             self.tris = own("sc_tris", &sc.tris, TRI_SIZE);
             self.open_tris = own("sc_open_tris", &sc.open_tris, TRI_SIZE);
+            self.hover_faces = own("sc_hover_faces", &sc.hover_faces, TRI_SIZE);
             self.pbr = own("sc_pbr", &sc.pbr, PBR_SIZE);
             self.trans = own("sc_trans", &sc.trans, TRI_SIZE);
             self.shadow = own("sc_shadow", &sc.shadow, TRI_SIZE);
@@ -2169,6 +2242,20 @@ impl Batches {
             }
             self.uploads.geometry += geometry;
             self.blocks_culled_for = None;
+            // Last: the palette texture is shared with the picture on screen, which a refused
+            // upload above must leave as it was.
+            if UPLOAD_FAILURE.with(|f| f.borrow().is_some()) {
+                return;
+            }
+            let mut written = 0;
+            match self.palette.take() {
+                Some(mut p) => {
+                    p.update(device, queue, uniform, bgl, sc.palette.clone(), &mut written);
+                    self.palette = Some(p);
+                }
+                None => self.palette = Some(PaletteGpu::new(device, queue, uniform, bgl, sc.palette.clone(), &mut written)),
+            }
+            self.uploads.palette = written;
             self.key = Some(key);
         }
     }
@@ -2205,7 +2292,7 @@ impl Batches {
                 };
                 self.uploads.placements += placements.len() as u64;
                 let count = if i == 0 { count } else { 0 };
-                levels.push(LevelDraw { tris: gpu.1.clone(), flat: tris.flat, error, instances, count });
+                levels.push(LevelDraw { tris: gpu.1.clone(), src: tris.clone(), flat: tris.flat, error, instances, count });
                 self.instanced_tris.insert(key, gpu);
             }
             if !levels.is_empty() {
@@ -2239,10 +2326,12 @@ impl Batches {
     /// Each placement's level of detail is chosen here too: the coarsest whose error stays under
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
-    fn cull(&mut self, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) {
+    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) {
         self.cull_blocks(vp);
+        let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
-        for d in &mut self.instanced {
+        for (n, d) in self.instanced.iter_mut().enumerate() {
+            let batched = self.indirect.as_ref().is_some_and(|x| x.batches(n));
             let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
             let mut shown: Vec<(u32, u8)> = d
                 .placements
@@ -2275,6 +2364,12 @@ impl Batches {
             if d.shown.as_ref() == Some(&shown) {
                 continue;
             }
+            changed = true;
+            if batched {
+                // Its placements go to the indirect draws' one buffer, written below.
+                d.shown = Some(shown);
+                continue;
+            }
             for (k, level) in d.levels.iter_mut().enumerate() {
                 let bytes: Vec<u8> = shown
                     .iter()
@@ -2289,6 +2384,31 @@ impl Batches {
                 level.count = u32::try_from(bytes.len() / INSTANCE_SIZE).unwrap_or(u32::MAX);
             }
             d.shown = Some(shown);
+        }
+        if changed && let Some(indirect) = self.indirect.as_mut() {
+            indirect.write(device, queue, &self.instanced);
+        }
+    }
+
+    /// Draw the instanced placements of look `look` (only closed bodies' when `closed_only`):
+    /// indirectly, a call per pipeline, where the device can; the rest one mesh and level at a
+    /// time.
+    fn draw_instanced(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        look: InstanceLook,
+        closed_only: bool,
+        smooth: &wgpu::RenderPipeline,
+        flat: &wgpu::RenderPipeline,
+        tally: &Tally,
+    ) {
+        if let Some(indirect) = &self.indirect {
+            indirect.draw(pass, look, closed_only, smooth, flat, tally);
+        }
+        for (n, d) in self.instanced.iter().enumerate() {
+            if d.look == look && (d.closed || !closed_only) && !self.indirect.as_ref().is_some_and(|x| x.batches(n)) {
+                d.draw(pass, smooth, flat, tally);
+            }
         }
     }
 
@@ -2393,20 +2513,22 @@ impl Batches {
 const STENCIL_BASE: u32 = 128;
 
 /// The section's pipelines (see `Renderer::tri_cut`), drawn in this order. The cap shows where
-/// the section plane lies inside a body: where the faces behind the plane, on the view ray
-/// through the pixel, are left by the ray more often than entered. The stencil counts them, so
+/// the view ray comes into what the section keeps (inside every plane) inside a body: where the
+/// faces past that point, on the view ray through the pixel, are left by the ray more often than
+/// entered. The stencil counts them, so
 /// no depth is compared where bodies touch: a cut body's far wall and the face of the body it
 /// rests on lie at one depth, and settling that by depth let the other body show through the
 /// cap in specks, stripes and triangles. The display meshes are watertight, so the count is
 /// exact for closed bodies; an open one (a surface body, a solid with faces left out) gets no
 /// cap.
 struct Cut {
-    /// Counts the crossings in the stencil from [`STENCIL_BASE`]: a back face behind the plane
-    /// adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
+    /// Counts the crossings in the stencil from [`STENCIL_BASE`]: a back face past where the view
+    /// ray comes into what the section keeps adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
     /// inside a body; at or below it, outside (an open sheet seen from its front counts below).
     count: wgpu::RenderPipeline,
-    /// Where the count is above the base, the nearest back face, by its true depth, in its body's cut
-    /// colour (the body the plane lies inside: the ray leaves it there).
+    /// Where the count is above the base, the nearest back face past that point, by its true
+    /// depth, in its body's cut colour (the body the cut lies inside: the ray leaves it there),
+    /// hidden itself where the body reaches past another plane first.
     fill: wgpu::RenderPipeline,
     /// The cap again, only there, at the section plane's depth (pushed as faces are), so what
     /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728).
@@ -2423,6 +2545,8 @@ pub struct Renderer {
     product_depth: Option<product_highlights::DepthPipelines>,
     /// The offscreen cache contains transparent product highlights rather than shaded colour.
     product_highlights: bool,
+    /// Why the last `prepare` could not upload a scene (the device refused a buffer), if so.
+    refused_upload: Option<String>,
     /// What the last frame drew ([`Renderer::stats`]).
     stats: DrawStatsHandle,
     /// What the frame `prepare` drew offscreen (supersampled, or for see-through surfaces),
@@ -2550,6 +2674,12 @@ pub struct Renderer {
     /// device cannot blend into float targets: they are sorted instead), and its targets.
     oit: Option<oit::Pipelines>,
     oit_targets: Option<oit::Targets>,
+    /// Timestamps of the view's passes ([`DrawStats::time_passes`]), made the first time they are
+    /// asked for; `timer_tried` once that was tried (the device may have no timestamp queries).
+    timer: Option<pass_times::PassTimer>,
+    timer_tried: bool,
+    /// The last frame asked for the passes' times ([`DrawStats::time_passes`]).
+    timing: bool,
     ss_bgl: wgpu::BindGroupLayout,
     /// The supersampled frame's textures, kept while its size stays.
     ss: Option<Supersampled>,
@@ -3269,8 +3399,8 @@ impl Renderer {
         let marks = |source: TriSource| {
             cut_states.as_ref().map(|(count, fill, rest, _)| {
                 (
-                    solid_writes("sc_tris_count", "fs_clip", None, Some(count.clone()), source, false),
-                    solid("sc_tris_fill", "fs_solid", Some(wgpu::Face::Front), Some(fill.clone()), source),
+                    solid_writes("sc_tris_count", "fs_section_count", None, Some(count.clone()), source, false),
+                    solid("sc_tris_fill", "fs_section_fill", Some(wgpu::Face::Front), Some(fill.clone()), source),
                     solid("sc_tris_rest", "fs_solid_open", None, rest.clone(), source),
                 )
             })
@@ -3505,6 +3635,7 @@ impl Renderer {
             Renderer {
                 product_depth: None,
                 product_highlights: false,
+                refused_upload: None,
                 ao: ao.join(),
                 ground_ao: ground_ao.join(),
                 ground_ao_key: None,
@@ -3521,6 +3652,9 @@ impl Renderer {
                 ss_scaled: false,
                 oit,
                 oit_targets: None,
+                timer: None,
+                timer_tried: false,
+                timing: false,
                 ss_bgl,
                 ss: None,
                 ss_ready: false,
@@ -3715,21 +3849,30 @@ fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, 
     Some(Batch { parts, chunk })
 }
 
-/// As `create_buffer_init`, without its panic when the device refused the buffer (an allocation
-/// error caught by an error scope): `None` instead, so the upload fails.
+thread_local! {
+    /// The first buffer the device refused during the scene upload under way on this thread.
+    static UPLOAD_FAILURE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The uploads' failure since the last call, if the device refused a buffer.
+fn take_upload_failure() -> Option<String> {
+    UPLOAD_FAILURE.with(|f| f.borrow_mut().take())
+}
+
+/// [`crate::buffer_init`] for the scene uploads: `None` (as an empty upload) when the device
+/// refused the buffer, with the reason kept for [`take_upload_failure`] so the whole scene's
+/// upload can fail and leave the previous picture in place.
 fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
-    let len = contents.len() as u64;
-    let size = len.div_ceil(wgpu::COPY_BUFFER_ALIGNMENT) * wgpu::COPY_BUFFER_ALIGNMENT;
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: true });
-    match buffer.get_mapped_range_mut(..len) {
-        Ok(mut mapped) => mapped.copy_from_slice(contents),
+    match crate::buffer_init(device, label, contents, usage) {
+        Ok(buffer) => Some(buffer),
         Err(error) => {
-            log::error!("geometry upload failed: {error}");
-            return None;
+            let reason = error.to_string();
+            UPLOAD_FAILURE.with(|f| {
+                f.borrow_mut().get_or_insert(reason);
+            });
+            None
         }
     }
-    buffer.unmap();
-    Some(buffer)
 }
 
 /// Bytes per GPU buffer for vertices of `stride` bytes: within the device's limit and a
@@ -3890,7 +4033,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.back.map(f32::to_bits).hash(&mut h);
     cb.eye.map(f32::to_bits).hash(&mut h);
     cb.size_px.map(f32::to_bits).hash(&mut h);
-    cb.clip.map(f32::to_bits).hash(&mut h);
+    cb.clip.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.cap.map(f32::to_bits).hash(&mut h);
     cb.analysis.map(f32::to_bits).hash(&mut h);
     cb.analysis_colors.map(f32::to_bits).hash(&mut h);
@@ -3942,12 +4085,45 @@ impl Renderer {
         self.target.samples != self.window.samples || self.target.depth != self.window.depth || self.target.format != self.window.format
     }
 
+    /// Why the last [`Renderer::prepare`] left a scene out (the device refused a buffer for it),
+    /// taken: the picture it prepared shows the previous scene.
+    pub(crate) fn take_refused_upload(&mut self) -> Option<String> {
+        self.refused_upload.take()
+    }
+
     /// Before the frame's render pass: upload the scenes that changed (planned bodies not yet on
     /// the GPU are evaluated by dispatches recorded into `encoder`), the uniform, the images and
     /// the accessibility map, and draw the frame supersampled when it asks for that. A frame whose
     /// content is the same as the picture drawn last is not drawn again: that picture is blitted
     /// instead, so pointer moves and UI animations over a still view cost no scene work.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        let time = self.stats.lock().is_ok_and(|s| s.time_passes);
+        if time && !self.timer_tried {
+            self.timer = pass_times::PassTimer::new(device, queue);
+            self.timer_tried = true;
+        }
+        // Timing just asked for over a still view: draw this frame instead of showing the cached
+        // picture, which records no passes, so the times come without waiting for the view to
+        // change. Later still frames reuse the picture as before.
+        if time && !self.timing && self.timer.is_some() {
+            self.ss_key = None;
+        }
+        self.timing = time;
+        if let Some(timer) = &mut self.timer {
+            timer.begin(device, time);
+        }
+        self.prepare_frame(device, queue, encoder, frame);
+        // The times cover the passes recorded here, in `prepare`. A frame drawn straight into the
+        // window's pass (`paint`, where it needs no offscreen picture) is not timed: that pass is
+        // the window's, which takes no timestamp writes from here. The app's window pass has one
+        // sample and no depth, so its view is always drawn offscreen, in passes timed here.
+        if let Some(timer) = &mut self.timer {
+            timer.finish(encoder);
+        }
+    }
+
+    /// [`Renderer::prepare`]'s work, between the pass timer's frame start and end.
+    fn prepare_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
         let res = self;
         let cb = frame;
         if res.product_highlights {
@@ -3955,6 +4131,7 @@ impl Renderer {
             res.ss_key = None;
             res.cached = None;
         }
+        res.refused_upload = None;
         let key = frame_key(cb);
         if can_reuse(res.ss_ready && res.ss.is_some(), res.ss_key, key) {
             // A still frame shows the picture as it is; the first one filters it down once.
@@ -3968,12 +4145,12 @@ impl Renderer {
         }
         res.cached = None;
         if cb.product {
-            res.prepare_product_geometry(device, queue, cb);
+            let _ = res.prepare_product_geometry(device, queue, cb);
             res.product.sort_glass(queue, cb.back);
             // The product picture goes through the window's pass too: offscreen when the targets
             // differ or it is drawn smaller, else straight into the window's pass.
             res.ss_ready = (res.window_differs() || cb.ssaa != 1.0) && res.supersample(device, encoder, cb, false);
-            res.ss_key = res.ss_ready.then_some(key);
+            res.ss_key = (res.ss_ready && res.refused_upload.is_none()).then_some(key);
             return;
         }
         res.take_ready_tessellation();
@@ -3981,13 +4158,24 @@ impl Renderer {
         // the model scene before the model scene without them lets them go (and the model scene
         // takes them back when the drag ends). The layer's palette is bound with its own uniform.
         let oit = res.oit.is_some();
+        let mut uploads = Vec::with_capacity(5);
         if let Some(mv) = &cb.moving {
             let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-            res.moving.take_sharing(device, queue, &res.moving_uniform, &res.uniform_bgl, mv.key, &mv.slot, tess, oit, Some(&mut res.model));
+            uploads.push(res.moving.take_sharing(
+                device,
+                queue,
+                &res.moving_uniform,
+                &res.uniform_bgl,
+                mv.key,
+                &mv.slot,
+                tess,
+                oit,
+                Some(&mut res.model),
+            ));
         }
         res.uniform_bgl.environment.upload(queue);
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving));
+        uploads.push(res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving)));
         match &cb.moving {
             Some(mv) => {
                 res.moving.sort_glass(queue, local_direction(&mv.transform, cb.back));
@@ -4001,12 +4189,14 @@ impl Renderer {
             }
             None => {}
         }
-        res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, oit);
+        uploads.push(res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, oit));
         // The highlight evaluates plans of its own where the model has none to draw again (in
         // Wireframe, a whole lit body's faces).
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, tess, oit);
-        res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit);
+        uploads.push(res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, tess, oit));
+        uploads.push(res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit));
+        // A refused scene leaves the previous picture; a capture must not pass it off as the new one.
+        res.refused_upload = uploads.into_iter().find_map(Result::err);
         // See-through surfaces are drawn without sorting where the device can (order-independent
         // transparency, in an offscreen frame); else their triangles are sorted for the view.
         // The dragged bodies' own (their blocks' glass is drawn only there with it) count too.
@@ -4014,7 +4204,7 @@ impl Renderer {
         if !see_through {
             res.model.sort_glass(queue, cb.back);
         }
-        res.model.cull(queue, &cb.view_proj, cb.size_px);
+        res.model.cull(device, queue, &cb.view_proj, cb.size_px);
         let ground_visible = res.model.ground_input.is_some_and(|ground| ground.visible_from(cb.back));
         let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits(), ground_visible);
         if res.ground_ao_key != Some(ground_key) {
@@ -4041,7 +4231,7 @@ impl Renderer {
                 .into_iter()
                 .flatten()
                 .collect();
-        res.ao.prepare(device, encoder, cb.ao_radius, cb.size_px, res.target.reversed_depth(), &layers);
+        res.ao.prepare(device, encoder, cb.ao_radius, cb.size_px, res.target.reversed_depth(), &layers, res.timer.as_ref());
         // Images: upload new or changed textures, drop removed ones, rebuild the quads.
         res.textures.retain(|id, _| cb.images.iter().any(|i| i.id == *id));
         res.quads.clear();
@@ -4093,7 +4283,7 @@ impl Renderer {
         }
         res.clouds.prepare(device, queue, &res.cloud_pipes, &cb.clouds);
         res.ss_ready = (cb.ssaa != 1.0 || see_through || res.window_differs()) && res.supersample(device, encoder, cb, see_through);
-        res.ss_key = res.ss_ready.then_some(key);
+        res.ss_key = (res.ss_ready && res.refused_upload.is_none()).then_some(key);
     }
 
     /// Draw the frame into `pass` within `viewport` (x, y, width, height in physical pixels):
@@ -4147,7 +4337,8 @@ impl Renderer {
 
     fn publish(&self, drawn: DrawStats) {
         if let Ok(mut s) = self.stats.lock() {
-            *s = DrawStats { lowered: self.lowered, ..drawn };
+            let gpu = if s.time_passes { self.timer.as_ref().and_then(|t| t.last) } else { None };
+            *s = DrawStats { lowered: self.lowered, time_passes: s.time_passes, gpu, ..drawn };
         }
     }
 
@@ -4253,9 +4444,7 @@ impl Renderer {
         // Instanced meshes, with the pipeline for smooth and for flat triangles.
         let instanced =
             |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
-                for d in b.instanced.iter().filter(|d| d.look == InstanceLook::Opaque && (d.closed || !counting)) {
-                    d.draw(pass, smooth, flat, tally);
-                }
+                b.draw_instanced(pass, InstanceLook::Opaque, counting, smooth, flat, tally);
             };
         // Whole highlighted bodies: the model's own evaluated plan triangles, drawn again in a
         // highlight colour (the pipeline adds or replaces the vertex colour).
@@ -4294,7 +4483,7 @@ impl Renderer {
                     d.draw(pass, smooth, flat, tally);
                 }
             };
-        let sectioned = cb.clip[..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
+        let sectioned = cb.clip[0][..3].iter().map(|c| c * c).sum::<f32>() > 0.25;
         match (
             res.tri_cut.as_ref().filter(|_| sectioned),
             res.tri_cut_planned.as_ref(),
@@ -4375,9 +4564,7 @@ impl Renderer {
         }
         in_moving(pass, &|pass, mv| tris(pass, &res.pbr, &mv.pbr));
         block_class(pass, &res.pbr_palette, TriClass::Pbr);
-        for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Pbr) {
-            d.draw(pass, &res.pbr_instanced, &res.pbr_instanced, tally);
-        }
+        m.draw_instanced(pass, InstanceLook::Pbr, false, &res.pbr_instanced, &res.pbr_instanced, tally);
         // Whole-body tints first, so a face or an edge highlighted over the body (in `h.tris`
         // and `h.lines`) keeps its own colour, as it did when the body's triangles were built
         // into the same list before them.
@@ -4421,6 +4608,9 @@ impl Renderer {
             }
         }
         tris(pass, &res.tri_hl, &h.tris);
+        // Hovered faces of opaque bodies: their own colour and finish, tinted as a whole hovered
+        // body is.
+        tris(pass, &res.tri_hl_hover_built, &h.hover_faces);
         // Hidden edges before the visible ones, so a visible edge is drawn over them. An edge
         // within a pixel of a nearer face's outline (a face seen edge on beside it) is hidden
         // under part of its own width; drawn after, its light hidden copy covered the visible
@@ -4474,9 +4664,7 @@ impl Renderer {
         // See-through instanced meshes (placements back to front) with the rest of their kind.
         let see_through =
             |pass: &mut wgpu::RenderPass<'static>, look: InstanceLook, (smooth, flat): &(wgpu::RenderPipeline, wgpu::RenderPipeline), b: &Batches| {
-                for d in b.instanced.iter().filter(|d| d.look == look) {
-                    d.draw(pass, smooth, flat, tally);
-                }
+                b.draw_instanced(pass, look, false, smooth, flat, tally);
             };
         tris(pass, &res.glass_far, &m.glass);
         see_through(pass, InstanceLook::Glass, &res.glass_far_instanced, m);
@@ -4572,8 +4760,8 @@ impl Renderer {
                 tally.triangles(d.mesh.index_count, 1);
             }
         }
-        for d in m.instanced.iter().filter(|d| d.look != InstanceLook::Opaque) {
-            d.draw(pass, &p.instanced, &p.instanced_flat, tally);
+        for look in [InstanceLook::Pbr, InstanceLook::Faded, InstanceLook::Glass] {
+            m.draw_instanced(pass, look, false, &p.instanced, &p.instanced_flat, tally);
         }
     }
 }
@@ -4742,7 +4930,7 @@ impl Renderer {
                         depth_ops: Some(wgpu::Operations { load: load_depth(first, far_depth(self.target.reversed_depth())), store: keep }),
                         stencil_ops: stencil.then_some(wgpu::Operations { load: load_depth(first, 0), store: keep }),
                     }),
-                    timestamp_writes: None,
+                    timestamp_writes: self.timer.as_ref().and_then(|t| t.writes(if first { "sc_ssaa" } else { "sc_ssaa_over" })),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 })
@@ -4766,8 +4954,9 @@ impl Renderer {
             first.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
             self.draw(cb, &mut first, Phase::BeforeSeeThrough, &tally);
         }
-        p.accumulate(encoder, t, ss.depth.as_ref(), stencil, |pass| self.draw_see_through(pass, p, &tally));
-        p.composite(encoder, t, &ss.color, ss.resolve.as_ref());
+        let timer = self.timer.as_ref();
+        p.accumulate(encoder, t, ss.depth.as_ref(), stencil, timer.and_then(|t| t.writes("sc_oit")), |pass| self.draw_see_through(pass, p, &tally));
+        p.composite(encoder, t, &ss.color, ss.resolve.as_ref(), timer.and_then(|t| t.writes("sc_oit_composite")));
         tally.call();
         {
             let mut over = pass(encoder, false);
@@ -4867,6 +5056,25 @@ fn load_depth<T>(first: bool, clear: T) -> wgpu::LoadOp<T> {
     if first { wgpu::LoadOp::Clear(clear) } else { wgpu::LoadOp::Load }
 }
 
+/// A section's planes (normal, d) as [`Frame::clip`]: the first [`MAX_SECTION_PLANES`], the
+/// rest of the slots unused.
+pub fn clip_planes(planes: &[(Vec3, f64)]) -> [[f32; 4]; MAX_SECTION_PLANES] {
+    let mut clip = [[0.0; 4]; MAX_SECTION_PLANES];
+    for (slot, (n, d)) in clip.iter_mut().zip(planes) {
+        *slot = [n.x as f32, n.y as f32, n.z as f32, *d as f32];
+    }
+    clip
+}
+
+/// A section's planes' hatches as [`Frame::clip_hatch`], beside [`clip_planes`].
+pub fn clip_hatches(hatch: &[usize]) -> [usize; MAX_SECTION_PLANES] {
+    let mut out = [0; MAX_SECTION_PLANES];
+    for (slot, h) in out.iter_mut().zip(hatch) {
+        *slot = *h;
+    }
+    out
+}
+
 /// Uniform bytes for a frame.
 pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -> Vec<u8> {
     uniform_bytes_placing(cb, w, h, linear, reversed, IDENTITY)
@@ -4887,7 +5095,7 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     let mut v: Vec<f32> = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed).iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
-    v.extend(cb.clip);
+    v.extend(cb.clip.iter().flatten());
     v.extend(cb.cap);
     v.extend(cb.analysis);
     match &cb.access {
@@ -4917,6 +5125,12 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
         let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
     }
+    let vp = solidcraft_viewport::Mat4(cb.view_proj.map(|c| c.map(f64::from)));
+    for (c, hatch) in cb.clip.iter().zip(cb.clip_hatch) {
+        let n = Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+        let [x, y] = solidcraft_viewport::section_hatch(&vp, n, hatch, f64::from(w.max(1.0)), f64::from(h.max(1.0)));
+        v.extend([x as f32, y as f32, 0.0, 0.0]);
+    }
     v.extend(cb.sky.map(|value| if value.is_finite() { value } else { 0.0 }));
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
@@ -4936,6 +5150,80 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
 
 #[cfg(test)]
 mod tests {
+    /// The device refuses a block's index buffer (past its buffer size limit, standing in for a
+    /// GPU out of memory): the scene is not swapped in, the previous picture stays, and the scene
+    /// is kept for a retry (#4791).
+    #[test]
+    fn refused_scene_upload_keeps_the_previous_picture_and_retries() {
+        use super::*;
+        let Ok((adapter, _, _)) = crate::open_headless(crate::test_env::policy()) else { return };
+        // Above the renderer's own buffers (its viewport uniform is 2080 bytes), below the index buffer refused.
+        let limits = wgpu::Limits { max_buffer_size: 3072, ..wgpu::Limits::downlevel_defaults() };
+        let Ok((device, queue)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() }))
+        else {
+            return;
+        };
+        let block = |runs: usize| SceneBlock {
+            key: 7,
+            bytes: Arc::new(BlockBytes { vertices: Arc::new(vec![0; 3 * TRI_SIZE]), opaque: Arc::new(vec![0..1; runs]), ..BlockBytes::default() }),
+        };
+        let scene = |block: &SceneBlock| GpuScene {
+            blocks: vec![block.clone()],
+            palette: Arc::new(Palette::with_stable(vec![if block.bytes.opaque.len() == 1024 { [9, 9, 9, 255] } else { [1, 2, 3, 255] }])),
+            ..GpuScene::default()
+        };
+        // The first texel of the palette texture, as the GPU holds it.
+        let first_texel = |batches: &Batches| -> [u8; 4] {
+            let texture = &batches.palette.as_ref().unwrap()._texture;
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("test palette read"),
+                size: u64::from(PALETTE_TEXEL),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
+                },
+                wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            );
+            queue.submit([encoder.finish()]);
+            buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let mapped = buffer.slice(..).get_mapped_range().unwrap();
+            [mapped[0], mapped[1], mapped[2], mapped[3]]
+        };
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let r = Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false }, None);
+        let mut batches = Batches::default();
+        let previous = block(1);
+        let slot: SceneSlot = Arc::new(Mutex::new(Some(scene(&previous))));
+        batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+        assert_eq!(batches.key, Some(1));
+        // So many runs need an index buffer, and its 4 KiB is over the 3 KiB limit.
+        let refused = block(1024);
+        *slot.lock().unwrap() = Some(scene(&refused));
+        for _ in 0..2 {
+            assert!(batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 2, &slot, None, false).is_err());
+            assert_eq!(batches.key, Some(1), "the previous picture stays");
+            assert!(Arc::ptr_eq(&batches.blocks[&7].bytes, &previous.bytes));
+            assert_eq!(first_texel(&batches), [1, 2, 3, 255], "the refused scene's colours are not written over the picture's");
+            let pending = slot.lock().unwrap();
+            assert!(Arc::ptr_eq(&pending.as_ref().unwrap().blocks[0].bytes, &refused.bytes), "kept for a retry");
+        }
+        // A newer scene published meanwhile is not overwritten by the one put back.
+        let newer = block(2);
+        *slot.lock().unwrap() = Some(scene(&newer));
+        batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 3, &slot, None, false).unwrap();
+        assert_eq!(batches.key, Some(3));
+        assert!(Arc::ptr_eq(&batches.blocks[&7].bytes, &newer.bytes));
+        assert!(slot.lock().unwrap().is_none());
+    }
+
     /// A placed box is kept while any of it may be in view, and left out only when it lies
     /// wholly past one side of the view: in an orthographic view and a perspective one, behind
     /// the eye too.
@@ -5046,12 +5334,12 @@ mod tests {
             eprintln!("skipping: no GPU adapter");
             return;
         };
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         // Invalid mapping usage provides a deterministic failed allocation without exhausting memory.
         let result =
             super::upload_with(&device, "rejected geometry", &[0; 288], super::PBR_SIZE, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::VERTEX);
         assert!(result.is_none());
-        assert!(pollster::block_on(scope.pop()).is_some());
+        // The refusal is caught by the upload's own scopes and kept for the scene upload to fail on.
+        assert!(super::take_upload_failure().is_some());
     }
 
     /// Only the FirePro under Metal skips GPU evaluation; the same card under another backend
@@ -5168,6 +5456,38 @@ mod tests {
         assert_ne!(super::frame_key(&frame), previous);
     }
 
+    /// The uniform fills the shader's `U` exactly, the section's planes and their hatch included.
+    #[test]
+    fn the_uniform_matches_the_shader_layout() {
+        let mut f = cached_frame();
+        f.clip = super::clip_planes(&[(super::Vec3::X, 1.0); super::MAX_SECTION_PLANES]);
+        f.clip[super::MAX_SECTION_PLANES - 1] = [0.0, 0.0, 1.0, 7.25];
+        f.clip_hatch = super::clip_hatches(&[0, 1, 2, 3, 4, 5]);
+        f.view_proj = solidcraft_viewport::Camera::default().view_proj(1.0, 40.0).to_f32();
+        let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+        assert_eq!(bytes.len() as u64, super::UNIFORM_SIZE);
+        let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        assert_eq!(v[24..28], [1.0, 0.0, 0.0, 1.0], "the first plane follows the screen");
+        let last = 16 + 8 + 4 * super::MAX_SECTION_PLANES;
+        assert_eq!(v[last - 2..last], [1.0, 7.25], "the last plane sits before the cap colour");
+        // Each plane's hatch comes just before the sky, as the shared `section_hatch` has it.
+        let vp = solidcraft_viewport::Mat4(f.view_proj.map(|c| c.map(f64::from)));
+        let hatches = |v: &[f32]| v[v.len() - 4 - 4 * super::MAX_SECTION_PLANES..v.len() - 4].to_vec();
+        let hatch = &hatches(&v);
+        for (k, (h, c)) in hatch.as_chunks::<4>().0.iter().zip(&f.clip).enumerate() {
+            let n = super::Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+            let [x, y] = solidcraft_viewport::section_hatch(&vp, n, k, 64.0, 64.0);
+            assert_eq!(h, &[x as f32, y as f32, 0.0, 0.0], "plane {k}'s hatch");
+        }
+        assert_ne!(hatch[..2], hatch[4..6], "the first two planes, alike but for their hatch, hatch differently");
+        // The hatch goes with the plane, not its slot: the second plane alone keeps its own.
+        f.clip_hatch = super::clip_hatches(&[1]);
+        let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+        let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        let [x, y] = solidcraft_viewport::section_hatch(&vp, super::Vec3::X, 1, 64.0, 64.0);
+        assert_eq!(hatches(&v)[..2], [x as f32, y as f32]);
+    }
+
     /// A frame with a fixed picture, and a key that names everything it shows.
     fn cached_frame() -> super::Frame {
         use std::sync::{Arc, Mutex};
@@ -5190,7 +5510,8 @@ mod tests {
             turned_depth: None,
             back: [0.0; 3],
             size_px: [800.0, 600.0],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -5261,7 +5582,8 @@ mod tests {
             ("lighting", key(|f| f.back[0] += 1.0)),
             ("eye", key(|f| f.eye[0] += 1.0)),
             ("size", key(|f| f.size_px[0] += 1.0)),
-            ("section", key(|f| f.clip[0] = 1.0)),
+            ("section", key(|f| f.clip[0][0] = 1.0)),
+            ("second section plane", key(|f| f.clip[1][0] = 1.0)),
             ("section cap", key(|f| f.cap[0] = 0.5)),
             ("analysis", key(|f| f.analysis[0] = 1.0)),
             ("analysis colours", key(|f| f.analysis_colors[0] = 1.0)),
@@ -5685,7 +6007,8 @@ mod glass_tests {
         };
         let take = |r: &mut Renderer, key: u64, sc: GpuScene| {
             let slot: SceneSlot = Arc::new(Mutex::new(Some(sc)));
-            r.product.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false);
+            let uploaded = r.product.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false);
+            assert!(uploaded.is_ok(), "the scene uploads: {uploaded:?}");
             r.product.uploads
         };
         let first = take(&mut r, 1, scene(material(0.2)));
@@ -5715,7 +6038,7 @@ mod glass_tests {
         };
         let take = |r: &mut Renderer, key: u64, sc: GpuScene| {
             let slot: SceneSlot = Arc::new(Mutex::new(Some(sc)));
-            r.model.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false);
+            r.model.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false).unwrap();
             r.model.uploads
         };
         let first = take(&mut r, 1, scene(&palette, &bytes));
@@ -5777,7 +6100,12 @@ mod glass_tests {
             turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip,
+            clip: {
+                let mut planes = [[0.0; 4]; super::MAX_SECTION_PLANES];
+                planes[0] = clip;
+                planes
+            },
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -5977,7 +6305,8 @@ mod glass_tests {
             turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -6441,6 +6770,61 @@ mod glass_tests {
         render_frame(&mut single, &device, &queue, &test_frame(test_scene(), 1.0), false);
         assert!(single.ss_ready, "the 1x scene is drawn offscreen too");
         assert_eq!(single.resolve_clears, 0, "at one sample no texture is resolved into");
+    }
+
+    /// The frame-rate readout's GPU time: while it asks, the view's passes are timed and a frame's
+    /// times arrive a few frames later, without waiting; while it does not, nothing is timed.
+    #[test]
+    fn the_views_passes_are_timed_only_while_the_readout_asks() {
+        let Some((adapter, _)) = crate::select::pick(crate::test_env::policy()) else { return };
+        if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            return;
+        }
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: crate::depth_features(&adapter) | wgpu::Features::TIMESTAMP_QUERY,
+            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let frames = |r: &mut Renderer| {
+            for i in 0..6 {
+                // A new camera each frame: the picture is drawn again, not blitted.
+                let mut frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
+                frame.view_proj[3][0] += 0.01 * i as f32;
+                render_frame(r, &device, &queue, &frame, true);
+            }
+            r.stats().lock().map(|s| s.gpu).ok().flatten()
+        };
+        let mut idle = Renderer::new(&device, target, None);
+        assert_eq!(frames(&mut idle), None, "nothing is timed unless the readout asks");
+        assert!(idle.timer.is_none(), "no query set is made unless the readout asks");
+        let mut timed = Renderer::new(&device, target, None);
+        if let Ok(mut s) = timed.stats().lock() {
+            s.time_passes = true;
+        }
+        let gpu = frames(&mut timed).expect("a timed frame's passes are read back within a few frames");
+        assert!(gpu.passes >= 1 && gpu.slowest.starts_with("sc_"), "the view's own passes are timed: {gpu:?}");
+        assert!(gpu.slowest_us <= gpu.span_us, "no pass outlasts the span of them all: {gpu:?}");
+        if let Ok(mut s) = timed.stats().lock() {
+            s.time_passes = false;
+        }
+        assert_eq!(frames(&mut timed), None, "the times go once the readout stops asking");
+        // A still view: the same frame again shows the picture already drawn, which records no
+        // passes. Timing asked for over it draws a frame once, so its times come all the same.
+        let mut still = Renderer::new(&device, target, None);
+        let frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
+        render_frame(&mut still, &device, &queue, &frame, true);
+        if let Ok(mut s) = still.stats().lock() {
+            s.time_passes = true;
+        }
+        for _ in 0..6 {
+            render_frame(&mut still, &device, &queue, &frame, true);
+        }
+        assert!(still.stats().lock().ok().and_then(|s| s.gpu).is_some(), "a still view's passes are timed once timing is asked for");
     }
 
     /// The Render workspace's preview once painted the modelling viewport's last frame instead of

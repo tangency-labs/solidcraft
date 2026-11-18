@@ -17,7 +17,7 @@ use solidcraft_doc::joints::{self, Joint, JointKind};
 use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::Mesh;
 
-use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
+use crate::{IoError, Result, export_mesh_noted, stl_binary, weld, weld_eps};
 
 /// Mass (kg) and inertia (kg m²) of a link with no massive body: Gazebo drops massless links.
 const TOKEN_MASS: f64 = 1e-6;
@@ -226,7 +226,8 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &m
         let (mut visual, mut collision) = (Mesh::default(), Mesh::default());
         let (mut masses, mut color, mut open) = (Vec::new(), None, false);
         for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == c) {
-            let mut m = export_mesh(&b.body)?;
+            let (mut m, notes) = export_mesh_noted(&b.body, crate::MeshQuality::Standard)?;
+            out.warnings.extend(notes.into_iter().map(|n| format!("body `{}`: {n}", b.name)));
             if let Some(o) = doc.model_body_offset(b) {
                 for p in &mut m.positions {
                     *p = apply_point(o, *p);
@@ -552,7 +553,8 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     let exists = |occ: u64| occ == 0 || doc.occurrences.iter().any(|o| o.id == occ);
     let mut usable: Vec<(&Joint, Mat)> = Vec::new();
     for j in doc.assembly.joints.iter().filter(|j| !j.suppressed).take(joints::MAX_JOINTS) {
-        let fa = joints::resolve_origin(doc, st, &j.a).ok().filter(|_| joints::resolve_origin(doc, st, &j.b).is_ok());
+        let fa =
+            joints::resolve_origin(doc, st, &j.a).ok().map(|frame| j.offset_frame_a(frame)).filter(|_| joints::resolve_origin(doc, st, &j.b).is_ok());
         match fa {
             Some(fa) if exists(j.a.occurrence) && exists(j.b.occurrence) && j.a.occurrence != j.b.occurrence => usable.push((j, fa)),
             _ => tree.warnings.push(format!("joint `{}` is skipped: its origins don't resolve or it joins an occurrence to itself", j.name)),

@@ -24,7 +24,7 @@ use solidcore_record::Vec2;
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::sketch_shapes::Created;
+use super::sketch_shapes::{CornerPoint, Created, SlotWidth};
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
 
@@ -430,31 +430,6 @@ impl JsonSchema for SnapPoint {
     }
 }
 
-/// A width, as the slot commands read it: a number above 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SlotWidth(pub f64);
-
-impl<'de> Deserialize<'de> for SlotWidth {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)?.as_f64().and_then(params::finite) {
-            Some(w) if w > 1e-9 => Ok(SlotWidth(w)),
-            _ => Err(D::Error::custom("must be positive")),
-        }
-    }
-}
-
-impl JsonSchema for SlotWidth {
-    fn schema_name() -> Cow<'static, str> {
-        "SlotWidth".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "The slot's width in mm: more than 0.000000001 and below 1 000 000 000.",
-            "type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e9
-        })
-    }
-}
-
 /// The schema of curve ids as `params::string_list` reads them: a list of ids, or one id when
 /// one is enough, with the bounds on the list.
 fn curve_ids_schema(description: &str, min: usize, max: usize) -> Schema {
@@ -797,7 +772,8 @@ pub struct SlotCenterPointParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub end: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -832,7 +808,8 @@ pub struct ArcSlotThreePointParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub end: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -880,7 +857,8 @@ pub struct ArcSlotCenterKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub start: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -932,14 +910,23 @@ impl JsonSchema for ArcSlotCenterParams {
     }
 }
 
-/// The minor radius of an ellipse, as `sketch.ellipse` reads it: a number of mm above 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MinorRadius(pub f64);
+/// The minor radius of an ellipse, as `sketch.ellipse` reads it: a number of mm above 0, or
+/// text that is an expression over the design's parameters. Whether an expression evaluates to
+/// a positive size is the handler's to check. Kept as given.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MinorRadius(pub Value);
 
 impl<'de> Deserialize<'de> for MinorRadius {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)?.as_f64().and_then(params::finite) {
-            Some(r) if r > 1e-9 && r < 1e8 => Ok(MinorRadius(r)),
+        let v = Value::deserialize(d)?;
+        if v.is_string() {
+            return match params::expr(&json!({ "v": v }), "v") {
+                Some(_) => Ok(MinorRadius(v)),
+                None => Err(D::Error::custom(whole(format!("`minor_radius` {}", params::expr_problem(Some(&v)))))),
+            };
+        }
+        match v.as_f64().and_then(params::finite) {
+            Some(r) if r > 1e-9 && r < 1e8 => Ok(MinorRadius(v)),
             _ => Err(D::Error::custom(whole("the minor radius must be positive"))),
         }
     }
@@ -950,7 +937,13 @@ impl JsonSchema for MinorRadius {
         "MinorRadius".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "The minor radius in mm: above 0.000000001 and below 100 000 000.", "type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e8})
+        json_schema!({
+            "description": "The minor radius: a number of mm above 0.000000001 and below 100 000 000, or an expression over the design's parameters such as \"w / 4\" (a dimension driven by them; text naming no parameter is just that number, in the design's length unit).",
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e8},
+                {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": not_blank_pattern()}
+            ]
+        })
     }
 }
 
@@ -991,15 +984,17 @@ fn axes_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = ellipse_required)]
 pub struct EllipseKeys {
-    /// The ellipse's centre, [x, y] in mm.
+    /// The ellipse's centre, [x, y] in mm. A coordinate typed as an expression holds it where
+    /// the parameters put it.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "PointXY")]
-    pub center: Option<PointXY>,
-    /// The end of the major axis, [x, y] in mm; not the centre.
+    #[schemars(with = "CornerPoint")]
+    pub center: Option<CornerPoint>,
+    /// The end of the major axis, [x, y] in mm, as `center` is given; not the centre.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "PointXY")]
-    pub major: Option<PointXY>,
-    /// The minor radius in mm. Wins over `minor`, which is then not read.
+    #[schemars(with = "CornerPoint")]
+    pub major: Option<CornerPoint>,
+    /// The minor radius in mm: a number, or an expression over the design's parameters, which
+    /// makes it a dimension driven by them. Wins over `minor`, which is then not read.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MinorRadius")]
     pub minor_radius: Option<MinorRadius>,
@@ -1028,14 +1023,15 @@ fn ellipse_required(schema: &mut Schema) {
 }
 
 /// `sketch.ellipse`'s parameters: [`EllipseKeys`], with `minor` left unread when there is a
-/// `minor_radius`, and a `minor_radius` that isn't a number left unread, as the handler does.
+/// `minor_radius`, and a `minor_radius` that is neither a number nor text left unread, as the
+/// handler does.
 #[derive(Debug)]
 pub struct EllipseParams(pub EllipseKeys);
 
 impl<'de> Deserialize<'de> for EllipseParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let mut value = Value::deserialize(d)?;
-        let radius = params::num(&value, "minor_radius").is_some();
+        let radius = params::num(&value, "minor_radius").is_some() || value.get("minor_radius").is_some_and(Value::is_string);
         if let Some(keys) = value.as_object_mut() {
             keys.remove(if radius { "minor" } else { "minor_radius" });
         }

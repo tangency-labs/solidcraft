@@ -7,6 +7,7 @@ use std::f64::consts::{PI, TAU};
 
 use serde_json::{Value, json};
 use solidcore_record::{Seg2, Vec2};
+use solidcraft_io::{DxfEntityWeight, DxfShape, DxfTextRecordKind};
 
 use crate::Session;
 
@@ -69,38 +70,99 @@ fn export(s: &mut Session, params: Value) -> String {
     run(s, "sheet.export_dxf", params)["dxf"].as_str().unwrap_or_default().to_string()
 }
 
-/// The entities of a DXF text: type and group codes.
-type Entity = (String, Vec<(i32, String)>);
-
-fn entities(dxf: &str) -> Vec<Entity> {
-    let lines: Vec<&str> = dxf.lines().collect();
-    let pairs: Vec<(i32, &str)> = lines.chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
-    let start = pairs.iter().position(|p| *p == (2, "ENTITIES")).unwrap_or(0);
-    let mut out: Vec<Entity> = Vec::new();
-    for (code, value) in pairs.iter().skip(start + 1) {
-        match (*code, *value) {
-            (0, "ENDSEC") => break,
-            (0, kind) => out.push((kind.to_string(), Vec::new())),
-            _ => {
-                if let Some(last) = out.last_mut() {
-                    last.1.push((*code, value.to_string()));
-                }
-            }
-        }
-    }
-    out
+/// A semantic entity from the actual shared layered reader. Layer handles are
+/// resolved by their owning file, never inferred from group-code strings.
+#[derive(Clone, Debug, PartialEq)]
+struct TestTextSource {
+    kind: DxfTextRecordKind,
+    first_anchor: Option<Vec2>,
+    raw_group1: Option<String>,
 }
 
-fn values(e: &Entity, code: i32) -> Vec<f64> {
-    e.1.iter().filter(|(c, _)| *c == code).filter_map(|(_, v)| v.parse().ok()).collect()
+#[derive(Clone, Debug, PartialEq)]
+struct Entity(String, DxfShape, String, Option<DxfEntityWeight>, Option<TestTextSource>);
+
+fn entities(dxf: &str) -> Vec<Entity> {
+    let file = solidcraft_io::read_dxf_file(dxf).unwrap();
+    file.entities()
+        .iter()
+        .map(|e| {
+            Entity(
+                // A text's record kind is the file's, not its geometry's.
+                match e.source_text().map(|source| source.kind()) {
+                    Some(DxfTextRecordKind::MText) => "MTEXT".into(),
+                    _ => kind(e.geometry()).into(),
+                },
+                e.geometry().clone(),
+                file.layer(e.layer()).unwrap().name().into(),
+                e.weight(),
+                e.source_text().map(|source| TestTextSource {
+                    kind: source.kind(),
+                    first_anchor: source.first_anchor_mm(),
+                    raw_group1: source.raw_group1().map(str::to_string),
+                }),
+            )
+        })
+        .collect()
+}
+
+fn kind(shape: &DxfShape) -> &'static str {
+    match shape {
+        DxfShape::Point(_) => "POINT",
+        DxfShape::Line(..) => "LINE",
+        DxfShape::Circle { .. } => "CIRCLE",
+        DxfShape::Arc { .. } => "ARC",
+        DxfShape::Ellipse { .. } => "ELLIPSE",
+        DxfShape::Spline { .. } => "SPLINE",
+        DxfShape::Polyline { .. } | DxfShape::BulgedPolyline { .. } => "LWPOLYLINE",
+        DxfShape::Text { .. } | DxfShape::AlignedText { .. } => "TEXT",
+        other => panic!("unexpected source-only geometry in an exported file: {other:?}"),
+    }
 }
 
 fn count(es: &[Entity], kind: &str) -> usize {
     es.iter().filter(|e| e.0 == kind).count()
 }
 
-fn point(e: &Entity, code: i32) -> Vec2 {
-    Vec2::new(values(e, code).first().copied().unwrap_or(f64::NAN), values(e, code + 10).first().copied().unwrap_or(f64::NAN))
+fn first_point(e: &Entity) -> Vec2 {
+    match &e.1 {
+        DxfShape::Point(p) | DxfShape::Line(p, _) => *p,
+        DxfShape::Circle { c, .. } | DxfShape::Arc { c, .. } | DxfShape::Ellipse { c, .. } => *c,
+        DxfShape::Spline { ctrl, .. } => ctrl[0],
+        DxfShape::Text { at, .. } | DxfShape::AlignedText { at, .. } => e.4.as_ref().and_then(|source| source.first_anchor).unwrap_or(*at),
+        other => panic!("no first point for {other:?}"),
+    }
+}
+
+fn second_point(e: &Entity) -> Vec2 {
+    match &e.1 {
+        DxfShape::Line(_, p) => *p,
+        DxfShape::Ellipse { major, .. } => *major,
+        DxfShape::Text { at, .. } | DxfShape::AlignedText { at, .. } => *at,
+        other => panic!("no second point for {other:?}"),
+    }
+}
+
+type SplineFields<'a> = (u8, &'a [f64], &'a [Vec2], Option<&'a [f64]>);
+
+fn spline(e: &Entity) -> SplineFields<'_> {
+    let DxfShape::Spline { degree, knots, ctrl, weights } = &e.1 else { panic!("{e:?}") };
+    (*degree, knots, ctrl, weights.as_deref())
+}
+
+fn spline_degree(e: &Entity) -> u8 {
+    spline(e).0
+}
+
+fn note_layout(e: &Entity) -> (f64, f64) {
+    let DxfShape::Text { height, angle_deg, .. } = &e.1 else { panic!("expected centred baseline note: {e:?}") };
+    (*height, *angle_deg)
+}
+
+/// Raw spelling remains a deliberate serialization check for the original
+/// byte fixtures. The shared reader retains it; this helper does not parse it.
+fn encoded_text(e: &Entity) -> String {
+    e.4.as_ref().and_then(|source| source.raw_group1.as_deref()).unwrap_or_else(|| panic!("no source text in {e:?}")).trim().to_string()
 }
 
 /// All loops of the flat pattern (outlines, cut-outs, islands).
@@ -129,10 +191,10 @@ fn an_elliptic_cut_out_is_one_ellipse() {
     // By hand: centre (40, 30), the major semi-axis 15 along x (to (55, 30) or (25, 30)), the
     // minor one 8, so the ratio is 8/15; the whole turn runs from parameter 0 to 2π.
     let e = es.iter().find(|e| e.0 == "ELLIPSE").unwrap();
-    let (c, major) = (point(e, 10), point(e, 11));
+    let (c, major) = (first_point(e), second_point(e));
     assert!(c.dist(Vec2::new(40.0, 30.0)) < 1e-9 && (major.x.abs() - 15.0).abs() < 1e-9 && major.y.abs() < 1e-9, "{c:?} {major:?}");
-    assert!((values(e, 40)[0] - 8.0 / 15.0).abs() < 1e-9 && values(e, 41)[0] == 0.0 && (values(e, 42)[0] - TAU).abs() < 1e-9);
-    assert_eq!(values(e, 230), [1.0]);
+    let DxfShape::Ellipse { ratio, t0, t1, .. } = &e.1 else { panic!("{e:?}") };
+    assert!((*ratio - 8.0 / 15.0).abs() < 1e-9 && *t0 == 0.0 && (*t1 - TAU).abs() < 1e-9);
     // Our reader gets the same ellipse back, and the same plate: 6000 mm² less π·15·8.
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Ellipse { c, major, minor }
@@ -155,10 +217,10 @@ fn a_spline_cut_out_is_the_splines_it_was() {
     assert!(!cubics.is_empty() && cubics.len() + 1 == hole.len(), "{hole:?}");
     assert_eq!((count(&es, "LINE"), count(&es, "SPLINE"), es.len()), (5, cubics.len(), 5 + cubics.len()));
     for (spline, want) in es.iter().filter(|e| e.0 == "SPLINE").zip(&cubics) {
-        assert_eq!((values(spline, 70), values(spline, 71), values(spline, 72), values(spline, 73)), (vec![8.0], vec![3.0], vec![8.0], vec![4.0]));
-        assert_eq!(values(spline, 40), [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
-        let (xs, ys) = (values(spline, 10), values(spline, 20));
-        assert!(want.iter().enumerate().all(|(i, p)| (xs[i] - p.x).abs() < 1e-9 && (ys[i] - p.y).abs() < 1e-9), "{xs:?} {ys:?} {want:?}");
+        let (degree, knots, ctrl, weights) = self::spline(spline);
+        assert_eq!((degree, knots.len(), ctrl.len(), weights), (3, 8, 4, None));
+        assert_eq!(knots, [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert!(want.iter().zip(ctrl).all(|(p, q)| (q.x - p.x).abs() < 1e-9 && (q.y - p.y).abs() < 1e-9), "{ctrl:?} {want:?}");
     }
     // The same plate comes back.
     let areas = reimported_areas(&dxf);
@@ -188,8 +250,8 @@ fn a_g4_blend_cut_out_is_one_spline_of_degree_nine_and_closes() {
     let es = entities(&dxf);
     assert_eq!((count(&es, "LINE"), count(&es, "SPLINE"), es.len()), (7, 1, 8));
     let spline = es.iter().find(|e| e.0 == "SPLINE").unwrap();
-    assert_eq!((values(spline, 70), values(spline, 71), values(spline, 72), values(spline, 73)), (vec![8.0], vec![9.0], vec![20.0], vec![10.0]));
-    let ctrl: Vec<Vec2> = values(spline, 10).into_iter().zip(values(spline, 20)).map(|(x, y)| Vec2::new(x, y)).collect();
+    let (degree, knots, ctrl, weights) = self::spline(spline);
+    assert_eq!((degree, knots.len(), ctrl.len(), weights), (9, 20, 10, None));
     assert!(ctrl.len() == 10 && ctrl.iter().zip(&blend).all(|(a, b)| a.dist(*b) < 1e-9), "{ctrl:?} {blend:?}");
     let ends = [ctrl[0], ctrl[9]];
     assert!(ends.contains(&Vec2::new(40.0, 20.0)) && ends.contains(&Vec2::new(40.0, 40.0)), "{ends:?}");
@@ -216,8 +278,8 @@ fn text_is_splines_and_lines_not_chords() {
     );
     assert_eq!(lines + quadratics + cubics, segs.len(), "only lines and Béziers");
     assert_eq!((count(&es, "LINE"), count(&es, "SPLINE"), es.len()), (lines, quadratics + cubics, segs.len()));
-    let degree = |d: f64| es.iter().filter(|e| e.0 == "SPLINE" && values(e, 71) == [d]).count();
-    assert_eq!((degree(2.0), degree(3.0)), (quadratics, cubics));
+    let degree = |d: u8| es.iter().filter(|e| e.0 == "SPLINE" && spline_degree(e) == d).count();
+    assert_eq!((degree(2), degree(3)), (quadratics, cubics));
     // The plate with the letters cut out comes back from the file with its area (the largest region; the islands inside the
     // letters come in no fixed order).
     let areas = reimported_areas(&dxf);
@@ -235,7 +297,8 @@ fn arcs_option_writes_only_lines_and_tangent_arcs_within_a_thousandth() {
         .iter()
         .filter(|e| e.0 == "ARC")
         .map(|e| {
-            let (c, r, (a0, a1)) = (point(e, 10), values(e, 40)[0], (values(e, 50)[0].to_radians(), values(e, 51)[0].to_radians()));
+            let DxfShape::Arc { c, r, a0, a1 } = e.1 else { panic!("{e:?}") };
+            let (a0, a1) = (a0.to_radians(), a1.to_radians());
             let sweep = (a1 - a0).rem_euclid(TAU);
             let samples = (0..=20).map(|k| c + Vec2::from_angle(a0 + sweep * f64::from(k) / 20.0) * r).collect::<Vec<Vec2>>();
             (c, r, [c + Vec2::from_angle(a0) * r, c + Vec2::from_angle(a1) * r], samples)
@@ -284,50 +347,36 @@ fn bend_lines_and_layers_are_still_there() {
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
     let out = run(&mut s, "sheet.export_dxf", json!({}));
     let es = entities(out["dxf"].as_str().unwrap_or_default());
-    let on = |layer: &str| es.iter().filter(|e| e.1.contains(&(8, layer.to_string()))).count();
+    let on = |layer: &str| es.iter().filter(|e| e.2 == layer).count();
     assert_eq!(on("BEND_UP") + on("BEND_DOWN"), out["bends"].as_u64().unwrap_or(0) as usize);
     // The ellipse is a cut-out, on CUT; the outline is the plate's.
     assert!(on("BEND_UP") + on("BEND_DOWN") > 0 && count(&es, "ELLIPSE") == 1 && on("CUT") == 1);
     assert_eq!(on("OUTLINE") + on("CUT"), es.len() - on("BEND_UP") - on("BEND_DOWN"));
 }
 
-/// The layer an entity is on.
+/// The layer declared in the owning file.
 fn layer_of(e: &Entity) -> String {
-    e.1.iter().find(|(c, _)| *c == 8).map(|(_, v)| v.clone()).unwrap_or_default()
+    e.2.clone()
 }
 
-/// The text of an entity's group code.
-fn string(e: &Entity, code: i32) -> String {
-    e.1.iter().find(|(c, _)| *c == code).map(|(_, v)| v.clone()).unwrap_or_default()
+/// Compare actual geometry, lineweight and retained text metadata, excluding
+/// only the owning layer identity and transport handles.
+fn on_layer(es: &[Entity], layer: &str) -> Vec<(DxfShape, Option<DxfEntityWeight>, Option<TestTextSource>)> {
+    es.iter().filter(|e| e.2 == layer).map(|e| (e.1.clone(), e.3, e.4.clone())).collect()
 }
 
-/// What the entities of a layer are, without their handles and the layer: to compare layers of two files.
-fn on_layer(es: &[Entity], layer: &str) -> Vec<(String, Vec<(i32, String)>)> {
-    es.iter().filter(|e| layer_of(e) == layer).map(|e| (e.0.clone(), e.1.iter().filter(|(c, _)| ![5, 8].contains(c)).cloned().collect())).collect()
-}
-
-/// The LAYER table: name → (colour, linetype).
+/// The actual owned layer table: name → (colour, linetype).
 fn layer_table(dxf: &str) -> std::collections::BTreeMap<String, (i64, String)> {
-    let lines: Vec<&str> = dxf.lines().collect();
-    let pairs: Vec<(i32, &str)> = lines.chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
-    let start = pairs.iter().position(|p| *p == (2, "LAYER")).unwrap_or(0);
-    let mut records: Vec<Vec<(i32, &str)>> = Vec::new();
-    for p in pairs.iter().skip(start + 1) {
-        match *p {
-            (0, "ENDTAB") => break,
-            (0, _) => records.push(Vec::new()),
-            _ => {
-                if let Some(record) = records.last_mut() {
-                    record.push(*p);
-                }
-            }
-        }
-    }
-    records
+    let file = solidcraft_io::read_dxf_file(dxf).unwrap();
+    file.layers()
         .iter()
-        .filter_map(|r| {
-            let get = |code: i32| r.iter().find(|(c, _)| *c == code).map(|(_, v)| *v);
-            Some((get(2)?.to_string(), (get(62)?.parse().ok()?, get(6)?.to_string())))
+        .map(|layer| {
+            let line = match layer.linetype() {
+                solidcraft_io::DxfLinetype::Continuous => "Continuous",
+                solidcraft_io::DxfLinetype::Dashed => "DASHED",
+                solidcraft_io::DxfLinetype::Hidden => "HIDDEN",
+            };
+            (layer.name().to_string(), (i64::from(layer.color()), line.to_string()))
         })
         .collect()
 }
@@ -347,7 +396,10 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
     let plate =
         regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcore_record::Loop2 { segs: Vec::new() });
-    assert_eq!(on("OUTLINE").len(), solidcraft_io::loop_shapes(&plate).len());
+    assert_eq!(
+        on("OUTLINE").len(),
+        solidcraft_io::path_shapes(solidcraft_io::DxfPath::Closed(&plate), solidcraft_io::DxfPathStyle::Exact).unwrap().len(),
+    );
     assert!(on("OUTLINE").iter().all(|e| e.0 == "LINE" || e.0 == "ARC"), "{:?}", on("OUTLINE").iter().map(|e| &e.0).collect::<Vec<_>>());
     // CUT: what is cut out inside it that is no text: the Ø5 hole as one CIRCLE, the slot's four lines.
     let cut = on("CUT");
@@ -357,7 +409,7 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     let letters = on("TEXT");
     assert!(letters.len() > 20, "{} letter entities", letters.len());
     for e in &letters {
-        let p = point(e, 10);
+        let p = first_point(e);
         assert!(p.x > 19.0 && p.x < 80.0 && p.y > 27.0 && p.y < 39.0, "{} at {p:?}", e.0);
     }
     // The bend lines by direction: three walls up, one down.
@@ -428,7 +480,7 @@ fn engraved_text_is_etched_and_other_pockets_keep_their_depth_layer() {
     let letters = on("ETCH");
     assert!(letters.len() > 20, "{} letter entities", letters.len());
     for e in &letters {
-        let p = point(e, 10);
+        let p = first_point(e);
         assert!(p.x > 19.0 && p.x < 80.0 && p.y > 27.0 && p.y < 39.0, "{} at {p:?}", e.0);
     }
     let layers = layer_table(&dxf);
@@ -455,21 +507,21 @@ fn a_bend_note_sits_beside_each_bend_line_when_asked_for() {
         // The walls bend by 90° round an inner radius of 1 mm: "B1 UP 90° R1" (`%%d` is the degree sign).
         let up = b["direction"] == "up";
         let text = format!("B{} {} 90%%d R1", b["bend"].as_u64().unwrap_or(0), if up { "UP" } else { "DOWN" });
-        let Some(note) = notes.iter().find(|e| string(e, 1) == text) else {
-            panic!("no note `{text}` among {:?}", notes.iter().map(|e| string(e, 1)).collect::<Vec<_>>())
+        let Some(note) = notes.iter().find(|e| encoded_text(e) == text) else {
+            panic!("no note `{text}` among {:?}", notes.iter().map(encoded_text).collect::<Vec<_>>())
         };
         // Centred (72 = 1), 3 mm high, parallel to the line: along x it reads left to right, along y upwards.
         let (start, end) = (vec2(&b["start"]), vec2(&b["end"]));
         let angle = if (end - start).x.abs() > (end - start).y.abs() { 0.0 } else { 90.0 };
-        assert!(values(note, 72) == [1.0] && values(note, 40) == [3.0] && (values(note, 50)[0] - angle).abs() < 1e-9, "{note:?}");
+        assert!(note_layout(note).0 == 3.0 && (note_layout(note).1 - angle).abs() < 1e-9, "{note:?}");
         // On the left of the way it reads, half its height from the middle of the line.
-        let off = point(note, 11) - (start + end) * 0.5;
+        let off = second_point(note) - (start + end) * 0.5;
         assert!(off.dist(Vec2::from_angle(angle.to_radians()).perp() * 1.5) < 1e-9, "{text}: {off:?}");
     }
     // The height is the caller's.
     let tall = entities(&export(&mut s, json!({"bend_notes": true, "note_height": 5})));
     let note = tall.iter().find(|e| e.0 == "TEXT");
-    assert!(note.is_some_and(|e| values(e, 40) == [5.0]));
+    assert!(note.is_some_and(|e| note_layout(e).0 == 5.0));
 }
 
 #[test]
@@ -483,7 +535,7 @@ fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
             let mut s = plate_in(s, &[]);
             run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg")}));
             let dxf = export(&mut s, json!({"bend_notes": true}));
-            let notes: Vec<String> = entities(&dxf).iter().filter(|e| e.0 == "TEXT").map(|e| string(e, 1)).collect();
+            let notes: Vec<String> = entities(&dxf).iter().filter(|e| e.0 == "TEXT").map(encoded_text).collect();
             let shown = if display == "included" { included } else { deg };
             assert_eq!(notes, [format!("B1 UP {shown}%%d R1")], "{deg}° under {display}");
             plain.push(export(&mut s, json!({})));
@@ -505,7 +557,7 @@ fn a_bend_note_follows_the_bodys_own_rule_and_bends_down_too() {
     run(&mut s, "sheet.flange", json!({"sketch": "Base", "rule": "Sheet2"}));
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "58 deg", "flip": true}));
     let notes = |s: &mut Session| -> Vec<String> {
-        entities(&export(s, json!({"bend_notes": true}))).iter().filter(|e| e.0 == "TEXT").map(|e| string(e, 1)).collect()
+        entities(&export(s, json!({"bend_notes": true}))).iter().filter(|e| e.0 == "TEXT").map(encoded_text).collect()
     };
     assert_eq!(notes(&mut s), ["B1 DOWN 122%%d R1"]);
     run(&mut s, "sheet.manage_rules", json!({"name": "Other", "thickness": "2 mm", "angle_display": "bend", "active": true}));
@@ -601,7 +653,7 @@ fn the_file_of_a_body_is_named_after_it_and_no_two_share_a_name() {
 #[test]
 fn bend_lines_can_be_left_out_and_everything_put_on_layer_0() {
     let mut s = tray_with(&marks());
-    let layer = |e: &Entity| e.1.iter().find(|(c, _)| *c == 8).map(|(_, v)| v.clone()).unwrap_or_default();
+    let layer = layer_of;
     let default = entities(&export(&mut s, json!({})));
     let bends = |es: &[Entity]| es.iter().filter(|e| matches!(layer(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
     assert_eq!(bends(&default), 4, "the tray's four bends");
@@ -648,7 +700,7 @@ fn a_curved_outline_folded_across_stays_its_curve_in_the_dxf() {
         // The only straight line is the bend line, across the sheet on the zone's centre line.
         let lines: Vec<&Entity> = es.iter().filter(|e| e.0 == "LINE").collect();
         assert_eq!(lines.len(), 1, "{name}: seams left in the outline");
-        let (a, b) = (point(lines[0], 10), point(lines[0], 11));
+        let (a, b) = (first_point(lines[0]), second_point(lines[0]));
         assert!((a.x - 10.0).abs() < 1e-6 && (b.x - 10.0).abs() < 1e-6, "{name}: bend line {a:?} to {b:?}");
         // The blank is the blank: as much of it as was drawn, exactly.
         let after: f64 = loops(&s).iter().map(|l| l.signed_area().abs()).sum();
@@ -693,7 +745,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     };
     let outline_of = |s: &mut Session| -> Vec<(Vec2, Vec2)> {
         let es = entities(&export(s, json!({})));
-        es.iter().filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE")).map(|e| (point(e, 10), point(e, 11))).collect()
+        es.iter().filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE").map(|e| (first_point(e), second_point(e))).collect()
     };
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
@@ -776,8 +828,8 @@ fn a_notch_through_a_junctions_far_edge_still_parts_the_blank() {
     );
     let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
         .iter()
-        .filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE"))
-        .map(|e| (point(e, 10), point(e, 11)))
+        .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
+        .map(|e| (first_point(e), second_point(e)))
         .collect();
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
@@ -839,7 +891,8 @@ fn a_round_notch_over_a_junctions_far_edge_ends_the_cut_on_the_arc() {
     assert!(off < 1e-9, "the cut ends {end:?}, off the arc by {off} mm");
     // The DXF writes both lines on the outline, and splits the arc there: an arc ends at the cut.
     let es = entities(&export(&mut s, json!({})));
-    let outline: Vec<(Vec2, Vec2)> = es.iter().filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE").map(|e| (point(e, 10), point(e, 11))).collect();
+    let outline: Vec<(Vec2, Vec2)> =
+        es.iter().filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE").map(|e| (first_point(e), second_point(e))).collect();
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
         lines.iter().any(|&(p, q)| near(p, a) && near(q, b)) && lines.iter().any(|&(p, q)| near(p, b) && near(q, a))
@@ -849,8 +902,8 @@ fn a_round_notch_over_a_junctions_far_edge_ends_the_cut_on_the_arc() {
         .iter()
         .filter(|e| e.0 == "ARC" && layer_of(e) == "OUTLINE")
         .map(|e| {
-            let (c, r) = (point(e, 10), values(e, 40)[0]);
-            let (a0, a1) = (values(e, 50)[0].to_radians(), values(e, 51)[0].to_radians());
+            let DxfShape::Arc { c, r, a0, a1 } = e.1 else { panic!("{e:?}") };
+            let (a0, a1) = (a0.to_radians(), a1.to_radians());
             (c, r, [c + Vec2::from_angle(a0) * r, c + Vec2::from_angle(a1) * r])
         })
         .collect();
@@ -905,7 +958,7 @@ fn every_surviving_bridge_of_a_junction_is_cut() {
     let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
         .iter()
         .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
-        .map(|e| (point(e, 10), point(e, 11)))
+        .map(|e| (first_point(e), second_point(e)))
         .collect();
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
@@ -977,7 +1030,7 @@ fn a_junction_cut_stops_at_its_own_tip_on_a_c_shaped_blank() {
     let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
         .iter()
         .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
-        .map(|e| (point(e, 10), point(e, 11)))
+        .map(|e| (first_point(e), second_point(e)))
         .collect();
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
@@ -1048,7 +1101,7 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
         .iter()
         .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
-        .map(|e| (point(e, 10), point(e, 11)))
+        .map(|e| (first_point(e), second_point(e)))
         .collect();
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
@@ -1063,4 +1116,505 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     run(&mut s, "sheet.unfold", json!({}));
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "unfold: {errors:?}");
+}
+
+// Outputs first recorded from upstream main at c0fb2cbce93b1e040bcbc73a917e5b5c262889e4, where
+// independent upstream and integrated-writer runs matched all 53 payloads byte for byte.
+// Re-recorded once for the DXF number rule (#5321): lengths on a 1e-9 grid, other values at
+// twelve decimals. 45 files changed; the JSON, text and Unicode cases did not. The main set was
+// captured on Windows. These byte pins are fixed expectations, never regenerated by the test.
+#[cfg(not(target_arch = "wasm32"))]
+mod byte_regressions {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    type ExpectedOutput = (&'static str, usize, &'static str);
+
+    const EXPECTED_OUTPUTS: [ExpectedOutput; 53] = [
+        ("circle-cutout-shapes.json", 48, "c634654c54b427c376b74eb30facd6c6d4cfa41ad4ae5dd51d3b31afc76ed458"),
+        ("circle-two-halves-exact.dxf", 5964, "40a43a719bac03a9cbbbdc2db260ee17b182364704285b7a397e4428e3bd59df"),
+        ("circle-two-halves-arcs.dxf", 5964, "40a43a719bac03a9cbbbdc2db260ee17b182364704285b7a397e4428e3bd59df"),
+        ("round-ended-slot-exact.dxf", 6339, "5401b80f7510c84bc693d7652a13c422d75495d3411c79afafe34fb911b0d794"),
+        ("round-ended-slot-arcs.dxf", 6339, "5401b80f7510c84bc693d7652a13c422d75495d3411c79afafe34fb911b0d794"),
+        ("ellipse-exact.dxf", 6053, "db0f0821313e35398ff562d6108241ef6dc482f92554ddc716f7fd25f045b881"),
+        ("ellipse-arcs.dxf", 16674, "96fd043c9c15322a24540481afb08def7ec9255d2d9ea68977f1924877c6457c"),
+        ("cubic-spline-exact.dxf", 6929, "23cb6844af9f0e3f3291ed81b73ef723f81655bfdbaf414ea1046156f583bd9e"),
+        ("cubic-spline-arcs.dxf", 13558, "c66d5b5cf52109e2dc6ddf0038c36d336738e0c25c0bebad7c2cfc4474c7edcb"),
+        ("degree-nine-exact.dxf", 6803, "87b5787a6827c59dbad0a4ee69bf2962c0c86d5b0698aa5a05be99ecba26c9df"),
+        ("degree-nine-arcs.dxf", 14321, "963dadae0fda38ab745e17bdf771e1d6132b1d7e1c908edf9e4e54caaf7afd16"),
+        ("text-outlines-exact.dxf", 13638, "5a4f73514a843788737077c20d1ab4bb995de13511c724b42eea4afa4d53b8e1"),
+        ("text-outlines-arcs.dxf", 25324, "f06e6b94b68674fa636de32dc56ba989c460946e061c8c0b74ad42d8e7bf10b6"),
+        ("tray-default.dxf", 25815, "51470dbc1911837c816a45072a00eb4bb5208338a05c80360808ebd7953f8ab9"),
+        ("tray-exact-cut-bends-true-roles.dxf", 26724, "8a3c211a370725fa974c8b8d0cd3aacfd3dcc0532eb4b8b3020d3d551b48c059"),
+        ("tray-exact-cut-bends-true-single.dxf", 25519, "b5554936cde102b0befba82c73ebaa4603598354a0aac8f52875c564bec9847a"),
+        ("tray-exact-cut-bends-false-roles.dxf", 26206, "542a3da95c4a79dbf1f518c86ac33aea6c787d5c7cdf5ac10f7e13c36233b7e1"),
+        ("tray-exact-cut-bends-false-single.dxf", 25027, "b6d6bb5df5eb941c2ea4dab854852ba031f31b6f5b92d72280a3b30ea7a77c59"),
+        ("tray-exact-etch-bends-true-roles.dxf", 26724, "f5ae4eeeb79007f1e45fd0f5f67bdd61ceffff5c6bfb012980f4b26d52e8de8c"),
+        ("tray-exact-etch-bends-true-single.dxf", 25519, "9f8d53b896f8d556642d800a613f4d6552d3e1391c42e379b4c74d33cf8b7bcf"),
+        ("tray-exact-etch-bends-false-roles.dxf", 26206, "fdc4c67fae681177e65b66655e700e53f123cce46e3b50a3de069e8ee43f2c0f"),
+        ("tray-exact-etch-bends-false-single.dxf", 25027, "5b3faa2323038cacca9fa9b89202b1d62288383e2854637bb8d946f7e9b92af8"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 43152, "c8b50566f1ee45d926010b1383adfefc3833b405f41fedb6dc4ab03e38407923"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41578, "d82ff89a9350162e0b8ba9add7439ecc2fdcd7ae1af23277a1b2e18bb5944cf2"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42630, "0732aee3742209c1f339844497f7a87ad592870bfbb84d758ebd9f77924b3044"),
+        ("tray-arcs-cut-bends-false-single.dxf", 41082, "01e2926d5771b5c54a584670c58b76c370a2fab30ad6dbcde2ab9c83ec610f59"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 43152, "d71a2cd93c03c0a53d71f9a1ccc7d02689063036149d788211ae6aee901d40dc"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41578, "146a7206fe943a298755fc4fd38edab9457c50f169626369a062034c490f27d8"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42630, "b33eb08720d88c5019df77a36dcc8396296bcdf55b659654b4bdffb00aa7b1f1"),
+        ("tray-arcs-etch-bends-false-single.dxf", 41082, "5d508d3eeaa95f64df2fc275f4fab8c871933e5b57abb2d37f7777c4fe558c17"),
+        ("rule-bend-down-exact-bends-true-roles.dxf", 6391, "067c212558876ffc79a7071c396e12266e5e277b542ea9b3bfcf36f60ac89aec"),
+        ("rule-bend-down-exact-bends-false-single.dxf", 5594, "557739d4068c69d0dba01420b72303eecfd89f4046c5e96913d9b9b4b87a433d"),
+        ("rule-bend-down-arcs-bends-true-roles.dxf", 6391, "067c212558876ffc79a7071c396e12266e5e277b542ea9b3bfcf36f60ac89aec"),
+        ("rule-bend-down-arcs-bends-false-single.dxf", 5594, "557739d4068c69d0dba01420b72303eecfd89f4046c5e96913d9b9b4b87a433d"),
+        ("rule-included-down-exact-bends-true-roles.dxf", 6392, "0b8ce4cefdab58b1ffbda2fb3d56c6412c88c04664b36953d21bf30b8b3c8e1f"),
+        ("rule-included-down-exact-bends-false-single.dxf", 5595, "1ea25efa78ac93885a1d50ccda8bfcf446422bc86c6efd5f1a86fd594957f3c1"),
+        ("rule-included-down-arcs-bends-true-roles.dxf", 6392, "0b8ce4cefdab58b1ffbda2fb3d56c6412c88c04664b36953d21bf30b8b3c8e1f"),
+        ("rule-included-down-arcs-bends-false-single.dxf", 5595, "1ea25efa78ac93885a1d50ccda8bfcf446422bc86c6efd5f1a86fd594957f3c1"),
+        ("pocket-and-engraved-text-exact.dxf", 22682, "5473834ce979d04c2084a390c50f1fb44c2010298cb06dc87e57377d0b702160"),
+        ("pocket-and-engraved-text-arcs.dxf", 39082, "de135de98da888d7df8216266740a6787e22468c3cc3f17a73d5c48be7f894fe"),
+        ("perforation-exact.dxf", 9347, "2c5e585c5c7f61078304c1c1f7ba28395b28192b4c0131e90402967e9878ca7e"),
+        ("perforation-arcs.dxf", 9347, "2c5e585c5c7f61078304c1c1f7ba28395b28192b4c0131e90402967e9878ca7e"),
+        ("per-body-0-exact.dxf", 5867, "2cf53293bc9c3a146de20cc97ed04e2b3100bdca27dc08828727ff9e8bda0a67"),
+        ("per-body-1-exact.dxf", 6079, "a75e6c959f13e17584d7ad3462c8267efc91ad3ed0b9a68ebb27b318a40500fc"),
+        ("per-body-0-arcs.dxf", 5867, "2cf53293bc9c3a146de20cc97ed04e2b3100bdca27dc08828727ff9e8bda0a67"),
+        ("per-body-1-arcs.dxf", 6079, "a75e6c959f13e17584d7ad3462c8267efc91ad3ed0b9a68ebb27b318a40500fc"),
+        ("writer-bmp-controls.dxf", 5259, "8237d6edba93809ec56483e99368a166b944ad463a449e8fc268218d97b7a4af"),
+        ("writer-bmp-cap.dxf", 6954, "637acb429ecc45551e53b3bce16ffee95030f16e94347f6428541ff1b8a2c2ef"),
+        ("unicode-early.txt", 159, "90c374179d2388832a9bbcafbbabd4c3887edde4989eedd9cfcbd48b4199b4f1"),
+        ("unicode-first-supplementary.txt", 159, "e14a0d3eb9fabbc361d3804fb00830c013771ad79ba52f24bd12d7ea8a8a02a0"),
+        ("unicode-last-scalar.txt", 166, "f931160242245ee3cdf4f9b551bb20c2a4883d52114208a6b66d83dffca4a484"),
+        ("unicode-after-cap.txt", 161, "6b415a0446cf33531d23a6768790ea562441eb23b70092e77dea4ee99951c617"),
+        ("unicode-far-after-cap.txt", 163, "87709acb08a4e729b4480182419ad843ab2c7887fc73dd23bc86a3e86f35beaa"),
+    ];
+
+    // Files whose arc-fit last decimals differ under another platform's math functions, captured
+    // there as complete byte streams: CI's Ubuntu 24.04 (glibc 2.39). The main set above is
+    // Windows (MSVC), which needed its own set before the re-recording (#18073, #18088). The
+    // glibc 2.44 set of the first recording was not re-captured. Keep exact (length, SHA-256)
+    // pairs: no numeric normalization or loose tolerance.
+    const UBUNTU_MATH_OUTPUTS: &[ExpectedOutput] = &[
+        ("ellipse-arcs.dxf", 16674, "b85882adb682ef4b317d401f369ebb4da50229a0927b8fa7d560cef4a556c98a"),
+        ("text-outlines-arcs.dxf", 25324, "0edcf6e207c586623964ae923d5f5e840b43ee91881c813dd68d91735efeb522"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 43149, "739272a05f099899508184acf72e635d0ce693f170735d5b66f69922bf4a63aa"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41575, "1210571398f89a0dfee572599ff33b801fbce967f2acc1fa9aced346aba67d29"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42627, "38091fc035d512b5763ba9e106e2fb2a158d4ed97755144acce104302ea8c31e"),
+        ("tray-arcs-cut-bends-false-single.dxf", 41079, "f51192bf3d3758062cb490b6bb14221bfa226d79332f94df9f6c3d647d687f09"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 43149, "a678be43519ad0ee2bd474b1d8666a2e2b62cc6b366fb60e171f467db79f45c8"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41575, "d55f2de65ca3a08c1688e7af1fdcd0c0cb596f9e41c776dd2f153cf4f713933c"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42627, "7d73520ff3b3b0ca58e98594b809421b438856f231f296b635c2324acd33478a"),
+        ("tray-arcs-etch-bends-false-single.dxf", 41079, "ebf1d836d92b6a54ec026ebb63831711648e3942405d0e83a48422de7d376d6d"),
+        ("pocket-and-engraved-text-arcs.dxf", 39080, "fdaad9b32f5df58bf0448957c597572ee53ad1f1a517791e11b00c2bc6acdc8c"),
+    ];
+
+    struct BytePins {
+        expected: &'static [ExpectedOutput; 53],
+        next: usize,
+        // Every changed case, so one run on a new platform reports its whole set.
+        changed: Vec<String>,
+    }
+
+    impl BytePins {
+        fn new(expected: &'static [ExpectedOutput; 53]) -> Self {
+            Self { expected, next: 0, changed: Vec::new() }
+        }
+
+        fn put(&mut self, name: &str, bytes: &[u8]) {
+            assert!(!bytes.is_empty(), "empty original-output case: {name}");
+            let &(expected_name, expected_len, expected_sha256) =
+                self.expected.get(self.next).unwrap_or_else(|| panic!("unexpected extra original-output case: {name}"));
+            assert_eq!(name, expected_name, "original-output case {} changed order or name", self.next + 1);
+            let actual_sha256 = format!("{:x}", Sha256::digest(bytes));
+            let primary_matches = bytes.len() == expected_len && actual_sha256 == expected_sha256;
+            let platform_matches =
+                UBUNTU_MATH_OUTPUTS.iter().any(|&(case, len, digest)| case == name && bytes.len() == len && actual_sha256 == digest);
+            if !(primary_matches || platform_matches) {
+                self.changed.push(format!("(\"{name}\", {}, \"{actual_sha256}\"),", bytes.len()));
+            }
+            self.next += 1;
+        }
+
+        fn dxf(&mut self, name: &str, text: &str) {
+            assert!(text.contains("AC1015") && text.ends_with("  0\nEOF\n"), "incomplete DXF: {name}");
+            self.put(&format!("{name}.dxf"), text.as_bytes());
+        }
+
+        fn finish(self) {
+            assert_eq!(self.next, self.expected.len(), "every original-output case must be checked");
+            assert!(
+                self.changed.is_empty(),
+                "original bytes changed for {} cases; their (name, length, SHA-256):\n{}",
+                self.changed.len(),
+                self.changed.join("\n")
+            );
+        }
+    }
+
+    fn modes(capture: &mut BytePins, name: &str, s: &mut Session) {
+        for curves in ["exact", "arcs"] {
+            let dxf = export(s, json!({"curves": curves}));
+            let es = entities(&dxf);
+            assert!(!es.is_empty());
+            if curves == "arcs" {
+                assert!(es.iter().all(|e| matches!(e.0.as_str(), "LINE" | "ARC" | "CIRCLE")));
+            }
+            capture.dxf(&format!("{name}-{curves}"), &dxf);
+        }
+    }
+
+    fn g4_plate() -> Session {
+        let mut s = plate_with(&[]);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+        let mut line = |a: [i32; 2], b: [i32; 2]| run(&mut s, "sketch.line", json!({"points": [a, b]}))["curves"][0].as_str().unwrap().to_string();
+        let bottom = line([20, 20], [40, 20]);
+        let top = line([40, 40], [20, 40]);
+        line([20, 40], [20, 20]);
+        run(&mut s, "sketch.blend_curve", json!({"a": format!("{bottom}.end"), "b": format!("{top}.start"), "continuity": "g4"}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+        let es = entities(&export(&mut s, json!({})));
+        assert_eq!(es.iter().filter(|e| e.0 == "SPLINE" && spline_degree(e) == 9).count(), 1);
+        s
+    }
+
+    fn rule_plate(display: &str) -> Session {
+        let mut s = sheet_of_2mm();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Sheet2", "angle_display": display}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Base", "rule": "Sheet2"}));
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "58 deg", "flip": true}));
+        s
+    }
+
+    #[test]
+    fn flat_export_preserves_original_bytes() {
+        let mut capture = BytePins::new(&EXPECTED_OUTPUTS);
+
+        let mut circle = plate_with(&[("sketch.circle.center", json!({"center": [25, 25], "radius": 4}))]);
+        let circular = loops(&circle).into_iter().find(|lp| lp.segs.iter().all(|s| matches!(s, Seg2::Arc { .. }))).unwrap();
+        assert_eq!(circular.segs.len(), 2, "the baseline must exercise a circular hole made of two semicircles");
+        assert!(circular.segs.iter().all(|s| matches!(s, Seg2::Arc { sweep, .. } if (sweep.abs() - PI).abs() < 1e-9)));
+        assert_eq!(count(&entities(&export(&mut circle, json!({}))), "CIRCLE"), 1);
+        let flat = run(&mut circle, "sheet.flat_pattern", json!({}));
+        assert!(flat["cutout_shapes"].as_array().unwrap().iter().any(|v| v.get("circle").is_some()));
+        capture.put("circle-cutout-shapes.json", &serde_json::to_vec(&flat["cutout_shapes"]).unwrap());
+        modes(&mut capture, "circle-two-halves", &mut circle);
+
+        let mut slot = plate_with(&[("sketch.slot.center_to_center", json!({"p0": [20, 20], "p1": [40, 20], "width": 6}))]);
+        let es = entities(&export(&mut slot, json!({})));
+        assert_eq!((count(&es, "LINE"), count(&es, "ARC"), es.len()), (6, 2, 8));
+        modes(&mut capture, "round-ended-slot", &mut slot);
+
+        let mut ellipse = plate_with(&[("sketch.ellipse", json!({"center": [40, 30], "major": [55, 30], "minor_radius": 8}))]);
+        assert_eq!(count(&entities(&export(&mut ellipse, json!({}))), "ELLIPSE"), 1);
+        modes(&mut capture, "ellipse", &mut ellipse);
+
+        let mut spline = plate_with(&[
+            ("sketch.spline.fit_point", json!({"points": [[20, 15], [40, 45], [65, 40], [85, 20]]})),
+            ("sketch.line", json!({"points": [[85, 20], [20, 15]]})),
+        ]);
+        assert!(count(&entities(&export(&mut spline, json!({}))), "SPLINE") > 0);
+        modes(&mut capture, "cubic-spline", &mut spline);
+        modes(&mut capture, "degree-nine", &mut g4_plate());
+
+        let mut text = plate_with(&[("sketch.text", json!({"text": "AB", "at": [30, 20], "height": 12}))]);
+        assert!(count(&entities(&export(&mut text, json!({}))), "SPLINE") > 0);
+        modes(&mut capture, "text-outlines", &mut text);
+
+        let mut tray = tray_with(&marks());
+        let default = export(&mut tray, json!({}));
+        assert_eq!(default, export(&mut tray, json!({"curves": "exact", "text": "cut", "bend_lines": true, "layers": "roles"})));
+        capture.dxf("tray-default", &default);
+        for curves in ["exact", "arcs"] {
+            for text in ["cut", "etch"] {
+                for bend_lines in [true, false] {
+                    for layers in ["roles", "single"] {
+                        let dxf = export(
+                            &mut tray,
+                            json!({"curves": curves, "text": text, "bend_lines": bend_lines, "layers": layers, "bend_notes": true}),
+                        );
+                        let es = entities(&dxf);
+                        assert_eq!(count(&es, "TEXT"), 4, "notes remain independent of bend lines");
+                        if layers == "single" {
+                            assert!(es.iter().all(|e| layer_of(e) == "0"));
+                        } else {
+                            let bends = es.iter().filter(|e| matches!(layer_of(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
+                            assert_eq!(bends, if bend_lines { 4 } else { 0 });
+                            assert!(es.iter().any(|e| layer_of(e) == if text == "cut" { "TEXT" } else { "ETCH" }));
+                            let inner = es.iter().rposition(|e| matches!(layer_of(e).as_str(), "CUT" | "TEXT" | "ETCH")).unwrap();
+                            let outline = es.iter().position(|e| layer_of(e) == "OUTLINE").unwrap();
+                            assert!(inner < outline);
+                        }
+                        capture.dxf(&format!("tray-{curves}-{text}-bends-{bend_lines}-{layers}"), &dxf);
+                    }
+                }
+            }
+        }
+
+        for display in ["bend", "included"] {
+            let mut s = rule_plate(display);
+            let before = export(&mut s, json!({"bend_notes": true}));
+            run(
+                &mut s,
+                "sheet.manage_rules",
+                json!({"name": "Other", "thickness": "2 mm", "angle_display": if display == "bend" { "included" } else { "bend" }, "active": true}),
+            );
+            assert_eq!(export(&mut s, json!({"bend_notes": true})), before, "the named body's rule wins over the active rule");
+            for curves in ["exact", "arcs"] {
+                for (bend_lines, layers) in [(true, "roles"), (false, "single")] {
+                    let dxf = export(&mut s, json!({"curves": curves, "bend_notes": true, "bend_lines": bend_lines, "layers": layers}));
+                    let notes: Vec<_> = entities(&dxf).iter().filter(|e| e.0 == "TEXT").map(encoded_text).collect();
+                    assert_eq!(notes, [if display == "included" { "B1 DOWN 122%%d R1" } else { "B1 DOWN 58%%d R1" }]);
+                    capture.dxf(&format!("rule-{display}-down-{curves}-bends-{bend_lines}-{layers}"), &dxf);
+                }
+            }
+        }
+
+        let mut pocket = plate_with(&[]);
+        run(&mut pocket, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+        run(&mut pocket, "sketch.rectangle.two_point", json!({"p0": [70, 40], "p1": [90, 45]}));
+        run(&mut pocket, "sketch.text", json!({"text": "AB-12", "at": [20, 28], "height": 10}));
+        run(&mut pocket, "sketch.finish", json!({}));
+        run(&mut pocket, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+        let es = entities(&export(&mut pocket, json!({})));
+        assert_eq!(on_layer(&es, "POCKET_BOTTOM_Z0.000000_TO_1.000000_MM").len(), 4);
+        assert!(!on_layer(&es, "ETCH").is_empty());
+        modes(&mut capture, "pocket-and-engraved-text", &mut pocket);
+
+        let mut perforated = plate_with(&[]);
+        run(&mut perforated, "sheet.perforate", json!({"diameter": 2, "pitch": 12, "margin": 6, "pattern": "square"}));
+        let es = entities(&export(&mut perforated, json!({})));
+        assert!(es.iter().any(|e| layer_of(e) == "PERFORATION" && e.0 == "CIRCLE"));
+        modes(&mut capture, "perforation", &mut perforated);
+
+        let mut bodies = lid_and_wall();
+        for curves in ["exact", "arcs"] {
+            let out = run(&mut bodies, "sheet.export_dxf", json!({"per_body": true, "curves": curves}));
+            let files = out["files"].as_array().unwrap();
+            assert_eq!(files.iter().map(|f| f["body"].as_str().unwrap()).collect::<Vec<_>>(), ["Lid", "Side Wall"]);
+            for (i, file) in files.iter().enumerate() {
+                let text = file["dxf"].as_str().unwrap();
+                assert_eq!(text, export(&mut bodies, json!({"body": file["body"], "curves": curves})));
+                capture.dxf(&format!("per-body-{i}-{curves}"), text);
+            }
+        }
+
+        // The writer is the reachable API for arbitrary TEXT. Sheet text is outlines and
+        // bend notes are generated ASCII; no synthetic public command is added to inject text.
+        use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
+        use solidcraft_io::{DxfShape, IoError};
+        let note = |text: String| DxfEntity {
+            layer: "NOTES".into(),
+            shape: DxfShape::Text { at: Vec2::new(30.0, 12.0), height: 3.0, angle_deg: 90.0, text },
+        };
+        let layers = [DxfLayer::new("NOTES", 8)];
+        for (name, text) in
+            [("writer-bmp-controls", "ASCII %%d %%p %%c ° 中 \u{ffff}\n\t\u{7f}".to_string()), ("writer-bmp-cap", "\u{ffff}".repeat(251))]
+        {
+            let dxf = legacy_dxf_baseline(&layers, &[note(text)]).unwrap();
+            let es = entities(&dxf);
+            if name == "writer-bmp-cap" {
+                // 251 characters on one line are TEXT, all of them: nothing is cut.
+                assert_eq!(encoded_text(es.iter().find(|e| e.0 == "TEXT").unwrap()), "\\U+FFFF".repeat(251));
+            } else {
+                // A line break makes it MTEXT: each typed `%` as `\U+0025`, the break as `\P`, the
+                // tab and DEL as spaces. This parser trims those two trailing spaces; the full byte
+                // pin below still includes them.
+                let value = encoded_text(es.iter().find(|e| e.0 == "MTEXT").unwrap());
+                assert_eq!(value, "ASCII \\U+0025\\U+0025d \\U+0025\\U+0025p \\U+0025\\U+0025c \\U+00B0 \\U+4E2D \\U+FFFF\\P");
+                assert!(dxf.contains("\\U+FFFF\\P  \n"));
+            }
+            capture.dxf(name, &dxf);
+        }
+        for (name, text, code, position) in [
+            ("unicode-early", "中\u{2000b}".to_string(), "U+2000B", 2),
+            ("unicode-first-supplementary", "\u{10000}".to_string(), "U+10000", 1),
+            ("unicode-last-scalar", "\u{10ffff}".to_string(), "U+10FFFF", 1),
+            ("unicode-after-cap", format!("{}\u{2000b}", "中".repeat(250)), "U+2000B", 251),
+            ("unicode-far-after-cap", format!("{}\u{2000b}", "中".repeat(10_000)), "U+2000B", 10_001),
+        ] {
+            let entities = [DxfEntity { layer: "OUTLINE".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::X) }, note(text)];
+            let error = legacy_dxf_baseline(&layers, &entities).unwrap_err();
+            assert!(matches!(error, IoError::Invalid(_)));
+            let message = error.to_string();
+            assert!(message.contains("DXF TEXT entity 2 on layer \"NOTES\""));
+            assert!(message.contains(code) && message.contains(&format!("at position {position}")));
+            assert!(message.len() < 300);
+            capture.put(&format!("{name}.txt"), message.as_bytes());
+        }
+        capture.finish();
+    }
+}
+
+/// Independent caller-level values for the explicitly reviewed legacy contract.
+/// The generic recognizer and its tests are not relaxed by these flat-pattern rules.
+mod caller_circle_compatibility {
+    use super::*;
+    use solidcore_record::Loop2;
+    use solidcraft_io::{DxfPathStyle, DxfShape};
+
+    fn halves(center: Vec2, radius: f64, second_center: Vec2, second_radius: f64) -> Loop2 {
+        Loop2 {
+            segs: vec![
+                Seg2::Arc { center, radius, start: 0.0, sweep: PI },
+                Seg2::Arc { center: second_center, radius: second_radius, start: PI, sweep: PI },
+            ],
+        }
+    }
+    fn styles() -> [DxfPathStyle; 2] {
+        [DxfPathStyle::Exact, DxfPathStyle::Arcs { tolerance_mm: 0.001 }]
+    }
+    fn expect_circle(lp: &Loop2, center: Vec2, radius: f64) {
+        assert_eq!(super::super::loop_circle(lp), Some((center, radius)));
+        let json = serde_json::to_value(super::super::loop_shape(lp)).unwrap();
+        assert_eq!(json["circle"]["center"], json!([center.x, center.y]));
+        assert_eq!(json["circle"]["radius"].as_f64(), Some(radius));
+        for style in styles() {
+            let shapes = super::super::flat_loop_shapes(lp, style).unwrap();
+            assert_eq!(shapes.len(), 1);
+            assert!(matches!(shapes[0], DxfShape::Circle { c, r } if c == center && r == radius), "{style:?}: {shapes:?}");
+        }
+    }
+    fn expect_arcs(lp: &Loop2) {
+        assert!(super::super::loop_circle(lp).is_none());
+        assert!(solidcore_ops::prism::loop_circle(lp).is_none(), "generic recognition must remain strict");
+        let json = serde_json::to_value(super::super::loop_shape(lp)).unwrap();
+        assert!(json.get("circle").is_none());
+        let segments = json["segments"].as_array().unwrap();
+        assert_eq!(segments.len(), lp.segs.len());
+        assert!(segments.iter().all(|s| s.get("arc").is_some()));
+        for style in styles() {
+            let shapes = super::super::flat_loop_shapes(lp, style).unwrap();
+            assert_eq!(shapes.len(), lp.segs.len());
+            assert!(shapes.iter().all(|s| matches!(s, DxfShape::Arc { .. })), "{style:?}: {shapes:?}");
+        }
+    }
+    #[test]
+    fn trimmed_cap_support_witness_is_one_flat_circle_but_not_a_generic_circle() {
+        // Captured source supports from the existing original regression, not new expected output.
+        let center = Vec2::new(25.0, 25.0);
+        let radius = 1.9999999999999987;
+        let second = Vec2::new(24.999999999999996, 25.0);
+        let other_radius = 2.0000000000000004;
+        assert!(center.dist(second) > 0.0 && center.dist(second) < 1e-9);
+        assert!(other_radius > radius && other_radius - radius < 1e-9);
+        let lp = halves(center, radius, second, other_radius);
+        assert!(solidcore_ops::prism::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
+        expect_circle(&lp, center, radius);
+    }
+    #[test]
+    fn center_distance_at_and_just_past_bound_keeps_both_arcs() {
+        let center = Vec2::new(0.0, 0.0);
+        let inside = 0.5e-9;
+        expect_circle(&halves(center, 1.0, Vec2::new(inside, 0.0), 1.0), center, 1.0);
+        for offset in [1e-9, f64::from_bits(1e-9_f64.to_bits() + 1)] {
+            let second = Vec2::new(offset, 0.0);
+            assert!(second.dist(center) >= 1e-9);
+            expect_arcs(&halves(center, 1.0, second, 1.0));
+        }
+    }
+    #[test]
+    fn radius_difference_just_past_bound_keeps_both_arcs() {
+        let center = Vec2::new(0.0, 0.0);
+        let radius = 1.0;
+        let inside = radius + 0.5e-9;
+        let outside = f64::from_bits((radius + 1e-9_f64).to_bits() + 1);
+        assert!(inside - radius < 1e-9);
+        assert!(outside - radius > 1e-9);
+        expect_circle(&halves(center, radius, center, inside), center, radius);
+        expect_arcs(&halves(center, radius, center, outside));
+    }
+    #[test]
+    fn angular_sum_just_past_one_turn_bound_keeps_both_arcs() {
+        let center = Vec2::new(0.0, 0.0);
+        let mut inside = halves(center, 1.0, center, 1.0);
+        inside.segs[1] = Seg2::Arc { center, radius: 1.0, start: PI, sweep: PI + 0.5e-9 };
+        expect_circle(&inside, center, 1.0);
+        let total = f64::from_bits((TAU + 1e-9).to_bits() + 1);
+        let second = total - PI;
+        assert!(((PI + second).abs() - TAU).abs() > 1e-9);
+        let outside = Loop2 {
+            segs: vec![Seg2::Arc { center, radius: 1.0, start: 0.0, sweep: PI }, Seg2::Arc { center, radius: 1.0, start: PI, sweep: second }],
+        };
+        expect_arcs(&outside);
+    }
+    #[test]
+    fn double_turn_is_four_arcs_in_both_flat_export_styles() {
+        let center = Vec2::new(0.0, 0.0);
+        let lp = Loop2 { segs: (0..4).map(|i| Seg2::Arc { center, radius: 1.0, start: f64::from(i) * PI, sweep: PI }).collect() };
+        expect_arcs(&lp);
+    }
+    #[test]
+    fn mixed_signs_with_net_one_turn_are_still_four_arcs() {
+        let center = Vec2::new(0.0, 0.0);
+        let lp = Loop2 {
+            segs: [PI, PI, PI, -PI]
+                .into_iter()
+                .enumerate()
+                .map(|(i, sweep)| Seg2::Arc { center, radius: 1.0, start: i as f64 * PI, sweep })
+                .collect(),
+        };
+        assert_eq!([PI, PI, PI, -PI].iter().sum::<f64>(), TAU);
+        expect_arcs(&lp);
+    }
+    #[test]
+    fn caller_merge_never_bypasses_shared_converter_admission() {
+        let center = Vec2::new(0.0, 0.0);
+        let invalid_start = Loop2 { segs: vec![Seg2::Arc { center, radius: 1.0, start: f64::NAN, sweep: TAU }] };
+        assert!(super::super::loop_circle(&invalid_start).is_some(), "historical helper ignores start; admission must not");
+        for style in styles() {
+            assert!(super::super::flat_loop_shapes(&invalid_start, style).is_err());
+        }
+        let valid = halves(center, 1.0, center, 1.0);
+        assert!(super::super::flat_loop_shapes(&valid, DxfPathStyle::Arcs { tolerance_mm: f64::NAN }).is_err());
+        // The existing shared path cap stays200000 even if a caller could merge to one entity.
+        let over_budget = Loop2 { segs: vec![Seg2::Arc { center, radius: 1.0, start: 0.0, sweep: TAU / 200001.0 }; 200001] };
+        assert!(super::super::loop_circle(&over_budget).is_some());
+        for style in styles() {
+            assert!(super::super::flat_loop_shapes(&over_budget, style).is_err());
+        }
+    }
+}
+
+// The sheet caller can certify one complete circle even when an individual arc
+// collapses at writer precision. Generic path recognition retains its stricter
+// support-identity and per-piece representation checks.
+#[test]
+fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
+    use solidcore_record::Loop2;
+    use solidcraft_io::{DxfPath, DxfPathStyle, DxfShape, path_shapes};
+
+    let center = Vec2::ZERO;
+    let lp = Loop2 {
+        segs: vec![
+            Seg2::Arc { center, radius: 8.0, start: 0.0, sweep: 1e-16 },
+            Seg2::Arc { center: Vec2::new(4e-15, 0.0), radius: 8.0, start: 1e-16, sweep: PI },
+            Seg2::Arc { center, radius: 8.0, start: PI, sweep: PI },
+        ],
+    };
+    assert_eq!(super::loop_circle(&lp), Some((center, 8.0)));
+    assert!(solidcore_ops::prism::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
+    let error = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Exact).unwrap_err();
+    assert!(error.to_string().contains("arc endpoints collapse"));
+
+    // Start with a real command-produced sheet's admitted rule/frame and replace only
+    // its public source outline. This tests the SheetBody/flat_regions/export API,
+    // not a claim about ordinary sketch-command or saved-design reachability.
+    let session = plate_with(&[]);
+    let mut sheet = session.model.state().sheets[0].clone();
+    sheet.base.outer = lp.clone();
+    let flat = sheet.flat_regions().expect("the public sheet flat-region route admits this outline");
+    assert_eq!(flat.len(), 1);
+    assert_eq!(flat[0].outer.segs, lp.segs, "flat-region admission must preserve the actual witness pieces");
+    assert_eq!(super::loop_circle(&flat[0].outer), Some((center, 8.0)));
+
+    // Cam's written caller contract promises the same CIRCLE here. These are
+    // expected old-caller oracles, not an observed RED/GREEN result.
+    for style in [DxfPathStyle::Exact, DxfPathStyle::Arcs { tolerance_mm: 0.001 }] {
+        let shapes = super::flat_loop_shapes(&flat[0].outer, style).expect("admitted legacy whole circle remains exportable");
+        assert!(matches!(shapes.as_slice(), [DxfShape::Circle { c, r }] if *c == center && *r == 8.0));
+    }
+    let dxf = super::flat_dxf(&sheet, &super::DxfOptions::default()).expect("the real default flat-pattern exporter retains its whole-circle result");
+    let es = entities(&dxf);
+    assert_eq!((count(&es, "CIRCLE"), count(&es, "ARC"), count(&es, "LINE")), (1, 0, 0));
 }

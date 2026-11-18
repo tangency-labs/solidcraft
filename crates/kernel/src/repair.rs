@@ -15,6 +15,9 @@
 //!
 //! Nothing is moved: a face rebuilt keeps its surface, a sewn edge keeps its curve (SMLib keeps
 //! one of the pair), a patch is a new face. What was done comes back in [`RepairReport`].
+//!
+//! When none of that applies, SMLib's full check (the one operations run on their results)
+//! decides the answer: "nothing to repair" only when it passes, else the tests it fails.
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Brep};
@@ -87,6 +90,18 @@ pub struct Hole {
     pub patched: bool,
     /// Why it was not, when it was asked for.
     pub why: Option<String>,
+}
+
+/// Why a repair that found no gap, hole or face SMLib refuses does nothing
+/// ([`KernelError::Repair`]): SMLib's full check of the part decides which.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+pub enum RepairRefusal {
+    /// The check passes: the part needs no repair.
+    #[error("nothing to repair: SMLib takes the part, its check passes and it has no gaps or holes")]
+    NothingToRepair,
+    /// The check fails the part, at the tests it names, for nothing the repair fixes.
+    #[error("SMLib's check fails the part, and none of it is what the repair fixes (faces SMLib refuses, gaps, holes): {0}")]
+    CheckFails(crate::validation::CheckFailure),
 }
 
 /// What a repair did.
@@ -190,11 +205,16 @@ pub fn repair(body: &Body, opts: &RepairOptions) -> Result<(Body, RepairReport)>
                 )
             })
             .collect();
-        return Err(invalid(if holes.is_empty() {
-            "nothing to repair: SMLib takes the part and it has no gaps or holes".to_string()
-        } else {
-            format!("nothing sewn: the free edges bound holes ({}); patch them to close the part", holes.join("; "))
-        }));
+        if holes.is_empty() {
+            // SMLib takes the part, and it is whole: its check says whether the operations on it
+            // will take their results, so "nothing to repair" is said only when it passes.
+            return Err(match crate::validation::failing_check(&current)? {
+                None => RepairRefusal::NothingToRepair,
+                Some(check) => RepairRefusal::CheckFails(check),
+            }
+            .into());
+        }
+        return Err(invalid(format!("nothing sewn: the free edges bound holes ({}); patch them to close the part", holes.join("; "))));
     }
     let after = current.record();
     report.faces[1] = after.faces.len();
@@ -312,7 +332,18 @@ fn rebuilt_face(r: &Brep, f: usize) -> Result<Option<b::Face>> {
         local.iter().filter_map(|&e| r.edges.get(e as usize)).map(|e| e.tolerance).fold(r.tolerance, f64::max),
     )
     .ok_or_else(|| invalid("no NURBS form of its surface over its boundary"))?;
-    let trim = TrimFace { surface: &face.surface, nurbs: Some(&form), domain, edges, vertices: points, loops, tolerance: r.tolerance };
+    // No vertex reach: the repaired face keeps its edges' tolerances, so SMLib may not move an
+    // edge's end farther than they cover.
+    let trim = TrimFace {
+        surface: &face.surface,
+        nurbs: Some(&form),
+        domain,
+        edges,
+        vertices: points,
+        vertex_tolerances: Vec::new(),
+        loops,
+        tolerance: r.tolerance,
+    };
     let pcurves = solidcraft_smlib::pcurves::SmlibTrims.trims(&trim).map_err(KernelError::Failed)?;
     let mut out = face.clone();
     out.nurbs = Some(form);
@@ -582,8 +613,36 @@ mod tests {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let err = repair(&b, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err().to_string();
         assert!(err.contains("nothing to repair"), "{err}");
+        // #17689: typed, as the refusal when the check fails is.
+        assert_eq!(repair(&b, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err(), KernelError::Repair(RepairRefusal::NothingToRepair));
         for gap in [0.0, -1.0, 2.0, f64::NAN, f64::INFINITY] {
             assert!(repair(&b, &RepairOptions { gap, patch_holes: false }).is_err(), "{gap}");
         }
+    }
+
+    /// #17689: a closed part SMLib takes, but whose check fails, was "nothing to repair". The
+    /// repair runs the same check as the operations, and says what fails that it does not fix.
+    #[test]
+    fn a_part_whose_check_fails_is_not_called_nothing_to_repair() {
+        // A box with one corner moved off its three edges: SMLib takes it, its check refuses it.
+        let good = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+        assert!(bad.smlib_refusal().is_none(), "SMLib takes the part");
+        assert!(bad.record().edges.iter().all(|e| e.uses.len() == 2), "it is closed");
+        assert_eq!((bad.face_count(), bad.edge_count(), bad.vertex_count()), (6, 12, 8), "a box's topology");
+        let check = bad.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        let failure = crate::validation::CheckFailure::of(&check).expect("the check fails it");
+        let err = repair(&bad, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err();
+        assert_eq!(err, KernelError::Repair(RepairRefusal::CheckFails(failure.clone())));
+        let text = err.to_string();
+        assert!(!text.contains("nothing to repair"), "{text}");
+        assert_eq!(
+            text,
+            format!(
+                "the operation failed: SMLib's check fails the part, and none of it is what the repair fixes (faces SMLib refuses, gaps, holes): {failure}"
+            )
+        );
     }
 }
