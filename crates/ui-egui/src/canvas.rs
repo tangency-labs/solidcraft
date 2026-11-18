@@ -129,7 +129,9 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         }
         // A curved face offsets along its outward normal where it was picked.
         Kind::OffsetFaces { .. } => (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at, &[]).map(|d| -d))),
-        Kind::Section { .. } | Kind::OffsetPlane { .. } => (at, normal),
+        // A section's distance runs against the plane's normal, into the part from a face.
+        Kind::Section { .. } => (at, normal.map(|n| -n)),
+        Kind::OffsetPlane { .. } => (at, normal),
         // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
         // on an outside edge, into the open corner on an inside one); shell thickness grows into
         // the body.
@@ -296,7 +298,9 @@ fn stored_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let plane = d.extra.get(key)?;
     let point = |key: &str| serde_json::from_value::<[f64; 3]>(plane.get(key)?.clone()).ok().map(|[x, y, z]| Vec3::new(x, y, z));
     let normal = point("normal").or_else(|| Some(point("x_dir")?.cross(point("y_dir")?)))?.normalized()?;
-    Some((point("origin")?, Some(normal)))
+    // A section's distance runs against the plane's normal, into the part from a face.
+    let toward = if matches!(d.kind, Kind::Section { .. }) { -normal } else { normal };
+    Some((point("origin")?, Some(toward)))
 }
 
 /// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a
@@ -591,7 +595,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let plane = solidcore_record::Plane::from_normal(base, n)?;
         reference_height(app, d, "To Object", &plane, base)
     });
-    let all_span = if matches!(d.kind, Kind::Extrude { all: true, .. }) {
+    let all_on = matches!(d.kind, Kind::Extrude { all: true, .. });
+    let all_span = if all_on {
         dir.and_then(|n| {
             let state = crate::open_meshing::session_world(&app.session);
             let plane = match d.inputs.first()?.items.first()? {
@@ -879,6 +884,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
         _ => Vec::new(),
     };
+    let section = matches!(d.kind, Kind::Section { .. });
+    // With To Object picked the box holds To Offset, which is used, whatever All says: the
+    // engine takes To Object first.
+    let names_all = all_on && !d.inputs.iter().any(|input| input.label == "To Object");
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -892,6 +901,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // Where the box hangs from: the arrow's tip, or the base when there is no arrow.
     let mut anchor = bs;
     let mut reverse = false;
+    // A section's box goes past the arrow's tip, clear of where a press takes the arrow: the
+    // arrow is what a section is mostly moved with.
+    let mut past_tip = None;
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
         let baseline = to_span.map(f64::abs).unwrap_or(0.0);
@@ -933,18 +945,42 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
             box_at = ts + vec2(14.0, -12.0);
             anchor = ts;
+            if section {
+                past_tip = Some((bs, ts));
+            }
         }
     }
     let note = crate::drag_extrude::step_note(app);
     // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
     // Clear of the command window first, then off the placement handles: the handles have the
     // last word, as a box over a grip takes the press meant for it (#6608).
-    let place = box_place(app, proj);
+    let mut place = box_place(app, proj);
     let size = box_size(ui, egui::Id::unique("sc_canvas_area"), label, note.as_deref());
-    let box_at = clear_of_dialog(rect_at(box_at, egui::Align2::LEFT_TOP, size), place).min;
+    let rect = match past_tip {
+        Some((from, ts)) => {
+            place.handles = Some(arrow_grab(from, ts));
+            keep_in_view(past_arrow(from, ts, size), place.view)
+        }
+        None => rect_at(box_at, egui::Align2::LEFT_TOP, size),
+    };
+    let box_at = clear_of_dialog(rect, place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
-    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), BoxPlace { dialog: None, ..place });
-    if *value != before
+    // Extent Type All (#18765): the depth of the Distance kept from before is not what the
+    // extrude reaches, so the field is empty and its hint names the extent. Text typed there is
+    // the new Distance. Like any empty box it has no number to step (Up, Down, the wheel).
+    let shows_all = names_all && *value == before;
+    let select_all = focus || *value != before;
+    let mut typed = String::new();
+    let shown = if shows_all { &mut typed } else { &mut *value };
+    let hint = if shows_all { "All" } else { "" };
+    value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
+    // Spaces alone are not an entry: the field has the keyboard as the dialog opens.
+    let entered = !typed.trim().is_empty();
+    if entered {
+        value.clone_from(&typed);
+    }
+    // A text typed that equals the kept Distance ends All too.
+    if (*value != before || entered)
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
@@ -1021,10 +1057,11 @@ fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, 
     value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);
 }
 
-/// [`value_box`] with a note after the field (a pull's step size).
-fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>, place: BoxPlace) {
+/// [`value_box`] with a note after the field (a pull's step size) and a `hint` for the empty
+/// field (`""` for none).
+fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, hint: &str, note: Option<&str>, place: BoxPlace) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
-    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note, place);
+    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), (hint, note), place);
 }
 
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
@@ -1040,10 +1077,11 @@ pub(crate) fn value_box_in(
     keep_tab: bool,
     place: BoxPlace,
 ) -> Option<egui::Rect> {
-    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), None, place)
+    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), ("", None), place)
 }
 
-/// [`value_box_in`] with a short dimmed note after the field (a pull's step size).
+/// [`value_box_in`] with a short dimmed note after the field (a pull's step size) and a hint
+/// shown in the field while it is empty.
 fn value_box_full(
     ui: &mut egui::Ui,
     (area, id): (egui::Id, egui::Id),
@@ -1051,7 +1089,7 @@ fn value_box_full(
     value: &mut String,
     (at, pivot): (Pos2, egui::Align2),
     (select_all, keep_tab): (bool, bool),
-    note: Option<&str>,
+    (hint, note): (&str, Option<&str>),
     place: BoxPlace,
 ) -> Option<egui::Rect> {
     // Off in Preferences: the value is typed in the command window only (#9479).
@@ -1070,7 +1108,9 @@ fn value_box_full(
     // #6608: the box moves out of the command window it would otherwise cover, and out of the
     // manipulator's handles: it keeps its place by its geometry, but a box that would cover
     // either of them moves out of it.
-    let at = if place.dialog.is_some() || place.handles.is_some() {
+    // Always inside the drawing area too: a box hung from a handle that has left the window
+    // (a far drag) would be cut off at its edge, out of reach (#18722).
+    let at = if place.dialog.is_some() || place.handles.is_some() || place.view.is_some() {
         let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), place);
         pivot.pos_in_rect(&kept)
     } else {
@@ -1086,7 +1126,7 @@ fn value_box_full(
                 ui.label(
                     egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption),
                 );
-                let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
+                let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab, hint);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
                     r.request_focus();
@@ -1112,10 +1152,12 @@ const DIALOG_GAP: f32 = 4.0;
 /// handles: whole, beside what it would cover (leaving a gap of `DIALOG_GAP`), and inside the
 /// drawing area (`view`), like a box kept in view (#6608). The sides of the command window
 /// are tried first, then the sides of the handles, and the first side that leaves the box
-/// clear of both wins. A box that misses them keeps its place, and one that no side clears
-/// keeps it too, unless a side leaves the handles free: a box over a handle takes the press
-/// the user meant for the handle.
+/// clear of both wins. A box that misses them keeps its place (inside the drawing area), and
+/// one that no side clears keeps it too, unless a side leaves the handles free: a box over a
+/// handle takes the press the user meant for the handle.
 fn clear_of_dialog(rect: egui::Rect, place: BoxPlace) -> egui::Rect {
+    // A box beyond the drawing area comes back inside it before anything else (#18722).
+    let rect = keep_in_view(rect, place.view);
     let mut obstacles: Vec<egui::Rect> = Vec::new();
     if let Some(dialog) = place.dialog {
         obstacles.push(dialog);
@@ -1207,6 +1249,40 @@ fn reversed_direction(direction: usize) -> Option<usize> {
     }
 }
 
+/// The square about an arrow's tip a press takes the arrow in (logical points).
+const ARROW_TIP: f32 = 20.0;
+
+/// The room a value box placed past an arrow leaves around where a press takes the arrow.
+const ARROW_BOX_GAP: f32 = 12.0;
+
+/// Where a press takes the arrow from `from` to its tip `ts`: the tip's square and the stem's
+/// reach, as one rectangle.
+fn arrow_grab(from: Pos2, ts: Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(ts, vec2(ARROW_TIP, ARROW_TIP)).union(egui::Rect::from_two_pos(from, ts).expand(ARROW_STEM_REACH))
+}
+
+/// Where a value box of `size` goes past the tip of the arrow from `from` to `ts`: beyond the
+/// end the arrow points at, centred on its line, and [`ARROW_BOX_GAP`] clear of
+/// [`arrow_grab`].
+fn past_arrow(from: Pos2, ts: Pos2, size: egui::Vec2) -> egui::Rect {
+    let u = Some((ts - from).normalized()).filter(|u| u.is_finite() && u.length() > 0.5).unwrap_or(vec2(0.0, -1.0));
+    let pivot = match (u.x.abs() > u.y.abs(), u.x > 0.0, u.y > 0.0) {
+        (true, true, _) => egui::Align2::LEFT_CENTER,
+        (true, false, _) => egui::Align2::RIGHT_CENTER,
+        (false, _, true) => egui::Align2::CENTER_TOP,
+        (false, _, false) => egui::Align2::CENTER_BOTTOM,
+    };
+    let grab = arrow_grab(from, ts).expand(ARROW_BOX_GAP);
+    let mut rect = rect_at(ts + u * (ARROW_TIP * 0.5 + ARROW_BOX_GAP), pivot, size);
+    for _ in 0..16 {
+        if !rect.intersects(grab) {
+            break;
+        }
+        rect = rect.translate(u * 4.0);
+    }
+    rect
+}
+
 /// The distance from `p` to the segment from `a` to `b` on screen.
 fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let v = b - a;
@@ -1280,7 +1356,7 @@ fn drag_arrow_to(
     let mut ts = tip(l)?;
     // Where the drawn arrow starts: the base, or past the cleared marker.
     let start = |ts: Pos2| if clear_px > 0.0 && (ts - bs).length() > clear_px { bs + (ts - bs).normalized() * clear_px } else { bs };
-    let at_tip = egui::Rect::from_center_size(ts, vec2(20.0, 20.0));
+    let at_tip = egui::Rect::from_center_size(ts, vec2(ARROW_TIP, ARROW_TIP));
     // Over the stem, the arrow answers where the pointer is. A placement handle the arrow crosses
     // (the turn ring's grip) keeps the pointer: the arrow then answers nowhere.
     let hover = ui.input(|i| i.pointer.hover_pos());
@@ -2385,6 +2461,22 @@ mod tests {
         assert_eq!(clear_of_dialog(clear, place), clear, "a box that misses the window stays");
     }
 
+    /// #18722: a value box hung from a handle that left the drawing area is brought back inside
+    /// it, whole, with no command window or handles to clear; one already inside stays.
+    #[test]
+    fn a_value_box_beyond_the_drawing_area_comes_back_inside() {
+        let view = egui::Rect::from_min_size(egui::pos2(100.0, 40.0), egui::vec2(1000.0, 700.0));
+        let place = BoxPlace { dialog: None, view: Some(view), handles: None };
+        let size = egui::vec2(140.0, 24.0);
+        for far in [egui::pos2(5000.0, 3000.0), egui::pos2(-900.0, -400.0), egui::pos2(1050.0, 300.0), egui::pos2(300.0, 735.0)] {
+            let kept = clear_of_dialog(egui::Rect::from_min_size(far, size), place);
+            assert!(view.contains_rect(kept), "the box at {far:?} stayed at {kept:?}, outside {view:?}");
+            assert_eq!(kept.size(), size, "the box keeps its size");
+        }
+        let inside = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), size);
+        assert_eq!(clear_of_dialog(inside, place), inside, "a box inside stays where it is");
+    }
+
     /// Canvas value boxes sit under Preferences and Report a bug (#9016).
     #[test]
     fn a_value_box_draws_under_system_windows() {
@@ -2407,6 +2499,51 @@ mod tests {
                 h.ctx.memory(|m| m.layer_id_at(box_rect.center())).is_some_and(|l| l.id == egui::Id::unique("sc_prefs")),
                 "Preferences covers the Distance box where they overlap"
             );
+        }
+    }
+
+    /// A box placed past an arrow keeps clear of where a press takes the arrow, whichever way the
+    /// arrow points on screen, however long it is.
+    #[test]
+    fn a_box_past_an_arrow_keeps_clear_of_its_grab() {
+        let size = vec2(132.0, 24.0);
+        let ts = egui::pos2(500.0, 400.0);
+        for k in 0..32 {
+            let a = k as f32 * std::f32::consts::TAU / 32.0;
+            for len in [0.0, 40.0, 120.0] {
+                let from = ts - vec2(a.cos(), a.sin()) * len;
+                let rect = past_arrow(from, ts, size);
+                assert!((rect.size() - size).length() < 1e-3, "{rect:?}");
+                let grab = arrow_grab(from, ts).expand(ARROW_BOX_GAP - 0.5);
+                assert!(!rect.intersects(grab), "angle {a}, length {len}: the box {rect:?} meets the arrow's grab {grab:?}");
+            }
+        }
+    }
+
+    /// #8717: Section Analysis's distance box sits clear of its arrow, so a press meant for the
+    /// arrow takes the arrow: at close, typical and far zooms, from the side and at a slant.
+    #[test]
+    fn the_section_box_keeps_clear_of_its_arrow() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.session.selection = vec![Sel::Plane { name: "XY".into() }];
+        h.app.start("inspect.section");
+        for view in
+            [solidcore_record::Vec3::new(1.0, -1.0, 1.0), solidcore_record::Vec3::new(0.0, -1.0, 0.0), solidcore_record::Vec3::new(-1.0, -0.3, 0.4)]
+        {
+            for distance in [60.0, 150.0, 400.0, 1200.0] {
+                let mut cam = h.app.cam.looking_from(view);
+                cam.target = solidcore_record::Vec3::ZERO;
+                cam.distance = distance;
+                h.app.cam = cam;
+                h.frames(4);
+                let tip = crate::scenario::handle_at("arrow").expect("the section's arrow");
+                let base = h.at(&serde_json::json!({"world": [0, 0, 0]})).map(|p| egui::pos2(p[0] as f32, p[1] as f32)).unwrap();
+                let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the distance box");
+                let grab = arrow_grab(base, tip);
+                assert!(!field.intersects(grab.expand(ARROW_STEM_REACH)), "view {view:?} at {distance}: the box {field:?} meets the arrow {grab:?}");
+            }
         }
     }
 

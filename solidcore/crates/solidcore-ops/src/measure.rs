@@ -37,6 +37,7 @@ impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
+impl Answer for Vec<[f64; 3]> {}
 impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
@@ -60,6 +61,13 @@ fn point(p: [f64; 3]) -> Result<Point3> {
         return Err(Error::Argument);
     }
     Ok(Point3::new(p[0], p[1], p[2]))
+}
+
+fn point2(p: [f64; 2]) -> Result<solidcore::Point2> {
+    if !p.iter().all(|x| x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    Ok(solidcore::Point2::new(p[0], p[1]))
 }
 
 /// Mass properties of a body at unit density (mm, mm², mm³, mm⁵), and what they are worth.
@@ -374,6 +382,37 @@ pub struct Normal {
 pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
     let (a, b) = (point(a)?, point(b)?);
     q::point_distance(a, b).map(Distance::from).map_err(status)
+}
+
+/// A 2D point set's centroid and mean distance from that centroid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: [f64; 2],
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// The arithmetic centroid and mean radial distance of a non-empty point set.
+pub fn point_set_summary(points: &[[f64; 2]]) -> Result<PointSetSummary> {
+    let points = points
+        .iter()
+        .copied()
+        .map(point2)
+        .collect::<Result<Vec<_>>>()?;
+    let summary = q::point_set_summary(&points).map_err(status)?;
+    Ok(PointSetSummary {
+        centroid: summary.centroid.to_array(),
+        mean_distance: summary.mean_distance,
+    })
+}
+
+/// The vector from point `from` to point `to`.
+pub fn point_displacement(from: [f64; 2], to: [f64; 2]) -> Result<[f64; 2]> {
+    let (from, to) = (point2(from)?, point2(to)?);
+    q::point_displacement(from, to)
+        .map(solidcore::Vec2::to_array)
+        .map_err(status)
 }
 
 /// The largest distance from `p` to a point of the box `[lo, hi]`: to its farthest corner
@@ -1285,6 +1324,51 @@ impl Body {
         }
         Ok(p)
     }
+
+    /// `count` points of record edge `edge`'s curve inside the edge, never at its ends: the
+    /// kernel's evaluation of the curve at the fractions k / (count + 1), k = 1 … count, of the
+    /// edge's parameter interval. They are spaced evenly in parameter, not in length: on a
+    /// line they are evenly spaced along it, on a rational arc or a spline they need not be. One
+    /// point is [`Body::edge_middle`]'s. For a caller that checks what happened along an edge,
+    /// not only at its middle: a blend that runs on past the end of its edge takes part of the
+    /// next one. The body is only read, never copied for a rollback.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a `count` of 0 or past [`EDGE_POINTS_MAX`]; otherwise as
+    /// [`Body::edge_middle`].
+    pub fn edge_points(&self, order: &Order, edge: usize, count: usize) -> Result<Vec<[f64; 3]>> {
+        let n = match u32::try_from(count) {
+            Ok(n) if (1..=EDGE_POINTS_MAX).contains(&n) => n,
+            _ => return Err(Error::Argument),
+        };
+        let e = order::edge(order, edge)?;
+        let points = read_body("edge_points", self, |k, b| {
+            let interval = edge::interval(b, e)?;
+            let curve = edge::curve(b, e)?
+                .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_points"))?;
+            let (lo, hi) = (interval.min(), interval.max());
+            (1..=n)
+                .map(|i| curve.evaluate_point(k, inside(lo, hi, i, n)).map(array))
+                .collect::<solidcore::Result<Vec<_>>>()
+        })?;
+        if !points.iter().flatten().all(|x| x.is_finite()) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok(points)
+    }
+}
+
+/// The most points [`Body::edge_points`] gives along one edge.
+pub const EDGE_POINTS_MAX: u32 = 64;
+
+/// The parameter `i / (n + 1)` of the way along `[lo, hi]`: the `i`-th of `n` sample positions
+/// ops chooses inside the interval, as [`middle`] is the one position for `n` = 1.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a sample parameter ops chooses, not a geometric quantity (docs/layers.md)"
+)]
+fn inside(lo: f64, hi: f64, i: u32, n: u32) -> f64 {
+    lo + (hi - lo) * (f64::from(i) / (f64::from(n) + 1.0))
 }
 
 /// The use of face `f` that faces out of its material, chosen by the materiality of the
@@ -1398,6 +1482,25 @@ pub(crate) mod tests {
             edges: k.edge_list().to_vec(),
             vertices: k.vertex_list().to_vec(),
         }
+    }
+
+    #[test]
+    fn point_set_summary_and_displacement_adapt_kernel_results() {
+        let summary = point_set_summary(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
+        assert_eq!(summary.centroid, [2.0, 2.0]);
+        // (2√2 + 4√5) / 3, evaluated independently.
+        let expected = 3.924_233_011_581_783;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_eq!(
+            point_displacement([2.0, 2.0], [5.0, 6.0]).unwrap(),
+            [3.0, 4.0]
+        );
+        assert_eq!(point_set_summary(&[[f64::NAN, 0.0]]), Err(Error::Argument));
+        assert_eq!(
+            point_displacement([0.0, 0.0], [f64::INFINITY, 0.0]),
+            Err(Error::Argument)
+        );
+        assert!(point_set_summary(&[]).is_err());
     }
 
     #[test]

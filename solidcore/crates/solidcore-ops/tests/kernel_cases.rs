@@ -54,6 +54,9 @@
     clippy::cast_precision_loss
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -3128,10 +3131,7 @@ fn union_all_replays_an_odd_operand_list_without_consuming_inputs() {
 #[test]
 #[ignore = "the 17 captured unions are slow; also covered by the full kernel rig"]
 fn union_all_replays_captured_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let mut files = Vec::new();
     entries(&corpus(), &mut files);
     files.sort();
@@ -3169,10 +3169,7 @@ fn union_all_replays_captured_cases() {
 #[test]
 #[ignore = "replays corpus cases with the rig's fixes; run with the kernel rig (--ignored)"]
 fn turn_cases_replay_their_traced_turn() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     for (case, refused) in [
         ("cov-fillet-turn-mitre-boss-base-r1", false),
@@ -4305,10 +4302,7 @@ fn extend_sheet_metadata_and_refusal_are_distinct() {
 #[test]
 #[ignore = "the whole corpus is slow; run it with --ignored, KERNEL_CASES_AREA shards it"]
 fn kernel_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     let areas: Option<Vec<String>> = std::env::var("KERNEL_CASES_AREA").ok().map(|a| {
         a.split(',')

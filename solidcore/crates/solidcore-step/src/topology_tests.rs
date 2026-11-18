@@ -1007,6 +1007,90 @@ fn a_near_miss_piece_blocks_a_seam_over_its_whole_height_range() {
     assert_eq!(reach(&|h| 7.0 - h), Some(1.0));
 }
 
+/// A rational quadratic spline on the cylinder of radius `r` about the z axis, from angle `from`
+/// at height `z` round the axis counterclockwise, a quarter turn and `rise` up for each of its
+/// `pieces`: seen along the axis each piece is an exact quarter circle (weights 1, cos 45°, 1),
+/// and its control points' heights are evenly spaced, so the piece is symmetric about its
+/// middle and the area under it is that under a straight helix. The curve, and its two ends.
+fn rising_quarters(w: &mut W, r: f64, from: f64, z: f64, rise: f64, pieces: usize) -> (u64, [V; 2]) {
+    use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_4, SQRT_2};
+    let at = |i: usize| {
+        let (angle, radius) = (from + i as f64 * FRAC_PI_4, if i.is_multiple_of(2) { r } else { r * SQRT_2 });
+        [radius * angle.cos(), radius * angle.sin(), z + 0.5 * rise * i as f64]
+    };
+    let points: Vec<u64> = (0..=2 * pieces).map(|i| w.pt(at(i))).collect();
+    let weights: Vec<String> = (0..points.len()).map(|i| real(if i.is_multiple_of(2) { 1.0 } else { FRAC_1_SQRT_2 })).collect();
+    let multiplicities: Vec<&str> = (0..=pieces).map(|i| if i == 0 || i == pieces { "3" } else { "2" }).collect();
+    let knots: Vec<String> = (0..=pieces).map(|i| real(i as f64)).collect();
+    let curve = w.add(format!(
+        "(BOUNDED_CURVE()B_SPLINE_CURVE(2,({}),.UNSPECIFIED.,.F.,.F.)B_SPLINE_CURVE_WITH_KNOTS(({}),({}),.UNSPECIFIED.)CURVE()GEOMETRIC_REPRESENTATION_ITEM()RATIONAL_B_SPLINE_CURVE(({}))REPRESENTATION_ITEM(''))",
+        list(&points),
+        multiplicities.join(","),
+        knots.join(","),
+        weights.join(",")
+    ));
+    (curve, [at(0), at(2 * pieces)])
+}
+
+/// A thread's crest in a bore: one cylinder face (radius 5) from a circle at z = 0 up to a rim at
+/// z = 8, less the thread's groove, 1 high, which starts at a wall along the axis from z = 2 to 3
+/// and winds a turn and a half up (4 a turn) to run out through the rim. The face's second loop
+/// goes along the rim, down the groove's lower helix, up the wall and up its upper helix. A seam
+/// can start from the circle's vertex alone, at 0° (the ruling from the rim's runs into the
+/// groove), and its ruling meets the lower helix half a turn up it, near z = 4, where two of the
+/// helix's pieces join. With that joint 0.001 rad to either side of 0° (0.005 mm, in a file of
+/// 0.01 mm uncertainty) the helix crosses the ruling on one piece, and the piece across the joint
+/// comes within the tolerance of the ruling without crossing it. That piece was taken for a
+/// second meeting, anywhere over its heights, and the face was left out ("a band winding round
+/// its axis whose rulings from its vertices meet another loop first"). It is the helix going on
+/// from the seam's end. The groove is 1 high over the upper helix's turn and a quarter, and half
+/// that on average over the last quarter turn under the rim, so the face's area is
+/// 5 (2π · 8 − 5π/2 − π/4) = 66.25π.
+#[test]
+fn a_seam_that_ends_beside_a_joint_of_a_helixs_pieces_is_not_taken_to_meet_the_next_piece() {
+    let (r, top, uncertainty) = (5.0, 8.0, 0.01);
+    for off in [-1e-3, 1e-3] {
+        let mut w = W::default();
+        let start = [r, 0.0, 0.0];
+        let v = w.vertex(start);
+        let circle = arc_about_z(&mut w, (v, v), r, 0.0);
+        // The helices from the wall at 180° + off: the lower one from z = 2 a turn and a half up
+        // to the rim, the upper one from z = 3 a turn and a quarter.
+        let (low_curve, [low_foot, low_top]) = rising_quarters(&mut w, r, PI + off, 2.0, 1.0, 6);
+        let (high_curve, [high_foot, high_top]) = rising_quarters(&mut w, r, PI + off, 3.0, 1.0, 5);
+        let (lf, hf, lt, ht) = (w.vertex(low_foot), w.vertex(high_foot), w.vertex(low_top), w.vertex(high_top));
+        let low = w.add(format!("EDGE_CURVE('',#{lf},#{lt},#{low_curve},.T.)"));
+        let high = w.add(format!("EDGE_CURVE('',#{hf},#{ht},#{high_curve},.T.)"));
+        let wall = w.line_edge((lf, low_foot), (hf, high_foot), true, 1.0);
+        // The rim over the crest: the three quarters of a turn from the lower helix's end on.
+        let rim = arc_about_z(&mut w, (lt, ht), r, top);
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+        let below = w.oe(circle, true);
+        let above = [(rim, false), (low, false), (wall, true), (high, true)].map(|(e, o)| w.oe(e, o));
+        let bounds = [w.bound(&[below], true, true), w.bound(&above, false, true)];
+        let face = w.face(&bounds, cylinder, true);
+        let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+        let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('crest',(#{open}))"));
+        let s = one_solid(&w.file_with_uncertainty(&[model], uncertainty));
+        assert!(s.sheet);
+        assert_eq!(s.brep.faces.len(), 1, "off {off}: {:?}", s.notes);
+        assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "off {off}: {:?}", s.notes);
+        // The seam: up the ruling from the circle's vertex to the lower helix, which is at
+        // 4 - off / 2 there (it climbs half a unit a radian where its pieces join).
+        let seam = s.brep.edges.iter().find_map(|e| {
+            let [p, q] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            (len3(sub3(p, start)) < 1e-9 && q[2] > 1.0).then_some(q).or_else(|| (len3(sub3(q, start)) < 1e-9 && p[2] > 1.0).then_some(p))
+        });
+        let end = seam.unwrap_or_else(|| panic!("off {off}: no seam from the circle's vertex: {:?}", s.brep.vertices));
+        assert!(len3(sub3(end, [r, 0.0, 4.0 - 0.5 * off])) < 1e-5, "off {off}: the seam ends at {end:?}");
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        let mass = body.mass_properties(1e-6).unwrap();
+        let area = 66.25 * PI;
+        assert!((mass.area - area).abs() < 1e-3 * area, "off {off}: area {} for {area}", mass.area);
+    }
+}
+
 /// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding
 /// leaves its one coefficient a few 1e-17 either way; that is not one way. An arc's is.
 #[test]
@@ -1349,6 +1433,164 @@ fn a_plate_with_a_through_hole() {
             }
         });
     }
+}
+
+/// [`cylinder`] with each rim circle from its vertex to a second VERTEX_POINT at the same point,
+/// as OpenCascade's booleans can write a hole's rim (tangency-labs/solidcraft#18784).
+fn cylinder_with_twin_rim_ends(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2]) -> Cyl {
+    let p = |h: f64| [c[0] + r, c[1], h];
+    let (v0, v1) = (w.vertex(p(z[0])), w.vertex(p(z[1])));
+    let circle = |w: &mut W, v: u64, h: f64| {
+        let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let end = w.vertex(p(h));
+        w.add(format!("EDGE_CURVE('',#{v},#{end},#{k},.T.)"))
+    };
+    let circles = [circle(w, v0, z[0]), circle(w, v1, z[1])];
+    let seam = w.line_edge((v0, p(z[0])), (v1, p(z[1])), true, 1.0);
+    let a = w.axis([c[0], c[1], 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    Cyl { circles, seam, surface }
+}
+
+/// A closed cylinder: its two caps (each bounded by one rim) and its side (rims and seam).
+fn closed_cylinder(twin_rim_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let c = if twin_rim_ends {
+        cylinder_with_twin_rim_ends(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    } else {
+        cylinder(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    };
+    let side_face = side(&mut w, &c, true);
+    let ob = w.oe(c.circles[0], false);
+    let bottom_bound = w.bound(&[ob], true, true);
+    let bottom_plane = w.plane([1.0, 2.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom = w.face(&[bottom_bound], bottom_plane, false);
+    let ot = w.oe(c.circles[1], true);
+    let top_bound = w.bound(&[ot], true, true);
+    let top_plane = w.plane([1.0, 2.0, 10.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let top = w.face(&[top_bound], top_plane, true);
+    let shell = closed_shell(&mut w, &[bottom, side_face, top]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    w.file(&[solid])
+}
+
+/// A cylinder whose rims are full circles each from one VERTEX_POINT to a second one at the same
+/// point (tangency-labs/solidcraft#18784): each rim is a full turn whose two ends are one vertex,
+/// so its caps' one-edge loops and its side's loop close, and it reads as the same closed solid
+/// as the cylinder whose rims have one vertex each.
+#[test]
+fn a_full_circle_edge_between_two_vertices_at_one_point_closes_its_loop() {
+    let (one, two) = (one_solid(&closed_cylinder(false)), one_solid(&closed_cylinder(true)));
+    assert!(!two.sheet);
+    assert_eq!(counts(&two.brep), [2, 1, 3, 3, 2]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    faces_away(&two.brep, 0, |p| [1.0, 2.0, p[2].clamp(1.0, 9.0)]);
+    for e in two.brep.edges.iter().filter(|e| matches!(e.curve, BCurve::Circle { .. })) {
+        let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
+        assert!((a1 - a0 - TAU).abs() < 1e-12, "a full turn: {a0} {a1}");
+        assert_eq!(e.vertices[0], e.vertices[1]);
+    }
+}
+
+/// A unit square sheet bounded by one closed edge on a closed polygon spline round it (its seam
+/// at (1, 0.5)), from the vertex there to itself, or with `twin_ends` to a second VERTEX_POINT at
+/// the same point.
+fn spline_outline(twin_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let start = [1.0, 0.5, 0.0];
+    let v = w.vertex(start);
+    let end = if twin_ends { w.vertex(start) } else { v };
+    let pts: Vec<u64> = [start, [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], start].iter().map(|p| w.pt(*p)).collect();
+    let c =
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',1,({}),.POLYLINE_FORM.,.T.,.F.,(2,1,1,1,1,2),(0.,1.,2.,3.,4.,5.),.UNSPECIFIED.)", list(&pts)));
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{c},.T.)"));
+    let oe = w.oe(e, true);
+    let bound = w.bound(&[oe], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&[bound], plane, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    w.file(&[model])
+}
+
+/// A closed spline edge written with two vertices at one point is read as the same edge written
+/// with one: the whole spline, not an empty piece of it between one point and itself.
+#[test]
+fn a_closed_spline_edge_between_two_vertices_at_one_point_is_its_one_vertex_edge() {
+    let (one, two) = (one_solid(&spline_outline(false)), one_solid(&spline_outline(true)));
+    assert_eq!(counts(&two.brep), [1, 1, 1, 1, 1]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    let (a, b) = (&one.brep.edges[0], &two.brep.edges[0]);
+    assert_eq!(a.curve, b.curve);
+    assert_eq!(a.interval, b.interval);
+    assert_eq!(b.vertices[0], b.vertices[1]);
+}
+
+/// A LINE edge between two vertices at one point is refused as the LINE edge with one vertex is:
+/// joining its ends never makes an edge of no length.
+#[test]
+fn a_line_edge_between_two_vertices_at_one_point_is_refused_as_a_closed_edge() {
+    for twin_ends in [false, true] {
+        let mut w = W::default();
+        let p = [1.0, 2.0, 3.0];
+        let v = w.vertex(p);
+        let end = if twin_ends { w.vertex(p) } else { v };
+        let (o, d) = (w.pt(p), w.dir([1.0, 0.0, 0.0]));
+        let vec = w.add(format!("VECTOR('',#{d},1.)"));
+        let line = w.add(format!("LINE('',#{o},#{vec})"));
+        let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{line},.T.)"));
+        let ex = w.file(&[e]);
+        with_builder(&ex, |b| {
+            let err = b.edge(e).err().unwrap_or_default();
+            assert!(err.contains("a closed edge on a line"), "twin ends {twin_ends}: {err}");
+        });
+    }
+}
+
+/// Two vertices at one point that are the two ends of a circle edge not read yet meet: a loop
+/// read before that edge joins them, as the edge itself would.
+#[test]
+fn the_two_ends_at_one_point_of_an_edge_read_later_meet() {
+    let mut w = W::default();
+    let p = [3.0, 0.0, 0.0];
+    let (v0, v1) = (w.vertex(p), w.vertex(p));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{v0},#{v1},#{k},.T.)"));
+    let ex = w.file(&[circle]);
+    with_builder(&ex, |b| {
+        let (a, z) = (b.vertex(v0).unwrap(), b.vertex(v1).unwrap());
+        assert!(b.meet(a, z).unwrap());
+        let (e, _) = b.edge(circle).unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_eq!(s, t);
+    });
+}
+
+/// A circle edge from A to a second vertex C at A's point, read after an earlier loop joined A
+/// with B, where B and C are the two ends of a LINE 1.5e-7 mm long (within their 1e-7 mm
+/// tolerances): the circle's two ends meet as any two vertices do, so they are not joined across
+/// the LINE, and the LINE keeps its two vertices.
+#[test]
+fn a_two_vertex_circle_never_joins_the_two_ends_of_a_line_read_after_it() {
+    let mut w = W::default();
+    let (a, c, bp) = ([0.0; 3], [0.0; 3], [1.5e-7, 0.0, 0.0]);
+    let (va, vb, vc) = (w.vertex(a), w.vertex(bp), w.vertex(c));
+    let k = w.circle([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{va},#{vc},#{k},.T.)"));
+    let line = w.line_edge((vb, bp), (vc, c), true, 1.0);
+    let ex = w.file(&[circle, line]);
+    with_builder(&ex, |b| {
+        let (ia, ib) = (b.vertex(va).unwrap(), b.vertex(vb).unwrap());
+        // An earlier loop meets A and B: they are apart by less than their tolerances.
+        assert!(b.meet(ib, ia).unwrap());
+        let _ = b.edge(circle);
+        let (e, _) = b.edge(line).unwrap();
+        b.join_vertices().unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_ne!(s, t, "the LINE keeps its two vertices");
+        let ic = b.vertex(vc).unwrap();
+        assert_ne!(b.find(ib), b.find(ic));
+    });
 }
 
 #[test]

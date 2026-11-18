@@ -33,6 +33,12 @@ pub fn largest_fit_note(size: &str, largest: f64) -> String {
     format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
 }
 
+/// The note naming the largest scale of a two-sided chamfer's distances that fits: "the largest
+/// that fits is 0.6 times the distances given".
+pub fn scale_fit_note(scale: f64) -> String {
+    format!("the largest that fits is {} times the distances given", trimmed_mm(scale))
+}
+
 /// Whether a refusal already names the largest size that fits ([`largest_fit_note`]).
 pub fn names_largest_fit(why: &str) -> bool {
     why.contains("that fits is ")
@@ -815,6 +821,23 @@ pub fn chamfer_max_why(body: &Body, edges: &[Vec3], distance: f64, hint: Option<
     largest_that_fits(distance, hint, |d| chamfer(body, edges, d))
 }
 
+/// The largest scale below 1 (to three significant digits) of both of a two-sided chamfer's
+/// sizes at which [`chamfer_sides_carrying_face`] builds, with its result: by distance and
+/// distance both scale, by angle the distance does (the angle stays). Each candidate is a real
+/// chamfer of the edges, as for [`chamfer_max_why`]: where SMLib fails a chamfer too large for
+/// the faces beside its edges inside the blend (status 1001) instead of refusing it as too large,
+/// a candidate that builds says it was its size (#18545).
+pub fn chamfer_sides_max_why(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<FitSearch> {
+    let _span = solidcraft_profile::span("kernel", "chamfer_sides_max");
+    largest_that_fits(1.0, None, |scale| {
+        let side = match side {
+            ChamferSide::Distance(d2) => ChamferSide::Distance(d2 * scale),
+            angle => angle,
+        };
+        chamfer_sides_carrying_face(body, edges, d1 * scale, side, flip)
+    })
+}
+
 /// The largest size in mm a refusal names ([`largest_fit_note`]): 3 for "...; the largest radius
 /// that fits is 3 mm". `None` where it names none, or names a scale ("2 times the distances").
 pub fn named_fit(why: &str) -> Option<f64> {
@@ -1203,6 +1226,31 @@ pub fn blend_edge_middles(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
 /// For a caller that shows the chain: it needs no point looked up on a tessellated edge.
 pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     picked_chain(body, picks).map(|(_, chain, _)| chain)
+}
+
+/// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
+/// themselves ([`tangent_chain`]): one list per such edge, in chain order, of `per_edge` points
+/// spread evenly inside the edge, never at its ends (solidcore's
+/// [`solidcore_ops::Body::edge_points`]; `per_edge` is held to 1 … its
+/// [`solidcore_ops::EDGE_POINTS_MAX`]). For a caller that
+/// checks which of those edges a blend left as they were: a blend may take part of an edge it
+/// runs past the end of, so its middle alone does not tell. Picks that find no edge are
+/// refused; a mesh body has no chain.
+pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize) -> Result<Vec<Vec<Vec3>>> {
+    let (_, chain, picked) = picked_chain(body, picks)?;
+    let most = usize::try_from(solidcore_ops::EDGE_POINTS_MAX).unwrap_or(1);
+    let per_edge = if per_edge == 0 { 1 } else { per_edge.min(most) };
+    let Some((ops, order)) = body.ops_body() else {
+        return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
+    };
+    chain
+        .into_iter()
+        .skip(picked)
+        .map(|e| {
+            let points = ops.edge_points(order, e, per_edge).map_err(|err| KernelError::Failed(format!("points along a chain edge: {err}")))?;
+            Ok(points.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect())
+        })
+        .collect()
 }
 
 /// The body's record, the picked edges' tangent chain as its edge indices (the picked edges
