@@ -917,7 +917,7 @@ impl AppPanelRuntime {
                         app.shell.browser = Some(rect);
                         crate::scenario::publish_rect("browser:card", rect);
                     }
-                    "history" => {
+                    "history" | "timeline-2d" => {
                         app.shell.history = Some(rect);
                         crate::scenario::publish_rect("history:card", rect);
                         crate::scenario::publish_rect(if section.zone == Zone::Bottom { "history:strip" } else { "history:vertical" }, rect);
