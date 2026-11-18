@@ -17347,7 +17347,7 @@ mod tests {
 
     #[test]
     fn compass_stays_below_pop_out_caption_buttons() {
-        let mut app = SolveApp::new(Session::default(), Default::default());
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         let view = Rect::from_min_size(Pos2::ZERO, vec2(380.0, 325.0));
         let original = axis_rect(&app, view);
         let captions = Rect::from_min_max(pos2(240.0, 0.0), pos2(380.0, 34.0));
