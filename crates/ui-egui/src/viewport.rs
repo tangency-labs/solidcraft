@@ -8496,7 +8496,7 @@ const WOKEN_CENTRE_FAR: f64 = 1.2;
 /// motion asks for, instead of drawing the same picture again at every move.
 ///
 /// Kept only while the view is still and the pointer only hovers it: no tool, dialog, sketch,
-/// drag, held button, open menu, woken snap point or view movement, all of which follow the
+/// drag, held button, open menu, woken snap point, deviation probe or view movement, all of which follow the
 /// pointer itself. What remains is the hover highlight, which is the same while the pointer
 /// stays over the same face, edge, vertex or plane, or over nothing.
 #[derive(Clone)]
@@ -8535,6 +8535,7 @@ impl QuietMotion {
             || app.viewport.woken.item.is_some()
             || !app.viewport.woken.points.is_empty()
             || crate::select_other::is_open(app)
+            || crate::point_cloud_deviation::probing(app)
             || crate::joint_drag::active(app)
             || crate::joint_handles::active(app)
             || crate::occurrence_drag::active(app)

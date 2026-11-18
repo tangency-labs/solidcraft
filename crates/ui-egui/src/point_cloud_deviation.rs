@@ -415,6 +415,12 @@ pub(crate) fn card(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Whether the card shows a current result, which [`probe`] draws at the pointer: pointer motion
+/// over the view then needs a frame, though what the view lights up stays the same.
+pub(crate) fn probing(app: &SolveApp) -> bool {
+    app.tree.deviation_card.as_ref().is_some_and(|card| current(app, card).is_some())
+}
+
 /// The point under the pointer, while the card shows a current result for a shown cloud: a ring
 /// on it, a dot on its closest point on the body and a line between, and its distance.
 pub(crate) fn probe(app: &SolveApp, painter: &Painter, proj: &Proj) {
@@ -554,9 +560,12 @@ mod tests {
         // The probe agrees with the report: the closest point is straight below the first point.
         let closest = shown.report.closest[0].unwrap();
         assert!((closest[0] - 5.0).abs() < 1e-5 && (closest[1] - 5.0).abs() < 1e-5 && (closest[2] - 10.0).abs() < 1e-5);
+        // The probe follows the pointer, so pointer motion over the view is not quiet.
+        assert!(super::probing(&h.app));
         h.step(&json!({"widget": "Close"})).unwrap();
         h.frames(2);
         assert!(h.app.tree.deviation_card.is_none());
+        assert!(!super::probing(&h.app));
         assert!(matches!(super::drawn(&h.app, &c), std::borrow::Cow::Borrowed(_)));
     }
 
