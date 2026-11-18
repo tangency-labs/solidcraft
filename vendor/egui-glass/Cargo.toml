@@ -15,6 +15,9 @@ egui-wgpu = "0.37"
 wgpu = { version = "30", default-features = false, features = ["wgsl"] }
 bytemuck = { version = "1", features = ["derive"] }
 
+[dev-dependencies]
+pollster = "0.4"
+
 [features]
 # SolidCraft: declared so the source's `cfg(feature = "serde")` is known; built without serde.
 serde = []
