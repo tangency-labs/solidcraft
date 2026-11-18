@@ -242,7 +242,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
         if !closed {
             return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
         }
-        let sheet = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
+        let sheet = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
         let (volume, centroid) = if sheet.is_some() {
             let measured = super::inspect::measure_body(body, Some(state))?;
             (measured.volume, measured.centroid)
