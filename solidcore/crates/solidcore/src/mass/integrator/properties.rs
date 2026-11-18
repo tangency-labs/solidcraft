@@ -633,11 +633,20 @@ fn face_properties_in(
 ) -> Result<PreciseProperties> {
     valid_flags(flags)?;
     valid_accuracy(accuracy)?;
-    let trims = if closed {
+    let mut trims = if closed {
         closed_boundary(k, b, f)?.curves
     } else {
         boundary(k, b, f)?
     };
+    let shift = match b.face(f)?.surface.as_ref() {
+        Some(surface) => period_shift(k, surface, &trims)?,
+        None => None,
+    };
+    if let Some(shift) = shift {
+        for c in &mut trims {
+            shifted(k, c, &shift)?;
+        }
+    }
     let fbox = face_box(k, b, f)?;
     let surface = b
         .face(f)?
@@ -665,6 +674,87 @@ fn face_properties_in(
         flags,
     )
 }
+/// Not upstream: the move by whole periods that puts a face's `trims` onto its B-spline
+/// surface's knot range along a direction it closes in, where the middle of their control
+/// points' box lies off it (a face whose trims a builder left a period round); `None` where
+/// none is needed. The surface is the same there, but the integral over trims off the range is
+/// taken on its clamped or continued evaluation, which is not: the face's integration and its
+/// closure ([`gap_closure`]) both run on the trims moved ([`shifted`]).
+fn period_shift(
+    k: &Kernel,
+    surface: &Surface,
+    trims: &[Curve],
+) -> Result<Option<crate::geom::axis2_placement::Axis2Placement>> {
+    use crate::surface::surface::SurfaceKind;
+    let SurfaceKind::BSpline(base) = surface.kind() else {
+        return Ok(None);
+    };
+    let domain = base.natural_uv_domain();
+    let mut lo = [f64::INFINITY; 2];
+    let mut hi = [f64::NEG_INFINITY; 2];
+    for c in trims {
+        let Some(bs) = c.b_spline_base() else {
+            return Ok(None);
+        };
+        let cn = crate::blend::fillet_section::certificate::NurbsCurve::of(bs)?;
+        for p in cn.pw.chunks(4) {
+            let &[xw, yw, _, w] = p else {
+                return Ok(None);
+            };
+            if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+                return Ok(None);
+            }
+            for (d, x) in [xw / w, yw / w].into_iter().enumerate() {
+                if let (Some(l), Some(h)) = (lo.get_mut(d), hi.get_mut(d)) {
+                    *l = l.min(x);
+                    *h = h.max(x);
+                }
+            }
+        }
+    }
+    let mut shift = Vec3::new(0.0, 0.0, 0.0);
+    let ranges = [
+        (domain.u_min(), domain.u_max(), SurfParamType::U),
+        (domain.v_min(), domain.v_max(), SurfParamType::V),
+    ];
+    for (d, (a, z, dir)) in ranges.into_iter().enumerate() {
+        let (Some(&l), Some(&h)) = (lo.get(d), hi.get(d)) else {
+            continue;
+        };
+        let (period, mid) = (z - a, 0.5 * (l + h));
+        if !(period > 0.0 && mid.is_finite()) || (mid >= a && mid < z) {
+            continue;
+        }
+        if !crate::surface::surface::p7::base_is_closed(k, base, &domain, dir, None, false)?.0 {
+            continue;
+        }
+        let by = -((mid - a) / period).floor() * period;
+        if d == 0 {
+            shift.x = by;
+        } else {
+            shift.y = by;
+        }
+    }
+    if shift.x == 0.0 && shift.y == 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(crate::geom::axis2_placement::Axis2Placement::new(
+        Point3::new(shift.x, shift.y, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+    )))
+}
+
+/// A 2D trim moved by a [`period_shift`].
+fn shifted(
+    k: &Kernel,
+    c: &mut Curve,
+    by: &crate::geom::axis2_placement::Axis2Placement,
+) -> Result<()> {
+    c.transform(k, by, None)?;
+    c.convert_to_2d(k)
+}
+
 /// The lowest v of the union of the trims' bounding boxes (as
 /// `CalculateUVDomainFromUVTrimCurves` builds the trim domain), no lower than the face's
 /// UV domain; the domain's lowest v without trims. Also the union's highest v (the lowest
@@ -1700,7 +1790,23 @@ fn gap_closure(
     // next) with a UV line. Such a line's image is part of the face's boundary but of no
     // edge use: it closes as a cone onto the corner's vertex, as a side without an edge
     // curve does, so every piece of the boundary the face integral runs along is closed.
-    let integrated = closed_boundary(k, b, f)?;
+    let mut integrated = closed_boundary(k, b, f)?;
+    // on trims moved onto a closed surface's range, as the face's integral is
+    // ([`period_shift`])
+    let shift = match b.face(f)?.surface.as_ref() {
+        Some(surface) => period_shift(k, surface, &integrated.curves)?,
+        None => None,
+    };
+    if let Some(shift) = shift {
+        for c in &mut integrated.curves {
+            shifted(k, c, &shift)?;
+        }
+        for (_, side) in pools.iter_mut().flatten() {
+            if let Some(side) = side {
+                shifted(k, &mut side.trim, &shift)?;
+            }
+        }
+    }
     let mut at_curve = 0usize;
     let mut counts = integrated.loops.iter();
     let mut loops: Vec<Vec<ClosureSide>> = Vec::new();
@@ -2997,6 +3103,75 @@ mod tests {
             );
         }
     }
+    /// A tube of triangular section, z from 0 to 1, closed along u (its first and last rows
+    /// one) where `closed`, else its last row moved off the first.
+    fn triangle_tube(closed: bool) -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::CPoint;
+        let last = if closed { [1.0, 0.0] } else { [1.0, 0.5] };
+        let ring = [[1.0, 0.0], [-0.5, 0.8], [-0.5, -0.8], last];
+        let pw: Vec<Vec<CPoint>> = ring
+            .iter()
+            .map(|&[x, y]| vec![CPoint::new(x, y, 0.0, 1.0), CPoint::new(x, y, 1.0, 1.0)])
+            .collect();
+        let u = [0.0, 0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 1.0];
+        let v = [0.0, 0.0, 1.0, 1.0];
+        Surface::from(BSplineSurface::from_data(3, 1, 1, 1, 5, 3, &pw, &u, &v).unwrap())
+    }
+
+    /// The four sides of the uv box `[u0, u1] × [v0, v1]`.
+    fn uv_box(u0: f64, u1: f64, v0: f64, v1: f64) -> Vec<Curve> {
+        let corners = [(u0, v0), (u1, v0), (u1, v1), (u0, v1), (u0, v0)];
+        corners
+            .windows(2)
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                Curve::from(
+                    crate::nurbs::b_spline_curve::BSplineCurve::create_line_segment(
+                        2,
+                        Vec3::new(a.0, a.1, 0.0),
+                        Vec3::new(b.0, b.1, 0.0),
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    /// Trims a whole period off a closed spline's knot range are moved back onto it before a
+    /// face is integrated (a builder left them there; continued or clamped, the surface is
+    /// another there), and only then: on the range, or on a surface that does not close.
+    #[test]
+    fn trims_a_period_round_a_closed_spline_are_moved_onto_its_range() {
+        let k = Kernel::default();
+        let tube = triangle_tube(true);
+        let mut trims = uv_box(1.1, 1.4, 0.2, 0.8);
+        let shift = period_shift(&k, &tube, &trims).unwrap().expect("moved");
+        for c in &mut trims {
+            shifted(&k, c, &shift).unwrap();
+        }
+        let start = trims[0]
+            .evaluate_point(&k, trims[0].natural_interval().min())
+            .unwrap();
+        assert!(
+            (start.x - 0.1).abs() < 1e-12 && (start.y - 0.2).abs() < 1e-12,
+            "{start:?}"
+        );
+        // A period below the range: moved up.
+        let below = uv_box(-0.9, -0.6, 0.2, 0.8);
+        assert!(period_shift(&k, &tube, &below).unwrap().is_some());
+        // On the range: nothing to move.
+        assert!(period_shift(&k, &tube, &uv_box(0.1, 0.4, 0.2, 0.8))
+            .unwrap()
+            .is_none());
+        // A surface that does not close: trims off its range are not a period round.
+        assert!(
+            period_shift(&k, &triangle_tube(false), &uv_box(1.1, 1.4, 0.2, 0.8))
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[test]
     fn face_area_makes_missing_uv_trims_on_the_callers_brep() {
         // Upstream's `SmFace::ComputePreciseProperties` builds its oriented trim boundary on
