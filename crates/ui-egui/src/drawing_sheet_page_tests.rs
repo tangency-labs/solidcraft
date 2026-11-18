@@ -123,6 +123,26 @@ fn true_size_is_one_millimetre_at_any_ui_scale() {
     assert!((number(&p["points_per_mm"]) - 1.25 * 96.0 / 25.4).abs() < 1e-9 && (number(&p["zoom"]) - 1.0).abs() < 1e-9, "{p}");
 }
 
+/// #19070: Fit Sheet frames the sheet in the part of the window the ribbon, the Browser and the
+/// History leave free, so no edge of the paper is under them, in a small window too.
+#[test]
+fn fit_sheet_keeps_the_paper_clear_of_the_ribbon_browser_and_history() {
+    let (mut h, _) = plate_sheet();
+    h.call("ui.resize", json!({"width": 1280, "height": 720}));
+    h.frames(6);
+    h.app.run("view.home", json!({})).unwrap();
+    h.frames(4);
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    let canvas = h.app.viewport.rect.unwrap();
+    let mut covers: Vec<(&str, Rect)> = h.app.shell.cards.iter().map(|r| ("a ribbon card", *r)).collect();
+    covers.extend(h.app.shell.browser.map(|r| ("the Browser", r)));
+    covers.extend(h.app.shell.history.map(|r| ("the History bar", r)));
+    assert!(!covers.is_empty(), "the shell reports what covers the canvas");
+    for (what, rect) in covers.into_iter().filter(|(_, r)| r.intersects(canvas)) {
+        assert!(!paper.intersects(rect), "the paper {paper:?} is under {what} {rect:?}");
+    }
+}
+
 /// Fit Sheet shows the whole sheet, and comes back after any zoom; typed and wheeled zooms stay
 /// within 5 % to 3200 %, and a zoom that isn't a number changes nothing.
 #[test]
@@ -216,7 +236,9 @@ fn pan_moves_the_sheet_and_leaves_the_design_camera() {
     let (cam, doc, undo) = (h.app.cam, h.app.session.doc.to_json(), h.app.session.undo.len());
     h.app.run("view.tool", json!({"tool": "pan"})).unwrap();
     let before = crate::scenario::rect_of("sheet:paper").unwrap();
-    let from = h.app.viewport.rect.unwrap().center();
+    // From an empty corner of the paper, not the canvas's middle: where the fitted sheet puts its
+    // views depends on the free area around it.
+    let from = before.min + vec2(15.0, 15.0);
     h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + 120.0, "y1": from.y + 40.0, "steps": 8}));
     h.frames(2);
     let after = crate::scenario::rect_of("sheet:paper").unwrap();
