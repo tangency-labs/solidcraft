@@ -2665,6 +2665,9 @@ pub struct Renderer {
     /// they are seen and where the model hides them.
     line_lit: wgpu::RenderPipeline,
     line_lit_hidden: wgpu::RenderPipeline,
+    /// The model's edges' depth alone, before its see-through faces: a faded or see-through face
+    /// behind an edge then leaves it alone instead of blending over it ([`EDGE_DEPTH_BIAS`]).
+    line_depth: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
@@ -3623,6 +3626,15 @@ impl Renderer {
                 pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
                 pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+                // Depth only: the colour stays as it is.
+                pipeline(
+                    "sc_lines_depth",
+                    "vs_line",
+                    "fs_line_depth",
+                    line_layout(),
+                    pushed(wgpu::CompareFunction::LessEqual, true, EDGE_DEPTH_BIAS),
+                    Some(wgpu::BlendState { color: KEEP, alpha: KEEP }),
+                ),
             )
         };
         let lines_all = || {
@@ -3673,7 +3685,7 @@ impl Renderer {
                 tri_hl_planned,
             ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden, line_depth) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3757,6 +3769,7 @@ impl Renderer {
                 line_hidden,
                 line_lit,
                 line_lit_hidden,
+                line_depth,
                 overlay,
                 guide_trans: guide_trans.join(),
                 guide_line,
@@ -3815,6 +3828,16 @@ pub const FACE_STEPS: i32 = 8;
 /// 3.5 px) may lose its outer edge on one side where it lies on a steep face. The section cap,
 /// which writes its own depth, adds the same in the shader.
 pub const FACE_SLOPE: f32 = 1.0;
+/// The model's edges' depth, written before its see-through faces are drawn (`line_depth`): pushed
+/// back as [`FACE_BIAS`] pushes an opaque face, so a see-through body's own faces at its edges
+/// still pass and tint them, while a face further behind (faded context, another see-through body)
+/// fails and leaves the edge alone. The slope term is the line's own (flat across its width), so
+/// where a body's face recedes steeply from its edge, the part of it under the line's far half is
+/// behind the line and does not tint it, as an opaque face does not cover its edge.
+const EDGE_DEPTH_BIAS: wgpu::DepthBiasState = FACE_BIAS;
+/// A blend that leaves the target's colour as it is.
+const KEEP: wgpu::BlendComponent =
+    wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add };
 /// The removed material of a preview, drawn translucent: behind the faces it shares with the new
 /// shape, so twice [`FACE_BIAS`].
 const GHOST_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FACE_STEPS, slope_scale: 2.0 * FACE_SLOPE, clamp: 0.0 };
@@ -4706,6 +4729,14 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         tris(pass, &res.guide_trans, &sk.shadow);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        // The model's edges' depth, so the see-through faces drawn next do not blend over an edge
+        // in front of them (they write no depth, and the edges were drawn before them). Only
+        // where there are any: the edges are drawn a second time.
+        let see_through = m.see_through() || moving.is_some_and(|mv| mv.see_through()) || sk.trans.is_some() || h.trans.is_some();
+        if see_through {
+            lines(pass, &res.line_depth, &m.lines);
+            in_moving(pass, &|pass, mv| lines(pass, &res.line_depth, &mv.lines));
+        }
         if phase == Phase::BeforeSeeThrough {
             return;
         }
@@ -7041,6 +7072,59 @@ mod glass_tests {
         let sorted = middle_pixel(two_layers(blue, red, false), false).unwrap();
         assert!(near(either, sorted, 48), "two colours: {either:?} vs sorted {sorted:?}");
         assert!(either[0] > 100 && either[2] > 100, "both colours show: {either:?}");
+    }
+
+    /// An edge of a see-through body in front was washed out wherever a faded or see-through face
+    /// lay behind it: neither those faces nor the edges write depth, and the faces were drawn
+    /// after the edges, so they blended over them as if the edge were behind. An edge now hides
+    /// the see-through faces behind it, sorted or not, and one behind a see-through face is still
+    /// seen through it. A line thinner than a pixel covers only part of it, so the faces behind
+    /// still show in the rest.
+    #[test]
+    fn see_through_faces_behind_an_edge_do_not_wash_it_out() {
+        let (blue, red, black) = ([40, 80, 220, 128], [220, 40, 40, 128], [0, 0, 0, 255]);
+        // A see-through square at z = 5 with an edge across it at `edge_z`, and `behind` (a faded
+        // or see-through square at z = -5, or nothing).
+        let scene = |edge_z: f32, behind: Option<bool>, width: f32| {
+            let mut sc = GpuScene::default();
+            let front = sc.color(blue);
+            let back = sc.color(red);
+            let square = [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]];
+            for p in square {
+                sc.glass_tri([p[0], p[1], 5.0], [0.0, 0.0, 1.0], front);
+            }
+            for p in square {
+                match behind {
+                    Some(true) => sc.trans_tri([p[0], p[1], -5.0], [0.0, 0.0, 1.0], back),
+                    Some(false) => sc.glass_tri([p[0], p[1], -5.0], [0.0, 0.0, 1.0], back),
+                    None => {}
+                }
+            }
+            let edge = sc.color(black);
+            // Through the middle pixel's centre (64 pixels over 20 units), which a line thinner
+            // than a pixel, drawn a pixel wide, must cover to be seen there.
+            let y = -10.0 / 64.0;
+            sc.line([-5.0, y, edge_z], [5.0, y, edge_z], edge, width, false);
+            sc
+        };
+        let near = |a: [u8; 4], b: [u8; 4]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 3);
+        for oit in [true, false] {
+            let Some(alone) = middle_pixel(scene(5.0, None, 4.0), oit) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            for faded in [true, false] {
+                let shown = middle_pixel(scene(5.0, Some(faded), 4.0), oit).unwrap();
+                assert!(near(shown, alone), "oit {oit}, faded {faded}: the front edge looks as it does with nothing behind: {shown:?} vs {alone:?}");
+            }
+            // An edge behind the front square is still seen through it.
+            let behind = middle_pixel(scene(-5.0, Some(true), 4.0), oit).unwrap();
+            assert!(behind[2] > 60, "oit {oit}: an edge behind a see-through face is tinted by it: {behind:?}");
+            // A line narrower than a pixel leaves part of it to the face behind.
+            let thin_alone = middle_pixel(scene(5.0, None, 0.75), oit).unwrap();
+            let thin = middle_pixel(scene(5.0, Some(true), 0.75), oit).unwrap();
+            assert!(!near(thin, thin_alone), "oit {oit}: the faded face behind still shows past a thin line: {thin:?} vs {thin_alone:?}");
+        }
     }
 
     #[test]
