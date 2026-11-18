@@ -1237,6 +1237,8 @@ enum Thing {
     Axis(String),
     /// A construction point.
     Point(String),
+    /// Any other feature, by id: only leads to its folders (#19153).
+    Feature(u64),
 }
 
 /// What the tree lights for the selection and the 3D view's pointer: each lit item's row (in
@@ -1327,15 +1329,19 @@ impl Lit {
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
-            None => app.viewport.hover_feature.and_then(|id| {
-                app.session.doc.feature(id).and_then(|f| match &f.kind {
-                    FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),
-                    FeatureKind::ConstructionPlane { .. } => Some(Thing::Plane(f.name.clone())),
-                    FeatureKind::ConstructionAxis { .. } => Some(Thing::Axis(f.name.clone())),
-                    FeatureKind::ConstructionPoint { .. } => Some(Thing::Point(f.name.clone())),
-                    _ => None,
+            None => app
+                .viewport
+                .hover_feature
+                .and_then(|id| {
+                    app.session.doc.feature(id).map(|f| match &f.kind {
+                        FeatureKind::Sketch { .. } => Thing::Sketch(id),
+                        FeatureKind::ConstructionPlane { .. } => Thing::Plane(f.name.clone()),
+                        FeatureKind::ConstructionAxis { .. } => Thing::Axis(f.name.clone()),
+                        FeatureKind::ConstructionPoint { .. } => Thing::Point(f.name.clone()),
+                        _ => Thing::Feature(id),
+                    })
                 })
-            }),
+                .or_else(|| browser_hover(app)),
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
@@ -1359,6 +1365,7 @@ impl Lit {
                 Thing::Sketch(id) => {
                     components.extend(doc.features.iter().find(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.component))
                 }
+                Thing::Feature(id) => components.extend(doc.feature(*id).map(|f| f.component)),
                 Thing::Plane(name) | Thing::Axis(name) | Thing::Point(name) => components.extend(
                     doc.features
                         .iter()
@@ -1416,6 +1423,19 @@ impl Lit {
     fn placement(&self, doc: &solidcraft_engine::doc::Document, path: &[u64], component: u64) -> Mark {
         let below = self.paths.iter().any(|p| p.starts_with(path)) || self.components.iter().any(|c| doc.component_within(*c, component));
         if below { Mark::Branch } else { Mark::None }
+    }
+}
+
+/// What a Browser row under the pointer last frame lit in the view, when it was no feature: a
+/// plane (an origin or construction plane's row), or the one body of a body's row. A row lighting
+/// several bodies (a folder or a placement) names no one of them (#19153).
+fn browser_hover(app: &SolveApp) -> Option<Thing> {
+    if let Some(plane) = &app.viewport.hover_plane {
+        return Some(Thing::Plane(plane.clone()));
+    }
+    match app.viewport.hover_bodies.as_slice() {
+        [body] => Some(Thing::Body(body.clone())),
+        _ => None,
     }
 }
 
@@ -3535,6 +3555,14 @@ fn entry_row(
     }
     if r.hovered
         && let Thing::Sketch(id) = &e.thing
+    {
+        acts.hover_feature = Some(*id);
+        acts.hovered = true;
+    }
+    // A construction axis or point row lights its feature, as a sketch's row does (#19153).
+    if r.hovered
+        && matches!(e.thing, Thing::Axis(_) | Thing::Point(_))
+        && let Some(Target::Plane { id }) = &e.target
     {
         acts.hover_feature = Some(*id);
         acts.hovered = true;

@@ -132,10 +132,17 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
             }
         }
     };
+    // The feature that made what is under the cursor or picked in the viewport, as the history
+    // lights it, and in the history layout what a selected history row lights.
+    let from_view = acts.lit.features_from_view(app);
+    let lit = if compact { lit_by_selection(app) } else { BTreeSet::new() };
+    // Only a row in view paints its mark (#6083).
+    let lights = rows.next_visible() && holds_any(app, component, compact, from_view.iter().flatten().chain(&lit));
+    let mark = if lights { Mark::Branch } else { Mark::None };
     let r = node_row(
         rows,
         Spec { key: &key, ..Default::default() },
-        Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), mark, ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
@@ -160,10 +167,6 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
             .collect(),
     };
     let here = Here { component, path, scope: &scope, body_row: None };
-    // The feature that made what is under the cursor or picked in the viewport, as the history
-    // lights it, and in the history layout what a selected history row lights.
-    let from_view = acts.lit.features_from_view(app);
-    let lit = if compact { lit_by_selection(app) } else { BTreeSet::new() };
     let mark = |app: &SolveApp, index: usize| {
         let id = app.session.doc.features.get(index).map(|f| f.id);
         if id.is_some_and(|id| lit.contains(&id) || from_view.contains(&Some(id))) { Mark::Here } else { Mark::None }
@@ -424,6 +427,14 @@ fn history_plan(app: &SolveApp, indices: &[usize], marker: usize) -> HistoryRows
 
 /// What a selected history row lights up: a feature's sketches, and the features built from a
 /// selected sketch.
+/// Whether the Features folder (or the History, when `compact`) of `component` lists any of these
+/// features: it then leads to them with a faint bar, as the Sketches and Bodies folders do (#19153).
+fn holds_any<'a>(app: &SolveApp, component: u64, compact: bool, ids: impl IntoIterator<Item = &'a u64>) -> bool {
+    ids.into_iter().any(|&id| {
+        app.session.doc.feature(id).is_some_and(|f| f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. })))
+    })
+}
+
 fn lit_by_selection(app: &SolveApp) -> BTreeSet<u64> {
     let mut lit = BTreeSet::new();
     let doc = &app.session.doc;
@@ -2077,6 +2088,47 @@ mod tests {
         assert!(h.app.session.selection.is_empty(), "hovering sketch doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
+    }
+
+    /// #19153: hovering a feature, body or construction row lights the folders above it, as
+    /// hovering a sketch's row already did.
+    #[test]
+    fn hovering_a_feature_body_or_construction_row_lights_its_folders() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Block"})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("construct.axis.two_planes", json!({"a":"XZ","b":"YZ","name":"Spindle"})).unwrap();
+        for folder in ["c0/features", "c0/bodies", "c0/construction"] {
+            h.app.tree.expanded.insert(folder.into());
+        }
+        h.frames(2);
+        let hover = |h: &mut Harness, handle: &str| {
+            let at = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("no handle {handle}"));
+            h.step(&json!({"move":[at.x, at.y]})).unwrap();
+        };
+
+        hover(&mut h, &format!("row:browser-feature:c0:{round}"));
+        let mut lit = Lit::of(&mut h.app);
+        assert!(lit.any(), "a hovered feature row lights the design row");
+        let from_view = lit.features_from_view(&h.app);
+        assert!(holds_any(&h.app, 0, false, from_view.iter().flatten()), "and its Features folder");
+
+        hover(&mut h, "row:Block");
+        let lit = Lit::of(&mut h.app);
+        let bodies = entries(&h.app, 0, "bodies");
+        assert_eq!(lit.branch(&h.app, &bodies), crate::ui_kit::Mark::Branch, "a hovered body row lights its Bodies folder");
+
+        hover(&mut h, "row:Spindle");
+        let lit = Lit::of(&mut h.app);
+        let construction = entries(&h.app, 0, "construction");
+        assert_eq!(lit.branch(&h.app, &construction), crate::ui_kit::Mark::Branch, "a hovered axis row lights its Construction folder");
+
+        h.step(&json!({"move":[5, 5]})).unwrap();
+        let mut lit = Lit::of(&mut h.app);
+        assert!(!lit.any(), "nothing is lit once the pointer leaves the Browser");
+        assert!(!holds_any(&h.app, 0, false, lit.features_from_view(&h.app).iter().flatten()));
     }
 
     #[test]
