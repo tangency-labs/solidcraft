@@ -44,6 +44,10 @@ pub struct TabSlotSpec {
     pub protrusion: f64,
     /// The slot prism's overshoot `o_S` past each of S's faces (design 7.2).
     pub overshoot: f64,
+    /// The seed of the tab width variation, per joint (the caller derives it from its own seed).
+    pub seed: u64,
+    /// The width variation, a `±` bound on each tab's width (0: every tab is `width` wide).
+    pub width_jitter: f64,
 }
 
 /// The recipe applied ([`Body::tab_slot_cut`]): T with its tabs joined, S with its slots cut,
@@ -66,6 +70,8 @@ pub struct TabSlotCut {
 pub struct TabPlan {
     /// The tab's start `u_k` along the strip.
     pub start: f64,
+    /// The tab's width, the spec's `width` unless varied ([`ts::vary`]).
+    pub width: f64,
     /// The slot's laser outline in P's `(x, y)` frame.
     pub slot: Region2,
     /// The first failing check of design 7.4, if any.
@@ -311,16 +317,26 @@ impl Body {
         };
         let g_min = ts::laser_g_min(spec.clearance, spec.min_land).map_err(status)?;
         let mut out = Vec::new();
-        for stretch in pc::stretches(band, &defects, tol).map_err(status)? {
+        for (index, stretch) in pc::stretches(band, &defects, tol).map_err(status)?.into_iter().enumerate() {
             let starts = ts::place(stretch, spec.layout, spec.width, spec.end_distance, g_min)
                 .map_err(status)?;
             let tabs = match starts {
                 Err(skip) => Err(skip),
                 Ok(starts) => {
-                    let mut tabs = Vec::with_capacity(starts.len());
-                    for start in starts {
+                    let sized = ts::vary(
+                        stretch,
+                        &starts,
+                        spec.width,
+                        spec.end_distance,
+                        g_min,
+                        ts::stretch_seed(spec.seed, index),
+                        spec.width_jitter,
+                    )
+                    .map_err(status)?;
+                    let mut tabs = Vec::with_capacity(sized.len());
+                    for (start, width) in sized {
                         let outline =
-                            ts::slot_outline_along(start, spec.width, across, spec.clearance, d)
+                            ts::slot_outline_along(start, width, across, spec.clearance, d)
                                 .map_err(status)?;
                         let mut skip = Some(SlotSkip::AtEdge);
                         for (i, region) in face.iter().enumerate() {
@@ -347,10 +363,11 @@ impl Body {
                             }
                         };
                         let tab =
-                            ts::tab_outline_for(start, spec.width, t_k, spec.protrusion, level)
+                            ts::tab_outline_for(start, width, t_k, spec.protrusion, level)
                                 .map_err(status)?;
                         tabs.push(TabPlan {
                             start,
+                            width,
                             slot: outline,
                             skip,
                             tab,
@@ -857,6 +874,8 @@ mod tests {
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
+            seed: 0,
+            width_jitter: 0.0,
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let (d, plan) = wall
@@ -939,6 +958,47 @@ mod tests {
         ));
     }
 
+    /// Request 3: a seeded width variation. The same seed plans the same widths, another seed
+    /// others; every slot is its tab plus the clearance each side, so both plates carry one
+    /// layout; every tab stays inside the end distances of the contact.
+    #[test]
+    fn a_seeded_width_variation_is_deterministic_and_symmetric() {
+        let (s, p) = bottom();
+        let spec = TabSlotSpec {
+            layout: Layout::Count(3),
+            width: 10.0,
+            end_distance: 5.0,
+            clearance: 0.1,
+            min_land: 0.5,
+            protrusion: 1.0,
+            overshoot: 0.5,
+            seed: 42,
+            width_jitter: 3.0,
+        };
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let widths = |spec: TabSlotSpec| -> Vec<f64> {
+            let (_, plan) = wall.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap();
+            plan.iter()
+                .flat_map(|st| st.tabs.as_ref().unwrap().iter().map(|t| t.width))
+                .collect()
+        };
+        let a = widths(spec);
+        assert_eq!(a, widths(spec));
+        assert_ne!(a, widths(TabSlotSpec { seed: 43, ..spec }));
+        assert!(a.iter().any(|w| (w - 10.0).abs() > 1e-9), "{a:?}");
+        let (_, plan) = wall.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap();
+        assert!(plan
+            .iter()
+            .flat_map(|st| st.tabs.as_ref().unwrap())
+            .all(|t| t.skip.is_none()));
+        let cut = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
+        let v = |b: &Body| b.mass_properties(1e-9).unwrap().volume;
+        let sum: f64 = a.iter().sum();
+        assert!((v(&cut.tab_plate) - (43200.0 + sum * 6.0 * 7.0)).abs() < 1e-6);
+        let slots: f64 = a.iter().map(|w| (w + 0.2) * 6.2 * 6.0).sum();
+        assert!((v(&cut.slot_plate) - (96000.0 - slots)).abs() < 1e-6);
+    }
+
     /// 16.2 the recipe applied: Wall on Bottom, count 2: T gains two 10 x 6 x 7 tabs (43200 +
     /// 840), S loses two 10.2 x 6.2 slots through its 6 (96000 - 758.88); the inputs are
     /// untouched. Lifted: `no_contact`, nothing made.
@@ -953,6 +1013,8 @@ mod tests {
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
+            seed: 0,
+            width_jitter: 0.0,
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let cut = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
@@ -990,6 +1052,8 @@ mod tests {
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
+            seed: 0,
+            width_jitter: 0.0,
         }
     }
 
@@ -1281,6 +1345,7 @@ mod tests {
             let outline = tab_outline(start, 18.0, 12.0, 0.0).unwrap().unwrap();
             TabPlan {
                 start,
+                width: 18.0,
                 slot: outline.clone(),
                 skip,
                 tab: if short {

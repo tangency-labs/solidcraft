@@ -167,7 +167,7 @@ mod tests {
     }
 
     fn spec(layout: Layout, width: f64, end_distance: f64) -> TabSlotSpec {
-        TabSlotSpec { layout, width, end_distance, clearance: 0.1, min_land: 0.5, protrusion: 0.0, overshoot: 0.5 }
+        TabSlotSpec { layout, width, end_distance, clearance: 0.1, min_land: 0.5, protrusion: 0.0, overshoot: 0.5, seed: 0, width_jitter: 0.0 }
     }
 
     fn volume(b: &Body) -> f64 {
