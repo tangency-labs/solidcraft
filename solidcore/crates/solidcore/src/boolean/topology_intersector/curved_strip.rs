@@ -1377,34 +1377,57 @@ mod tests {
         assert_eq!(dropped, [1, 0, 0, 0, 0, 0, 0]);
     }
 
-    /// [`net_of`]'s bound is the bound of the definition a B-spline surface keeps (the
-    /// fixture's curved faces, the nets of rounds: MEASURED 1.21e-8 for A), and 0 for a
-    /// plain B-spline surface.
+    /// [`net_of`]'s bound is the bound of the definition a B-spline surface keeps (a screw
+    /// sweep's wall, the net of its sweep), as it is a procedural blend's (the fixture's
+    /// blend faces, A among them: MEASURED 1.21e-8), and 0 for a plain B-spline surface.
     #[test]
     fn a_kept_definition_gives_the_net_its_bound() {
         use crate::nurbs::b_spline_curve::KnotType;
         use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
         use crate::topology::brep::p1::faces;
         let mut k = Kernel::default();
+        let profile: Vec<Curve> = [(4.1, 0.0), (5.0, 0.0), (5.0, 0.9), (4.1, 0.9)]
+            .iter()
+            .zip([(5.0, 0.0), (5.0, 0.9), (4.1, 0.9), (4.1, 0.0)].iter())
+            .map(|(&(ar, az), &(br, bz))| {
+                Curve::from(crate::curve::line::Line::from_points(
+                    Point3::new(ar, 0.0, az),
+                    Point3::new(br, 0.0, bz),
+                    3,
+                ))
+            })
+            .collect();
+        let screw = crate::sweep::screw::screw_sweep(
+            &mut k,
+            &profile,
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+            1.0,
+            1.0,
+            1e-4,
+        )
+        .unwrap();
         let (body, kept) = curved_strip_join(&mut k);
-        let mut kept_bounds = 0;
-        for b in [&body, &kept] {
+        let mut checked = [0, 0];
+        for b in [&screw, &body, &kept] {
             for f in faces(b, None).unwrap() {
                 let Some(surface) = b.face(f).unwrap().surface.as_ref() else {
                     continue;
                 };
-                let (SurfaceKind::BSpline(_), Some(definition)) =
-                    (surface.kind(), surface.procedural_definition())
-                else {
+                let Some(definition) = surface.procedural_definition() else {
                     continue;
                 };
                 let (_, bound) = net_of(surface).unwrap();
                 assert!(bound > 0.0, "{bound:e}");
                 assert_eq!(bound.to_bits(), definition.bound().to_bits());
-                kept_bounds += 1;
+                match surface.kind() {
+                    SurfaceKind::BSpline(_) => checked[0] += 1,
+                    SurfaceKind::ProceduralBlend(_) => checked[1] += 1,
+                    other => panic!("{other:?}"),
+                }
             }
         }
-        assert!(kept_bounds > 0, "no B-spline face keeps a definition");
+        assert!(checked[0] > 0 && checked[1] > 0, "{checked:?}");
         let plain = BSplineSurface::create_canonical(&CanonicalSurfaceData {
             u_degree: 1,
             v_degree: 1,
