@@ -413,7 +413,7 @@ impl FileAction {
         // with unsaved changes under the report, and ask about it where it can't be answered.
         let behind_report = app.issue_report.draft.is_some();
         let available = match self {
-            Self::NewDrawing => crate::drawing_workspace::enabled(app) && app.session.doc.has_something_to_draw(),
+            Self::NewDrawing => app.session.doc.has_something_to_draw(),
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
@@ -517,11 +517,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
     let mut rows = vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)];
-    // Drawings are a preview (Preferences > Design > Drawings): off, the File menu has no New Drawing.
-    if crate::drawing_workspace::enabled(app) {
-        // The icon `drawing.create` itself uses.
-        rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
-    }
+    // The icon `drawing.create` itself uses.
+    rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
     rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
     let mut recent: Vec<FileRow> = app
         .home
@@ -785,8 +782,11 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
         if let Some(format) = format {
             params["format"] = json!(format);
         }
-        if app.run("file.export", params).is_ok() {
-            app.set_status(format!("Exported {path}"), false);
+        if let Ok(result) = app.run("file.export", params) {
+            let skipped =
+                result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+            let line = if skipped.is_empty() { format!("Exported {path}") } else { format!("Exported {path} (skipped {})", skipped.join(", ")) };
+            app.set_status(line, false);
         }
     });
 }
@@ -2645,10 +2645,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     // Home hides the design: only New, Open and Preferences work there.
     // An empty Drawing workspace has no drawing history, selection or camera. Shortcuts
     // must not silently edit the source design behind it. Explicit source editors retain
-    // their existing shortcuts while open.
+    // their existing shortcuts while open. With a drawing open, undo and redo step through that
+    // drawing's own history only, so Ctrl+Z and Ctrl+Y pass.
     let drawing =
         crate::drawing_workspace::active(app) && app.bom.is_none() && app.design_properties.is_none() && !crate::dialogs_sheet::flat_active(app);
     let shown = design_shown(app) && !drawing;
+    let drawing_history = drawing && design_shown(app) && app.session.open_drawing.is_some();
     if shown {
         crate::edit_clipboard::handle(app, ctx);
     } else {
@@ -2697,7 +2699,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     });
                 }
-                _ if !shown => {}
+                _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {}
                 // Ctrl+W closes the view shown, and the design with it when that is its only view;
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
@@ -2783,6 +2785,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
+            }
+            // The quick menu at the cursor (#5501), unless the person bound the key to a command.
+            Key::S if mods.shift && !mods.alt && crate::keymap::commands_for(app, crate::quick_menu::KEY).is_empty() => {
+                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                crate::quick_menu::open(app, at);
             }
             Key::F2 => {
                 if !crate::context_menu::press_shortcut(app, "F2") {
@@ -2966,7 +2973,6 @@ mod header_report_tests {
     fn native_menu_actions_disable_save_on_home() {
         let mut h = crate::scenario::Harness::new();
         // New Drawing is there with drawings on (Preferences > Design > Drawings).
-        h.app.preferences.drawings_preview = true;
         h.app.home.open = true;
         assert!(!FileAction::Save.enabled(&h.app));
         assert!(!FileAction::SaveAs.enabled(&h.app));
@@ -3221,7 +3227,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_opens_the_first_sheet_of_the_open_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         assert!(!FileAction::NewDrawing.enabled(&h.app), "an empty design has nothing to draw");
         FileAction::NewDrawing.run(&mut h.app);
         assert!(h.app.session.doc.drawings.is_empty() && !crate::drawing_workspace::active(&h.app));
@@ -3245,7 +3250,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_that_fails_goes_back_to_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.preferences.part_drawing_template = "no-such-template".into();
         assert!(FileAction::NewDrawing.enabled(&h.app));
@@ -3261,7 +3265,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_that_fails_in_drawing_stays_in_drawing() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         let template = h.app.preferences.part_drawing_template.clone();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();

@@ -46,12 +46,10 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "boolean_vertex_by_best_crossing",
     "bspline_trim_preserves_uv_spans",
     "classify_edge_interval",
     "corner_patch_face_side_twist",
     "curve_loop_normal_from_area",
-    "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",
     "fillet_cleanup_keeps_target_faces",
@@ -79,10 +77,8 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "revolve_analytic_profile_faces",
     "shell_edges_on_analytics_exact",
     "simple_coincidence_crossing_is_point",
-    "ssi_low_angle_start_on_probation",
     "ssi_proto_topology_statuses_pass_on",
     "ssi_tangent_curve_tracer",
-    "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
     "uv_trim_corner_end_points_only",
 ];
@@ -90,13 +86,18 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
 const FORK_VOLUME: f64 = 40_267.709_270_590_589;
 
+/// A kernel with the fixes `names` on and the rest off. A name the kernel no longer has is a
+/// retired flag, whose fix is now the default behaviour: it is skipped, so retiring a flag
+/// edits none of these lists. The lists are frozen snapshots of past profiles, so a misspelt
+/// name is skipped silently too; a check against a list of retired names would bring back
+/// an edit here for every retirement.
 fn kernel(names: &[&str]) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = UpstreamFixes::default();
     for name in names {
-        *k.fixes
-            .flag_mut(name)
-            .unwrap_or_else(|| panic!("no flag {name}")) = true;
+        if let Some(on) = k.fixes.flag_mut(name) {
+            *on = true;
+        }
     }
     k
 }

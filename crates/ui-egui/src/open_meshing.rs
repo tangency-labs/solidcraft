@@ -311,6 +311,10 @@ pub(crate) fn warm(
     if shared {
         crate::viewport::warm_shared_tris(&mesh);
     }
+    // Its box, which framing the view reads for every body once they are all shown: worked out
+    // there, on the window thread, it moved every point of every placement (a second for a
+    // hundred copies of a large assembly).
+    let _ = b.mesh_bounds();
     if plans && b.placed_definition().is_none_or(|id| !repeated.contains(&id)) {
         let _ = b.gpu_plan_at(q);
     }

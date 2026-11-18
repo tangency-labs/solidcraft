@@ -8,19 +8,38 @@
 //! The case is the SSI corpus' `c2n_cylN_on_planeN` (jyviko/ssi-corpus `b04c8a6`): a
 //! rational quadratic NURBS cylinder of radius 1 about the x axis at `z = 1`, lying on the
 //! NURBS plane `z = 0` along `y = 0, -2 <= x <= 2`, at approximation tolerance `1e-6`.
-//! With `UpstreamFixes::ssi_trace_tangent_curves_once` off (upstream) the result is two
-//! tangent curves on top of each other; with it on, one.
+//! Upstream the result is two tangent curves on top of each other; with the fix, one.
+//!
+//! **Cluster direction** (`coaxial_sphere_cylinder_tangent_circle`): when a better tangent
+//! boundary start point replaces a cluster's representative (`AddStartPoint`), it keeps
+//! the representative's direction. A sphere of radius 2 and a cylinder of radius 2 about
+//! the same axis touch along the sphere's equator. The cylinder's tangent boundary samples
+//! give a cluster of start points on the circle; the sign of each sample's direction
+//! depends only on the boundary that produced it. Had the replacement flipped the
+//! cluster's direction, `TestPoint` would snap a trace from the contact band's edge onto
+//! the cluster after one step (it snaps onto a start point whose direction opposes the
+//! trace), the cluster would go with that stub and the tangent circle would be lost. The
+//! intersection is the one whole circle in either operand order; only the sphere-first
+//! order fails with the direction kept from the replacement (the swapped order passes
+//! either way and is kept as the other order's check).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::indexing_slicing
+    clippy::indexing_slicing,
+    clippy::cast_precision_loss
 )] // test helpers
+use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::approx_tol3d;
+use solidcore::intersect::api_intersectors::intersect_surfaces;
 use solidcore::kernel::Kernel;
+use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
+use solidcore::surface::cone::Cone;
+use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surface::p2::{SurfaceIntersection, TsectCurveType};
 use solidcore::surface::surface::Surface;
 
@@ -56,9 +75,8 @@ fn nurbs(
 }
 
 /// The corpus' plane and cylinder, intersected as its `gsi` runner does.
-fn intersect(fix: bool) -> SurfaceIntersection {
-    let mut k = Kernel::default();
-    k.fixes.ssi_trace_tangent_curves_once = fix;
+fn intersect() -> SurfaceIntersection {
+    let k = Kernel::default();
     let plane = nurbs(
         [1, 1],
         &[0.0, 0.0, 1.0, 1.0],
@@ -127,24 +145,8 @@ fn ends(r: &SurfaceIntersection) -> Vec<[[f64; 3]; 2]> {
 }
 
 #[test]
-fn upstream_traces_the_tangent_line_twice() {
-    let r = intersect(false);
-    assert_eq!(
-        r.curve_types,
-        [TsectCurveType::Tangent, TsectCurveType::Tangent],
-        "{:?}",
-        ends(&r)
-    );
-    // both run the whole line, from x = -2 to x = 2 (one each way)
-    for [a, b] in ends(&r) {
-        assert!((a[0].abs() - 2.0).abs() < 1e-6 && (b[0].abs() - 2.0).abs() < 1e-6);
-        assert!((a[0] + b[0]).abs() < 1e-6);
-    }
-}
-
-#[test]
-fn fixed_traces_the_tangent_line_once() {
-    let r = intersect(true);
+fn tangent_line_is_traced_once() {
+    let r = intersect();
     assert_eq!(r.curve_types, [TsectCurveType::Tangent], "{:?}", ends(&r));
     let [[a, b]] = <[[[f64; 3]; 2]; 1]>::try_from(ends(&r)).unwrap();
     assert!((a[0].abs() - 2.0).abs() < 1e-6 && (b[0].abs() - 2.0).abs() < 1e-6);
@@ -152,4 +154,83 @@ fn fixed_traces_the_tangent_line_once() {
     for p in [a, b] {
         assert!(p[1].abs() < 1e-5 && p[2].abs() < 1e-5, "{p:?}");
     }
+}
+
+// ---- cluster direction (see the module docs) ----------------------------------------
+
+fn frame(origin: Vec3) -> Axis2Placement {
+    let mut f = Axis2Placement::default();
+    f.set_canonical(origin, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))
+        .unwrap();
+    f
+}
+
+fn operands(k: &Kernel) -> (Surface, Surface) {
+    let sphere =
+        Surface::from(Sphere::create_canonical(k, &frame(Vec3::new(0.0, 0.0, 0.0)), 2.0).unwrap());
+    let mut cylinder = Surface::from(
+        Cone::create_canonical_cylinder(k, &frame(Vec3::new(0.0, 0.0, -3.0)), 2.0).unwrap(),
+    );
+    let mut d = Extent2d::default();
+    d.set_min_max_coords(0.0, 0.0, 360.0, 6.0).unwrap();
+    cylinder.adjust_step_uv_domain(k, &d).unwrap();
+    (sphere, cylinder)
+}
+
+/// The one curve of the intersection is the whole equator.
+fn assert_equator(k: &Kernel, s1: &Surface, s2: &Surface) {
+    let (curves, status) = intersect_surfaces(k, s1, s2);
+    status.unwrap();
+    assert_eq!(curves.len(), 1, "expected the one tangent circle");
+    let c = &curves[0];
+    let d = c.natural_interval();
+    let n = 256;
+    let mut prev: Option<f64> = None;
+    let mut turned = 0.0;
+    for i in 0..=n {
+        let p = c
+            .evaluate_point(k, d.evaluate(f64::from(i) / f64::from(n)))
+            .unwrap();
+        // on both surfaces, within the intersector's tolerance (a thousandth of
+        // the operands' size, which is over 4)
+        let r = (p.x * p.x + p.y * p.y).sqrt();
+        let rho = (r * r + p.z * p.z).sqrt();
+        assert!(
+            (r - 2.0).abs() <= 1e-3,
+            "point {i} {r} from the cylinder axis"
+        );
+        assert!(
+            (rho - 2.0).abs() <= 1e-3,
+            "point {i} {rho} from the sphere centre"
+        );
+        let a = p.y.atan2(p.x);
+        if let Some(b) = prev {
+            let mut step = a - b;
+            if step > std::f64::consts::PI {
+                step -= std::f64::consts::TAU;
+            } else if step < -std::f64::consts::PI {
+                step += std::f64::consts::TAU;
+            }
+            turned += step;
+        }
+        prev = Some(a);
+    }
+    assert!(
+        (turned.abs() - std::f64::consts::TAU).abs() <= 1e-6,
+        "the curve turns {turned} rad about the axis, not one whole turn"
+    );
+}
+
+#[test]
+fn coaxial_sphere_cylinder_tangent_circle() {
+    let k = Kernel::default();
+    let (sphere, cylinder) = operands(&k);
+    assert_equator(&k, &sphere, &cylinder);
+}
+
+#[test]
+fn coaxial_sphere_cylinder_tangent_circle_swapped() {
+    let k = Kernel::default();
+    let (sphere, cylinder) = operands(&k);
+    assert_equator(&k, &cylinder, &sphere);
 }

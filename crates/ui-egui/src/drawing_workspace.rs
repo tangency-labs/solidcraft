@@ -12,6 +12,7 @@ use crate::ui_kit::{self, Container, Edge, Surface};
 use solidcraft_theme::Tokens;
 
 pub(crate) mod browser;
+pub(crate) mod dimension;
 mod first_sheet;
 pub(crate) mod note;
 mod panels;
@@ -28,6 +29,8 @@ pub struct State {
     options: Option<Tool>,
     placement: Option<placement::Placement>,
     note: Option<note::Draft>,
+    view_edit: Option<panels::ViewEdit>,
+    dimension: Option<dimension::Draft>,
     add_sheet: Option<panels::AddSheet>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
@@ -36,6 +39,8 @@ pub struct State {
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
+    /// The drawing open when Drawing was last left in this design: entering opens it again.
+    parked: Option<u64>,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
 }
@@ -44,37 +49,29 @@ pub fn active(app: &SolveApp) -> bool {
     matches!(app.ui.tab.as_str(), "DRAWING LAYOUT" | "DRAWING ANNOTATE" | "DRAWING PARTS" | "DRAWING REVIEW")
 }
 
-/// Whether drawings are turned on (Preferences > Design > Drawings, off by default). Off, the app
-/// shows no Drawing workspace; a design's drawings are still read and saved as they are.
-pub fn enabled(app: &SolveApp) -> bool {
-    app.preferences.drawings_preview
-}
-
-/// Leave the Drawing workspace once drawings are turned off (or a saved layout put the app there
-/// while they are off).
-pub fn reconcile(app: &mut SolveApp) {
-    if !enabled(app) && active(app) {
-        let _ = enter(app, false);
-    }
-}
-
 pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     if drawing {
-        if !enabled(app) {
-            return Err(solidcraft_ui_text::tr("ui.drawings_preview_off").to_string());
-        }
         if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
             return Err("Finish the current operation before entering Drawing".into());
         }
         if !active(app) {
             app.drawing_workspace.previous_tab = Some(app.ui.tab.clone());
             app.ui.tab = "DRAWING LAYOUT".into();
+            open_a_drawing(app);
         }
     } else if active(app) {
+        // An open drawing locks the model, so leaving closes it. The engine closes no drawing
+        // under a sheet sketch, so the user stays in Drawing until the sketch is finished.
+        if let Some(open) = app.session.open_drawing {
+            app.run("drawing.close", serde_json::json!({}))?;
+            app.drawing_workspace.parked = Some(open);
+        }
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         app.drawing_workspace.options = None;
         app.drawing_workspace.placement = None;
         app.drawing_workspace.note = None;
+        app.drawing_workspace.view_edit = None;
+        app.drawing_workspace.dimension = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
@@ -86,6 +83,22 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     app.ui.ribbon_context = None;
     app.cancel_view_animation();
     Ok(())
+}
+
+/// Entering Drawing with no drawing open opens one: the drawing left last in this design, where
+/// its sheet and zoom are kept, else the design's first, fitted on its first sheet. A design
+/// without drawings starts on the page that makes one.
+fn open_a_drawing(app: &mut SolveApp) {
+    if app.session.open_drawing.is_some() {
+        return;
+    }
+    let parked = app.drawing_workspace.parked.take().filter(|id| app.session.doc.drawing(*id).is_some());
+    let Some(id) = parked.or_else(|| app.session.doc.drawings.first().map(|d| d.id)) else { return };
+    match app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)})) {
+        Ok(_) if parked.is_none() => crate::drawing_sheet_page::fit(app),
+        Ok(_) => {}
+        Err(error) => app.set_status(error, true),
+    }
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -101,6 +114,10 @@ pub(crate) fn placing_view(app: &SolveApp) -> bool {
 
 pub(crate) fn placing_note(app: &SolveApp) -> bool {
     app.drawing_workspace.options == Some(Tool::Note(None))
+}
+
+pub(crate) fn placing_dimension(app: &SolveApp) -> bool {
+    app.drawing_workspace.options == Some(Tool::Dimension(None))
 }
 
 pub fn can_open_options(id: &str) -> bool {
@@ -119,6 +136,8 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.options = None;
     app.drawing_workspace.placement = None;
     app.drawing_workspace.note = None;
+    app.drawing_workspace.view_edit = None;
+    app.drawing_workspace.dimension = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
@@ -824,6 +843,12 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     } else if let Some(Tool::Note(selected)) = app.drawing_workspace.options {
         note::editor(app, ui, selected);
+    } else if let Some(Tool::Edit(view)) = app.drawing_workspace.options {
+        if panels::view_editor(app, ui, view) {
+            close_panel(app);
+        }
+    } else if placing_dimension(app) {
+        dimension::panel(app, ui);
     } else if let Some(tool) = app.drawing_workspace.options {
         panels::tool_body(app, ui, tool);
         if panels::footer(ui, tool) {
@@ -839,29 +864,120 @@ mod tests {
     use super::*;
     use crate::scenario::Harness;
 
-    /// Drawings are off until Preferences > Design turns them on: Drawing stays "coming later" in
-    /// the workspace menu and the workspace refuses to open; turned off again, the app leaves it.
+    /// The Drawing workspace is a normal workspace: it opens with default preferences.
     #[test]
-    fn drawings_stay_off_until_turned_on() {
+    fn drawing_workspace_opens_with_default_preferences() {
         let mut h = Harness::new();
         h.app.home.open = false;
-        assert!(!h.app.preferences.drawings_preview, "off by default");
-        let drawing_row = |app: &SolveApp| {
-            crate::context_menu::items(app, &crate::context_menu::Target::Workspace).into_iter().find(|item| item.label == "Drawing").unwrap()
-        };
-        let off = drawing_row(&h.app);
-        assert!(!off.enabled && off.id == "ui.workspace", "{:?}", off.id);
-        assert!(crate::workspace::enter(&mut h.app, "drawing").is_err());
-        assert!(!active(&h.app));
-        h.app.preferences.drawings_preview = true;
-        let on = drawing_row(&h.app);
+        let on =
+            crate::context_menu::items(&h.app, &crate::context_menu::Target::Workspace).into_iter().find(|item| item.label == "Drawing").unwrap();
         assert!(on.enabled && on.id == "ui.workspace.drawing");
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
         assert!(active(&h.app));
-        h.app.preferences.drawings_preview = false;
-        h.frames(2);
-        assert!(!active(&h.app), "turning drawings off leaves the Drawing workspace");
-        assert_eq!(h.app.ui.tab, "MODEL");
+    }
+
+    /// A preferences file written while Drawings was a setting still loads: the retired key is
+    /// ignored and the other settings in it are kept.
+    #[test]
+    fn saved_preferences_with_the_retired_drawings_key_still_load() {
+        let mut h = Harness::new();
+        h.app.load_prefs(r#"{"preferences":{"drawings_preview":false,"default_units":"in"}}"#);
+        assert_eq!(h.app.preferences.default_units, "in");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert!(active(&h.app));
+    }
+
+    /// A box in Drawing, with a drawing of one base view open: its id.
+    fn drawing_with_a_view(h: &mut Harness) -> Option<u64> {
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.app.run("drawing.view.base", serde_json::json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[150,150]})).unwrap();
+        h.app.session.open_drawing
+    }
+
+    /// A design saved with a drawing and opened again shows that drawing when Drawing is entered,
+    /// on its first sheet, not the page that starts a new drawing.
+    #[test]
+    fn a_saved_drawing_opens_again_when_drawing_is_entered() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-drawing-reopen-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.solidcraft").to_string_lossy().into_owned();
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        assert!(drawing.is_some());
+        h.app.run("file.save", serde_json::json!({"path": path})).unwrap();
+        h.app.run("doc.open", serde_json::json!({"path": path})).unwrap();
+        assert!(!active(&h.app) && h.app.session.open_drawing.is_none(), "a design opens in Design");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.frames(4);
+        assert_eq!(h.app.session.open_drawing, drawing, "entering Drawing opens the design's drawing");
+        let first = h.app.session.drawing("test").unwrap().sheets[0].id;
+        assert_eq!(active_sheet(&h.app), Some(first), "on its first sheet");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the new-drawing page");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Leaving Drawing closes the drawing, so the model can be changed in Design; coming back opens
+    /// the same drawing. Undo works on what is open: the drawing's steps in Drawing, the model's in
+    /// Design.
+    #[test]
+    fn leaving_drawing_closes_the_drawing_and_coming_back_opens_it() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(!active(&h.app));
+        assert!(h.app.session.open_drawing.is_none(), "leaving Drawing closes the drawing");
+        h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
+        let features = h.app.session.doc.features.len();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, drawing, "the same drawing opens again");
+        let views = |h: &Harness| h.app.session.drawing("test").unwrap().views.len();
+        assert_eq!(views(&h), 1);
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(views(&h), 0, "undo in Drawing takes back the drawing's step");
+        assert_eq!(h.app.session.doc.features.len(), features, "and not the model's");
+        crate::workspace::enter(&mut h.app, "render").unwrap();
+        assert!(h.app.session.open_drawing.is_none(), "Render leaves Drawing the same way");
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features - 1, "undo in Design takes back the model's step");
+    }
+
+    /// The drawing left last in this design comes back, not the design's first; a design opened
+    /// afresh starts on its first drawing.
+    #[test]
+    fn the_drawing_left_last_comes_back_not_the_first() {
+        let mut h = Harness::new();
+        drawing_with_a_view(&mut h);
+        h.app.run("drawing.create", serde_json::json!({"name":"Second"})).unwrap();
+        let ids: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        let (first, later) = (ids[0], ids[1]);
+        h.app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(later)})).unwrap();
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(h.app.session.open_drawing.is_none());
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, Some(later), "the drawing left last");
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        reset_document(&mut h.app);
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
+    }
+
+    /// A sheet sketch keeps its drawing open: leaving Drawing waits until it is finished.
+    #[test]
+    fn a_sheet_sketch_keeps_the_drawing_open_until_it_is_finished() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
+        h.app.run("drawing.sketch.create", serde_json::json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        assert!(crate::workspace::enter(&mut h.app, "design").is_err());
+        assert!(active(&h.app));
+        assert_eq!(h.app.session.open_drawing, drawing);
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(h.app.session.open_drawing.is_none());
     }
 
     #[test]
@@ -872,7 +988,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", json!({"length":60,"width":35,"height":12})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", json!({})).unwrap();
         let created = h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[175,140]})).unwrap();
@@ -913,7 +1028,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         h.frames(6);
@@ -963,7 +1077,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let view = h.app.run("drawing.view.base", serde_json::json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[310,180]})).unwrap();
@@ -983,7 +1096,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.frames(4);
         assert!(h.app.session.open_drawing.is_none());
@@ -1003,7 +1115,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":100,"width":60,"height":12})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.frames(4);
         h.step(&serde_json::json!({"click":{"handle":"drawing:first:standard"}})).unwrap();
@@ -1020,7 +1131,6 @@ mod tests {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         h.app.run("drawing.sheet.add", serde_json::json!({"name":"Inspection sheet"})).unwrap();
@@ -1041,7 +1151,6 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
@@ -1067,7 +1176,6 @@ mod tests {
         h.app.ui.show_browser = true;
         h.app.preferences.drawing_sheets_visibility = "off".into();
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let added = h.app.run("drawing.sheet.add", serde_json::json!({"name":"Detail"})).unwrap();
@@ -1093,7 +1201,6 @@ mod tests {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         let first = h.app.run("drawing.create", serde_json::json!({})).unwrap()["sheets"][0]["id"].as_str().unwrap().to_string();
         h.frames(4);
@@ -1132,7 +1239,6 @@ mod tests {
         let revision = h.app.session.revision;
         let undo = h.app.session.undo.len();
         let cam = h.app.cam;
-        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         assert!(start(&mut h.app, "drawing.view.base.planned"));
         h.frames(2);
@@ -1160,7 +1266,6 @@ mod tests {
             h.app.ui.layout = layout;
             h.call("ui.resize", serde_json::json!({"width":1400,"height":1000}));
             h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-            h.app.preferences.drawings_preview = true;
             enter(&mut h.app, true).unwrap();
             h.app.run("drawing.create", serde_json::json!({})).unwrap();
             let revision = h.app.session.revision;
@@ -1237,7 +1342,6 @@ mod tests {
             h.call("ui.resize", serde_json::json!({"width":960,"height":600}));
             h.app.preferences.drawing_panel_width = 560.0;
             h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
-            h.app.preferences.drawings_preview = true;
             enter(&mut h.app, true).unwrap();
             h.app.run("drawing.create", serde_json::json!({})).unwrap();
             h.app.drawing_workspace.settings_open = true;
