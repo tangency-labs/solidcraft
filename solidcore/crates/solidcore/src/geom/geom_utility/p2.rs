@@ -1505,6 +1505,21 @@ mod tests {
         let noise_up = ev(v(1.0, 0.0, 0.0), v(0.0, 1e-9, 0.0));
         let noise_down = ev(v(1.0, 0.0, 0.0), v(0.0, -1e-9, 0.0));
         assert_eq!(c(&noise_up, &noise_down), ContinuityType::C1C2);
+        // the same at twice the speed on one side (G1): curvatures 1e-9 and 2.5e-10
+        let noise_fast = ev(v(2.0, 0.0, 0.0), v(0.0, -1e-9, 0.0));
+        assert_eq!(c(&noise_up, &noise_fast), ContinuityType::G1G2);
+
+        // one curvature within the gap (9e-8), the other above it (1.8e-7), opposite:
+        // the vectors are 2.7e-7 apart, over the gap, so the join is not G2
+        let small = ev(v(1.0, 0.0, 0.0), v(0.0, 9e-8, 0.0));
+        let small_flip = ev(v(2.0, 0.0, 0.0), v(0.0, -7.2e-7, 0.0));
+        assert_eq!(c(&small, &small_flip), ContinuityType::G1);
+
+        // a slow parameter does not hide a flip: speed 1e-3, second derivatives
+        // ±4e-7 (within the C2 gap) are curvatures 0.4 with mirrored normals
+        let slow_up = ev(v(1e-3, 0.0, 0.0), v(0.0, 4e-7, 0.0));
+        let slow_down = ev(v(1e-3, 0.0, 0.0), v(0.0, -4e-7, 0.0));
+        assert_eq!(c(&slow_up, &slow_down), ContinuityType::C1);
 
         // the curvature gap decides G2 before the C2 gap: equal second derivatives,
         // mostly tangential (|P''| 600), and first derivatives 1e-7 apart move the
