@@ -14232,3 +14232,58 @@ fn production_history_resize_paints_and_commits_each_width_above_regular_minimum
         }
     }
 }
+
+/// A lone panel can put its own content in its title's place (the Browser's search field, #1634):
+/// after the grip and before the header's actions, mirrored right to left and kept while folded.
+/// Content wider than the header moves the actions to a row below; a group keeps its tabs there.
+#[test]
+fn header_content_takes_the_titles_place_after_the_grip() {
+    for direction in [Direction::Ltr, Direction::Rtl] {
+        let (mut h, _) = review_cohort_host(|_| {});
+        h.dispatch(vec![
+            fixture_open("fixture.editor", "lone", "side", Zone::Right, 0).unwrap(),
+            Mutation::SetSize { section: section("side"), size: Size { width: 320.0, height: 300.0 } },
+        ])
+        .unwrap();
+        let mut environment = h.runtime.environment().clone();
+        environment.direction = direction;
+        h.runtime.set_environment(environment, &mut h.local).unwrap();
+        let mut raw = RawPanelHost::new(h, 1.0);
+        let card = |raw: &mut RawPanelHost| {
+            raw.frame(Vec::new(), false);
+            raw.frame(Vec::new(), false);
+            assert_host_geometry(&raw.content, &raw.host.frame().unwrap().layout);
+            raw.host.frame().unwrap().layout.sections[0].clone()
+        };
+        assert!(card(&mut raw).header_content.is_none(), "only a panel that asks gets it");
+        raw.host.set_header_content(id("lone"), Some(60.0));
+        let c = card(&mut raw);
+        assert!(c.action_bar.is_none(), "60 wide fits beside the actions");
+        let order = [c.title.unwrap(), c.header_content.unwrap(), c.actions[0].1, c.menu];
+        for pair in order.windows(2) {
+            let (first, second) = if direction == Direction::Ltr { (pair[0], pair[1]) } else { (pair[1], pair[0]) };
+            assert!(first.origin.x + first.size.width <= second.origin.x + 0.01, "{direction:?}: {order:?}");
+        }
+        raw.host.set_header_content(id("lone"), Some(10_000.0));
+        let c = card(&mut raw);
+        assert!(c.action_bar.is_some() && c.header_content.is_some(), "too wide: the actions go to a row below");
+        raw.host.set_header_content(id("lone"), Some(60.0));
+        raw.content.dispatch(vec![Mutation::Collapse { section: section("side"), collapsed: true }]).unwrap();
+        let c = card(&mut raw);
+        assert!(c.collapsed && c.header_content.is_some(), "a folded panel keeps it");
+        raw.content
+            .dispatch(vec![
+                Mutation::Collapse { section: section("side"), collapsed: false },
+                Mutation::Open {
+                    kind: PanelKind::new("fixture.log").unwrap(),
+                    instance: id("peer"),
+                    destination: Some(Destination::JoinTab { section: section("side"), index: 1 }),
+                },
+                Mutation::Activate { instance: id("lone") },
+            ])
+            .unwrap();
+        let c = card(&mut raw);
+        assert!(c.tab_strip.is_some() && c.header_content.is_none(), "a group keeps its tabs in the header");
+        raw.host.set_header_content(id("lone"), None);
+    }
+}

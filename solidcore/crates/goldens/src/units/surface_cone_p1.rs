@@ -36,11 +36,9 @@ use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::geom_utility::p1::line_closest_point;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
-use solidcore::math::EFF_ZERO_SQ;
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
@@ -332,6 +330,18 @@ fn rust_cone(k: &Kernel, c: &ConeIn) -> solidcore::Result<Cone> {
     rust_cone_made(k, c, true)
 }
 
+/// The cone a case of this unit builds (its `cone` input, made as [`Runner`] makes it), for
+/// replaying moved rows against the analytic cone (`tests/wr704_wr713_cone_moves.rs`).
+///
+/// # Errors
+///
+/// A harness error for inputs that are not a case of this unit with a cone.
+pub fn case_cone(k: &Kernel, inputs: &Value) -> Result<solidcore::Result<Cone>, HarnessError> {
+    let i: Inputs = serde_json::from_value(inputs.clone()).map_err(|e| harness(e.to_string()))?;
+    let c = i.cone.as_ref().ok_or_else(|| harness("missing cone"))?;
+    Ok(rust_cone(k, c))
+}
+
 /// [`rust_cone`]; without `make`, the constructor modes skip their `MakeNurb` (the cone
 /// as its constructor leaves it, as the shim's op 19).
 fn rust_cone_made(k: &Kernel, c: &ConeIn, make: bool) -> solidcore::Result<Cone> {
@@ -576,48 +586,6 @@ fn side(left: bool) -> Side {
     }
 }
 
-/// The shim's test before `CreateIsoCircleFromPoint`: the STEP inversion it makes
-/// leaves the parameters unset, or the NURB conversion of those parameters fails and
-/// leaves the NURB parameter it then uses unset (always without `swap_uv`; with it,
-/// when the polar converter wrote nothing).
-fn iso_circle_inversion_fails(k: &Kernel, s: &Cone, p: Vec3, tol: f64) -> solidcore::Result<bool> {
-    let pos = s.rev().position();
-    let origin = pos.origin();
-    let z_axis = pos.z_axis();
-    let height_ivl = s.rev().step_uv_domain().v_interval();
-    let param = line_closest_point(origin, z_axis, p);
-    if !height_ivl.contains_value(param, tol) {
-        return Ok(false);
-    }
-    let radius = s.radius(param);
-    let center = origin + param * z_axis;
-    let mut vec = p - center;
-    if vec.length_squared() < 2.0 * EFF_ZERO_SQ {
-        vec = pos.x_axis();
-    }
-    let vec = vec.unitize_or_z();
-    let point_on_surface = center + radius * vec;
-    let inv = match s.step_inversion(k, point_on_surface, tol, None) {
-        Ok(inv) => inv,
-        Err(e) if e.is_unported() => return Err(e),
-        Err(_) => return Ok(true),
-    };
-    match s.convert_uv_from_step_to_nurbs(k, inv.uv) {
-        Ok(_) => Ok(false),
-        Err(e) if e.is_unported() => Err(e),
-        Err(_) if !s.rev().swap_uv() => Ok(true),
-        Err(_) => {
-            let Some(circle) = s.rev().polar_curve() else {
-                return Ok(true);
-            };
-            Ok(s.rev()
-                .polar_converter()
-                .convert_to_nurbs_parameter_or_written(k, circle, inv.uv.x, 0.0)?
-                .is_none())
-        }
-    }
-}
-
 /// Runs the op on the Rust cone, appending its status and outputs.
 fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcore::Result<()>, HarnessError> {
     let r: solidcore::Result<()> = match op {
@@ -698,17 +666,12 @@ fn rust_op(k: &Kernel, s: &Cone, op: &OpIn, o: &mut Vec<f64>) -> Result<solidcor
                 o.push(SC_ERR_ARG);
                 Ok(())
             } else {
-                match iso_circle_inversion_fails(k, s, v3(*p), *tol) {
-                    Err(e) => Err(e),
-                    Ok(true) => {
-                        o.push(SC_ERR_ARG);
-                        Ok(())
-                    }
-                    Ok(false) => s.create_iso_circle_from_point(k, v3(*p), *tol).map(|c| {
-                        o.push(SUCCESS);
-                        put_curve(o, c.as_ref());
-                    }),
-                }
+                // (WR-704: the function makes no STEP inversion, so the reference shim's
+                // test of one before the call no longer applies)
+                s.create_iso_circle_from_point(k, v3(*p), *tol).map(|c| {
+                    o.push(SUCCESS);
+                    put_curve(o, c.as_ref());
+                })
             }
         }
         OpIn::Inversion { p, tol, guess } => s

@@ -167,6 +167,12 @@ use crate::topology::{
 
 const OP: &str = "topology::brep::p3";
 
+/// The [`TopologyFailure::Inconsistent`] reason of the orientation's
+/// `"Nonorientable Brep, gathered faceuses from both sides of some face."` assert: more
+/// face uses are connected to one side than faces remain to be oriented.
+pub(crate) const GATHERED_BOTH_SIDES: &str =
+    "more face uses are connected than faces remain to be oriented";
+
 /// Upstream dereferences null here (no `NER`): the FFI guard rejects the input.
 const fn null_deref(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -4971,9 +4977,7 @@ fn orient_body(
             if faceuses.len() > remaining {
                 return Err(SolidError::topology(
                     OP,
-                    TopologyFailure::Inconsistent(
-                        "more face uses are connected than faces remain to be oriented",
-                    ),
+                    TopologyFailure::Inconsistent(GATHERED_BOTH_SIDES),
                 ));
             }
         }

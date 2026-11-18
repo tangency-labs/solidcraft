@@ -8,6 +8,7 @@
 
 pub mod boundary_moves;
 pub(crate) mod cylinder_section;
+pub mod knot_lines;
 pub mod p1;
 pub mod p2;
 pub mod p3;

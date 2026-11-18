@@ -164,9 +164,9 @@ pub mod watch;
 
 pub use blend::{
     ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edge_middles, blend_edges, chamfer, chamfer_carrying_face, chamfer_max,
-    chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners,
-    fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note, named_fit,
-    names_largest_fit, smooth_picks, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
+    chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, chamfer_sides_max_why, fillet, fillet_each, fillet_g2, fillet_g2_corners,
+    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note,
+    named_fit, names_largest_fit, scale_fit_note, smooth_picks, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
@@ -231,6 +231,7 @@ pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, sp
 pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
+pub use step_in::records::{ImportRecords, RecordBody, import_trims, records_import, records_import_shared, records_text};
 pub use step_in::{
     ImportChecks, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
     step_import_shared, step_orientation_errors, step_validate,
@@ -247,7 +248,7 @@ pub use surfaces::{
     stitch, sweep_sheet, sweep_sheet_point_path_with, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
-pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
+pub use topo::{CylinderFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
 pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};
