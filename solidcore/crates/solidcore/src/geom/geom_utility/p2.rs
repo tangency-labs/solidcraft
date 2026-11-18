@@ -53,9 +53,9 @@
 //! - [`evaluate_curve_continuity`] judges G2 by the geometry (WR-380): the two sides'
 //!   Frenet curvature vectors (upstream computes them with `smgu_FrenetFromDerivatives`
 //!   and never reads them) are compared by length, relative to the larger, and by the
-//!   angle between their normals where both exceed the length gap. Upstream compares the
-//!   raw second-derivative lengths against an absolute gap and measures the first normal
-//!   against itself. The debug-only (and unused)
+//!   angle between their normals where both exceed the length gap, and as vectors where
+//!   one does not. Upstream compares the raw second-derivative lengths against an absolute
+//!   gap and measures the first normal against itself. The debug-only (and unused)
 //!   `sDist` / projected-line computations of other functions are omitted.
 //! - Calls into `geom.geom_utility_p1` use [`p1`] directly, through small private
 //!   adapters where the output shapes differ (`sm_AddClosestPoint` on a
@@ -1144,8 +1144,9 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 /// G2 is geometric (WR-380, not upstream's test): the curvature vectors are the Frenet
 /// ones (`smgu_FrenetFromDerivatives`, `|P' x P''| / |P'|^3` along the normal), their
 /// lengths are compared relative to the larger (`SM_EFF_ZERO_SQRT / 10 * (1 + max)`), and
-/// the angle is between the two normals, where both curvatures exceed that gap (a smaller
-/// one is zero at it and has no normal). Upstream takes the curvatures as the lengths of
+/// the angle is between the two normals, where both curvatures exceed that gap; a smaller
+/// one is zero at it and has no normal, and then the two curvature vectors must lie within
+/// the gap of each other. Upstream takes the curvatures as the lengths of
 /// the raw second derivatives (which depend on the parameter speed), compares them with
 /// an absolute `SM_EFF_ZERO_SQRT / 10`, and measures the angle of the first normal with
 /// itself (always 0).
@@ -1231,18 +1232,22 @@ pub fn evaluate_curve_continuity(
     let curvature1 = k1.length();
     let curvature2 = k2.length();
     let gap_tol = EFF_ZERO_SQRT / 10.0 * (1.0 + max2(curvature1, curvature2));
-    // a curvature within the gap tolerance of zero is zero at it and has no normal
-    // (upstream: `SM_IS_ZERO`, which compares a straight join's rounding noise)
-    let mut ang_rad = 0.0;
-    if curvature1 > gap_tol && curvature2 > gap_tol {
+    // Two curvatures above the gap compare by length and normal. A curvature within the
+    // gap of zero is zero at it and has no normal (upstream compares normals above
+    // `SM_IS_ZERO`, a straight join's rounding noise): then the two curvature vectors
+    // compare as vectors.
+    let not_g2 = if curvature1 > gap_tol && curvature2 > gap_tol {
         let mut normal1 = k1;
         normal1 /= curvature1;
         let mut normal2 = k2;
         normal2 /= curvature2;
-        ang_rad = normal1.angle_between(normal2).unwrap_or(0.0);
-    }
-    // (as upstream's condition, NaN included)
-    if !in_tol(curvature1 - curvature2, gap_tol) || rad_to_deg(ang_rad) > continuity_angle_deg {
+        let ang_rad = normal1.angle_between(normal2).unwrap_or(0.0);
+        // (as upstream's condition, NaN included)
+        !in_tol(curvature1 - curvature2, gap_tol) || rad_to_deg(ang_rad) > continuity_angle_deg
+    } else {
+        !in_tol(k1.distance(k2), gap_tol)
+    };
+    if not_g2 {
         return Ok(kind);
     }
     kind = if kind == ContinuityType::G1 {
