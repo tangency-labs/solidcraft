@@ -5,6 +5,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::f64::consts::PI;
 
 use solidcore_ops::blend::{blend, Blend, Corners};
@@ -16,11 +19,7 @@ const R: f64 = 0.5;
 /// The tooth (SolidCraft's `65-sketch-gear-tooth`, its 30 degree sector of R40 root, R50 tip and
 /// R15 flank arcs, 8 thick) with edge `e` rounded `R`: its volume before and after.
 fn rounded(e: usize) -> (f64, f64) {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let record: Record = serde_json::from_str(include_str!("data/gear_tooth.record.json")).unwrap();
     let (body, _) = Body::from_record(&record, true).unwrap();
     let before = body.volume(1e-9).unwrap();

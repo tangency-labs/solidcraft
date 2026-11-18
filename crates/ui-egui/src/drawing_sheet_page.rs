@@ -465,6 +465,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let on_paper = hover.filter(|p| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y));
     let placement_painter = painter.with_clip_rect(sheet_rect.intersect(painter.clip_rect()));
     let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
+    let placing_note = crate::drawing_workspace::placing_note(app);
+    if placing_note && let Some(point) = on_paper {
+        crate::drawing_workspace::note::on_sheet(app, &placement_painter, at.screen(point), point, sheet, response.clicked());
+    }
+    let placing_dimension = crate::drawing_workspace::placing_dimension(app);
+    if placing_dimension && let Some(point) = on_paper {
+        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, response.clicked());
+    }
+    let placing = placing || placing_note || placing_dimension;
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
         .show(app, ui, placing);
     let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
@@ -472,8 +481,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         && let Some(hit) = hit
     {
         let kind = match hit.kind {
-            ObjectKind::View if hit.on_edge => Some("view"),
+            ObjectKind::View => Some("view"),
             ObjectKind::Dimension => Some("dimension"),
+            ObjectKind::Note => Some("note"),
             ObjectKind::PartsList => Some("parts_list"),
             _ => None,
         };
@@ -481,7 +491,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
             crate::drawing_workspace::edit_object(app, kind, hit.object);
         }
     }
-    if let Some(hit) = hit.filter(outlined)
+    if let Some(hit) = hit
         && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
     {
         let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
@@ -522,7 +532,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "generation": view.generation,
         "views": states,
         "working": working,
-        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "outlined": outlined(&h)})),
+        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "outlined": true})),
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
     }));
     true
@@ -560,12 +570,6 @@ fn paint_offscreen_arrow(ui: &mut egui::Ui, painter: &egui::Painter, area: Rect,
     crate::ui_kit::BackingTooltipExt::backing_on_hover_text(response.on_hover_cursor(egui::CursorIcon::PointingHand), label);
     crate::scenario::publish_rect("sheet:offscreen_arrow", rect);
     clicked
-}
-
-/// Whether the hovered object shows its boundary: a view only while the pointer is near its edge,
-/// where it will be grabbed (D17), so the sheet stays clean; anything else while it is under it.
-pub(crate) fn outlined(hit: &drawing_scene::Hit) -> bool {
-    hit.kind != ObjectKind::View || hit.on_edge
 }
 
 fn hex(c: Color32) -> String {

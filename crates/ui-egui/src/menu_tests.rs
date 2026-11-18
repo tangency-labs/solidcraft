@@ -667,6 +667,56 @@ fn component_menu_activates_grounds_and_pastes() {
     assert_eq!(app.session.doc.components.len(), 2);
 }
 
+/// The Browser's Hide action takes every selected component or placement rather than only
+/// the row under the pointer. Each action uses one visibility command (#18716).
+#[test]
+fn browser_hide_applies_to_selected_components_and_occurrences() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (name, x) in [("Base", 0), ("Lid", 25)] {
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+    }
+    for name in ["Base", "Lid"] {
+        app.run("component.from_bodies", json!({"bodies":[name]})).unwrap();
+    }
+    let ids: Vec<u64> = app.session.doc.components.iter().map(|c| c.id).collect();
+    assert_eq!(ids.len(), 2);
+    let (a, b) = (ids[0], ids[1]);
+    app.tree.picked_components = ids;
+    let bodies = crate::browser::selected_component_bodies(&app, a);
+    assert_eq!(bodies.len(), 2);
+
+    let menu = Target::Component { id: a };
+    let hide = find(&context_menu::items(&app, &menu), "Show/Hide");
+    let listed: Vec<String> = serde_json::from_value(hide.params.as_ref().unwrap()["bodies"].clone()).unwrap();
+    assert_eq!(listed.len(), 2, "the menu acts on both components");
+    let before = app.session.undo.len();
+    context_menu::run_item(&mut app, &hide, pos2(0.0, 0.0));
+    assert!(bodies.iter().all(|body| app.session.visibility.hidden_bodies.contains(body)), "{:?}", app.session.visibility.hidden_bodies);
+    assert_eq!(app.session.undo.len(), before + 1, "the batch is one undo step");
+
+    // The same selection rule applies to instances, whose paths distinguish copies.
+    let paths: Vec<Vec<u64>> = [a, b].into_iter().map(|id| app.session.doc.first_path(id)).collect();
+    app.run("select.set", json!({"items":paths.iter().map(|path| json!({"type":"occurrence","path":path})).collect::<Vec<_>>()})).unwrap();
+    assert_eq!(crate::browser::selected_occurrence_paths(&app, &paths[0]), paths);
+    let row = Target::Occurrence { path: paths[0].clone() };
+    let hide = find(&context_menu::items(&app, &row), "Show/Hide");
+    assert_eq!(hide.params.as_ref().unwrap()["paths"], json!(paths));
+    context_menu::run_item(&mut app, &hide, pos2(0.0, 0.0));
+    assert!(paths.iter().all(|path| app.session.occurrence_hidden(path)));
+
+    // An empty component can still open the Show/Hide action when a populated component
+    // is selected with it. The batch target set, not the clicked row, enables it.
+    let empty = app.run("component.create", json!({"name":"Empty"})).unwrap()["component"].as_u64().unwrap();
+    app.tree.picked_components = vec![empty, a];
+    let empty_menu = Target::Component { id: empty };
+    let item = find(&context_menu::items(&app, &empty_menu), "Show/Hide");
+    assert!(item.enabled, "a selected populated component provides a visibility target");
+    assert_eq!(item.params.as_ref().unwrap()["bodies"], json!(["Base"]));
+
+    // Clicking a row outside the selection does not change the selected rows.
+    assert_eq!(crate::browser::selected_occurrence_paths(&app, &[u64::MAX]), vec![vec![u64::MAX]]);
+}
+
 #[test]
 fn move_shortcut_uses_the_selected_nested_instance_and_pending_position() {
     let mut app = SolveApp::new(Session::default(), Services::default());
@@ -2201,6 +2251,37 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
             assert_eq!(dialog.inputs[0].items, bodies, "{label}: clicked {clicked}, selected {selected:?}");
         }
     }
+}
+
+/// A selected browser body exports the *full* body selection, just as Save As Mesh and
+/// Send to Slicer do (#18902). A body outside the selection exports only itself.
+#[test]
+fn export_from_a_selected_browser_body_includes_all_selected_bodies() {
+    let cases = [
+        ("One", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Two", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Other", vec!["One", "Two"], vec!["Other"]),
+        ("One", vec!["One"], vec!["One"]),
+        ("Other", vec!["One", "Two", "Other"], vec!["One", "Two", "Other"]),
+    ];
+    for (clicked, selected, expected) in cases {
+        let mut app = appearance_selection_app();
+        let items: Vec<_> = selected.iter().map(|name| json!({"type":"body","name":name})).collect();
+        app.run("select.set", json!({"items":items})).unwrap();
+        let export = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Export…");
+        assert_eq!(export.id, "ui.export");
+        assert_eq!(export.params.as_ref().unwrap()["bodies"], json!(expected), "clicked {clicked}, selected {selected:?}");
+        let mesh = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Save As Mesh");
+        assert_eq!(
+            export.params.as_ref().unwrap()["bodies"],
+            mesh.params.as_ref().unwrap()["bodies"],
+            "Export and Save As Mesh target the same bodies"
+        );
+    }
+    let mut app = appearance_selection_app();
+    app.run("select.set", json!({"items":[{"type":"body","name":"Two"},{"type":"body","name":"One"}]})).unwrap();
+    let export = find(&context_menu::items(&app, &Target::Viewport), "Export…");
+    assert_eq!(export.params.as_ref().unwrap()["bodies"], json!(["Two", "One"]), "viewport export also respects selection order");
 }
 
 #[test]

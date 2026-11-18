@@ -63,6 +63,7 @@ mod features;
 mod features_more;
 mod join_pieces;
 pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
+pub(crate) use browser::{find_kinds, find_text};
 pub(crate) use component::follow_expressed_moves;
 pub(crate) use component::{path_ids, refuse_filled_virtual};
 pub(crate) use config::put_row;
@@ -81,8 +82,9 @@ pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mas
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
+pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
-pub(crate) use file::{NAMES_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub(crate) use file::{NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;
@@ -119,10 +121,12 @@ pub(crate) mod measure_sel;
 mod measure_shape;
 mod mesh;
 mod metadata;
+mod model_selection;
 pub(crate) mod motion;
 mod notes;
 mod parts;
 mod plugin;
+mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
 mod script;
@@ -180,6 +184,7 @@ mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::{MAX_PROJECTED_ENTITIES, RefForm, model_ref, ref_form};
+pub mod sketch_selection;
 mod sketch_store;
 mod surface;
 mod surface_analysis;
@@ -202,6 +207,9 @@ pub type Run = fn(&mut Session, &Value) -> Result<Value>;
 pub type LiveRun = fn(&mut Session, &Value) -> Result<(Value, Option<crate::LiveEdit>)>;
 pub type Enabled = fn(&Session) -> std::result::Result<(), String>;
 pub type SchemaFn = fn() -> schemars::Schema;
+/// The parameters that apply a command to the session's selection, or `None` when the
+/// selection is not exactly what it takes.
+pub type FromSelection = fn(&Session) -> Option<Value>;
 
 /// The part of the design a command works on (#3890): the model (most commands), the open
 /// drawing, or either (files, undo, selection, diagnostics, choosing a drawing).
@@ -247,6 +255,9 @@ pub struct CommandSpec {
     pub contract: Option<&'static dyn crate::schema::Contract>,
     /// The JSON Schema of a successful result; `None` until described.
     pub output: Option<SchemaFn>,
+    /// The parameters the current selection gives the command, when the selection is exactly
+    /// what the command takes (see [`CommandSpec::for_selection`]); `None`: no such form.
+    pub selection: Option<FromSelection>,
     /// The part of the design it works on: the model unless it says otherwise.
     pub part: Part,
 }
@@ -270,6 +281,7 @@ impl CommandSpec {
             planned: None,
             contract: None,
             output: None,
+            selection: None,
             part: Part::Model,
         }
     }
@@ -309,6 +321,11 @@ impl CommandSpec {
     /// The JSON Schema of a successful result.
     pub const fn output(mut self, f: SchemaFn) -> Self {
         self.output = Some(f);
+        self
+    }
+    /// How the command takes the current selection (see [`CommandSpec::for_selection`]).
+    pub const fn from_selection(mut self, f: FromSelection) -> Self {
+        self.selection = Some(f);
         self
     }
     pub const fn params(mut self, p: &'static str) -> Self {
@@ -379,6 +396,15 @@ impl CommandSpec {
     /// the message can tell it from a failure of the command itself.
     pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
         self.allowed(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
+    }
+    /// The parameters the session's selection gives this command, when it is enabled and the
+    /// selection is complete and unambiguous for it; menus offer the command for the selection
+    /// only then. A sketch constraint's are complete, so a toolbar start runs it straight away;
+    /// a command with a dialog gets what the selection fills in, and its dialog asks for the rest.
+    pub fn for_selection(&self, s: &Session) -> Option<Value> {
+        let take = self.selection?;
+        (self.enabled)(s).ok()?;
+        take(s)
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = self.allowed(s);
@@ -460,6 +486,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());
+    v.extend(plugin_storage::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
@@ -527,7 +554,15 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v
 }
 
+/// The command an id names: its exact id, else the one it spells in another case. Surrounding
+/// whitespace is ignored. Command ids are ASCII, so an id with any other character names none
+/// (a look-alike letter such as a Cyrillic `е` or a fullwidth `ｆ` is never a command).
+///
+/// Everything that decides what a command id may do (the agent chat's gate, the read-only
+/// classification, a host's check) decides on the id this returns, never the id as sent, so it
+/// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    let id = normalize_command_id(id)?;
     let all = command_specs();
     all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
 }
@@ -544,6 +579,13 @@ pub fn command_verb_alternative(id: &str, candidate: &str) -> bool {
     groups
         .iter()
         .any(|words| words.iter().any(|word| verb.eq_ignore_ascii_case(word)) && words.iter().any(|word| other_verb.eq_ignore_ascii_case(word)))
+}
+
+/// A command id as [`find_command`] reads it: without surrounding whitespace, and `None` when it
+/// holds anything but printable ASCII (no command id does).
+pub fn normalize_command_id(id: &str) -> Option<&str> {
+    let id = id.trim();
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_graphic())).then_some(id)
 }
 
 /// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in

@@ -15,11 +15,14 @@
 //! | [`ProtoTopologyManager::resolve_overlapping_proto_edges`] | `SmProtoTopologyManager::ResolveOverlappingProtoEdges` |
 //!
 //! Deviations:
-//! - **Vertices placed by their best edge crossing** (not upstream, WR-410,
-//!   tangency-labs/solidcore#1059, opt-in `Kernel::fixes.boolean_vertex_by_best_crossing`;
+//! - **Vertices placed by their best certified edge crossing** (not upstream, WR-410,
+//!   tangency-labs/solidcore#1059, the default since its flag was retired;
 //!   the SolidCraft fork's `FindOrCreateProtoEdge` change): after each end's proto vertex,
 //!   [`ProtoTopologyManager::add_crossing`] with the angle at which the face pair's curve
-//!   crosses the edge its end lies on (`crossing_sine`).
+//!   crosses the edge its end lies on (`crossing_sine`) and that curve. A later crossing
+//!   with a smaller misplacement bound (gap over sine) moves the vertex only where a
+//!   certified bound proves the edge stretch it moves along stays within tolerance of the
+//!   other object and of the first crossing's curve; otherwise the first placement stays.
 //! - **One proto vertex per crossing of an edge with a face** (not upstream, #17595). A face
 //!   pair's curve ends where its own face's surface meets the other face, so the two faces at
 //!   an edge with a loose tolerance give two points on that edge where it crosses a face of
@@ -522,8 +525,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 crossing,
             ))?
             .and_then(|r| r.0);
-            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (start_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
+            // moves the vertex only where certified (`add_crossing`)
+            if let Some(pv) = start_pv {
                 let sine = crossing_sine(
                     k,
                     &*geometry,
@@ -533,7 +537,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     ci2,
                     false,
                 )?;
-                self.add_crossing(k, &*geometry, pv, &ci1.start, &ci2.start, sine)?;
+                self.add_crossing(k, &*geometry, pv, &ci1.start, &ci2.start, sine, crossing)?;
             }
         }
         if can_imprint(ci1.end.point_class()) && can_imprint(ci2.end.point_class()) {
@@ -547,8 +551,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 crossing,
             ))?
             .and_then(|r| r.0);
-            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (end_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
+            // moves the vertex only where certified (`add_crossing`)
+            if let Some(pv) = end_pv {
                 let sine = crossing_sine(
                     k,
                     &*geometry,
@@ -558,7 +563,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     ci2,
                     true,
                 )?;
-                self.add_crossing(k, &*geometry, pv, &ci1.end, &ci2.end, sine)?;
+                self.add_crossing(k, &*geometry, pv, &ci1.end, &ci2.end, sine, crossing)?;
             }
         }
 
@@ -2969,9 +2974,10 @@ mod tests {
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
     }
 
-    /// A vertex definition first placed by a grazing crossing is placed again by a
-    /// steeper one, whose misplacement bound along the edge (gap over sine) is smaller,
-    /// and not by a later, more grazing one (WR-410, #1059).
+    /// A vertex definition first placed by a grazing crossing is placed again by a later
+    /// one whose misplacement bound along the edge (gap over sine) is smaller (here the
+    /// same gap at a steeper angle), and not by one whose bound is larger (WR-410, #1059).
+    /// Its points lie on a curve, not an edge, so no moved edge stretch needs a certificate.
     #[test]
     fn issue_1059_a_steeper_crossing_places_the_vertex_definition() {
         let k = Kernel::default();
@@ -2997,11 +3003,17 @@ mod tests {
         )
         .unwrap();
         // the first crossing to arrive places it, here at a grazing angle
-        assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.02).unwrap());
+        assert!(!vd
+            .place_by_crossing(&k, &pool, &pc1, &pc2, 0.02, None)
+            .unwrap());
         // a steeper crossing fixes it more closely
-        assert!(vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.9).unwrap());
+        assert!(vd
+            .place_by_crossing(&k, &pool, &pc1, &pc2, 0.9, None)
+            .unwrap());
         // a more grazing one than that does not
-        assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.5).unwrap());
+        assert!(!vd
+            .place_by_crossing(&k, &pool, &pc1, &pc2, 0.5, None)
+            .unwrap());
     }
 
     /// A proto vertex relates two vertices within their intersection tolerance (two zones
