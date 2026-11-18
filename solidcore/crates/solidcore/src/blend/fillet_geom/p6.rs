@@ -101,8 +101,8 @@ use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, RolloverGuesses};
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
-use crate::curve::line::Line;
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::curve::line::Line;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::geom::extent1d::Extent1d;
@@ -1221,7 +1221,14 @@ impl FilletBrep {
         // Not the fork's (`fixes.fillet_on_edge_continues_line`): on a straight side edge
         // continued past its end (a cliff overflow at a concave crease), the segment of its line
         if !joined && k.fixes.fillet_on_edge_continues_line {
-            if let Some(line) = continued_line_segment(k, target, orig_edge, &new_3d_curve, self.vertex_point(start_fv)?, self.vertex_point(end_fv)?)? {
+            if let Some(line) = continued_line_segment(
+                k,
+                target,
+                orig_edge,
+                &new_3d_curve,
+                self.vertex_point(start_fv)?,
+                self.vertex_point(end_fv)?,
+            )? {
                 set_rail_curve(self.brep_mut(), e, line)?;
                 return Ok(());
             }
