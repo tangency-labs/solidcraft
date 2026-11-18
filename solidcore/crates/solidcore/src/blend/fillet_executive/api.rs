@@ -347,10 +347,7 @@ fn fillet_all_edges(
         };
         session.set_solver_generator(solver, generator)?;
         // fork 66b02de passes this on (SER)
-        ignored(crate::error::passed_on(
-            session.load_solver(k, solver),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        session.load_solver(k, solver)?;
     }
 
     session.create_corners(k, None)?;

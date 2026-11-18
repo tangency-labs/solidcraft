@@ -10,6 +10,7 @@
 mod checks;
 pub mod p21;
 mod parallel;
+pub mod records;
 mod tessellated;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -34,12 +35,12 @@ fn body_item(rep: u64, name: &str) -> bool {
 }
 
 /// Deepest assembly nesting followed.
-const MAX_ASSEMBLY_DEPTH: usize = 32;
+pub const MAX_ASSEMBLY_DEPTH: usize = 32;
 /// Most body instances in one import.
-const MAX_BODIES: usize = 10_000;
+pub const MAX_BODIES: usize = 10_000;
 /// Most product occurrences and mapped representations visited (a shared sub-assembly used
 /// twice at every level would otherwise grow exponentially).
-const MAX_VISITS: usize = 100_000;
+pub const MAX_VISITS: usize = 100_000;
 /// Most planned solids converted in one go (bounds the geometry held at once).
 const MAX_WINDOW: usize = 64;
 /// Most representation entries walked while deciding which items are converted exactly once. A
@@ -1421,13 +1422,16 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 /// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
     let key = text_key(text);
-    if let Ok(cache) = RECENT.lock()
-        && let Some(imp) = cache.iter().filter(|r| r.key == key).find_map(|r| r.import.upgrade())
-    {
+    if let Some(imp) = recent(key) {
         return Ok(imp);
     }
     let _span = solidcraft_profile::span("import", "step.import");
     StepReading::new(text)?.finish_shared()
+}
+
+/// The import the recent imports still hold for `key`.
+fn recent(key: (u64, usize)) -> Option<Arc<StepImport>> {
+    RECENT.lock().ok()?.iter().filter(|r| r.key == key).find_map(|r| r.import.upgrade())
 }
 
 /// The cache key of a STEP text: its hash and length.
@@ -1438,14 +1442,29 @@ fn text_key(text: &str) -> (u64, usize) {
     (h.finish(), text.len())
 }
 
-/// Keep `imp` in the recent imports (strongly only when `small`).
+/// Keep `imp` in the recent imports. The four-entry limit applies only to the strong
+/// references that retain small imports after their callers let go. Weak lookups for active
+/// imports must stay until their external owners release them, however many there are (#18814).
+fn remember_in(cache: &mut Vec<Recent>, key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
+    cache.retain(|r| r.key != key && r.import.strong_count() > 0);
+    cache.push(Recent { key, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
+    let mut small_kept = 0;
+    for recent in cache.iter_mut().rev() {
+        if recent._small.is_some() {
+            small_kept += 1;
+            if small_kept > 4 {
+                recent._small = None;
+            }
+        }
+    }
+    // Removing our last strong reference drops an otherwise unowned import. Externally held
+    // imports retain their weak entry, including the fifth and later imports of an assembly.
+    cache.retain(|r| r.import.strong_count() > 0);
+}
+
 fn remember(key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
     if let Ok(mut cache) = RECENT.lock() {
-        cache.retain(|r| r.key != key && r.import.strong_count() > 0);
-        cache.push(Recent { key, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
-        while cache.len() > 4 {
-            cache.remove(0);
-        }
+        remember_in(&mut cache, key, imp, small);
     }
 }
 
