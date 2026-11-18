@@ -1293,6 +1293,40 @@ mod tests {
     }
 
     #[test]
+    fn knots_and_tangents_refuses_fewer_points_than_the_degree_needs() {
+        // two or three points cannot carry a cubic: the fit used to return two or three
+        // control points of degree 3, a curve the .smb reader refuses
+        let a = pts();
+        for few in [&a[..2], &a[..3]] {
+            let r = interp_knots_and_tangents(
+                few,
+                None,
+                EndTangents::None,
+                VectorKind::Tangent,
+                &mut None,
+                1.0,
+                3,
+            );
+            assert!(
+                matches!(r, Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))),
+                "{} points: {r:?}",
+                few.len()
+            );
+        }
+        let c = interp_knots_and_tangents(
+            &a[..3],
+            None,
+            EndTangents::None,
+            VectorKind::Tangent,
+            &mut None,
+            1.0,
+            2,
+        )
+        .unwrap();
+        assert_eq!((c.n(), c.degree(), c.m()), (2, 2, 5));
+    }
+
+    #[test]
     fn closed_conditions_closes_smoothly() {
         let mut a = pts();
         a.push(a[0]);
