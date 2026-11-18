@@ -486,6 +486,7 @@ fn run_case(
                 }
                 // Into the scratch folder, under the case's name and the slot's first extension.
                 let extension = entry.extensions.first().map(String::as_str).unwrap_or("out");
+                std::fs::create_dir_all(work).map_err(|e| format!("{}: {e}", work.display()))?;
                 let path = work.join(format!("{name}.{extension}"));
                 s.execute(
                     "file.export",

@@ -2381,15 +2381,18 @@ fn export_laid_to(
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export";
     let path = path_arg(p, cmd)?;
-    // An exporter plugin: a `format` naming one (`plugin_id.entry`; SolidCraft's own formats have
-    // no dot), or a file whose extension SolidCraft does not write and an exporter claims.
+    // An installed exporter id takes precedence over native file-name formats such as `part.step`.
+    // Without a named format, only extensions SolidCraft does not write go to a plugin.
     let named = str_(p, "format");
-    let plugin_format = named.filter(|f| f.contains('.'));
-    if plugin_format.is_some() || (named.is_none() && Format::from_name(path).is_err()) {
-        if let Some(exporter) = crate::plugin::exporter_for(s, path, plugin_format)? {
-            return export_with_plugin(s, cmd, path, &exporter, p);
-        }
-    } else if p.get("options").is_some_and(|v| !v.is_null()) {
+    let exporter = match named {
+        Some(format) if format.contains('.') => crate::plugin::exporters(s).into_iter().find(|e| e.id == format),
+        None if Format::from_name(path).is_err() => crate::plugin::exporter_for(s, path, None)?,
+        _ => None,
+    };
+    if let Some(exporter) = exporter {
+        return export_with_plugin(s, cmd, path, &exporter, p);
+    }
+    if p.get("options").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`options` applies to formats an exporter plugin writes"));
     }
     let format = Format::from_name(named.unwrap_or(path))?;
@@ -3098,6 +3101,14 @@ mod tests {
             let bytes = std::fs::read(&path).unwrap();
             assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64), "{cmd}");
             assert!(bytes.starts_with(signature), "{cmd}");
+        }
+        // A native file name in `format` still selects that format, independently of the path.
+        for (format, expected, signature) in [("part.step", "Step", &b"ISO-10303-21;"[..]), ("part.json", "Design", &b"{"[..])] {
+            let path = at(&format!("{format}.out"));
+            let reply = s.execute("file.export", &json!({"path": path, "format": format})).unwrap();
+            assert_eq!(reply["format"], expected);
+            assert!(std::fs::read(&path).unwrap().starts_with(signature));
+            assert!(s.execute("file.export", &json!({"path": path, "format": format, "options": {}})).is_err());
         }
         // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
         // bytes each, as many as the OBJ export's. The 20 x 10 x 5 box is meshed on the mesh path,

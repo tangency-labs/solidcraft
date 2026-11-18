@@ -1269,11 +1269,31 @@ mod exporters {
             "entries":[slot("copy","smp"),slot("error","bad"),slot("trap","bad"),slot("loop","bad"),slot("write","bad")],
             "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}})
     }
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let root = Self(solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-exporter-{}-{name}", std::process::id())));
+            let _ = std::fs::remove_dir_all(&root.0);
+            root
+        }
+    }
+    impl std::ops::Deref for Fixture {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     /// A session with a box whose plugins folder holds the original exporter fixture, and a folder
     /// to export into. The fixture's `copy` slot writes the reply of `document.inspect`.
-    fn installed(name: &str) -> (Session, std::path::PathBuf) {
-        let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-exporter-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    fn installed(name: &str) -> (Session, Fixture) {
+        let root = Fixture::new(name);
         let (package, version) = API.split_once('@').unwrap();
         let component = wat::parse_str(include_str!("exporter_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
         let dir = root.join("plugins/smp");
@@ -1294,6 +1314,38 @@ mod exporters {
             std::fs::read_dir(root.join("files")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn the_exporter_fixture_cleans_up_on_return_and_unwind() {
+        for unwind in [false, true] {
+            let fixture = Fixture::new(if unwind { "cleanup-unwind" } else { "cleanup-return" });
+            let path = fixture.0.clone();
+            let result = std::panic::catch_unwind(move || {
+                let root = fixture;
+                std::fs::create_dir_all(root.join("plugins")).unwrap();
+                std::fs::write(root.join("partial.wasm"), b"partial setup").unwrap();
+                if unwind {
+                    panic!("fixture setup interrupted");
+                }
+            });
+            assert_eq!(result.is_err(), unwind);
+            assert!(!path.exists(), "fixture files remain at {}", path.display());
+        }
+    }
+
+    #[test]
+    fn an_installed_exporter_id_takes_precedence_over_a_native_file_name() {
+        let (mut s, root) = installed("native-name");
+        let mut manifest = exporter_manifest(json!(["document.inspect"]));
+        manifest["runtime"]["entries"][0]["name"] = json!("step");
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let reply = s.execute("file.export", &json!({"path": at(&root, "bracket.step"), "format": "smp.step"})).unwrap();
+        assert_eq!(reply["format"], "smp.step");
+        let written: Value = serde_json::from_slice(&std::fs::read(at(&root, "bracket.step")).unwrap()).unwrap();
+        let mut inspected = s.execute("document.inspect", &json!({})).unwrap();
+        inspected["undo"] = json!(0);
+        assert_eq!(written, inspected);
     }
 
     #[test]
@@ -1323,7 +1375,6 @@ mod exporters {
         // A disabled plugin writes nothing.
         s.disabled_plugins.insert("smp".into());
         assert!(s.execute("file.export", &json!({"path": at(&root, "off.smp")})).is_err());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1340,7 +1391,6 @@ mod exporters {
         assert_eq!(files(&root), ["keep.bad"], "no new file and no partial or temporary file");
         // The next export gets a fresh instance.
         assert!(s.execute("file.export", &json!({"path": at(&root, "after.smp")})).is_ok());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1364,7 +1414,6 @@ mod exporters {
         });
         assert!(outside.is_err());
         assert_eq!(files(&root), Vec::<String>::new());
-        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
