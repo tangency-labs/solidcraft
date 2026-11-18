@@ -796,10 +796,11 @@ fn paint_tab(ctx: &Context, view: &DesignView, origin: Rect, slot: Slot, pointer
     let client = ctx.viewport_rect();
     let p = painter(ctx).with_clip_rect(client);
     let t = Tokens::get();
-    let tab = held_rect(client, slot.center, origin.size() * 1.04, origin.size() * 0.5);
-    dashed(&p, tab.expand(2.0), t.accent, 1.0);
-    let morph = morph(ctx, view.id, origin, tab, Form::Tab, pointer);
-    draw_shape(ctx, &p, view, morph.rect, GhostStyle { form: Form::Tab, tilt: 0.0, detail: morph.detail, ink: t.accent, shadow: true }, None);
+    if let Some(tab) = crate::app_bar::view_drag_gap(ctx, crate::documents::tab_strip_id(slot.viewport), slot.index) {
+        morph(ctx, view.id, origin, tab, Form::Tab, pointer);
+        let tab_painter = p.with_clip_rect(tab);
+        draw_shape(ctx, &tab_painter, view, tab, GhostStyle { form: Form::Tab, tilt: 0.0, detail: 0.0, ink: t.accent, shadow: false }, None);
+    }
     paint_hint(&p, client, view, pointer, Some(label), false);
 }
 
