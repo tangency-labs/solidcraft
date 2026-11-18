@@ -690,6 +690,8 @@ pub struct SolveApp {
     pub(crate) snaps: dialogs_assembly::SnapMemo,
     /// Each command dialog's options and values as last applied (this session only).
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
+    /// Radius of the last new Fillet applied this session, for the next new Fillet dialog.
+    pub(crate) last_fillet_radius: String,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
@@ -1059,6 +1061,7 @@ impl SolveApp {
             dialog: None,
             snaps: Default::default(),
             remembered_commands: Vec::new(),
+            last_fillet_radius: String::new(),
             params: None,
             design_properties: None,
             sketch_report: None,
