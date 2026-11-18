@@ -156,7 +156,6 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.curve_loop_normal_from_area = true;
@@ -168,7 +167,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.join_touching_loops = true;
