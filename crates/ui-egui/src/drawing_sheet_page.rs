@@ -118,8 +118,11 @@ fn lightness(c: Color32) -> f32 {
 /// How far apart in [`lightness`] the paper and the backdrop must be for the sheet's edge to show.
 pub const STAND_OFF: f32 = 0.06;
 
+/// The lightest colour; as a picture's tint, it keeps the picture's own colours.
+const WHITE: Color32 = Color32::WHITE;
+
 /// Lightest and darkest: what the stage, or failing that the paper, moves toward.
-const ENDS: [Color32; 2] = [Color32::WHITE, Color32::BLACK];
+const ENDS: [Color32; 2] = [WHITE, Color32::BLACK];
 
 /// The first of twenty steps from `from` toward `to`, at most `steps` of them, that stands off `other`.
 fn toward(from: Color32, to: Color32, other: Color32, steps: u8) -> Option<Color32> {
@@ -1079,7 +1082,7 @@ fn tile_mesh(at: &OnScreen, grid: &PixelGrid, tile: &Tile, shown: Aabb2, clip: O
     let size = tile_rect.size();
     let uv = |q: Vec2| pos2(((q.x - tile_rect.min.x) / size.x) as f32, ((tile_rect.max.y - q.y) / size.y) as f32);
     // The texture is premultiplied, so the tint scales every channel.
-    let tint = Color32::WHITE.gamma_multiply(opacity.clamp(0.0, 1.0) as f32);
+    let tint = WHITE.gamma_multiply(opacity.clamp(0.0, 1.0) as f32);
     let mut mesh = egui::Mesh::with_texture(tile.texture.id());
     for q in &outline {
         mesh.vertices.push(egui::epaint::Vertex { pos: at.screen(*q), uv: uv(*q), color: tint });
