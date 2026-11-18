@@ -6959,7 +6959,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     "solid.cylinder" | "solid.coil" | "solid.cone" => {
                         p.insert("base".into(), pt(point));
                         if let Some(n) = normal {
-                            p.insert("axis".into(), pt(n));
+                            // An axis of expressions (#18822) that still points along the face's
+                            // normal is kept as written, so it goes on following its parameters.
+                            let written = d
+                                .extra
+                                .get("axis")
+                                .filter(|a| a.as_array().is_some_and(|c| c.iter().any(Value::is_string)))
+                                .filter(|a| axis_now(s, a).is_some_and(|now| now.dot(n) > 1.0 - 1e-9));
+                            p.insert("axis".into(), written.cloned().unwrap_or_else(|| pt(n)));
                         }
                         // Reference edges (#6380) place the base by its distances from them.
                         let references = crate::hole_refs::params(d);
@@ -6973,6 +6980,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
+                if let Some(saved) = d.extra.get("saved_references") {
+                    p.insert("references".into(), saved.clone());
+                }
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
@@ -7885,6 +7895,18 @@ fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
 }
 
+/// The direction an axis saved as `[x, y, z]` of numbers or unitless expressions (#18822) has
+/// with the parameters as they are now.
+fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
+    let c = axis.as_array().filter(|a| a.len() == 3)?;
+    let v = |i: usize| match c.get(i)? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(e) => s.doc.eval(e, ValueKind::Unitless).ok(),
+        _ => None,
+    };
+    solidcraft_engine::doc::unit_direction(Vec3::new(v(0)?, v(1)?, v(2)?))
+}
+
 /// A point of expressions: numbers as numbers, expressions as strings.
 fn pt_expr(p: &solidcraft_engine::doc::PointExpr) -> Value {
     Value::Array(p.iter().map(|e| e.parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| json!(e), |x| json!(x))).collect())
@@ -8322,15 +8344,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let (Some(x), Some(y), Some(z)) = (x, y, z)
                 && let Some(face @ Sel::Face { .. }) = face_sel(s, Vec3::new(x, y, z))
                 && let Sel::Face { body, index, .. } = &face
-                && let Some(axis) = solidcraft_engine::doc::literal_dir(axis)
-                && planar_face(s, body, *index).is_some_and(|(_, n)| n.dot(axis) > 1.0 - 1e-9)
+                && let Some(now) = axis_now(s, &pt_expr(axis))
+                && planar_face(s, body, *index).is_some_and(|(_, n)| n.dot(now) > 1.0 - 1e-9)
                 && let Kind::Primitive { at, .. } = &mut d.kind
             {
-                *at = Some((Vec3::new(x, y, z), Some(axis)));
+                *at = Some((Vec3::new(x, y, z), Some(now)));
                 if let Some(inp) = d.inputs.first_mut() {
                     inp.items = vec![face];
                 }
                 crate::hole_refs::restore(s, &mut d, references, &f.edge_names, app.preferences.length_decimals);
+            } else if !references.is_empty() {
+                // Not placed on its face (an axis of expressions that isn't square to it now,
+                // #18822): OK sends the reference edges as they are saved, never none.
+                let saved: Vec<Value> = references.iter().map(|r| json!({"edge": pt3(r.edge.0), "distance": r.distance.to_string()})).collect();
+                d.extra.insert("saved_references".into(), json!(saved));
             }
             d
         }

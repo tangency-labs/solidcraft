@@ -464,31 +464,39 @@ pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
 
 /// [`map_point_expr`] for coordinates read with `unit` after a bare number (" mm" for lengths, ""
 /// for the unitless components of a direction).
+///
+/// A length's constant under 1e-12 mm is rounding left by the matrix and is dropped. A
+/// direction has no scale of its own (it is normalized when evaluated), so its constant is
+/// dropped only when it is that small next to the numbers it came from: an axis whose only
+/// number is 1e-20 keeps it (#18822).
 fn map_exprs(m: &Mat, p: &mut crate::PointExpr, unit: &str) {
     let num = |e: &crate::Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
     if let [Some(x), Some(y), Some(z)] = [num(&p[0]), num(&p[1]), num(&p[2])] {
         *p = crate::point_expr(apply_point(m, Vec3::new(x, y, z)));
         return;
     }
+    let direction = unit.is_empty();
+    let scale = if direction { p.iter().filter_map(num).fold(0.0_f64, |a, v| a.max(v.abs())) } else { 1.0 };
     let old = p.clone();
     for (row, out) in p.iter_mut().enumerate() {
         let mut constant = m[3][row];
         let mut terms: Vec<String> = Vec::new();
         for (col, e) in old.iter().enumerate() {
             let c = m[col][row];
-            if c.abs() < 1e-12 {
-                continue;
-            }
             match num(e) {
-                Some(v) => constant += c * v,
+                // A direction's numbers count at any size; a length's below the cutoff are noise.
+                Some(v) if direction || c.abs() >= 1e-12 => constant += c * v,
+                Some(_) => {}
+                None if c.abs() < 1e-12 => {}
                 None if (c - 1.0).abs() < 1e-12 => terms.push(format!("({e})")),
                 None => terms.push(format!("{c} * ({e})")),
             }
         }
+        let kept = constant != 0.0 && constant.abs() >= 1e-12 * scale;
         let mut e = terms.join(" + ");
         if terms.is_empty() {
             e = format!("{constant}{unit}");
-        } else if constant.abs() >= 1e-12 {
+        } else if kept {
             e = format!("{e} {} {}{unit}", if constant < 0.0 { '-' } else { '+' }, constant.abs());
         }
         *out = e.into();

@@ -1417,6 +1417,27 @@ fn datum_refs_parse_strictly() {
 /// `Document::placement_frame` walks one exact placement the way the engine's occurrence walk
 /// does: the #7313 scenario's parent translated +100, a child +20, a copy of the parent another
 /// +50 - the copied child's XY plane sits at (170, 0, 0) against the original at (120, 0, 0).
+/// A direction of expressions turned by a frame keeps a constant however small it is next to
+/// nothing else: `["sin(t)", "0", "1e-20"]` at t = 0 is still along Z after a turn about Y, not
+/// zero (#18822). A length keeps its cutoff of 1e-12 mm for rounding.
+#[test]
+fn a_turned_direction_keeps_its_small_constants() {
+    let mut doc = Document::new("T");
+    doc.set_param("t", "0 deg", None, None).unwrap();
+    let turn = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Y, std::f64::consts::FRAC_PI_4);
+    let mut d: crate::DirExpr = ["sin(t)".into(), "0".into(), "1e-20".into()];
+    crate::map_dir_expr(&turn, &mut d);
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    let unit = crate::unit_direction(Vec3::new(v[0], v[1], v[2])).expect("a direction, not zero");
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    assert!(unit.dist(Vec3::new(h, 0.0, h)) < 1e-9, "{d:?} -> {unit:?}");
+    // Rounding from the turn itself is still dropped from a direction of ordinary size.
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1".into(), "0".into()];
+    crate::map_dir_expr(&crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2), &mut d);
+    assert!(d[1].contains("sin(t)") && !d[1].contains("e-"), "{d:?}");
+    assert!(!d[0].contains("e-") && !d[0].contains("sin"), "{d:?}");
+}
+
 #[test]
 fn placement_frame_matches_the_occurrence_walk() {
     let mut doc = Document::new("datum frames");

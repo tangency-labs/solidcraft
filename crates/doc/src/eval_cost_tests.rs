@@ -3488,7 +3488,7 @@ fn holed_cube(doc: &mut Document, size: f64, hole: f64) {
     {
         let kind = FeatureKind::Cylinder {
             base: point_expr(base),
-            axis: Dir(axis),
+            axis: crate::dir_expr(axis),
             radius: (hole / 2.0).to_string().into(),
             height: size.to_string().into(),
             operation: Operation::Cut,

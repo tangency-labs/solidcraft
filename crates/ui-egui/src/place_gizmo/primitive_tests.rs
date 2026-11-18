@@ -642,3 +642,47 @@ fn a_cylinder_with_a_reference_edge_reopens_with_its_marker_and_outline_on_its_f
     let o = outline(&h);
     assert!(!o.is_empty() && o.iter().all(|p| (p.z - 10.0).abs() < 1e-6 && (p.dist(Vec3::new(30.0, 25.0, 10.0)) - 4.0).abs() < 1e-6), "{o:?}");
 }
+
+/// Editing a cylinder whose axis holds expressions (#18822) and pressing OK keeps the axis as
+/// expressions and keeps its reference edges, whether the axis stands square to the face it is
+/// on now or not; a tilted cylinder away from any face keeps its axis too.
+#[test]
+fn editing_a_cylinder_with_an_expression_axis_keeps_its_axis_and_reference_edges() {
+    for tilt in ["0 deg", "20 deg"] {
+        let mut h = plate();
+        h.app.run("parameters.add", json!({"name": "t", "expression": tilt})).unwrap();
+        let made = h
+            .app
+            .run(
+                "solid.cylinder",
+                json!({"radius": 4, "height": 8, "base": [30, 25, 10], "axis": ["0", "sin(t)", "cos(t)"],
+                       "references": [{"edge": [0, 20, 10], "distance": "30 mm"}], "operation": "join"}),
+            )
+            .unwrap();
+        let name = made["name"].as_str().unwrap().to_string();
+        h.settle();
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+        h.settle();
+        ok(&mut h);
+        let (_, kind) = last(&h);
+        let FeatureKind::Cylinder { axis, references, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
+        assert_eq!(axis.clone().map(|e| e.to_string()), ["0", "sin(t)", "cos(t)"], "{tilt}: the axis stays expressions");
+        assert_eq!(references.len(), 1, "{tilt}: the reference edge stays: {references:?}");
+        assert_eq!(references[0].distance.to_string(), "30 mm", "{tilt}");
+    }
+    // Away from any face, tilted by its expressions.
+    let mut h = plate();
+    h.app.run("parameters.add", json!({"name": "t", "expression": "30 deg"})).unwrap();
+    let made = h
+        .app
+        .run("solid.cylinder", json!({"radius": 2, "height": 5, "base": [100, 100, 50], "axis": ["sin(t)", 0, "cos(t)"], "operation": "new"}))
+        .unwrap();
+    let name = made["name"].as_str().unwrap().to_string();
+    h.settle();
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+    h.settle();
+    ok(&mut h);
+    let (_, kind) = last(&h);
+    let FeatureKind::Cylinder { axis, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
+    assert_eq!(axis.clone().map(|e| e.to_string()), ["sin(t)", "0", "cos(t)"], "the floating cylinder keeps its axis");
+}
