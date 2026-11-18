@@ -17,7 +17,10 @@
 //! still read ([`Bodies::failures`]).
 //!
 //! Input is hostile: every id is looked up (a missing one refuses its region), and the faces of
-//! one model and the edges of one loop are capped.
+//! one model and the edges of one loop are capped. Before a region is read, its shells, each
+//! shell's faces and each face's loops are counted against their caps (the STEP reader's), and
+//! a face or loop used twice in it is refused, so the work of reading a region grows with the
+//! model's size, never with how often it names one face or loop.
 
 mod geometry;
 
@@ -33,7 +36,7 @@ use solidcore_step::assembly::{
     Assembly, Bound, Kind, hyperbola_curve, parabola_curve, periodic_edge,
 };
 use solidcore_step::topology::{
-    MAX_FACES, MAX_FILE_FACES, MAX_FIT_TOLERANCE, MAX_LOOP, MIN_TOLERANCE,
+    MAX_BOUNDS, MAX_FACES, MAX_FILE_FACES, MAX_FIT_TOLERANCE, MAX_LOOP, MIN_TOLERANCE,
 };
 
 use geometry::R;
@@ -240,6 +243,7 @@ impl<'a> Model<'a> {
             joined: HashMap::new(),
             edges: HashMap::new(),
         };
+        self.preflight(&region.shells)?;
         b.join_collapsed(&region.shells);
         let mut shells = Vec::new();
         let mut left_out = 0usize;
@@ -275,6 +279,53 @@ impl<'a> Model<'a> {
             ));
         }
         Ok(solid)
+    }
+}
+
+impl<'a> Model<'a> {
+    /// The counts of a region of `shells`, checked before anything of it is read: at most
+    /// `MAX_SHELLS` shells, each of at most `MAX_FACES` faces, each of at most `MAX_BOUNDS`
+    /// loops, and no face or loop used twice (a face is in one shell once, and a loop bounds one
+    /// face once). Every face and loop it walks is then one of the model's, once, so the walk is
+    /// no longer than the model's own lists.
+    fn preflight(&self, shells: &'a [cadmpeg_ir::ids::ShellId]) -> R<()> {
+        if shells.len() > solidcore_record::brep::MAX_SHELLS {
+            return Err(format!(
+                "more than {} shells",
+                solidcore_record::brep::MAX_SHELLS
+            ));
+        }
+        let (mut faces, mut loops) = (
+            std::collections::HashSet::new(),
+            std::collections::HashSet::new(),
+        );
+        for s in shells {
+            let shell = self
+                .shells
+                .get(s.as_str())
+                .ok_or_else(|| format!("missing shell {s}"))?;
+            if shell.faces().len() > MAX_FACES {
+                return Err(format!("more than {MAX_FACES} faces"));
+            }
+            for f in shell.faces() {
+                let &(_, face) = self
+                    .faces
+                    .get(f.as_str())
+                    .ok_or_else(|| format!("missing face {f}"))?;
+                if !faces.insert(f.as_str()) {
+                    return Err(format!("face {f} used more than once"));
+                }
+                if face.loops.len() > MAX_BOUNDS {
+                    return Err(format!("face {f} with {} loops", face.loops.len()));
+                }
+                for l in face.loops.iter() {
+                    if !loops.insert(l.as_str()) {
+                        return Err(format!("face {f}: loop {l} used more than once"));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 

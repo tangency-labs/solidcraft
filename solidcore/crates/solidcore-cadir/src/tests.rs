@@ -130,6 +130,106 @@ fn a_missing_coedge_refuses_its_region_without_a_panic() {
     );
 }
 
+/// The one failure of reading `ir`, whose one region is refused.
+fn refused(ir: &CadIr) -> String {
+    let bodies = read_bodies(ir, None);
+    assert!(bodies.read.is_empty());
+    assert_eq!(bodies.failures.len(), 1, "{:?}", bodies.failures);
+    bodies.failures[0].message.clone()
+}
+
+/// A region's shells, a shell's faces and a face's loops are counted against their caps before
+/// the region is read. At each cap, the extra ids (none of them in the model) are looked up and
+/// the first is missing; one past it, the region is refused for the count, before any is looked
+/// up. Without the counts, the reader walked them all to join collapsed edges first.
+#[test]
+fn a_regions_shells_faces_and_loops_are_refused_past_their_caps() {
+    use cadmpeg_ir::ids::{FaceId, LoopId, ShellId};
+    use solidcore_record::brep::MAX_SHELLS;
+    let shells = |n: usize| {
+        let mut ir = cube();
+        let region = ir.model.regions.first_mut().unwrap();
+        region
+            .shells
+            .extend((1..n).map(|k| tid::<ShellId>("shell", k)));
+        ir
+    };
+    assert!(refused(&shells(MAX_SHELLS)).contains("missing shell"));
+    assert_eq!(
+        refused(&shells(MAX_SHELLS + 1)),
+        format!("more than {MAX_SHELLS} shells")
+    );
+    let faces = |n: usize| {
+        let mut ir = cube();
+        let shell = ir.model.shells.first().unwrap().clone();
+        let mut ids = shell.faces().to_vec();
+        ids.extend((ids.len()..n).map(|k| tid::<FaceId>("face", k)));
+        *ir.model.shells.first_mut().unwrap() = cadmpeg_ir::topology::Shell::new(
+            shell.id.clone(),
+            shell.region.clone(),
+            ids,
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        ir
+    };
+    assert!(refused(&faces(MAX_FACES)).contains("missing face"));
+    assert_eq!(
+        refused(&faces(MAX_FACES + 1)),
+        format!("more than {MAX_FACES} faces")
+    );
+    let loops = |n: usize| {
+        let mut ir = cube();
+        let face = ir.model.faces.first_mut().unwrap();
+        let mut ids = face.loops.to_vec();
+        ids.extend((ids.len()..n).map(|k| tid::<LoopId>("loop", k)));
+        face.loops = FaceLoops::unspecified(ids);
+        ir
+    };
+    assert!(refused(&loops(MAX_BOUNDS)).contains("missing loop"));
+    assert!(
+        refused(&loops(MAX_BOUNDS + 1)).ends_with(&format!("with {} loops", MAX_BOUNDS + 1)),
+        "{}",
+        refused(&loops(MAX_BOUNDS + 1))
+    );
+}
+
+/// A face named twice in a region's shells, or a loop named twice by its faces, refuses the
+/// region with the reason: a face is in one shell once and a loop bounds one face once, so the
+/// walk over a region is no longer than the model's lists however often it names one.
+#[test]
+fn a_face_or_loop_used_twice_in_a_region_refuses_it() {
+    let mut ir = cube();
+    let shell = ir.model.shells.first().unwrap().clone();
+    let mut ids = shell.faces().to_vec();
+    ids.push(ids[0].clone());
+    *ir.model.shells.first_mut().unwrap() = cadmpeg_ir::topology::Shell::new(
+        shell.id.clone(),
+        shell.region.clone(),
+        ids,
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let m = refused(&ir);
+    assert!(
+        m.ends_with("used more than once") && m.starts_with("face "),
+        "{m}"
+    );
+
+    let mut ir = cube();
+    let face = ir.model.faces.first_mut().unwrap();
+    let mut ids = face.loops.to_vec();
+    ids.push(ids[0].clone());
+    face.loops = FaceLoops::unspecified(ids);
+    let m = refused(&ir);
+    assert!(
+        m.contains(": loop ") && m.ends_with("used more than once"),
+        "{m}"
+    );
+}
+
 #[test]
 fn a_vertex_far_from_its_edges_refuses_its_region() {
     let mut ir = cube();
