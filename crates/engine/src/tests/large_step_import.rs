@@ -174,9 +174,13 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     // A mesh file follows the same limit: read, and refused only for not holding a mesh.
     let error = s.execute("file.insert_mesh", &json!({"path": obj})).unwrap_err().to_string();
     assert!(!error.contains("too large"), "{error}");
+    // A point cloud file follows the limit for import files too, and is never read under the
+    // 1 GB it has always had (#14548).
+    assert_eq!(limits::Kind::PointCloud.limit(), GB);
     // The flag overrides the preference for the run, and the ceiling holds for both.
     limits::set_override(Some(2 * GB)).unwrap();
     assert_eq!(limits::effective(), FileLimits { step: 2 * GB, design: 2 * GB });
+    assert_eq!(limits::Kind::PointCloud.limit(), 2 * GB, "the flag raises the point cloud limit too");
     assert_eq!(solidcraft_kernel::step_max_bytes(), 2 << 30);
     assert!(limits::set_override(Some(16 * GB + 1)).is_err());
     assert!(limits::set_preferred(FileLimits { step: 17 * GB, design: GB }).is_err());
