@@ -125,6 +125,30 @@ impl Similarity {
         self.scale
     }
 
+    /// Whether it is a rigid motion (no scale), its columns unit to `SIMILARITY`.
+    pub(crate) fn is_rigid(&self) -> bool {
+        (self.scale - 1.0).abs() <= SIMILARITY
+    }
+
+    /// The map as a column-major 4 × 4 matrix (`m[j][i]` row i of column j), or `None` at the
+    /// identity.
+    pub(crate) fn column_major(&self) -> Option<[[f64; 4]; 4]> {
+        let r = self.rows;
+        let m = [
+            [r[0][0], r[1][0], r[2][0], 0.0],
+            [r[0][1], r[1][1], r[2][1], 0.0],
+            [r[0][2], r[1][2], r[2][2], 0.0],
+            [r[0][3], r[1][3], r[2][3], 1.0],
+        ];
+        let identity = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        (m != identity).then_some(m)
+    }
+
     pub(crate) fn point(&self, p: [f64; 3]) -> [f64; 3] {
         self.rows
             .map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3])
@@ -676,7 +700,7 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(FaceSurface, bo
 }
 
 /// The rows of CADIR's affine placement, `[[f64; 4]; 3]`.
-trait Rows3 {
+pub(crate) trait Rows3 {
     fn rows3(&self) -> [[f64; 4]; 3];
 }
 

@@ -9,7 +9,6 @@
   "fillet_knife_edge_rounds",
   "keep_operand_uv_trims",
   "geometric_g2_continuity",
-  "degen_param_tiebreak_uses_actual_param",
   "proto_vertex_miss_is_false",
   "surface_continuity_checks_last_v_knot",
   "local_surface_intersect_guards_max_boundary_retry",
