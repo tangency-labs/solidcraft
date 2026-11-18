@@ -1763,7 +1763,11 @@ const FILLET_MAIN: [u64; 29] = [
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
 /// since; its entries are classified against a certified enclosure in goldens'
-/// `mass_knot_line_moved_rows_are_classified`.
+/// `mass_knot_line_moved_rows_are_classified`. #18162's lazy UV trim raise refits that
+/// body's trims at lower edge tolerances, which moves two of its values once more: the
+/// volume (index 0) by 8.2e-15 and index 11 by 1.6e-14 relative, the faces' quadrature
+/// summed in another order (goldens' `certify::trim_tolerance`, class `quadrature`, at most
+/// 1e-13 relative); entry 14 holds those bits.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1819,7 +1823,7 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce093b407,
+            0x40408bcce093b3e1,
             0x402621896ddff25f,
             0x402621896ddff25f,
             0x3f10d1d4e45e4676,
@@ -1830,7 +1834,7 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
             0x40151aaab4b869fc,
             0x3f6aed519268bff5,
             0x3f66b6ad970f60ae,
-            0xbf3c98793964b142,
+            0xbf3c98793964b1c2,
         ],
     ),
 ];

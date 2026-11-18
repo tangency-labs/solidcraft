@@ -21,6 +21,13 @@
 //!
 //! [`DATA`] was made by [`record`] on main and on this branch (`TOLSUB_CASES`, a
 //! `unit<TAB>case` list, and `TOLSUB_OUT`), diffed read by read.
+//!
+//! The tape is a proof against the main it was recorded on, not kept in step with later
+//! code: a later change that re-blesses one of its rows records the tape again or deletes
+//! that row's entry and lowers the unit's row count below. #18162's lazy UV trim raise
+//! re-blessed `blend.fillet_executive_p3` `stubs4-delete-edge-bottle-e8-r0.1` and
+//! `topology.brep_p10` `gen0020` (their edge tolerances, each certified in
+//! `certify::trim_tolerance`), so their entries are deleted.
 
 use std::collections::BTreeMap;
 
@@ -162,12 +169,12 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 30;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 29;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
     corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
-    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 39;
+    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
     face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
 }
