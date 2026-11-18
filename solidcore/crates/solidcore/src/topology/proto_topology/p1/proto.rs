@@ -1057,8 +1057,10 @@ fn crossing_error(gap: f64, crossing_sine: f64) -> f64 {
 ///
 /// A steep first crossing leaves the edge at once, so it certifies only a stretch within
 /// the tolerance; a grazing one runs along the edge as far as it stays within it, and no
-/// farther (no reach argued from the angle). A side that did not move, on a face or a
-/// vertex, has no stretch of its own; its other side's edge bounds it. `false` when a
+/// farther (no reach argued from the angle). A side on a vertex has no stretch of its own;
+/// its other side's edge bounds it. A side on a face whose uv moved is certified only as the
+/// target of the other side's moved edge stretch (its surface piece between the two uv's);
+/// a uv move without one is `false`. `false` also when a
 /// classification's kind or object changed since `from`, the first crossing named no
 /// curve, a drop or a bound is not made (another curve kind, a surface without a net) or a
 /// bound is past `tol` (NaN included): the definition then keeps its placement.
@@ -1096,6 +1098,14 @@ fn crossing_stretch_certified<O: ClassObject>(
         else {
             return Ok(false);
         };
+        // (a face's uv that moved is certified only as the target of the other side's
+        // moved edge stretch, below; with no such stretch the move is not certified)
+        if b.point_class() == PointClassType::Face
+            && a.uv_param() != b.uv_param()
+            && (ob.point_class() != PointClassType::Edge || oa.t_param() == ob.t_param())
+        {
+            return Ok(false);
+        }
         // (only an edge's parameter moves along a stretch; equal ones have none)
         if b.point_class() != PointClassType::Edge || a.t_param() == b.t_param() {
             continue;
