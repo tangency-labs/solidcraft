@@ -20,6 +20,8 @@
 //! again that 0.30.1 saved as a numbered piece (`F2:side#2`) or under a later index
 //! (`F4:bore:side:1`): see [`locate_thread_face_on_body`] (#16602).
 
+use std::sync::Arc;
+
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
@@ -53,6 +55,63 @@ pub struct EdgeHit {
     pub verified: bool,
     /// Whether the reference's point still lies on the edge.
     pub on_point: bool,
+}
+
+/// A body's edge names and face names, worked out once for every edge name looked up on it.
+pub(crate) struct BodyEdges {
+    pub(crate) mesh: Arc<Mesh>,
+    names: Vec<String>,
+    faces: Arc<Names>,
+}
+
+/// The edges of a body a stored edge name matches, before a picked point decides between them.
+pub(crate) enum EdgeMatch {
+    /// The edge with that name, or the one edge between the faces it names.
+    Edge(usize),
+    /// Pieces of it: the faces it names meet along several edges now, or only a piece of one of
+    /// them is left.
+    Pieces(Vec<usize>),
+}
+
+impl BodyEdges {
+    pub(crate) fn new(b: &ModelBody) -> BodyEdges {
+        BodyEdges { mesh: b.mesh(), names: edge_names(b), faces: naming::names(b) }
+    }
+
+    /// Whether edge `i`'s name follows exact history: the faces it separates do, and it isn't one
+    /// of several edges between them, numbered by where they lie.
+    /// Edge `i`'s persistent name.
+    pub(crate) fn name(&self, i: usize) -> Option<&str> {
+        self.names.get(i).map(String::as_str)
+    }
+
+    pub(crate) fn verified(&self, i: usize) -> bool {
+        self.mesh.edge_faces.get(i).is_some_and(|fs| fs.iter().all(|f| self.faces.verified(*f as usize)))
+            && self.names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
+    }
+
+    /// What the stored edge name `name` matches: the edge with that name; else the one edge
+    /// between the faces it names (followed through splits and merges of those faces); else the
+    /// pieces of it. `None` when nothing does.
+    pub(crate) fn matching(&self, name: &str) -> Option<EdgeMatch> {
+        if let Some(i) = self.names.iter().position(|n| n == name) {
+            return Some(EdgeMatch::Edge(i));
+        }
+        // By the faces it separates: the best way any edge matches.
+        let wanted = strip_edge_number(name);
+        let mut best: Option<(Match, Vec<usize>)> = None;
+        for (i, fs) in self.mesh.edge_faces.iter().enumerate() {
+            let [fa, fb] = fs.as_slice() else { continue };
+            let Some(level) = edge_match(&self.faces, *fa as usize, *fb as usize, wanted) else { continue };
+            keep_best(&mut best, level, i);
+        }
+        let (level, cands) = best?;
+        let one = match cands.as_slice() {
+            [i] if level >= Match::Piece => Some(*i),
+            _ => None,
+        };
+        Some(one.map_or(EdgeMatch::Pieces(cands), EdgeMatch::Edge))
+    }
 }
 
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge

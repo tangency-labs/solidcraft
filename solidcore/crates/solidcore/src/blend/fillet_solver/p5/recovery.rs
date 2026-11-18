@@ -932,10 +932,7 @@ impl Recovery<'_> {
                         // Bare Copy: upstream ignores its status but uses its output.
                         let (copy, status) = ops.copy_offset(self.k, &orig.surface);
                         // fork 66b02de passes this on (SER)
-                        ignored(crate::error::passed_on(
-                            status,
-                            self.k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        status?;
                         if let Some(copy) = copy {
                             self.fillets
                                 .geom_mut(required(new_geom)?)?

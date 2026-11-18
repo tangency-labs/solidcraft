@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_check": "Check Drawing"
+  },
+  "ar": {
+    "cmd.drawing_check": "فحص الرسم"
+  },
+  "de": {
+    "cmd.drawing_check": "Zeichnung prüfen"
+  },
+  "he": {
+    "cmd.drawing_check": "בדיקת השרטוט"
+  },
+  "ja": {
+    "cmd.drawing_check": "図面のチェック"
+  },
+  "ko": {
+    "cmd.drawing_check": "도면 검사"
+  },
+  "vi": {
+    "cmd.drawing_check": "Kiểm tra bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_check": "检查绘图"
+  }
+}
