@@ -12,6 +12,12 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+// Tests: GnuPG is not found on this thread, as on a computer without it (#18686).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static HIDDEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// A GnuPG installation SolidCraft can run.
 pub struct Gpg {
     program: PathBuf,
@@ -44,6 +50,10 @@ impl Gpg {
     /// GnuPG on this computer, if one can be run. The common install locations are tried because
     /// a window launched from the desktop does not always have the shell's `PATH`.
     pub fn find() -> Option<Gpg> {
+        #[cfg(test)]
+        if HIDDEN.with(std::cell::Cell::get) {
+            return None;
+        }
         for program in candidates() {
             let Ok(status) = Command::new(&program).arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status() else {
                 continue;

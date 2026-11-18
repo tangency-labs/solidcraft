@@ -1013,6 +1013,32 @@ mod tests {
         crate::write_design_container_with_provenance(doc, crate::DesignCompression::Fast, None, None, None, &save(None, chain, None, None)).unwrap()
     }
 
+    /// A save over the open limit keeps the history it wrote: the bytes just written are read back
+    /// without that limit, while opening such a file still needs it raised (#18686).
+    #[test]
+    fn a_chain_written_over_the_open_limit_is_read_back_from_the_save() {
+        let first = signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default());
+        let chain = crate::read_design_provenance_chain(&first).expect("the signed file has a chain");
+        let mut doc = Document::new("Noisy import");
+        let step = crate::design::tests::padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
+        doc.add_feature(
+            solidcraft_doc::FeatureKind::Import {
+                file: "noisy.step".into(),
+                step: step.into(),
+                components: Vec::new(),
+                skip: Vec::new(),
+                records: None,
+            },
+            None,
+        )
+        .unwrap();
+        let big = unsigned_save(&doc, &chain);
+        assert!(big.len() > crate::MAX_DESIGN_BYTES);
+        assert!(crate::read_design_provenance_chain(&big).is_none(), "opening still keeps to the limit");
+        let kept = crate::written_design_provenance_chain(&big).expect("the save's own chain is read back");
+        assert_eq!(kept.records.len(), chain.records.len());
+    }
+
     fn report(bytes: &[u8]) -> Option<ProvenanceReport> {
         crate::read_design_provenance(bytes)
     }

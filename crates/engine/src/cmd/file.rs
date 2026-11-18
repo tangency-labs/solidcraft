@@ -1757,7 +1757,10 @@ fn write_bytes(
 ) -> Result<Value> {
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
-    let bytes = if sign {
+    // Notes the save reports: a signature that couldn't be made, a file too large to open again.
+    let mut notes: Vec<String> = Vec::new();
+    let mut sign = sign;
+    if sign {
         if !s.signing_allowed {
             return Err(bad(
                 "file.save",
@@ -1767,8 +1770,16 @@ fn write_bytes(
         if format != "container" {
             return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
         }
-        let (bytes, signed) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
-        signature = signed;
+    }
+    let signed = if sign { write_signed_container(s, &chain, path, compression, preview, cache, signing_key)? } else { Err("") };
+    // Signing asked for where GnuPG can't run: the design is saved without a signature, and the
+    // save says so, rather than refusing and leaving the work unsaved (#18686).
+    if sign && let Err(why) = &signed {
+        notes.push(format!("Saved without a signature: {why}."));
+        sign = false;
+    }
+    let bytes = if let (true, Ok((bytes, made))) = (sign, signed) {
+        signature = made;
         bytes
     } else if !chain.records.is_empty() {
         // A save without a key keeps the history it opened with, so the newest record is reported
@@ -1801,15 +1812,20 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
+    // The chain just written, read without the open-size limit: a save over it keeps its history.
+    s.provenance_chain = solidcraft_io::written_design_provenance_chain(&bytes);
     s.provenance = None;
     s.mark_saved();
+    notes.extend(solidcraft_io::limits::over_design_limit(bytes.len()));
     let mut out = SaveResult {
         path: path.to_string(),
         bytes: bytes.len(),
         name: s.doc.name.clone(),
         kept_format: None,
-        warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
+        warnings: {
+            let warnings: Vec<String> = cache_not_saved.iter().chain(&notes).cloned().collect();
+            (!warnings.is_empty()).then_some(warnings)
+        },
         cache_not_saved,
         not_kept: None,
         param_warnings: Vec::new(),
@@ -1831,7 +1847,11 @@ fn write_bytes(
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
 
-/// Write the container with one GnuPG-signed provenance record appended to the session's chain.
+/// A signed save: the container and who signed it, or why GnuPG can't sign here.
+type Signed = std::result::Result<(Vec<u8>, Option<SignedSave>), &'static str>;
+
+/// Write the container with one GnuPG-signed provenance record appended to the session's chain;
+/// `Ok(Err(why))` when GnuPG can't be found, so the caller saves unsigned (#18686).
 #[cfg(not(target_arch = "wasm32"))]
 fn write_signed_container(
     s: &Session,
@@ -1841,8 +1861,8 @@ fn write_signed_container(
     preview: bool,
     cache: bool,
     signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
-    let gpg = crate::gpg::Gpg::find().ok_or_else(|| bad("file.save", "signing needs GnuPG, which was not found on this computer"))?;
+) -> Result<Signed> {
+    let Some(gpg) = crate::gpg::Gpg::find() else { return Ok(Err("GnuPG was not found on this computer")) };
     let signer = crate::gpg::Signer::new(&gpg, signing_key.map(str::trim).filter(|key| !key.is_empty()));
     let save = solidcraft_io::ProvenanceSave {
         source: Some(solidcraft_io::SignatureSource::OpenPgp(&signer)),
@@ -1854,7 +1874,7 @@ fn write_signed_container(
     };
     let bytes = s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let info = signer.signing_info().ok_or_else(|| EngineError::Other(format!("{path}: GnuPG signed the design but named no key")))?;
-    Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id })))
+    Ok(Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id }))))
 }
 
 /// The browser cannot run GnuPG.
@@ -1867,8 +1887,8 @@ fn write_signed_container(
     _preview: bool,
     _cache: bool,
     _signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
-    Err(bad("file.save", "signing needs the desktop app and GnuPG; the browser cannot sign"))
+) -> Result<Signed> {
+    Ok(Err("the browser can't run GnuPG; the desktop app can sign"))
 }
 
 /// `file.verify`: check a saved design's signature.

@@ -279,11 +279,11 @@ Before you raise them:
 - **Memory:** a file is read whole, and what is built from it is held in memory beside it. Expect
   several times the file's size in RAM, more for finely detailed parts, and a long open and a slow
   view for an assembly with hundreds of thousands of faces.
-- **Saving:** a design keeps the text of a STEP import, compressed, and the design limit applies
-  to the saved file. An import whose compressed text doesn't fit in a design file is refused when
-  it is imported, so it never opens and then fails to save; raise the design file limit too, or
+- **Saving:** a design keeps the text of a STEP import, compressed. An import whose compressed text
+  doesn't fit in a design file is refused when it is imported; raise the design file limit too, or
   open the file with `--max-file-size`, which raises both. Opening that design again needs the
-  same limits.
+  same limits. A design that grows past the design limit is still saved (and autosaved), and the
+  save says that the file is over the limit and how to raise it to open the file again.
 - **Web app:** the browser version keeps 512 MB and 256 MB: a browser tab can't hold larger files.
   Its Preferences show a note instead of the setting.
 

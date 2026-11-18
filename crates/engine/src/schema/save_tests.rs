@@ -220,6 +220,28 @@ fn a_newer_files_reply_matches_the_output_schema() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Signing asked for by the app's Save on a computer without GnuPG: the design is saved without a
+/// signature and the save says so, instead of refusing and leaving the work unsaved (#18686).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_signed_save_without_gnupg_saves_unsigned_and_says_so() {
+    crate::gpg::HIDDEN.with(|hidden| hidden.set(true));
+    let mut s = Session { signing_allowed: true, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let path = std::env::temp_dir().join(format!("solidcraft-unsigned-{}.sc", std::process::id()));
+    let saved = s.execute("file.save", &json!({"path": path, "sign": true})).expect("saved, unsigned");
+    crate::gpg::HIDDEN.with(|hidden| hidden.set(false));
+    let warnings: Vec<&str> = saved["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(warnings, ["Saved without a signature: GnuPG was not found on this computer."]);
+    assert!(saved.get("signature").is_none_or(Value::is_null), "{saved}");
+    assert!(!s.is_dirty(), "the design counts as saved");
+    let mut opened = Session::default();
+    opened.execute("doc.open", &json!({"path": path})).unwrap();
+    assert_eq!(opened.doc.features.len(), 1);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("sc.bak"));
+}
+
 #[test]
 fn a_script_or_agent_cannot_sign_a_save() {
     let mut s = Session::default();
