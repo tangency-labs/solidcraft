@@ -773,6 +773,31 @@ impl<O: ClassObject> PointClassification<O> {
         }
     }
 
+    /// Not upstream (WR-410): the surface of the classification object, as
+    /// [`Self::curve_object`] gives the curve: the surface itself, or the surface of a face;
+    /// `None` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] for face handles `geometry` cannot resolve to its B-rep;
+    /// [`SolidError::InvalidInput`] when `geometry` cannot resolve a surface handle.
+    pub fn surface_object<'g>(
+        &self,
+        geometry: &'g impl ClassGeometry<O>,
+    ) -> Result<Option<&'g Surface>> {
+        match (self.point_class, self.object) {
+            (PointClassType::Face, Some(o)) => {
+                let (b, f) = topology_face(geometry, o, OP_GEOMETRY)?;
+                face::p2::surface(b, f)
+            }
+            (PointClassType::Surface, Some(o)) => geometry
+                .surface(o)
+                .map(Some)
+                .ok_or_else(|| unresolved(OP_GEOMETRY)),
+            _ => Ok(None),
+        }
+    }
+
     /// The gap between the classified point and the object (`GetGap3d`): the stored
     /// gap for `opt_surface = None`, else the length of the gap component tangent to
     /// `opt_surface` at the object point's drop point on it. Upstream returns

@@ -17,6 +17,7 @@ mod consumed;
 mod crossing_loops;
 mod edgeuse;
 mod empty;
+mod extinct_branches;
 mod face;
 mod isolated;
 mod merge;

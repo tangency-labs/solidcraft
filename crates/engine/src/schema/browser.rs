@@ -12,6 +12,7 @@ use solidcraft_doc::BrowserEntry;
 use super::canvas::CanvasPlane;
 use super::check::{located, whole};
 use super::types::{FeatureCommon, LengthExpr, feature_common, present};
+use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern, Search};
 
 /// Repair a part the modelling kernel refuses, or an open part that should be a solid: faces
 /// SMLib refuses on their own are rebuilt on their own surfaces (geometry unchanged), free edges
@@ -1280,7 +1281,9 @@ impl JsonSchema for ViewCamera {
                 "yaw": {"description": "Turn about the up axis; 0 looks along +Y, from the front.", "type": "number"},
                 "pitch": {"description": "Elevation of the eye above the ground plane.", "type": "number"},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
-                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0}
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0},
+                "roll": {"description": "Rotation about the view direction, in radians. Default: 0.", "type": "number", "default": 0.0},
+                "up": {"description": "The world axis pointing up. Default: z.", "type": "string", "enum": ["z", "y"], "default": "z"}
             },
             "required": ["target", "yaw", "pitch", "distance"]
         })
@@ -1294,8 +1297,8 @@ impl JsonSchema for ViewCamera {
 pub struct ViewSaveParams {
     // Optional in the type and required in the schema (`camera_required`): left out, the handler
     // refuses it with its own message.
-    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?}`, finite, with a
-    /// distance above 0.
+    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?, roll?, up?}`,
+    /// finite, with a distance above 0. Up is "z" or "y".
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ViewCamera")]
     pub camera: Option<ViewCamera>,
@@ -1384,6 +1387,11 @@ pub struct ViewEntry {
     pub distance: f64,
     /// Vertical field of view in radians; 0 is orthographic.
     pub fov: f64,
+    /// Rotation about the view direction in radians.
+    pub roll: f64,
+    /// World axis pointing up, serialized as "z" or "y".
+    #[schemars(with = "String")]
+    pub up: solidcraft_viewport::UpAxis,
 }
 
 /// What `view.list` returns.
@@ -1667,6 +1675,76 @@ pub struct RenamedBody {
     pub body: String,
     /// Its name now.
     pub name: String,
+}
+
+/// Search the Browser by name, as its search field does. Give `text`, `kinds` or both. Read-only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FindParams {
+    /// What the names hold. Default: every name of the `kinds` given.
+    #[serde(default)]
+    pub text: Option<FindText>,
+    /// The kinds of thing to list. Default: every kind.
+    #[serde(default)]
+    pub kinds: Option<FindKinds>,
+}
+
+/// `text`, read by the handler's own reader: `None` when blank.
+#[derive(Debug)]
+pub struct FindText(pub Option<Pattern>);
+
+impl<'de> Deserialize<'de> for FindText {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::find_text(Some(&Value::deserialize(d)?)).map(FindText).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for FindText {
+    fn schema_name() -> Cow<'static, str> {
+        "FindText".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Text anywhere in the name, ignoring case. With `*` (any text) or `?` (any one character) it must match the whole name instead: `*:1` is every name that ends in `:1`. Spaces around it don't count, and blank text counts as none.",
+            "type": "string",
+            "maxLength": MAX_PATTERN_CHARS
+        })
+    }
+}
+
+/// `kinds`, read by the handler's own reader.
+#[derive(Debug)]
+pub struct FindKinds(pub Vec<Kind>);
+
+impl<'de> Deserialize<'de> for FindKinds {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::find_kinds(Some(&Value::deserialize(d)?)).map(FindKinds).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for FindKinds {
+    fn schema_name() -> Cow<'static, str> {
+        "FindKinds".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let ids: Vec<&str> = Kind::ALL.iter().map(|k| k.id()).collect();
+        json_schema!({
+            "description": "A list of kinds: a placement of a component, a body, a sketch, a construction plane, axis or point, a joint. An empty list means every kind.",
+            "type": "array",
+            "items": {"enum": ids},
+            "maxItems": Kind::ALL.len()
+        })
+    }
+}
+
+/// What `browser.find` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FindResult {
+    #[serde(flatten)]
+    pub search: Search,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 #[cfg(test)]

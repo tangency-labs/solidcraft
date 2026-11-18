@@ -1481,6 +1481,65 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
 }
 
+#[test]
+fn directed_planar_sweep_preserves_record_coordinates() {
+    let center = v(10.0, 20.0);
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, v(12.0, 20.0), v(10.0, 23.0)),
+        Some(FRAC_PI_2)
+    );
+    assert_eq!(
+        solidcore_ops::prism::counterclockwise_sweep(center, center, v(10.0, 23.0)),
+        None
+    );
+}
+
+#[test]
+fn hatch_record_admission_bounds_conversion_before_geometry() {
+    use solidcore_ops::hatch::generate;
+    use solidcore_record::hatch::{Invalid, Pattern};
+    let pattern = Pattern::lines_45();
+    let line = Seg2::Line {
+        a: v(0.0, 0.0),
+        b: v(1.0, 0.0),
+    };
+    let mut region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; solidcore::hatch::MAX_INPUT_PIECES + 1],
+        },
+        holes: Vec::new(),
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted"))
+    );
+    region.outer.segs.pop();
+    assert_ne!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted")),
+        "the exact ceiling remains inclusive"
+    );
+    let circle = Loop2::circle(v(0.0, 0.0), 5.0);
+    region = Region2 {
+        outer: circle.clone(),
+        holes: vec![circle.clone(), circle],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("not supported yet: multiple circular hatch holes"))
+    );
+    region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; 3],
+        },
+        holes: vec![Loop2::default(); solidcore::hatch::MAX_INPUT_PIECES / 3 + 1],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("too many region holes"))
+    );
+}
+
 /// The section fit as Convert Mesh takes it (moved from SolidCraft's `mesh_convert.rs`
 /// `planar_boxes_are_exact_and_coarse_polygons_are_not_rounded`): a hexagon keeps its six sides,
 /// sixteen nodes too coarse for 0.001 keep sixteen, and within 0.2 they are the exact circle, one

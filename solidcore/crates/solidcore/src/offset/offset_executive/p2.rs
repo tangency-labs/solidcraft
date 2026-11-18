@@ -993,6 +993,7 @@ impl OffsetExecutive {
             }
         }
 
+        self.remove_extinct_branches(kernel, original, notifications)?;
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
         // (not upstream) a local operation's edges whose surfaces all stay are kept
         self.keep_unmoved_edges(original)?;

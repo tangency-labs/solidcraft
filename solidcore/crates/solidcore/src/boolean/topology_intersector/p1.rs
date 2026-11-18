@@ -1391,6 +1391,35 @@ pub(crate) fn room_left(reach: &[(f64, f64)]) -> Option<f64> {
     (fits > 0.0).then_some(fits)
 }
 
+/// Not upstream: the vertices of `covers` whose grown ball stays clear of every one of its
+/// far vertices, each with its grown tolerance (docs/booleans.md, "What a vertex stands
+/// for"). A far vertex is taken at the largest tolerance any of `growths` (applied
+/// whatever is decided here) or of `covers` would give it, or its stored one where that is
+/// larger: the answer for one cover does not depend on which of the others fit, so it is
+/// the same in any order. A NaN distance or tolerance passes no test, and that cover is
+/// left out.
+pub(crate) fn covers_staying_clear<K: Copy + PartialEq>(
+    growths: &[Growth<K>],
+    covers: &[Growth<K>],
+) -> Vec<(K, f64)> {
+    let grown = |far: Option<K>, stored: f64| {
+        growths
+            .iter()
+            .chain(covers)
+            .filter(|h| far == Some(h.vertex))
+            .fold(stored, |t, h| t.max(h.tolerance))
+    };
+    covers
+        .iter()
+        .filter(|g| {
+            g.reach
+                .iter()
+                .all(|&(far, apart, stored)| g.tolerance + grown(far, stored) < apart)
+        })
+        .map(|g| (g.vertex, g.tolerance))
+        .collect()
+}
+
 /// Not upstream (WR-306): the growths of the raise that makes each vertex of an absorbing
 /// vertex definition's pair cover the other (`sides`: each vertex's B-rep, id and raised
 /// tolerance), keyed by the side (0 or 1) and the vertex. A side grows only past its stored
@@ -2471,21 +2500,29 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
-        // Not upstream: each vertex an exactly placed vertex definition made (both source
-        // objects a vertex, a line edge or a plane face) covers the gaps the construction
-        // left between it and the curve ends and planes incident to it or to the other
-        // operand's vertex of the definition (the merge makes the two one, at either
-        // point; WR-306's fit covers its mate the same way). Its definition
-        // took one point for exactly placed points within their summed tolerances
-        // (`EXACT_TOL_FACTOR`), so an edge from one of the others ends a known distance
-        // off it: a distance between two computed points, or from a point to a plane,
+        // Not upstream: each vertex a vertex definition made stands for every point its
+        // proto vertex took for one (docs/booleans.md, "What a vertex stands for"), so it
+        // covers the gaps the construction left between it and the curve ends and planes
+        // incident to it or to the other operand's vertex of the definition (the merge
+        // makes the two one, at either point; WR-306's fit covers its mate the same way).
+        // Each gap is a distance between two computed points, or from a point to a plane,
         // exact to rounding (`docs/validity-and-tolerances.md` §8, a construction's
         // bound). The vertex's tolerance grows to twice its largest gap (`AssertValid`
-        // checks half of it), an edge's to its own curve end's gap, and a growth whose
-        // ball would reach the far vertex of one of its edges, at that vertex's grown
-        // tolerance when it grows too, is refused before any is applied.
+        // checks half of it), and only while its ball stays clear of the far vertex of
+        // each of its edges, at that vertex's grown tolerance when it grows too.
+        //
+        // An exactly placed definition (both source objects a vertex, a line edge or a
+        // plane face) took one point for exactly placed points within their summed
+        // tolerances (`EXACT_TOL_FACTOR`), so the gap is all there is to cover: its edges
+        // grow to their own curve ends' gaps too, and a ball that would reach a far vertex
+        // is refused before any growth is applied. Any other definition's vertex is given
+        // its cover where the ball stays clear, and keeps its tolerance where it does not:
+        // the points its proto vertex holds may lie as far apart as their uncertainty
+        // regions reach (two crossings of one grazing edge), and an edge that ends at
+        // another of them is not at this vertex for a tolerance to say so.
         let mut grow: Vec<(O, f64)> = Vec::new();
         let mut growths: Vec<Growth<O>> = Vec::new();
+        let mut covers: Vec<Growth<O>> = Vec::new();
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
             let Some(proto_vertex) = mgr.proto_vertex(pv) else {
@@ -2495,11 +2532,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let Some(def) = mgr.vertex_def(vd) else {
                     continue;
                 };
-                if !(exactly_placed(&*brep, def.src_topo(1))
-                    && exactly_placed(&*brep, def.src_topo(2)))
-                {
-                    continue;
-                }
+                let exact = exactly_placed(&*brep, def.src_topo(1))
+                    && exactly_placed(&*brep, def.src_topo(2));
                 let mut finals = Vec::new();
                 for v in [def.final_vertex(1), def.final_vertex(2)]
                     .into_iter()
@@ -2512,11 +2546,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 for &v in &finals {
                     let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
                     let (edges, growth) = certified_vertex_gaps(k, &*brep, v, &mates)?;
-                    grow.extend(edges);
-                    if let Some(g) = &growth {
-                        grow.push((g.vertex, g.tolerance));
+                    if exact {
+                        grow.extend(edges);
+                        if let Some(g) = &growth {
+                            grow.push((g.vertex, g.tolerance));
+                        }
+                        growths.extend(growth);
+                    } else {
+                        covers.extend(growth);
                     }
-                    growths.extend(growth);
                 }
             }
         }
@@ -2527,6 +2565,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             )
             .into_error());
         }
+        grow.extend(covers_staying_clear(&growths, &covers));
         for (o, tolerance) in grow {
             brep.set_topology_tolerance(k, o, tolerance, true, true)?;
         }
@@ -5723,6 +5762,41 @@ mod tests {
             reach: vec![(None, f64::NAN, 0.0)],
         }];
         assert_eq!(first_reaching(&nan), Some((1, 1.0, None)));
+    }
+
+    /// A vertex of a definition that is not exactly placed takes its cover only while its
+    /// ball stays clear of its far vertices, each at its grown tolerance: of two vertices 3
+    /// apart, the one that needs 0.5 fits beside the other's stored 1e-6 but is judged
+    /// against the 2.6 the other asks for (0.5 + 2.6 > 3), and that one against its 0.5
+    /// (2.6 + 0.5 > 3): neither is covered, whichever comes first. Beside a certified
+    /// growth of the far vertex to 1 the 0.5 fits (1.5 < 3), and a cover alone fits. A
+    /// NaN distance fits nothing.
+    #[test]
+    fn a_cover_is_taken_only_while_its_ball_stays_clear() {
+        let g = |vertex: u8, far: u8, tolerance: f64| Growth {
+            vertex,
+            tolerance,
+            reach: vec![(Some(far), 3.0, 1e-6), (None, 5.0, 1e-6)],
+        };
+        assert_eq!(
+            covers_staying_clear::<u8>(&[], &[g(1, 2, 0.5), g(2, 1, 2.6)]),
+            vec![]
+        );
+        assert_eq!(
+            covers_staying_clear::<u8>(&[], &[g(2, 1, 2.6), g(1, 2, 0.5)]),
+            vec![]
+        );
+        assert_eq!(
+            covers_staying_clear(&[g(2, 1, 1.0)], &[g(1, 2, 0.5)]),
+            vec![(1, 0.5)]
+        );
+        assert_eq!(covers_staying_clear(&[], &[g(2, 1, 2.6)]), vec![(2, 2.6)]);
+        let nan = [Growth {
+            vertex: 1u8,
+            tolerance: 1.0,
+            reach: vec![(None, f64::NAN, 0.0)],
+        }];
+        assert_eq!(covers_staying_clear(&[], &nan), vec![]);
     }
 
     /// WR-306 (#17888 review): the raise that makes each vertex of an absorbing pair cover
