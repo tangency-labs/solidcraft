@@ -334,7 +334,7 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     assert!(parse(&command).is_err());
     // A capability this host lacks is named first, whatever else the manifest holds.
     let mut newer = exporter();
-    newer["capabilities"] = json!(["formats@0.2"]);
+    newer["capabilities"] = json!(["formats@0.3"]);
     newer["runtime"]["entries"][0]["kind"] = json!("printer");
     assert!(matches!(parse(&newer), Err(HostError::UnsupportedCapability { .. })));
 }
