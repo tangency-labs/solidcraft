@@ -6,6 +6,7 @@
 //! say what each face is and stay with it when sizes change or other flanges come and go.
 
 use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::prelude::*;
 
 use super::SheetBody;
@@ -118,37 +119,47 @@ impl SheetBody {
 /// the sheet does not name (a hole's wall, a pocket's floor) and for every face of a body that is
 /// no folded sheet of `st`.
 pub fn body_sheet_face_names(st: &ModelState, b: &ModelBody) -> Vec<Option<String>> {
-    let m = b.mesh();
-    let nf = m.tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0);
+    let rec = b.body.record();
+    let nf = b.body.face_count();
     let Some(sheet) = st.sheets.iter().find(|s| s.body == b.name && !s.flat) else { return vec![None; nf] };
-    // Triangle centres lie inside a face, off a curved one by its facets' sag: a fifth of the
-    // thickness takes them and still tells a flat face from the rim beside it.
+    // Points lie on the surface; a fifth of the thickness tells a flat face from the rim beside it.
     let tol = sheet.t * 0.2;
-    let mut votes: Vec<Vec<(String, usize)>> = vec![Vec::new(); nf];
-    let mut total = vec![0usize; nf];
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let (Some(v), Some(n), Some([a, b2, c])) = (votes.get_mut(*f as usize), total.get_mut(*f as usize), m.tri(t)) else { continue };
-        let Some(normal) = (b2 - a).cross(c - a).normalized() else { continue };
-        // At most a few dozen points a face: enough to tell its name, cheap on a fine mesh.
-        if *n >= 48 {
+    let mut names = vec![None; nf];
+
+    for (f, face) in rec.faces.iter().enumerate() {
+        let plane_opt = b.body.face_plane(f).or_else(|| b.body.planar_face(f));
+        let Ok(eval) = SurfaceEval::new(face.parameters()) else { continue };
+        let [[u0, u1], [v0, v1]] = face.domain;
+        if !u0.is_finite() || !u1.is_finite() || !v0.is_finite() || !v1.is_finite() {
             continue;
         }
-        *n += 1;
-        if let Some(name) = sheet.face_name_facing((a + b2 + c) * (1.0 / 3.0), normal, tol) {
-            match v.iter_mut().find(|(x, _)| *x == name) {
-                Some(x) => x.1 += 1,
-                None => v.push((name, 1)),
+
+        let mut votes: Vec<(String, usize)> = Vec::new();
+
+        let samples = [0.15, 0.3, 0.5, 0.7, 0.85];
+        for &ku in &samples {
+            for &kv in &samples {
+                let u = u0 + (u1 - u0) * ku;
+                let v = v0 + (v1 - v0) * kv;
+                let Some((pt, du, dv)) = eval.derivs(u, v) else { continue };
+                let normal = du.cross(dv).normalized().or_else(|| plane_opt.as_ref().map(|p| p.normal()));
+                let Some(normal) = normal else { continue };
+                if let Some(name) = sheet.face_name_facing(pt, normal, tol) {
+                    match votes.iter_mut().find(|(x, _)| *x == name) {
+                        Some(x) => x.1 += 1,
+                        None => votes.push((name, 1)),
+                    }
+                }
+            }
+        }
+
+        let total: usize = votes.iter().map(|x| x.1).sum();
+        if let Some((name, count)) = votes.into_iter().max_by_key(|x| x.1) {
+            if total > 0 && count as f64 >= AGREE * total as f64 {
+                names[f] = Some(super::sheet_face_name(&b.name, &name));
             }
         }
     }
-    votes
-        .into_iter()
-        .zip(total)
-        .map(|(v, n)| {
-            v.into_iter()
-                .max_by_key(|x| x.1)
-                .filter(|(_, k)| *k as f64 >= AGREE * n.max(1) as f64)
-                .map(|(name, _)| super::sheet_face_name(&b.name, &name))
-        })
-        .collect()
+
+    names
 }
