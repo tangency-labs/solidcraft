@@ -653,6 +653,16 @@ impl ModelBody {
         self.mesh.get().cloned()
     }
 
+    /// The mesh a cam's profile is read from: the body's edges at the cam's own tolerance (finer
+    /// than the display mesh, as the profile follows the body's outline). The mesh is made once
+    /// and kept, so a solve that works the cam's table out again does not mesh the body again
+    /// (#3389).
+    pub(crate) fn cam_mesh(&self) -> Result<Arc<Mesh>> {
+        #[cfg(test)]
+        cost_tests::count(|c| c.cam_meshes += 1);
+        Ok(Arc::new(self.body.mesh(&solidcraft_kernel::MeshTolerance::chord(crate::joints::cam::profile_tolerance(self.body.size())))?))
+    }
+
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
     /// spaced across the face (faces on one surface spaced together, so they share them), exact
     /// and cut to its trims ([`kernel::iso_grid`]), their points at the chord
