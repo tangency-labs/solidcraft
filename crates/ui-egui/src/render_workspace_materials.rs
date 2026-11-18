@@ -100,10 +100,13 @@ pub(super) struct Coat {
     pub weight: f64,
     pub roughness: f64,
     pub ior: f64,
+    /// Metallic paint flakes under the coat; `flakes` keeps its numbers while switched off.
+    pub flakes_enabled: bool,
+    pub flakes: solidcraft_engine::doc::render_coat::FlakeMaterial,
 }
 impl Default for Coat {
     fn default() -> Self {
-        Self { weight: 1.0, roughness: 0.12, ior: 1.5 }
+        Self { weight: 1.0, roughness: 0.12, ior: 1.5, flakes_enabled: false, flakes: Default::default() }
     }
 }
 
@@ -193,7 +196,13 @@ impl Binding {
         self.saved_coat_source = Some(coat);
         self.coat_edited = false;
         self.coat_enabled = true;
-        self.coat = Coat { weight: coat.weight, roughness: coat.roughness, ior: coat.ior };
+        self.coat = Coat {
+            weight: coat.weight,
+            roughness: coat.roughness,
+            ior: coat.ior,
+            flakes_enabled: coat.flakes.is_some(),
+            flakes: coat.flakes.unwrap_or_default(),
+        };
     }
     fn coat_has_local_changes(&self) -> bool {
         self.coat_edited
@@ -207,7 +216,12 @@ impl Binding {
         self.maps_enabled || self.maps != Maps::default()
     }
     fn coat_material(&self) -> solidcraft_engine::doc::render_coat::CoatMaterial {
-        solidcraft_engine::doc::render_coat::CoatMaterial { weight: self.coat.weight, roughness: self.coat.roughness, ior: self.coat.ior }
+        solidcraft_engine::doc::render_coat::CoatMaterial {
+            weight: self.coat.weight,
+            roughness: self.coat.roughness,
+            ior: self.coat.ior,
+            flakes: self.coat.flakes_enabled.then_some(self.coat.flakes),
+        }
     }
     fn optics(&self) -> solidcraft_engine::doc::render_optics::OpticalMaterial {
         solidcraft_engine::doc::render_optics::OpticalMaterial {
@@ -555,6 +569,9 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
         if binding.coat_enabled {
             let value = &binding.coat;
             ClearCoat::new(value.weight, value.roughness, value.ior).map_err(|e| e.to_string())?;
+            if value.flakes_enabled {
+                value.flakes.to_runtime().map_err(|e| e.to_string())?;
+            }
             // The stable coat overlay already captured these exact numbers.
             // Never duplicate it as an ordinal runtime override.
         }
@@ -922,9 +939,48 @@ fn coat_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) -
             response
         })
         .changed();
+        changed |= flake_controls(app, ui, &mut binding.coat);
     });
     binding.coat_edited |= changed;
     saved_coat_controls(app, ui, binding)
+}
+
+/// Metallic paint flakes under the coat (docs/render-flakes.md).
+fn flake_controls(app: &mut SolveApp, ui: &mut egui::Ui, coat: &mut Coat) -> bool {
+    let enabled = ui_kit::checkbox(ui, app.tr("render.flakes.enable"), &mut coat.flakes_enabled);
+    crate::scenario::publish_target("render:flakes:enable", enabled.rect);
+    let mut changed = enabled.changed();
+    ui.add_enabled_ui(coat.flakes_enabled, |ui| {
+        let flakes = &mut coat.flakes;
+        for (key, target, value, range) in [
+            ("render.flakes.coverage", "render:flakes:coverage", &mut flakes.coverage, 0.0..=1.0),
+            ("render.flakes.spread", "render:flakes:spread", &mut flakes.spread, 0.0..=1.0),
+            ("render.flakes.depth", "render:flakes:depth", &mut flakes.depth, 0.0..=1.0),
+            ("appearance.metallic", "render:flakes:metallic", &mut flakes.metallic, 0.0..=1.0),
+            ("appearance.roughness", "render:flakes:roughness", &mut flakes.roughness, 0.045..=1.0),
+        ] {
+            changed |= ui_kit::row(ui, app.tr(key), |ui| {
+                let response = ui_kit::mixed_slider(ui, value, range, None);
+                crate::scenario::publish_target(target, response.rect);
+                response
+            })
+            .changed();
+        }
+        changed |= ui_kit::row(ui, app.tr("render.flakes.size"), |ui| {
+            let response = ui_kit::number_field_preserving(ui, &mut flakes.size_mm, 0.005..=10.0, 0.005, "mm");
+            crate::scenario::publish_target("render:flakes:size", response.rect);
+            response
+        })
+        .changed();
+        changed |= ui_kit::row(ui, app.tr("render.flakes.color"), |ui| {
+            let response = ui_kit::color_field(ui, &mut flakes.color);
+            crate::scenario::publish_target("render:flakes:color", response.rect);
+            response
+        })
+        .changed();
+        ui_kit::text(ui, app.tr("render.flakes.help"), ui_kit::Text::Note("render.flakes.help"));
+    });
+    changed
 }
 
 #[derive(Clone, Copy)]

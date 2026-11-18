@@ -6,6 +6,26 @@ a flake happens to face both the light and the eye, and the sparkle moves as the
 turns. `solidcraft_viewport::flakes` is the shading model for this; it is a bounded
 preview model, not a simulation of pigment layers.
 
+## In the Appearance editor
+
+Select a whole body, open the Clear coat section and enable the coat, then tick
+**Metallic flakes under the coat** and set Coverage, Tilt, Depth, Metallic,
+Roughness, Flake size and Flake color. The flakes are saved with the coat by **Save
+coat to shot**, and Discard, Replace, Remove and Undo treat them like the coat's
+other numbers. They show in CPU ray-traced and GPU path-traced images. The realtime
+viewport and raster images stay schematic, as they do for the coat.
+
+A saved coat carries them as `flakes` beside its weight, roughness and IOR:
+
+```json
+{"weight":1,"roughness":0.12,"ior":1.5,"flakes":{"coverage":0.4,"size_mm":0.1,"spread":0.5,"depth":0.3,"color":[235,235,235],"metallic":1,"roughness":0.25}}
+```
+
+`render.coat.bind` takes the same object in `coat`. A coat without flakes saves as
+before. Flakes apply under a zero-weight coat too: the paint then has flakes and no
+coat lobe. Every number is checked when the coat is saved and when a design opens.
+The runtime `clear_coats` override API has no flakes.
+
 ## Parameters
 
 A `FlakeLayer` belongs to one paint and is checked when it is made:
