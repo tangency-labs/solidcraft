@@ -209,4 +209,13 @@ fn a_copy_of_nothing_it_can_use_is_left_out_with_why() {
     let r = ImportRecords { bodies: vec![broken, copy(0)], tree: Vec::new(), ..records.clone() };
     let imp = records_import(&r).unwrap();
     assert!(imp.bodies.is_empty() && imp.warnings.iter().any(|w| w.contains("was not imported")), "{:?}", imp.warnings);
+    // A copy of an original whose own placement is refused still comes in where it is placed,
+    // the part counted once.
+    let mut unplaced = records.bodies[0].clone();
+    unplaced.placement = Some([[f64::NAN; 4]; 4]);
+    let r = ImportRecords { bodies: vec![unplaced, copy(0)], tree: Vec::new(), ..records.clone() };
+    let imp = records_import(&r).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("not finite")), "{:?}", imp.warnings);
+    assert_eq!((imp.report.parts, imp.report.solids), (1, 1));
 }

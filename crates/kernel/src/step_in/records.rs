@@ -97,6 +97,8 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     let mut kept = vec![None; records.bodies.len()];
     // Each original's part, made once and placed again for each of its copies.
     let mut originals: std::collections::HashMap<usize, Part> = std::collections::HashMap::new();
+    // The parts counted among the import's solids.
+    let mut counted = std::collections::HashSet::new();
     for (k, r) in records.bodies.iter().enumerate() {
         let label = if r.name.is_empty() { format!("body {}", k + 1) } else { r.name.clone() };
         // The record body whose part this is: itself, or the one it is a copy of.
@@ -105,6 +107,13 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             None => part_of(r),
             Some(j) => copy_part(records, &originals, k, j),
         };
+        // An original's part is kept for its copies whatever its own placement: a copy placed
+        // where it can be still comes in when the original's placement is refused.
+        if r.copy_of.is_none()
+            && let Ok(part) = &part
+        {
+            originals.insert(k, part.clone());
+        }
         let made = part.and_then(|part| {
             finite_placement(r)?;
             placed(&part.body, &r.placement.unwrap_or(super::IDENTITY)).map(|b| (part, b)).map_err(|e| e.to_string())
@@ -147,11 +156,9 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             continue;
         };
         let body = body.with_color(r.color).with_face_sources(Some(Arc::new(sources)));
-        if part.closed && r.copy_of.is_none() {
+        // A part is counted once, by the first of its bodies that comes in.
+        if part.closed && counted.insert(source) {
             report.solids += 1;
-        }
-        if r.copy_of.is_none() {
-            originals.insert(k, part.clone());
         }
         kept[k] = Some(bodies.len());
         bodies.push(ImportedBody {
