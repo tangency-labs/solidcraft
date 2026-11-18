@@ -10,9 +10,11 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::boolean::api_brep::boolean_intersection;
 use solidcore::curve::curve::Curve;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives::create_box;
@@ -58,13 +60,7 @@ fn wedge(k: &mut Kernel) -> Brep {
 
 #[test]
 fn a_short_arc_extends_along_long_rulings_on_its_cylinder() {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in &names {
-        if let Some(flag) = f.flag_mut(name) {
-            *flag = true;
-        }
-    }
+    let f = solidcraft_fixes::solidcraft_fixes();
     let mut k = Kernel {
         fixes: f,
         ..Kernel::default()
