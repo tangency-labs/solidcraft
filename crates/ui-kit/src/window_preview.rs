@@ -17,12 +17,14 @@ pub(crate) fn show(ui: &mut Ui, menu: &WindowMenu<'_>, max_height: f32) {
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, label));
         let t = Tokens::get();
         let painter = ui.painter_at(rect);
-        desktop(&painter, rect, t.accent_soft, t.accent_soft.lerp_to_gamma(t.surface_accent, 0.24));
+        desktop(&painter, rect, t.accent_soft.lerp_to_gamma(t.figure_ground, 0.32), t.surface_accent.lerp_to_gamma(t.figure_ground, 0.45));
         let inset = (rect.height() * 0.055).min(12.0);
         let scale = ((rect.width() - 2.0 * inset) / 900.0).min((rect.height() - 2.0 * inset) / 560.0);
         let window = Rect::from_center_size(rect.center(), vec2(900.0, 560.0) * scale);
         let radius = (16.0 * scale).round() as u8;
-        painter.rect_filled(window.translate(vec2(0.0, 5.0 * scale)).expand(5.0 * scale), radius, t.figure_shadow);
+        for (spread, opacity) in [(18.0, 0.12), (10.0, 0.20), (3.0, 0.30)] {
+            painter.rect_filled(window.translate(vec2(0.0, 12.0 * scale)).expand(spread * scale), radius, t.figure_shadow.gamma_multiply(opacity));
+        }
         painter.rect(window, radius, t.figure_ground, Stroke::new(3.0 * scale, t.border), StrokeKind::Inside);
         let preview = Painter::with_clip_rect(&painter, window);
         miniature(&preview, window, scale, menu, t);
@@ -61,19 +63,30 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
     if menu.top_bar == TopBar::Always {
         let bar = region(3.0, 3.0, 894.0, 44.0);
         painter.rect_filled(bar, (12.0 * scale).round() as u8, t.app_bar);
-        painter.rect_filled(region(16.0, 11.0, 260.0, 28.0), 2, t.app_bar_hover_button);
-        for x in [28.0, 96.0, 158.0, 220.0] {
-            painter.rect_filled(region(x, 21.0, 40.0, 7.0), 1, t.app_bar_text.gamma_multiply(0.62));
+        crate::icons::paint_ink(painter, region(18.0, 13.0, 20.0, 20.0), "ws_design", t.app_bar_text);
+        painter.rect_filled(region(52.0, 10.0, 401.0, 29.0), 2, t.app_bar_hover_button);
+        for (x, label, selected) in [(62.0, "ui.design", false), (162.0, "Model", true), (259.0, "Model", false)] {
+            let tab = region(x, 14.0, 88.0, 21.0);
+            if selected {
+                painter.rect_filled(tab, 2, t.app_bar_text.gamma_multiply(0.16));
+            }
+            painter.text(
+                tab.center(),
+                egui::Align2::CENTER_CENTER,
+                solidcraft_ui_text::tr(label),
+                crate::type_face::semibold(12.0 * scale),
+                t.app_bar_text,
+            );
         }
-        crate::app_bar::paint_layout_glyph(painter, region(289.0, 14.0, 20.0, 20.0), "layout.side_by_side", t.app_bar_text);
+        crate::app_bar::paint_layout_glyph(painter, region(411.0, 15.0, 18.0, 18.0), "layout.grid", t.app_bar_text);
         for x in [830.0, 838.0, 846.0] {
             painter.circle_filled(point(x, 24.0), 2.8 * scale, t.app_bar_text);
         }
     }
-    cube(painter, point(446.0, 294.0), 145.0 * scale, t);
+    cube(painter, point(446.0, 300.0), 290.0 * scale, t);
     let card = region(633.0, 368.0, 253.0, 176.0);
     painter.rect_filled(card.translate(vec2(0.0, 8.0 * scale)), 3, t.figure_shadow);
-    painter.rect(card, 3, t.figure_card, Stroke::new(3.0 * scale, t.accent), StrokeKind::Inside);
+    painter.rect(card, 3, t.figure_card, Stroke::new(2.5 * scale, t.accent.gamma_multiply(0.65)), StrokeKind::Inside);
     let header = region(636.0, 371.0, 247.0, 25.0);
     match menu.card_headers {
         CardHeaders::Always => {
@@ -105,10 +118,11 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
             }
         }
     }
-    if menu.ribbon && (menu.top_bar == TopBar::Always || !menu.ribbon_auto_hide) {
-        let ribbon = region(3.0, 47.0, 894.0, 84.0);
+    if menu.ribbon {
+        let ribbon_top = if menu.top_bar == TopBar::Always { 51.0 } else { 31.0 };
+        let ribbon = region(14.0, ribbon_top, 872.0, 84.0);
         if menu.ribbon_auto_hide {
-            painter.rect_filled(ribbon, 0, t.toolbar.gamma_multiply(0.62));
+            painter.rect_filled(ribbon, 3, t.toolbar.gamma_multiply(0.86));
             painter.extend(crate::dashed_line(
                 &[ribbon.left_top(), ribbon.right_top(), ribbon.right_bottom(), ribbon.left_bottom(), ribbon.left_top()],
                 window,
@@ -117,15 +131,19 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
                 8.0 * scale,
             ));
         } else {
-            painter.rect(ribbon, 0, t.toolbar, Stroke::new(3.0 * scale, t.border), StrokeKind::Inside);
+            painter.rect(ribbon, 3, t.toolbar, Stroke::new(2.0 * scale, t.border), StrokeKind::Inside);
         }
-        for x in (26..850).step_by(86) {
-            painter.rect_filled(region(x as f32, 71.0, 26.0, 29.0), 1, t.text_dim.gamma_multiply(0.40));
-            painter.rect_filled(region(x as f32 - 5.0, 110.0, 36.0, 4.0), 1, t.text_dim.gamma_multiply(0.48));
+        for (index, icon) in ["sketch", "extrude", "revolve", "fillet", "chamfer", "shell", "pattern", "measure"].into_iter().enumerate() {
+            let x = 38.0 + index as f32 * 105.0;
+            crate::icons::paint_ink(painter, region(x, ribbon_top + 15.0, 28.0, 28.0), icon, t.text_dim);
+            painter.rect_filled(region(x - 7.0, ribbon_top + 55.0, 42.0, 3.0), 1, t.text_dim.gamma_multiply(0.40));
+            if index < 7 {
+                painter.line_segment([point(x + 66.0, ribbon_top + 14.0), point(x + 66.0, ribbon_top + 68.0)], Stroke::new(scale, t.border));
+            }
         }
     }
     if menu.top_bar == TopBar::Edge {
-        painter.rect_filled(region(398.0, 7.0, 104.0, 10.0), (5.0 * scale).round() as u8, t.text_dim.gamma_multiply(0.5));
+        painter.rect_filled(region(416.0, 7.0, 68.0, 6.0), (5.0 * scale).round() as u8, t.text_dim.gamma_multiply(0.5));
     }
 }
 
@@ -134,7 +152,7 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
 fn cube(painter: &Painter, center: Pos2, width: f32, t: Tokens) {
     let p = |x, y| center + vec2(x, y) * width;
     let [a, b, c, d, e, f, g] = [p(0.0, -0.58), p(0.5, -0.29), p(0.0, 0.0), p(-0.5, -0.29), p(-0.5, 0.29), p(0.0, 0.58), p(0.5, 0.29)];
-    let line = Stroke::new(width * 0.035, t.figure_line);
+    let line = Stroke::new(width * 0.026, t.figure_line);
     for (points, fill) in [([d, c, f, e], t.figure_face_left), ([b, g, f, c], t.figure_face_right), ([a, b, c, d], t.figure_face_top)] {
         painter.add(Shape::convex_polygon(points.to_vec(), fill, line));
     }
