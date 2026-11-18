@@ -595,6 +595,13 @@ impl TargetEdge {
         }
     }
 
+    /// The edge `edge` of the caller's body, named by an operation that works on that body
+    /// itself (a weld bead's refusal, #15129).
+    #[must_use]
+    pub(crate) const fn of_target(edge: EdgeId) -> Self {
+        Self(edge)
+    }
+
     /// The edge's id in the caller's body.
     #[must_use]
     pub const fn id(self) -> EdgeId {

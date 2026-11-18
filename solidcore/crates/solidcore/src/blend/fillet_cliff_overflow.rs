@@ -131,9 +131,9 @@ fn curve_ends(k: &Kernel, curve: &Curve) -> Result<(Point3, Point3)> {
 
 /// A curve of a closing face's loop and its orientation (`sm_LoopCurve`).
 #[derive(Debug, Clone)]
-pub(crate) struct LoopCurve {
-    pub(crate) curve: Curve,
-    pub(crate) orient: OrientType,
+struct LoopCurve {
+    curve: Curve,
+    orient: OrientType,
 }
 
 /// `sm_AddCurve`: adds `curve` to `lp`, oriented to run from `from` to `to`.
@@ -623,7 +623,7 @@ fn on_section_plane(p: Point3, at: Point3, normal: Vec3, tol: f64) -> bool {
 ///
 /// # Errors
 /// `SM_ERR` for a failed drop; those of the samples and the face construction.
-pub(crate) fn face_of_loop(
+fn face_of_loop(
     k: &mut Kernel,
     region: &mut Brep,
     surface: Surface,

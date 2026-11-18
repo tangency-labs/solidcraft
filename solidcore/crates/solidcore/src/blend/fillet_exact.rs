@@ -1868,7 +1868,9 @@ pub fn chord_implicit(blend: &ExactBlend) -> Option<crate::surface::implicit::Im
 /// middle `sagitta` off the chord, away from the edge (to the offsets' line's side) for a
 /// positive sagitta and towards it for a negative one: radius `R = (c^2 / 4 + h^2) / (2 |h|)`.
 /// The chord's plane for a sagitta of 0. `None` where [`chord_implicit`] has none or the
-/// offsets' line lies on the chord.
+/// offsets' line lies on the chord. The offsets' line lies on the edge's side of the chord
+/// only where both offsets are positive (no obtuse toe: `ChamferDefinition::offsets`), which
+/// every exact chord's definition requires (`ExactRound::chord`).
 #[must_use]
 pub fn arc_section_implicit(
     blend: &ExactBlend,

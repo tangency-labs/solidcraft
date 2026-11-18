@@ -370,7 +370,7 @@ impl BeadSpan {
                 "a bead has at least one span",
             ));
         }
-        let mut out: Vec<Self> = Vec::with_capacity(spans.len());
+        let mut out: Vec<Self> = Vec::new();
         for &(from, to) in spans {
             let span = Self::new(from, to)?;
             if out.last().is_some_and(|last| span.from < last.to) {

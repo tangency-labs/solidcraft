@@ -515,11 +515,11 @@ A reviewer checks each of these on a change that touches a definition, a net or 
 8. **Records are files.** A definition persists as plain data: the database type
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
-   `CornerRecord`), every number as stored; an `ExactRoundRecord`'s chamfer sizes carry the
-   section's sagitta (`ChamferRecord::sagitta`, written only when it is not 0, so a chamfer's
-   record is as before). `convert::rebuild`, `exact_rebuild` and
+   `CornerRecord`), every number as stored. A chord with a sagitta (a weld bead's) has no record
+   yet: `exact_to_record` refuses it (`Unsupported`) rather than write it as the flat chord.
+   `convert::rebuild`, `exact_rebuild` and
    `corner_rebuild` make the definition exactly and certify the net again before it is an operand
-   (or take the proof the kernel already finished for the same record, §4.5).
+(or take the proof the kernel already finished for the same record, §4.5).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
    one written; evaluation is a pure function of the definition, and the station memo keys a
    definition by its identity (`DefinitionIdentity`), so two threads agree with one bit for bit.
