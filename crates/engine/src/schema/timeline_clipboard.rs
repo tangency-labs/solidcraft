@@ -412,6 +412,9 @@ pub struct ExportScriptResult {
     pub omitted: Vec<String>,
     /// The file written, or null.
     pub path: Option<String>,
+    /// With `path`: the size of the file written, in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<usize>,
     /// The script.
     pub script: Script,
     /// How many steps it has.

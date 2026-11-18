@@ -370,6 +370,8 @@ fn add_and_export_replies_match_the_output_schema() {
     let sorted = serde_json::to_string_pretty(&written["script"]).unwrap_or_default();
     assert_eq!(text, sorted);
     assert_eq!(written["path"], json!(file), "{written}");
+    assert_eq!(written["bytes"], json!(text.len()), "the reply gives the size of the file written: {written}");
+    assert!(exported.get("bytes").is_none(), "no file, no size: {exported}");
     matches(output_schema_for::<ExportScriptResult>(), "timeline.export_script", &written);
 }
 

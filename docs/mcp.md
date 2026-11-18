@@ -540,6 +540,13 @@ its new curves have ends (the poles of an offset's splines), `created.points` be
 `created.point_count`: refer to those curves by their ids. A `sketch.move_points` reply gives
 `moved_count` and `reached` (true when every point reached its target) instead of the `moved`
 list, and lists only the moves that missed under `not_reached` (`point`, `to`, `at`).
+An export's mesh warnings (STL, OBJ and 3MF: faces left short of the smallest angle asked or
+off the surface, edges off the curve) are counted: two or more of one kind become one line with
+how many there were and the worst of them, such as `130 faces short of the 25° smallest angle
+asked; the sharpest: 12.94° (Node: face 41)`, and `warning_count` gives the number of lines
+`verbose: true` lists. A `warning` or `error` that is null is left out, and a `display_value` the same as `value` (a new parameter in its own unit)
+is left out. `timeline.export_script` with a `path` replies with the path, `bytes` (the size of
+the file) and `steps`, not the script itself: the script is in the file.
 Other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
