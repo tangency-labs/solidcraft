@@ -2186,13 +2186,10 @@ impl<'target> FilletSession<'target> {
                 // Not upstream (#16404): a face beside a blended edge that closes to a point
                 // at the vertex, between that edge and one of the other convexity not blended
                 // there, leaves no room for a blend of any size, so the corner is refused
-                // saying so, in place of the unsupported corner or the later failure it would
-                // otherwise be. A round that
-                // runs out at the vertex (the degenerate corner) has no width there and builds.
-                if !made
-                    .as_ref()
-                    .is_some_and(|c| c.kind == FilletCornerKind::Degenerate)
-                {
+                // saying so, in place of the unsupported corner. Only diagnose a corner
+                // the factory did not build: every successfully built corner, including a
+                // degenerate round that runs out at the vertex, keeps its existing path.
+                if made.is_none() {
                     // the tightest tangency tolerance of the vertex's solvers, as the corner
                     // takes it
                     let mut tangency_tol_radians = f64::INFINITY;

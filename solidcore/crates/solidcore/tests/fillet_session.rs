@@ -53,6 +53,11 @@ fn actual_box_solver_stays_authoritative_through_corner_creation() {
     assert_eq!(session.executive().filleted_vertices.len(), 2);
     session.create_corners(&k, None).unwrap();
     assert_eq!(session.executive().corners.len(), 2);
+    // Both NByOne corners built: the missing-corner diagnosis must leave them
+    // retained without recording a refusal.
+    assert_eq!(session.error_info().code, 0);
+    assert_eq!(session.error_info().comment, "<no comment>\n");
+    assert_eq!(session.error_site(), solidcore::error::Site::default());
     assert!(std::ptr::eq(
         actual_base,
         session.solver(solver).unwrap().base()
@@ -273,12 +278,14 @@ fn actual_box_solver_builds_surface_and_rails_in_retained_geometry() {
     };
     let actual_base = std::ptr::from_ref(session.solver(id).unwrap().base());
     let geometries = session.solver(id).unwrap().base().fillet_geoms.clone();
-    assert!(geometries.iter().all(|&geometry| session
-        .pseudo_brep()
-        .geom(geometry)
-        .unwrap()
-        .fillet_surface
-        .is_none()));
+    assert!(geometries.iter().all(|&geometry| {
+        session
+            .pseudo_brep()
+            .geom(geometry)
+            .unwrap()
+            .fillet_surface
+            .is_none()
+    }));
     session.calc_solver_geometry(&k, id).unwrap();
     let solver = session.solver(id).unwrap().base();
     assert_eq!(std::ptr::from_ref(solver), actual_base);
