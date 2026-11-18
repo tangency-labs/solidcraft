@@ -110,6 +110,16 @@ impl WindowLevel {
     }
 }
 
+/// An arrangement of existing views in one window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowArrangement {
+    pub views: Vec<u64>,
+    pub active: Option<u64>,
+    pub tiles: Option<Tiles>,
+    pub level: WindowLevel,
+    pub placement: Option<WindowPlacement>,
+}
+
 /// Logical window coordinates relative to the selected display.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowPlacement {
@@ -296,6 +306,62 @@ impl ViewSet {
             tiles: None,
             camera_link: CameraLinkMode::Off,
         }
+    }
+
+    /// Arrange the live views in their new strips, reusing existing window identities in order.
+    /// The input must assign each open view exactly once and leave at least one in the main window.
+    pub fn arrange_windows(&mut self, groups: Vec<WindowArrangement>) -> bool {
+        if self.window_id != 0 || groups.is_empty() || groups.len() > MAX_POPOUTS + 1 {
+            return false;
+        }
+        let all = std::iter::once(&*self).chain(self.windows.iter().map(|window| &window.views));
+        let mut unassigned: std::collections::BTreeMap<_, _> = all.flat_map(|strip| strip.views.iter().map(|view| (view.id, view.clone()))).collect();
+        let mut assigned = Vec::new();
+        for group in groups {
+            if group.views.is_empty() || group.placement.as_ref().is_some_and(|placement| !placement.is_valid()) {
+                return false;
+            }
+            let views = group.views.iter().map(|id| unassigned.remove(id)).collect::<Option<Vec<_>>>();
+            let Some(views) = views else { return false };
+            assigned.push((group, views));
+        }
+        if !unassigned.is_empty() {
+            return false;
+        }
+        let mut assigned = assigned.into_iter();
+        let Some((main, views)) = assigned.next() else { return false };
+        self.apply_arrangement(main, views);
+        let mut old = std::mem::take(&mut self.windows).into_iter();
+        for (group, views) in assigned {
+            let mut window = old.next().unwrap_or_else(|| {
+                let id = self.allocate_window_id();
+                PopOut { id, level: WindowLevel::ViewsOnly, placement: None, views: Self::strip(Vec::new(), 0, self.next_id, id) }
+            });
+            window.level = group.level;
+            if let Some(placement) = &group.placement {
+                window.placement = Some(placement.clone());
+            }
+            window.views.apply_arrangement(group, views);
+            self.put_window(window);
+        }
+        for window in old {
+            self.closed.extend(window.views.closed);
+        }
+        let excess = self.closed.len().saturating_sub(CLOSED_CAP);
+        self.closed.drain(..excess);
+        true
+    }
+
+    fn apply_arrangement(&mut self, group: WindowArrangement, views: Vec<DesignView>) {
+        self.views = views;
+        let requested = group.active.unwrap_or(self.active);
+        if self.get(requested).is_some() {
+            self.active = requested;
+        } else if let Some(first) = self.views.first() {
+            self.active = first.id;
+        }
+        self.tiles = group.tiles;
+        self.prune_tiles();
     }
 
     /// The open pop-outs in this design. The main strip is this ViewSet itself.

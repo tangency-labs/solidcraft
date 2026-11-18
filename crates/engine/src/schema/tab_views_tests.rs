@@ -244,6 +244,47 @@ fn window_commands_refuse_malformed_requests() {
 }
 
 #[test]
+fn saved_layout_commands_check_and_echo_without_editing_the_design() {
+    use crate::schema::tab_layouts::{TabLayoutListReply, TabLayoutNameParams, TabLayoutRenameParams};
+
+    assert_keys(input_schema_for::<TabLayoutNameParams>(), &["name"]);
+    assert_keys(input_schema_for::<TabLayoutRenameParams>(), &["name", "new_name"]);
+
+    let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let before = session.doc.to_json();
+    let undo = session.undo.len();
+    for (command, params, echo, schema) in [
+        ("tab.layout.save", json!({"name": "  Review "}), json!({"name": "Review"}), output_schema_for::<TabLayoutNameParams>()),
+        ("tab.layout.apply", json!({"name": "Review"}), json!({"name": "Review"}), output_schema_for::<TabLayoutNameParams>()),
+        ("tab.layout.remove", json!({"name": "Review"}), json!({"name": "Review"}), output_schema_for::<TabLayoutNameParams>()),
+        ("tab.layout.list", Value::Null, json!({"layouts": []}), output_schema_for::<TabLayoutListReply>()),
+        (
+            "tab.layout.rename",
+            json!({"name": "Review", "new_name": "  Tall "}),
+            json!({"name": "Review", "new_name": "Tall"}),
+            output_schema_for::<TabLayoutRenameParams>(),
+        ),
+    ] {
+        let result = session.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"));
+        assert_eq!(result, echo, "{command} {params}");
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &result), "{result} doesn't match {schema}");
+    }
+    for (command, params) in [
+        ("tab.layout.save", json!({})),
+        ("tab.layout.save", json!({"name": " "})),
+        ("tab.layout.apply", json!({"name": 1})),
+        ("tab.layout.remove", json!({"name": "x".repeat(65)})),
+        ("tab.layout.rename", json!({"name": "Old", "new_name": "bad\nname"})),
+        ("tab.layout.list", json!({"all": true})),
+    ] {
+        assert!(session.execute(command, &params).is_err(), "{command} {params}");
+    }
+    assert_eq!(session.doc.to_json(), before);
+    assert_eq!(session.undo.len(), undo);
+}
+
+#[test]
 fn the_view_shortcuts_are_the_defaults() {
     for (id, key) in [
         ("tab.view.open", Some("Ctrl+T")),

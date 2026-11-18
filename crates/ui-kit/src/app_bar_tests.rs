@@ -1879,6 +1879,9 @@ fn layout_test_data(visible: usize, window_count: usize) -> crate::view_layout_m
     use crate::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
     LayoutMenu {
         text: LayoutText::default(),
+        saved: Vec::new(),
+        matching_saved: None,
+)
         design: "One".into(),
         window: 0,
         native: true,
