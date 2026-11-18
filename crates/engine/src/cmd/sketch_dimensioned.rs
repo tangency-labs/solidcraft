@@ -65,7 +65,7 @@ fn wanted<'a>(roles: &[&'a str], given: &'a Map<String, Value>, as_drawn: bool) 
 
 pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.draw.dimensioned";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let create = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name a supported sketch creator"))?;
     let roles = dimension_roles(create).ok_or_else(|| bad(cmd, "unsupported sketch creator"))?;
     let as_drawn = bool_(p, "as_drawn").unwrap_or(false);

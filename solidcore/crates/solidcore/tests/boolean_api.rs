@@ -1427,6 +1427,33 @@ fn relating_coincident_edges_needs_their_curves_within_tolerance() {
     }
 }
 
+/// A boss of radius `boss_r` and height `boss_h` standing on the top face of an upright
+/// cylinder of radius `r` and height `h`, its wall `overhang` past the larger rim (inside it
+/// when negative): the boss touches the top face only, so the union's volume is the sum of
+/// the two cylinders'. An overhang of 1e-6, under the 1e-5 tolerance, failed in the point
+/// classification ("no single nearest point on the face's surface"), where 1e-7, flush and
+/// -1e-6 joined; on a long thin cylinder too.
+#[test]
+fn a_boss_a_hair_past_a_cylinders_rim_joins() {
+    for (r, h, boss_r, boss_h) in [(5.0, 10.0, 1.2, 1.0), (0.5, 1000.0, 0.06, 0.1)] {
+        for overhang in [1e-6, 1e-7, 0.0, -1e-6] {
+            let mut k = rig_kernel();
+            let base = api::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, h).unwrap();
+            let boss = api::create_cylinder(
+                &mut k,
+                Point3::new(r - boss_r + overhang, 0.0, h),
+                boss_r,
+                boss_h,
+            )
+            .unwrap();
+            let joined = boolean_union(&mut k, base, boss)
+                .unwrap_or_else(|e| panic!("r {r}, overhang {overhang}: {e}"));
+            let want = PI * (r * r * h + boss_r * boss_r * boss_h);
+            assert_closed_with_volume(&mut k, joined, want, want * 1e-9);
+        }
+    }
+}
+
 /// The control of #16640: the same profile with the arc exactly tangent to the face's plane
 /// (centre `(5, 10)`, radius 5), which joined before.
 #[test]

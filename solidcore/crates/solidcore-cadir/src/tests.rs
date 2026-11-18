@@ -19,9 +19,17 @@ fn one(ir: &CadIr) -> Solid {
     bodies.read.into_iter().next().unwrap().solid
 }
 
+/// The fit of a model of the unit cube's size at its tolerance.
+fn fit() -> geometry::Fit {
+    geometry::Fit {
+        tolerance: 1e-6,
+        extent: 20.0,
+    }
+}
+
 /// A solved surface read as a record surface, and whether it is reversed against CADIR's.
 fn record_surface(g: &SurfaceGeometry) -> (solidcore_record::brep::Surface, bool) {
-    match geometry::surface(g).unwrap() {
+    match geometry::surface(g, fit()).unwrap() {
         Some((geometry::FaceSurface::Record(s), reversed)) => (s, reversed),
         other => panic!("{other:?}"),
     }
@@ -119,6 +127,106 @@ fn a_missing_coedge_refuses_its_region_without_a_panic() {
         bodies.failures[0].message.contains("missing coedge"),
         "{:?}",
         bodies.failures
+    );
+}
+
+/// The one failure of reading `ir`, whose one region is refused.
+fn refused(ir: &CadIr) -> String {
+    let bodies = read_bodies(ir, None);
+    assert!(bodies.read.is_empty());
+    assert_eq!(bodies.failures.len(), 1, "{:?}", bodies.failures);
+    bodies.failures[0].message.clone()
+}
+
+/// A region's shells, a shell's faces and a face's loops are counted against their caps before
+/// the region is read. At each cap, the extra ids (none of them in the model) are looked up and
+/// the first is missing; one past it, the region is refused for the count, before any is looked
+/// up. Without the counts, the reader walked them all to join collapsed edges first.
+#[test]
+fn a_regions_shells_faces_and_loops_are_refused_past_their_caps() {
+    use cadmpeg_ir::ids::{FaceId, LoopId, ShellId};
+    use solidcore_record::brep::MAX_SHELLS;
+    let shells = |n: usize| {
+        let mut ir = cube();
+        let region = ir.model.regions.first_mut().unwrap();
+        region
+            .shells
+            .extend((1..n).map(|k| tid::<ShellId>("shell", k)));
+        ir
+    };
+    assert!(refused(&shells(MAX_SHELLS)).contains("missing shell"));
+    assert_eq!(
+        refused(&shells(MAX_SHELLS + 1)),
+        format!("more than {MAX_SHELLS} shells")
+    );
+    let faces = |n: usize| {
+        let mut ir = cube();
+        let shell = ir.model.shells.first().unwrap().clone();
+        let mut ids = shell.faces().to_vec();
+        ids.extend((ids.len()..n).map(|k| tid::<FaceId>("face", k)));
+        *ir.model.shells.first_mut().unwrap() = cadmpeg_ir::topology::Shell::new(
+            shell.id.clone(),
+            shell.region.clone(),
+            ids,
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        ir
+    };
+    assert!(refused(&faces(MAX_FACES)).contains("missing face"));
+    assert_eq!(
+        refused(&faces(MAX_FACES + 1)),
+        format!("more than {MAX_FACES} faces")
+    );
+    let loops = |n: usize| {
+        let mut ir = cube();
+        let face = ir.model.faces.first_mut().unwrap();
+        let mut ids = face.loops.to_vec();
+        ids.extend((ids.len()..n).map(|k| tid::<LoopId>("loop", k)));
+        face.loops = FaceLoops::unspecified(ids);
+        ir
+    };
+    assert!(refused(&loops(MAX_BOUNDS)).contains("missing loop"));
+    assert!(
+        refused(&loops(MAX_BOUNDS + 1)).ends_with(&format!("with {} loops", MAX_BOUNDS + 1)),
+        "{}",
+        refused(&loops(MAX_BOUNDS + 1))
+    );
+}
+
+/// A face named twice in a region's shells, or a loop named twice by its faces, refuses the
+/// region with the reason: a face is in one shell once and a loop bounds one face once, so the
+/// walk over a region is no longer than the model's lists however often it names one.
+#[test]
+fn a_face_or_loop_used_twice_in_a_region_refuses_it() {
+    let mut ir = cube();
+    let shell = ir.model.shells.first().unwrap().clone();
+    let mut ids = shell.faces().to_vec();
+    ids.push(ids[0].clone());
+    *ir.model.shells.first_mut().unwrap() = cadmpeg_ir::topology::Shell::new(
+        shell.id.clone(),
+        shell.region.clone(),
+        ids,
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let m = refused(&ir);
+    assert!(
+        m.ends_with("used more than once") && m.starts_with("face "),
+        "{m}"
+    );
+
+    let mut ir = cube();
+    let face = ir.model.faces.first_mut().unwrap();
+    let mut ids = face.loops.to_vec();
+    ids.push(ids[0].clone());
+    face.loops = FaceLoops::unspecified(ids);
+    let m = refused(&ir);
+    assert!(
+        m.contains(": loop ") && m.ends_with("used more than once"),
+        "{m}"
     );
 }
 
@@ -263,7 +371,7 @@ fn a_polyline_with_decreasing_parameters_keeps_its_parameters() {
     let Some(geometry::Carrier::Curve {
         curve: solidcore_record::brep::Curve::Spline { knots, points },
         periodic: false,
-    }) = geometry::curve(&g).unwrap()
+    }) = geometry::curve(&g, fit()).unwrap()
     else {
         panic!("not a spline")
     };
@@ -432,28 +540,33 @@ fn a_placement_scaling_unevenly_is_refused() {
 }
 
 /// A shell's wire edges and free vertices, which a record of faces cannot hold yet, are noted on
-/// the region, and its faces still come in: the cube's six faces, and one free vertex noted.
+/// the region, and its faces still come in: the cube's six faces, and its shell's wire edge (a
+/// copy of a cube edge, used by no face) and free vertex noted together, as two.
 #[test]
-fn a_shells_free_vertex_is_noted_and_its_faces_kept() {
+fn a_shells_wire_edge_and_free_vertex_are_noted_and_its_faces_kept() {
     let mut ir = cube();
     let shell = ir.model.shells.first().unwrap().clone();
     let vertex = ir.model.vertices.first().unwrap().id.clone();
-    let with_vertex = cadmpeg_ir::topology::Shell::new(
+    let mut wire = ir.model.edges.first().unwrap().clone();
+    wire.id = tid("edge", 0);
+    ir.model.edges.push(wire.clone());
+    let with_members = cadmpeg_ir::topology::Shell::new(
         shell.id.clone(),
         shell.region.clone(),
         shell.faces().to_vec(),
-        Vec::new(),
+        vec![wire.id],
         vec![vertex],
     )
     .unwrap();
-    *ir.model.shells.first_mut().unwrap() = with_vertex;
+    *ir.model.shells.first_mut().unwrap() = with_members;
     let s = one(&ir);
     assert_eq!(s.brep.faces.len(), 6);
+    assert_eq!(s.brep.edges.len(), 12);
     assert!((volume(&s) - 1000.0).abs() < 1e-6);
     assert!(
         s.notes
             .iter()
-            .any(|n| n == "1 wire edges and free vertices of its shells left out"),
+            .any(|n| n == "2 wire edges and free vertices of its shells left out"),
         "{:?}",
         s.notes
     );
@@ -547,14 +660,452 @@ fn a_sphere_face_with_no_boundary_is_the_whole_ball() {
     assert!((volume(&s) - ball).abs() < 1e-6 * ball, "{}", volume(&s));
 }
 
-/// A curve-less edge between two vertices at one point collapses, and the loops through it run on
-/// from the one vertex the two are: the cube with one corner split into two vertices at its
-/// point, joined by such an edge in both loops that pass there, is still the cube.
+/// The cube's shell as one face with no loops on `sphere`: the whole of it.
+fn whole_ball(sphere: SolvedSurfaceGeometry) -> CadIr {
+    let mut ir = cube();
+    let shell = ir.model.shells.first().unwrap().clone();
+    let face = ir.model.faces.first().unwrap().clone();
+    *ir.model.shells.first_mut().unwrap() = cadmpeg_ir::topology::Shell::new(
+        shell.id.clone(),
+        shell.region.clone(),
+        vec![face.id.clone()],
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let surface = ir
+        .model
+        .surfaces
+        .iter_mut()
+        .find(|s| s.id == face.surface)
+        .unwrap();
+    surface.geometry = SurfaceGeometry::Solved(sphere);
+    let f = ir.model.faces.first_mut().unwrap();
+    f.loops = FaceLoops::unspecified(Vec::new());
+    f.sense = Sense::Forward;
+    ir
+}
+
+/// A placement 1e-14 short of a similarity (within the 64 ulp its columns may differ by) moves a
+/// sphere it places by up to 1e-14 of the sphere's size: within the tolerance on a ball of radius
+/// 5, which comes in placed, and past it on one of radius 1e8, which is refused
+/// with the reason. The same placement on both, so only the carrier's extent decides.
 #[test]
-fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() {
+fn a_placement_off_a_similarity_is_refused_on_a_carrier_too_large_for_its_rounding() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::SphereSurface;
+    let near = cadmpeg_ir::transform::Transform::affine([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0 + 1e-14, 0.0],
+    ])
+    .unwrap();
+    let placed = |radius: f64| {
+        let ball = SphereSurface::try_new(
+            Point3::new(5.0, 5.0, 5.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            radius,
+        )
+        .unwrap();
+        whole_ball(SolvedSurfaceGeometry::Transformed(
+            PlacedSurface::try_new(Box::new(SolvedSurfaceGeometry::Sphere(ball)), near).unwrap(),
+        ))
+    };
+    let s = one(&placed(5.0));
+    assert_eq!(s.brep.faces.len(), 1);
+    assert!(
+        matches!(s.brep.faces[0].surface, solidcore_record::brep::Surface::Sphere { radius, .. }
+            if (radius - 5.0).abs() < 1e-12),
+        "{:?}",
+        s.brep.faces[0].surface
+    );
+    let bodies = read_bodies(&placed(1e8), None);
+    assert!(bodies.read.is_empty());
+    assert!(
+        bodies.failures[0].message.contains("past the tolerance"),
+        "{:?}",
+        bodies.failures
+    );
+}
+
+/// `diag(1, 1, 1 + 1e-14)` twice, then a uniform scale of 600, about the origin.
+fn nested_placements() -> [cadmpeg_ir::transform::Transform; 3] {
+    let near = cadmpeg_ir::transform::Transform::affine([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0 + 1e-14, 0.0],
+    ])
+    .unwrap();
+    let scale = cadmpeg_ir::transform::Transform::affine([
+        [600.0, 0.0, 0.0, 0.0],
+        [0.0, 600.0, 0.0, 0.0],
+        [0.0, 0.0, 600.0, 0.0],
+    ])
+    .unwrap();
+    [near, near, scale]
+}
+
+/// A chain of placements is held to the tolerance as a whole. A ball of radius `r` at the origin
+/// placed by [`nested_placements`] is the ellipsoid of semi-axes 600 r, 600 r and
+/// 600 r (1 + 1e-14)², which the sphere of radius 600 r it is read as misses by 1.2e-11 r at its
+/// poles. For r = 1e5 that is 1.2e-6 mm, past the tolerance 1e-6, though each placement alone
+/// is within it (2 × 3.3e-13 × 1e5 and 1.4e-14 × 6e7 mm): refused. For r = 1e3 it is 1.2e-8 mm,
+/// and the bound carried through the chain, 4e-7 mm, is within it: read.
+#[test]
+fn a_chain_of_placements_is_refused_when_their_rounding_together_is_past_the_tolerance() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::SphereSurface;
+    let placed = |radius: f64| {
+        let ball = SphereSurface::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            radius,
+        )
+        .unwrap();
+        let mut g = SolvedSurfaceGeometry::Sphere(ball);
+        for t in nested_placements() {
+            g = SolvedSurfaceGeometry::Transformed(PlacedSurface::try_new(Box::new(g), t).unwrap());
+        }
+        whole_ball(g)
+    };
+    let small = placed(1e3);
+    assert_eq!(tolerance(&small), 1e-6);
+    let s = one(&small);
+    assert!(
+        matches!(s.brep.faces[0].surface, solidcore_record::brep::Surface::Sphere { radius, .. }
+            if (radius - 6e5).abs() < 1e-9),
+        "{:?}",
+        s.brep.faces[0].surface
+    );
+    let bodies = read_bodies(&placed(1e5), None);
+    assert!(bodies.read.is_empty());
+    assert!(
+        bodies.failures[0].message.contains("past the tolerance"),
+        "{:?}",
+        bodies.failures
+    );
+}
+
+/// The same for a curve: a circle of radius `r` about the x axis at the origin, placed by
+/// [`nested_placements`], is the ellipse of semi-axes 600 r along y and 600 r (1 + 1e-14)² along
+/// z, which the circle of radius 600 r it is read as misses by 1.2e-11 r at its top. Each
+/// placement alone is within the tolerance for r = 1e5, but the chain is not: refused. Read for
+/// r = 1e3.
+#[test]
+fn a_chain_of_placements_on_a_curve_is_held_to_the_tolerance_as_a_whole() {
+    use cadmpeg_ir::geometry::analytic::CircleCurve;
+    use cadmpeg_ir::geometry::{CurveGeometry, PlacedCurve, SolvedCurveGeometry};
+    let placed = |radius: f64| {
+        let circle = CircleCurve::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+            radius,
+        )
+        .unwrap();
+        let mut g = SolvedCurveGeometry::Circle(circle);
+        for t in nested_placements() {
+            g = SolvedCurveGeometry::Transformed(PlacedCurve::try_new(Box::new(g), t).unwrap());
+        }
+        geometry::curve(&CurveGeometry::Solved(g), fit())
+    };
+    match placed(1e3) {
+        Ok(Some(geometry::Carrier::Curve {
+            curve: solidcore_record::brep::Curve::Circle { frame, radius },
+            ..
+        })) => {
+            assert!((radius - 6e5).abs() < 1e-9, "{radius}");
+            assert_eq!(frame.origin, [0.0; 3]);
+        }
+        other => panic!("{other:?}"),
+    }
+    match placed(1e5) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A chain of placements is compared with the tolerance in the model's frame, not in each of its
+/// own. A ball of radius 1e8 placed by `diag(1, 1, 1 + 1e-14)` alone is refused (its bound is
+/// 3.3e-5 mm); scaled by 1e-3 after that, the bound in the model is 3.5e-8 mm, and it is read as
+/// the sphere of radius 1e5. A placement that grows the bound past the tolerance after an inner
+/// one still refuses it: the ball of radius 1e5 placed by 600 after two near ones (as in
+/// [`a_chain_of_placements_is_refused_when_their_rounding_together_is_past_the_tolerance`]).
+/// Inside the scale, the model's extent is taken back through it: a parabola `f t² z + 2 f t x`
+/// placed by the near map three times and then scaled by 1e-3, used out to 5e7 mm in a model, is
+/// used out to 5e10 in the frame inside the scale, where the near maps stretch it by up to
+/// 3e-14 of that along z: 1.5e-6 mm in the model, past the tolerance, so refused. (Bounded over
+/// the model's extent in that frame instead, its near maps would add 5e-8 mm and the scale
+/// 7e-7: read.) Within 20 mm, read.
+#[test]
+fn a_chain_of_placements_is_held_to_the_tolerance_in_the_models_frame() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::{ParabolaCurve, SphereSurface};
+    use cadmpeg_ir::geometry::{CurveGeometry, PlacedCurve, SolvedCurveGeometry};
+    let [near, _, _] = nested_placements();
+    let shrink = cadmpeg_ir::transform::Transform::affine([
+        [1e-3, 0.0, 0.0, 0.0],
+        [0.0, 1e-3, 0.0, 0.0],
+        [0.0, 0.0, 1e-3, 0.0],
+    ])
+    .unwrap();
+    let ball = |placements: &[cadmpeg_ir::transform::Transform]| {
+        let ball = SphereSurface::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            1e8,
+        )
+        .unwrap();
+        let mut g = SolvedSurfaceGeometry::Sphere(ball);
+        for t in placements {
+            g = SolvedSurfaceGeometry::Transformed(
+                PlacedSurface::try_new(Box::new(g), *t).unwrap(),
+            );
+        }
+        geometry::surface(&SurfaceGeometry::Solved(g), fit())
+    };
+    match ball(&[near]) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    match ball(&[near, shrink]) {
+        Ok(Some((
+            geometry::FaceSurface::Record(solidcore_record::brep::Surface::Sphere {
+                radius, ..
+            }),
+            false,
+        ))) => assert!((radius - 1e5).abs() < 1e-9, "{radius}"),
+        other => panic!("{other:?}"),
+    }
+    let parabola = |extent: f64| {
+        let p = ParabolaCurve::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            1.0,
+        )
+        .unwrap();
+        let mut g = SolvedCurveGeometry::Parabola(p);
+        for t in [near, near, near, shrink] {
+            g = SolvedCurveGeometry::Transformed(PlacedCurve::try_new(Box::new(g), t).unwrap());
+        }
+        let fit = geometry::Fit {
+            tolerance: 1e-6,
+            extent,
+        };
+        geometry::curve(&CurveGeometry::Solved(g), fit)
+    };
+    match parabola(20.0) {
+        Ok(Some(geometry::Carrier::Parabola { focal, .. })) => {
+            assert!((focal - 1e-3).abs() < 1e-15, "{focal}")
+        }
+        other => panic!("{other:?}"),
+    }
+    match parabola(5e7) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A placed line's bound counts the rounding of its direction. The line along x through the
+/// origin, turned by 2^-31 about z and moved to (0, 2^23, 0), is `(0, 2^23, 0) + t (1, 2^-31, 0)`;
+/// the record holds it by that start and the end `start + (1, 2^-31, 0)`, whose y rounds to
+/// 2^23, so the line it holds is level and misses the placed one by 2^-31 t: 4.9e-4 mm at
+/// t = 2^20, a point within 1e7 mm of the origin. The map's own rounding is under 3e-7
+/// mm there, but the direction's is past the tolerance: refused. Moved to (0, 1, 0) instead, the
+/// end's rounding is an ulp of 1 and the line is read.
+#[test]
+fn a_placed_lines_bound_counts_the_rounding_of_its_direction() {
+    use cadmpeg_ir::geometry::analytic::LineCurve;
+    use cadmpeg_ir::geometry::{CurveGeometry, PlacedCurve, SolvedCurveGeometry};
+    let placed = |y: f64| {
+        let line =
+            LineCurve::try_new(Point3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0)).unwrap();
+        let (c, s) = (1.0, 2f64.powi(-31));
+        let turn = cadmpeg_ir::transform::Transform::affine([
+            [c, -s, 0.0, 0.0],
+            [s, c, 0.0, y],
+            [0.0, 0.0, 1.0, 0.0],
+        ])
+        .unwrap();
+        let g = SolvedCurveGeometry::Transformed(
+            PlacedCurve::try_new(Box::new(SolvedCurveGeometry::Line(line)), turn).unwrap(),
+        );
+        let fit = geometry::Fit {
+            tolerance: 1e-6,
+            extent: 1e7,
+        };
+        geometry::curve(&CurveGeometry::Solved(g), fit)
+    };
+    match placed(1.0) {
+        Ok(Some(geometry::Carrier::Curve {
+            curve: solidcore_record::brep::Curve::Line { start, end },
+            ..
+        })) => {
+            assert_eq!(start, [0.0, 1.0, 0.0]);
+            assert_eq!(end[0], 1.0);
+        }
+        other => panic!("{other:?}"),
+    }
+    match placed(2f64.powi(23)) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A sheet square 10 mm across bounded by two edges on one periodic spline (the degree-one square
+/// on knots -1..5, period 4), one of them over [3.5, 4.5], past the spline's range and across its
+/// seam at the corner (0, 0, 0): read through the reader, its edges meet their vertices and the
+/// square's area is 100 mm².
+#[test]
+fn an_edge_across_a_periodic_splines_seam_is_read_with_its_points() {
+    use cadmpeg_ir::geometry::analytic::PlaneSurface;
+    use cadmpeg_ir::geometry::nurbs::{NurbsCurve, NurbsPoles3};
+    use cadmpeg_ir::geometry::{Curve, CurveGeometry, SolvedCurveGeometry, Surface};
+    use cadmpeg_ir::topology::{Body, EdgeCarrier, LoopRing, Point, Region, Vertex};
+    let mut ir = CadIr::empty();
+    for (i, c) in [[0.0, 5.0, 0.0], [5.0, 0.0, 0.0]].iter().enumerate() {
+        let at = cadmpeg_ir::features::FinitePoint3::new(Point3::new(c[0], c[1], c[2])).unwrap();
+        ir.model.points.push(Point::new(tid("point", i), at, None));
+        ir.model.vertices.push(Vertex {
+            id: tid("vertex", i),
+            point: tid("point", i),
+            tolerance: None,
+        });
+    }
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let square = NurbsCurve::new(
+        1,
+        vec![-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        NurbsPoles3::Polynomial {
+            points: vec![
+                p(0.0, 0.0),
+                p(10.0, 0.0),
+                p(10.0, 10.0),
+                p(0.0, 10.0),
+                p(0.0, 0.0),
+            ],
+        },
+        true,
+    )
+    .unwrap();
+    ir.model.curves.push(Curve {
+        id: tid("curve", 0),
+        geometry: CurveGeometry::Solved(SolvedCurveGeometry::Nurbs(square)),
+        parameter_range: None,
+        source_object: None,
+    });
+    // (interval, start, end): down the left side and along the bottom across the seam, then
+    // the rest of the way round.
+    for (i, (interval, a, z)) in [([3.5, 4.5], 0, 1), ([0.5, 3.5], 1, 0)]
+        .into_iter()
+        .enumerate()
+    {
+        ir.model.edges.push(cadmpeg_ir::topology::Edge {
+            id: tid("edge", i),
+            carrier: EdgeCarrier::new(Some(tid("curve", 0)), Some(interval)).unwrap(),
+            start: tid("vertex", a),
+            end: tid("vertex", z),
+            tolerance: None,
+        });
+        ir.model.coedges.push(Coedge {
+            id: tid("coedge", i),
+            owner_loop: tid("loop", 0),
+            edge: tid("edge", i),
+            radial_next: tid("coedge", i),
+            sense: Sense::Forward,
+            pcurves: Vec::new(),
+            use_curve: None,
+        });
+    }
+    ir.model.surfaces.push(Surface {
+        id: tid("surface", 0),
+        geometry: SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(
+            PlaneSurface::try_new(
+                Point3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        )),
+        source_object: None,
+    });
+    ir.model.loops.push(cadmpeg_ir::topology::Loop {
+        id: tid("loop", 0),
+        face: tid("face", 0),
+        boundary: LoopBoundary::Ring(
+            LoopRing::new(vec![tid("coedge", 0), tid("coedge", 1)], Vec::new()).unwrap(),
+        ),
+    });
+    ir.model.faces.push(Face {
+        id: tid("face", 0),
+        shell: tid("shell", 0),
+        surface: tid("surface", 0),
+        sense: Sense::Forward,
+        loops: FaceLoops::unspecified(vec![tid("loop", 0)]),
+        name: None,
+        color: None,
+        tolerance: None,
+    });
+    ir.model.shells.push(
+        Shell::new(
+            tid("shell", 0),
+            tid("region", 0),
+            vec![tid("face", 0)],
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    ir.model.regions.push(Region {
+        id: tid("region", 0),
+        body: tid("body", 0),
+        shells: vec![tid("shell", 0)],
+    });
+    ir.model.bodies.push(Body {
+        id: tid("body", 0),
+        kind: BodyKind::Sheet,
+        regions: vec![tid("region", 0)],
+        transform: None,
+        name: Some("square".into()),
+        color: None,
+        visible: None,
+    });
+    ir.finalize();
+    let s = one(&ir);
+    assert_eq!(
+        (
+            s.brep.faces.len(),
+            s.brep.edges.len(),
+            s.brep.vertices.len()
+        ),
+        (1, 2, 2)
+    );
+    let (body, _) = solidcore_ops::Body::from_record(&s.brep, false).unwrap();
+    let area = body.area(1e-9).unwrap();
+    assert!((area - 100.0).abs() < 1e-6, "{area}");
+}
+
+/// The cube with one corner split into two vertices at its point, joined by an edge on `curve`
+/// (none, or one the model holds) in both loops that pass there.
+fn cube_with_a_corner_split(curve: Option<cadmpeg_ir::geometry::SolvedCurveGeometry>) -> CadIr {
+    use cadmpeg_ir::geometry::{Curve, CurveGeometry};
     use cadmpeg_ir::ids::{CoedgeId, EdgeId, VertexId};
     use cadmpeg_ir::topology::{EdgeCarrier, LoopRing, Vertex};
     let mut ir = cube();
+    let curve = curve.map(|g| {
+        let id: cadmpeg_ir::ids::CurveId = tid("curve", 0);
+        ir.model.curves.push(Curve {
+            id: id.clone(),
+            geometry: CurveGeometry::Solved(g),
+            parameter_range: None,
+            source_object: None,
+        });
+        id
+    });
     let first = ir.model.edges.first().unwrap().clone();
     let a = first.start.clone();
     let point = ir
@@ -575,7 +1126,7 @@ fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() 
     let collapsed: EdgeId = tid("edge", 0);
     ir.model.edges.push(cadmpeg_ir::topology::Edge {
         id: collapsed.clone(),
-        carrier: EdgeCarrier::new(None, None).unwrap(),
+        carrier: EdgeCarrier::new(curve, None).unwrap(),
         start: a,
         end: split,
         tolerance: None,
@@ -620,16 +1171,71 @@ fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() 
         ring.insert(at, ids[k].clone());
         lp.boundary = LoopBoundary::Ring(LoopRing::new(ring, Vec::new()).unwrap());
     }
-    let s = one(&ir);
-    assert_eq!(
-        (
-            s.brep.faces.len(),
-            s.brep.edges.len(),
-            s.brep.vertices.len()
-        ),
-        (6, 12, 8)
+    ir
+}
+
+/// A curve-less edge between two vertices at one point collapses, and the loops through it run on
+/// from the one vertex the two are: the cube with one corner split into two vertices at its
+/// point, joined by such an edge in both loops that pass there, is still the cube. So it is when
+/// the edge is on a degenerate curve (a point), placed or not, as a seam or pole collapses one.
+#[test]
+fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() {
+    use cadmpeg_ir::geometry::analytic::DegenerateCurve;
+    use cadmpeg_ir::geometry::{PlacedCurve, SolvedCurveGeometry};
+    let point = SolvedCurveGeometry::Degenerate(
+        DegenerateCurve::try_new(Point3::new(0.0, 0.0, 0.0)).unwrap(),
     );
-    assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+    let moved = cadmpeg_ir::transform::Transform::affine([
+        [1.0, 0.0, 0.0, 3.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ])
+    .unwrap();
+    let placed = SolvedCurveGeometry::Transformed(
+        PlacedCurve::try_new(Box::new(point.clone()), moved).unwrap(),
+    );
+    for curve in [None, Some(point), Some(placed)] {
+        let s = one(&cube_with_a_corner_split(curve.clone()));
+        assert_eq!(
+            (
+                s.brep.faces.len(),
+                s.brep.edges.len(),
+                s.brep.vertices.len()
+            ),
+            (6, 12, 8),
+            "{curve:?}"
+        );
+        assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+    }
+}
+
+/// Vertices joined one after another (as many collapsed edges into one vertex from different
+/// ones join them: each end under its start) are walked to the vertex they are once: after one
+/// walk from the first, every one of them points straight at it, so no later walk is longer
+/// than a step, and the vertex found is the same.
+#[test]
+fn a_chain_of_joined_vertices_is_walked_once() {
+    let ir = cube();
+    let model = Model::of(&ir);
+    let mut b = Builder {
+        model: &model,
+        asm: Assembly::new(1e-6, None),
+        vertices: HashMap::new(),
+        joined: HashMap::new(),
+        edges: HashMap::new(),
+    };
+    let ids: Vec<String> = (0..64).map(|i| format!("v{i}")).collect();
+    for w in ids.windows(2) {
+        b.joined.insert(w[0].as_str(), w[1].as_str());
+    }
+    let last = ids[63].as_str();
+    assert_eq!(b.joined_to(ids[0].as_str()), last);
+    for id in &ids[..63] {
+        assert_eq!(b.joined.get(id.as_str()), Some(&last), "{id}");
+    }
+    assert_eq!(b.joined_to(ids[0].as_str()), last);
+    assert_eq!(b.joined_to(ids[31].as_str()), last);
+    assert_eq!(b.joined_to(last), last);
 }
 
 /// A coedge with a 3D curve of its own in place of its edge's refuses its region with the reason,

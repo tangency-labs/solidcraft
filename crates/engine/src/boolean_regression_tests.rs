@@ -3,6 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
+use std::path::Path;
 
 use crate::Session;
 
@@ -81,6 +82,25 @@ fn replay(script: &str) -> Session {
 
 fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
+}
+
+/// #18039: a 360° revolve cut whose sketch is in the same plane as the body it cuts (a body
+/// revolved a whole turn in that plane) was refused: SMLib's boolean split the two seam edges
+/// the solids of revolution share and left an edge near the seam, which its check refuses ("Face
+/// Near missing Seam"). The tool's seam is turned away from the sketch plane, so the two never
+/// share one, and the cut builds. The design is `revolve-360-cut.sc` (the owner's, with the cut
+/// at 360°).
+#[test]
+fn a_whole_turn_revolve_cut_from_a_whole_turn_revolve_body_builds() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/revolve-360-cut.sc");
+    let mut s = Session::default();
+    let opened = s.execute("doc.open", &json!({"path": path.to_string_lossy()})).unwrap();
+    assert_eq!(opened["errors"], 0, "{opened}");
+    // The body's volume with the cut: what the 360° cut leaves of the part.
+    let volume = volume(&s, "Body1");
+    assert!((volume - 8854.30886576782).abs() < 1e-6, "{volume}");
+    let body = s.model.state().body("Body1").unwrap().body.clone();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
 }
 
 /// #14419: solids touching along a line and joined as one body (`touching: one_body`) keep a
