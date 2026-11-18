@@ -5511,7 +5511,7 @@ mod fill_width_tests {
         let expected = crate::shell::panel_bounds(&h.app, rect);
         for fraction in [0.0, 0.2, 1.0, 0.0] {
             let _ = h.ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_max(egui::Pos2::ZERO, rect.max)), ..Default::default() }, |ui| {
-                pop_out_ribbon(&mut h.app, ui, rect, fraction, false);
+                pop_out_ribbon(&mut h.app, ui, rect, fraction, false, None);
                 assert_eq!(crate::shell::panel_bounds(&h.app, rect), expected);
                 assert_eq!(h.app.shell.ribbon_overlay.is_some(), fraction > 0.0);
                 if let Some(overlay) = h.app.shell.ribbon_overlay {
