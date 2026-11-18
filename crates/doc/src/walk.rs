@@ -55,6 +55,8 @@ impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
+// A sheet pick names a sheet metal joint, not a body, sketch or feature, and holds no expression.
+impl Walk for crate::document::SheetPick {}
 impl Walk for crate::document::CellGridMode {}
 impl Walk for solidcore_record::cell_grid::CellShape {}
 impl Walk for solidcore_record::cell_grid::DotGrid {}

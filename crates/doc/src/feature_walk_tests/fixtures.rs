@@ -269,7 +269,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
             json!({"body": "B"})
         }
-        "tab_slot" => json!({"tab_plates": [{"key": 1, "body": "B", "near": o}], "slot_plates": [{"key": 2, "body": "B"}]}),
+        "tab_slot" => json!({"tab_plates": [{"key": 1, "body": "B", "near": o}], "slot_plates": [{"key": 2, "body": "B"}], "sheet_picks": [{"kind": "joint", "key": 3, "name": "J"}]}),
         "combine" => json!({"target": "B", "tools": ["B"]}),
         "pattern_rectangular" | "pattern_circular" | "pattern_path" | "mirror" => json!({"bodies": ["B"]}),
         "hole_simple" | "hole_drilled" | "hole_counterbore" | "hole_countersink" => json!({"points": {"sketch": 3, "ids": ["p"]}}),

@@ -135,7 +135,7 @@ pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<St
 /// Edit Feature: the dialog of a stored Tab and Slot, its plates picked and its rows as typed.
 /// The stored picks and `next_plate_key` ride in `extra`, so OK sends the keys back.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
-    let FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, count, spacing, tab_width, end_distance, clearance, protrusion } = kind
+    let FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, count, spacing, tab_width, end_distance, clearance, protrusion, .. } = kind
     else {
         return None;
     };

@@ -251,16 +251,34 @@ fn pair_skip_text(skip: &kernel_ts::PairSkip) -> String {
     }
 }
 
-/// Why the plate `name` cannot take a tab or a slot (design v3 4.4 / 11.3), as (reason id, text):
-/// sheet metal in the state before the feature (`sheet_metal`), or a mesh body (`not_solid`).
-fn plate_unusable(st: &ModelState, name: &str, body: Option<&Body>) -> Option<(&'static str, String)> {
-    if st.sheets.iter().any(|s| s.body == name) {
-        Some(("sheet_metal", format!("cannot be cut: {name} is sheet metal")))
-    } else if body.is_some_and(Body::is_mesh) {
-        Some(("not_solid", format!("cannot be cut: {name} is a mesh body")))
-    } else {
-        None
+/// The route a plate pair takes (design 4.4): the plate route here, or the sheet metal route when
+/// a plate is sheet metal in the state before the feature. One Tab and Slot, two routes, chosen by
+/// what is picked (#17424).
+enum Route {
+    Plate,
+    /// The sheet metal route, for the named sheet metal plate. Not built yet.
+    Sheet(String),
+}
+
+/// The route of the pair of plates `names`.
+fn route_of(st: &ModelState, names: [&str; 2]) -> Route {
+    match names.into_iter().find(|n| st.sheets.iter().any(|s| s.body == *n)) {
+        Some(sheet) => Route::Sheet(sheet.to_string()),
+        None => Route::Plate,
     }
+}
+
+/// The sheet metal route (not built yet): a pair it takes is skipped as
+/// `sheet_route_not_built`, with the sheet metal plate named. When the route is built, it takes
+/// these pairs (and the feature's sheet picks) here, and the plate route is unchanged.
+fn sheet_route(sheet: &str) -> (&'static str, String) {
+    ("sheet_route_not_built", format!("needs the sheet metal route, not built yet: {sheet} is sheet metal"))
+}
+
+/// Why the plate `name` cannot take a tab or a slot in the plate route (design v3 4.4 / 11.3), as
+/// (reason id, text): a mesh body (`not_solid`).
+fn plate_unusable(body: Option<&Body>, name: &str) -> Option<(&'static str, String)> {
+    body.is_some_and(Body::is_mesh).then(|| ("not_solid", format!("cannot be cut: {name} is a mesh body")))
 }
 
 /// A joint's skip in the user's words (design 11.3), naming the earlier joint (`earlier[j]`,
@@ -305,7 +323,8 @@ fn skipped_note(joints: &[TabSlotJoint]) -> Option<String> {
 }
 
 /// The feature's failure when every pair is skipped (design v2 11.2, `no_plate_joint`): "tab and
-/// slot: no plate joint to make (Wall → Bottom cannot be cut: Bottom is sheet metal; Far → Bottom
+/// slot: no plate joint to make (Wall → Bottom needs the sheet metal route, not built
+/// yet: Bottom is sheet metal; Far → Bottom
 /// does not meet it (0.50 mm apart)) (no_plate_joint)".
 fn no_plate_joint(skipped: &[TabSlotJoint]) -> DocError {
     let items: Vec<String> = skipped.iter().map(|j| format!("{} → {} {}", j.tab, j.slot, j.skipped.as_deref().unwrap_or(""))).collect();
@@ -330,7 +349,7 @@ pub struct TabSlotReport {
 /// takes the previous joint's result), the plates replaced in place. A pair that does not meet is
 /// named in the report only; a joint skipped, or a pair the cut refuses, in `warning` and the report.
 pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut ModelState, warning: &mut Option<String>) -> Result<TabSlotReport> {
-    let FeatureKind::TabSlot { tab_plates, slot_plates, .. } = k else {
+    let FeatureKind::TabSlot { tab_plates, slot_plates, sheet_picks, .. } = k else {
         return Err(DocError::Invalid("not a tab and slot".into()));
     };
     if let Some(bad) = bad_plate_key(tab_plates, slot_plates) {
@@ -350,8 +369,8 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     // The pairs with a joint, in pick order, with their settings.
     let mut list: Vec<(usize, usize, Plane)> = Vec::new();
     let mut specs: Vec<TabSlotSpec> = Vec::new();
-    // Pairs with a plate the cut cannot take (design v3 4.4 / 11.3): sheet metal or a mesh body in
-    // the state before the feature; and pairs with no joint (no contact, ...). Every such pair is
+    // Pairs the plate route does not take (design v3 4.4 / 11.3): a sheet metal plate (the sheet
+    // metal route's, not built yet) or a mesh body in the state before the feature; and pairs with no joint (no contact, ...). Every such pair is
     // skipped and named.
     let mut unusable: Vec<TabSlotJoint> = Vec::new();
     for t in tab_plates {
@@ -372,7 +391,11 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
                 continue;
             }
             let (ti, si) = (index(&tn), index(&sn));
-            if let Some((reason, text)) = [ti, si].into_iter().find_map(|i| plate_unusable(st, &names[i], plates.get(i))) {
+            let routed = match route_of(st, [&names[ti], &names[si]]) {
+                Route::Sheet(sheet) => Some(sheet_route(&sheet)),
+                Route::Plate => [ti, si].into_iter().find_map(|i| plate_unusable(plates.get(i), &names[i])),
+            };
+            if let Some((reason, text)) = routed {
                 unusable.push(TabSlotJoint {
                     tab: names[ti].clone(),
                     slot: names[si].clone(),
@@ -404,6 +427,15 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
             specs.push(spec_of(vals, k, joint.faces.thickness, extent_along(slot, &p)?)?);
             list.push((ti, si, p));
         }
+    }
+    // The feature's sheet picks belong to the sheet metal route, not built yet: named, never silent.
+    if !sheet_picks.is_empty() {
+        let n = sheet_picks.len();
+        let note = format!("tab and slot: {n} sheet metal joint{} skipped: the sheet metal route is not built yet (sheet_route_not_built)", if n == 1 { "" } else { "s" });
+        if specs.is_empty() && unusable.is_empty() {
+            return Err(DocError::Invalid(note));
+        }
+        append_warning(warning, note);
     }
     if specs.is_empty() {
         return Err(no_plate_joint(&unusable));
@@ -728,9 +760,34 @@ mod tests {
         st.sheets.push(base_flange("Bottom", "Steel (mm)", &rv, frame, region));
         let mut warning = None;
         let err = apply(&BTreeMap::new(), &kind(serde_json::json!({"clearance": "0.1"})), &mut st, &mut warning).unwrap_err().to_string();
-        assert_eq!(err, "tab and slot: no plate joint to make (Wall → Bottom cannot be cut: Bottom is sheet metal) (no_plate_joint)");
+        assert_eq!(err, "tab and slot: no plate joint to make (Wall → Bottom needs the sheet metal route, not built yet: Bottom is sheet metal) (no_plate_joint)");
+        let wall = report_reason(&st);
+        assert_eq!(wall.as_deref(), Some("sheet_route_not_built"));
         let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
         assert!((volume("Wall") - 43_200.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
+    }
+
+    /// The reason id of the only pair of fixture `st`, as the plate loop names it.
+    fn report_reason(st: &ModelState) -> Option<String> {
+        let names = ["Wall", "Bottom"];
+        match route_of(st, names) {
+            Route::Sheet(sheet) => Some(sheet_route(&sheet).0.to_string()),
+            Route::Plate => None,
+        }
+    }
+
+    #[test]
+    fn tab_slot_sheet_picks_wait_for_the_sheet_metal_route() {
+        let v = serde_json::json!({"type": "tab_slot", "tab_plates": [], "slot_plates": [], "sheet_picks": [{"kind": "joint", "key": 1, "name": "Joint 1"}], "clearance": "0.1"});
+        let k: FeatureKind = serde_json::from_value(v.clone()).unwrap();
+        let mut back = serde_json::to_value(&k).unwrap();
+        back["next_plate_key"] = 0.into();
+        let mut want = v;
+        want["next_plate_key"] = 0.into();
+        assert_eq!(back, want);
+        let (mut st, mut warning) = (ModelState::default(), None);
+        let err = apply(&BTreeMap::new(), &k, &mut st, &mut warning).unwrap_err().to_string();
+        assert_eq!(err, "tab and slot: 1 sheet metal joint skipped: the sheet metal route is not built yet (sheet_route_not_built)");
     }
 
     /// Fixture F's Bottom and Wall, and `more` (name, min, max) boxes, in the state.

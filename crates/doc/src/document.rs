@@ -287,6 +287,23 @@ pub struct PlatePick {
     pub near: Option<Position>,
 }
 
+/// A sheet metal input of a Tab and Slot feature, for the feature's sheet metal route: tabs
+/// placed by a shared sheet metal joint (or, later, on open edges). That route is not built yet:
+/// nothing writes one, and a feature that holds one skips it (`sheet_route_not_built`). The
+/// record has room for it now, so the sheet metal route needs no new format.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SheetPick {
+    /// A shared sheet metal joint, by its persistent name.
+    Joint {
+        /// As a plate pick's key: names the pick's tools, minted by SolidCraft.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<u32>,
+        /// The joint's persistent name.
+        name: String,
+    },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -1583,6 +1600,11 @@ pub enum FeatureKind {
         tab_plates: Vec<PlatePick>,
         /// The plates that get slots.
         slot_plates: Vec<PlatePick>,
+        /// The sheet metal route's inputs (not built yet; see [`SheetPick`]). The plate route
+        /// takes `tab_plates` and `slot_plates`; a pair with a sheet metal plate also goes to the
+        /// sheet metal route.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sheet_picks: Vec<SheetPick>,
         /// The next key a new pick gets. Only grows: a key is never handed out twice in one
         /// feature, so a pick added after another was removed never takes over its names.
         #[serde(default)]
