@@ -4,7 +4,10 @@
 //! Not upstream (SMLib 1.0.1 has none): the SolidCraft fork's tangency-labs/smlib
 //! `a307480` (WR-631), used
 //! in the executive's cliff-overflow choice: an end section that runs off its end face
-//! under material overflows it, and the blend is built as a cliff overflow is.
+//! under material overflows it, and the blend is built as a cliff overflow is. A
+//! material-removing blend crossing a sharp convex boundary is cut the same way: the
+//! end face's plane bounds the removal region, and the body clips that region at the
+//! face beyond. A tangent continuation keeps the corner's global merge.
 //!
 //! Deviations: the fork's `sm_SrfSrfIntersection` takes two `SmFilletVertex` objects
 //! holding the crossings; [`srf_srf_intersection`] takes the points. The section, a curve
@@ -195,19 +198,38 @@ fn side_run(target: &Brep, side: EdgeId, v: VertexId) -> Result<Vec<(EdgeId, Ver
     Ok(run)
 }
 
-/// Whether face `g` has a concave edge, other than one of the side's `run`, at vertex `at`.
-fn concave_edge_of_face_at(
+/// Whether crossing an end face's boundary needs the overflow's cut: under material at
+/// a concave edge, or into the open at a sharp convex edge for a material-removing blend.
+/// Tangent continuations belong to the corner's global merge, not this cut.
+fn boundary_requires_cut(
+    k: &Kernel,
+    target: &mut Brep,
+    e: EdgeId,
+    blend_concave: bool,
+    tangency_tol: f64,
+) -> Result<bool> {
+    Ok(is_concave_edge(k, target, e)?
+        || (!blend_concave
+            && edge_bounds_material(target, e)?
+            && !test_manifold_tangent_rollover(k, target, e, tangency_tol)?.0))
+}
+
+/// Whether face `g` has a boundary requiring a cut, other than one of the side's `run`,
+/// at vertex `at`.
+fn boundary_requires_cut_at(
     k: &Kernel,
     target: &mut Brep,
     run: &[(EdgeId, VertexId)],
     at: VertexId,
     g: FaceId,
+    blend_concave: bool,
+    tangency_tol: f64,
 ) -> Result<bool> {
     for e in vertex::edges(target, at, None)? {
         if run.iter().any(|(r, _)| *r == e) || !edge::faces(target, e, None)?.contains(&g) {
             continue;
         }
-        if is_concave_edge(k, target, e)? {
+        if boundary_requires_cut(k, target, e, blend_concave, tangency_tol)? {
             return Ok(true);
         }
     }
@@ -225,9 +247,11 @@ impl FilletSolver {
     /// its face and E at the vertex) to rail 1's. Where E is narrower than the fillet and
     /// something stands on it next to the vertex (a lip on a shelled box's rim, the
     /// section running under the lip's foot: off E across a concave edge of it), the
-    /// fillet overflows its end face. A section off E across a convex edge (a hole's rim,
-    /// a cliff) is not judged here. The section is the surfaces' exact intersection
-    /// between the two crossings, classified against E. Judged only where the corner
+    /// fillet overflows its end face. A material-removing blend whose section crosses a
+    /// sharp convex edge of E is cut by the same construction, clipped to the body beyond
+    /// E. A tangent continuation keeps the corner's global merge. The section is the
+    /// surfaces' exact intersection between the two crossings, classified against E.
+    /// Judged only where the corner
     /// takes the end face as it is: both side edges of the filleted edge's convexity,
     /// neither tangent.
     ///
@@ -395,14 +419,15 @@ impl FilletSolver {
                         }
                     }
                     if nearest == BIG_DOUBLE {
-                        // The rail crosses no side
-                        // edge at the vertex because it runs past the side edge's far end P
+                        // The rail crosses no side edge at the vertex because it runs
+                        // past the side edge's far end P
                         // (where it meets the end face's plane, the end section's start,
-                        // projects past P on the side edge's line), and the end face
-                        // has a concave edge at P (something stands on it there): the end
-                        // section starts past P, under material, and the fillet overflows its
-                        // end face. Else, as the fork: not judged. A rail that crosses no side
-                        // edge because its face runs on past the end face (the side edge
+                        // projects past P on the side edge's line), and the end face has a
+                        // boundary requiring a cut at P: the end section lies past that face.
+                        // Its plane cuts the removal region, and subtraction clips it to the
+                        // body. Tangent continuations keep the corner's global merge.
+                        // A rail that crosses no side edge because its face runs on past
+                        // the end face (the side edge
                         // leaves the vertex the other way) is short of the vertex there, not
                         // past P (#17710).
                         // P is each end along the side's run: a side split only by a seam
@@ -422,8 +447,15 @@ impl FilletSolver {
                                 let p = vertex::point(target, far)?;
                                 if crossing.is_some_and(|x| {
                                     crossing_past_side_edge_end(x, v_point, p, approx_tol)
-                                }) && concave_edge_of_face_at(k, target, &run, far, g)?
-                                {
+                                }) && boundary_requires_cut_at(
+                                    k,
+                                    target,
+                                    &run,
+                                    far,
+                                    g,
+                                    concave,
+                                    tangency_tol,
+                                )? {
                                     fit = false;
                                     break;
                                 }
@@ -508,11 +540,10 @@ impl FilletSolver {
                             continue;
                         }
                     }
-                    // Off the face across a wall's foot (a concave edge of the end face:
-                    // something standing on it), the section runs under material. Across a
-                    // convex edge (a hole's rim, a cliff) it runs into the open, which this
-                    // does not judge.
-                    let mut under = false;
+                    // The same boundary event as a rail past its side edge's far end:
+                    // the end face no longer holds the section, so its plane cuts the
+                    // removal region and the body clips it at the boundary beyond.
+                    let mut leaves = false;
                     for pc in [&ivl.start, &ivl.end] {
                         if pc.point_class() != PointClassType::Edge {
                             continue;
@@ -526,11 +557,11 @@ impl FilletSolver {
                                 "the classification's side edge",
                             ));
                         };
-                        if is_concave_edge(k, target, e)? {
-                            under = true;
+                        if boundary_requires_cut(k, target, e, concave, tangency_tol)? {
+                            leaves = true;
                         }
                     }
-                    if under {
+                    if leaves {
                         fit = false;
                     }
                 }
