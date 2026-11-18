@@ -38,9 +38,37 @@ pub struct Segments<'a> {
     pub glyphs: Option<&'a dyn Fn(&egui::Painter, egui::Rect, usize, egui::Color32)>,
 }
 
+/// Arrows choose an available neighbour without moving focus outside the value group.
+fn segment_key(ui: &Ui, salt: &str, count: usize, available: impl Fn(usize) -> bool) -> Option<usize> {
+    if !ui.is_enabled() {
+        return None;
+    }
+    let focused = ui.memory(|m| m.focused())?;
+    let from = (0..count).find(|&index| ui.make_persistent_id((salt, index)) == focused)?;
+    if !available(from) {
+        return None;
+    }
+    ui.memory_mut(|m| m.set_focus_lock_filter(focused, egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, ..Default::default() }));
+    let backwards = ui.input_mut(|i| {
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            Some(true)
+        } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            Some(false)
+        } else {
+            None
+        }
+    })?;
+    ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+    let target =
+        if backwards { (0..from).rev().find(|&index| available(index)) } else { (from.saturating_add(1)..count).find(|&index| available(index)) }?;
+    ui.memory_mut(|m| m.request_focus(ui.make_persistent_id((salt, target))));
+    ui.ctx().request_repaint();
+    Some(target)
+}
+
 pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
-    super::settings_search::note_unlabelled(ui, options);
-    if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, options) {
+    crate::settings_search::note_unlabelled(ui, options);
+    if crate::settings_search::suppress_chrome(ui) && !crate::settings_search::texts_hit(ui, options) {
         return false;
     }
     if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
@@ -117,7 +145,15 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
     );
     ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
     let equal_width = rect.width() / options.len().max(1) as f32;
-    let mut clicked = false;
+    let keyboard = segment_key(ui, "segment", options.len(), |index| {
+        enabled.get(index).copied().unwrap_or(true)
+            && disabled.get(index).copied().flatten().is_none()
+            && disabled_reasons.get(index).copied().flatten().is_none()
+    });
+    if let Some(index) = keyboard {
+        *selected = index;
+    }
+    let mut clicked = keyboard.is_some();
     let mut x = rect.left();
     for (index, (option, text)) in options.iter().zip(&shown).enumerate() {
         let width =
@@ -204,7 +240,7 @@ pub fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Se
         }
         let response =
             if let Some(reason) = reason { response.backing_on_disabled_hover_text(reason) } else { response.backing_on_hover_text(*text) };
-        if response.clicked() && segment_enabled {
+        if segment_enabled && super::checks::activated(&response) {
             *selected = index;
             clicked = true;
         }
@@ -243,7 +279,11 @@ pub fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment
         ui.painter().rect_filled(rect, t.control_radius, t.control_fill);
     }
     let width = rect.width() / options.len().max(1) as f32;
-    let mut clicked = false;
+    let keyboard = segment_key(ui, "icon_segment", options.len(), |_| true);
+    if let Some(index) = keyboard {
+        *selected = index;
+    }
+    let mut clicked = keyboard.is_some();
     for (index, option) in options.iter().enumerate() {
         let segment = egui::Rect::from_min_size(rect.min + vec2(index as f32 * width, 0.0), vec2(width, rect.height()));
         let response = ui.interact(segment, ui.make_persistent_id(("icon_segment", index)), egui::Sense::click());
@@ -284,7 +324,7 @@ pub fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[IconSegment
         solidcraft_ui_registry::publish_handle(&format!("dialog:{}:{}", label(ui), option.key), segment.center());
         solidcraft_ui_registry::publish_target(option.key, segment);
         let response = response.backing_on_hover_text(&option.tip);
-        if response.clicked() {
+        if super::checks::activated(&response) {
             *selected = index;
             clicked = true;
         }
@@ -325,7 +365,7 @@ pub fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usiz
             ui.spacing_mut().item_spacing = vec2(t.space_8, 0.0);
             for (label, value) in chunk {
                 let (rect, mut response) = ui.allocate_exact_size(vec2(width, t.form_checkbox_height), egui::Sense::click());
-                if response.clicked() {
+                if super::checks::activated(&response) {
                     **value = !**value;
                     response.mark_changed();
                 }
@@ -365,7 +405,7 @@ pub fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) -> bool
     painter.text(rect.left_center(), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(t.font_label), t.form_ink);
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), on, label));
     solidcraft_ui_registry::publish_target(&format!("sketch_palette:toggle:{key}"), rect);
-    response.backing_on_hover_text(label).clicked()
+    super::checks::activated(&response.backing_on_hover_text(label))
 }
 
 /// The host's text for [`text_emphasis`]: the two style names, and why Bold is off.
