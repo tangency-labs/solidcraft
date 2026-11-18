@@ -1,7 +1,8 @@
 //! An SVG given as a canvas or decal image, drawn into a PNG as it is inserted. The design keeps
 //! the picture, not the drawing, so the canvas reopens, draws and exports as any PNG canvas does.
 //!
-//! resvg draws it without text, system fonts or embedded raster images, and an `<image>` that
+//! resvg (all its features off) draws it without text, system fonts, embedded raster images or
+//! SVGZ decompression, and an `<image>` that
 //! names a file or address draws nothing, so reading an SVG reads no other file (images given
 //! inline as `data:` URLs still draw). A compressed SVG (SVGZ) is refused rather than inflated to
 //! an unknown size. The picture's size is capped before anything is drawn.
