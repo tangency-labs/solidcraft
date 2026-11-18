@@ -265,6 +265,7 @@ plugin.list                       plugins: the installed plugins and their decla
 plugin.remove                     plugins: removes an installed plugin and its grants, no geometry; crates/engine/src/plugin/tests.rs
 plugin.revoke                     plugins: removes a stored approval, no geometry; apps/solidcraft-cli/tests/run_results.rs
 plugin.run                        plugins: runs a sandboxed plugin's entry through the engine's own commands; crates/engine/src/plugin/tests.rs
+plugin.tools                      plugins: lists installed plugin entries as tools for agents, no geometry; crates/engine/src/plugin/tests.rs
 pointcloud.delete                 point clouds: points drawn, never a body
 pointcloud.deviation              point clouds: reads distances, changes nothing; tested in crates/engine/src/cmd/point_cloud_deviation.rs
 pointcloud.edit                   point clouds: points drawn, never a body

@@ -49,7 +49,34 @@ fn say(id: &str, args: &[(&str, &str)]) -> String {
         return text;
     }
     let english = MESSAGES.iter().find(|(known, _)| *known == id).map_or(id, |(_, english)| english);
-    args.iter().fold(english.to_string(), |text, (name, value)| text.replace(&format!("{{{name}}}"), value))
+    fill(english, args)
+}
+
+/// Fills the `{name}` placeholders in `template` in one pass, so the text put in for one (a file
+/// named `part{reason}.smp`) is never read as another.
+fn fill(template: &str, args: &[(&str, &str)]) -> String {
+    let mut text = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let (before, after) = rest.split_at(open);
+        text.push_str(before);
+        let filled = after.find('}').and_then(|close| {
+            let name = after.get(1..close)?;
+            args.iter().find(|(known, _)| *known == name).map(|(_, value)| (*value, close))
+        });
+        match filled {
+            Some((value, close)) => {
+                text.push_str(value);
+                rest = after.get(close + 1..).unwrap_or_default();
+            }
+            None => {
+                text.push('{');
+                rest = after.get(1..).unwrap_or_default();
+            }
+        }
+    }
+    text.push_str(rest);
+    text
 }
 
 /// Seconds, as a person reads them: 300, or 0.05.

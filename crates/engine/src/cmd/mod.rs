@@ -82,6 +82,7 @@ pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{NAMES_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub use file::{runs_plugin_exporter, runs_plugin_importer};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
 pub use parts::part_length_label;

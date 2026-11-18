@@ -61,7 +61,8 @@ pub fn format_slots(session: &Session, kind: EntryKind) -> Vec<FormatSlot> {
         if session.disabled_plugins.contains(&id) {
             continue;
         }
-        let Ok(manifest) = read_manifest(&folder) else { continue };
+        // An installed format slot is read with the app's authority: a caller names a file, not it.
+        let Ok(manifest) = with_installed(session, &folder, || read_manifest(&folder)) else { continue };
         let Some(runtime) = manifest.runtime.as_ref() else { continue };
         for entry in runtime.entries.iter().filter(|e| e.kind == kind && kind.is_format()) {
             found.push(FormatSlot {
@@ -116,7 +117,7 @@ pub(super) fn slot_for(session: &Session, kind: EntryKind, path: &str, format: O
 /// this exact package and its limits within the user's.
 pub(super) fn checked_package(session: &mut Session, slot: &FormatSlot) -> Result<Package> {
     session.plugin_state.refresh_stored();
-    let package = read_package(&slot.folder)?;
+    let package = with_installed(session, &slot.folder, || read_package(&slot.folder))?;
     if package.manifest.id != slot.plugin_id || session.disabled_plugins.contains(&slot.plugin_id) {
         return Err(error("plugin is disabled or was replaced; try again"));
     }
@@ -192,6 +193,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
             view: None,
             groups: BTreeSet::new(),
             file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
             evaluation: None,
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the

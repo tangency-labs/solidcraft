@@ -31,6 +31,10 @@ pub struct RunParams {
     pub entry: String,
     #[serde(default = "empty_params")]
     pub params: Value,
+    /// Called by name (`<plugin>.<entry>`, as a tool): a missing grant or a read entry's refusal
+    /// comes back naming the plugin, the grant and how to approve it, or the refused import.
+    #[serde(default)]
+    pub named: bool,
 }
 fn empty_params() -> Value {
     Value::Object(Default::default())
@@ -111,6 +115,61 @@ pub struct ListResult {
     pub param_warnings: Vec<String>,
 }
 
+/// List the installed, enabled plugins' entries as tools for agents (`plugin.tools`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolsParams {
+    /// Only this tool (`<plugin>.<entry>`), with its `approval`. Without it every tool is
+    /// listed, without approvals, and no component is read.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToolsResult {
+    /// One tool per entry of every installed, enabled plugin, sorted by name.
+    pub tools: Vec<PluginTool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+/// What a plugin tool does when it is called.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginToolKind {
+    /// A command entry: called as the `<plugin>.<entry>` command with the entry's inputs, one
+    /// undo step.
+    Command,
+    /// An exporter entry: writes the open design through `file.export`.
+    Exporter,
+    /// An importer entry: opens a file it claims as a new design through `file.import`.
+    Importer,
+}
+/// One installed plugin entry as a tool. Every text field except `name`, `plugin` and `entry`
+/// comes from the plugin's own manifest: plugin text, not SolidCraft's.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct PluginTool {
+    /// `<plugin>.<entry>`: the tool's name and, for a command entry, the command it runs.
+    pub name: String,
+    pub kind: PluginToolKind,
+    /// The plugin's id.
+    pub plugin: String,
+    pub entry: String,
+    /// The plugin's name, version and description, from its manifest.
+    pub plugin_name: String,
+    pub plugin_version: String,
+    pub description: String,
+    pub effect: crate::plugin::Effect,
+    /// The extensions a format entry opens or writes, lowercase, without the dot; empty for a command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<String>,
+    /// The tool's arguments: a command entry's declared inputs, strict (no undeclared field); a
+    /// format entry's `{path, options}`, `options` its declared options.
+    pub input_schema: Value,
+    /// A command entry's package hash, which its `<plugin>.<entry>` call passes as `approval`;
+    /// given when the tool is asked for by `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<String>,
+}
+
 /// An installed import or export slot.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImporterInfo {
@@ -158,6 +217,10 @@ pub struct ImportParams {
     /// The importer's declared options. Default: its defaults.
     #[serde(default = "empty_params")]
     pub options: Value,
+    /// Called as the importer's tool: a missing grant comes back naming the plugin, the grant and
+    /// how to approve it.
+    #[serde(default)]
+    pub named: bool,
 }
 
 /// What an importer made: the new design, and what it could not carry over.

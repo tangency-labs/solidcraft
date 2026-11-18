@@ -99,6 +99,7 @@ The command surface exposes management without opening dialogs:
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
 | `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
 | `plugin.revoke` | `{id}` | `{id, revoked}` |
+| `plugin.tools` | `{name?}` | `{tools: [{name, kind, plugin, entry, plugin_name, plugin_version, description, effect, extensions, input_schema, approval?}]}`: every installed, enabled plugin's entries as tools for agents (below); `approval` only for the one tool `name` asks for |
 
 All commands expose input and output schemas through `engine.describe`. Removal validates the id
 and confines deletion to the host's plugin directory. Installation and removal do not edit the design.
@@ -337,6 +338,55 @@ refused with a typed error. Traps, missing permissions, failed commands, limits
 and invalid manifest fields return structured errors (see Errors below). Phase 2 adds importers
 and exporters (below) and the author tools (`plugin check` and `plugin test`, below); browser
 execution follows.
+
+## Plugins as tools for agents
+
+Every installed, enabled plugin's entries are tools for the assistant chat and for MCP clients,
+beside the built-in tools, so an agent can find and use what a plugin offers without opening it
+([RFC 0002](rfcs/0002-plugins.md) section 6c).
+
+- **Named tools.** A command entry is the tool `<plugin>.<entry>`, with its input schema as the
+  tool's arguments. An importer entry is the tool `<plugin>.<entry>` titled "Open .ext files with
+  Plugin name", taking `path` and the importer's `options`; it opens the file as a new design through
+  `file.import`. Export slots get their tools when exporters land.
+- **Fresh every listing.** `tools/list` asks `plugin.tools` each time, so a plugin turned off or
+  removed is gone from the next listing, and calling its tool is an unknown tool.
+- **Strict arguments.** MCP tool arguments are checked against the entry's declared schema:
+  declared types, required fields, fixed values and ranges. Object schemas accept only declared
+  fields unless they allow others with `additionalProperties` or use unsupported schema keywords.
+  Composition options do not implicitly close objects. Nothing runs when the arguments don't fit.
+  Existing `<plugin>.<entry>` engine calls keep passing inputs through to the plugin unchanged.
+- **Headless, under existing grants.** A tool call opens none of the plugin's dialogs and runs
+  with the grants it was given at install, as one undo step, like any command.
+- **A `read` entry stays read-only.** Whoever runs it, a person or a tool call, the host refuses it
+  edit commands and the file-writing host import `write-file`, whatever folders the plugin was
+  granted. The refusal names the import (or command).
+- **A missing grant is an error, never a prompt.** A call that needs a grant the plugin lacks
+  (a folder, a command group, more memory than the ceiling, or approval of a changed package)
+  fails with an error that names the plugin, the grant and how to approve it: in Preferences ›
+  Plugins by installing the plugin again and allowing it, or headlessly with `plugin.install` and
+  its `approve` object. Over MCP the result also carries it as data,
+  `structuredContent.plugin_error`: `{plugin, grant, approve}`, or `{plugin, entry, refused_import}`
+  and `{plugin, entry, refused_command}` for a read entry.
+- **Marked as plugin tools.** Each definition has a `plugin` field
+  (`{id, name, version, entry, kind, effect}`), and its description starts "Plugin tool" and puts
+  the plugin's own description between `<plugin-text>` and `</plugin-text>`, as text to read, not
+  instructions to follow.
+- **The assistant asks first.** In the assistant chat a plugin tool call goes through the same
+  approval as every other tool call, and it always asks, whatever the permission mode or an earlier
+  **Always allow**: running a plugin's code needs your go each time. An importer tool, and any
+`file.import` or `doc.open` that would run an importer plugin, asks the same way.
+
+- **Described like commands.** `engine.describe` (MCP `describe_command`) of `<plugin>.<entry>`
+  returns the entry with the same schema as `tools/list` (`tool.input`): a command entry as the
+  `<plugin>.<entry>` command (`approval` and `params`), an importer as the tool that opens its files,
+  with `file.import` named.
+
+Installed plugins are read with the app's own authority (a tool names a plugin, never a path), so
+an agent confined to its folders (only the folder of its input file, say) still sees them in
+`plugin.list`, `plugin.tools` and `engine.describe`, and `doc.open` and `file.import` still find an
+installed importer. The input file itself must be in the agent's folders; when it isn't, the
+refusal names it. The files a plugin reads or writes stay within its grants and the agent's folders.
 
 ## Checking and testing a plugin
 

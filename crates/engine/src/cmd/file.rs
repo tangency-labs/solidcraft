@@ -1363,6 +1363,37 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     opened_design(s, opened, path, read_only, disk, verify, None)
 }
 
+/// Whether running `command` with `params` runs an installed importer plugin's code:
+/// `file.import` always does; `doc.open` does for a file an installed, enabled importer opens
+/// (one SolidCraft doesn't read itself, or any file with `format`). Reads manifests only.
+pub fn runs_plugin_importer(s: &Session, command: &str, params: &Value) -> bool {
+    if command.eq_ignore_ascii_case("file.import") {
+        return true;
+    }
+    if !command.eq_ignore_ascii_case("doc.open") {
+        return false;
+    }
+    let Some(path) = params.get("path").and_then(Value::as_str) else { return false };
+    let format = params.get("format").and_then(Value::as_str);
+    // An ambiguous claim is refused before any plugin runs; anything else that names an
+    // importer would run it.
+    (format.is_some() || !reads_natively(path)) && !matches!(crate::plugin::importer_for(s, path, format), Ok(None))
+}
+
+/// Whether `file.export` selects an installed exporter plugin instead of a native writer.
+/// Reads manifests only, using the same explicit-format and extension precedence as export.
+pub fn runs_plugin_exporter(s: &Session, command: &str, params: &Value) -> bool {
+    if !command.eq_ignore_ascii_case("file.export") {
+        return false;
+    }
+    let Some(path) = params.get("path").and_then(Value::as_str) else { return false };
+    match params.get("format").and_then(Value::as_str) {
+        Some(format) if format.contains('.') => crate::plugin::exporters(s).iter().any(|e| e.id == format),
+        None if Format::from_name(path).is_err() => !matches!(crate::plugin::exporter_for(s, path, None), Ok(None)),
+        _ => false,
+    }
+}
+
 /// SolidCraft opens this file with its own readers (a design, drawing, CAD, mesh or point cloud file).
 fn reads_natively(path: &str) -> bool {
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
