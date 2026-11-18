@@ -19,6 +19,8 @@
 #[allow(missing_docs)]
 pub mod brep;
 pub mod cell_grid;
+#[allow(missing_docs)]
+pub mod hatch;
 pub mod living_hinge;
 pub mod native;
 pub mod plane;

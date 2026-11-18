@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_status": "Drawing Status"
+  },
+  "ar": {
+    "cmd.drawing_status": "حالة الرسم"
+  },
+  "de": {
+    "cmd.drawing_status": "Zeichnungsstatus"
+  },
+  "he": {
+    "cmd.drawing_status": "מצב השרטוט"
+  },
+  "ja": {
+    "cmd.drawing_status": "図面の状態"
+  },
+  "ko": {
+    "cmd.drawing_status": "도면 상태"
+  },
+  "vi": {
+    "cmd.drawing_status": "Trạng thái bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_status": "绘图状态"
+  }
+}
