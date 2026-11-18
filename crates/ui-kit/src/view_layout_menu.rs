@@ -169,7 +169,7 @@ fn window_block(ui: &mut Ui, data: &LayoutMenu, window: &LayoutWindow) -> Option
     let t = Tokens::get();
     let local = window.id == data.window;
     let title = if local { tr("view_layout.this_window") } else { &window.name };
-    let detail = if local { Some(window.display.as_deref().unwrap_or(tr("view_layout.main"))) } else { window.display.as_deref() };
+    let detail = if local && window.id == 0 { Some(tr("view_layout.main")) } else { window.display.as_deref() };
     let mut picked = None;
     ui.push_id(window.id, |ui| {
         ui.horizontal(|ui| {
