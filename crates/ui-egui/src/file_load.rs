@@ -934,7 +934,10 @@ fn start(app: &mut SolveApp) {
     let worker_finished = finished;
     #[cfg(test)]
     let worker_gate = app.file_load.worker_gate.take();
+    // A plugin's failure is worded on the worker, in the window's language.
+    let language = app.preferences.language.clone();
     let spawned = std::thread::Builder::new().name("file-load".into()).spawn(move || {
+        let _language = solidcraft_ui_text::scope(&language);
         #[cfg(test)]
         if let Some((started, release)) = worker_gate {
             let _ = started.send(std::thread::current().id());

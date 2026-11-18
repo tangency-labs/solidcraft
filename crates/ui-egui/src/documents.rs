@@ -1149,6 +1149,52 @@ pub fn prepare_open(app: &mut SolveApp) {
     }
 }
 
+/// Close only the active clean design for the control API. The optional document_id
+/// guards against a tab switch between inspection and closing (#18781).
+pub(crate) fn close_clean(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let expected = match p {
+        Value::Null => None,
+        Value::Object(fields) => {
+            if let Some(key) = fields.keys().find(|key| key.as_str() != "document_id") {
+                return Err(format!("unknown document.close field {key}"));
+            }
+            match fields.get("document_id") {
+                None => None,
+                Some(Value::String(id)) => Some(id.as_str()),
+                _ => return Err("document_id must be a string".into()),
+            }
+        }
+        _ => return Err("document.close params must be an object".into()),
+    };
+    if let Some(id) = expected
+        && id != app.session.document_id
+    {
+        return Err("the active document changed; nothing was closed".into());
+    }
+    if app.file_picker_busy()
+        || app.file_load.busy()
+        || app.saving.is_some()
+        || app.docs.closing.is_some()
+        || app.docs.quitting.is_some()
+        || app.docs.batch.is_some()
+        || app.docs.group.is_some()
+    {
+        return Err("finish the file operation or save prompt before closing a document".into());
+    }
+    if app.docs.count() == 1 && active_is_blank(app) {
+        return Err("no open design to close".into());
+    }
+    if dirty(app, app.docs.active) {
+        return Err("the design has unsaved changes; save it before document.close".into());
+    }
+    let closed = app.session.document_id.clone();
+    close(app, app.docs.active, false);
+    if app.session.document_id == closed {
+        return Err("the active design could not be closed".into());
+    }
+    Ok(json!({"closed_document_id": closed, "document_id": app.session.document_id, "documents": app.docs.count()}))
+}
+
 /// Close tab `i`: asks first when it has unsaved changes (`force`: close anyway).
 pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     if app.docs.group.is_some() || app.file_picker_busy() {
