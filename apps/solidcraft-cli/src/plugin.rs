@@ -1,7 +1,8 @@
 //! `solidcraft-cli plugin check` and `plugin test`: a plugin author's tools.
 //!
 //! `check` runs the app's `plugin.check`: what Install and a call would refuse, each with its fix.
-//! `test` installs the package into a scratch plugins folder with the app's own installer, then
+//! `test` installs the package into a scratch plugins folder with the app's own installer, stores
+//! each case's approvals in that folder's grant store as an install does, then
 //! runs the plugin's test cases (`tests/*.json` in the package) through `plugin.run` and
 //! `file.import` on the real host, with its real limits, and compares what comes back.
 
@@ -152,8 +153,9 @@ struct CaseFolder {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Expect {
-    /// The call fails with this kind of error (`permission_denied`, `limit_exceeded`, `trap`,
-    /// `invalid_input`, `command_failed`, `cancelled`, ...), or `any`. Default: it succeeds.
+    /// The call fails with this kind of error (`permission_denied`, `limit_exceeded`, `exhausted`,
+    /// `over_ceiling`, `unsupported`, `trap`, `invalid_input`, `command_failed`, `cancelled`, ...),
+    /// or `any`. Default: it succeeds.
     #[serde(default)]
     error: Option<String>,
     /// Text the error message contains.
@@ -448,9 +450,17 @@ fn run_case(
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let grants = case_grants(manifest, &approval, tests, work, case)?;
+        let mut grants = case_grants(manifest, &approval, tests, work, case)?;
+        grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
         let folders = grants.folders.clone();
-        s.plugin_state.grants.insert(manifest.id.clone(), grants);
+        // Approved as an install would store it: in the scratch plugins folder's grant store, which
+        // the session reads back before the call, as a later run of the command line does.
+        solidcraft_engine::plugin::grant_store::write(plugins, &manifest.id, &grants).map_err(|e| format!("grants: {e}"))?;
+        s.plugin_state.stored = Some(Default::default());
+        s.plugin_state.refresh_stored();
+        if s.plugin_state.grants.get(&manifest.id) != Some(&grants) {
+            return Err("grants: the stored approval did not read back".into());
+        }
         let params = case.params.clone().unwrap_or_else(|| json!({}));
         let reply = match entry.kind {
             EntryKind::Command => {
@@ -489,7 +499,7 @@ fn run_case(
             (Err(e), None) => return Err(format!("failed: {e}")),
             (Err(e), Some(kind)) => {
                 let got = error_kind(&e);
-                if kind != "any" && *kind != got {
+                if !kind_matches(kind, &got) {
                     return Err(format!("failed with a {got} error, and the test expects {kind}: {e}"));
                 }
                 if let Some(text) = &case.expect.message
@@ -516,10 +526,19 @@ fn run_case(
     CaseResult { failure, design, journal }
 }
 
+/// Whether an error of kind `got` is the `expected` one. `limit_exceeded` also covers the two
+/// limit errors that carry numbers, `exhausted` (a budget ran out) and `over_ceiling` (refused
+/// before it ran), so a test written before they existed still passes.
+fn kind_matches(expected: &str, got: &str) -> bool {
+    expected == "any" || expected == got || (expected == "limit_exceeded" && matches!(got, "exhausted" | "over_ceiling"))
+}
+
 /// The kind of an engine error, as a plugin error names it (`permission_denied`, ...), or `other`.
 fn error_kind(e: &EngineError) -> String {
+    if let Some(e) = e.host_error() {
+        return serde_json::to_value(e).ok().and_then(|v| v["kind"].as_str().map(String::from)).unwrap_or_else(|| "other".into());
+    }
     match e {
-        EngineError::Plugin(e) => serde_json::to_value(e).ok().and_then(|v| v["kind"].as_str().map(String::from)).unwrap_or_else(|| "other".into()),
         EngineError::BadParams { .. } => "invalid_input".into(),
         EngineError::Cancelled(_) => "cancelled".into(),
         _ => "other".into(),

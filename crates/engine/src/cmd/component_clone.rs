@@ -325,6 +325,7 @@ pub(super) fn build(
         o.transform = transform;
         // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
         o.grounded = false;
+        o.bom_type = source_occurrence.as_ref().and_then(|o| o.bom_type);
     }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);
@@ -339,6 +340,7 @@ pub(super) fn build(
         let id = scratch.doc_mut().add_occurrence(child, owner, pose)?;
         if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
             o.grounded = old.grounded;
+            o.bom_type = old.bom_type;
         }
         occurrences.insert(old.id, id);
     }
