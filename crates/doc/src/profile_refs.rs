@@ -602,7 +602,7 @@ mod tests {
         assert_eq!(WHOLE_MAX_HOLES, 128, "the drawing-fill hole cap stays unchanged");
         for count in [128, 129, 707, MAX_MODEL_WHOLE_HOLES] {
             let large = profile(count, 4);
-            validate_whole(&[large.clone()]).unwrap_or_else(|e| panic!("{count} holes should be accepted: {e}"));
+            validate_whole(std::slice::from_ref(&large)).unwrap_or_else(|e| panic!("{count} holes should be accepted: {e}"));
             let duplicate = validate_whole(&[large.clone(), large]).unwrap_err().to_string();
             assert!(duplicate.contains("duplicate identity"), "{duplicate}");
         }
