@@ -588,9 +588,12 @@ pub fn picture_frame(
         None => normal.cross(along) * aspect,
     };
     let (width, height) = (along.length(), up.length());
-    if !(width > 1e-9 && height > 1e-9 && width.is_finite() && height.is_finite())
-        || !(along.cross(up).length() > 1e-6 * width * height)
-    {
+    let ok = width > 1e-9
+        && height > 1e-9
+        && width.is_finite()
+        && height.is_finite()
+        && along.cross(up).length() > 1e-6 * width * height;
+    if !ok {
         return None;
     }
     Some([bl, br, br + up, bl + up])
