@@ -364,7 +364,12 @@ pub fn create_ruled_surface(
 
 /// The surface of revolution of `curve` about the axis through `origin` along
 /// `axis_dir`, over `angle_deg` degrees (`SmApiCreateSurfaceRevolution`): a copy of
-/// the curve is swept rotationally into a B-rep and its first surface returned.
+/// the curve is swept rotationally into a B-rep and its surface returned.
+///
+/// Deviation: the curve is swept whole (`test_continuity: false`). Upstream splits it at
+/// every join that is not C1 and G2, makes a face per piece and returns the first, so a
+/// profile with such a join (a kink, or two arcs bending opposite ways) gave the
+/// surface of its first piece only.
 ///
 /// # Errors
 ///
@@ -397,7 +402,7 @@ pub fn create_surface_revolution(
             RepeatedSweepOptions {
                 repetitions: 1,
                 cap_ends: false,
-                test_continuity: true,
+                test_continuity: false,
             },
         )
     })?;
