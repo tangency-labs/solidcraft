@@ -2622,7 +2622,9 @@ fn export_sdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     for t in std::iter::once(&dir).chain(targets.iter().map(|(t, _)| t)) {
         solidcraft_io::vfs::check_new(t).map_err(|e| EngineError::Other(format!("{t}: {e}")))?;
     }
-    solidcraft_io::vfs::create_dir_all(&dir).map_err(|e| EngineError::Other(format!("{dir}: {e}")))?;
+    // Missing folders above the model folder are made too: checked as a new destination, as the
+    // files were above, so an allowed folder's new subfolders are in scope.
+    solidcraft_io::vfs::create_new_dir_all(&dir).map_err(|e| EngineError::Other(format!("{dir}: {e}")))?;
     let mut written: Vec<String> = Vec::new();
     for (t, bytes) in &targets {
         if let Err(e) = solidcraft_io::vfs::write(t, bytes) {

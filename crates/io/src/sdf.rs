@@ -108,8 +108,9 @@ pub fn sdf_model(doc: &Document, world: &ModelState, options: &SdfOptions) -> Re
                     "      <collision name=\"{}\">\n        {geometry}\n      </collision>\n",
                     attr(&names.take(&format!("{}_collision", b.name)))
                 );
-                // g/cm³ to kg/mm³.
-                let rho = doc.density(&b.name) * 1e-6;
+                // g/cm³ to kg/mm³. Materials are assigned to the body's definition, which every
+                // occurrence of its component shares, not to the occurrence's display name.
+                let rho = doc.density(b.body.definition_name()) * 1e-6;
                 masses.push((rho * mp.volume, mp.centroid, mp.inertia.map(|row| row.map(|x| x * rho))));
             }
             None => warnings.push(format!("body `{}` is not a closed solid: it is drawn, with no collision or mass", b.name)),
