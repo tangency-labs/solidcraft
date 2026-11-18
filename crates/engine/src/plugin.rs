@@ -3,7 +3,7 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
-    MAX_JOB_SECONDS, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
+    MAX_JOB_SECONDS, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -98,10 +98,15 @@ impl AppState {
 
     /// Take in grants another program stored or revoked since this session last looked. Nothing
     /// to do unless this session keeps its grants in the store.
+    ///
+    /// The store is read with the app's own authority, whatever the caller's file scope: what the
+    /// user approved for a plugin applies whoever calls it, so an agent confined to its folders
+    /// runs a plugin with its approvals, not with none. Writes still need the caller's scope.
     pub fn refresh_stored(&mut self) {
         let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return };
         if let Some(synced) = self.stored.as_mut() {
-            synced.refresh(&dir, &mut self.grants);
+            let grants = &mut self.grants;
+            solidcraft_io::vfs::scoped(None, || synced.refresh(&dir, grants));
         }
     }
 
@@ -246,6 +251,20 @@ pub fn read_package(path: &str) -> Result<Package> {
     Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
 }
 
+/// Whether `folder` is an installed package in the app's own plugins folder (`{plugins}/<id>`).
+pub fn is_installed_folder(session: &Session, folder: &str) -> bool {
+    let path = Path::new(folder);
+    session.plugin_state.plugins_dir().is_some_and(|root| path.parent() == Some(root.as_path()))
+        && path.file_name().and_then(|n| n.to_str()).is_some_and(valid_id)
+}
+
+/// Reads an installed package with the app's authority, whatever the caller's file scope: a
+/// plugin tool call names a plugin, never a path, and the plugins folder is the app's own. Any
+/// other folder is read through the caller's scope, as `plugin.inspect` reads it.
+pub fn with_installed<T>(session: &Session, folder: &str, read: impl FnOnce() -> T) -> T {
+    if is_installed_folder(session, folder) { solidcraft_io::vfs::scoped(None, read) } else { read() }
+}
+
 /// The ceilings a package runs under: the app's, raised to the memory the user approved for this
 /// exact manifest and component at install. A grant for another package hash raises nothing.
 pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
@@ -373,6 +392,8 @@ pub use import::{Importer, describe as describe_importers, import_file, importer
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
+mod tools;
+pub use tools::{explain_importer, explain_named, missing_grant, structured_error as structured_tool_error, tools};
 
 /// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
 pub struct SolidCraftHost {
@@ -580,20 +601,15 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     }
     let approval =
         params.get("approval").and_then(Value::as_str).ok_or_else(|| crate::params::bad(id, "approval from plugin.inspect is required"))?;
-    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":params.get("params").cloned().unwrap_or(json!({}))})))
+    let inputs = params.get("params").cloned().unwrap_or(json!({}));
+    // Preserve direct calls' input pass-through; tool callers validate their listed schema.
+    // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
+    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
 }
 
+/// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
-    if crate::find_command(id).is_some() {
-        return Ok(None);
-    }
-    let Some((package, name)) = id.split_once('.') else { return Ok(None) };
-    let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
-    let package = read_package(path)?;
-    let Some(runtime) = package.manifest.runtime else { return Ok(None) };
-    let Some(entry) = runtime.entries.iter().find(|e| e.name == name && e.kind == EntryKind::Command) else { return Ok(None) };
-    Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
-        "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-            "approval":{"type":"string"},"params":entry.input_schema}},
-        "output":{},"effect":entry.effect,"slots":entry.slots})))
+    tools::describe(s, id)
 }
