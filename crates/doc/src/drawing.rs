@@ -88,7 +88,7 @@ pub use fill::{
     FillPaint, FillRegionStatus, MAX_FILL_REGION_PIECES, MAX_FILLED_SKETCHES, MAX_PATTERN_SNAPSHOTS, MAX_SKETCH_FILLS, PatternSnapshot,
     ResolvedSketchFill, SheetFillProfile, SheetFillProfiles, SketchFill,
 };
-pub use sketch::{MAX_SHEET_SKETCHES, SheetSketch, SolvedSheetSketch};
+pub use sketch::{MAX_SHEET_SKETCHES, Owner, SheetSketch, SolvedSheetSketch, ViewLinkState};
 
 use balloon::Balloon;
 use by_id::ById;
@@ -563,7 +563,7 @@ impl Drawing {
 
     /// A drawing a newer build saved: it opens with what this build can read of it. Everything in a
     /// drawing refuses a field it doesn't know, so what it can't read shows as a top-level field,
-    /// a source or a sheet that doesn't read, which stays out and is named in
+    /// a source, a sheet or a sketch that doesn't read, which stays out and is named in
     /// [`NewerDrawing::not_understood`]; [`Drawing::to_json`] writes it all back, with the file's
     /// format. It takes at least one sheet this build can read to open.
     fn from_newer(mut v: Value, version: u32, applied: Option<Vec<String>>, newer: crate::format::Newer) -> Result<Drawing> {
@@ -589,6 +589,7 @@ impl Drawing {
             }
             take_unread::<Sheet>(top, "sheets", "sheet", &mut file);
             take_unread::<Source>(top, "sources", "source", &mut file);
+            take_unread::<SheetSketch>(top, "sketches", "sketch", &mut file);
             read = can_read(v);
         }
         let d = read.map_err(|why| {
@@ -661,30 +662,25 @@ impl Drawing {
         on.tables = self.tables.iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
         let in_views = |n: &Note| n.anchor.view().is_some_and(|v| on.views.binary_search(&v).is_ok());
         on.notes = self.notes.iter().filter(|n| n.anchor == Anchor::Sheet(id) || in_views(n)).map(|n| n.id).collect();
-        on.sketches = self.sketches.iter().filter(|record| record.sheet == id).map(|record| record.id).collect();
+        on.sketches = self.sketches.iter().filter(|record| self.sketch_sheet(record) == Some(id)).map(|record| record.id).collect();
         on.sketches.sort_unstable();
         on.fills = self.fills.iter().filter(|fill| on.sketches.binary_search(&fill.sketch).is_ok()).map(|fill| fill.id).collect();
         on.fills.sort_unstable();
         on
     }
 
-    /// `views`, listed by id, with the dimensions and balloons in them. An image sits on a sheet, never in a
-    /// view, so there are none.
+    /// `views`, listed by id, with the dimensions, balloons, notes and sketches in them, and those
+    /// sketches' fills. An image sits on a sheet, never in a view, so there are none.
     pub fn with_contents(&self, views: Vec<u64>) -> OnSheet {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
         let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
-        OnSheet {
-            views,
-            dimensions,
-            balloons,
-            images: Vec::new(),
-            tags: Vec::new(),
-            tables: Vec::new(),
-            notes,
-            sketches: Vec::new(),
-            fills: Vec::new(),
-        }
+        let in_views = |record: &&Arc<SheetSketch>| matches!(record.owner, Owner::View(view) if views.binary_search(&view).is_ok());
+        let mut sketches: Vec<u64> = self.sketches.iter().filter(in_views).map(|record| record.id).collect();
+        sketches.sort_unstable();
+        let mut fills: Vec<u64> = self.fills.iter().filter(|fill| sketches.binary_search(&fill.sketch).is_ok()).map(|fill| fill.id).collect();
+        fills.sort_unstable();
+        OnSheet { views, dimensions, balloons, images: Vec::new(), tags: Vec::new(), tables: Vec::new(), notes, sketches, fills }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -724,6 +720,15 @@ impl Drawing {
     /// Read only this drawing's sketch. Identical local sketch ids in another drawing are unrelated.
     pub fn sheet_sketch(&self, id: u64) -> Option<&Arc<SheetSketch>> {
         self.sketches.iter().find(|record| record.id == id)
+    }
+
+    /// The sheet `record` is on: its own sheet, or its view's. None when its owner is not one of
+    /// this drawing's sheets or views.
+    pub fn sketch_sheet(&self, record: &SheetSketch) -> Option<u64> {
+        match record.owner {
+            Owner::Sheet(sheet) => self.sheets.iter().any(|s| s.id == sheet).then_some(sheet),
+            Owner::View(view) => self.view(view).map(|v| v.sheet),
+        }
     }
 
     /// Every object's id, of every kind: what a new id must differ from. Each later kind adds its
@@ -774,9 +779,8 @@ impl Drawing {
             let length = unit.trim() == unit.as_str() && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length);
             require(length, || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
         }
-        let sheets: BTreeSet<_> = self.sheets.iter().map(|sheet| sheet.id).collect();
         for record in &self.sketches {
-            require(sheets.contains(&record.sheet), || "sheet sketch owner does not exist in this drawing".into())?;
+            require(self.sketch_sheet(record).is_some(), || "drawing sketch owner is not one of this drawing's sheets or views".into())?;
         }
         let mut seen = BTreeSet::new();
         for id in self.ids() {

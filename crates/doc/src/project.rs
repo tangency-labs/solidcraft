@@ -561,29 +561,13 @@ fn sketch_curves(ss: &crate::eval::SolvedSketch, ci: usize) -> Vec<WireCurve> {
 /// along a circle in a plane parallel to `plane` comes in as that circle ([`circular`]): a
 /// round's edge is a spline that only follows its circle.
 fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<Option<Vec<LinkGeom>>> {
-    use crate::kernel::PlanarPiece;
-    let free_form = |p: &PlanarPiece| matches!(p, PlanarPiece::Spline(_) | PlanarPiece::Seg(Seg2::Cubic { .. } | Seg2::Bezier { .. }));
-    let link = |p: &PlanarPiece| match p {
-        PlanarPiece::Seg(s) => LinkGeom::from_seg(s),
-        PlanarPiece::Spline(s) => link_spline(s),
-    };
     let mut mesh = None;
     body.body
         .planar_edges(plane, edges)
         .into_iter()
         .zip(edges)
         .map(|(pieces, e)| match pieces {
-            Some(pieces) if !pieces.iter().any(free_form) => pieces.iter().map(link).collect(),
-            Some(pieces) => {
-                let samples: Option<Vec<Vec2>> = pieces.iter().map(piece_samples).collect::<Option<Vec<_>>>().map(|s| s.concat());
-                match samples.as_deref().and_then(circular) {
-                    Some((g, _)) => Some(vec![g]),
-                    None => match samples.as_deref().and_then(elliptical) {
-                        Some(gs) => Some(gs),
-                        None => pieces.iter().map(link).collect(),
-                    },
-                }
-            }
+            Some(pieces) => planar_link(&pieces),
             None if body.body.is_mesh() => None,
             None => {
                 // Not read: its polyline lies on the curve, but only many points of it show a circle.
@@ -594,6 +578,29 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<O
             }
         })
         .collect()
+}
+
+/// An edge's exact pieces on a plane ([`crate::kernel::Body::planar_edges`]) as the link geometry
+/// of the same curves: each piece as it is, and free-form pieces that run along a circle or an
+/// ellipse as that curve ([`circular`], [`elliptical`]). `None` for a spline no sketch holds.
+pub(crate) fn planar_link(pieces: &[crate::kernel::PlanarPiece]) -> Option<Vec<LinkGeom>> {
+    use crate::kernel::PlanarPiece;
+    let free_form = |p: &PlanarPiece| matches!(p, PlanarPiece::Spline(_) | PlanarPiece::Seg(Seg2::Cubic { .. } | Seg2::Bezier { .. }));
+    let link = |p: &PlanarPiece| match p {
+        PlanarPiece::Seg(s) => LinkGeom::from_seg(s),
+        PlanarPiece::Spline(s) => link_spline(s),
+    };
+    if !pieces.iter().any(free_form) {
+        return pieces.iter().map(link).collect();
+    }
+    let samples: Option<Vec<Vec2>> = pieces.iter().map(piece_samples).collect::<Option<Vec<_>>>().map(|s| s.concat());
+    match samples.as_deref().and_then(circular) {
+        Some((g, _)) => Some(vec![g]),
+        None => match samples.as_deref().and_then(elliptical) {
+            Some(gs) => Some(gs),
+            None => pieces.iter().map(link).collect(),
+        },
+    }
 }
 
 /// A free-form edge's B-spline as the control spline that is the same curve, with its own knots
@@ -1423,24 +1430,7 @@ fn refresh_links_in(
                 if let Err(e) = sk.set_link_wires(&l.id, &r.wires).and_then(|()| sk.set_link_wire_curves(&l.id, &r.exact)) {
                     warn.push(format!("projected {}: {e}", l.source.describe()));
                 }
-                // Words built from text parameters change shape when the parameters do: that
-                // rebuild is the text following them, not a reference that changed under it.
-                let words_follow = matches!(&l.source, LinkSource::Text { exprs, .. } if exprs.text.is_some());
-                let others = |sk: &Sketch| (sk.constraints.len(), sk.curves.len().saturating_sub(sk.link_curves(&l.id).len()));
-                let before = others(sk);
-                match sk.update_link(&l.id, &r.geom) {
-                    Ok(true) if words_follow => {}
-                    // A rebuilt projection is only worth a warning when it took something of
-                    // the user's with it: a constraint, a dimension or a curve drawn on it.
-                    Ok(true) if others(sk) == before => {}
-                    Ok(true) => warn.push(format!("projected {} changed shape and was rebuilt; constraints on it were removed", l.source.describe())),
-                    Ok(false) if r.moved => warn.push(format!("projected {} was re-found on the nearest geometry", l.source.describe())),
-                    Ok(false) => {}
-                    Err(e) => {
-                        sk.set_link_lost(&l.id, true);
-                        warn.push(format!("projected {}: {e}", l.source.describe()));
-                    }
-                }
+                apply_resolved(sk, l, &r.geom, r.moved, &mut warn);
             }
             Err(e) => {
                 sk.set_link_lost(&l.id, true);
@@ -1449,6 +1439,30 @@ fn refresh_links_in(
         }
     }
     Ok(warn)
+}
+
+/// Link `l` of `sk` given the geometry `geom` its reference has now (`moved`: re-found on the
+/// nearest geometry), warning when that took something of the user's with it, or moved it. A link
+/// the geometry can't be given to is marked lost, with why.
+pub(crate) fn apply_resolved(sk: &mut Sketch, l: &solidcraft_sketch::Link, geom: &[LinkGeom], moved: bool, warn: &mut Vec<String>) {
+    // Words built from text parameters change shape when the parameters do: that rebuild is the
+    // text following them, not a reference that changed under it.
+    let words_follow = matches!(&l.source, LinkSource::Text { exprs, .. } if exprs.text.is_some());
+    let others = |sk: &Sketch| (sk.constraints.len(), sk.curves.len().saturating_sub(sk.link_curves(&l.id).len()));
+    let before = others(sk);
+    match sk.update_link(&l.id, geom) {
+        Ok(true) if words_follow => {}
+        // A rebuilt projection is only worth a warning when it took something of the user's with
+        // it: a constraint, a dimension or a curve drawn on it.
+        Ok(true) if others(sk) == before => {}
+        Ok(true) => warn.push(format!("projected {} changed shape and was rebuilt; constraints on it were removed", l.source.describe())),
+        Ok(false) if moved => warn.push(format!("projected {} was re-found on the nearest geometry", l.source.describe())),
+        Ok(false) => {}
+        Err(e) => {
+            sk.set_link_lost(&l.id, true);
+            warn.push(format!("projected {}: {e}", l.source.describe()));
+        }
+    }
 }
 
 /// A link whose face or edge `name` finds nothing: the sketch fails asking for it again, or (only

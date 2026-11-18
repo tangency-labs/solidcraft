@@ -16,7 +16,7 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::cutting_line::SectionKind;
-use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
+use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
@@ -580,14 +580,6 @@ pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
     }
 }
 
-/// Why nothing on saved view `view` can point at the model, if nothing can (#13030): a flat pattern
-/// view draws its body's flat, whose edges aren't the model's, so no dimension, balloon or note
-/// leader has a place on it. A note on it that points at nothing is drawn.
-pub fn no_model_edges(view: &View) -> Option<&'static str> {
-    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
-    matches!(view.kind, ViewKind::Flat { .. }).then_some(why)
-}
-
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
 /// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
 pub fn measured<'a>(
@@ -727,15 +719,15 @@ pub(crate) struct ViewOnSheet {
 /// an occurrence move not captured yet is left out). Or, in the sheet's words
 /// ([`crate::drawing_scene::NOT_DRAWN`]), that it isn't drawn: no such view, a style the sheet can't
 /// draw yet, a section view (what points at its cut faces is in no part yet, #13046), or nothing to
-/// measure. A view that draws no model edges, a flat
-/// pattern view ([`no_model_edges`]), has no place for what points at the model
-/// ([`crate::drawing_scene::NO_PLACE`]).
+/// measure. A view that draws no model edges, a flat pattern view
+/// ([`solidcraft_doc::drawing::view::ViewKind::no_model_edges`]), has no place for what points at the
+/// model ([`crate::drawing_scene::NO_PLACE`]).
 pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std::result::Result<ViewOnSheet, &'static str> {
     use crate::drawing_scene::{NO_PLACE, NOT_DRAWN, designed};
     let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
     let view = d.resolve_view(id).map_err(|_| NOT_DRAWN)?;
-    if d.view(id).and_then(no_model_edges).is_some() {
+    if d.view(id).and_then(|view| view.kind.no_model_edges()).is_some() {
         return Err(NO_PLACE);
     }
     let unstyled = not_drawable(view.visual_style.value, view.reference_style.value);

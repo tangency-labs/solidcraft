@@ -84,7 +84,7 @@ fn from_model(s: &mut Session, p: &Value) -> Result<Value> {
     let record = s.drawing(FROM_MODEL)?.clone();
     let view = request.view.0;
     let on = record.view(view).ok_or_else(|| bad(FROM_MODEL, format!("the drawing has no view {}", ids::encode(view))))?;
-    if let Some(why) = crate::drawing_view::no_model_edges(on) {
+    if let Some(why) = on.kind.no_model_edges() {
         return Err(bad(FROM_MODEL, why));
     }
     let basis = record.resolve_view(view).map_err(|e| bad(FROM_MODEL, e.to_string()))?.basis;

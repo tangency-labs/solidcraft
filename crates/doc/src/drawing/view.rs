@@ -281,6 +281,20 @@ impl ViewKind {
             ViewKind::Projected { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } => None,
         }
     }
+
+    /// Why a view of this kind draws no model edges, so nothing on it can point at the model: no
+    /// dimension, balloon or note leader, and no sketch link. None when it draws them. Every kind
+    /// says, so a new kind chooses too.
+    pub fn no_model_edges(&self) -> Option<&'static str> {
+        match self {
+            ViewKind::Flat { .. } => Some("a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model"),
+            ViewKind::Base { .. }
+            | ViewKind::Projected { .. }
+            | ViewKind::Section { .. }
+            | ViewKind::Pictorial { .. }
+            | ViewKind::Auxiliary { .. } => None,
+        }
+    }
 }
 
 /// The diagonal of its parent a pictorial view sits on.
