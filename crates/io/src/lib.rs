@@ -39,7 +39,8 @@ pub mod limits;
 mod mutate;
 mod native_cad;
 pub use native_cad::{
-    NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_records, native_cad_to_step,
+    NATIVE_CAD_EXTS, NativeDesign, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_records,
+    native_cad_to_step,
 };
 pub mod paper;
 mod pat;
@@ -333,9 +334,10 @@ pub enum StepReader {
     /// the records route.
     #[default]
     SolidCraft,
-    /// cadmpeg's neutral model read straight into B-rep records, with no STEP text in between:
-    /// a FreeCAD or Rhino file's solids. The Preferences switch "Import with cadmpeg" (off by
-    /// default) chooses it in the window.
+    /// cadmpeg's neutral model read straight into B-rep records, with no STEP text in between: a
+    /// FreeCAD or Rhino file's solids, or a STEP file decoded by cadmpeg's STEP decoder (to
+    /// compare with SolidCraft's reader). IGES is always SolidCraft's. The Preferences switch
+    /// "Import with cadmpeg" (off by default) chooses it in the window.
     Cadmpeg,
 }
 
@@ -355,10 +357,13 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     step_import_feature_read(bytes, file, names, StepReader::SolidCraft)
 }
 
-/// [`step_import_feature_named`], a FreeCAD or Rhino file read by `reader`.
+/// [`step_import_feature_named`], a STEP, FreeCAD or Rhino file read by `reader`.
 pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, reader: StepReader) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
+    if reader == StepReader::Cadmpeg && is_step_path(file) && !is_iges_path(file) && !is_native_cad_path(file) {
+        return records_import_feature(cadmpeg_step_records(bytes, file).map_err(IoError::Invalid)?, file, names);
+    }
     if reader == StepReader::Cadmpeg && is_native_cad_path(file) {
         return records_import_feature(native_cad_records(bytes, file).map_err(IoError::Invalid)?, file, names);
     }
@@ -404,10 +409,10 @@ pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, read
     })
 }
 
-/// A FreeCAD or Rhino file read with [`StepReader::Cadmpeg`] into an Import feature that keeps
-/// the B-rep records cadmpeg's neutral model was read into (no STEP text). A FreeCAD body's hidden
-/// intermediate shapes (each pad and pocket, the tool shapes, sketch faces, which FreeCAD shows
-/// only through its body's own shape) are not built, unless nothing else is; a Rhino file's
+/// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino or STEP) into an Import feature that
+/// keeps the B-rep records cadmpeg's neutral model was read into (no STEP text). A FreeCAD body's
+/// hidden intermediate shapes (each pad and pocket, the tool shapes, sketch faces, which FreeCAD
+/// shows only through its body's own shape) are not built, unless nothing else is; a Rhino file's
 /// hidden objects are its user's own choice, so they are built and start hidden. The format is
 /// the one cadmpeg detects in the contents, not the file's name.
 fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, bool), file: &str, names: StepNames) -> Result<StepFeature> {
