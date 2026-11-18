@@ -35,6 +35,10 @@ fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = conditional_keys)]
 pub struct SaveMeshKeys {
+    /// Explicitly allow bodies that cannot mesh to be omitted and list them in `skipped` and
+    /// `warnings`. Default: false, a missing body fails the export.
+    #[serde(default)]
+    pub allow_missing: Option<bool>,
     /// The file to write: not blank, fewer than 4096 UTF-8 bytes.
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MeshPath")]
@@ -346,6 +350,9 @@ pub struct SlicerDelivery {
 /// What `file.save_mesh` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SaveMeshResult {
+    /// Bodies omitted only with explicit `allow_missing`; each has a diagnostic in `warnings`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
     /// The file written, as given.
     pub path: String,
     /// Its size in bytes.

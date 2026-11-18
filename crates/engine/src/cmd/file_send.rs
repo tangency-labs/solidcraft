@@ -59,6 +59,7 @@ pub(super) struct Send<'a> {
     pub format: Format,
     /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
     pub quality: solidcraft_io::MeshQuality,
+    pub allow_missing: bool,
     pub dest: Dest<'a>,
     pub single_instance: bool,
     pub wait: Wait,
@@ -82,7 +83,7 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
         return Err(bad(r.cmd, format!("{} does not take {}", target.name, format_name(r.format))));
     }
     let mut out = match r.dest {
-        Dest::Path(path) => export_laid_to(s, path, r.format, &r.bodies, &r.parts, r.quality)?,
+        Dest::Path(path) => export_laid_to(s, path, r.format, &r.bodies, &r.parts, r.quality, r.allow_missing)?,
         Dest::Folder => write_in_folder(s, &r)?,
     };
     let path = out.get("path").and_then(Value::as_str).unwrap_or_default().to_string();

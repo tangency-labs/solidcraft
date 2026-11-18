@@ -1,0 +1,62 @@
+{
+  "en": {
+    "ui.export_allow_missing": "Allow missing bodies (report each skipped body)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "Skipped bodies: {bodies}.\n{details}"
+  },
+  "ar": {
+    "ui.export_allow_missing": "السماح بالأجسام المفقودة (الإبلاغ عن كل جسم متخطى)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "الأجسام المتخطاة: {bodies}.\n{details}"
+  },
+  "de": {
+    "ui.export_allow_missing": "Fehlende Körper zulassen (jeden ausgelassenen Körper melden)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "Ausgelassene Körper: {bodies}.\n{details}"
+  },
+  "es": {
+    "ui.export_allow_missing": "Permitir cuerpos faltantes (informar de cada cuerpo omitido)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "Cuerpos omitidos: {bodies}.\n{details}"
+  },
+  "fr": {
+    "ui.export_allow_missing": "Autoriser les corps manquants (signaler chaque corps omis)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "Corps omis : {bodies}.\n{details}"
+  },
+  "he": {
+    "ui.export_allow_missing": "לאפשר גופים חסרים (לדווח על כל גוף שדולג)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "גופים שדולגו: {bodies}.\n{details}"
+  },
+  "ja": {
+    "ui.export_allow_missing": "ボディの欠落を許可する（省略した各ボディを報告）",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "省略したボディ: {bodies}。\n{details}"
+  },
+  "ko": {
+    "ui.export_allow_missing": "누락된 바디 허용 (생략된 각 바디 보고)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "생략된 바디: {bodies}.\n{details}"
+  },
+  "lv": {
+    "ui.export_allow_missing": "Atļaut trūkstošus ķermeņus (ziņot par katru izlaisto ķermeni)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "Izlaistie ķermeņi: {bodies}.\n{details}"
+  },
+  "uk": {
+    "ui.export_allow_missing": "Дозволити відсутні тіла (повідомляти про кожне пропущене тіло)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "Пропущені тіла: {bodies}.\n{details}"
+  },
+  "vi": {
+    "ui.export_allow_missing": "Cho phép thiếu khối (báo cáo từng khối bị bỏ qua)",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "Các khối bị bỏ qua: {bodies}.\n{details}"
+  },
+  "zh": {
+    "ui.export_allow_missing": "允许缺失实体（报告每个跳过的实体）",
+    "ui.export_format_obj": "OBJ",
+    "ui.export_skipped": "跳过的实体：{bodies}。\n{details}"
+  }
+}

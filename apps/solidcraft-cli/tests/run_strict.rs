@@ -81,6 +81,24 @@ fn allow_errors_writes_anyway_and_a_saved_design_keeps_failing() {
     assert!(report["timeline"].as_array().unwrap().iter().any(|f| f["error"].is_string()), "{}", report["timeline"]);
 }
 
+/// The mesh omission switch is independent of timeline errors and consumes no positional path.
+#[test]
+fn allow_missing_is_explicit_and_does_not_hide_feature_errors() {
+    let dir = Scratch::new();
+    let script = dir.0.join("box.json");
+    std::fs::write(&script, json!({"commands": [{"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4}}]}).to_string()).unwrap();
+    for ext in ["stl", "obj", "3mf"] {
+        let file = dir.0.join(format!("box.{ext}"));
+        let output = cli().args(["run", "--allow-missing"]).arg(&script).arg("--out").arg(&file).arg("--quiet").output().unwrap();
+        assert!(output.status.success(), "{ext}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(file.is_file() && output.stdout.is_empty(), "{ext}");
+    }
+    let missing = dir.0.join("refused.3mf");
+    let output = cli().arg("run").arg(dir.broken_script()).arg("--allow-missing").arg("--out").arg(&missing).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!missing.exists());
+}
+
 #[test]
 fn a_clean_timeline_still_writes() {
     let dir = Scratch::new();

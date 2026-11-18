@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("allow_missing?: bool (default false: a body that cannot mesh fails the export; true skips it and reports its body and face in warnings); path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -133,19 +133,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_STL_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: binary STL, whatever the path's extension"),
+        .params("allow_missing?: bool (default false: a body that cannot mesh fails the export; true skips it and reports its body and face in warnings); path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: binary STL, whatever the path's extension"),
     CommandSpec::new("file.export_3mf", "Export 3MF", crate::checked!("file.export_3mf", export_3mf))
         .icon("mesh_export")
         .noundo()
         .contract(&EXPORT_3MF_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); objects?: body|component (as file.export); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: 3MF, whatever the path's extension"),
+        .params("allow_missing?: bool (default false: a body that cannot mesh fails the export; true skips it and reports its body and face in warnings); path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); objects?: body|component (as file.export); lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: 3MF, whatever the path's extension"),
     CommandSpec::new("file.export_obj", "Export OBJ", crate::checked!("file.export_obj", export_obj_cmd))
         .icon("export")
         .noundo()
         .contract(&EXPORT_OBJ_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
+        .params("allow_missing?: bool (default false: a body that cannot mesh fails the export; true skips it and reports its body and face in warnings); path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
         .noundo()
@@ -158,7 +158,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_MESH_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::save_mesh::SaveMeshResult>)
-        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (default false: each body with a print face (body.print_face) is saved laid on it; a file sent to `slicer` is laid on them whatever this says)"),
+        .params("allow_missing?: bool (default false: a body that cannot mesh fails the export; true skips it and reports its body and face in warnings); path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (default false: each body with a print face (body.print_face) is saved laid on it; a file sent to `slicer` is laid on them whatever this says)"),
     CommandSpec::new("file.send_to_slicer", "Send to Slicer", send_to_slicer)
         .enabled(starts_programs)
         .at("INSERT", "FILES")
@@ -2294,6 +2294,14 @@ fn mesh_quality(p: &Value, cmd: &str) -> Result<solidcraft_io::MeshQuality> {
     }
 }
 
+fn allow_missing(p: &Value, cmd: &str) -> Result<bool> {
+    match p.get("allow_missing") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(bad(cmd, "`allow_missing` must be true or false")),
+    }
+}
+
 /// The 3MF parts a mesh export's `objects` asks for (#8139): none for `body` (the default, one
 /// object per body), or for `component` one part per placement of a component with two or more
 /// bodies ([`component_parts`]). Other formats have no parts, so `component` is refused there.
@@ -2332,6 +2340,7 @@ fn component_parts(s: &Session) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_to(
     s: &Session,
     cmd: &str,
@@ -2340,10 +2349,11 @@ fn export_to(
     bodies: &[String],
     parts: &[(String, Vec<String>)],
     quality: solidcraft_io::MeshQuality,
+    allow_missing: bool,
 ) -> Result<Value> {
     if format == Format::Obj {
         // The colours of the bodies go in a material library beside the mesh file.
-        return export_obj(s, path, bodies, quality);
+        return export_obj(s, path, bodies, quality, allow_missing);
     }
     if format == Format::Glb {
         return export_glb(s, cmd, path, bodies, quality);
@@ -2364,7 +2374,7 @@ fn export_to(
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
         let bytes;
-        (bytes, warnings) = solidcraft_io::export_with_parts_noted(
+        (bytes, warnings) = solidcraft_io::export_with_parts_allow_missing(
             &s.doc.painted(&*s.world_state()?),
             bodies,
             parts,
@@ -2373,6 +2383,7 @@ fn export_to(
             &s.doc.metadata,
             quality,
             export_thumbnail(s, format, bodies).as_deref(),
+            allow_missing,
         )?;
         bytes
     };
@@ -2413,14 +2424,24 @@ fn write_laid(
     bodies: &[String],
     parts: &[(String, Vec<String>)],
     quality: solidcraft_io::MeshQuality,
+    allow_missing: bool,
 ) -> Result<(usize, print_face::Laid)> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let thumbnail = export_thumbnail(s, format, bodies);
     let mut laid = laid;
-    let (bytes, notes) =
-        solidcraft_io::export_with_parts_noted(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
+    let (bytes, notes) = solidcraft_io::export_with_parts_allow_missing(
+        &state,
+        bodies,
+        parts,
+        format,
+        &name,
+        &s.doc.metadata,
+        quality,
+        thumbnail.as_deref(),
+        allow_missing,
+    )?;
     laid.warnings.extend(notes);
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok((bytes.len(), laid))
@@ -2435,8 +2456,9 @@ fn export_laid(
     bodies: &[String],
     parts: &[(String, Vec<String>)],
     quality: solidcraft_io::MeshQuality,
+    allow_missing: bool,
 ) -> Result<Value> {
-    let (bytes, laid) = write_laid(s, path, format, bodies, parts, quality)?;
+    let (bytes, laid) = write_laid(s, path, format, bodies, parts, quality, allow_missing)?;
     let skipped = skipped_from_warnings(&laid.warnings);
     let reply = ExportResult {
         path: path.to_string(),
@@ -2459,13 +2481,15 @@ fn export_laid_to(
     bodies: &[String],
     parts: &[(String, Vec<String>)],
     quality: solidcraft_io::MeshQuality,
+    allow_missing: bool,
 ) -> Result<Value> {
-    let (bytes, laid) = write_laid(s, path, format, bodies, parts, quality)?;
+    let (bytes, laid) = write_laid(s, path, format, bodies, parts, quality, allow_missing)?;
     let reply = SaveMeshResult {
         path: path.to_string(),
         bytes,
         format: format!("{format:?}"),
         print_faces: laid.bodies,
+        skipped: skipped_from_warnings(&laid.warnings),
         warnings: laid.warnings,
         delivery: SlicerDelivery::default(),
         param_warnings: Vec::new(),
@@ -2487,15 +2511,15 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let parts = mesh_parts(s, p, cmd, format)?;
     let bodies = string_list(cmd, p, "bodies")?;
     if lay_on_print_faces(p, cmd, format)? {
-        return export_laid(s, path, format, &bodies, &parts, quality);
+        return export_laid(s, path, format, &bodies, &parts, quality, allow_missing(p, cmd)?);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, allow_missing(p, cmd)?)
 }
 
 fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_step";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default())
+    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default(), false)
 }
 
 fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2503,9 +2527,9 @@ fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, cmd)?;
     let (bodies, quality) = (string_list(cmd, p, "bodies")?, mesh_quality(p, cmd)?);
     if lay_on_print_faces(p, cmd, Format::StlBinary)? {
-        return export_laid(s, path, Format::StlBinary, &bodies, &[], quality);
+        return export_laid(s, path, Format::StlBinary, &bodies, &[], quality, allow_missing(p, cmd)?);
     }
-    export_to(s, cmd, path, Format::StlBinary, &bodies, &[], quality)
+    export_to(s, cmd, path, Format::StlBinary, &bodies, &[], quality, allow_missing(p, cmd)?)
 }
 
 fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2514,15 +2538,15 @@ fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
     let parts = mesh_parts(s, p, cmd, Format::ThreeMf)?;
     let (bodies, quality) = (string_list(cmd, p, "bodies")?, mesh_quality(p, cmd)?);
     if lay_on_print_faces(p, cmd, Format::ThreeMf)? {
-        return export_laid(s, path, Format::ThreeMf, &bodies, &parts, quality);
+        return export_laid(s, path, Format::ThreeMf, &bodies, &parts, quality, allow_missing(p, cmd)?);
     }
-    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality)
+    export_to(s, cmd, path, Format::ThreeMf, &bodies, &parts, quality, allow_missing(p, cmd)?)
 }
 
 fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_obj";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?, allow_missing(p, cmd)?)
 }
 
 fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2533,10 +2557,10 @@ fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// The OBJ export: the mesh file and the material library beside it, with the colours of the
 /// bodies. Every path is checked before anything is written; the library goes first and the
 /// mesh file last, so a mesh file never names a library that is not there.
-fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
+fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, allow_missing: bool) -> Result<Value> {
     let mtl_path = std::path::Path::new(path).with_extension("mtl");
     let mtl_name = mtl_path.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| String::from("model.mtl"));
-    let files = solidcraft_io::export_obj(&s.doc.painted(&*s.world_state()?), bodies, &mtl_name, quality)?;
+    let files = solidcraft_io::export_obj_allow_missing(&s.doc.painted(&*s.world_state()?), bodies, &mtl_name, quality, allow_missing)?;
     let mut targets: Vec<(String, &[u8])> = Vec::new();
     if !files.mtl.is_empty() {
         targets.push((mtl_path.to_string_lossy().to_string(), files.mtl.as_bytes()));
@@ -2556,8 +2580,11 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
     let mut reply = json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written});
     // What meshing the bodies reported: each face the mesh path left short of the smallest angle
     // or the chord tolerance.
-    if !files.warnings.is_empty() {
-        reply["warnings"] = json!(files.warnings);
+    if !files.warnings.is_empty()
+        && let Some(reply) = reply.as_object_mut()
+    {
+        reply.insert("skipped".into(), json!(skipped_from_warnings(&files.warnings)));
+        reply.insert("warnings".into(), json!(files.warnings));
     }
     Ok(reply)
 }
@@ -2683,6 +2710,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
                 parts,
                 format,
                 quality,
+                allow_missing: allow_missing(p, cmd)?,
                 dest: send::Dest::Path(path),
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait: send::Wait::Block,
@@ -2691,9 +2719,9 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let bodies = string_list(cmd, p, "bodies")?;
     if lay {
-        return export_laid_to(s, path, format, &bodies, &parts, quality);
+        return export_laid_to(s, path, format, &bodies, &parts, quality, allow_missing(p, cmd)?);
     }
-    export_to(s, cmd, path, format, &bodies, &parts, quality)
+    export_to(s, cmd, path, format, &bodies, &parts, quality, allow_missing(p, cmd)?)
 }
 
 /// The browser build can't start a program.
@@ -2730,6 +2758,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 parts: Vec::new(),
                 format,
                 quality: Default::default(),
+                allow_missing: false,
                 dest: send::Dest::Folder,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait,

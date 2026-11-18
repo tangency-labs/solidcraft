@@ -77,8 +77,16 @@ negative volumes come in as ordinary solid geometry.
 
 **File → Export STL…** and **File → Export 3MF…** (also **Save As Mesh** on the Insert tab's Files
 panel, and in the right-click menu of a body) open the same dialog with that format chosen; it saves
-the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
+the selected bodies as STL, OBJ, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
+
+STL, OBJ and 3MF exports fail if any selected body cannot mesh, naming the body and failing
+face. No output file is replaced in that case. To deliberately export the remaining bodies,
+tick **Allow missing bodies (report each skipped body)** in the export dialog. The result
+lists every skipped body and its face diagnostic. This choice starts off for each export.
+Scripts use `allow_missing: true` with `file.export`, `file.export_stl`, `file.export_obj`,
+`file.export_3mf` or `file.save_mesh`; the reply's `skipped` and `warnings` list the omissions.
+An export where every selected body fails still returns an error.
 
 A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
 bed. Scripts and the control channel can keep each component together: `file.export` or

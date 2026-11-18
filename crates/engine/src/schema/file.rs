@@ -57,6 +57,10 @@ pub struct ExportStepParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportMeshParams {
+    /// Explicitly allow bodies that cannot mesh to be omitted, listing each body and its face
+    /// diagnostic in `warnings`. Default: false, a missing body fails the export.
+    #[serde(default)]
+    pub allow_missing: Option<bool>,
     /// The file to write.
     pub path: String,
     /// The bodies to export, by name. Default: every body.
@@ -71,6 +75,10 @@ pub struct ExportMeshParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportStlParams {
+    /// Explicitly allow bodies that cannot mesh to be omitted, listing each body and its face
+    /// diagnostic in `warnings`. Default: false, a missing body fails the export.
+    #[serde(default)]
+    pub allow_missing: Option<bool>,
     /// The file to write.
     pub path: String,
     /// The bodies to export, by name. Default: every body.
@@ -91,6 +99,10 @@ pub struct ExportStlParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct Export3mfParams {
+    /// Explicitly allow bodies that cannot mesh to be omitted, listing each body and its face
+    /// diagnostic in `warnings`. Default: false, a missing body fails the export.
+    #[serde(default)]
+    pub allow_missing: Option<bool>,
     /// The file to write.
     pub path: String,
     /// The bodies to export, by name. Default: every body.
@@ -134,6 +146,10 @@ pub struct ExportUrdfParams {
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
 pub struct ExportParams {
+    /// Explicitly allow bodies that cannot mesh to be omitted, listing each body and its face
+    /// diagnostic in `warnings`. Default: false, a missing body fails the export.
+    #[serde(default)]
+    pub allow_missing: Option<bool>,
     // `path` is optional in the type and required in the schema: left out, the handler refuses it
     // with its own message.
     /// The file to write.
@@ -208,6 +224,7 @@ impl<'de> Deserialize<'de> for ExportParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = Map::<String, Value>::deserialize(d)?;
         let mut out = ExportParams {
+            allow_missing: None,
             path: None,
             format: None,
             bodies: None,
@@ -248,6 +265,11 @@ impl<'de> Deserialize<'de> for ExportParams {
             out.velocity = positive("velocity")?;
             return Ok(out);
         }
+        out.allow_missing = match m.get("allow_missing") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(value)) => Some(*value),
+            Some(_) => return Err(refuse("`allow_missing` must be true or false")),
+        };
         // `mesh_prefix`, `effort` and `velocity` are not read for the other formats.
         out.quality = match m.get("quality") {
             None | Some(Value::Null) => None,
@@ -294,7 +316,7 @@ pub struct ExportResult {
     /// With `lay_on_print_faces` only: the bodies that were written laid on their print face.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub print_faces: Vec<String>,
-    /// Bodies that could not be meshed and were skipped in the export (#18780).
+    /// Bodies omitted only with explicit `allow_missing`; their face diagnostics are in `warnings`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<String>,
     /// STL, OBJ and 3MF: a warning for each face the mesh path left short of its smallest angle

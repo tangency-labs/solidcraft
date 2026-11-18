@@ -371,6 +371,11 @@ rebuilds it; `run` then exits with status 1, lists the failing features and writ
 its `--out` and `--save` files, because the bodies lack what those features should have made.
 `--allow-errors` writes them anyway.
 
+A mesh export that cannot mesh any selected body also exits with status 1, naming that
+body and face. `--allow-missing` explicitly permits `--out` to write the remaining bodies;
+every omission is printed on stderr, including with `--quiet`. If all bodies fail, the run
+still fails. `--allow-errors` does not permit missing bodies in mesh exports.
+
 `--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
 follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
 1e-5 of each body's size, though never under 1 µm, so on a small body `fine` and `finest`

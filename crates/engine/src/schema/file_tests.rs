@@ -15,13 +15,13 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
-    assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportStlParams>(), &["bodies", "lay_on_print_faces", "path", "quality"]);
-    assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportMeshParams>(), &["allow_missing", "bodies", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportStlParams>(), &["allow_missing", "bodies", "lay_on_print_faces", "path", "quality"]);
+    assert_keys(input_schema_for::<Export3mfParams>(), &["allow_missing", "bodies", "lay_on_print_faces", "objects", "path", "quality"]);
     assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "mesh_prefix", "path", "velocity"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
-        &["bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
+        &["allow_missing", "bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
     );
     assert_keys(
         input_schema_for::<OpenParams>(),
@@ -45,6 +45,20 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
+}
+
+/// Omissions require an explicit boolean even when schema checking is off.
+#[test]
+fn allow_missing_is_a_boolean_in_every_mesh_export_contract() {
+    for check in [ParamCheck::Off, ParamCheck::Strict] {
+        let mut s = Session { param_check: check, ..Session::default() };
+        for cmd in ["file.export", "file.export_stl", "file.export_3mf", "file.export_obj", "file.save_mesh"] {
+            let e = s.execute(cmd, &json!({"path": "missing.stl", "allow_missing": "yes"})).unwrap_err().to_string();
+            assert!(e.contains("allow_missing"), "{cmd}: {e}");
+        }
+    }
+    let parsed: ExportParams = serde_json::from_value(json!({"path": "out.3mf", "allow_missing": true})).unwrap();
+    assert_eq!(parsed.allow_missing, Some(true));
 }
 
 /// The words the open contract takes are the ones the handler's readers take, and its limits

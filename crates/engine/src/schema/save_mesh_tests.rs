@@ -25,7 +25,7 @@ fn with_box(level: ParamCheck) -> Session {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SaveMeshParams>(),
-        &["ascii", "bodies", "format", "lay_on_print_faces", "objects", "path", "quality", "single_instance", "slicer"],
+        &["allow_missing", "ascii", "bodies", "format", "lay_on_print_faces", "objects", "path", "quality", "single_instance", "slicer"],
     );
     // `path` is the key the handler refuses when it is left out: required in the schema, optional in the type.
     let schema = input_schema_for::<SaveMeshParams>();
@@ -292,6 +292,7 @@ fn replies_with_a_slicer_match_the_output_schema() {
 fn the_reply_type_serializes_as_before() {
     use super::{SaveMeshResult, SlicerDelivery};
     let reply = |delivery| SaveMeshResult {
+        skipped: Vec::new(),
         path: "a.stl".into(),
         bytes: 5,
         format: "StlBinary".into(),

@@ -750,6 +750,10 @@ pub(crate) fn download_design(app: &mut SolveApp) {
 }
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
+    if ext == "obj" {
+        crate::dialogs_save_mesh::start_with_format(app, ext);
+        return;
+    }
     export_as(app, ext, None);
 }
 
@@ -759,7 +763,7 @@ pub(crate) fn export(app: &mut SolveApp, ext: &str) {
 pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
     let (extension, mesh) = match id {
         "file.export_step" => ("step", false),
-        "file.export_obj" => ("obj", false),
+        "file.export_obj" => ("obj", true),
         "file.export_urdf" => ("urdf", false),
         "file.export_stl" => ("stl", true),
         "file.export_3mf" => ("3mf", true),
@@ -3217,7 +3221,7 @@ mod header_report_tests {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
         h.app.preferences.save_mesh_format = "3mf".into();
-        for (item, format) in [("Export STL…", "stl"), ("Export 3MF…", "3mf")] {
+        for (item, format) in [("Export STL…", "stl"), ("Export 3MF…", "3mf"), ("Export OBJ…", "obj")] {
             h.frames(3);
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
             h.step(&json!({"widget": item})).unwrap();
