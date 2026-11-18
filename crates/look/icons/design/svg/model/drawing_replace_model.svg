@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Replace model</title>
+  <path d="M11 14L24 14Q27 14 27 17L27 30Q27 33 24 33L11 33Q8 33 8 30L8 17Q8 14 11 14Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M40 32L53 32Q56 32 56 35L56 48Q56 51 53 51L40 51Q37 51 37 48L37 35Q37 32 40 32Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 45L13 45L13 38M37 20L50 20L50 27M44 22L50 28L56 22" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
