@@ -110,7 +110,6 @@ mod keep_features;
 mod law_corners;
 mod original_merge;
 mod original_trim;
-mod outline_rims;
 mod overflow_first;
 mod piecewise;
 mod surface;
@@ -2074,9 +2073,6 @@ impl<'target> FilletSession<'target> {
         // solvers loaded since the last sync (`SetFilletParameters`) read the handler
         // during the corners' traces
         self.sync_self_intersection_handler();
-        // (not upstream, solidcore #2541) a lone round's solver takes the rims it may end
-        // on before the corners trace it
-        self.end_round_on_outline(k)?;
         // (not upstream) a round rolls over its faces' smooth far edges, the whole length
         self.roll_over_tangent_edges(k)?;
         let SessionObjects {
@@ -3956,10 +3952,42 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         {
             return Ok(None);
         }
+        // the material the concave rounds of the same blend add, which the section may run
+        // through (the rig's 1668-fillet-both-sides-of-thin-wall-r7)
+        let mut fills = Vec::new();
+        for (index, other) in self.solvers.iter_mut().enumerate() {
+            let Some(other) = other.as_mut() else {
+                continue;
+            };
+            if index == id.0 as usize {
+                continue;
+            }
+            let Some(other_edge) = other
+                .base()
+                .edgeuse(0)?
+                .map(|edgeuse| crate::topology::edgeuse::p1::edge(self.target, edgeuse))
+                .transpose()?
+                .flatten()
+            else {
+                continue;
+            };
+            if !crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, other_edge)? {
+                continue;
+            }
+            if let Some(fill) = band_cuts::ConcaveFill::of_round(k, self.target, other)? {
+                fills.push(fill);
+            }
+        }
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
         let Some(cut) = band_cuts::band_breaks_through_the_part_cached(
             k,
             self.target,
             current,
+            fills,
             &mut self.band_cut_cache,
         )?
         else {

@@ -149,14 +149,13 @@ fn a_round_past_an_inside_round_is_refused_as_breaking_through() {
     }
 }
 
-/// SolidCraft builds these (its `rounds_into_hollow` counts the inside edge's concave round,
-/// made in the same fillet, as material the outer round runs over: the rig's
-/// 1668-fillet-both-sides-of-thin-wall-r7, 39509.938); the kernel's `BreaksThrough` judges the
-/// outer round against the body before the inside round is added and refuses them. Measured
-/// in notes, not yet the kernel's: ignored until `BreaksThrough` counts concave rounds of the
-/// same blend.
+/// The inside edge's concave round, made in the same fillet, fills the hollow's corner the
+/// outer round runs over, so `BreaksThrough` counts it as material and both build (the rig's
+/// 1668-fillet-both-sides-of-thin-wall-r7). Closed form: the outer round takes the corner
+/// square less the quarter disc, (1 - pi/4) 49, along 104, and the inside round adds it
+/// along 100, all of what the outer one takes inside the hollow lying in what the inside one
+/// adds: 39552 - 4 (1 - pi/4) 49.
 #[test]
-#[ignore = "BreaksThrough judges a round before the concave rounds of the same blend add material"]
 fn an_inside_round_holds_the_wall_an_outer_round_runs_over() {
     all_fixes();
     let wall = thin_walled();

@@ -16,8 +16,8 @@
 //! | `keeps` (private)             | the `Keeps` lambda of `BandCutsThePart`  |
 //!
 //! Not the fork's: [`band_breaks_through_the_part`] (WR-707, #2299), the same sections
-//! judged for breaking through the part into a hollow behind a wall, with
-//! `fixes.fillet_refuse_rounds_breaking_through`.
+//! judged for breaking through the part into a hollow behind a wall, less the hollows a
+//! concave round of the same blend fills ([`ConcaveFill`]).
 //!
 //! Deviations: the fork's out-params are returned (`None` for no cut). The solutions of
 //! `SmSurface::GlobalCurveIntersect` carry no object handles (the fork reads only their
@@ -31,7 +31,7 @@ use crate::blend::fillet_executive::session::ball_regular::{
 };
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_solver::p1::{FilletSurfaceGeneratorType, SeamDomain};
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::p2::EllipseOptions;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
@@ -50,7 +50,7 @@ use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::query::brep::BrepQuery;
 use crate::surface::plane::p1::Plane;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1 as eu;
@@ -428,6 +428,60 @@ struct Section {
     setback: f64,
 }
 
+/// The ball's section at the edge's `t` (`near` the guess): the solve, and the ball's
+/// centre and its two rails (on the base surfaces, or on their extensions past their
+/// domains, as the offsets evaluate them). `None` where the solve finds no section.
+fn section_points(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    edge_curve: &Curve,
+    t: f64,
+    near: Option<&TsectPnt>,
+) -> Result<Option<(TsectPnt, [Point3; 3])>> {
+    let Some(pnt) = ball_section_at(k, target, solver, edge_curve, t, near, SeamDomain::Wrapped)?
+    else {
+        return Ok(None);
+    };
+    let uvs = [pnt.uv_pos(SrfIndex::First), pnt.uv_pos(SrfIndex::Second)];
+    let base = solver.base_mut();
+    let mut at = [Point3::UNDEF; 3];
+    {
+        let slot = base
+            .surface_mut(0)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+        at[0] = slot.surface.surface.evaluate_point_extending(k, uvs[0])?;
+    }
+    for (rail, uv) in uvs.into_iter().enumerate() {
+        let slot = base
+            .surface(rail)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+        let offset = &slot.surface.surface;
+        let p = offset.base_surface().evaluate_point(k, uv)?;
+        if let Some(dst) = at.get_mut(rail + 1) {
+            *dst = p;
+        }
+        // a rail past its base surface's domain lies on its extension, as the offset
+        // evaluates it
+        if let Some(extended) = offset.extended_base_surface() {
+            if !offset
+                .base_surface()
+                .natural_uv_domain_with_nurb(k)?
+                .contains_point(uv, 0.0)
+                && extended
+                    .natural_uv_domain_with_nurb(k)?
+                    .contains_point(uv, 0.0)
+            {
+                let p = extended.evaluate_point(k, uv)?;
+                if let Some(dst) = at.get_mut(rail + 1) {
+                    *dst = p;
+                }
+            }
+        }
+    }
+    Ok(Some((pnt, at)))
+}
+
 /// The `Keeps` lambda of `BandCutsThePart`: at the edge's `t` with the ball's radius
 /// `trial` (0: the solver's own, restored to `own` after), whether material is kept behind
 /// the section; `near` is the guess, then this section if found.
@@ -453,61 +507,7 @@ fn keeps(
     if trial > 0.0 && !set_ball_radius(solver, trial)? {
         return Ok(out);
     }
-    let evaluated = (|| -> Result<Option<(TsectPnt, [Point3; 3])>> {
-        let Some(pnt) = ball_section_at(
-            k,
-            target,
-            solver,
-            edge_curve,
-            t,
-            near.as_ref(),
-            SeamDomain::Wrapped,
-        )?
-        else {
-            return Ok(None);
-        };
-        let uvs = [pnt.uv_pos(SrfIndex::First), pnt.uv_pos(SrfIndex::Second)];
-        let base = solver.base_mut();
-        let mut at = [Point3::UNDEF; 3];
-        {
-            let slot = base
-                .surface_mut(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
-            at[0] = slot.surface.surface.evaluate_point_extending(k, uvs[0])?;
-        }
-        for (rail, uv) in uvs.into_iter().enumerate() {
-            let slot = base
-                .surface(rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
-            let p = slot.surface.surface.base_surface().evaluate_point(k, uv)?;
-            if let Some(dst) = at.get_mut(rail + 1) {
-                *dst = p;
-            }
-        }
-        // the rails past a base surface's domain lie on its extension, as the offset evaluates it
-        for (rail, uv) in uvs.into_iter().enumerate() {
-            let slot = base
-                .surface(rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
-            let offset = &slot.surface.surface;
-            if let Some(extended) = offset.extended_base_surface() {
-                if !offset
-                    .base_surface()
-                    .natural_uv_domain_with_nurb(k)?
-                    .contains_point(uv, 0.0)
-                    && extended
-                        .natural_uv_domain_with_nurb(k)?
-                        .contains_point(uv, 0.0)
-                {
-                    let p = extended.evaluate_point(k, uv)?;
-                    if let Some(dst) = at.get_mut(rail + 1) {
-                        *dst = p;
-                    }
-                }
-            }
-        }
-        Ok(Some((pnt, at)))
-    })();
+    let evaluated = section_points(k, target, solver, edge_curve, t, near.as_ref());
     if trial > 0.0 {
         // the solver's own radius back, whatever the solve did
         let _ = set_ball_radius(solver, own);
@@ -548,6 +548,237 @@ struct ThroughFaces {
     /// The blended faces and every face sharing an edge with one: the faces the blend
     /// reaches over the blended faces' boundaries, which it is trimmed to.
     reached: BTreeSet<FaceId>,
+    /// The material the concave rounds of the same blend add ([`ConcaveFill`]).
+    fills: Vec<ConcaveFill>,
+}
+
+/// A section's shape between its rails (`section_breaks_through`).
+#[derive(Clone, Copy)]
+enum SectionShape {
+    /// The ball's arc: `centre + rho (cos θ e1 + sin θ e2)`, θ from 0 at the first rail
+    /// up to the second (less than a half turn).
+    Arc {
+        /// The ball's centre.
+        centre: Point3,
+        /// Unit, towards the first rail.
+        e1: Vec3,
+        /// Unit, square to `e1` in the section's plane, towards the second rail.
+        e2: Vec3,
+        /// The ball's radius.
+        rho: f64,
+    },
+    /// The chamfer's chord, straight between the rails.
+    Chord,
+}
+
+/// Not the fork's (WR-707, #2299; the rig's `1668-fillet-both-sides-of-thin-wall-r7`): the
+/// material a concave constant round of the same blend adds, along a straight edge between
+/// two planes. Across the edge it is the round's section region: bounded by the two faces
+/// from the edge out to the rails and by the ball's arc between them, so the points in the
+/// hollow's corner (`(x - edge)·n_i >= 0`, `n_i` the face's normal out of the material,
+/// from the rail to the ball's centre), on the edge's side of the lines from the centre
+/// through the rails (`(x - centre)·u_i <= 0`, `u_i` from the edge to the rail along the
+/// face), and outside the ball (at least its radius from the line of centres). Along the
+/// edge it is that region swept between the edge's ends (a prism: both planes, and the
+/// line of centres, run along the edge).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ConcaveFill {
+    /// A point of the round's edge, where its section was solved.
+    edge: Point3,
+    /// The ball's centre in that section.
+    centre: Point3,
+    /// The ball's rails in that section, on the edge's two faces.
+    rails: [Point3; 2],
+    /// The edge's unit direction.
+    dir: Vec3,
+    /// The ball's radius.
+    radius: f64,
+    /// The edge's ends along `dir`, measured from `edge`.
+    span: [f64; 2],
+}
+
+/// The least of `a + b cos θ + c sin θ` over `θ` in `[t0, t1]` (`t1 - t0` under a turn):
+/// at an end, or at the one angle where `b cos θ + c sin θ` is least, `-sqrt(b² + c²)`.
+fn least_on_arc(a: f64, b: f64, c: f64, t0: f64, t1: f64) -> f64 {
+    let f = |t: f64| a + b * t.cos() + c * t.sin();
+    let mut least = f(t0).min(f(t1));
+    let at = (-c).atan2(-b);
+    let turn = 2.0 * std::f64::consts::PI;
+    for t in [at - turn, at, at + turn] {
+        if t > t0 && t < t1 {
+            least = least.min(a - (b * b + c * c).sqrt());
+        }
+    }
+    least
+}
+
+impl ConcaveFill {
+    /// The concave round `solver`'s fill, where it is one: a constant ball of circular
+    /// section along a straight edge between two planes, its section solved at the edge's
+    /// middle. `None` for any other round (its material is not counted: the section
+    /// through it is judged against the part alone, which refuses).
+    ///
+    /// # Errors
+    /// Those of the topology queries and of the section's solve.
+    pub(crate) fn of_round(
+        k: &Kernel,
+        target: &mut Brep,
+        solver: &mut SolverObject,
+    ) -> Result<Option<Self>> {
+        let base = solver.base();
+        if base.surface(0)?.is_none() || base.surface(1)?.is_none() {
+            return Ok(None);
+        }
+        let circular = base.fsg.as_ref().is_some_and(|fsg| {
+            fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Circular
+        });
+        let Some(edgeuse) = base.edgeuse(0)? else {
+            return Ok(None);
+        };
+        let (rolls, on_edge) = rolls_a_ball(solver);
+        if !circular || !rolls || on_edge {
+            return Ok(None);
+        }
+        let Some(edge_id) = eu::edge(target, edgeuse)? else {
+            return Ok(None);
+        };
+        let Some(curve) = edge::evaluation_curve(target, edge_id)? else {
+            return Ok(None);
+        };
+        if !matches!(curve.kind(), CurveKind::Line(_)) {
+            return Ok(None);
+        }
+        let faces = edge::faces(target, edge_id, None)?;
+        if faces.len() != 2 {
+            return Ok(None);
+        }
+        for f in faces {
+            let planar = face::p2::surface(target, f)?
+                .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
+            if !planar {
+                return Ok(None);
+            }
+        }
+        let ivl = edge::interval(target, edge_id)?;
+        let t = ivl.evaluate(0.5);
+        let Some((_, [centre, rail0, rail1])) = section_points(k, target, solver, &curve, t, None)?
+        else {
+            return Ok(None);
+        };
+        let at = curve.evaluate_point(k, t)?;
+        let (p0, p1) = (
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        );
+        let Some((_, dir)) = (p1 - p0).length_and_unit() else {
+            return Ok(None);
+        };
+        let tol = target.tolerance();
+        let radius = centre.distance(rail0);
+        if !(radius > tol) || !((centre.distance(rail1) - radius).abs() <= tol) {
+            return Ok(None);
+        }
+        let (s0, s1) = ((p0 - at).dot(dir), (p1 - at).dot(dir));
+        Ok(Some(Self {
+            edge: at,
+            centre,
+            rails: [rail0, rail1],
+            dir,
+            radius,
+            span: [s0.min(s1), s0.max(s1)],
+        }))
+    }
+
+    /// Whether the piece of a section from `ends[0]` to `ends[1]` (along `shape`) lies in
+    /// this fill, `tol` inside it where it leaves the part: at least `tol` inside the
+    /// edge's ends and `tol` outside the ball, within `tol` of the hollow's corner and of
+    /// the lines through the rails. Each condition is a bound over the whole piece, in
+    /// closed form: a linear function along an arc is `a + b cos θ + c sin θ`, least at an
+    /// end or at one angle ([`least_on_arc`]); along a chord, at an end. The distance from
+    /// the line of centres is bounded below by the distance from the centre less the most
+    /// the piece runs along the edge.
+    fn holds(&self, shape: &SectionShape, ends: [Point3; 2], tol: f64) -> bool {
+        let [q0, q1] = ends;
+        // `n_i` (out of the material, from the rail to the centre) and `u_i` (from the
+        // edge to the rail): the hollow's corner `(x - edge)·n_i >= -tol` and the edge's
+        // side `(x - centre)·u_i <= tol`, as `w·(x - p) >= m`
+        let [rail0, rail1] = self.rails;
+        let unit = |v: Vec3| v.length_and_unit().map(|(_, u)| u);
+        let (Some(n0), Some(n1), Some(u0), Some(u1)) = (
+            unit(self.centre - rail0),
+            unit(self.centre - rail1),
+            unit(rail0 - self.edge),
+            unit(rail1 - self.edge),
+        ) else {
+            return false;
+        };
+        let [span0, span1] = self.span;
+        let linear = [
+            (n0, self.edge, -tol),
+            (n1, self.edge, -tol),
+            (u0 * -1.0, self.centre, -tol),
+            (u1 * -1.0, self.centre, -tol),
+            // inside the edge's ends: `(x - edge)·dir` in `(span0 + tol, span1 - tol)`
+            (self.dir, self.edge, span0 + tol),
+            (self.dir * -1.0, self.edge, tol - span1),
+        ];
+        let clear = self.radius + tol;
+        match *shape {
+            SectionShape::Arc {
+                centre,
+                e1,
+                e2,
+                rho,
+            } => {
+                let angle = |q: Point3| {
+                    let v = q - centre;
+                    v.dot(e2).atan2(v.dot(e1))
+                };
+                let (a0, a1) = (angle(q0), angle(q1));
+                let (t0, t1) = (a0.min(a1), a0.max(a1));
+                for (w, p, m) in linear {
+                    let least =
+                        least_on_arc(w.dot(centre - p), rho * w.dot(e1), rho * w.dot(e2), t0, t1);
+                    if !(least >= m) {
+                        return false;
+                    }
+                }
+                // |x - c|² = |cs - c|² + rho² + 2 rho ((cs - c)·e1 cos θ + (cs - c)·e2 sin θ),
+                // and |(x - c)·dir| <= |(cs - c)·dir| + rho (|e1·dir| + |e2·dir|)
+                let d = centre - self.centre;
+                let near = least_on_arc(
+                    d.dot(d) + rho * rho,
+                    2.0 * rho * d.dot(e1),
+                    2.0 * rho * d.dot(e2),
+                    t0,
+                    t1,
+                );
+                let along =
+                    d.dot(self.dir).abs() + rho * (e1.dot(self.dir).abs() + e2.dot(self.dir).abs());
+                near - along * along >= clear * clear
+            }
+            SectionShape::Chord => {
+                for (w, p, m) in linear {
+                    if !(w.dot(q0 - p) >= m && w.dot(q1 - p) >= m) {
+                        return false;
+                    }
+                }
+                // the distance from the line of centres, square to it: least on the chord
+                // where its projection is nearest
+                let across = |v: Vec3| v - self.dir * v.dot(self.dir);
+                let w0 = across(q0 - self.centre);
+                let v = across(q1 - q0);
+                let vv = v.dot(v);
+                let s = if vv > 0.0 {
+                    (-w0.dot(v) / vv).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let x = w0 + v * s;
+                x.dot(x) >= clear * clear
+            }
+        }
+    }
 }
 
 /// Not the fork's (WR-707, #2299): whether the section of a convex blend at a station,
@@ -593,6 +824,7 @@ fn section_breaks_through(
     if !(det > EFF_ZERO * aa * bb) {
         return Ok(false); // rails opposite or together: no section to judge
     }
+    let mut shape = SectionShape::Chord;
     let section = if chord {
         Curve::from(Line::create_line_segment(3, rail1, rail2, None)?)
     } else {
@@ -600,6 +832,12 @@ fn section_breaks_through(
         let e1 = a / rho;
         let e2 = (b - a * (ab / aa)).unitize()?;
         let phi = b.dot(e2).atan2(b.dot(e1));
+        shape = SectionShape::Arc {
+            centre,
+            e1,
+            e2,
+            rho,
+        };
         Curve::from(Ellipse::new_circle(
             k,
             centre,
@@ -728,6 +966,22 @@ fn section_breaks_through(
         if pieces.material_to_rail(k, body, (0..piece).rev())?
             || pieces.material_to_rail(k, body, piece + 1..at.len() - 1)?
         {
+            // the hollow there filled by a concave round of the same blend: the section
+            // stays in the material that round adds
+            let (Some(&t0), Some(&t1)) = (at.get(piece), at.get(piece + 1)) else {
+                return Err(SolidError::blend_missing(OP, "the piece's end parameters"));
+            };
+            let piece_ends = [
+                section.evaluate_point(k, t0)?,
+                section.evaluate_point(k, t1)?,
+            ];
+            if faces
+                .fills
+                .iter()
+                .any(|f| f.holds(&shape, piece_ends, ends))
+            {
+                continue;
+            }
             return Ok(true); // a hollow behind a wall: the section breaks through
         }
     }
@@ -1037,7 +1291,7 @@ pub(crate) fn band_cuts_the_part_cached(
     Ok(cut)
 }
 
-/// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): whether this convex blend's section breaks
+/// Not the fork's (WR-707, #2299): whether this convex blend's section breaks
 /// through the part somewhere along its edge (it leaves the part and comes back into it
 /// through an inner face, one sharing no edge with the blended faces: a hollow behind a
 /// wall, `section_breaks_through`), and where it would, the largest size that keeps every
@@ -1055,13 +1309,14 @@ pub fn band_breaks_through_the_part(
     target: &mut Brep,
     solver: &mut SolverObject,
 ) -> Result<Option<BandCut>> {
-    band_breaks_through_the_part_cached(k, target, solver, &mut None)
+    band_breaks_through_the_part_cached(k, target, solver, Vec::new(), &mut None)
 }
 
 pub(crate) fn band_breaks_through_the_part_cached(
     k: &Kernel,
     target: &mut Brep,
     solver: &mut SolverObject,
+    fills: Vec<ConcaveFill>,
     cache_slot: &mut Option<BandCutCache>,
 ) -> Result<Option<BandCut>> {
     let base = solver.base();
@@ -1102,7 +1357,11 @@ pub(crate) fn band_breaks_through_the_part_cached(
             reached.extend(edge::faces(target, e, None)?);
         }
     }
-    let faces = ThroughFaces { skip, reached };
+    let faces = ThroughFaces {
+        skip,
+        reached,
+        fills,
+    };
     let cache = match cache_slot {
         Some(c) => c,
         None => cache_slot.insert(BandCutCache::new(k, target)?),

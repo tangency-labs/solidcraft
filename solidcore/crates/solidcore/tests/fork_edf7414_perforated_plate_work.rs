@@ -383,11 +383,8 @@ fn an_extruded_plate_walks_each_hole_a_fixed_number_of_times() {
 /// shell traversals marked and the point solves it ran of a proto vertex against a proto
 /// edge.
 fn plate_cut_counts(n: u32) -> (u64, u64) {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let (w, thick, radius) = (PITCH * f64::from(n), 12.0, 4.0);

@@ -87,28 +87,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
 /// against its closed form is a win.
 ///
-/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. At
-/// solidcore 9856ffee5, with it on, the fillet rig's 1668-fillet-both-sides-of-thin-wall-r7 is
-/// refused as breaking through the wall into the hollow behind it ("the largest radius that fits is
-/// 6.828 mm"), where with it off it builds the closed form, 39509.938 (at 8ddce9016 it refused 11
-/// rig cases that pass with it off; at this pin the other 270 fillet rig cases come out as with it
-/// off).
-///
-/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
-/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
-/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
-/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
-/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
-/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
-/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
-/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
-/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
-/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
-/// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
+/// None is held back: the last two (WR-707's refusal of rounds breaking through a wall, and
+/// WR-730's round ending on the outline) were fixed or removed in solidcore.
 ///
 /// solidcore's tests, its kernel rig and its diagnostics read this list from
 /// `kernel_cases/held_back.json`; a test keeps the file equal to it.
-pub(crate) const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
+pub(crate) const HELD_BACK: &[&str] = &[];
 
 /// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
