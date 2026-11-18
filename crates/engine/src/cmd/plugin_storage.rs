@@ -5,8 +5,8 @@ use serde_json::Value;
 use super::CommandSpec;
 use crate::plugin::storage::{self, MAX_READ_BYTES};
 use crate::schema::plugin_storage::{
-    BlobDeleted, BlobRead, BlobWritten, StorageData, StorageDeleteBlobParams, StorageGetBlobParams, StorageGetParams, StorageList, StorageListParams,
-    StoragePatchParams, StoragePutBlobParams, StorageSetParams, StorageWritten,
+    BlobDeleted, BlobRead, BlobWritten, DocumentRead, StorageDeleteBlobParams, StorageGetBlobParams, StorageGetParams, StorageGetResult, StorageList,
+    StorageListParams, StoragePatchParams, StoragePutBlobParams, StorageSetParams, StorageWritten,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session, params::bad};
@@ -15,8 +15,8 @@ use solidcraft_doc::plugin_data::{BLOBS, CACHE};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("storage.get", "Read Plugin Data", crate::checked!("storage.get", get)).icon("inspect").noundo().read_only().doc_only()
-        .contract(&TypedContract::<StorageGetParams>::new()).output(output_schema_for::<StorageData>)
-        .params("plugin?: plugin id (required outside a plugin's run; a plugin reads only its own) → the plugin's data in the open design: name, plugin_version, format (null: none), plugin_format and read_only inside its run, document (the main JSON document or null), blobs: [{name, cache, bytes}]"),
+        .contract(&TypedContract::<StorageGetParams>::new()).output(output_schema_for::<StorageGetResult>)
+        .params("plugin?: plugin id (required outside a plugin's run; a plugin reads only its own), offset?: bytes, len?: 1..524288 → supplying offset or len reads the serialized main document in bounded parts: {plugin, data: base64 JSON bytes, offset (default 0), bytes: whole document size}, default len 524288; concatenate decoded parts before parsing JSON. Use parts for documents up to 16 MiB to stay within a plugin's 1 MiB result limit. Without offset or len: name, plugin_version, format (null: none), plugin_format, read_only, document (main JSON or null), blobs: [{name, cache, bytes}]"),
     CommandSpec::new("storage.set", "Set Plugin Data", crate::checked!("storage.set", set)).icon("edit").doc_only()
         .contract(&TypedContract::<StorageSetParams>::new()).output(output_schema_for::<StorageWritten>)
         .params("document: any JSON, at most 16 MiB → replaces the running plugin's main document in the design, saved in its data_format; only from a plugin's own run; one undoable edit"),
@@ -45,9 +45,29 @@ fn reply<T: serde::Serialize>(cmd: &str, value: T) -> Result<Value> {
 }
 
 fn get(s: &mut Session, p: &Value) -> Result<Value> {
-    let p: StorageGetParams = parse("storage.get", p)?;
-    let id = storage::reader(s, "storage.get", p.plugin.as_deref())?;
-    reply("storage.get", storage::read(&s.doc, &id, s.plugin_state.storage_caller.as_ref()))
+    const CMD: &str = "storage.get";
+    let p: StorageGetParams = parse(CMD, p)?;
+    let id = storage::reader(s, CMD, p.plugin.as_deref())?;
+    if p.offset.is_some() || p.len.is_some() {
+        let len = p.len.unwrap_or(MAX_READ_BYTES);
+        if !(1..=MAX_READ_BYTES).contains(&len) {
+            return Err(bad(CMD, "`len` must be 1 to 524288"));
+        }
+        let bytes = storage::blob(&s.doc, &id, solidcraft_doc::plugin_data::DATA).unwrap_or_default();
+        let offset = p.offset.unwrap_or(0);
+        let start = usize::try_from(offset).unwrap_or(usize::MAX).min(bytes.len());
+        let end = start.saturating_add(len as usize).min(bytes.len());
+        return reply(
+            CMD,
+            StorageGetResult::Chunk(DocumentRead {
+                plugin: id,
+                data: base64_encode(bytes.get(start..end).unwrap_or_default()),
+                offset,
+                bytes: bytes.len() as u64,
+            }),
+        );
+    }
+    reply(CMD, StorageGetResult::Full(storage::read(&s.doc, &id, s.plugin_state.storage_caller.as_ref())))
 }
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -72,14 +92,15 @@ fn put_blob(s: &mut Session, p: &Value) -> Result<Value> {
     let caller = storage::writer(s)?;
     let data = base64_decode(&p.data).ok_or_else(|| bad(CMD, "`data` must be base64"))?;
     let path = format!("{}{}", if p.cache { CACHE } else { BLOBS }, p.name);
-    let mut bytes = if p.append { storage::blob(&s.doc, &caller.id, &path).unwrap_or_default() } else { Vec::new() };
+    let mut bytes = if p.append {
+        storage::blob_path(&s.doc, &caller.id, &p.name).and_then(|(path, _)| storage::blob(&s.doc, &caller.id, &path)).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     bytes.extend_from_slice(&data);
-    storage::put(s, &caller, &path, Some(&bytes))?;
-    // One name is one file: writing it as a cache file (or not) replaces the other kind.
+    // One name is one file: validate the write and removal of the other category together.
     let other = format!("{}{}", if p.cache { BLOBS } else { CACHE }, p.name);
-    if storage::blob(&s.doc, &caller.id, &other).is_some() {
-        storage::put(s, &caller, &other, None)?;
-    }
+    storage::put_replacing(s, &caller, &path, Some(&bytes), Some(&other))?;
     reply(CMD, BlobWritten { name: p.name, cache: p.cache, bytes: bytes.len() as u64 })
 }
 

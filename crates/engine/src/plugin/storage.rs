@@ -123,6 +123,11 @@ pub fn read(doc: &Document, id: &str, caller: Option<&StorageCaller>) -> Storage
 /// Writes one file of the caller's data and stamps its `meta.json` with the caller, keeping every
 /// other plugin's data and the plugin's other files as they are. `None` deletes the file.
 pub(crate) fn put(s: &mut Session, caller: &StorageCaller, path: &str, bytes: Option<&[u8]>) -> Result<()> {
+    put_replacing(s, caller, path, bytes, None)
+}
+
+/// Replaces a file and optionally removes its old category, validating the final map atomically.
+pub(crate) fn put_replacing(s: &mut Session, caller: &StorageCaller, path: &str, bytes: Option<&[u8]>, remove: Option<&str>) -> Result<()> {
     let key = format!("{}/{path}", caller.id);
     if !plugin_data::valid_key(&key) {
         return Err(crate::params::bad("storage", format!("`{path}` is not a plain relative name")));
@@ -130,33 +135,32 @@ pub(crate) fn put(s: &mut Session, caller: &StorageCaller, path: &str, bytes: Op
     let meta_key = format!("{}/{META}", caller.id);
     let meta = Meta { plugin: caller.id.clone(), name: caller.name.clone(), plugin_version: caller.version.clone(), format: caller.data_format };
     let meta = serde_json::to_vec(&meta).map_err(|e| EngineError::Other(e.to_string()))?;
-    let data = &s.doc.plugin_data;
-    let adds = [&key, &meta_key].iter().filter(|k| !data.contains_key(k.as_str())).count();
-    if bytes.is_some() && data.len() + adds > plugin_data::MAX_FILES {
-        return Err(limit(format!("a design keeps at most {} files of plugin data", plugin_data::MAX_FILES)));
+    // Values are shared Arcs, so staging the final map does not copy existing file contents.
+    let mut data = s.doc.plugin_data.clone();
+    if let Some(remove) = remove {
+        data.remove(&format!("{}/{remove}", caller.id));
     }
-    if let Some(bytes) = bytes {
-        let before = data.get(&key).map_or(0, |text| decoded_len(text));
-        let grows = (bytes.len() as u64).saturating_sub(before);
-        let total: u64 = data.values().map(|text| decoded_len(text)).sum();
-        if total.saturating_add(grows) > MAX_TOTAL_BYTES {
-            return Err(limit("plugin data in one design is at most 256 MiB, all plugins together"));
-        }
-        let own: u64 = blobs(data, &caller.id).iter().map(|blob| blob.bytes).sum();
-        if (path.starts_with(BLOBS) || path.starts_with(CACHE)) && own.saturating_add(grows) > MAX_BLOB_BYTES {
-            return Err(limit("a plugin keeps at most 256 MiB of files in one design"));
-        }
-    }
-    let doc = s.doc_mut();
     match bytes {
         Some(bytes) => {
-            doc.plugin_data.insert(key, base64_encode(bytes).into());
+            data.insert(key, base64_encode(bytes).into());
         }
         None => {
-            doc.plugin_data.remove(&key);
+            data.remove(&key);
         }
     }
-    doc.plugin_data.insert(meta_key, base64_encode(&meta).into());
+    data.insert(meta_key, base64_encode(&meta).into());
+    if data.len() > plugin_data::MAX_FILES {
+        return Err(limit(format!("a design keeps at most {} files of plugin data", plugin_data::MAX_FILES)));
+    }
+    let total: u64 = data.values().map(|text| decoded_len(text)).sum();
+    if total > MAX_TOTAL_BYTES {
+        return Err(limit("plugin data in one design is at most 256 MiB, all plugins together"));
+    }
+    let own: u64 = blobs(&data, &caller.id).iter().map(|blob| blob.bytes).sum();
+    if own > MAX_BLOB_BYTES {
+        return Err(limit("a plugin keeps at most 256 MiB of files in one design"));
+    }
+    s.doc_mut().plugin_data = data;
     Ok(())
 }
 

@@ -438,7 +438,15 @@ number. Its manifest lists the `storage.*` commands it calls, like any other com
   256 MiB per plugin per design, and all plugin data in a design at most 256 MiB.
   SolidCraft writes `meta.json` beside them: the plugin's id, name and version and the data's format.
 - **Reading.** `storage.get` returns the main document, the data's `format`, the running plugin's
-  `plugin_format`, `read_only` and the list of files. `storage.get_blob {name, offset?, len?}`
+  `plugin_format`, `read_only` and the list of files. To read a large main document within the
+  plugin host's 1 MiB result limit, supply `offset` or `len`: `storage.get {offset: 0}` returns
+  `{plugin, data, offset, bytes}`, with `data` holding base64 of up to 512 KiB of the saved JSON
+  bytes and `bytes` the whole document size. Advance `offset` by the number of decoded bytes,
+  concatenate the decoded parts, then parse the JSON. `len` defaults to 524288 and accepts
+  1 through 524288; `offset` defaults to 0. Parts omit metadata and the file list. Past the end,
+  or without a saved document, `data` is empty (`bytes` is 0 without a document). Documents
+  still accept up to 16 MiB; plugins should use parts when the full reply could exceed 1 MiB.
+  `storage.get_blob {name, offset?, len?}`
   returns up to 512 KiB of a file, base64, so a reply stays inside a plugin's 1 MiB. Inside a
   plugin's run these reach only that plugin's own data. Agents and scripts read any plugin's
   data by naming it: `storage.get {"plugin": "gears"}`.
