@@ -1716,6 +1716,22 @@ impl SolveApp {
                         self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
                     }
                 }
+                "mesh.reduce" => {
+                    if let (Some(original), Some(target), Some(achieved)) = (
+                        v.get("original_triangles").and_then(Value::as_u64),
+                        v.get("target_triangles").and_then(Value::as_u64),
+                        v.get("achieved_triangles").and_then(Value::as_u64),
+                    ) {
+                        let key = if achieved > target { "ui.mesh_reduce_shortfall" } else { "ui.mesh_reduce_result" };
+                        self.set_status(
+                            solidcraft_ui_text::format(
+                                key,
+                                &[("original", &original.to_string()), ("target", &target.to_string()), ("achieved", &achieved.to_string())],
+                            ),
+                            false,
+                        );
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
@@ -2985,6 +3001,7 @@ impl SolveApp {
                         FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
                         FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
                         FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
+                        FeatureKind::MeshReduce { .. } => language.text("ui.feature_kind.mesh_reduce"),
                         FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
                         FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),

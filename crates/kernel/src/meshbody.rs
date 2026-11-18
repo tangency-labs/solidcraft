@@ -92,6 +92,25 @@ pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
     mesh_body_with_normals(positions, triangles, &[])
 }
 
+/// Create a reduced copy using SolidCore's checked connectivity, without import-time welding or
+/// winding repair. Returns the mesh and its achieved triangle count; it may exceed the target.
+pub fn reduce_mesh(body: &Body, target: usize) -> Result<(Body, usize)> {
+    let (positions, triangles) = body.triangle_mesh().ok_or_else(|| KernelError::Invalid("select a mesh body".into()))?;
+    let points: Vec<[f64; 3]> = positions.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let normals: Vec<[f64; 3]> = body.triangle_corner_normals().unwrap_or_default().iter().flatten().map(|n| [n.x, n.y, n.z]).collect();
+    let reduction = solidcore_ops::reduce_mesh(&points, triangles.as_flattened(), (!normals.is_empty()).then_some(normals.as_slice()), target)
+        .map_err(|e| match e {
+            solidcore_ops::MeshReductionError::Cancelled => KernelError::Failed(format!("mesh reduction failed: {e}")),
+            solidcore_ops::MeshReductionError::Invalid(_) => KernelError::Invalid(format!("mesh reduction failed: {e}")),
+        })?;
+    let mesh = TriMesh {
+        positions: reduction.positions.into_iter().map(Vec3::from).collect(),
+        triangles: reduction.indices.as_chunks::<3>().0.to_vec(),
+        corner_normals: reduction.corner_normals.as_deref().unwrap_or_default().as_chunks::<3>().0.iter().map(|n| n.map(Vec3::from)).collect(),
+    };
+    Ok((Body::of_mesh(mesh).with_color(body.color()), reduction.reduced_triangles))
+}
+
 /// A mesh with optional independent, finite nonzero shading normals per triangle corner.
 /// Welding and winding repair affect geometric indices; seams never affect connectivity.
 pub fn mesh_body_with_normals(positions: &[Vec3], triangles: &[[u32; 3]], normals: &[[Vec3; 3]]) -> Result<Body> {

@@ -2285,6 +2285,14 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
+    /// Derive a reduced mesh without changing its upstream source.
+    MeshReduce {
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        triangle_count: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        percentage: Option<f64>,
+    },
     /// Mesh bodies imported from a 3MF or STL file, embedded in the design.
     MeshImport {
         /// Source file name (display only).
@@ -3086,6 +3094,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
+            FeatureKind::MeshReduce { .. } => "MeshReduceFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
         }
     }
@@ -3169,6 +3178,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
             FeatureKind::MeshConvert { .. } => "mesh_convert",
+            FeatureKind::MeshReduce { .. } => "mesh_reduce",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
         }
@@ -3253,6 +3263,7 @@ impl FeatureKind {
             "BaseFeature" => "import",
             "MeshFeature" => "mesh_import",
             "MeshConvertFeature" => "mesh_convert",
+            "MeshReduceFeature" => "mesh_reduce",
             "RepairFeature" => "repair",
             _ => return None,
         })
@@ -3341,6 +3352,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
+            FeatureKind::MeshReduce { .. } => "ReduceMesh",
             FeatureKind::Repair { .. } => "Repair",
         }
     }

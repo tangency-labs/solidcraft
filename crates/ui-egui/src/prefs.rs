@@ -1451,6 +1451,8 @@ preference_settings! {
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
     /// Show command names beneath ribbon icons, independently of workspace layout.
     ribbon_labels: bool = true, PAGE_LAYOUT;
+    /// Restore the former Surface Create and Convert sections.
+    legacy_surface_toolbar: bool = false, PAGE_LAYOUT => check_id("prefs.legacy_surface_toolbar");
     /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
     persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
     viewport_analysis_status: bool = true, PAGE_GRAPHICS;

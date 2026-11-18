@@ -56,6 +56,7 @@ pub mod hatch;
 pub mod heal;
 pub mod intersect;
 pub mod mass;
+pub mod mesh_reduce;
 pub mod nurbs;
 pub mod offset;
 pub mod primitive;

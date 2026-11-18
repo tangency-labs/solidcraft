@@ -149,6 +149,21 @@ Closed meshes can be rebuilt as solids with the `mesh.convert` command (command 
 scripts and the control channel): a mesh with a constant cross-section as analytic planar and
 cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
+Use **Surface → Mesh → Reduce Mesh** to create a separate, simpler mesh without changing the
+original. Select the mesh body and choose either a retained percentage (greater than 0 and less
+than 100) or a positive target triangle count. The status reports the original, target and achieved
+triangle counts, including when the target could not be reached. Open boundary edges and
+original creases sharper than 30° stay in place. The reduced body keeps the source body's colour
+and preserves per-corner normal seams where present; reduction does not repair the source.
+Smaller targets can remove more detail: the triangle count is not a geometric tolerance.
+The reduced body can be selected for Convert Mesh, which still requires a closed mesh within its
+triangle limit. The reported count describes the body in the design: mesh exporters that weld
+nearby vertices can write a different count. Scripts can call `mesh.reduce` with `body` and
+exactly one of `percentage` or `triangle_count`; an optional `name` names the history feature.
+
+The **Mesh** section also contains **Convert Mesh**, **Insert Mesh**, and **Save As Mesh**.
+To restore the previous Surface toolbar, enable **Use legacy Surface toolbar** in Layout preferences.
+
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
 is the tessellation's own double-precision value. Meshing and analysis tools can use the tags to

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Reduce Mesh</title>
+  <path d="M8.51 18.75L28 30L28 52.5L8.51 41.25Z" fill="#b8c3cf"/>
+  <path d="M47.49 18.75L28 30L28 52.5L47.49 41.25Z" fill="#8e9faf"/>
+  <path d="M28 7.5L47.49 18.75L28 30L8.51 18.75Z" fill="#e2e8ef"/>
+  <path d="M28 7.5L47.49 18.75L47.49 41.25L28 52.5L8.51 41.25L8.51 18.75Z M8.51 18.75L28 30L47.49 18.75 M28 30L28 52.5 M8.51 18.75L47.49 18.75 M8.51 18.75L28 52.5L47.49 18.75" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="48" cy="47" r="11" fill="#236ead" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M43 47L53 47" fill="none" stroke="#ffffff" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

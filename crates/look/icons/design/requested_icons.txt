@@ -207,6 +207,7 @@ material	false
 measure	false
 mesh_body	false
 mesh_export	false
+mesh_reduce	false
 min_radius	false
 mirror	false
 motion_link	false
