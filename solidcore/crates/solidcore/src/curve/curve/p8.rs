@@ -4564,8 +4564,9 @@ mod tests {
     /// meet exactly (`dr` above the line) but stay within the scaled zero of it over the
     /// whole stretch (`c` tiny): a near overlap at the zero, not a touch. The convex
     /// offset puts the (empty) set of exact meetings in one interval, so without a bound
-    /// on the run within the zero this was certified the stretch's only contact. A
-    /// parabola that does bend away (`c = 1`) touching the line stays certified.
+    /// on the run within the zero this was certified the stretch's only contact. The same
+    /// offset with a parabola that does bend away (`c = 1`) is a touch within the zero
+    /// and stays certified.
     #[test]
     fn a_run_within_the_zero_over_the_stretch_is_not_a_lone_touch() {
         let k = Kernel::default();
@@ -4584,7 +4585,7 @@ mod tests {
         }
         assert!(!touch_is_alone(&k, &line, whole, &flat, whole, [0.5, 0.5]).unwrap());
         assert!(!touch_is_alone(&k, &flat, whole, &line, whole, [0.5, 0.5]).unwrap());
-        let bent = parabola(0.0, 1.0);
+        let bent = parabola(1e-13, 1.0);
         assert!(touch_is_alone(&k, &line, whole, &bent, whole, [0.5, 0.5]).unwrap());
         assert!(touch_is_alone(&k, &bent, whole, &line, whole, [0.5, 0.5]).unwrap());
     }
