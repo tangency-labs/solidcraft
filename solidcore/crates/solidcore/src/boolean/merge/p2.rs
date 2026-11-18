@@ -109,9 +109,11 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
+use crate::geom::vector2d::Point2;
 use crate::intersect::point_class::{ClassObject, ClassObjectKind};
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, PI};
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::topology::brep::p7::{self as brep_p7, MakeFaceOptions};
@@ -1014,7 +1016,8 @@ pub fn make_faceuse_attempt_with(
 /// parameterised by its edge's curve on its face's surface, so it stays exact where
 /// the new edge is the primary mate of the other edge that `MergeEdge` copied from it
 /// (one of [`Relations::copied_edges`]: the other operand's own edge, not one the
-/// intersection made or related), runs on a copy of its curve
+/// intersection made or related, unless the other's trim ends at a singularity of the
+/// surface, where no drop of the edge can find the parameter), runs on a copy of its curve
 /// (the same definition, [`Curve::same_definition`](crate::curve::curve::Curve::same_definition):
 /// a closed curve run the other way round, or a re-fit, is not one) over the same
 /// interval, has at least the other edge's tolerance, and the
@@ -1083,9 +1086,29 @@ fn copy_uv_trim_curves_of_other_face(
         // intersection made or related has the intersector's UV curve on the other face,
         // an approximation that can lie farther from the exact curve than MakeFace's
         // trim dropped from the edge (#17896: a torus cut by a box's planes, 9.6e-7 off
-        // the plane against 7.1e-8), so it keeps MakeFace's trim
+        // the plane against 7.1e-8), so it keeps MakeFace's trim. Unless that UV curve
+        // ends at a singularity of the surface (a sphere's pole): there the surface
+        // maps a whole side of its domain to one point, so the edge's end gives no
+        // parameter to drop to, and the drop's trim comes out with coincident control
+        // points and a cusp, where the intersector's trace took the parameter the curve
+        // runs into the singularity at (#17896: a ball cut with its poles on a roll's face)
         if !relations.copied_edges.contains(&new_edge) {
-            continue;
+            let interval = other.edge(other_edge)?.interval;
+            let Some(surface) = brep.face(new_face)?.surface.as_ref() else {
+                continue;
+            };
+            let mut singular_end = false;
+            for (t, from_left) in [(interval.min(), false), (interval.max(), true)] {
+                let Some(p) = trim.evaluate(k, t, 0, from_left, false)?.first().copied() else {
+                    continue;
+                };
+                // (a failed evaluation reads singular in no direction: not a singularity)
+                let at = surface.is_singularity(k, Point2::new(p.x, p.y), EFF_ZERO, false)?;
+                singular_end |= at.singular && at.direction != SurfParamType::Neither;
+            }
+            if !singular_end {
+                continue;
+            }
         }
         let (other_record, new_record) = (other.edge(other_edge)?, brep.edge(new_edge)?);
         // A trim lies on its edge only within that edge's tolerance (the other operand's
