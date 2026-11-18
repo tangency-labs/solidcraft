@@ -1389,6 +1389,22 @@ impl Cone {
         if !equal_radii {
             return Ok(None);
         }
+        // Not upstream (#17462, #18415 review): the chord recovery holds the arcs to the
+        // circle and to the plane square to the ruling only within `pt_tol`, so the copied
+        // net is kept as this cylinder's form only when `implicit::lies_on` certifies it on
+        // the cylinder, to the rounding of storing it. Otherwise the surface is no cylinder
+        // here and stays a B-spline.
+        if from_chord {
+            let certificate = implicit::Implicit::Cone {
+                origin,
+                axis: z_axis,
+                radius: bot.radius,
+                tan_angle: 0.0,
+            };
+            if !implicit::lies_on(test_surface, &certificate)? {
+                return Ok(None);
+            }
+        }
 
         let mut cylinder = Self::new_cylinder_bounded(
             origin,
@@ -2222,23 +2238,17 @@ mod tests {
         }
     }
 
-    /// #17462: the wall a linear sweep made from 0.008 mm of a spline, a 0.005 degree arc of
-    /// radius 88 mm swept 53 mm along -y, its NURBS form as the app's flat arrays carry it
-    /// (rows exact translates). The legs' normal of so short an arc is 2e-8 rad off the
-    /// ruling, past the angular zero both recoveries held it to, so the form, which is the
-    /// cylinder's own, was refused. It is a cylinder on the form with the ruling's axis.
-    #[test]
-    fn a_very_short_extruded_arc_is_a_cylinder_whatever_its_legs_normal() {
+    /// The #17462 wall's NURBS form (see the test below), its middle control points moved
+    /// by `nudge` (in both rows, so the rows stay translates).
+    fn short_arc_wall(nudge: Vec3) -> BSplineSurface {
         use crate::nurbs::math::CPoint;
         use crate::nurbs::srf_basic::Surface as Nurb;
-        use crate::surface::implicit::{lies_on, AnalyticSupport};
-        let k = kernel();
         let w = 0.999_999_998_985_303_8;
         // (x w, y w, z w, w), as the record holds them
         let row = |p: [[f64; 3]; 3]| -> Vec<CPoint> {
             p.iter()
-                .zip([1.0, w, 1.0])
-                .map(|(&[x, y, z], w)| CPoint::new(x, y, z, w))
+                .zip([(1.0, Vec3::ZERO), (w, nudge * w), (1.0, Vec3::ZERO)])
+                .map(|(&[x, y, z], (w, d))| CPoint::new(x + d.x, y + d.y, z + d.z, w))
                 .collect()
         };
         let net = vec![
@@ -2270,7 +2280,19 @@ mod tests {
             vec![0.0, 0.0, 0.0, knot, knot, knot],
         )
         .unwrap();
-        let form = BSplineSurface::from_nurb(nurb, false);
+        BSplineSurface::from_nurb(nurb, false)
+    }
+
+    /// #17462: the wall a linear sweep made from 0.008 mm of a spline, a 0.005 degree arc of
+    /// radius 88 mm swept 53 mm along -y, its NURBS form as the app's flat arrays carry it
+    /// (rows exact translates). The legs' normal of so short an arc is 2e-8 rad off the
+    /// ruling, past the angular zero both recoveries held it to, so the form, which is the
+    /// cylinder's own, was refused. It is a cylinder on the form with the ruling's axis.
+    #[test]
+    fn a_very_short_extruded_arc_is_a_cylinder_whatever_its_legs_normal() {
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let form = short_arc_wall(Vec3::ZERO);
         let cone = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
             .unwrap()
             .expect("a cylinder");
@@ -2284,6 +2306,26 @@ mod tests {
         };
         let axis = placement.z_axis();
         assert!(axis.x.abs() < 1e-15 && axis.z.abs() < 1e-15, "{axis:?}");
+    }
+
+    /// #18415 review: the chord recovery holds the arc's control points to the circle only
+    /// within `pt_tol` (1.4e-8 here). The #17462 wall with its middle control points moved
+    /// 5e-9 mm off the circle, square to the chord in the arc's plane, passes every one of
+    /// those checks, but its net is not the cylinder's: the copy is refused rather than
+    /// labelled as that cylinder, and the surface stays a B-spline.
+    #[test]
+    fn a_short_arc_wall_off_its_circle_by_less_than_the_zero_is_no_cylinder() {
+        let k = kernel();
+        let chord = Vec3::new(
+            4.778_385_209_010_169 - 4.770_516_121_717_348,
+            0.0,
+            58.640_147_758_206_49 - 58.638_980_067_614_24,
+        );
+        let across = Vec3::new(-chord.z, 0.0, chord.x).unitize().unwrap();
+        let wall = short_arc_wall(across * 5e-9);
+        assert!(Cone::is_nurb_surface_cylinder(&k, &wall, 1.0)
+            .unwrap()
+            .is_none());
     }
 
     /// #16488: a form whose rows are not exact translates. A unit-radius arc of 1 rad about
