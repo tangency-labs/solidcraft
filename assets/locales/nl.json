@@ -4128,6 +4128,7 @@
   "ui.agent_chat_attach_selection_tip": "Verstuur wat in het model is geselecteerd (vlakken, randen, kenmerken, lichamen) met het bericht mee, zodat de agent weet wat je bedoelt",
   "ui.agent_chat_attach_view": "Weergave bijvoegen",
   "ui.agent_chat_attach_view_tip": "Een afbeelding van de huidige weergave met het bericht meesturen",
+  "ui.agent_chat_attachable": "Afbeeldingen, pdf's, tekst en CAD-bestanden",
   "ui.agent_chat_auth_agent": "Aanmelden met {name}",
   "ui.agent_chat_auth_env": "Stel {vars} in uw omgeving in en start SolidCraft opnieuw.",
   "ui.agent_chat_auth_needed": "De agent vraagt u zich aan te melden. U meldt zich aan bij de agent zelf; SolidCraft ziet nooit uw wachtwoord of sleutels.",

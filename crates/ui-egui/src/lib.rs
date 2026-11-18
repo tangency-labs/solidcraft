@@ -511,10 +511,10 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog for several files of any type at once (the agent chat's files: whatever it
-    /// can't read goes to the agent by path, so nothing is filtered out). `None`: one file, with
-    /// `pick_file`.
-    pub pick_files: Option<Box<dyn Fn() -> FilesPickerFuture>>,
+    /// Open a dialog for several files at once (the agent chat's files): the types it names listed
+    /// under its label, or any type when it names none (a coding agent reads them itself). `None`:
+    /// one file, with `pick_file`.
+    pub pick_files: Option<Box<dyn Fn(&str, &[&str]) -> FilesPickerFuture>>,
     /// Open a dialog for several folders at once (the agent chat's files). `None`: one, with
     /// `pick_folder`.
     pub pick_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,

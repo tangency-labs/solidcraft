@@ -360,15 +360,9 @@ pub fn current_sels(session: &Session, entry: &Entry, names: &mut NameCache) -> 
 }
 
 /// The message as the agent gets it: the text, then what was selected.
-/// The message with what was picked or selected after it, in a `<solidcraft-selection>` element:
-/// SolidCraft wrote it, not the user (names from the design can't close it).
 pub fn with_context(text: &str, context: &Context) -> String {
     let block = context.prompt_block();
-    if block.is_empty() {
-        text.to_string()
-    } else {
-        format!("{text}\n\n<solidcraft-selection>\n{}\n</solidcraft-selection>", super::attach::neutralize(&block))
-    }
+    if block.is_empty() { text.to_string() } else { format!("{text}\n\n{block}") }
 }
 
 /// Describe what the session has selected, as what was clicked: see [`clicked`].

@@ -4445,6 +4445,7 @@
   "ui.agent_chat_attach_selection_tip": "Envoyer ce qui est sélectionné dans le modèle (faces, arêtes, fonctions, corps) avec le message, pour que l'agent sache de quoi vous parlez",
   "ui.agent_chat_attach_view": "Joindre la vue",
   "ui.agent_chat_attach_view_tip": "Envoyer une image de la vue actuelle avec le message",
+  "ui.agent_chat_attachable": "Images, PDF, textes et fichiers de CAO",
   "ui.agent_chat_auth_agent": "S'authentifier avec {name}",
   "ui.agent_chat_auth_env": "Définir {vars} dans votre environnement, puis redémarrer SolidCraft.",
   "ui.agent_chat_auth_needed": "L'agent demande une authentification. Vous vous authentifiez auprès de l'agent lui-même ; SolidCraft ne voit jamais votre mot de passe ni vos clés.",

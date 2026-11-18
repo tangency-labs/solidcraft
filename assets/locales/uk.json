@@ -5294,6 +5294,7 @@
   "ui.agent_chat_attach_selection_tip": "Надіслати разом із повідомленням, що виділено в моделі (грані, ребра, операції, тіла), щоб агент розумів, що ви маєте на увазі",
   "ui.agent_chat_attach_view": "Прикріпити вид",
   "ui.agent_chat_attach_view_tip": "Надіслати знімок поточного виду разом із повідомленням",
+  "ui.agent_chat_attachable": "Зображення, текст і CAD-файли",
   "ui.agent_chat_auth_agent": "Увійти через {name}",
   "ui.agent_chat_auth_env": "Задайте {vars} у своєму середовищі та перезапустіть SolidCraft.",
   "ui.agent_chat_auth_needed": "Агент просить вас увійти. Ви входите через сам агент; SolidCraft ніколи не бачить вашого пароля чи ключів.",

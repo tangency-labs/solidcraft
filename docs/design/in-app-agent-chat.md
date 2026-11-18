@@ -230,16 +230,22 @@ session asks it to turn them off (`_meta.claudeCode.options.disallowedTools`) an
 "bypass permissions". Once a message sends a file or folder by path, its read tools (Read, Glob,
 Grep) come on behind a `permissions.ask` rule (`_meta.claudeCode.options.settings`): a running
 session is opened again with `session/new` and `_meta.claudeCode.options.resume` set to its id,
-which keeps the conversation (`acp::turn_on_reads`), and the message waits for its Ready. The
-first such file on the chips makes the chat say so. Every read then arrives as `session/request_permission`
-with the path in `rawInput` (`file_path` for Read, `path` and `pattern` for Glob, `path` or
-`file_path` and `glob` for Grep). `acp::read_path` accepts only that form, with an absolute path
-and a pattern that can't leave it; the chat answers allow-once when the path, links followed,
-lies inside a file or folder sent by path in this conversation (`AgentChat::by_path`, cleared by
-New chat with the tools turned off again), and asks the user otherwise. Checked with
-`claude-agent-acp` 0.107.0: without the rule these tools read any path without asking, and a
-resumed session keeps what was said before. Other agents' own permission requests appear in the
-panel with their options.
+which keeps the conversation (`acp::turn_on_reads`), and the message waits for its Ready. A
+session that has had no message yet can't be resumed ("Resource not found"), and has nothing to
+keep, so it is opened fresh. The first such file on the chips makes the chat say so. Every read
+then arrives as `session/request_permission` with the path in `rawInput` (`file_path` for Read,
+`path` and `pattern` for Glob, `path` or `file_path` and `glob` for Grep). `acp::read_path`
+accepts only that form, with an absolute path and a pattern that can't leave it; the chat answers
+allow-once when the path, links followed, lies inside a file or folder sent by path in this
+conversation (`AgentChat::by_path`, cleared by New chat with the tools turned off again), and asks
+the user otherwise. Checked with `claude-agent-acp` 0.107.0: without the rule these tools read any
+path without asking, and a resumed session keeps what was said before. Other agents' own
+permission requests appear in the panel with their options.
+
+A coding agent gets every attached file and folder by its path (`attach::reference`,
+`attach::folder`); an endpoint, which has no tool that opens a path, gets pictures, text and PDFs
+in the message (a PDF as an OpenAI `file` part or an Anthropic `document` block) and CAD files
+imported (`attach::read`), at most eight, and is refused any other file.
 
 ### Processes
 

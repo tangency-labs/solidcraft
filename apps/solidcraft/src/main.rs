@@ -804,9 +804,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = open_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        // One kind of file (a plug-in, the agent chat's attachments): only the types it names, as
-        // given and in lower and upper case (Linux dialogs match case; macOS allows just the listed
-        // types).
+        // One kind of file (the agent chat's attachments): only the types it names, as given and in
+        // lower and upper case (Linux dialogs match case; macOS allows just the listed types).
         pick_file: Some(Box::new(move |label: &str, exts: &[&str]| {
             let all = any_case(exts);
             let all: Vec<&str> = all.iter().map(String::as_str).collect();
@@ -815,11 +814,17 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        // Several files of any type at once (the agent chat's attachments: a batch of photos). No
-        // filter: what the chat can't read goes to the agent by path. (On macOS a filter lists the
-        // only types that can be chosen, and its "All files" `*` is no wildcard.)
-        pick_files: Some(Box::new(move || {
-            let future = files_folder.start(files_parent.clone()).pick_files();
+        // Several files at once (the agent chat's attachments: a batch of photos): only the types
+        // named, as `pick_file` lists them (for an endpoint, which is refused any other); with none
+        // named (for a coding agent, which reads any file itself), any file.
+        pick_files: Some(Box::new(move |label: &str, exts: &[&str]| {
+            let mut dialog = files_folder.start(files_parent.clone());
+            if !exts.is_empty() {
+                let all = any_case(exts);
+                let all: Vec<&str> = all.iter().map(String::as_str).collect();
+                dialog = dialog.add_filter(label, &all);
+            }
+            let future = dialog.pick_files();
             let folder = files_folder.clone();
             Box::pin(async move { folder.answer_all(future.await) })
         })),

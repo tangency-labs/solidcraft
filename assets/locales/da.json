@@ -4117,6 +4117,7 @@
   "ui.agent_chat_attach_selection_tip": "Send det, der er markeret i modellen (flader, kanter, features, emner), sammen med beskeden, så agenten ved, hvad du mener",
   "ui.agent_chat_attach_view": "Vedhæft visning",
   "ui.agent_chat_attach_view_tip": "Send et billede af den aktuelle visning sammen med beskeden",
+  "ui.agent_chat_attachable": "Billeder, PDF-filer, tekst og CAD-filer",
   "ui.agent_chat_auth_agent": "Log ind med {name}",
   "ui.agent_chat_auth_env": "Indstil {vars} i dit miljø, og genstart SolidCraft.",
   "ui.agent_chat_auth_needed": "Agenten beder dig logge ind. Du logger ind hos agenten selv; SolidCraft ser aldrig din adgangskode eller dine nøgler.",

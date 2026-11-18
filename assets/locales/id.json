@@ -4117,6 +4117,7 @@
   "ui.agent_chat_attach_selection_tip": "Kirim apa yang dipilih di model (muka, tepi, fitur, bodi) bersama pesan, agar agen tahu maksud Anda",
   "ui.agent_chat_attach_view": "Lampirkan tampilan",
   "ui.agent_chat_attach_view_tip": "Kirim gambar tampilan saat ini bersama pesan",
+  "ui.agent_chat_attachable": "Gambar, PDF, teks, dan file CAD",
   "ui.agent_chat_auth_agent": "Masuk dengan {name}",
   "ui.agent_chat_auth_env": "Atur {vars} di environment Anda dan mulai ulang SolidCraft.",
   "ui.agent_chat_auth_needed": "Agen meminta Anda masuk. Anda masuk melalui agen itu sendiri; SolidCraft tidak pernah melihat kata sandi atau key Anda.",

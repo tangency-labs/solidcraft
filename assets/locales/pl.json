@@ -5410,6 +5410,7 @@
   "ui.agent_chat_attach_selection_tip": "Wyślij z wiadomością to, co zaznaczono w modelu (ściany, krawędzie, operacje, bryły), aby agent wiedział, o co chodzi",
   "ui.agent_chat_attach_view": "Dołącz widok",
   "ui.agent_chat_attach_view_tip": "Wyślij z wiadomością obraz bieżącego widoku",
+  "ui.agent_chat_attachable": "Obrazy, pliki PDF, tekstowe i CAD",
   "ui.agent_chat_auth_agent": "Zaloguj się przez {name}",
   "ui.agent_chat_auth_env": "Ustaw {vars} w swoim środowisku i uruchom ponownie SolidCraft.",
   "ui.agent_chat_auth_needed": "Agent prosi o zalogowanie. Logujesz się w samym agencie; SolidCraft nigdy nie widzi twojego hasła ani kluczy.",

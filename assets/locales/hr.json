@@ -4116,6 +4116,7 @@
   "ui.agent_chat_attach_selection_tip": "Pošalji s porukom ono što je odabrano u modelu (lica, bridove, značajke, tijela), kako bi agent znao na što mislite",
   "ui.agent_chat_attach_view": "Priloži prikaz",
   "ui.agent_chat_attach_view_tip": "Pošalji sliku trenutnog prikaza s porukom",
+  "ui.agent_chat_attachable": "Slike, PDF-ovi, tekst i CAD datoteke",
   "ui.agent_chat_auth_agent": "Prijavi se pomoću {name}",
   "ui.agent_chat_auth_env": "Postavite {vars} u svom okruženju i ponovno pokrenite SolidCraft.",
   "ui.agent_chat_auth_needed": "Agent traži da se prijavite. Prijavljujete se kod samog agenta; SolidCraft nikad ne vidi vašu lozinku ni ključeve.",

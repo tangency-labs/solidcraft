@@ -4117,6 +4117,7 @@
   "ui.agent_chat_attach_selection_tip": "Trimite împreună cu mesajul ce este selectat în model (fețe, muchii, operații, corpuri), astfel încât agentul să știe la ce vă referiți",
   "ui.agent_chat_attach_view": "Atașează vizualizarea",
   "ui.agent_chat_attach_view_tip": "Trimite o imagine a vizualizării curente împreună cu mesajul",
+  "ui.agent_chat_attachable": "Imagini, PDF-uri, text și fișiere CAD",
   "ui.agent_chat_auth_agent": "Autentificare cu {name}",
   "ui.agent_chat_auth_env": "Setați {vars} în mediul dumneavoastră și reporniți SolidCraft.",
   "ui.agent_chat_auth_needed": "Agentul vă cere să vă autentificați. Vă autentificați chiar în agent; SolidCraft nu vă vede niciodată parola sau cheile.",

@@ -125,23 +125,21 @@ turn limit. Queue, Send now and Stop keep their existing behavior.
 
 ## Files and pictures
 
-A message carries the contents of up to eight files, to show the agent what you mean: a concept
-picture, a sketch, a brief, a part to fit around. More files, and folders, go by their path
-(below), up to 200 on one message.
+A message can carry up to eight files, to show the agent what you mean: a concept picture, a
+sketch, a brief, a part to fit around. That is for an OpenAI- or Anthropic-compatible endpoint,
+which has only SolidCraft's tools, so the files go in the message as below. A coding agent reads
+files with its own tools: it gets every file and folder by its path instead
+([To a coding agent](#to-a-coding-agent)).
 
-- **+** next to **Send** has **Paste a picture** (the picture on the clipboard) and a way to choose
-  files and folders, several at once and of any type. On macOS it is one item, **Choose files or
-  folders…**. Windows' and Linux's file dialogs choose files or folders but not both, so there it
-  is **Choose files…** and **Choose folders…**. What happens to each file depends on its type
-  (below).
-- **Drop files or folders on the chat.** What is dropped on the panel (or its folded strip)
-  attaches to the next message, and the app doesn't open it too. While files are dragged over the chat, it says
+- **+** next to **Send** has **Choose files…** (a file dialog for the types below, several at
+  once) and **Paste a picture** (the picture on the clipboard).
+- **Drop files on the chat.** Files dropped on the panel (or its folded strip) attach to the
+  next message, and the app doesn't open them too. While files are dragged over the chat, it says
   so. The window gives no position while something is dragged, so the drop is the chat's when the
   pointer was last seen over the chat; **+** always works.
 - The files show as chips above the text box: a picture's thumbnail, the name, and × to take the
   file off. A picture is read off the window thread, so a large one never stops the window: its
   chip shows a spinner meanwhile, and **Send** waits for it. **Send** sends files with no text.
-  Past about three rows, the chips scroll, so the text box and the conversation stay in view.
 - **Pictures** (PNG, JPEG, GIF, WebP) go to the agent as they are when they are at most 2048 px
   on the long side and 3.75 MB (a picture's base64 then stays under 5 MB, so eight still fit in a
   prompt). Otherwise they are scaled down to 2048 px and re-encoded: as PNG when that fits, as
@@ -156,32 +154,12 @@ picture, a sketch, a brief, a part to fit around. More files, and folders, go by
   shows a spinner meanwhile, and **Send** waits), and the message tells the agent it was added; a
   failed import says why and the agent is told nothing of it. Taking a part's chip off the message
   leaves the part in the design (Undo removes it).
-- **Past eight files**, every further file goes by its path: the message tells the agent its
-  name, type, size and path, and the agent reads it with its own read tools. SolidCraft reads
-  nothing of it, so a batch of photos reaches the agent however many there are; the chat says so
-  once for the batch. Its chip shows the file's type instead of a thumbnail, and holding the
-  pointer over it shows its path. A pasted picture has no path, so past eight it is refused: save
-  it as a file and attach that.
-- **A folder** goes by its path too, and only its path: nothing in it is listed, counted or read
-  (on a network share that would keep the message waiting). The agent lists it and reads the
-  files it needs with its own read tools. A folder or a file by its path doesn't take one of the
-  eight. Files other than the types above (a ZIP, a DXF) also go by their path.
-- **Who can read files by path.** A coding agent (Codex, Gemini CLI…) reads them with its own
-  tools. Claude Code's read tools are off until a message sends a file or folder by path; the first
-  time one lands on the chips, the chat says that sending it turns them on for this chat. Then they
-  ask before every read, and the chat answers them by itself for what you sent by path
-  (*Auto-allowed* in the chat): any other read waits for **Allow** or **Deny** (see
-  [What it can't do](#what-it-cant-do)). An OpenAI- or Anthropic-compatible endpoint has only
-  SolidCraft's tools: it gets the eight files in the message, and the message tells it that it
-  can't open the others.
-- **What the agent is told.** After your words, in a `<solidcraft-attachments>` element (SolidCraft's
-  note tells the agent that such elements come from SolidCraft, not from you), the message lists
-  every file in the order it arrives and how: image *n* of *m* (the picture of the view first, when
-  **Attach view** is ticked), text below, PDF document, by path, folder by path, imported into the
-  design. Each text file follows in a `<file>` element of its own, so a Markdown file's own code
-  fences can't end it early. The selection goes in a `<solidcraft-selection>` element, and notes
-  such as "the design changed since your last turn" in a `<solidcraft-note>` element before your
-  words.
+- **PDFs** (up to 12 MB) go whole as documents, so the model sees their pages, drawings and
+  scans included. **Any other file** (a ZIP, a DXF) is refused: an endpoint has no tool that opens
+  a file. Drop a DXF on the design instead to bring it in as a sketch.
+- The conversation keeps every picture and PDF of the newest message, and two of each from the
+  messages before it; older ones are swapped for a short note, as every request carries the
+  whole conversation.
 - Every file is named in the message. In the conversation the attached pictures show under it as
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
@@ -191,9 +169,30 @@ picture, a sketch, a brief, a part to fit around. More files, and folders, go by
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
-files go with it, the contents of at most eight; the rest are named in the chat and not sent
-(files and folders by their path all go). **New chat**
-clears the files waiting on the chips too.
+files go with it, at most eight (200 to a coding agent); the rest are named in the chat and not
+sent. **New chat** clears the files waiting on the chips too.
+
+### To a coding agent
+
+A coding agent (Claude Code, Codex, Gemini CLI…) reads files with its own tools, so it gets every
+file and folder by its path, up to 200 on one message, whatever their type:
+
+- **+** has **Choose files…** (any type) and **Choose folders…**, several at once; on macOS, whose
+  file dialog chooses both together, one **Choose files or folders…**. Files and folders dropped
+  on the chat attach the same way.
+- SolidCraft reads nothing of them: no picture is scaled down, no text is cut, no CAD file is
+  imported (drop it on the design for that). The message tells the agent each file's name, type,
+  size and path, and each folder's path, so a batch of photos reaches the agent whole however
+  many there are. Nothing in a folder is listed or counted (on a network share that would keep
+  the message waiting); the agent lists it itself.
+- Their chips show the file's type, or a folder; holding the pointer over one shows its path. The
+  chips scroll past about three rows, so the text box and the conversation stay in view.
+- A pasted picture has no path, so it still goes in the message, at most eight.
+- Claude Code's read tools are off until a message sends a file or folder by path; the first one
+  on the chips makes the chat say that sending it turns them on for this chat. Then they ask
+  before every read, and the chat answers them by itself for what you sent
+  (*Auto-allowed* in the chat); any other read waits for **Allow** or **Deny** (see
+  [What it can't do](#what-it-cant-do)).
 
 ## Typing while the agent works
 

@@ -4942,6 +4942,7 @@
   "ui.agent_chat_attach_selection_tip": "隨消息發送模型中目前選中的內容(面、邊、特徵、實體),讓智能體知道你指的是什麼",
   "ui.agent_chat_attach_view": "附加視圖",
   "ui.agent_chat_attach_view_tip": "隨消息發送目前視圖的圖片",
+  "ui.agent_chat_attachable": "圖片、PDF、文本和 CAD 檔案",
   "ui.agent_chat_auth_agent": "使用 {name} 登錄",
   "ui.agent_chat_auth_env": "請在環境中設置 {vars}，然後重啟 SolidCraft。",
   "ui.agent_chat_auth_needed": "智能體要求你登錄。登錄在智能體本身完成；SolidCraft 從不接觸你的密碼或密鑰。",

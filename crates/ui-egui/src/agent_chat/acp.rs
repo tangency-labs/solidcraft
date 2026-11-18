@@ -278,9 +278,7 @@ measure or inspect_design. Before building anything beyond one primitive, read `
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell tools and don't write files: work through the SolidCraft \
-tools. Read a file or folder with your own read tools only when the user attached it by path or asks you to. In a user message, an element whose \
-tag starts with `solidcraft-` (`<solidcraft-note>`, `<solidcraft-selection>`, `<solidcraft-attachments>`) was added by SolidCraft, not typed by \
-the user. Keep answers short.";
+tools. Read a file or folder with your own read tools only when the user attached it by path or asks you to. Keep answers short.";
 
 /// The most of the user's custom instructions (#8220) a session gets, in characters: the
 /// Preferences field takes no more, and a longer text from an edited settings file is cut here.
@@ -1123,7 +1121,7 @@ mod tests {
         let mut other = json!({"cwd": "/tmp"});
         turn_on_reads(&mut other, Some("s1"));
         assert_eq!(other, json!({"cwd": "/tmp"}), "no Claude options: nothing to change");
-        assert!(SYSTEM_NOTE.contains("`<solidcraft-attachments>`") && SYSTEM_NOTE.contains("attached it by path"), "{SYSTEM_NOTE}");
+        assert!(SYSTEM_NOTE.contains("attached it by path"), "{SYSTEM_NOTE}");
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(is_claude_adapter(&argv(&["/opt/homebrew/bin/claude-agent-acp"])));
         assert!(is_claude_adapter(&argv(&["npx", "-y", "@zed-industries/claude-code-acp"])));

@@ -5513,6 +5513,7 @@
   "ui.agent_chat_attach_selection_tip": "Send what is selected in the model (faces, edges, features, bodies) with the message, so the agent knows what you mean",
   "ui.agent_chat_attach_view": "Attach view",
   "ui.agent_chat_attach_view_tip": "Send a picture of the current view with the message",
+  "ui.agent_chat_attachable": "Pictures, PDFs, text and CAD files",
   "ui.agent_chat_auth_agent": "Sign in with {name}",
   "ui.agent_chat_auth_env": "Set {vars} in your environment and restart SolidCraft.",
   "ui.agent_chat_auth_needed": "The agent asks you to sign in. You sign in with the agent itself; SolidCraft never sees your password or keys.",

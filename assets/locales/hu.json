@@ -4117,6 +4117,7 @@
   "ui.agent_chat_attach_selection_tip": "A modellben kijelölt elemeket (lapok, élek, elemek, testek) elküldi az üzenettel együtt, hogy az ügynök tudja, mire gondol",
   "ui.agent_chat_attach_view": "Nézet csatolása",
   "ui.agent_chat_attach_view_tip": "Az aktuális nézet képének küldése az üzenettel",
+  "ui.agent_chat_attachable": "Képek, PDF-ek, szöveg- és CAD-fájlok",
   "ui.agent_chat_auth_agent": "Bejelentkezés: {name}",
   "ui.agent_chat_auth_env": "Állítsa be a(z) {vars} változót a környezetében, és indítsa újra a SolidCraftot.",
   "ui.agent_chat_auth_needed": "Az ügynök bejelentkezést kér. Magával az ügynökkel jelentkezik be; a SolidCraft soha nem látja a jelszavát vagy kulcsait.",

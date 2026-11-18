@@ -27,12 +27,15 @@ const MAX_TOOL_TEXT: usize = 20_000;
 const MODEL_NAME_CAP: usize = 256;
 /// Messages kept in the conversation (the system note stays).
 const MAX_HISTORY: usize = 240;
-/// Pictures of the view kept in the conversation. The whole history goes with every request
-/// (up to `MAX_REQUESTS_PER_TURN` per message), so older views are swapped for a short note:
-/// otherwise each attached view makes every later request bigger, until the endpoint refuses it.
+/// Pictures, and PDFs, kept from earlier messages in the conversation (the newest message keeps
+/// all of its own). The whole history goes with every request (up to `MAX_REQUESTS_PER_TURN` per
+/// message), so older ones are swapped for a short note: otherwise each attached view or file
+/// makes every later request bigger, until the endpoint refuses it.
 const MAX_HISTORY_IMAGES: usize = 2;
 /// What an older view becomes in the history.
 const DROPPED_VIEW_NOTE: &str = "[an earlier picture of the view, removed to keep the request small]";
+/// What an older PDF becomes in the history.
+const DROPPED_DOCUMENT_NOTE: &str = "[an earlier PDF, removed to keep the request small]";
 const DROPPED_THINKING_NOTE: &str = "[earlier reasoning, removed with older history]";
 /// How long one tool call may take (it may wait for the user's Allow, declined after four
 /// minutes). It does not depend on the endpoint's request timeout: a tool call is SolidCraft's own
@@ -296,6 +299,11 @@ fn openai_part_image_url(p: &Value) -> Option<&str> {
     p.pointer("/image_url/url").and_then(Value::as_str)
 }
 
+/// One OpenAI content part's file name and `data:` URL, if it is a file (a PDF).
+fn openai_part_file(p: &Value) -> Option<(&str, &str)> {
+    Some((p.pointer("/file/filename").and_then(Value::as_str).unwrap_or(""), p.pointer("/file/file_data").and_then(Value::as_str)?))
+}
+
 /// One OpenAI tool call's id and function name.
 fn openai_tool_call(c: &Value) -> (&str, &str) {
     (c.get("id").and_then(Value::as_str).unwrap_or(""), c.pointer("/function/name").and_then(Value::as_str).unwrap_or(""))
@@ -318,6 +326,10 @@ fn go_anthropic_messages(history: &[Value]) -> Vec<Value> {
                             && let Some((mime, data)) = go_data_url(url)
                         {
                             go_push_block(&mut out, "user", json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": data}}));
+                        } else if let Some((name, url)) = openai_part_file(p)
+                            && let Some((mime, data)) = go_data_url(url)
+                        {
+                            go_push_block(&mut out, "user", anthropic_document(name, mime, data));
                         }
                     }
                 }
@@ -370,6 +382,8 @@ fn go_responses_input(system: &str, history: &[Value]) -> Vec<Value> {
                         .filter_map(|p| {
                             if let Some(t) = openai_part_text(p) {
                                 Some(json!({"type": "input_text", "text": t}))
+                            } else if let Some((name, url)) = openai_part_file(p) {
+                                Some(json!({"type": "input_file", "filename": name, "file_data": url}))
                             } else {
                                 openai_part_image_url(p).map(|url| json!({"type": "input_image", "image_url": url}))
                             }
@@ -457,7 +471,7 @@ fn go_gemini_contents(history: &[Value], sigs: &std::collections::HashMap<String
                     for p in parts {
                         if let Some(t) = openai_part_text(p) {
                             go_push_part(&mut out, "user", json!({"text": t}));
-                        } else if let Some(url) = openai_part_image_url(p)
+                        } else if let Some(url) = openai_part_image_url(p).or_else(|| openai_part_file(p).map(|(_, url)| url))
                             && let Some((mime, data)) = go_data_url(url)
                         {
                             go_push_part(&mut out, "user", json!({"inlineData": {"mimeType": mime, "data": data}}));
@@ -807,6 +821,8 @@ impl Worker {
             self.emit(Event::Error(e));
         }
         self.emit(Event::ToolsAvailable(!self.tools.is_empty()));
+        // PDFs go as documents, which the model reads with their drawings.
+        self.emit(Event::Documents(true));
         self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
         // The endpoint's models for the picker. An endpoint that does not list them still shows the
         // configured model, and says why there are no others.
@@ -1341,25 +1357,33 @@ fn tool_arguments(raw: Option<&Value>) -> Result<Value, String> {
     }
 }
 
-/// The message for what the user typed (and the view, as the endpoint's own content blocks).
+/// A PDF as an Anthropic `document` block.
+fn anthropic_document(name: &str, mime: &str, data: &str) -> Value {
+    json!({"type": "document", "source": {"type": "base64", "media_type": mime, "data": data}, "title": name})
+}
+
+/// The message for what the user typed (and the view, pictures and PDFs, as the endpoint's own
+/// content blocks).
 fn user_message(protocol: Protocol, parts: &[PromptPart]) -> Value {
-    let images = parts.iter().any(|p| matches!(p, PromptPart::Image { .. }));
-    if !images {
+    let attached = parts.iter().any(|p| matches!(p, PromptPart::Image { .. } | PromptPart::Document { .. }));
+    if !attached {
         let text: Vec<&str> = parts.iter().filter_map(|p| if let PromptPart::Text(t) = p { Some(t.as_str()) } else { None }).collect();
         return json!({"role": "user", "content": text.join("\n")});
     }
     let content: Vec<Value> = parts
         .iter()
-        .filter_map(|p| match (protocol, p) {
-            (_, PromptPart::Text(t)) => Some(json!({"type": "text", "text": t})),
+        .map(|p| match (protocol, p) {
+            (_, PromptPart::Text(t)) => json!({"type": "text", "text": t}),
             (Protocol::OpenAi, PromptPart::Image { mime, base64 }) => {
-                Some(json!({"type": "image_url", "image_url": {"url": format!("data:{mime};base64,{base64}")}}))
+                json!({"type": "image_url", "image_url": {"url": format!("data:{mime};base64,{base64}")}})
             }
             (Protocol::Anthropic, PromptPart::Image { mime, base64 }) => {
-                Some(json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64}}))
+                json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64}})
             }
-            // These endpoints take no documents (the chat doesn't send any); the message names the file.
-            (_, PromptPart::Document { .. }) => None,
+            (Protocol::OpenAi, PromptPart::Document { name, mime, base64, .. }) => {
+                json!({"type": "file", "file": {"filename": name, "file_data": format!("data:{mime};base64,{base64}")}})
+            }
+            (Protocol::Anthropic, PromptPart::Document { name, mime, base64, .. }) => anthropic_document(name, mime, base64),
         })
         .collect();
     json!({"role": "user", "content": content})
@@ -1527,22 +1551,26 @@ fn anthropic_reply(body: &Value) -> Reply {
     Reply { text, calls, assistant, stop }
 }
 
-/// Keeps the newest `keep` pictures of the view in the history and swaps every older one for a
-/// short note, so the model still knows a view was shown. Text is never touched. Pictures come
-/// as OpenAI `image_url` parts or Anthropic `image` blocks, depending on the endpoint. True when
-/// a picture was swapped.
+/// Keeps every picture and PDF of the newest message (the one being sent, which may carry several)
+/// and the newest `keep` pictures and `keep` PDFs before it, and swaps every older one for a short
+/// note, so the model still knows it was shown. Text is never touched. Pictures come as OpenAI
+/// `image_url` parts or Anthropic `image` blocks, PDFs as `file` parts or `document` blocks,
+/// depending on the endpoint. True when one was swapped.
 fn drop_old_views(history: &mut [Value], keep: usize) -> bool {
-    let mut seen = 0;
+    let newest = history.iter().rposition(starts_a_turn).unwrap_or(history.len());
+    let (mut pictures, mut documents) = (0, 0);
     let mut dropped = false;
-    for msg in history.iter_mut().rev() {
+    for msg in history[..newest].iter_mut().rev() {
         let Some(content) = msg.get_mut("content").and_then(Value::as_array_mut) else { continue };
         for part in content.iter_mut().rev() {
-            if !matches!(part.get("type").and_then(Value::as_str), Some("image_url" | "image")) {
-                continue;
-            }
-            seen += 1;
-            if seen > keep {
-                *part = json!({"type": "text", "text": DROPPED_VIEW_NOTE});
+            let (seen, note) = match part.get("type").and_then(Value::as_str) {
+                Some("image_url" | "image") => (&mut pictures, DROPPED_VIEW_NOTE),
+                Some("file" | "document") => (&mut documents, DROPPED_DOCUMENT_NOTE),
+                _ => continue,
+            };
+            *seen += 1;
+            if *seen > keep {
+                *part = json!({"type": "text", "text": note});
                 dropped = true;
             }
         }
@@ -1851,8 +1879,9 @@ mod tests {
 
         h.push(json!({"role": "user", "content": "plain text"}));
         h.push(view(3));
+        h.push(view(4));
         assert!(drop_old_views(&mut h, 2));
-        assert_eq!(pictures(&h), vec!["data:image/png;base64,V2", "data:image/png;base64,V3"]);
+        assert_eq!(pictures(&h), vec!["data:image/png;base64,V2", "data:image/png;base64,V3", "data:image/png;base64,V4"]);
         // The oldest view is a note now; the words sent with it, and every other message, stay.
         assert_eq!(h[1]["content"][0]["text"], "look 1");
         assert_eq!(h[1]["content"][1], json!({"type": "text", "text": DROPPED_VIEW_NOTE}));
@@ -1873,8 +1902,50 @@ mod tests {
             h.push(json!({"role": "assistant", "content": "done"}));
         }
         let size = json!({"messages": h}).to_string().len();
-        assert_eq!(pictures(&h).len(), MAX_HISTORY_IMAGES);
-        assert!(size < (MAX_HISTORY_IMAGES + 1) * big.len(), "request body is {size} bytes");
+        assert_eq!(pictures(&h).len(), MAX_HISTORY_IMAGES + 1, "the newest message's, and two before it");
+        assert!(size < (MAX_HISTORY_IMAGES + 2) * big.len(), "request body is {size} bytes");
+    }
+
+    /// Every picture and PDF of the message being sent goes (Review: eight attached photos reached
+    /// an endpoint as their last two). PDFs go as the endpoint's own document parts; older ones,
+    /// past `keep`, become a note as older pictures do.
+    #[test]
+    fn the_newest_message_keeps_all_its_pictures_and_pdfs() {
+        let pdf = |n: u8| PromptPart::Document { name: format!("d{n}.pdf"), uri: String::new(), mime: "application/pdf".into(), base64: format!("D{n}") };
+        let photo = |n: u8| PromptPart::Image { mime: "image/jpeg".into(), base64: format!("P{n}") };
+        let mut parts = vec![PromptPart::Text("these".into())];
+        parts.extend((1..=8).map(photo));
+        parts.extend((1..=3).map(pdf));
+        let mut h = vec![json!({"role": "system", "content": "note"}), user_message(Protocol::OpenAi, &parts)];
+        assert!(!drop_old_views(&mut h, MAX_HISTORY_IMAGES));
+        assert_eq!(pictures(&h).len(), 8, "every photo of the message goes");
+        let files: Vec<&Value> = h[1]["content"].as_array().unwrap().iter().filter(|p| p["type"] == "file").collect();
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0]["file"], json!({"filename": "d1.pdf", "file_data": "data:application/pdf;base64,D1"}));
+        h.push(json!({"role": "assistant", "content": "ok"}));
+        h.push(user_message(Protocol::OpenAi, &[PromptPart::Text("next".into())]));
+        assert!(drop_old_views(&mut h, MAX_HISTORY_IMAGES));
+        assert_eq!(pictures(&h), vec!["data:image/jpeg;base64,P7", "data:image/jpeg;base64,P8"]);
+        let kept: Vec<&str> = h[1]["content"].as_array().unwrap().iter().filter_map(|p| p.pointer("/file/filename").and_then(Value::as_str)).collect();
+        assert_eq!(kept, ["d2.pdf", "d3.pdf"]);
+        assert_eq!(h[1]["content"].as_array().unwrap().iter().filter(|p| p["text"] == DROPPED_DOCUMENT_NOTE).count(), 1);
+
+        let anthropic = user_message(Protocol::Anthropic, &[PromptPart::Text("see".into()), pdf(1)]);
+        assert_eq!(
+            anthropic["content"][1],
+            json!({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "D1"}, "title": "d1.pdf"})
+        );
+        // OpenCode Go turns the OpenAI-shaped history into each model family's own parts.
+        let go = vec![user_message(Protocol::OpenAi, &[PromptPart::Text("see".into()), pdf(1)])];
+        assert_eq!(go_anthropic_messages(&go)[0]["content"][1], anthropic["content"][1]);
+        assert_eq!(
+            go_responses_input("sys", &go)[1]["content"][1],
+            json!({"type": "input_file", "filename": "d1.pdf", "file_data": "data:application/pdf;base64,D1"})
+        );
+        assert_eq!(
+            go_gemini_contents(&go, &std::collections::HashMap::new())[0]["parts"][1],
+            json!({"inlineData": {"mimeType": "application/pdf", "data": "D1"}})
+        );
     }
 
     #[test]
@@ -1885,11 +1956,11 @@ mod tests {
                 &[PromptPart::Text(format!("look {n}")), PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") }],
             )
         };
-        let mut h = vec![view(1), json!({"role": "assistant", "content": "ok"}), view(2), view(3)];
+        let mut h = vec![view(1), json!({"role": "assistant", "content": "ok"}), view(2), view(3), view(4)];
         drop_old_views(&mut h, 2);
         let kept: Vec<&str> =
             h.iter().filter_map(|m| m["content"].as_array()).flatten().filter_map(|p| p.pointer("/source/data").and_then(Value::as_str)).collect();
-        assert_eq!(kept, vec!["V2", "V3"]);
+        assert_eq!(kept, vec!["V2", "V3", "V4"]);
         assert_eq!(h[0]["content"][0]["text"], "look 1");
         assert_eq!(h[0]["content"][1], json!({"type": "text", "text": DROPPED_VIEW_NOTE}));
     }
@@ -3086,10 +3157,13 @@ mod tests {
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
-        for n in 1..=3 {
-            b.prompt(&[PromptPart::Text(format!("look {n}")), PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") }]);
-            wait_for_turn(&mut b);
-        }
+        let view = |n: &str| PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") };
+        b.prompt(&[PromptPart::Text("look 1".into()), view("1a"), view("1b")]);
+        wait_for_turn(&mut b);
+        b.prompt(&[PromptPart::Text("look 2".into()), view("2")]);
+        wait_for_turn(&mut b);
+        b.prompt(&[PromptPart::Text("look 3".into())]);
+        wait_for_turn(&mut b);
         b.prompt(&[PromptPart::Text("and now?".into())]);
         wait_for_turn(&mut b);
         b.shutdown(true);
@@ -3098,10 +3172,10 @@ mod tests {
         let replies = |i: usize| -> Vec<Value> {
             sent[i]["messages"].as_array().unwrap().iter().filter(|m| m["role"] == "assistant").map(|m| m["content"].clone()).collect()
         };
-        // Two views fit: the reply goes back untouched, signature and all.
+        // Two views before the message fit: the reply goes back untouched, signature and all.
         assert_eq!(replies(1)[0][0]["signature"], "s1");
-        // The third view drops the first: no earlier thinking is left, a thinking-only reply
-        // keeps a note, and the words stay.
+        // A third view before the message drops the oldest: no earlier thinking is left, a
+        // thinking-only reply keeps a note, and the words stay.
         let third = replies(2);
         assert_eq!(sent[2]["messages"][0]["content"][1]["text"], DROPPED_VIEW_NOTE);
         assert_eq!(third[0], json!([{"type": "text", "text": "Seen 1."}]));

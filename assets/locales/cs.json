@@ -4848,6 +4848,7 @@
   "ui.agent_chat_attach_selection_tip": "Odešle se zprávou to, co je v modelu vybráno (plochy, hrany, prvky, tělesa), aby agent věděl, co máte na mysli",
   "ui.agent_chat_attach_view": "Přiložit pohled",
   "ui.agent_chat_attach_view_tip": "Odeslat se zprávou obrázek aktuálního pohledu",
+  "ui.agent_chat_attachable": "Obrázky, PDF, text a soubory CAD",
   "ui.agent_chat_auth_agent": "Přihlásit se přes {name}",
   "ui.agent_chat_auth_env": "Nastavte {vars} v proměnných prostředí a restartujte SolidCraft.",
   "ui.agent_chat_auth_needed": "Agent žádá o přihlášení. Přihlašujete se přímo u agenta; SolidCraft vaše heslo ani klíče nikdy nevidí.",

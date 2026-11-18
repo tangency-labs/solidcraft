@@ -71,11 +71,13 @@ pub enum PanelAction {
         at: Option<usize>,
     },
     AttachDropped(Vec<std::path::PathBuf>),
-    /// Choose files of any type to attach, one or several.
+    /// Choose files to attach, one or several: for an endpoint, those the chat can send or import;
+    /// for a coding agent, any type.
     ChooseAttachment,
-    /// Choose folders to attach, one or several: the agent is told where each is.
+    /// Choose folders to attach, one or several, for a coding agent: it is told where each is.
     ChooseFolder,
-    /// Choose files and folders in one dialog, where the host's dialog can (macOS).
+    /// Choose files and folders in one dialog, for a coding agent, where the host's dialog can
+    /// (macOS).
     ChooseAny,
     /// Attach the clipboard's picture (desktop only, as the clipboard reader is).
     #[cfg(not(target_arch = "wasm32"))]
@@ -131,10 +133,14 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         }
         PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
         PanelAction::StartPick { at } => start_pick(app, at),
-        PanelAction::AttachDropped(paths) => attach_paths(app, paths.into_iter()),
-        PanelAction::ChooseAttachment => app.pick_files(|app, paths| attach_paths(app, paths.into_iter().map(std::path::PathBuf::from))),
-        PanelAction::ChooseFolder => app.pick_folders(|app, paths| attach_paths(app, paths.into_iter().map(std::path::PathBuf::from))),
-        PanelAction::ChooseAny => app.pick_files_or_folders(|app, paths| attach_paths(app, paths.into_iter().map(std::path::PathBuf::from))),
+        PanelAction::AttachDropped(paths) => attach_dropped(app, paths.into_iter()),
+        PanelAction::ChooseAttachment => {
+            // A coding agent reads any file itself; an endpoint gets what the chat can send or import.
+            let exts = if takes_paths(app) { Vec::new() } else { attach::extensions() };
+            app.pick_files(tr("ui.agent_chat_attachable"), &exts, |app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from)))
+        }
+        PanelAction::ChooseFolder => app.pick_folders(|app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from))),
+        PanelAction::ChooseAny => app.pick_files_or_folders(|app, paths| attach_dropped(app, paths.into_iter().map(std::path::PathBuf::from))),
         #[cfg(not(target_arch = "wasm32"))]
         PanelAction::PastePicture => {
             if let Err(e) = paste_picture(app) {
@@ -224,8 +230,8 @@ pub struct PanelView {
     pub shared: bool,
     /// The composer's height the shared host measured last time, if it has.
     pub composer_height: Option<f32>,
-    /// The host's file dialog chooses files and folders together (macOS): the + menu offers one
-    /// Choose files or folders… instead of Choose files… and Choose folders….
+    /// The host's file dialog chooses files and folders together (macOS): the + menu offers a
+    /// coding agent one Choose files or folders… instead of Choose files… and Choose folders….
     pub mixed_picker: bool,
 }
 
@@ -1194,7 +1200,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_min_height(Tokens::get().control_height + Tokens::get().space_2);
-                        add_menu(chat, view.mixed_picker, ui);
+                        add_menu(chat, view, ui);
                         let mode = view.permission;
                         let permissions = ui
                             .allocate_ui(vec2(Tokens::get().space_24 * 4.0, Tokens::get().control_height), |ui| {
@@ -2627,11 +2633,11 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
 }
 
 /// What a chip says when the pointer rests on it: the file's name; for one that goes by its path,
-/// that place and what the agent does with it.
+/// that place (and for a folder, what the agent does with it).
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn chip_tip(f: &attach::Attachment) -> String {
     match &f.content {
-        attach::Content::Reference { path, .. } => format!("{}\n{}", path.display(), tr("ui.agent_chat_file_by_place_tip")),
+        attach::Content::Reference { path, .. } => path.display().to_string(),
         attach::Content::Folder { path, .. } => format!("{}\n{}", path.display(), tr("ui.agent_chat_folder_tip")),
         _ => f.name.clone(),
     }
@@ -2756,13 +2762,17 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
     clicked
 }
 
-/// The + button: choose files of any type and folders, several at once (in one dialog where the
-/// host's dialog mixes them, `mixed`; else one item for each), or paste the clipboard's picture.
+/// The + button: choose files, several at once, or paste the clipboard's picture. For a coding
+/// agent, folders too, and files of any type (in one dialog where the host's dialog mixes them;
+/// else one item for each).
 #[cfg(not(target_arch = "wasm32"))]
-fn add_menu(chat: &mut AgentChat, mixed: bool, ui: &mut egui::Ui) {
+fn add_menu(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
+    let takes_paths = view.current.as_ref().is_some_and(|e| !e.kind.is_api());
     let mut picked = None;
     let r = ui_kit::action_menu(ui, "+", |ui| {
-        let mut items = if mixed {
+        let mut items = if !takes_paths {
+            vec![("ui.agent_chat_add_file", "agent_chat:add_file", None, PanelAction::ChooseAttachment)]
+        } else if view.mixed_picker {
             vec![("ui.agent_chat_add_any", "agent_chat:add_any", Some("ui.agent_chat_add_folder_tip"), PanelAction::ChooseAny)]
         } else {
             vec![
