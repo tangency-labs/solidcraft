@@ -1181,6 +1181,58 @@ fn graphics_restart_uses_normal_quit_and_keeps_the_saved_tab_paths() {
     assert!(!take_graphics_restart(&mut h.app));
 }
 
+/// A verified macOS disk image never opens while the old app is still running. Quit and
+/// update goes through the normal Save / Discard / Cancel flow; after cancelling, the same
+/// verified image can be used again without downloading it (#18844).
+#[test]
+fn verified_macos_update_waits_for_quit_and_retries_after_cancel() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.save_prompt_one_at_a_time = true;
+    h.app.updater.started = true;
+    h.app.updater.kind = Some(InstallKind::MacApp("/Applications/SolidCraft.app".into()));
+    h.app.updater.managed = Some(None);
+    h.app.updater.release = Some(release());
+    h.app.updater.open = true;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    assert!(h.app.session.is_dirty());
+
+    let dmg = PathBuf::from("/tmp/SolidCraft update '0.45'.dmg");
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.job = Some((rx, Arc::new(install::Progress::default())));
+    tx.send(Ok(install::Outcome::DmgReady(dmg.clone()))).unwrap();
+    poll_install(&mut h.app);
+    assert_eq!(h.app.updater.installed, Some(Ok(install::Outcome::DmgReady(dmg.clone()))));
+    assert!(h.app.updater.launch.is_none() && !h.app.quit_requested, "downloading and verifying must not open Finder or quit");
+    h.frames(3);
+    assert!(h.widget("Quit and update").is_some(), "a separate, deliberate quit action is offered");
+    assert!(h.widget("1. Choose Quit and update, then save any unsaved designs when prompted.").is_some());
+    assert!(h.widget("2. In Finder, drag SolidCraft to Applications, replacing the previous version.").is_some());
+
+    let button = h.widget("Quit and update").unwrap();
+    h.call("ui.click", json!({"x":button[0],"y":button[1]}));
+    assert!(!h.app.quit_requested);
+    assert!(h.app.docs.quitting.is_some(), "dirty designs must get a save prompt");
+    let helper = install::open_dmg_after_exit(&dmg, std::process::id());
+    assert_eq!(h.app.updater.launch, Some(helper.clone()));
+    assert!(!take_graphics_restart(&mut h.app), "opening the DMG must not restart the app");
+
+    crate::documents::control(&mut h.app, &json!({"answer":"cancel"}));
+    tick(&mut h.app, &h.ctx);
+    assert!(h.app.docs.quitting.is_none() && !h.app.quit_requested);
+    assert!(take_launch(&mut h.app).is_none(), "Cancel must suppress Finder launch");
+    assert!(h.app.session.is_dirty(), "Cancel must preserve edits");
+    assert_eq!(h.app.updater.installed, Some(Ok(install::Outcome::DmgReady(dmg.clone()))), "the verified image remains ready");
+    h.frames(2);
+    assert!(h.widget("Quit and update").is_some(), "the user can retry without a download");
+
+    h.app.session.mark_saved();
+    quit_and_open_dmg(&mut h.app);
+    assert!(h.app.quit_requested, "a clean design can quit normally");
+    assert_eq!(take_launch(&mut h.app), Some(helper));
+    assert!(take_launch(&mut h.app).is_none(), "the DMG is only opened once");
+}
+
 #[test]
 fn an_installer_completing_during_graphics_restart_owns_the_pending_launch() {
     let mut h = crate::scenario::Harness::new();

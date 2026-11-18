@@ -937,17 +937,24 @@ fn poll_install(app: &mut SolveApp) {
             app.updater.graphics_restart = false;
             crate::documents::request_quit(app);
         }
-        Ok(install::Outcome::Opened(dmg)) => {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let _ = std::process::Command::new("open").arg(dmg).spawn();
-            }
-            let _ = dmg;
-        }
+        // A verified macOS disk image waits for an explicit Quit and update action.
+        // Starting Finder while the old app is running makes dragging the new bundle fail.
+        Ok(install::Outcome::DmgReady(_)) => {}
         Ok(install::Outcome::Restart(_)) => {}
         Err(e) => log::warn!("update: {e}"),
     }
     app.updater.installed = Some(result);
+}
+
+/// Quit using the normal save/Discard/Cancel prompts and open the verified macOS disk
+/// image only after the old executable has fully exited (#18844). Cancellation clears the
+/// pending launch, while the verified DMG remains available for a later attempt.
+pub fn quit_and_open_dmg(app: &mut SolveApp) {
+    if let Some(Ok(install::Outcome::DmgReady(dmg))) = &app.updater.installed {
+        app.updater.launch = Some(install::open_dmg_after_exit(dmg, std::process::id()));
+        app.updater.graphics_restart = false;
+        crate::documents::request_quit(app);
+    }
 }
 
 /// Restart now: close (asking about unsaved designs), then start the new version.
@@ -1019,12 +1026,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let state = match &app.updater.installed {
         _ if downloading => State::Downloading,
         Some(Ok(install::Outcome::Restart(_))) => State::Restart,
-        Some(Ok(install::Outcome::Installer(..) | install::Outcome::Opened(_))) => State::Started,
+        Some(Ok(install::Outcome::Installer(..))) => State::Started,
+        Some(Ok(install::Outcome::DmgReady(_))) => State::ReadyDmg,
         _ => State::Offer,
     };
     let primary = match (&install, one_click) {
         (Some(install::Method::Msi), true) => solidcraft_ui_text::tr("update.install_msi"),
-        (Some(install::Method::Dmg), true) => solidcraft_ui_text::tr("update.download_open"),
+        (Some(install::Method::Dmg), true) => solidcraft_ui_text::tr("update.prepare_dmg"),
         (Some(_), true) => solidcraft_ui_text::tr("update.update_now"),
         _ if kind.system_managed() => solidcraft_ui_text::tr("update.release_page"),
         _ => solidcraft_ui_text::tr("update.download"),
@@ -1033,6 +1041,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (ok, cancel, apply) = match state {
         State::Downloading => ("", solidcraft_ui_text::tr("ui.cancel"), None),
         State::Restart => (solidcraft_ui_text::tr("update.restart"), solidcraft_ui_text::tr("update.restart_later"), None),
+        State::ReadyDmg => (solidcraft_ui_text::tr("update.quit_and_update"), solidcraft_ui_text::tr("ui.close"), None),
         State::Started => ("", solidcraft_ui_text::tr("ui.close"), None),
         // Managed: nothing here installs or downloads; the launcher does.
         State::Offer if managed.is_some() => ("", solidcraft_ui_text::tr("update.later"), Some(solidcraft_ui_text::tr("update.skip"))),
@@ -1099,8 +1108,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 (_, Some(Ok(install::Outcome::Installer(..))), _) => {
                     ui_kit::text(ui, solidcraft_ui_text::tr("update.installer_started"), ui_kit::Text::Report("installer", false));
                 }
-                (_, Some(Ok(install::Outcome::Opened(_))), _) => {
-                    ui_kit::text(ui, solidcraft_ui_text::tr("update.dmg_opened"), ui_kit::Text::Report("dmg", false));
+                (State::ReadyDmg, Some(Ok(install::Outcome::DmgReady(_))), _) => {
+                    // The disk image stays closed until the app has quit. Show the actual
+                    // order of operations, with the first step as the primary button.
+                    ui_kit::text(ui, solidcraft_ui_text::tr("update.dmg_ready"), ui_kit::Text::Report("dmg_ready", false));
+                    for (key, name) in [
+                        ("update.dmg_step_quit", "dmg_step_quit"),
+                        ("update.dmg_step_copy", "dmg_step_copy"),
+                        ("update.dmg_step_reopen", "dmg_step_reopen"),
+                    ] {
+                        ui_kit::text(ui, solidcraft_ui_text::tr(key), ui_kit::Text::Note(name));
+                    }
                 }
                 (_, Some(Err(e)), _) => {
                     ui_kit::text(ui, &solidcraft_ui_text::format("update.install_failed", &[("error", e)]), ui_kit::Text::Report("failed", true));
@@ -1122,7 +1140,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         (State::Offer, ui_kit::Action::Cancel) => Some("later"),
         (State::Offer, _) if also_download => Some("download"),
         (State::Restart, ui_kit::Action::Ok) => Some("restart"),
-        (State::Restart | State::Started, ui_kit::Action::Cancel) => Some("close"),
+        (State::ReadyDmg, ui_kit::Action::Ok) => Some("quit_dmg"),
+        (State::Restart | State::ReadyDmg | State::Started, ui_kit::Action::Cancel) => Some("close"),
         (State::Downloading, ui_kit::Action::Cancel) => Some("cancel_download"),
         _ => None,
     };
@@ -1143,6 +1162,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
         Some("install") => start_install(app, ctx),
         Some("restart") => restart(app),
+        Some("quit_dmg") => quit_and_open_dmg(app),
         Some("close") => app.updater.open = false,
         Some("cancel_download") => {
             // Drop the job from the UI at once so Cancel leaves "Downloading" immediately; the
@@ -1196,8 +1216,10 @@ enum State {
     Downloading,
     /// The update is installed and waits for a restart.
     Restart,
-    /// An installer or disk image was started; nothing is left to do here.
+    /// An installer is waiting for SolidCraft to close.
     Started,
+    /// A verified macOS disk image waits for Quit and update before Finder opens.
+    ReadyDmg,
 }
 
 /// Preferences ▸ General: the automatic check and Check now.
