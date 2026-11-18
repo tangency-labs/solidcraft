@@ -374,16 +374,15 @@ impl CommandSpec {
         if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
             return Err("finish or cancel the sheet sketch before switching drawings".into());
         }
-        // One sketch is edited at a time: the model's or a sheet's.
-        if s.active_sketch.is_some() && matches!(self.id, "drawing.sketch.create" | "drawing.sketch.edit") {
-            return Err("finish or cancel the model's sketch before editing a sheet sketch".into());
-        }
+        // Nothing a drawing does holds the model's commands: an open drawing, or a sheet sketch
+        // being edited in it, leaves them working, and the views they change wait for the
+        // drawing's Update. The model drives the drawing, never the reverse.
         match (self.part, s.open_drawing.is_some()) {
-            // An open drawing leaves the model's commands working (the views they change wait
-            // for the drawing's Update); only a sheet sketch being edited holds them, as the
-            // model's own sketch mode holds the drawing's sketches.
-            (Part::Model, true) if s.sheet_sketching() => {
-                Err("a sheet sketch is being edited: finish or cancel it to change the model (sketch.finish or sketch.cancel)".into())
+            // A tool of the model's sketch has no sketch to work on while the sheet's is the one
+            // being edited (and the model's isn't): it isn't offered on a sheet. That holds no
+            // model command: entering a model sketch ends the sheet's (`Session::execute`).
+            (Part::Model, true) if s.sheet_sketching() && s.active_sketch.is_none() && std::ptr::fn_addr_eq(self.enabled, in_sketch as Enabled) => {
+                Err("not available on a sheet sketch".into())
             }
             (Part::Drawing, false) => Err("open a drawing first (drawing.open, or drawing.create)".into()),
             _ => (self.enabled)(s),

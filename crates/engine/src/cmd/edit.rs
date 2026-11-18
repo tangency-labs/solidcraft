@@ -379,7 +379,8 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
             section: snap.section.clone(),
             ..was.clone()
         },
-        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), ..snap },
+        // A sheet sketch being edited stays as it is: the model's steps never end or start one.
+        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);

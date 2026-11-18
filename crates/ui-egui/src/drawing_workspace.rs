@@ -65,12 +65,8 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
             open_a_drawing(app);
         }
     } else if active(app) {
-        // The drawing stays open, on its sheet and zoom, for when Drawing is entered again: the
-        // model's commands work with it open. A sheet sketch is Drawing's own edit mode, as a
-        // sketch is Design's, so the user finishes it before leaving.
-        if app.session.sheet_sketching() {
-            return Err("Finish or cancel the sheet sketch before leaving Drawing".into());
-        }
+        // The drawing stays open, on its sheet and zoom, with a sheet sketch being edited still
+        // being edited, for when Drawing is entered again: the model's commands work with either.
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         swap_selection(app);
         sync_history(app);
@@ -128,7 +124,7 @@ pub(crate) fn swap_selection(app: &mut SolveApp) {
 /// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the
 /// model's everywhere else, a drawing open or not.
 pub(crate) fn sync_history(app: &mut SolveApp) {
-    app.session.undo_in_model = !active(app);
+    app.session.model_focus = !active(app);
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -1056,23 +1052,32 @@ mod tests {
         assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
     }
 
-    /// A sheet sketch is Drawing's edit mode: leaving Drawing waits until it is finished, and the
-    /// drawing then stays open.
+    /// A sheet sketch being edited never holds Design: Drawing can be left with it open, the
+    /// model's commands and sketch tools work on the model there, undo takes the model's steps, and
+    /// back in Drawing the sheet sketch is still being edited.
     #[test]
-    fn a_sheet_sketch_keeps_the_user_in_drawing_until_it_is_finished() {
+    fn a_sheet_sketch_stays_open_in_drawing_while_design_changes_the_model() {
         let mut h = Harness::new();
         let drawing = drawing_with_a_view(&mut h);
         let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
         h.app.run("drawing.sketch.create", serde_json::json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        assert!(crate::workspace::enter(&mut h.app, "design").is_err());
-        assert!(active(&h.app));
-        assert_eq!(h.app.session.open_drawing, drawing);
-        let refused = h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap_err();
-        assert!(refused.contains("a sheet sketch is being edited"), "{refused}");
-        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        let sketch = h.app.session.active_sheet_sketch.clone();
         crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(!active(&h.app));
         assert_eq!(h.app.session.open_drawing, drawing);
+        let features = h.app.session.doc.features.len();
         h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features + 1, "the model changes with the sheet sketch open");
+        h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", serde_json::json!({"center": [0, 0], "radius": 3})).unwrap();
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        assert_eq!(h.app.session.active_sheet_sketch, sketch, "the model's sketch leaves the sheet sketch alone");
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and so does the model's undo");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert!(h.app.session.sheet_sketching(), "back in Drawing the sheet sketch is still being edited");
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        assert!(h.app.session.active_sheet_sketch.is_none());
     }
 
     #[test]

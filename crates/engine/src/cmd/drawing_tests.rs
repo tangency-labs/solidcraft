@@ -1799,7 +1799,6 @@ fn sheet_editor_rejects_cross_targets_model_tools_and_source_mutation() {
         ("sketch.line", json!({"points": ["vertex:1,2,3",[4,5]]})),
         ("sketch.dimension", json!({"entities": [], "value": "Forbidden = 3"})),
         ("sketch.project", json!({"refs": []})),
-        ("sketch.create", json!({"plane": "XY"})),
         ("drawing.close", json!({})),
         ("drawing.open", json!({"drawing": made["drawing"]})),
         ("drawing.delete", json!({"drawing": made["drawing"]})),
@@ -1911,7 +1910,8 @@ fn sheet_editor_commands_and_refusals_do_not_evaluate_a_stale_model() {
     run(&mut s, "drawing.sketch.create", json!({"owner": drawing["sheets"][0]["id"]}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [15,10], "p1": [55,30]}));
     run(&mut s, "drawing.sketch.inspect", json!({}));
-    refused(&mut s, "solid.box", json!({"length": 3,"width": 3,"height": 3}));
+    // A refusal on the sheet (model commands are no longer refused there, so a drawing switch).
+    refused(&mut s, "drawing.close", json!({}));
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.redo", json!({}));
     run(&mut s, "sketch.finish", json!({}));
@@ -3583,17 +3583,13 @@ fn sheet_batch_command_capability_matrix_refuses_unsafe_record_families() {
     ] {
         assert!(find_command(id).unwrap().allowed(&s).is_ok(), "{id} should accept an active drawing-owned sketch");
     }
-    for id in [
-        "sketch.text",
-        "sketch.edit_text",
-        "sketch.offset",
-        "sketch.pattern.circular",
-        "sketch.pattern.rectangular",
-        "sketch.drag_end",
-        "sketch.create",
-        "sketch.edit",
-    ] {
+    for id in ["sketch.text", "sketch.edit_text", "sketch.offset", "sketch.pattern.circular", "sketch.pattern.rectangular", "sketch.drag_end"] {
         assert!(find_command(id).unwrap().allowed(&s).is_err(), "{id} is not admitted on a sheet");
+    }
+    // Entering a model sketch is the model's command, which a sheet sketch never holds: it ends
+    // the sheet sketch instead (`a_sheet_sketch_holds_no_model_command`).
+    for id in ["sketch.create", "sketch.edit"] {
+        assert!(find_command(id).unwrap().allowed(&s).is_ok(), "{id} is the model's and runs");
     }
 }
 
@@ -4318,4 +4314,51 @@ fn sheet_sketch_creation_reserves_current_and_retired_image_ids() {
             assert_eq!((s.evaluations, s.doc.features.clone()), (evaluations, features));
         }
     }
+}
+
+/// A sheet sketch being edited holds no model command: one runs against the model with the
+/// sheet sketch still open, as its own model step, and the model's undo leaves the sheet sketch
+/// being edited. Entering a model sketch from a script (nothing shows the model) ends the sheet
+/// sketch as Finish would, since the shared sketch tools reach one sketch only; the model's
+/// command is never refused.
+#[test]
+fn a_sheet_sketch_holds_no_model_command() {
+    let mut s = design();
+    run(&mut s, "drawing.create", json!({}));
+    let owner = ids::encode(open_one(&s).sheets[0].id);
+    run(&mut s, "drawing.sketch.create", json!({"owner": owner}));
+    let editing = s.active_sheet_sketch.clone();
+    assert!(editing.is_some() && s.sheet_sketching());
+    let features = s.doc.features.len();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [60, 0, 0], "operation": "new"}));
+    assert_eq!(s.doc.features.len(), features + 1, "the model changes under the sheet sketch");
+    assert_eq!(s.active_sheet_sketch, editing, "which stays open");
+    assert_eq!(s.undo.last().unwrap().part, None, "the box is the model's step");
+    s.model_focus = true;
+    assert!(!s.sheet_sketching(), "with the model shown, the sketch tools are the model's");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features.len(), features, "the model's undo");
+    assert_eq!(s.active_sheet_sketch, editing, "leaves the sheet sketch being edited");
+    s.model_focus = false;
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    assert!(s.active_sketch.is_some(), "the model's sketch is entered");
+    assert!(s.active_sheet_sketch.is_none(), "and the sheet sketch is finished, its edits kept in the drawing");
+}
+
+/// An open drawing changes whether no model command can run: every `Part::Model` command is
+/// allowed with the drawing open exactly when it is with the drawing closed, and Select All
+/// (Ctrl+A) runs in Design (`model_focus`) with it open.
+#[test]
+fn an_open_drawing_allows_every_model_command_it_would_without_one() {
+    let mut s = design();
+    run(&mut s, "drawing.create", json!({}));
+    let open = s.open_drawing;
+    let with_drawing: Vec<_> = command_specs().iter().filter(|c| c.part == Part::Model).map(|c| (c.id, c.allowed(&s).is_ok())).collect();
+    run(&mut s, "drawing.close", json!({}));
+    let without: Vec<_> = command_specs().iter().filter(|c| c.part == Part::Model).map(|c| (c.id, c.allowed(&s).is_ok())).collect();
+    assert_eq!(with_drawing, without);
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(open.unwrap())}));
+    s.model_focus = true;
+    run(&mut s, "select.all", json!({}));
+    assert!(!s.selection.is_empty(), "Select All in Design picks the model's bodies with a drawing open");
 }

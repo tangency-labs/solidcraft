@@ -601,10 +601,11 @@ pub struct Session {
     /// The drawing open (by id): drawing commands change it. The model's commands work with it
     /// open too ([`cmd::Part`]); the views they leave out of date wait for the drawing's Update.
     pub open_drawing: Option<u64>,
-    /// Undo and redo take the model's steps even with a drawing open: the app sets it outside its
-    /// Drawing workspace, so each workspace undoes its own steps. Off (the default), they take
-    /// the open drawing's ([`Session::history_part`]).
-    pub undo_in_model: bool,
+    /// The host shows the model (the app's Design and Render): undo, redo and the shared sketch
+    /// tools take the model's part even with a drawing open or a sheet sketch entered in it, so
+    /// each workspace works on its own part and none holds another. Off (the default), they take
+    /// the open drawing's ([`Session::history_part`], [`Session::sheet_sketching`]).
+    pub model_focus: bool,
     /// The design as it was when the open sketch was entered, for Cancel Sketch.
     pub(crate) sketch_entry: Option<SketchEntry>,
     /// Sketch temporarily shown while editing a feature that consumes it. View state only.
@@ -1070,7 +1071,7 @@ impl Session {
             active_sketch: None,
             active_sheet_sketch: None,
             open_drawing: None,
-            undo_in_model: false,
+            model_focus: false,
             sketch_entry: None,
             feature_edit_sketch: None,
             selection: Vec::new(),
@@ -1468,15 +1469,15 @@ impl Session {
     }
 
     /// Whose steps undo and redo go through: the open drawing's (by id), or the model's (`None`),
-    /// with none open or when [`Session::undo_in_model`] is set.
+    /// with none open or when [`Session::model_focus`] is set.
     pub fn history_part(&self) -> Option<u64> {
-        self.open_drawing.filter(|_| !self.undo_in_model)
+        self.open_drawing.filter(|_| !self.model_focus)
     }
 
-    /// A sheet sketch of the open drawing is being edited: the shared sketch tools work on it, not
-    /// on the model's sketch.
+    /// A sheet sketch of the open drawing is being edited, and the host isn't showing the model
+    /// ([`Session::model_focus`]): the shared sketch tools work on it, not on the model's sketch.
     pub fn sheet_sketching(&self) -> bool {
-        self.active_sheet_sketch.as_ref().is_some_and(|entry| self.open_drawing == Some(entry.drawing))
+        !self.model_focus && self.active_sheet_sketch.as_ref().is_some_and(|entry| self.open_drawing == Some(entry.drawing))
     }
 
     /// The drawing open, for `cmd`.
@@ -2291,7 +2292,7 @@ impl Session {
         // The command, the evaluation it causes and the refresh after it: one profiler span.
         let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
-        let undo_in_model = self.undo_in_model;
+        let model_focus = self.model_focus;
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
@@ -2411,12 +2412,19 @@ impl Session {
         // so its capability metadata survives those document lifecycle commands.
         self.render_viewport = host_viewport;
         // Which workspace undoes what is the host's too, whichever design is open.
-        self.undo_in_model = undo_in_model;
+        self.model_focus = model_focus;
         if self.render_jobs.host.is_none() && host_jobs.is_some() {
             self.set_render_job_host(host_jobs)?;
         }
         for (host, _) in additional_jobs {
             self.register_render_job_host(host)?;
+        }
+        // A model sketch entered while a sheet sketch is edited, with the host not showing the
+        // model (a script), ends the sheet sketch as Finish would: its edits are already in the
+        // drawing. The shared sketch tools can reach one sketch only, and the model's is what
+        // the command asked for; the model's command is never the one refused.
+        if !self.model_focus && self.active_sketch.is_some() && before.active_sketch.is_none() && self.active_sheet_sketch.is_some() {
+            self.active_sheet_sketch = None;
         }
         // A command that closed the drawing, or opened another, ends its sheet scenes.
         drawing_scene::forget_closed(self);
@@ -2587,8 +2595,11 @@ impl Session {
             return v;
         }
         let Some(out) = v.as_object_mut() else { return v };
-        if let Some(entry) =
-            self.active_sheet_sketch.as_ref().or(before.active_sheet_sketch.as_ref()).filter(|entry| self.open_drawing == Some(entry.drawing))
+        if let Some(entry) = self
+            .active_sheet_sketch
+            .as_ref()
+            .or(before.active_sheet_sketch.as_ref())
+            .filter(|entry| !self.model_focus && self.open_drawing == Some(entry.drawing))
         {
             let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
             if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
@@ -2692,7 +2703,7 @@ impl Session {
             active_sketch: self.active_sketch,
             active_sheet_sketch: self.active_sheet_sketch.clone(),
             open_drawing: self.open_drawing,
-            undo_in_model: self.undo_in_model,
+            model_focus: self.model_focus,
             sketch_entry: None,
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),

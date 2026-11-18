@@ -4438,23 +4438,20 @@ mod tests {
         assert_eq!(drawings(&mut a), [Value::Null, expected]);
     }
 
-    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does; a sheet
-    /// sketch entered there holds them in that tab only, and is still active after a round trip.
+    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does, with a
+    /// sheet sketch being edited there too; the sheet sketch stays in its own tab and is still
+    /// active after a round trip.
     #[test]
-    fn a_tabs_sheet_sketch_holds_model_commands_only_in_that_tab() {
-        let gate = "a sheet sketch is being edited";
+    fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
         let mut a = app();
         let [sheet, _] = two_sheet_drawing(&mut a);
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
         assert!(a.session.open_drawing.is_some(), "with the drawing still open");
         a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        let refused = |a: &mut SolveApp| a.run("solid.sphere", json!({"diameter": 4})).unwrap_err();
-        assert!(refused(&mut a).contains(gate), "{}", refused(&mut a));
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_some(), "a model command leaves the sheet sketch open");
         new_design(&mut a);
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
-        switch(&mut a, 0);
-        assert!(refused(&mut a).contains(gate));
-        switch(&mut a, 1);
         assert!(a.session.active_sheet_sketch.is_none());
         switch(&mut a, 0);
         assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
