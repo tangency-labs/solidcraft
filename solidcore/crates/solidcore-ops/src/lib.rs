@@ -43,6 +43,7 @@ pub mod cancel;
 pub mod cap;
 pub mod cell_grid;
 pub mod check;
+pub mod conic_projection;
 pub mod contact;
 pub mod continuity;
 pub mod curve;
@@ -57,6 +58,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod fit_projection;
 pub mod hatch;
 pub mod heal;
 pub mod import_geometry;
@@ -70,11 +72,13 @@ pub mod path_export;
 pub mod pcurve;
 pub mod pick;
 pub mod plate_contact;
+pub mod point_identity;
 pub mod prism;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
 pub mod session;
+pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
@@ -109,6 +113,7 @@ pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
     EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample, MassPropertiesEstimate,
     MembersClosest, Normal, PointClass, PointSetSummary, RayEntity, RayHit, SquareFaceLevel,
+    EDGE_POINTS_MAX,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;

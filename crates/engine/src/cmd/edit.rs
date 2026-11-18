@@ -291,7 +291,7 @@ fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
 }
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let at = latest(&s.undo, s.open_drawing).ok_or_else(|| nothing(s, "undo"))?;
+    let at = latest(&s.undo, s.history_part()).ok_or_else(|| nothing(s, "undo"))?;
     let prev = s.undo.get(at).cloned().ok_or_else(|| nothing(s, "undo"))?;
     let now = go_to(s, prev, "edit.undo")?;
     s.undo.remove(at);
@@ -301,7 +301,7 @@ fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let at = latest(&s.redo, s.open_drawing).ok_or_else(|| nothing(s, "redo"))?;
+    let at = latest(&s.redo, s.history_part()).ok_or_else(|| nothing(s, "redo"))?;
     let next = s.redo.get(at).cloned().ok_or_else(|| nothing(s, "redo"))?;
     let now = go_to(s, next, "edit.redo")?;
     s.redo.remove(at);
@@ -352,14 +352,14 @@ fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
     ))
 }
 
-/// Takes the latest of `steps` on `part` (the open drawing, else the model): undo and redo go
-/// through one part's steps, and leave the others' where they are.
+/// Takes the latest of `steps` on `part` ([`Session::history_part`]: the open drawing, else the
+/// model): undo and redo go through one part's steps, and leave the others' where they are.
 fn latest(steps: &[Snapshot], part: Option<u64>) -> Option<usize> {
     steps.iter().rposition(|step| step.part == part)
 }
 
 fn nothing(s: &Session, what: &str) -> EngineError {
-    match s.open_drawing {
+    match s.history_part() {
         Some(_) => EngineError::Other(format!("nothing to {what} in this drawing (close it to {what} in the model)")),
         None => EngineError::Other(format!("nothing to {what}")),
     }
@@ -368,8 +368,8 @@ fn nothing(s: &Session, what: &str) -> EngineError {
 /// Put the session at `snap`; returns where it was, under the same label. A drawing's step puts
 /// back only that drawing. The model's step puts back the design as it was, but keeps each
 /// drawing the design had as it is now: each part's steps are undone in that part only. Neither
-/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's while
-/// none is.
+/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's with a
+/// drawing open or not.
 fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     let was = Snapshot { part: snap.part, section: snap.section.as_ref().map(|_| s.section_state()), ..Snapshot::of(s, &snap.label) };
     let mut snap = match snap.part {
@@ -379,7 +379,8 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
             section: snap.section.clone(),
             ..was.clone()
         },
-        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), ..snap },
+        // A sheet sketch being edited stays as it is: the model's steps never end or start one.
+        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
@@ -1849,28 +1850,59 @@ fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// In an open sketch, every curve of it (construction ones too) and every point of it on no
 /// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
-fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
-    let all: Vec<Sel> = match s.active_sketch {
-        Some(id) => {
-            let sk = super::sketch_store::read(&s.doc, id)?;
-            let own = sk.curves.iter().filter(|c| c.link.is_none());
-            let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
-            own.clone()
-                .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
-                .chain(
-                    sk.points
-                        .iter()
-                        .enumerate()
-                        .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
-                        .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
-                )
+fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::select::SelectAllParams = crate::schema::read("select.all", p)?;
+    // The drawing's sheet, unless the model has the focus (the Design workspace with a drawing open).
+    let drawing = s.open_drawing.filter(|_| s.active_sketch.is_none() && !s.model_focus);
+    if drawing.is_none() && request.sheet.is_some() {
+        return Err(bad("select.all", "sheet: only with a drawing open"));
+    }
+    let all: Vec<Sel> = match (s.active_sketch, drawing) {
+        (None, Some(open)) => {
+            let d = s.drawing("select.all")?;
+            let sheet = match &request.sheet {
+                Some(named) => crate::drawing_scene::sheet_id(d, named, "select.all")?,
+                None => d.sheets.first().map(|sheet| sheet.id).ok_or_else(|| bad("select.all", "the drawing open has no sheet"))?,
+            };
+            let on = d.on_sheet(sheet);
+            on.views
+                .iter()
+                .chain(&on.dimensions)
+                .chain(&on.balloons)
+                .chain(&on.notes)
+                .filter(|object| d.has_object(**object))
                 .take(10_001)
+                .map(|object| Sel::Drawing { drawing: open, object: *object })
                 .collect()
         }
-        None => {
-            let hidden = &s.visibility.hidden_bodies;
-            s.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect()
-        }
+        (active, _) => match active {
+            Some(id) => {
+                let sk = super::sketch_store::read(&s.doc, id)?;
+                let own = sk.curves.iter().filter(|c| c.link.is_none());
+                let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+                own.clone()
+                    .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                    .chain(
+                        sk.points
+                            .iter()
+                            .enumerate()
+                            .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                            .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                    )
+                    .take(10_001)
+                    .collect()
+            }
+            None => {
+                let hidden = &s.visibility.hidden_bodies;
+                s.world_state()?
+                    .bodies
+                    .iter()
+                    .filter(|b| !hidden.contains(&b.name))
+                    .take(10_001)
+                    .map(|b| Sel::Body { name: b.name.clone() })
+                    .collect()
+            }
+        },
     };
     if all.len() > 10_000 {
         return Err(bad("select.all", "too many items"));
