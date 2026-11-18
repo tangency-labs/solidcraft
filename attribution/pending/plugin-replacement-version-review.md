@@ -1,0 +1,1 @@
+| assets/locales/pending/plugin-replacement-version-review.json | SolidCraft contributors | Original install/update/replace labels and version-comparison localisation written for SolidCraft issue #18762 from the English UI copy; no third-party artwork or copied interface text | MIT OR Apache-2.0 |

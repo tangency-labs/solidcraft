@@ -162,7 +162,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             egui::ScrollArea::vertical().max_height(ctx.content_rect().height() * 0.55).show(ui, |ui| {
                 ui_kit::text(ui, &std::format!("{name} {version}"), ui_kit::Text::Heading("plugin_install_name"));
                 if let Some(comparison) = replacement_comparison(plugin) {
-                    ui_kit::text(ui, &comparison, ui_kit::Text::Report("plugin_install_replaces", true));
+                    ui_kit::text(ui, &comparison, ui_kit::Text::Report("plugin_install_version_comparison", false));
                 }
                 if !summary.is_empty() {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
@@ -224,6 +224,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     if entry.slots.is_empty() {
                         ui_kit::text(ui, tr("prefs.plugin_slot_command"), ui_kit::Text::Hint("plugin_entry_command"));
                     }
+                }
+                // Keep the existing replacement report after entry-point details. The
+                // comparison above is additive and does not move this warning (#18762).
+                if let Some(replaces) = &replaces {
+                    ui_kit::text(
+                        ui,
+                        &format("plugin_install.replaces", &[("plugin", replaces)]),
+                        ui_kit::Text::Report("plugin_install_replaces", true),
+                    );
                 }
             });
         });
