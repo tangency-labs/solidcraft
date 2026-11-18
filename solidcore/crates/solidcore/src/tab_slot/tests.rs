@@ -198,11 +198,7 @@ fn random_finite_inputs_never_panic() {
         state ^= state >> 7;
         state ^= state << 17;
         let x = f64::from_bits(state);
-        if x.is_finite() {
-            x
-        } else {
-            1.0
-        }
+        if x.is_finite() { x } else { 1.0 }
     };
     for _ in 0..20_000 {
         let (a, b, w, e, g, q) = (next(), next(), next(), next(), next(), next());
@@ -362,7 +358,14 @@ fn skips_name_their_reason_ids() {
 
 // Seeded width variation (h0witzer's request 3).
 
-fn varied(stretch: (f64, f64), layout: Layout, w: f64, e: f64, seed: u64, j: f64) -> Vec<(f64, f64)> {
+fn varied(
+    stretch: (f64, f64),
+    layout: Layout,
+    w: f64,
+    e: f64,
+    seed: u64,
+    j: f64,
+) -> Vec<(f64, f64)> {
     let starts = tabs(stretch, layout, w, e);
     vary(stretch, &starts, w, e, LASER, seed, j).unwrap()
 }
@@ -397,12 +400,20 @@ fn widths_stay_within_the_jitter_and_the_floor() {
 
 #[test]
 fn varied_tabs_stay_in_the_usable_length_and_keep_the_least_space() {
-    for layout in [Layout::Count(1), Layout::Count(5), Layout::Auto, Layout::Spacing(12.0)] {
+    for layout in [
+        Layout::Count(1),
+        Layout::Count(5),
+        Layout::Auto,
+        Layout::Spacing(12.0),
+    ] {
         for seed in 0..200 {
             let v = varied((10.0, 110.0), layout, 6.0, 5.0, seed, 4.0);
             let mut prev_end = 15.0;
             for &(u, w) in &v {
-                assert!(u >= prev_end - 1e-9 && (prev_end == 15.0 || u - prev_end >= LASER - 1e-9), "{v:?}");
+                assert!(
+                    u >= prev_end - 1e-9 && (prev_end == 15.0 || u - prev_end >= LASER - 1e-9),
+                    "{v:?}"
+                );
                 prev_end = u + w;
             }
             assert!(prev_end <= 105.0 + 1e-9, "{v:?}");

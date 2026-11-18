@@ -43,13 +43,7 @@ pub(crate) fn joint_seed(seed: u64, (tab, slot): (u32, u32)) -> u64 {
 ///
 /// `joint_keys` are the tab and slot plates' keys: the joint's seed is hashed from the feature's
 /// seed and both, so adding or removing a joint does not reshuffle the others' widths.
-pub(crate) fn spec_of(
-    vals: &BTreeMap<String, Value>,
-    k: &FeatureKind,
-    t_tab: f64,
-    t_slot: f64,
-    joint_keys: (u32, u32),
-) -> Result<TabSlotSpec> {
+pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f64, t_slot: f64, joint_keys: (u32, u32)) -> Result<TabSlotSpec> {
     let FeatureKind::TabSlot { count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, .. } = k else {
         return Err(DocError::Invalid("not a tab and slot".into()));
     };

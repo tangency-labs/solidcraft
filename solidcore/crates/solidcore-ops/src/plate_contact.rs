@@ -9,10 +9,10 @@ use solidcore::prism::profile::{Loop2, Region2};
 use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip, TabSkip};
 
 use crate::body::Body;
-use crate::boolean::{boolean, union_all, BooleanOp};
+use crate::boolean::{BooleanOp, boolean, union_all};
 use crate::contact::{copy_of, poisoned};
 use crate::error::status;
-use crate::session::{run, run_on, Answer};
+use crate::session::{Answer, run, run_on};
 use crate::{Error, Result};
 
 /// A pair's answer: the joint, or why there is none.
@@ -317,7 +317,11 @@ impl Body {
         };
         let g_min = ts::laser_g_min(spec.clearance, spec.min_land).map_err(status)?;
         let mut out = Vec::new();
-        for (index, stretch) in pc::stretches(band, &defects, tol).map_err(status)?.into_iter().enumerate() {
+        for (index, stretch) in pc::stretches(band, &defects, tol)
+            .map_err(status)?
+            .into_iter()
+            .enumerate()
+        {
             let starts = ts::place(stretch, spec.layout, spec.width, spec.end_distance, g_min)
                 .map_err(status)?;
             let tabs = match starts {
@@ -362,9 +366,8 @@ impl Body {
                                 t_s
                             }
                         };
-                        let tab =
-                            ts::tab_outline_for(start, width, t_k, spec.protrusion, level)
-                                .map_err(status)?;
+                        let tab = ts::tab_outline_for(start, width, t_k, spec.protrusion, level)
+                            .map_err(status)?;
                         tabs.push(TabPlan {
                             start,
                             width,
@@ -785,8 +788,8 @@ pub fn check_tool_faces(per_plate: &[usize], max: usize, slow: usize) -> Option<
 mod tests {
     use super::*;
     use crate::make_box;
-    use solidcore::tab_slot::{check_slot, slot_outline, SlotSkip};
     use solidcore::Vec3;
+    use solidcore::tab_slot::{SlotSkip, check_slot, slot_outline};
 
     const TOL: f64 = 1.0e-3;
 
@@ -987,10 +990,11 @@ mod tests {
         assert_ne!(a, widths(TabSlotSpec { seed: 43, ..spec }));
         assert!(a.iter().any(|w| (w - 10.0).abs() > 1e-9), "{a:?}");
         let (_, plan) = wall.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap();
-        assert!(plan
-            .iter()
-            .flat_map(|st| st.tabs.as_ref().unwrap())
-            .all(|t| t.skip.is_none()));
+        assert!(
+            plan.iter()
+                .flat_map(|st| st.tabs.as_ref().unwrap())
+                .all(|t| t.skip.is_none())
+        );
         let cut = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
         let v = |b: &Body| b.mass_properties(1e-9).unwrap().volume;
         let sum: f64 = a.iter().sum();
@@ -1138,10 +1142,11 @@ mod tests {
             bottom.plate_pair_swapped(&wall, foot, q, TOL).unwrap(),
             Err(PairSkip::Swapped)
         );
-        assert!(wall
-            .plate_pair_swapped(&bottom, q, foot, TOL)
-            .unwrap()
-            .is_ok());
+        assert!(
+            wall.plate_pair_swapped(&bottom, q, foot, TOL)
+                .unwrap()
+                .is_ok()
+        );
     }
 
     /// 16.2 passes through [m22]: Wall sunk through Bottom (z -2..66) overlaps S and runs out of
@@ -1340,7 +1345,7 @@ mod tests {
     /// tab too short and a stretch with no tabs bring none.
     #[test]
     fn tool_faces_count_made_tabs() {
-        use solidcore::tab_slot::{tab_outline, StretchSkip, TabSkip};
+        use solidcore::tab_slot::{StretchSkip, TabSkip, tab_outline};
         let tab = |start: f64, skip: Option<SlotSkip>, short: bool| {
             let outline = tab_outline(start, 18.0, 12.0, 0.0).unwrap().unwrap();
             TabPlan {
@@ -1519,7 +1524,10 @@ mod tests {
             .unwrap()
             .as_slice()
         {
-            [None, Some(JointSkip::Pair(PairSkip::Contact(Contact::NoContact { distance })))] => {
+            [
+                None,
+                Some(JointSkip::Pair(PairSkip::Contact(Contact::NoContact { distance }))),
+            ] => {
                 assert!((distance - 40.0).abs() < 1e-2, "{distance}");
             }
             other => panic!("{other:?}"),

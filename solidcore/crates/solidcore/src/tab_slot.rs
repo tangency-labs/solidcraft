@@ -259,10 +259,14 @@ pub fn vary(
     }
     let (a, b) = stretch;
     if !(a.is_finite() && b.is_finite() && a <= b && width.is_finite() && width > 0.0) {
-        return Err(invalid("a stretch and the tab width must be finite, ordered and positive"));
+        return Err(invalid(
+            "a stretch and the tab width must be finite, ordered and positive",
+        ));
     }
     if !(non_negative(end_distance) && non_negative(g_min)) {
-        return Err(invalid("the end distance and least space must be finite and non-negative"));
+        return Err(invalid(
+            "the end distance and least space must be finite and non-negative",
+        ));
     }
     if jitter == 0.0 {
         return Ok(starts.iter().map(|&u| (u, width)).collect());
