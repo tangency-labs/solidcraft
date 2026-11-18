@@ -8757,8 +8757,8 @@ pub(crate) fn path_segments_at(curves: &[PathCurve], start: Vec3, profile: Optio
     // Orient the first curve: it runs toward the second where it meets it at one end only;
     // otherwise (one curve, or a second meeting it at both ends) from the end nearest `start`
     // (no start given, a pipe: as drawn).
-    if let Some((a, b)) = curves.first().and_then(&ends) {
-        let touches = |p: Vec3| curves.get(1).and_then(&ends).is_some_and(|(na, nb)| na.dist(p) <= JOINT || nb.dist(p) <= JOINT);
+    if let Some((a, b)) = curves.first().and_then(ends) {
+        let touches = |p: Vec3| curves.get(1).and_then(ends).is_some_and(|(na, nb)| na.dist(p) <= JOINT || nb.dist(p) <= JOINT);
         let flip = match (touches(a), touches(b)) {
             (true, false) => true,
             (false, true) => false,
@@ -8805,7 +8805,7 @@ pub(crate) fn path_segments_at(curves: &[PathCurve], start: Vec3, profile: Optio
 /// still reported by the caller. `ends` gives each curve's two ends, in space (curves of
 /// different sketches sit in different planes, #16168).
 fn chain_order<T: Clone>(curves: Vec<T>, joint: f64, ends: impl Fn(&T) -> Option<(Vec3, Vec3)>) -> Vec<T> {
-    let ends: Vec<Option<(Vec3, Vec3)>> = curves.iter().map(&ends).collect();
+    let ends: Vec<Option<(Vec3, Vec3)>> = curves.iter().map(ends).collect();
     let meets = |p: Vec3, q: Vec3| p.dist(q) <= joint;
     // Already end to end as listed: nothing to do.
     let connected = ends.windows(2).all(|w| match (w[0], w[1]) {

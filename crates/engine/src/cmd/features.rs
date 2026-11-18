@@ -4102,7 +4102,13 @@ pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<
         return Ok((0, Vec::new(), Some(BodyName::from(body)), edges));
     }
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = p.get("path").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`path` must list curve ids"))?;
+    // A bare string was and is one curve of the path's sketch (`string_list` accepted it).
+    let path_value = p.get("path").ok_or_else(|| bad(cmd, "`path` must list curve ids"))?;
+    let path: Vec<Value> = match path_value {
+        Value::String(_) => vec![path_value.clone()],
+        Value::Array(a) => a.clone(),
+        _ => return Err(bad(cmd, "`path` must list curve ids")),
+    };
     if path.is_empty() || path.len() > 1000 {
         return Err(bad(cmd, "the path needs 1…1000 curves"));
     }
