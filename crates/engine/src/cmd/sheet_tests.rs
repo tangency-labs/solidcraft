@@ -1224,6 +1224,58 @@ fn a_pattern_of_a_cut_in_the_flat_is_kept_like_the_cut() {
     assert!(rel(volume(&mut s), folded - 4.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 4.0 * each);
 }
 
+/// Hole copies on a folded flange keep their cut-outs when unfolded, rebuilt and reopened.
+#[test]
+fn a_pattern_of_holes_in_a_flange_is_kept_in_the_flat_material() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "N", "expression": "3", "unit": ""}));
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 60, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    let each = PI * 2.0 * 2.0 * 2.5;
+    run(&mut s, "solid.hole", json!({"position": [10, 60, 12], "diameter": 4, "name": "WallHole"}));
+    assert!(rel(volume(&mut s), folded - each) < 1e-9);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["WallHole"], "dir1": [1, 0, 0], "count1": "N", "spacing1": 20}));
+    assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(3));
+    assert!(rel(volume(&mut s), folded - 3.0 * each) < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "N", "expression": "5"}));
+    let pattern = flat(&mut s);
+    assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(5));
+    assert!(rel(volume(&mut s), folded - 5.0 * each) < 1e-9);
+    run(&mut s, "sheet.unfold", json!({}));
+    assert_eq!(flat(&mut s)["cutouts"], pattern["cutouts"]);
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), folded - 5.0 * each) < 1e-9);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(flat(&mut reopened)["cutouts"], pattern["cutouts"]);
+    assert!(rel(volume(&mut reopened), folded - 5.0 * each) < 1e-9);
+}
+
+#[test]
+fn patterned_sheet_holes_cut_only_the_source_targets() {
+    for (cut_sheet, cut_box) in [(true, false), (false, true), (true, true)] {
+        let mut s = Session::default();
+        base(&mut s, 100.0, 60.0);
+        let sheet_name = s.model.state().surface_sheets[0].body.clone();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 5, "corner": [0, 0, 10], "body_name": "Neighbor"}));
+        let mut targets = Vec::new();
+        if cut_sheet {
+            targets.push(sheet_name.clone());
+        }
+        if cut_box {
+            targets.push("Neighbor".to_owned());
+        }
+        run(&mut s, "solid.hole", json!({"position": [10, 10, 15], "diameter": 4, "targets": targets, "name": "Hole"}));
+        run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
+        for (name, thickness, cut) in [(sheet_name, 2.5, cut_sheet), ("Neighbor".to_owned(), 5.0, cut_box)] {
+            let measured = run(&mut s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap();
+            let removed = if cut { 3.0 * PI * 2.0 * 2.0 * thickness } else { 0.0 };
+            assert!(rel(measured, 100.0 * 60.0 * thickness - removed) < 1e-9, "{name}: {measured}");
+        }
+        assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(if cut_sheet { 3 } else { 0 }));
+    }
+}
+
 /// Material joined in the flat, one sheet thick in the plane of a panel, becomes part of that
 /// panel as a cut made there does: kept in the flat pattern and refolded, its size following a
 /// parameter. A tab on the base's free edge and one beside the flange's panel. A join that
