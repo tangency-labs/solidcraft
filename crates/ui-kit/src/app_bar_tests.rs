@@ -300,6 +300,7 @@ const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
 
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
+        compass: None,
         name: "Model",
         icon: "model",
         accent: egui::Color32::BLUE,
@@ -313,6 +314,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         tip: "Model",
     },
     ViewTab {
+        compass: None,
         name: "Sketch 2",
         icon: "sketch",
         accent: egui::Color32::GREEN,
@@ -326,6 +328,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         tip: "Sketch 2",
     },
     ViewTab {
+        compass: None,
         name: "Sheet 1",
         icon: "sheet",
         accent: egui::Color32::RED,

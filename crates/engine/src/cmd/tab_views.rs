@@ -8,6 +8,7 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::TypedContract;
 use crate::schema::output_schema_for;
+use crate::schema::tab_views::ViewCompassParams;
 use crate::schema::tab_views::{
     MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams,
     TabViewLinkParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
@@ -18,6 +19,7 @@ use crate::schema::tab_windows::{
 };
 use crate::{Result, Session};
 
+const COMPASS_CONTRACT: TypedContract<ViewCompassParams> = TypedContract::new();
 const OPEN_CONTRACT: TypedContract<TabViewOpenParams> = TypedContract::new();
 const ID_CONTRACT: TypedContract<TabViewIdParams> = TypedContract::new();
 const CLOSE_GROUP_CONTRACT: TypedContract<TabViewCloseGroupParams> = TypedContract::new();
@@ -35,6 +37,9 @@ const WINDOW_ID_CONTRACT: TypedContract<TabWindowIdParams> = TypedContract::new(
 const WINDOW_LIST_CONTRACT: TypedContract<TabWindowListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("view.set_compass", "Set View Compass", crate::checked!("view.set_compass", set_compass))
+        .icon("orbit").noundo().doc_only().contract(&COMPASS_CONTRACT).output(output_schema_for::<ViewCompassParams>)
+        .params("view: the id of an open 3D view; on: whether its compass is visible → view, on"),
     CommandSpec::new("tab.view.open", "Open Another View", crate::checked!("tab.view.open", open))
         .icon("new").noundo().doc_only().key("Ctrl+T").contract(&OPEN_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("kind?: model|sketch|sheet|render|animation (default: the active view's kind); subject?: the sketch or sheet id; reuse?: bool (default: true with a subject); window?: id (default: last focused) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
@@ -100,6 +105,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order; read-only")];
 
 /// `p` as the contract type `P`; no parameters at all (`null`) is the empty object.
+fn set_compass(_session: &mut Session, p: &Value) -> Result<Value> {
+    let options = parse::<ViewCompassParams>("view.set_compass", p)?;
+    serde_json::to_value(options).map_err(|error| bad("view.set_compass", error.to_string()))
+}
+
 fn parse<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {
     let p = if p.is_null() { Value::Object(Default::default()) } else { p.clone() };
     serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))

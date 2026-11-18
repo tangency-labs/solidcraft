@@ -69,6 +69,7 @@ impl ViewKind {
 /// One view of a design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DesignView {
+    pub compass: bool,
     /// Unique within its design for as long as the set lives; never reused.
     pub id: u64,
     pub kind: ViewKind,
@@ -289,7 +290,7 @@ impl Default for ViewSet {
 impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
-        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None };
+        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None, compass: true };
         Self::strip(vec![model], 1, 2, 0)
     }
 
@@ -724,7 +725,7 @@ impl ViewSet {
         }
         let Some(id) = self.take_id() else { return self.active };
         let name = self.default_name(kind);
-        self.views.push(DesignView { id, kind, name, subject, spec: None });
+        self.views.push(DesignView { id, kind, name, subject, spec: None, compass: true });
         self.active = id;
         id
     }
@@ -811,7 +812,7 @@ impl ViewSet {
         let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
         self.views.retain(keep);
         if let Some(id) = replacement {
-            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None });
+            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None, compass: true });
         }
         if self.get(self.active).is_none() {
             self.active = fallback.or_else(|| self.views.first().map(|view| view.id)).unwrap_or(self.active);
@@ -857,6 +858,24 @@ impl ViewSet {
         Some(id)
     }
 
+    /// Set the compass on the named view without changing which view is active.
+    pub fn set_compass(&mut self, id: u64, on: bool) -> bool {
+        let Some(window) = self.window_of(id) else { return false };
+        let strip = if window == 0 {
+            self
+        } else if let Some(window) = self.window_mut(window) {
+            &mut window.views
+        } else {
+            return false;
+        };
+        let Some(view) = strip.views.iter_mut().find(|view| view.id == id) else { return false };
+        if !view.kind.can_tile() {
+            return false;
+        }
+        view.compass = on;
+        true
+    }
+
     /// Keep `spec` as how the view `id` looks at the model. False when there is no such view.
     pub fn set_spec(&mut self, id: u64, spec: ViewSpec) -> bool {
         match self.views.iter_mut().find(|view| view.id == id) {
@@ -889,7 +908,8 @@ impl ViewSet {
             return None;
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
-        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec };
+        let compass = self.views[i].compass;
+        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec, compass };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
         Some(self.active)
@@ -1112,7 +1132,7 @@ impl ViewSet {
     /// The set as saved with the design. Window ids on the flat view list maintain compatibility
     /// with older readers, which ignore them and show all the views in their main window.
     pub fn to_json(&self) -> Value {
-        let view_json = |view: &DesignView, window| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec, "window": window});
+        let view_json = |view: &DesignView, window| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec, "window": window, "compass": view.compass});
         let strips = std::iter::once(self).chain(self.windows.iter().map(|window| &window.views));
         json!({
             "active": self.active,
@@ -1285,7 +1305,8 @@ fn view_from_json(value: &Value) -> Option<DesignView> {
     // A spec that does not read back, or holds numbers a camera cannot use, is dropped: the view
     // then starts from where the design looks.
     let spec = value.get("spec").and_then(|spec| serde_json::from_value::<ViewSpec>(spec.clone()).ok()).filter(ViewSpec::is_valid);
-    Some(DesignView { id, kind, name, subject, spec })
+    let compass = value.get("compass").and_then(Value::as_bool).unwrap_or(true);
+    Some(DesignView { id, kind, name, subject, spec, compass })
 }
 
 #[cfg(test)]
@@ -1747,6 +1768,20 @@ mod tests {
         let (first, last) = (set.views()[0].id, set.views()[2].id);
         assert!(set.close(first));
         assert_eq!(set.active().id, last);
+    }
+
+    #[test]
+    fn compass_visibility_is_saved_per_view_and_defaults_to_on() {
+        let mut set = ViewSet::new();
+        let first = set.active().id;
+        let second = set.open(ViewKind::Model, None, false);
+        assert!(set.set_compass(first, false));
+        let mut saved = set.to_json();
+        assert_eq!(ViewSet::from_json(&saved).as_ref(), Some(&set));
+        assert!(!set.get(first).unwrap().compass);
+        assert!(set.get(second).unwrap().compass);
+        saved["views"][0].as_object_mut().unwrap().remove("compass");
+        assert!(ViewSet::from_json(&saved).unwrap().get(first).unwrap().compass);
     }
 
     #[test]

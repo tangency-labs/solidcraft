@@ -317,3 +317,11 @@ pub struct TabViewReply {
 #[cfg(test)]
 #[path = "tab_views_tests.rs"]
 mod tests;
+
+/// Set visibility of the orientation compass in one 3D view.
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewCompassParams {
+    pub view: u64,
+    pub on: bool,
+}
