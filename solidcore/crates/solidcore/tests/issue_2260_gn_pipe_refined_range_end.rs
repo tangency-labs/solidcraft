@@ -51,7 +51,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "classify_edge_interval",
     "corner_patch_face_side_twist",
     "curve_loop_normal_from_area",
-    "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",
     "fillet_cleanup_keeps_target_faces",
@@ -79,10 +78,8 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "revolve_analytic_profile_faces",
     "shell_edges_on_analytics_exact",
     "simple_coincidence_crossing_is_point",
-    "ssi_low_angle_start_on_probation",
     "ssi_proto_topology_statuses_pass_on",
     "ssi_tangent_curve_tracer",
-    "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
     "uv_trim_corner_end_points_only",
 ];

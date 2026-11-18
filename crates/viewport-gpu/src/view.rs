@@ -26,6 +26,8 @@ pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, G
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
 mod oit;
+mod pass_times;
+pub use pass_times::PassTimes;
 mod product_highlights;
 #[cfg(not(target_arch = "wasm32"))]
 pub use msaa_check::MsaaCheck;
@@ -277,6 +279,12 @@ pub struct DrawStats {
     /// The device refused the memory for a frame (#7296): the view is drawn at a lower
     /// resolution, or with its see-through surfaces sorted.
     pub lowered: bool,
+    /// Asked by the UI: time the view's render passes on the GPU (the frame-rate readout is on).
+    /// Kept as it is when a frame publishes what it drew.
+    pub time_passes: bool,
+    /// The GPU time of the view's passes in a recent frame, while `time_passes` and where the
+    /// device has timestamp queries.
+    pub gpu: Option<PassTimes>,
 }
 
 /// What the last scene change uploaded to the GPU, in bytes: what an edit costs beyond the CPU
@@ -331,13 +339,7 @@ impl Tally {
     }
 
     fn stats(&self) -> DrawStats {
-        DrawStats {
-            draw_calls: self.calls.get(),
-            triangles: self.triangles.get(),
-            line_segments: self.segments.get(),
-            supersampled: false,
-            lowered: false,
-        }
+        DrawStats { draw_calls: self.calls.get(), triangles: self.triangles.get(), line_segments: self.segments.get(), ..DrawStats::default() }
     }
 }
 
@@ -1420,6 +1422,9 @@ enum SharedGpu {
     Indexed { vertices: wgpu::Buffer, indices: wgpu::Buffer, count: u32 },
     /// Too large for one buffer: unshared, in as many buffers as it takes.
     Unshared(Batch),
+    /// In the indirect draws' arena ([`indirect::Arena`]), `count` indices from `first_index`,
+    /// not uploaded a second time.
+    InArena { vertices: wgpu::Buffer, indices: wgpu::Buffer, first_index: u32, count: u32, base_vertex: i32 },
 }
 
 impl SharedGpu {
@@ -1574,6 +1579,12 @@ impl LevelDraw {
                 pass.set_vertex_buffer(0, vertices.slice(..));
                 pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*count, 0, 0..self.count);
+                tally.triangles(*count, self.count);
+            }
+            SharedGpu::InArena { vertices, indices, first_index, count, base_vertex } => {
+                pass.set_vertex_buffer(0, vertices.slice(..));
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(*first_index..first_index.saturating_add(*count), *base_vertex, 0..self.count);
                 tally.triangles(*count, self.count);
             }
             SharedGpu::Unshared(batch) => {
@@ -2037,6 +2048,9 @@ struct Batches {
     instanced: Vec<InstancedDraw>,
     /// `instanced` drawn by indirect draws, where the device can ([`indirect`]).
     indirect: Option<indirect::Indirect>,
+    /// The instanced meshes' triangles in one pair of buffers, where the device draws them
+    /// indirectly: each mesh uploaded once, kept from scene to scene ([`indirect::Arena`]).
+    arena: Option<Arc<indirect::Arena>>,
     /// Whole highlighted bodies redrawn from `planned` (the scene's own plans are not used).
     hover_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     selected_planned: Vec<Arc<solidcore_tess::TessPlan>>,
@@ -2149,16 +2163,34 @@ impl Batches {
                 Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
-            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref());
-            self.indirect = if indirect::supported(device) { indirect::Indirect::new(device, &self.instanced, self.indirect.as_ref()) } else { None };
+            // On a device that draws them indirectly, the meshes go into the arena (only those it
+            // lacks are uploaded) and are drawn from it, even one at a time: none is uploaded twice.
+            self.arena = if indirect::supported(device) {
+                let meshes: Vec<Arc<SharedTris>> = sc
+                    .instanced
+                    .iter()
+                    .filter(|m| m.count() > 0)
+                    .flat_map(|m| std::iter::once(&m.tris).chain(m.levels.iter().map(|(t, _)| t)))
+                    .cloned()
+                    .collect();
+                indirect::Arena::holding(device, queue, &meshes, self.arena.as_ref()).map(|(arena, uploaded)| {
+                    self.uploads.geometry += uploaded;
+                    arena
+                })
+            } else {
+                None
+            };
+            let arena = self.arena.clone();
+            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
+            self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
             self.hover_planned = sc.hover_planned.clone();
             self.selected_planned = sc.selected_planned.clone();
             self.hover_blocks = sc.hover_blocks.clone();
             self.selected_blocks = sc.selected_blocks.clone();
             self.recoloured = sc.recoloured.clone();
             self.lit_edges = sc.lit_edges.clone();
-            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref());
-            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref());
+            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref(), arena.as_deref());
+            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref(), arena.as_deref());
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
             let mut geometry = 0;
@@ -2258,9 +2290,16 @@ impl Batches {
         }
     }
 
-    /// The instanced meshes on the GPU: triangles uploaded once per key (kept while the key comes
-    /// back with the same bytes), placements every time.
-    fn instanced(&mut self, device: &wgpu::Device, meshes: &[InstancedMesh], donor: Option<&Batches>) -> Vec<InstancedDraw> {
+    /// The instanced meshes on the GPU: triangles drawn from `arena` where it holds them, else
+    /// uploaded once per key (kept while the key comes back with the same bytes); placements
+    /// every time.
+    fn instanced(
+        &mut self,
+        device: &wgpu::Device,
+        meshes: &[InstancedMesh],
+        donor: Option<&Batches>,
+        arena: Option<&indirect::Arena>,
+    ) -> Vec<InstancedDraw> {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
         for m in meshes {
@@ -2273,15 +2312,21 @@ impl Batches {
             for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().map(|(t, e)| (t, *e))).enumerate() {
                 let key = Arc::as_ptr(tris) as usize;
                 let shared = || donor?.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned();
-                let gpu = match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)).or_else(shared) {
-                    Some(t) => t,
-                    None => match SharedGpu::new(device, tris) {
-                        Some(g) => {
-                            self.uploads.geometry += (tris.vertices.len() + tris.indices.len() * 4) as u64;
-                            (tris.clone(), Arc::new(g))
+                let in_arena = arena.and_then(|a| a.place(tris));
+                let gpu = match in_arena {
+                    Some(g) => (tris.clone(), Arc::new(g)),
+                    None => {
+                        match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)).or_else(shared) {
+                            Some(t) => t,
+                            None => match SharedGpu::new(device, tris) {
+                                Some(g) => {
+                                    self.uploads.geometry += (tris.vertices.len() + tris.indices.len() * 4) as u64;
+                                    (tris.clone(), Arc::new(g))
+                                }
+                                None => continue,
+                            },
                         }
-                        None => continue,
-                    },
+                    }
                 };
                 // Until the first cull, every placement is drawn in full.
                 let Some(instances) = buffer_init(device, "sc_instances", &placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)
@@ -2291,7 +2336,10 @@ impl Batches {
                 self.uploads.placements += placements.len() as u64;
                 let count = if i == 0 { count } else { 0 };
                 levels.push(LevelDraw { tris: gpu.1.clone(), src: tris.clone(), flat: tris.flat, error, instances, count });
-                self.instanced_tris.insert(key, gpu);
+                // A mesh in the arena is drawn from there: it keeps no buffers of its own.
+                if !matches!(*gpu.1, SharedGpu::InArena { .. }) {
+                    self.instanced_tris.insert(key, gpu);
+                }
             }
             if !levels.is_empty() {
                 out.push(InstancedDraw { look: m.look, closed: m.closed, levels, bounds: m.tris.bounds, placements, shown: None });
@@ -2672,6 +2720,12 @@ pub struct Renderer {
     /// device cannot blend into float targets: they are sorted instead), and its targets.
     oit: Option<oit::Pipelines>,
     oit_targets: Option<oit::Targets>,
+    /// Timestamps of the view's passes ([`DrawStats::time_passes`]), made the first time they are
+    /// asked for; `timer_tried` once that was tried (the device may have no timestamp queries).
+    timer: Option<pass_times::PassTimer>,
+    timer_tried: bool,
+    /// The last frame asked for the passes' times ([`DrawStats::time_passes`]).
+    timing: bool,
     ss_bgl: wgpu::BindGroupLayout,
     /// The supersampled frame's textures, kept while its size stays.
     ss: Option<Supersampled>,
@@ -3644,6 +3698,9 @@ impl Renderer {
                 ss_scaled: false,
                 oit,
                 oit_targets: None,
+                timer: None,
+                timer_tried: false,
+                timing: false,
                 ss_bgl,
                 ss: None,
                 ss_ready: false,
@@ -4086,6 +4143,33 @@ impl Renderer {
     /// content is the same as the picture drawn last is not drawn again: that picture is blitted
     /// instead, so pointer moves and UI animations over a still view cost no scene work.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        let time = self.stats.lock().is_ok_and(|s| s.time_passes);
+        if time && !self.timer_tried {
+            self.timer = pass_times::PassTimer::new(device, queue);
+            self.timer_tried = true;
+        }
+        // Timing just asked for over a still view: draw this frame instead of showing the cached
+        // picture, which records no passes, so the times come without waiting for the view to
+        // change. Later still frames reuse the picture as before.
+        if time && !self.timing && self.timer.is_some() {
+            self.ss_key = None;
+        }
+        self.timing = time;
+        if let Some(timer) = &mut self.timer {
+            timer.begin(device, time);
+        }
+        self.prepare_frame(device, queue, encoder, frame);
+        // The times cover the passes recorded here, in `prepare`. A frame drawn straight into the
+        // window's pass (`paint`, where it needs no offscreen picture) is not timed: that pass is
+        // the window's, which takes no timestamp writes from here. The app's window pass has one
+        // sample and no depth, so its view is always drawn offscreen, in passes timed here.
+        if let Some(timer) = &mut self.timer {
+            timer.finish(encoder);
+        }
+    }
+
+    /// [`Renderer::prepare`]'s work, between the pass timer's frame start and end.
+    fn prepare_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
         let res = self;
         let cb = frame;
         if res.product_highlights {
@@ -4193,7 +4277,7 @@ impl Renderer {
                 .into_iter()
                 .flatten()
                 .collect();
-        res.ao.prepare(device, encoder, cb.ao_radius, cb.size_px, res.target.reversed_depth(), &layers);
+        res.ao.prepare(device, encoder, cb.ao_radius, cb.size_px, res.target.reversed_depth(), &layers, res.timer.as_ref());
         // Images: upload new or changed textures, drop removed ones, rebuild the quads.
         res.textures.retain(|id, _| cb.images.iter().any(|i| i.id == *id));
         res.quads.clear();
@@ -4299,7 +4383,8 @@ impl Renderer {
 
     fn publish(&self, drawn: DrawStats) {
         if let Ok(mut s) = self.stats.lock() {
-            *s = DrawStats { lowered: self.lowered, ..drawn };
+            let gpu = if s.time_passes { self.timer.as_ref().and_then(|t| t.last) } else { None };
+            *s = DrawStats { lowered: self.lowered, time_passes: s.time_passes, gpu, ..drawn };
         }
     }
 
@@ -4891,7 +4976,7 @@ impl Renderer {
                         depth_ops: Some(wgpu::Operations { load: load_depth(first, far_depth(self.target.reversed_depth())), store: keep }),
                         stencil_ops: stencil.then_some(wgpu::Operations { load: load_depth(first, 0), store: keep }),
                     }),
-                    timestamp_writes: None,
+                    timestamp_writes: self.timer.as_ref().and_then(|t| t.writes(if first { "sc_ssaa" } else { "sc_ssaa_over" })),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 })
@@ -4915,8 +5000,9 @@ impl Renderer {
             first.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
             self.draw(cb, &mut first, Phase::BeforeSeeThrough, &tally);
         }
-        p.accumulate(encoder, t, ss.depth.as_ref(), stencil, |pass| self.draw_see_through(pass, p, &tally));
-        p.composite(encoder, t, &ss.color, ss.resolve.as_ref());
+        let timer = self.timer.as_ref();
+        p.accumulate(encoder, t, ss.depth.as_ref(), stencil, timer.and_then(|t| t.writes("sc_oit")), |pass| self.draw_see_through(pass, p, &tally));
+        p.composite(encoder, t, &ss.color, ss.resolve.as_ref(), timer.and_then(|t| t.writes("sc_oit_composite")));
         tally.call();
         {
             let mut over = pass(encoder, false);
@@ -6730,6 +6816,61 @@ mod glass_tests {
         render_frame(&mut single, &device, &queue, &test_frame(test_scene(), 1.0), false);
         assert!(single.ss_ready, "the 1x scene is drawn offscreen too");
         assert_eq!(single.resolve_clears, 0, "at one sample no texture is resolved into");
+    }
+
+    /// The frame-rate readout's GPU time: while it asks, the view's passes are timed and a frame's
+    /// times arrive a few frames later, without waiting; while it does not, nothing is timed.
+    #[test]
+    fn the_views_passes_are_timed_only_while_the_readout_asks() {
+        let Some((adapter, _)) = crate::select::pick(crate::test_env::policy()) else { return };
+        if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            return;
+        }
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: crate::depth_features(&adapter) | wgpu::Features::TIMESTAMP_QUERY,
+            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            ..Default::default()
+        })) else {
+            return;
+        };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let frames = |r: &mut Renderer| {
+            for i in 0..6 {
+                // A new camera each frame: the picture is drawn again, not blitted.
+                let mut frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
+                frame.view_proj[3][0] += 0.01 * i as f32;
+                render_frame(r, &device, &queue, &frame, true);
+            }
+            r.stats().lock().map(|s| s.gpu).ok().flatten()
+        };
+        let mut idle = Renderer::new(&device, target, None);
+        assert_eq!(frames(&mut idle), None, "nothing is timed unless the readout asks");
+        assert!(idle.timer.is_none(), "no query set is made unless the readout asks");
+        let mut timed = Renderer::new(&device, target, None);
+        if let Ok(mut s) = timed.stats().lock() {
+            s.time_passes = true;
+        }
+        let gpu = frames(&mut timed).expect("a timed frame's passes are read back within a few frames");
+        assert!(gpu.passes >= 1 && gpu.slowest.starts_with("sc_"), "the view's own passes are timed: {gpu:?}");
+        assert!(gpu.slowest_us <= gpu.span_us, "no pass outlasts the span of them all: {gpu:?}");
+        if let Ok(mut s) = timed.stats().lock() {
+            s.time_passes = false;
+        }
+        assert_eq!(frames(&mut timed), None, "the times go once the readout stops asking");
+        // A still view: the same frame again shows the picture already drawn, which records no
+        // passes. Timing asked for over it draws a frame once, so its times come all the same.
+        let mut still = Renderer::new(&device, target, None);
+        let frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
+        render_frame(&mut still, &device, &queue, &frame, true);
+        if let Ok(mut s) = still.stats().lock() {
+            s.time_passes = true;
+        }
+        for _ in 0..6 {
+            render_frame(&mut still, &device, &queue, &frame, true);
+        }
+        assert!(still.stats().lock().ok().and_then(|s| s.gpu).is_some(), "a still view's passes are timed once timing is asked for");
     }
 
     /// The Render workspace's preview once painted the modelling viewport's last frame instead of

@@ -51,6 +51,10 @@ pub struct ModelBody {
     pub feature: u64,
     // Timeline snapshots are cloned before meshes are requested. Share the cell itself so
     // meshing any snapshot also warms every unchanged copy of this body.
+    /// The box of the body's display mesh ([`ModelBody::mesh_bounds`]), worked out once: framing
+    /// the view goes over every body, and a placed copy's box moves every point of its part's
+    /// mesh. Shared by the copies of this body that keep its placement.
+    bounds: Arc<OnceLock<solidcraft_geom::Aabb3>>,
     mesh: Arc<OnceLock<Arc<Mesh>>>,
     /// Joint face measurements use their own tolerance, independent of display quality.
     /// Shared by snapshots of this geometry; the body identity guards direct replacement.
@@ -205,6 +209,7 @@ impl ModelBody {
             body,
             feature,
             mesh: Arc::new(OnceLock::new()),
+            bounds: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
             faces: Default::default(),
             mesh_placement: None,
@@ -493,19 +498,27 @@ impl ModelBody {
     }
 
     /// The box of [`ModelBody::mesh`] without making a placement's moved copy: the shared mesh's
-    /// points, moved.
+    /// points, moved. Worked out once (the background mesher works it out ahead, so framing a
+    /// large design reads it).
     pub fn mesh_bounds(&self) -> solidcraft_geom::Aabb3 {
-        if let Some(mesh) = self.cached_mesh() {
-            return mesh.bounds();
-        }
-        let (mesh, m) = self.mesh_in_place();
-        if crate::is_identity(&m) {
-            return mesh.bounds();
-        }
-        mesh.positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut b, p| {
-            b.add(crate::apply_point(&m, *p));
-            b
+        *self.bounds.get_or_init(|| {
+            if let Some(mesh) = self.cached_mesh() {
+                return mesh.bounds();
+            }
+            let (mesh, m) = self.mesh_in_place();
+            if crate::is_identity(&m) {
+                return mesh.bounds();
+            }
+            mesh.positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut b, p| {
+                b.add(crate::apply_point(&m, *p));
+                b
+            })
         })
+    }
+
+    /// Whether [`ModelBody::mesh_bounds`] is worked out already.
+    pub fn mesh_bounds_made(&self) -> bool {
+        self.bounds.get().is_some()
     }
 
     /// The box of [`ModelBody::mesh`] seen on a plane, in the plane's own coordinates
@@ -1733,6 +1746,8 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
 #[derive(Clone, Debug, Default)]
 struct ImportDigests {
     steps: std::collections::HashMap<u64, (Arc<str>, u64)>,
+    /// An import kept as records: its records and their digest, computed once per records.
+    records: std::collections::HashMap<u64, (Arc<kernel::ImportRecords>, u64)>,
     meshes: std::collections::HashMap<u64, Vec<MeshDigest>>,
 }
 
@@ -1757,9 +1772,13 @@ impl ImportDigests {
         let mut out = ImportDigests::default();
         for f in &doc.features {
             match &f.kind {
-                FeatureKind::Import { step, .. } => {
+                FeatureKind::Import { step, records, .. } => {
                     let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
                     out.steps.insert(f.id, (step.clone(), digest));
+                    if let Some(r) = records {
+                        let digest = known.records_digest(f.id, r).unwrap_or_else(|| records_digest(r));
+                        out.records.insert(f.id, (r.clone(), digest));
+                    }
                 }
                 FeatureKind::MeshImport { meshes, .. } => {
                     let digests = meshes
@@ -1787,6 +1806,10 @@ impl ImportDigests {
         self.steps.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
     }
 
+    fn records_digest(&self, id: u64, records: &Arc<kernel::ImportRecords>) -> Option<u64> {
+        self.records.get(&id).filter(|(r, _)| Arc::ptr_eq(r, records)).map(|(_, digest)| *digest)
+    }
+
     fn mesh(&self, id: u64, index: usize, mesh: &crate::MeshData) -> Option<u64> {
         self.meshes.get(&id)?.get(index).filter(|cached| cached.matches(mesh)).map(|cached| cached.digest)
     }
@@ -1805,6 +1828,12 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
         n.to_bits().hash(&mut h);
     }
     h.finish()
+}
+
+/// An import's records digested as their serialised form; records that will not serialise
+/// digest as nothing (their evaluation fails and says why).
+fn records_digest(records: &kernel::ImportRecords) -> u64 {
+    step_text_digest(&kernel::records_text(records).unwrap_or_default())
 }
 
 fn step_text_digest(text: &str) -> u64 {
@@ -1902,11 +1931,17 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
         // writing the large numeric arrays out again. Equal content in fresh Arcs hashes alike.
         return serde_json::to_string(&(g, digests)).unwrap_or_default();
     }
-    if let FeatureKind::Import { step, .. } = &f.kind {
+    if let FeatureKind::Import { step, records, .. } = &f.kind {
         let mut g = f.clone();
-        if let FeatureKind::Import { step: text, .. } = &mut g.kind {
+        if let FeatureKind::Import { step: text, records: kept, .. } = &mut g.kind {
             let digest = steps.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
-            *text = Arc::from(format!("{digest:016x}:{}", step.len()));
+            // Records stand in by their digest, as the STEP text does.
+            let of_records = records.as_ref().map(|r| steps.records_digest(f.id, r).unwrap_or_else(|| records_digest(r)));
+            *kept = None;
+            *text = match of_records {
+                Some(r) => Arc::from(format!("{digest:016x}:{}:records:{r:016x}", step.len())),
+                None => Arc::from(format!("{digest:016x}:{}", step.len())),
+            };
         }
         return serde_json::to_string(&g).unwrap_or_default();
     }
@@ -4926,8 +4961,14 @@ const MAX_CLOSE_TOOL_PAIRS: usize = 4096;
 
 /// Whether no two of `bodies` meet or touch, decided on their exact shapes. Only pairs whose
 /// exact boxes, grown by twice the bodies' tolerances (as [`kernel::apart`] grows them), meet
-/// are tested, by [`apart_by_union`]. `false` whenever that cannot be shown: a mesh body, a body
-/// without an exact box, too many pairs to test, a union that fails.
+/// are tested. All of the bodies of those pairs are tested together: their union comes out with
+/// as many material regions as there are bodies of them, and no two of those regions meet.
+/// Crossing and nested bodies come out in one piece, touching ones in one or in two that share
+/// an edge or a face.
+/// One union of all of them replaces a union for every pair of them: a pattern of fifty copies
+/// of a coil cut took a union for each of its pairs, and minutes (#17632).
+/// `false` whenever that cannot be shown: a mesh body, a body without an exact box, too many
+/// pairs to test, a union that fails.
 fn tools_clearly_apart(bodies: &[Body]) -> bool {
     if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
         return false;
@@ -4952,13 +4993,35 @@ fn tools_clearly_apart(bodies: &[Body]) -> bool {
             close.push((i, j));
         }
     }
-    close.into_iter().all(|(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b)))
+    if close.is_empty() {
+        // No two of them meet: they are apart.
+        return true;
+    }
+    // The bodies of those pairs: the union of all of them says whether they are apart.
+    let mut in_pair = vec![false; bodies.len()];
+    for &(i, j) in &close {
+        in_pair[i] = true;
+        in_pair[j] = true;
+    }
+    let group: Vec<&Body> = (0..bodies.len()).filter(|&i| in_pair[i]).map(|i| &bodies[i]).collect();
+    #[cfg(test)]
+    cost_tests::count(|c| c.apart_unions += 1);
+    match kernel::union_all(&group) {
+        // One union of all of them: it comes out with a piece for each of them when no two of
+        // them meet or touch.
+        Ok(one) => one.record().material_regions().len() == group.len() && one.region_contacts().is_ok_and(|c| c.is_empty()),
+        // The union of all of them failed: each pair is tried on its own, as before.
+        Err(_) => close.iter().all(|&(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b))),
+    }
 }
 
 /// Whether the exact union of `a` and `b` comes out in two pieces that share no face, edge or
 /// vertex. Crossing and nested bodies come out in one piece, touching ones in one or in two that
-/// share an edge or a face.
+/// share an edge or a face. The fallback of [`tools_clearly_apart`], for a union of all the
+/// bodies that failed.
 fn apart_by_union(a: &Body, b: &Body) -> bool {
+    #[cfg(test)]
+    cost_tests::count(|c| c.apart_unions += 1);
     match kernel::boolean(a, b, BoolOp::Union) {
         Ok(Some(u)) => u.record().material_regions().len() == 2 && u.region_contacts().is_ok_and(|c| c.is_empty()),
         _ => false,
@@ -6283,8 +6346,15 @@ fn blend_body(
     mb: &ModelBody,
     edges: &[Vec3],
     r: f64,
+    each: Option<&[f64]>,
     warning: &mut Option<String>,
 ) -> Result<(Traced, Option<Vec<f64>>, Tapered)> {
+    // Each edge at its own radius, in one blend (checked by the caller: constant, exact, rolling,
+    // mitred, the picked edges alone).
+    if let (FeatureKind::Fillet { turn, .. }, Some(each)) = (&f.kind, each) {
+        let nb = kernel::fillet_each(&mb.body, edges, each, turn.kernel())?;
+        return Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&mb.traced()]), None, Vec::new()));
+    }
     let (nb, from, used, tapered) = blend_raw(vals, f, mb, edges, r, warning)?;
     // Keeping the input's planar certificates may join faces; their history stays over the same
     // operand.
@@ -9746,6 +9816,13 @@ fn replay(
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
             let r = val(vals, radius, Kind::Length)?;
+            // A fillet's own per-edge radii, in the order of its picks (as it saved its edges).
+            let each_r: Option<Vec<f64>> = match &src.kind {
+                FeatureKind::Fillet { edge_radii, .. } if !edge_radii.is_empty() => {
+                    Some(edge_radii.iter().map(|e| val(vals, e, Kind::Length)).collect::<Result<_>>()?)
+                }
+                _ => None,
+            };
             // The edges the feature blended in this evaluation (found by name), falling back to
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
@@ -9770,6 +9847,21 @@ fn replay(
                         // A copy is congruent to the original: the radius it was reduced to first.
                         (FeatureKind::Fillet { turn, .. }, Some(used)) => {
                             let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                            mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
+                        }
+                        // A copy of a fillet with per-edge radii pairs each copied edge with its radius.
+                        (FeatureKind::Fillet { turn, .. }, None) if each_r.is_some() => {
+                            // Before its fillet has run (a pattern placed ahead of it): the radii
+                            // pair with the picks, so their count is checked as the fillet checks it.
+                            let all = each_r.as_deref().unwrap_or(&[]);
+                            if all.len() != edges.len() {
+                                return Err(DocError::Invalid(format!(
+                                    "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                                    all.len(),
+                                    edges.len()
+                                )));
+                            }
+                            let used: Vec<f64> = idx.iter().map(|i| all.get(*i).copied().unwrap_or(r)).collect();
                             mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
                         }
                         // Otherwise the copy is the same blend, with its type, fit, corners and
@@ -11588,6 +11680,27 @@ fn eval_feature_kind(
             {
                 return Err(DocError::Invalid("corner setbacks are built for a constant-radius fillet (type: constant, fit: exact) only".into()));
             }
+            // Each picked edge at its own radius: one value per pick, for the blend that supports it.
+            let each_r: Option<Vec<f64>> = match &f.kind {
+                FeatureKind::Fillet { edge_radii, style, fit, corner, setbacks, turn, tangent_chain, .. } if !edge_radii.is_empty() => {
+                    if !style.is_constant() || !fit.is_exact() || !corner.is_rolling() || !setbacks.is_empty() || !turn.is_mitre() || *tangent_chain {
+                        return Err(DocError::Invalid(crate::EDGE_RADII_TAKE.into()));
+                    }
+                    if edge_radii.len() != edges.len() {
+                        return Err(DocError::Invalid(format!(
+                            "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                            edge_radii.len(),
+                            edges.len()
+                        )));
+                    }
+                    let mut v = Vec::with_capacity(edge_radii.len());
+                    for e in edge_radii {
+                        v.push(val(vals, e, Kind::Length)?);
+                    }
+                    Some(v)
+                }
+                _ => None,
+            };
             let on = blend_bodies(st, f, body, &crate::plain(edges))?;
             let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
             for (i, ti) in on.iter().enumerate() {
@@ -11609,10 +11722,27 @@ fn eval_feature_kind(
                 _ => false,
             };
             let mut picks = Vec::with_capacity(groups.len());
+            // Per-edge radii: each resolved edge point, on its body, keyed (exactly) to its pick and
+            // radius. The smooth-edge filter below only drops picks, so the keys survive it.
+            let key = |ti: usize, p: &Vec3| (ti, [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+            let mut radius_of: BTreeMap<(usize, [u64; 3]), (usize, f64)> = BTreeMap::new();
+            // (pick, the blended edge's middle, its radius), for pattern and mirror copies.
+            let mut by_pick: Vec<(usize, Vec3, f64)> = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
-                picks.push((*ti, blend_edges_on(mb, f, edges, idx, &mut w)?));
+                let resolved = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                if let Some(all) = &each_r {
+                    if resolved.len() != idx.len() {
+                        return Err(DocError::Invalid(
+                            "an edge given its own radius (`edge_radii`) no longer resolves to one edge: each radius needs its edge".into(),
+                        ));
+                    }
+                    for (p, i) in resolved.iter().zip(idx) {
+                        radius_of.insert(key(*ti, p), (*i, all.get(*i).copied().unwrap_or(r)));
+                    }
+                }
+                picks.push((*ti, resolved));
                 if let Some(w) = w {
                     notes.push(w);
                 }
@@ -11624,8 +11754,11 @@ fn eval_feature_kind(
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
-                let (nb, used, tapered) =
-                    blend_body(vals, f, mb, &edges, r, &mut note).map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
+                // This body's edges' own radii, found by their resolved points.
+                let each: Option<Vec<f64>> =
+                    each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(ti, e)).map_or(r, |(_, x)| *x)).collect());
+                let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
+                    .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
                     notes.push(n);
                 }
@@ -11634,11 +11767,24 @@ fn eval_feature_kind(
                 tapered_all.extend(tapered);
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
-                found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
+                let middles = kernel::blend_edge_middles(&mb.body, &edges)?;
+                if each.is_some() {
+                    // Per-edge radii: each blended edge's middle with its pick and radius.
+                    by_pick.extend(edges.iter().zip(&middles).filter_map(|(e, m)| radius_of.get(&key(ti, e)).map(|(i, x)| (*i, *m, *x))));
+                }
+                found.extend(middles);
                 blended.push((ti, nb));
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
+            }
+            if each_r.is_some() {
+                // The blended edges in pick order, each with its own radius: pattern and mirror
+                // copies read the radius at the same index as the edge (as a fitted fillet's).
+                by_pick.sort_by_key(|(i, _, _)| *i);
+                found = by_pick.iter().map(|(_, m, _)| *m).collect();
+                fitted = by_pick.iter().map(|(_, _, x)| *x).collect();
+                reduced = true;
             }
             st.blend_edges.insert(f.id, found);
             if reduced {
@@ -11938,9 +12084,11 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Import { step, skip, .. } => {
-            let imp = kernel::step_import_shared(step)?;
-            let digest = crate::config::payload_digest(step);
+        FeatureKind::Import { step, skip, records, .. } => {
+            let (imp, digest) = match records {
+                Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
+                None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
+            };
             let names = import_body_names(st, &f.body_names, &imp, skip);
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
@@ -12695,6 +12843,7 @@ impl PlacedBodies {
         self.reused(b, m).map(|placed| {
             let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
             fresh.mesh = placed.mesh.clone();
+            fresh.bounds = placed.bounds.clone();
             fresh.measured = placed.measured.clone();
             fresh.joint_faces = placed.joint_faces.clone();
             fresh.faces = placed.faces.clone();
@@ -13185,13 +13334,15 @@ mod world_placement_cache_tests {
     #[test]
     fn an_imports_body_is_asked_for_its_own_slots_name() {
         let mut doc = Document::new("names");
-        let id =
-            doc.add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0] }, None).unwrap();
+        let id = doc
+            .add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0], records: None }, None)
+            .unwrap();
         doc.feature_mut(id).unwrap().body_names = vec!["A".into(), "B".into()];
         let mut state = ModelState::default();
         state.bodies.push(ModelBody::new("B (2)".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), id));
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("B"));
-        doc.feature_mut(id).unwrap().kind = FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new() };
+        doc.feature_mut(id).unwrap().kind =
+            FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: None };
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("A"));
     }
 
@@ -13332,6 +13483,7 @@ mod chain_tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )
@@ -13392,6 +13544,7 @@ mod chain_tests {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain,
+            edge_radii: Vec::new(),
         }
     }
 
