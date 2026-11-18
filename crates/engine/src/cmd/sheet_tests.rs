@@ -9490,3 +9490,44 @@ fn a_cut_passing_a_hair_off_a_flange_corner_builds() {
     }
     assert!(failed.is_empty(), "{failed:?}");
 }
+
+/// #18576: a 1.5 mm sheet with a closed spline outline and a 0.72 mm square notch cut into its
+/// edge folds 90° about a line away from the notch. v0.43.0 refused the half-depth notch ("an
+/// edge not read exactly in the plane"). With no notch, a half-depth one or one through the
+/// sheet, the fold is one sound body and adds the same bend volume to the flat sheet, so the
+/// notch is kept as cut.
+#[test]
+fn a_spline_sheet_with_a_notch_at_its_edge_folds() {
+    let sheet = |notch: Option<f64>, fold: bool| {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "thickness": 1.5, "k_factor": 0.44, "bend_radius": 1.5, "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SheetOutline"}));
+        let points = [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [0.0, -22.0], [19.7, -13.1]];
+        run(&mut s, "sketch.spline.fit_point", json!({"points": points, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "SheetOutline", "type": "base", "body_name": "Base"}));
+        if let Some(depth) = notch {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Notch", "offset": 1.5}));
+            run(&mut s, "sketch.rectangle.center", json!({"center": [0, 18], "corner": [0.36, 18.36]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let cut = json!({"sketch": "Notch", "distance": depth, "direction": "negative", "operation": "cut", "targets": ["Base"]});
+            run(&mut s, "solid.extrude", cut);
+        }
+        if fold {
+            run(&mut s, "sheet.fold", json!({"points": [[12, -1, 1.5], [12, 1, 1.5]], "angle": "90 deg", "fixed": [-12, 0, 1.5]}));
+        }
+        let state = s.world_state().unwrap();
+        assert_eq!(state.bodies.len(), 1, "{notch:?} fold {fold}");
+        assert!(state.bodies[0].body.validity().is_empty(), "{notch:?} fold {fold}: {:?}", state.bodies[0].body.validity());
+        drop(state);
+        volume(&mut s)
+    };
+    let bend = sheet(None, true) - sheet(None, false);
+    assert!(bend > 1.0, "the bend adds material: {bend}");
+    for depth in [0.75, 1.5] {
+        let flat = sheet(Some(depth), false);
+        assert!(flat < sheet(None, false) - 0.1, "the notch is cut: {flat}");
+        let folded = sheet(Some(depth), true);
+        assert!((folded - flat - bend).abs() < 1e-3, "depth {depth}: the fold adds {} not {bend}", folded - flat);
+    }
+}
