@@ -896,8 +896,12 @@ pub(super) fn has_corner(k: &Kernel, composite: &CompositeCurve, n: Vec3) -> boo
 }
 
 /// Whether `input` is a B-spline whose control points have positive weights (or none) and
-/// lie within `tol` of its chord, which is longer than `tol`: the whole curve lies in their
-/// convex hull, so it is that straight line (#16639; the fork takes only lines).
+/// lie within `tol` of the segment `a b` between its ends, which is longer than `tol`: the
+/// whole curve lies in their convex hull, so within `tol` of that segment, and it is that
+/// straight line (#16639; the fork takes only lines). Each point `q`'s distance from the
+/// segment is proved: its foot on the chord (clamped to the segment) and the residual round
+/// as in [`touch_bound`], the point's Euclidean form once more, taken as `gamma_16` of
+/// `|q| + |a| + |b - a|`; the computed distance plus that bound is at most `tol`.
 fn straight_bspline(input: &Curve, tol: f64) -> bool {
     let CurveKind::BSpline(c) = input.kind() else {
         return false;
@@ -909,9 +913,23 @@ fn straight_bspline(input: &Curve, tol: f64) -> bool {
     let (Some(first), Some(last)) = (pts.first(), pts.last()) else {
         return false;
     };
-    pts.iter().all(|p| p.w == NOW || p.w > 0.0)
-        && first.to_euclid().distance(last.to_euclid()) > tol
-        && nurb.is_line(tol)
+    let a = first.to_euclid();
+    let d = last.to_euclid() - a;
+    let dd = d.dot(d);
+    let chord = dd.sqrt();
+    if !(chord > tol) {
+        return false;
+    }
+    pts.iter().all(|p| {
+        if !(p.w == NOW || p.w > 0.0) {
+            return false;
+        }
+        let q = p.to_euclid();
+        let w = q - a;
+        let t = (d.dot(w) / dd).clamp(0.0, 1.0);
+        let off = (w - d * t).length();
+        off + gamma(16) * (q.length() + a.length() + chord) <= tol
+    })
 }
 
 /// The line or circle among `inputs` that the profile's segment `c` is (its copy,
@@ -2264,6 +2282,24 @@ mod tests {
         assert!(!straight_bspline(&quadratic(4.0 * tol, None).unwrap(), tol));
         // rational: on the chord with positive weights; a negative weight is refused by
         // the constructor, or not straight
+        // points beside the segment's start, within `tol` of its line and of its extension
+        // by `tol` but 0.9 sqrt 2 `tol` from the segment: the curve leaves it by over `tol`
+        let mut control = vec![Point3::new(-0.9 * tol, -0.9 * tol, 0.0); 9];
+        control[0] = Point3::ZERO;
+        control[8] = Point3::new(100.0, 0.0, 0.0);
+        let hooked = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 8,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[9, 9],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        assert!(!straight_bspline(&Curve::from(hooked), tol));
         let rational = quadratic(0.0, Some(&[1.0, 2.0, 1.0])).unwrap();
         assert!(straight_bspline(&rational, tol));
         if let Ok(negative) = quadratic(0.0, Some(&[1.0, -0.5, 1.0])) {

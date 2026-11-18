@@ -108,9 +108,9 @@ fn bspline_polygon(sides: u64) -> Vec<Curve> {
 }
 
 /// How far each side of [`bowed_polygon`] bows out at its middle: its radius of curvature,
-/// about `side^2 / (8 BOW)` (75 for 16 sides), stays over the offset, so its offset is
-/// a curve.
-const BOW: f64 = 0.01;
+/// about `side^2 / (8 BOW)` (750 for 16 sides, 48 for 64), stays over the offset (28.3), so
+/// its offset is a curve.
+const BOW: f64 = 0.001;
 
 /// The `sides`-gon with each side a quadratic B-spline bowed out by [`BOW`] at its middle:
 /// not a line or an arc, so the tangent rule leaves it to the offset method and from there
