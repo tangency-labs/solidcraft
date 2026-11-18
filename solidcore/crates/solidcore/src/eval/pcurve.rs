@@ -87,6 +87,91 @@ pub struct EdgeUse<'a> {
     pub given: Option<&'a Curve2>,
 }
 
+/// One face leaving an edge, with its pcurve on the edge's own parameter interval.
+/// The loop direction is relative to the surface's natural normal.
+#[derive(Clone, Copy, Debug)]
+pub struct RadialFace<'a> {
+    /// The face's surface in the pcurve's parameters.
+    pub surface: &'a Surface,
+    /// The edge's curve in the face's surface parameters.
+    pub pcurve: &'a Curve2,
+    /// Whether the face's loop follows the edge's positive curve direction.
+    pub forward: bool,
+}
+
+/// Orders faces counter-clockwise about an edge's positive tangent, starting at the
+/// first face. This is the radial-edge construction (Weiler, 1988): at an interior
+/// point, each face leaves the edge along `(S_u × S_v) × tangent`, reversed when
+/// its loop runs backwards. The pcurve selects that point on the surface; a face's
+/// extent beyond the edge has no part in its order.
+/// The caller supplies a valid edge with regular, distinct inward directions along
+/// its interior: their cyclic order cannot change without a coincidence or a
+/// singularity. This computes that order; it does not certify the whole edge.
+///
+/// With the first inward ray `b` as reference, the polar coordinates are
+/// `x = b.dot(ray)` and `y = tangent.dot(b.cross(ray))`. Omitting normalization
+/// scales every y coordinate by the same positive factor, preserving cyclic order.
+/// The surface derivatives are evaluated directly, with no stepped probes or
+/// angular tolerance. Coincident rays need higher-order contact information and
+/// are refused rather than assigned an arbitrary order.
+///
+/// # Errors
+/// Malformed or unevaluable geometry, a vanishing tangent or inward ray, or faces
+/// whose radial directions cannot be distinguished.
+pub fn radial_order(
+    curve: &Curve,
+    interval: [f64; 2],
+    faces: &[RadialFace<'_>],
+) -> Result<Vec<usize>> {
+    let [lo, hi] = interval;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(Error::Invalid("invalid radial edge interval".into()));
+    }
+    let t = lo.midpoint(hi);
+    let (_, tangent) = CurveEval::new(curve)?
+        .derivs(t)
+        .ok_or_else(|| Error::Failed("cannot evaluate the radial edge tangent".into()))?;
+    if !tangent.is_finite() || tangent.len2() == 0.0 {
+        return Err(Error::Failed("the radial edge tangent vanishes".into()));
+    }
+    let mut reference = None;
+    let mut angles = Vec::new();
+    for (i, face) in faces.iter().enumerate() {
+        let [u, v] = face
+            .pcurve
+            .eval(t)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's pcurve".into()))?;
+        let (_, du, dv) = SurfaceEval::new(face.surface)?
+            .derivs(u, v)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's normal".into()))?;
+        let ray = du.cross(dv).cross(tangent);
+        let ray = if face.forward { ray } else { -ray };
+        let b = *reference.get_or_insert(ray);
+        let (x, y) = (b.dot(ray), tangent.dot(b.cross(ray)));
+        if !(x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0)) {
+            return Err(Error::Failed(
+                "a radial face's inward direction is undefined".into(),
+            ));
+        }
+        let angle = y.atan2(x);
+        let angle = if angle < 0.0 {
+            angle + std::f64::consts::TAU
+        } else {
+            angle
+        };
+        angles.push((i, angle));
+    }
+    angles.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+    for pair in angles.windows(2) {
+        if matches!(pair, [a, b] if a.1 == b.1) {
+            return Err(Error::Failed(
+                "tangent faces do not determine a radial order from their inward directions".into(),
+            ));
+        }
+    }
+    Ok(angles.into_iter().map(|(i, _)| i).collect())
+}
+
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
 const MAX_SPANS: usize = 4000;
 /// Edge uses of one face.
