@@ -23,7 +23,7 @@ const KEYWORDS: &[&str] = &[
 ];
 
 fn main() {
-    if let Err(e) = run() {
+    if let Err(e) = self_check().and_then(|()| run()) {
         eprintln!("error: solidcore build script: {e}");
         std::process::exit(1);
     }
@@ -47,6 +47,9 @@ fn run() -> Result<(), String> {
 
     let mut fields = String::new();
     for path in &paths {
+        if is_ignored(path) {
+            continue;
+        }
         println!("cargo:rerun-if-changed={}", path.display());
         let name = flag_name(path)?;
         let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -78,6 +81,17 @@ fn run() -> Result<(), String> {
     fs::write(&path, src).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Entries of the flag directory that are not flag files and are skipped: hidden files
+/// (`.DS_Store`, vim's `.<file>.swp`) and editor backups (`<file>~`, `<file>.swp`). Any other
+/// entry must be a flag file, so a mistyped name still fails the build.
+fn is_ignored(path: &Path) -> bool {
+    let hidden_or_backup = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with('.') || n.ends_with('~'));
+    hidden_or_backup || path.extension().is_some_and(|e| e == "swp")
+}
+
 /// The flag `path` declares: its file name less `.md`, which must be a lower-case Rust
 /// identifier (`[a-z_][a-z0-9_]*`, not `_` and not a keyword).
 fn flag_name(path: &Path) -> Result<&str, String> {
@@ -107,12 +121,14 @@ fn flag_name(path: &Path) -> Result<&str, String> {
 }
 
 /// The doc lines of a flag file: its lines, ending in one newline. A doc is required (every
-/// public field has one), and carriage returns are refused so the doc is the same on every
-/// checkout.
-fn doc_lines<'a>(path: &Path, text: &'a str) -> Result<Vec<&'a str>, String> {
+/// public field has one). CRLF line ends (a Windows checkout without the `.gitattributes`
+/// rule, or an unpacked archive) read as LF, so the doc is the same on every checkout; a lone
+/// carriage return is refused.
+fn doc_lines(path: &Path, text: &str) -> Result<Vec<String>, String> {
+    let text = text.replace("\r\n", "\n");
     if text.contains('\r') {
         return Err(format!(
-            "{}: carriage return in a flag's doc",
+            "{}: a lone carriage return in a flag's doc",
             path.display()
         ));
     }
@@ -122,5 +138,27 @@ fn doc_lines<'a>(path: &Path, text: &'a str) -> Result<Vec<&'a str>, String> {
     if body.trim().is_empty() {
         return Err(format!("{}: a flag needs its doc", path.display()));
     }
-    Ok(body.split('\n').collect())
+    Ok(body.split('\n').map(str::to_owned).collect())
+}
+
+/// Checks the file rules above on fixed inputs before every run (Cargo runs no tests for a
+/// build script): CRLF reads as LF, a lone carriage return, a missing final newline or an
+/// empty doc is refused, and only hidden files and editor backups are skipped.
+fn self_check() -> Result<(), String> {
+    let p = Path::new("self-check.md");
+    let lf = doc_lines(p, "a\n\nb\n")?;
+    let crlf = doc_lines(p, "a\r\n\r\nb\r\n")?;
+    let refused = ["a\rb\n", "a", "\n", " \r\n"]
+        .iter()
+        .all(|t| doc_lines(p, t).is_err());
+    let skipped = [".DS_Store", ".x.md.swp", "x.md~", "x.md.swp"]
+        .iter()
+        .all(|n| is_ignored(Path::new(n)));
+    let kept = ["x.md", "x.txt", "x"]
+        .iter()
+        .all(|n| !is_ignored(Path::new(n)));
+    if lf != ["a", "", "b"] || crlf != lf || !refused || !skipped || !kept {
+        return Err("build.rs self-check failed: the flag file rules changed".to_owned());
+    }
+    Ok(())
 }

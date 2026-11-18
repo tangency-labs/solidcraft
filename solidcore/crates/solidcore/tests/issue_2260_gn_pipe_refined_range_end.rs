@@ -90,7 +90,9 @@ const FORK_VOLUME: f64 = 40_267.709_270_590_589;
 
 /// A kernel with the fixes `names` on and the rest off. A name the kernel no longer has is a
 /// retired flag, whose fix is now the default behaviour: it is skipped, so retiring a flag
-/// edits none of these lists.
+/// edits none of these lists. The lists are frozen snapshots of past profiles, so a misspelt
+/// name is skipped silently too; a check against a list of retired names would bring back
+/// an edit here for every retirement.
 fn kernel(names: &[&str]) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = UpstreamFixes::default();
