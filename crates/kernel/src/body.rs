@@ -1621,19 +1621,26 @@ impl Body {
         (self.size() * 1e-7).max(1e-9) * 10.0
     }
 
-    /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
-    /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. Splines and ellipses also project exactly
-    /// between nonparallel planes. An edge on a cylinder whose axis is `plane`'s normal projects
-    /// as that cylinder's circle or arc ([`Body::projected_on_cylinder`]). `None` for other edges
-    /// outside a parallel plane, edges that aren't read exactly or aren't there, and mesh bodies.
+    /// Edges `indices` (record edge indices) as planar curves in `plane`'s coordinates:
+    /// lines, circular arcs and splines with their own knots and weights. An edge must lie
+    /// in a plane parallel to `plane`, except a cylinder's rim read along its axis
+    /// ([`Body::projected_on_cylinder`]). Nonparallel curves, unreadable edges and mesh
+    /// bodies return `None`; drawing measurements must not measure a flattened image.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
-        let exact = solidcore_ops::spline_projection::project_edges(&self.record, plane, indices, tol);
-        indices.iter().zip(exact).map(|(i, projected)| self.cylinder_edge_projection(plane, *i).or(projected)).collect()
+        indices
+            .iter()
+            .map(|i| {
+                if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, *i, tol) {
+                    solidcore_ops::spline_projection::project_edges(&self.record, plane, &[*i], tol).pop().flatten()
+                } else {
+                    self.cylinder_edge_projection(plane, *i)
+                }
+            })
+            .collect()
     }
 
     /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
