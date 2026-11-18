@@ -6446,7 +6446,7 @@
   "ui.drawing_ribbon.align": "Alinear",
   "ui.drawing_ribbon.issue_short": "Emitir rev.",
   "ui.drawing_ribbon.model_dims_short": "Cotas modelo",
-  "ui.drawing_ribbon.planned": "(previsto)",
+  "ui.drawing_ribbon.planned": "Próximamente",
   "ui.drawing_ribbon.space": "Espaciar",
   "ui.drawing_ribbon.surface_texture_short": "Textura superf.",
   "ui.drawing_settings.immediate": "Los cambios de hoja se aplican al momento. Cada edición es un paso de deshacer del dibujo.",
