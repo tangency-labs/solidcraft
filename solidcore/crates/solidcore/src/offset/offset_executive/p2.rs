@@ -1393,16 +1393,21 @@ impl OffsetExecutive {
             // among them, which filled the cavity in. The regions kept are the material
             // ones, read from the faces ([`p5::alternating_void_flags`]); the cavity's
             // walls stay, between a kept region and one that is not.
-            let material: Vec<RegionId> = if !select
-                && self.operation() == OffsetOperation::LocalOperation
-            {
-                crate::topology::brep::p5::alternating_void_flags(&result)?
-                    .filter(|flags| flags.values().filter(|&&v| v).count() > 1)
-                    .map(|flags| flags.into_iter().filter(|&(_, v)| !v).map(|(r, _)| r).collect())
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
+            let material: Vec<RegionId> =
+                if !select && self.operation() == OffsetOperation::LocalOperation {
+                    crate::topology::brep::p5::alternating_void_flags(&result)?
+                        .filter(|flags| flags.values().filter(|&&v| v).count() > 1)
+                        .map(|flags| {
+                            flags
+                                .into_iter()
+                                .filter(|&(_, v)| !v)
+                                .map(|(r, _)| r)
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
             let keep = if select {
                 Some(cavities.as_slice())
             } else if material.is_empty() {
