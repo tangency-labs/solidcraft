@@ -1109,6 +1109,47 @@ fn a_join_in_the_flat_is_kept_like_a_cut() {
     }
 }
 
+/// A 100 x 30 plate whose part past x = 60 runs on to y = 60, folded up at x = 60 (bend start, 1.5 mm
+/// sheet, R 3): the outline's corner at (60 + BA, 30) lies on the bend zone's far edge, where the
+/// panel's notch starts. A join in the plane of the base or of the folded panel was refused ("planar
+/// boolean supports finite nondegenerate lines and circular arcs"): the clipped panel outline held
+/// that corner twice.
+#[test]
+fn a_join_on_a_sheet_folded_where_an_outline_corner_is_on_the_bend_zone_edge() {
+    let (t, r) = (1.5, 3.0);
+    for k in [0.44, 0.5] {
+        let ba = FRAC_PI_2 * (r + k * t);
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Rule", "active": true, "thickness": "1.5 mm", "k_factor": k, "bend_radius": "1.5 mm"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [100, 0], [100, 60], [60.0 + ba, 60], [60.0 + ba, 30], [0, 30]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Outline", "rule": "Rule"}));
+        run(
+            &mut s,
+            "sheet.fold",
+            json!({"points": [[60, 0, t], [60, 30, t]], "angle": "90 deg", "position": "start", "radius": r, "fixed": [20, 15, t]}),
+        );
+        let folded = volume(&mut s);
+        // 10 x 15 on the base's free edge at x = 0.
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base_Tab"}));
+        run(&mut s, "sketch.line", json!({"points": [[-10, 5], [0, 5], [0, 20], [-10, 20]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let out = run(&mut s, "solid.extrude", json!({"sketch": "Base_Tab", "distance": t, "operation": "join"}));
+        assert!(out["warning"].is_null(), "K {k}: {out}");
+        let joined = volume(&mut s);
+        assert!(rel(joined, folded + 150.0 * t) < 1e-6, "K {k}: {joined} vs {}", folded + 150.0 * t);
+        // 15 x 2 on the folded panel's face, y 35 to 50, 1 mm up from where the panel starts.
+        let lo = t + r;
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 60.0 + r, "name": "Panel_Tab"}));
+        run(&mut s, "sketch.line", json!({"points": [[35, lo + 1.0], [50, lo + 1.0], [50, lo + 3.0], [35, lo + 3.0]], "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Panel_Tab", "distance": t, "operation": "join"}));
+        assert!(rel(volume(&mut s), joined) < 1e-6, "K {k}: {} vs {joined}", volume(&mut s));
+        assert!(flat(&mut s)["flat_size_mm"].is_array(), "K {k}");
+    }
+}
+
 /// A plate (15, -20) (0, 0) (-100, 0) (-100, -20) with a 20 mm inside flange on its slanted edge
 /// (2 mm sheet, R 2, K 0.5: the folded sheet holds its flat area times the thickness), unfolded,
 /// and a triangle cut out with a corner on the bend line: where the line ends on the plate's

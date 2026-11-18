@@ -1731,20 +1731,30 @@ fn snap(v: Vec2) -> Vec2 {
     Vec2::new(r(v.x), r(v.y))
 }
 
-/// Clip a polygon to the half-plane (p − o)·n ≥ 0.
+/// Clip a polygon to the half-plane (p − o)·n ≥ 0. A corner on the line comes out once: an edge
+/// that ends on the line (or starts there and leaves) adds no crossing of its own, and a crossing
+/// that lands on the corner before it is that corner.
 fn clip(poly: &[Vec2], o: Vec2, n: Vec2) -> Vec<Vec2> {
-    let mut out = Vec::new();
+    let mut out: Vec<Vec2> = Vec::new();
+    let push = |q: Vec2, out: &mut Vec<Vec2>| {
+        if out.last().is_none_or(|l| l.dist(q) > 1e-9) {
+            out.push(q);
+        }
+    };
     let m = poly.len();
     for i in 0..m {
         let (Some(&a), Some(&b)) = (poly.get(i), poly.get((i + 1) % m)) else { continue };
         let (da, db) = ((a - o).dot(n), (b - o).dot(n));
         if da >= 0.0 {
-            out.push(a);
+            push(a, &mut out);
         }
-        if (da >= 0.0) != (db >= 0.0) {
+        if (da > 0.0 && db < 0.0) || (da < 0.0 && db > 0.0) {
             let t = da / (da - db);
-            out.push(snap(a + (b - a) * t));
+            push(snap(a + (b - a) * t), &mut out);
         }
+    }
+    if out.len() > 1 && out.first().zip(out.last()).is_some_and(|(a, b)| a.dist(*b) <= 1e-9) {
+        out.pop();
     }
     out
 }
