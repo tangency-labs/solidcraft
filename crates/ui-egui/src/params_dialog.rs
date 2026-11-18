@@ -7,7 +7,8 @@
 //! (`expr.evaluate`) with a live model preview; Enter or leaving the field applies them.
 //! With "Apply each change as you leave its field" off (a remembered preference, #9279), they
 //! wait instead, without a preview, until Apply or OK sets them in one `parameters.change`.
-//! Escape closes the window and discards pending edits and their preview.
+//! Escape closes the window and discards pending edits and their preview; Cancel and Escape also
+//! put back the expressions applied live since the dialog opened, in one undo step (#15377).
 //! Import and export go through `parameters.import` / `parameters.export`.
 //!
 //! [`complete`] adds suggestions (parameters, functions, units) under any expression box: the
@@ -1171,10 +1172,9 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
 /// Put back the expressions applied live since the dialog opened (#15377): one
 /// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
 /// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
-/// left as it is. With `parameters_cancel_reverts` off, nothing is put back, as before. False,
-/// with the error shown, when the put-back is refused; what to put back is kept for the next try.
+/// left as it is. False, with the error shown, when the put-back is refused; what to put back is kept for the next try.
 fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
-    if d.applied.is_empty() || !app.preferences.parameters_cancel_reverts {
+    if d.applied.is_empty() {
         return true;
     }
     let now = rows(app);
@@ -1755,17 +1755,21 @@ mod tests {
         escape_closed(&mut h, &before, "10 mm");
     }
 
+    /// #3399, #15377: Escape drops what is being typed and puts back an edit already applied, in
+    /// one undo step.
     #[test]
-    fn escape_keeps_previously_committed_parameter_edit() {
+    fn escape_drops_the_typed_value_and_puts_back_a_previously_committed_parameter_edit() {
         let mut h = escape_dialog();
-        // The old Escape, kept behind the preference: an edit already applied stays (#15377).
-        h.app.preferences.parameters_cancel_reverts = false;
         escape_type(&mut h, "param:width", "20 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert_eq!(h.app.session.doc.param("width").unwrap().expr, "20 mm");
-        let before = escape_state(&h);
+        let undo = h.app.session.undo.len();
         escape_type(&mut h, "param:width", "30 mm");
-        escape_closed(&mut h, &before, "20 mm");
+        escape_key(&mut h, true);
+        assert!(h.app.params.is_none(), "the first Escape press closes Parameters");
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "10 mm", "30 mm is never applied and 20 mm goes back");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one step puts the edit back");
+        escape_key(&mut h, false);
     }
 
     #[test]
@@ -1857,7 +1861,6 @@ mod tests {
     #[test]
     fn live_edits_are_put_back_by_cancel_or_escape_in_one_undo_step_and_kept_by_ok_or_the_close_button() {
         let mut h = live_dialog();
-        assert!(crate::prefs::Prefs::default().parameters_cancel_reverts, "Cancel takes live edits back by default");
         let undo = h.app.session.undo.len();
         hold(&mut h, "w", "30 mm");
         hold(&mut h, "h", "w * 2");
@@ -1898,7 +1901,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_leaves_a_parameter_changed_elsewhere_and_the_preference_keeps_the_old_cancel() {
+    fn cancel_leaves_a_parameter_changed_elsewhere() {
         let mut h = live_dialog();
         hold(&mut h, "w", "30 mm");
         hold(&mut h, "h", "25 mm");
@@ -1908,15 +1911,6 @@ mod tests {
         h.frames(1);
         h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
         assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("40 mm", "20 mm"), "only the dialog's own edit goes back");
-
-        h.app.preferences.parameters_cancel_reverts = false;
-        reopen(&mut h);
-        let undo = h.app.session.undo.len();
-        hold(&mut h, "w", "30 mm");
-        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
-        assert!(h.app.params.is_none());
-        assert_eq!(expression(&h, "w"), "30 mm", "with the preference off, Cancel only closes the dialog, as before");
-        assert_eq!(h.app.session.undo.len(), undo + 1);
     }
 
     /// An agent can change a parameter between the frame that applies a live edit and the next
