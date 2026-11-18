@@ -2607,7 +2607,8 @@ fn assert_host_geometry(h: &PanelMountHarness, host: &HostLayout) {
         control.bounds.validate().unwrap();
         assert!(host.capacity.contains_rect(control.bounds), "reachable control: {control:?}");
         assert!(!control.accessible_name.is_empty());
-        assert!(host.painted.iter().any(|paint| paint.contains_rect(control.bounds)), "input must remain within actual paint");
+        assert!(control.bounds.contains_rect(control.ink));
+        assert!(host.painted.iter().any(|paint| paint.contains_rect(control.ink)), "drawn handle must remain within actual paint");
     }
     if let Some(viewport) = host.viewport {
         viewport.validate().unwrap();
@@ -8587,6 +8588,50 @@ fn shared_modal_receives_reserved_escape_once_and_keeps_the_restored_header_and_
                 (retained.reparents, retained.cancels, retained.applies, retained.finishes, retained.destroys)
             );
         }
+    }
+}
+
+#[test]
+fn a_press_three_logical_pixels_off_a_docked_sash_still_captures_it() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.frame(Vec::new(), false);
+    let sash = raw.host.frame().unwrap().layout.sashes.first().unwrap().clone();
+    let target = HostControlTarget::Pointer(HostPointerTarget::Sash { first: sash.first, second: sash.second });
+    let control = raw_control(&raw, &target);
+    assert_eq!(control.ink, sash.bounds, "the drawn sash keeps its width");
+    assert!(control.bounds.size.height.min(control.bounds.size.width) >= 8.0);
+    let centre = raw.at(target);
+    let off = if sash.bounds.size.height < sash.bounds.size.width { egui::vec2(0.0, 3.0) } else { egui::vec2(3.0, 0.0) };
+    raw.frame(vec![egui::Event::PointerMoved(centre + off)], false);
+    raw.pointer(centre + off, true, false);
+    assert!(raw.host.interaction().is_captured());
+}
+
+#[test]
+fn a_widened_docked_sash_grab_stays_inside_the_input_area_and_the_cards_content_inset() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let sash = layout.sashes.first().unwrap().clone();
+    let target = HostPointerTarget::Sash { first: sash.first, second: sash.second };
+    let control = layout.control(&target).unwrap();
+    assert!(control.bounds.size.width.max(control.bounds.size.height) >= sash.bounds.size.width.max(sash.bounds.size.height));
+    let tokens = solidcraft_theme::Tokens::get();
+    let (reach, inset) = if sash.bounds.size.width < sash.bounds.size.height {
+        ((control.bounds.size.width - sash.bounds.size.width) / 2.0, tokens.space_4)
+    } else {
+        ((control.bounds.size.height - sash.bounds.size.height) / 2.0, tokens.space_2)
+    };
+    assert!(reach > 0.0 && reach <= inset, "the grab reaches into a card by no more than the inset render_slot leaves around its content");
+    for point in [control.bounds.origin, middle(control.bounds)] {
+        assert_eq!(layout.hit_test(point).as_ref(), Some(&target));
+        assert!(layout.consumes_pointer(point), "hit-testing and input regions agree");
     }
 }
 

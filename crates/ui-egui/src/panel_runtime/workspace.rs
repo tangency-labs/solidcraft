@@ -136,6 +136,7 @@ pub struct HostFrameControl {
     pub role: InputRole,
     pub accessible_name: String,
     pub enabled: bool,
+    pub ink: LogicalRect,
 }
 
 #[derive(Clone, Debug)]
@@ -1002,6 +1003,7 @@ impl WorkspacePanelHost {
                 role: control.role,
                 accessible_name: name,
                 enabled,
+                ink: control.ink,
             });
         }
         let focused = runtime.layout().interaction().focused.clone();
@@ -1863,7 +1865,15 @@ impl WorkspacePanelHost {
             };
             let horizontal = panel.zone != Zone::Bottom;
             let extent = if horizontal { panel.outer.size.height } else { panel.outer.size.width };
-            let response = ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name, horizontal, extent);
+            let response = ui_kit::panel_host_sash(
+                ui,
+                control.id,
+                egui_rect(control.bounds),
+                egui_rect(control.ink),
+                &control.accessible_name,
+                horizontal,
+                extent,
+            );
             if allow_actions && response.double_clicked() {
                 pointer_events.push((response.id, HostPointerEvent::DoubleClick { target: target.clone() }));
             }
@@ -2809,6 +2819,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                                 id: response.id,
                                                 target,
                                                 bounds: logical_rect(visible),
+                                                ink: logical_rect(visible),
                                                 role: InputRole::Action,
                                                 accessible_name: action.label.clone(),
                                                 enabled: action.enabled && response.enabled(),
@@ -2854,6 +2865,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             ui,
                             control.id,
                             egui_rect(control.bounds).translate(chrome_offset),
+                            egui_rect(control.ink).translate(chrome_offset),
                             &control.accessible_name,
                             horizontal,
                             extent,
@@ -3391,6 +3403,7 @@ fn record_control(frame: &mut HostFrame, response: &egui::Response, target: Host
             id: response.id,
             target,
             bounds: logical_rect(bounds),
+            ink: logical_rect(bounds),
             role: InputRole::Action,
             accessible_name: name.to_owned(),
             enabled: enabled && response.enabled(),

@@ -278,6 +278,9 @@ pub struct HostMetrics {
     pub min_viewport: Size,
 }
 
+/// Docked sashes draw `sash_width` but grab this wide.
+const DOCKED_GRAB_WIDTH: f32 = 8.0;
+
 impl Default for HostMetrics {
     fn default() -> Self {
         let t = solidcraft_theme::Tokens::get();
@@ -638,6 +641,8 @@ pub struct HostControl {
     pub bounds: LogicalRect,
     pub role: InputRole,
     pub accessible_name: String,
+    /// What a handle draws; `bounds` is the grab area around it.
+    pub ink: LogicalRect,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -827,7 +832,8 @@ impl HostLayout {
             return Err(error(Rule::Bounds, "render viewport must fill its domain"));
         }
         for bounds in &self.input {
-            if !self.painted.iter().any(|paint| paint.contains_rect(*bounds)) {
+            let grab = self.controls.iter().any(|control| control.bounds == *bounds && control.bounds != control.ink);
+            if !grab && !self.painted.iter().any(|paint| paint.contains_rect(*bounds)) {
                 return Err(error(Rule::Bounds, "host input outside paint"));
             }
         }
@@ -841,7 +847,7 @@ impl HostLayout {
             if !targets.insert(&control.target) {
                 return Err(error(Rule::DuplicateId, "duplicate typed host target"));
             }
-            if !self.painted.iter().any(|paint| paint.contains_rect(control.bounds)) {
+            if !control.bounds.contains_rect(control.ink) || !self.painted.iter().any(|paint| paint.contains_rect(control.ink)) {
                 return Err(error(Rule::Bounds, "host control outside paint"));
             }
         }
@@ -1597,9 +1603,10 @@ fn append_sashes(out: &mut HostLayout, proposed: &Layout) -> PanelResult<()> {
                     out.painted.push(bounds);
                     out.occlusion.push(bounds);
                     out.input.push(bounds);
-                    add_control(
+                    add_grab_control(
                         out,
                         HostPointerTarget::Sash { first: first.clone(), second: second.clone() },
+                        centre_widen(bounds, DOCKED_GRAB_WIDTH),
                         bounds,
                         InputRole::Sash,
                         "ui.panel_host.sash",
@@ -1612,8 +1619,31 @@ fn append_sashes(out: &mut HostLayout, proposed: &Layout) -> PanelResult<()> {
 }
 
 fn add_control(out: &mut HostLayout, target: HostPointerTarget, bounds: LogicalRect, role: InputRole, name: &str) {
-    if let Some(bounds) = intersect_rect(bounds, out.capacity) {
-        out.controls.push(HostControl { target, bounds, role, accessible_name: name.into() });
+    add_grab_control(out, target, bounds, bounds, role, name);
+}
+
+/// A handle grabs `grab` and draws `ink`. Grab beyond the painted card still
+/// consumes the pointer, so hit-testing and input regions agree.
+fn add_grab_control(out: &mut HostLayout, target: HostPointerTarget, grab: LogicalRect, ink: LogicalRect, role: InputRole, name: &str) {
+    if let Some(bounds) = intersect_rect(grab, out.capacity) {
+        let ink = intersect_rect(ink, bounds).unwrap_or(bounds);
+        if grab != ink && !out.painted.iter().any(|paint| paint.contains_rect(bounds)) {
+            out.input.push(bounds);
+            out.occlusion.push(bounds);
+        }
+        out.controls.push(HostControl { target, bounds, role, accessible_name: name.into(), ink });
+    }
+}
+
+/// Widen a thin handle across its short axis, centred. A sash may only reach
+/// into the cards by less than their content inset.
+fn centre_widen(ink: LogicalRect, grab: f32) -> LogicalRect {
+    if ink.size.width <= ink.size.height {
+        let width = ink.size.width.max(grab);
+        rect(ink.origin.x - (width - ink.size.width) / 2.0, ink.origin.y, width, ink.size.height)
+    } else {
+        let height = ink.size.height.max(grab);
+        rect(ink.origin.x, ink.origin.y - (height - ink.size.height) / 2.0, ink.size.width, height)
     }
 }
 
