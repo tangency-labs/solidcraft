@@ -108,6 +108,7 @@ pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
     EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample, MassPropertiesEstimate,
     MembersClosest, Normal, PointClass, PointSetSummary, RayEntity, RayHit, SquareFaceLevel,
+    EDGE_POINTS_MAX,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
