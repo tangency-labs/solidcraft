@@ -3060,6 +3060,86 @@ mod wr664_near_knot_trims {
         assert_eq!(found, rails, "{name}: rail edges");
     }
 
+    /// Every loop of every rolled blend face `name`'s round made (a face whose surface has a
+    /// procedural blend definition: the faces whose rails `TrimRailCurves` trims) closes in
+    /// the face's UV space: at each vertex the start of an edge use's UV trim curve and the
+    /// end of its clockwise neighbour's are no farther apart than `EFF_ZERO * (1 + |uv|)`,
+    /// the gap below which the face builder counts a loop corner as closed
+    /// (`topology::face::p3`'s `create_uv_trim_curves_body`, `uv_scaled_zero`). Where a rail
+    /// meets the blend's end curve, both ends are the rail's trimmed end on the fillet
+    /// surface, so they agree to rounding. The near-knot snap moves a rail's end along it by
+    /// up to the zone tolerance after the end curve is built; an end curve left where it was
+    /// opens the loop there by that much, and the volume enclosure of the body can then no
+    /// longer prove its volume positive (`round_definition_rows`).
+    ///
+    /// The bottle's other blend face, a patch without a definition, is not checked: three of
+    /// its corners are open by 1.4e-10 to 3.9e-6 on main as well.
+    fn loops_close(name: &str) {
+        use solidcore::topology::edgeuse::p3::normalized_evaluate_read_only;
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        k.blend_face_log = Some(BlendFaceLog::default());
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        let made: Vec<_> = k
+            .blend_face_log
+            .as_ref()
+            .unwrap()
+            .last()
+            .iter()
+            .map(|m| m.face)
+            .filter(|&f| {
+                let surface = body.face(f).unwrap().surface.as_ref().expect("a blend surface");
+                surface.procedural_blend().is_some()
+            })
+            .collect();
+        assert!(!made.is_empty(), "{name}: no rolled blend face");
+        let mut open = Vec::new();
+        for &f in &made {
+            for l in face::loops(&body, f, false, None).unwrap() {
+                for use_ in loopuse::loop_edgeuses(&body, l).unwrap() {
+                    let cw = eu::cw_edgeuse(&body, use_).unwrap().expect("a clockwise neighbour");
+                    let start = normalized_evaluate_read_only(&k, &body, use_, 0.0, true, false).unwrap().point;
+                    let end = normalized_evaluate_read_only(&k, &body, cw, 1.0, true, false).unwrap().point;
+                    let gap = start.distance(end);
+                    let closed = solidcore::math::EFF_ZERO * (1.0 + start.x.abs().max(start.y.abs()));
+                    println!("WR664 {name}: face {f:?} at ({}, {}) gap {gap:e} (closed below {closed:e})", start.x, start.y);
+                    if gap > closed {
+                        open.push((f, start.x, start.y, gap));
+                    }
+                }
+            }
+        }
+        assert!(open.is_empty(), "{name}: blend face loops open at {open:?}");
+    }
+
+    #[test]
+    fn bottle_e8_r0_1_loops_close() {
+        loops_close(ROWS[0].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_1_loops_close() {
+        loops_close(ROWS[1].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_5_loops_close() {
+        loops_close(ROWS[2].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_1_loops_close() {
+        loops_close(ROWS[3].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_5_loops_close() {
+        loops_close(ROWS[4].0);
+    }
+
     #[test]
     fn bottle_e8_r0_1() {
         check(ROWS[0].0, ROWS[0].1, ROWS[0].2);
