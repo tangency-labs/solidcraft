@@ -17,8 +17,14 @@
 //! - main refusing, this branch answering: the answer is not farther than the guess, and
 //!   proven the closest point of the surface to `1e-6` relative (the surface's certified
 //!   lower bound, [`solidcore::query::distance_bound::surface_distance_lower_bound`], over
-//!   the whole domain);
-//! - main answering, this branch refusing: main's answer is proven farther than the guess;
+//!   the whole domain); where that bound is too coarse, the answer proven nearer than the
+//!   guess (enclosures apart: an added answer that improves on the caller's start, not a
+//!   proof that it is the global closest point);
+//! - main answering, this branch refusing: main's answer is proven farther than the guess,
+//!   or a point of the domain's boundary is proven nearer the test point than main's
+//!   answer by more than the call's tolerance (main's answer, reported converged, is then
+//!   not the closest point; `heal_data_p3`'s sliver surfaces, whose `u = 0` edge is a
+//!   segment 1e-5 long, not a pole, with the test points on it);
 //! - both refusing: no answer on either side.
 //!
 //! A call none of these proves is classed `ARGUED ...` and listed; a call proven worse is
@@ -200,6 +206,8 @@ fn invert(k: &Kernel, c: &Call<'_>, main: &Answer) -> &'static str {
             );
             if lo.is_ok_and(|lo| nd.1 - lo <= 1e-6 * nd.1) {
                 "invert: main refuses, this branch answers the closest point (1e-6)"
+            } else if nd.1 < g.0 {
+                "invert: main refuses, this branch answers, proven nearer than the guess"
             } else {
                 "ARGUED invert: main refuses, this branch answers not farther than the guess"
             }
@@ -212,6 +220,10 @@ fn invert(k: &Kernel, c: &Call<'_>, main: &Answer) -> &'static str {
                 (Some(m), Some(g)) if m.0 > g.1 => {
                     "invert: this branch refuses main's answer, proven farther than the guess"
                 }
+                (Some(m), _) if nearer_boundary_witness(k, c, p, m.0) => {
+                    "invert: this branch refuses main's answer, a boundary point proven nearer \
+                     by more than the tolerance"
+                }
                 _ => {
                     "ARGUED invert: this branch refuses an answer not proven farther than the guess"
                 }
@@ -220,16 +232,56 @@ fn invert(k: &Kernel, c: &Call<'_>, main: &Answer) -> &'static str {
     }
 }
 
+/// Whether a point of the call's uv domain boundary is proven nearer `p` than `main_lo`
+/// (the lower end of main's answer's enclosed distance) by more than the call's
+/// tolerance: main's answer, reported converged, is then not the closest point to within
+/// that tolerance, so refusing it loses nothing. The witness is located by plain
+/// evaluation at 1025 points along each of the domain's four edges (locating only); the
+/// proof is the witness's certified distance ([`crate::certify::distance`]), whose upper
+/// end plus the tolerance must lie below `main_lo`.
+fn nearer_boundary_witness(k: &Kernel, c: &Call<'_>, p: Vec3, main_lo: f64) -> bool {
+    const N: u32 = 1024;
+    let w = c.input;
+    let (u0, v0, u1, v1, tol) = (f(w[3]), f(w[4]), f(w[5]), f(w[6]), f(w[9]));
+    let s = c.surface;
+    let mut best: Option<(f64, Point2)> = None;
+    for i in 0..=N {
+        let t = f64::from(i) / f64::from(N);
+        let (u, v) = (u0 + t * (u1 - u0), v0 + t * (v1 - v0));
+        for uv in [
+            Point2::new(u0, v),
+            Point2::new(u1, v),
+            Point2::new(u, v0),
+            Point2::new(u, v1),
+        ] {
+            let Ok(q) = s.evaluate_point(k, uv) else {
+                continue;
+            };
+            let d = (q - p).length();
+            if d.is_finite() && best.is_none_or(|(b, _)| d < b) {
+                best = Some((d, uv));
+            }
+        }
+    }
+    best.and_then(|(_, uv)| crate::certify::distance(k, s, p, uv))
+        // (the sum's own rounding charged by one relative epsilon)
+        .is_some_and(|(_, hi)| (hi + tol) * (1.0 + f64::EPSILON) < main_lo)
+}
+
 /// The certificate classes of `blend.fillet_executive_p3`'s substituted calls.
 pub(super) const EXECUTIVE_P3: &[(&str, usize)] = &[
     (
         "ARGUED invert: main refuses, this branch answers not farther than the guess",
-        4966,
+        46,
     ),
     ("degen: aligned equally to the rounding", 130),
     ("degen: proven more aligned", 9),
     ("invert: as near to the rounding", 12),
     ("invert: both refuse", 112),
+    (
+        "invert: main refuses, this branch answers, proven nearer than the guess",
+        4920,
+    ),
     ("invert: proven nearer", 1204),
 ];
 /// Of `blend.fillet_geom_p2`'s.
@@ -245,11 +297,12 @@ pub(super) const STANDARD_SOLVER_P1: &[(&str, usize)] =
     &[("degen: aligned equally to the rounding", 8)];
 /// Of `heal.heal_data_p3`'s.
 pub(super) const HEAL_DATA_P3: &[(&str, usize)] = &[
+    ("invert: proven nearer", 21),
     (
-        "ARGUED invert: this branch refuses an answer not proven farther than the guess",
+        "invert: this branch refuses main's answer, a boundary point proven nearer by more \
+         than the tolerance",
         58,
     ),
-    ("invert: proven nearer", 21),
     (
         "invert: this branch refuses main's answer, proven farther than the guess",
         59,
