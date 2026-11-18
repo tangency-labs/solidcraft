@@ -51,7 +51,8 @@
 //!   grow (three times each round) until its faces are apart, and a coincidence of faces the
 //!   definitions show to lie on different surfaces
 //!   ([`crate::query::face::p1::faces_on_other_surfaces`]), or on surfaces of different kinds
-//!   (a blend and a cylinder in G2 contact), is held back likewise. Where the
+//!   (a blend and a cylinder in G2 contact) once the steps show them part by more than
+//!   rounding, is held back likewise. Where the
 //!   faces part by more than the tolerance the sector decides; where a step leaves a face
 //!   or the rounds run out first, the class is returned. A step that leaves only one face of
 //!   the sector while the classified face is held to the other, tangent to it at the edge
@@ -573,14 +574,18 @@ fn on_plane(brep: &Brep, eu: EdgeuseId) -> Result<bool> {
 /// tolerance of each other, and the held steps read exactly that: a coincidence that holds
 /// until a step leaves a face or the rounds run out is returned as before. Asked once and
 /// kept in `known`.
+///
+/// Different kinds alone prove nothing: a swept wall can be the very plane of the face it
+/// meets. [`Surfaces::Kinds`] tells that case apart, so a held coincidence can ask for the
+/// steps to show the faces parting first ([`holds_coincidence`]).
 fn on_other_surfaces(
     k: &Kernel,
     brep: &Brep,
     eu: EdgeuseId,
     other: &Brep,
     other_eu: EdgeuseId,
-    known: &mut Option<bool>,
-) -> Result<bool> {
+    known: &mut Option<Surfaces>,
+) -> Result<Surfaces> {
     if let Some(apart) = *known {
         return Ok(apart);
     }
@@ -597,10 +602,43 @@ fn on_other_surfaces(
                 .kind(),
         ))
     };
-    let apart = kind(brep, f)? != kind(other, other_f)?
-        || crate::query::face::p1::faces_on_other_surfaces(k, brep, f, other, other_f)?;
+    let apart = if crate::query::face::p1::faces_on_other_surfaces(k, brep, f, other, other_f)? {
+        Surfaces::Other
+    } else if kind(brep, f)? != kind(other, other_f)? {
+        Surfaces::Kinds
+    } else {
+        Surfaces::Same
+    };
     *known = Some(apart);
     Ok(apart)
+}
+
+/// What [`on_other_surfaces`] knows of the surfaces of two faces.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Surfaces {
+    /// Nothing shows them to differ: a coincidence near the edge is the surfaces'.
+    Same,
+    /// The definitions show the surfaces to differ.
+    Other,
+    /// Surfaces of different kinds the definitions cannot compare.
+    Kinds,
+}
+
+/// Whether a coincidence of two faces near the edge is held back while the steps grow
+/// (not upstream). Faces on surfaces the definitions show to differ always are. Faces on
+/// surfaces of different kinds are held only once the steps show them part: their step
+/// points `gap` apart at the same step is more than rounding ([`EFF_ZERO`]). A blend in G2
+/// contact with a cylinder (#18166) parts as a power of the step: its points are 1.0e-9
+/// apart at the coincidence's step of 7.7e-3 and part by 5.6e-4 at 0.21. A swept wall on
+/// the plane of the face it meets stays at 1e-14 for over a millimetre and then parts
+/// where the wall turns, far from the edge: read there, the side of a coincident face
+/// came out of a feature the edge does not touch (rig sweeps/5037, status 1001).
+fn holds_coincidence(surfaces: Surfaces, gap: f64) -> bool {
+    match surfaces {
+        Surfaces::Same => false,
+        Surfaces::Other => true,
+        Surfaces::Kinds => gap > EFF_ZERO,
+    }
 }
 
 /// `SmEdge::RadialSectorClassify`: where the face of `classify_eu` lies relative to
@@ -743,8 +781,8 @@ pub fn radial_sector_classify_between(
     // while the steps grow to see whether the two part; whether the sector face's and the
     // radial partner's surfaces are other surfaces than the classified face's.
     let mut held = false;
-    let mut other_than_sector: Option<bool> = None;
-    let mut other_than_radial: Option<bool> = None;
+    let mut other_than_sector: Option<Surfaces> = None;
+    let mut other_than_radial: Option<Surfaces> = None;
 
     // the step-off vectors (Bin = binormal)
     let mut s1 = StepOffVectors::default();
@@ -828,7 +866,7 @@ pub fn radial_sector_classify_between(
                         classify_brep,
                         classify_eu,
                         &mut other_than_sector,
-                    )?
+                    )? != Surfaces::Same
             } else {
                 ang3 <= ang2 + EFF_ZERO
                     && ang3 < EFF_ZERO_SQRT
@@ -839,7 +877,7 @@ pub fn radial_sector_classify_between(
                         classify_brep,
                         classify_eu,
                         &mut other_than_radial,
-                    )?
+                    )? != Surfaces::Same
             };
             if follow {
                 if off1 {
@@ -1073,14 +1111,17 @@ pub fn radial_sector_classify_between(
             let on_radial = ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0;
             if on_sector
                 && (done
-                    || !on_other_surfaces(
-                        k,
-                        brep,
-                        sector_eu,
-                        classify_brep,
-                        classify_eu,
-                        &mut other_than_sector,
-                    )?)
+                    || !holds_coincidence(
+                        on_other_surfaces(
+                            k,
+                            brep,
+                            sector_eu,
+                            classify_brep,
+                            classify_eu,
+                            &mut other_than_sector,
+                        )?,
+                        diff2,
+                    ))
             {
                 return Ok(if norm1.dot(norm3) < 0.0 {
                     RadialSectorClass::CoincidentSectorMate
@@ -1089,14 +1130,17 @@ pub fn radial_sector_classify_between(
                 });
             } else if on_radial
                 && (done
-                    || !on_other_surfaces(
-                        k,
-                        brep,
-                        eu_radial,
-                        classify_brep,
-                        classify_eu,
-                        &mut other_than_radial,
-                    )?)
+                    || !holds_coincidence(
+                        on_other_surfaces(
+                            k,
+                            brep,
+                            eu_radial,
+                            classify_brep,
+                            classify_eu,
+                            &mut other_than_radial,
+                        )?,
+                        diff3,
+                    ))
             {
                 let norm4 = s2.tangent.cross(s2.binormal);
                 let norm5 = s3.tangent.cross(bin3);
