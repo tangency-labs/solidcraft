@@ -3136,17 +3136,29 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
         inp.label = objects_label(inp.accept);
         // The pre-selection moved into this input when the dialog opened, so switching back
         // restores what that type held instead of losing it; each type keeps its own. Bodies
-        // switched to Components become the placements they are in, and Components with none
-        // kept take the placements of the Bodies kept.
+        // changed since Components was left become the placements they are in; Bodies left as
+        // they came back (or giving no placement) give the Components kept back; and Components
+        // with none kept take the placements of the Bodies kept.
         let saved = d.other_objects.get_mut(ty).map(std::mem::take).unwrap_or_default();
         let items = std::mem::take(&mut inp.items);
-        let next = if ty == 2 && (from_bodies || saved.is_empty()) {
-            crate::pattern_components::as_placements(s, if from_bodies { &items } else { &d.other_objects[0] })
+        let next = if ty == 2 {
+            let unchanged = from_bodies && items == d.other_objects[0];
+            if !saved.is_empty() && (!from_bodies || unchanged) {
+                saved
+            } else {
+                let placed = crate::pattern_components::as_placements(s, if from_bodies { &items } else { &d.other_objects[0] });
+                if placed.is_empty() { saved } else { placed }
+            }
         } else {
             saved
         };
         if let Some(slot) = d.other_objects.get_mut(cur) {
             *slot = items;
+        }
+        // Bodies keeps a copy of what it came back with, so that leaving it unchanged for
+        // Components can tell (the slot is written again when Bodies is left).
+        if ty == 0 {
+            d.other_objects[0].clone_from(&next);
         }
         inp.items = next;
         d.active = 0;

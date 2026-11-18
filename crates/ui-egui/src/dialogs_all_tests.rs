@@ -2111,6 +2111,32 @@ fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, placements);
     mirror_object_type(&mut h, "Features");
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, feature);
+    // Components picked by hand outlast a trip to Bodies that leaves the bodies as they came
+    // back, or empties them; bodies picked anew there become their placements.
+    let items = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    let narrowed = vec![Sel::Occurrence { path: vec![first] }];
+    mirror_object_type(&mut h, "Components");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&narrowed);
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(items(&h), bodies);
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(items(&h), narrowed, "Bodies left as they came back");
+    mirror_object_type(&mut h, "Bodies");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(items(&h), narrowed, "Bodies emptied");
+    mirror_object_type(&mut h, "Bodies");
+    assert!(items(&h).is_empty());
+    let picked = vec![bodies[3].clone()];
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&picked);
+    mirror_object_type(&mut h, "Components");
+    let placed = crate::pattern_components::as_placements(&h.app.session, &picked);
+    assert_eq!(placed.len(), 1);
+    assert_ne!(placed, narrowed, "the body picked is in the other placement");
+    assert_eq!(items(&h), placed, "Bodies picked anew");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&placements);
+    mirror_object_type(&mut h, "Features");
+    assert_eq!(items(&h), feature);
     mirror_object_type(&mut h, "Components");
     {
         let d = h.app.dialog.as_mut().unwrap();
