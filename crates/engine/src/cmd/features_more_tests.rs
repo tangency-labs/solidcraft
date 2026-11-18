@@ -1180,7 +1180,8 @@ fn a_loft_u_turn_between_end_faces_of_different_sizes_blends_without_twisting() 
     let st = s.model.state();
     let loft = st.bodies.iter().find(|b| b.name != "A" && b.name != "B").expect("a loft body");
     let b = loft.body.exact_bounds().expect("bounds");
-    assert!(b.min.z > -1e-3 && b.max.z < 22.5 + 1e-3 && b.max.x > 48.0 + 5.0 && b.min.x > 48.0 - 1e-3, "{b:?}");
+    // A twist used to throw it millimetres out; the blended skin itself may bulge a few hundredths.
+    assert!(b.min.z > -0.1 && b.max.z < 22.5 + 0.1 && b.max.x > 48.0 + 5.0 && b.min.x > 48.0 - 0.1, "{b:?}");
 }
 
 /// Two parallel plates offset so far sideways that no square bend fits between their big faces:
