@@ -515,12 +515,16 @@ fn default_reuse_import(app: &SolveApp, request: &mut Request) {
 }
 
 /// Import options the preferences add for `path` (with `history: solids` a FreeCAD file brings
-/// only its solids, as before its history was rebuilt).
+/// only its solids, as before its history was rebuilt; with `reader: cadmpeg` a FreeCAD or Rhino
+/// file's solids are read from cadmpeg's model straight into records).
 pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
     let freecad = std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"));
     if freecad && !app.preferences.freecad_history {
         out.insert("history".into(), json!("solids"));
+    }
+    if solidcraft_engine::io::is_native_cad_path(path) && app.preferences.cadmpeg_import {
+        out.insert("reader".into(), json!("cadmpeg"));
     }
     out
 }
@@ -2235,6 +2239,34 @@ M30
             app.insert_path(path);
             let got: Vec<&str> = app.session.doc.features.iter().map(|f| f.kind.type_name()).collect();
             assert_eq!(got, types, "preference {on}");
+        }
+    }
+
+    /// A FreeCAD or Rhino file's solids come in through cadmpeg's STEP writer and SolidCraft's STEP
+    /// reader, the Import feature keeping that STEP text, as before; with "Import with cadmpeg" on,
+    /// read from cadmpeg's model straight into records, with no STEP text kept. Both bring the
+    /// same block.
+    #[test]
+    fn cadmpeg_import_preference_reads_freecad_and_rhino_into_records() {
+        assert!(!crate::prefs::Prefs::default().cadmpeg_import, "off by default");
+        for file in ["block.FCStd", "block.3dm"] {
+            let path = format!("{}/../io/src/native_cad/fixtures/{file}", env!("CARGO_MANIFEST_DIR"));
+            let mut volumes = Vec::new();
+            for on in [false, true] {
+                let mut app = SolveApp::new(Session::default(), Default::default());
+                app.preferences.freecad_history = false;
+                app.preferences.cadmpeg_import = on;
+                app.insert_path(&path);
+                let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
+                    solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                    _ => None,
+                });
+                assert_eq!(import, Some((on, on)), "{file}: preference {on}");
+                let bodies = &app.session.model.state().bodies;
+                assert_eq!(bodies.len(), 1, "{file}: preference {on}");
+                volumes.push(solidcraft_engine::kernel::measure(&bodies[0].body).unwrap().volume);
+            }
+            assert!((volumes[0] - volumes[1]).abs() < 1e-6 * volumes[0], "{file}: {volumes:?}");
         }
     }
 
