@@ -7740,19 +7740,13 @@ fn feature_tools_with_constructor(
                 }
                 face => Some(ss.plane.offset(height_at(&tst, face, &ss.plane, centre, p.0))),
             });
-            let level_because = match &slanted_from {
-                None => None,
-                Some(_) if extent.to.is_some() && to_end_plane.is_none() => {
-                    Some("To Object is on a face that is not flat, or within 5 degrees of running along the extrusion")
-                }
-                Some(_) if extent.to.is_some() && extent.distance2.is_some() => Some("To Object is set with a second side"),
-                Some(_) if extent.through_all => Some("Through All is set"),
-                Some(_) if tapered => Some("the extrude is tapered"),
-                Some(slope) if slope.normal().dot(n).abs() < FROM_SLOPE_LEAST_SINE => {
-                    Some("the face is within 5 degrees of running along the extrusion")
-                }
-                Some(_) => None,
+            let ends = ExtrudeEnds {
+                to: extent.to.map(|_| to_end_plane.is_some()),
+                through_all: extent.through_all,
+                tapered,
+                two_sided: extent.distance2.is_some(),
             };
+            let level_because = slanted_from.as_ref().and_then(|slope| level_start_reason(slope, n, &ends));
             if let Some(why) = level_because {
                 append_warning(
                     warning,
@@ -9383,28 +9377,42 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
         .collect()
 }
 
-/// Whether `new` has a face on a surface no face of `old` lies on, read from the exact surfaces
-/// of both: a plane, a cylinder or a sphere of its own. A cut that removes material leaves one (a
-/// wall of the pocket); one that only splits faces where its tool touches them (#18825) leaves
-/// none. A face on another kind of surface settles nothing.
+/// Whether `new` has a face on a surface no face of `old` lies on. A plane, cylinder, cone,
+/// sphere or torus is compared by its geometry, to within a ten-millionth of the bodies' size;
+/// any other surface (a spline) by its exact definition in the record. A cut that removes
+/// material usually leaves such a face (a wall of the pocket); one that only splits faces where
+/// its tool touches them (#18825) leaves none. It is a quick test, not a proof: a cut whose new
+/// faces all lie on surfaces the body had already (a thin wall cut away between two pockets)
+/// leaves none either, so the caller compares volumes when it finds none.
 fn has_a_new_surface(old: &Body, new: &Body) -> bool {
     use kernel::FaceSurface as S;
     let tol = (old.size().max(new.size()) * 1e-7).max(1e-7);
-    let olds: Vec<S> = (0..old.face_count()).filter_map(|fi| kernel::face_surface(old, fi)).collect();
-    let on_plane = |n: Vec3, p: Vec3, q: Vec3| (q - p).dot(n).abs() <= tol;
+    let parallel = |a: Vec3, b: Vec3| a.cross(b).len() <= 1e-9;
+    let same_axis = |o: Vec3, a: Vec3, p: Vec3, b: Vec3| {
+        let off = p - o;
+        parallel(a, b) && (off - a * off.dot(a)).len() <= tol
+    };
     let same = |a: &S, b: &S| match (a, b) {
-        (S::Plane { normal: n, point: p }, S::Plane { normal: m, point: q }) => n.vec().cross(m.vec()).len() <= 1e-9 && on_plane(n.vec(), *p, *q),
+        (S::Plane { normal: n, point: p }, S::Plane { normal: m, point: q }) => parallel(n.vec(), m.vec()) && (*q - *p).dot(n.vec()).abs() <= tol,
         (S::Cylinder { origin: o, axis: a, radius: r }, S::Cylinder { origin: p, axis: b, radius: s }) => {
-            let off = *p - *o;
-            (r - s).abs() <= tol && a.vec().cross(b.vec()).len() <= 1e-9 && (off - a.vec() * off.dot(a.vec())).len() <= tol
+            (r - s).abs() <= tol && same_axis(*o, a.vec(), *p, b.vec())
+        }
+        (S::Cone { apex: o, axis: a, half_angle: h }, S::Cone { apex: p, axis: b, half_angle: k }) => {
+            o.dist(*p) <= tol && a.vec().dot(b.vec()) > 1.0 - 1e-12 && (h - k).abs() <= 1e-9
         }
         (S::Sphere { center: c, radius: r }, S::Sphere { center: d, radius: s }) => (r - s).abs() <= tol && c.dist(*d) <= tol,
+        (S::Torus { center: c, axis: a, major: r, minor: t }, S::Torus { center: d, axis: b, major: s, minor: u }) => {
+            c.dist(*d) <= tol && parallel(a.vec(), b.vec()) && (r - s).abs() <= tol && (t - u).abs() <= tol
+        }
         _ => false,
     };
-    (0..new.face_count())
-        .rev()
-        .filter_map(|fi| kernel::face_surface(new, fi))
-        .any(|surface| matches!(surface, S::Plane { .. } | S::Cylinder { .. } | S::Sphere { .. }) && !olds.iter().any(|o| same(o, &surface)))
+    let (old_rec, new_rec) = (old.record(), new.record());
+    let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Surface>)> =
+        (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi).map(|f| &f.surface))).collect();
+    (0..new.face_count()).rev().any(|fi| match kernel::face_surface(new, fi) {
+        Some(surface) => !olds.iter().any(|(o, _)| o.as_ref().is_some_and(|o| same(o, &surface))),
+        None => new_rec.faces.get(fi).is_some_and(|f| !olds.iter().any(|(_, o)| *o == Some(&f.surface))),
+    })
 }
 
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
@@ -10132,22 +10140,54 @@ pub fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f
     height_at(st, face_at(st, p, Some(plane.normal())), plane, centre, p)
 }
 
-/// Where an extrude From Object at `p` starts above `centre`, along `plane`'s normal, when the
-/// face there is flat and at a slant the extrude starts on: the level at which the line
-/// through `centre` along the normal meets the face's plane. `None` for any other face,
-/// including one within 5 degrees of running along the extrusion, which starts at
-/// [`object_height`] as the build does. The caller rules out To Object on a face that is not
-/// flat ([`to_end_is_flat`]), Through All, a taper and a design kept on the old start
-/// (`from_level`), which also start there.
-pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> Option<f64> {
+/// What an extrude From a flat face at a slant needs to know about its other end to tell whether
+/// it starts on the face ([`level_start_reason`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ExtrudeEnds {
+    /// With To Object: whether it ends on a flat plane ([`to_end_is_flat`]).
+    pub to: Option<bool>,
+    pub through_all: bool,
+    /// A taper other than 0.
+    pub tapered: bool,
+    /// A second side (`distance2`).
+    pub two_sided: bool,
+}
+
+/// Why an extrude From the flat face at a slant `slope` (the extrusion along `n`) starts on a
+/// plane parallel to the sketch, at the face's level, instead of on the face; `None` when it
+/// starts on the face. The build and the extrude window's arrow both decide by this.
+fn level_start_reason(slope: &Plane, n: Vec3, ends: &ExtrudeEnds) -> Option<&'static str> {
+    match ends.to {
+        Some(false) => return Some("To Object is on a face that is not flat, or within 5 degrees of running along the extrusion"),
+        Some(true) if ends.two_sided => return Some("To Object is set with a second side"),
+        _ => {}
+    }
+    if ends.through_all {
+        Some("Through All is set")
+    } else if ends.tapered {
+        Some("the extrude is tapered")
+    } else if slope.normal().dot(n).abs() < FROM_SLOPE_LEAST_SINE {
+        Some("the face is within 5 degrees of running along the extrusion")
+    } else {
+        None
+    }
+}
+
+/// Where an extrude From Object at `p` starts above `centre`, along `plane`'s normal, when it
+/// starts on a flat face at a slant there: the level at which the line through `centre` along
+/// the normal meets the face's plane. `None` when it starts at [`object_height`] instead: on
+/// any other face, or for the reasons [`level_start_reason`] gives with the extrude's other end
+/// `ends` (`ends.to` is filled in here from `to`, the To pick). The caller rules out a design
+/// kept on the old start (`from_level`), which also starts there.
+pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3, to: Option<Vec3>, ends: ExtrudeEnds) -> Option<f64> {
     let n = plane.normal();
     let slope = slanted_plane(st, face_at(st, p, Some(n))?, n)?;
-    let m = slope.normal();
-    let across = n.dot(m);
-    if across.abs() < FROM_SLOPE_LEAST_SINE {
+    let ends = ExtrudeEnds { to: to.map(|q| to_end_is_flat(st, plane, q)), ..ends };
+    if level_start_reason(&slope, n, &ends).is_some() {
         return None;
     }
-    Some(level_along(plane, centre + n * ((slope.origin - centre).dot(m) / across)))
+    let m = slope.normal();
+    Some(level_along(plane, centre + n * ((slope.origin - centre).dot(m) / n.dot(m))))
 }
 
 /// Whether a To Object pick at `p` ends an extrude on `plane` on a flat plane: a point off every
@@ -10733,16 +10773,42 @@ fn trim_between_planes(tools: Vec<Traced>, from: &Plane, to: &Plane, n: Vec3, si
 
 /// Whether `to` lies before `from` along the extrusion (`n` times the sign of `d`, `n` the
 /// normal of `plane`) somewhere over the profiles' outer loops: the two planes cross over them.
-/// Both levels change linearly across the sketch, so the loops' points settle it; a crossing on
-/// a loop's edge, within a hair, does not count.
+/// The gap between the planes changes linearly across the sketch, so its least value over a
+/// loop lies at a line's end or at an arc's end or its point farthest the gap's way down,
+/// found exactly; a Bézier or conic piece is sampled to 1e-6 mm. A crossing on a loop's edge,
+/// within a hair, does not count.
 fn planes_cross_over(from: &Plane, to: &Plane, plane: &Plane, regions: &[Region2], d: f64) -> Result<bool> {
+    let gap = |q: Vec2| -> Result<f64> {
+        let q = plane.to_world(q);
+        Ok((level_on(plane, q, to)? - level_on(plane, q, from)?) * d.signum())
+    };
+    // The gap's slope across the sketch: it falls fastest along `down`.
+    let at0 = gap(Vec2::new(0.0, 0.0))?;
+    let slope = Vec2::new(gap(Vec2::new(1.0, 0.0))? - at0, gap(Vec2::new(0.0, 1.0))? - at0);
+    let down = (slope * -1.0).normalized();
+    let mut points = Vec::new();
+    for seg in regions.iter().flat_map(|r| &r.outer.segs) {
+        match *seg {
+            solidcore_record::Seg2::Line { a, b } => points.extend([a, b]),
+            solidcore_record::Seg2::Arc { center, radius, start, sweep } => {
+                points.extend([center + Vec2::from_angle(start) * radius, center + Vec2::from_angle(start + sweep) * radius]);
+                if let Some(down) = down {
+                    // Whether the arc passes the angle of `down`, going from `start` by `sweep`.
+                    let turn = (down.y.atan2(down.x) - start) * sweep.signum();
+                    if turn.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
+                        points.push(center + down * radius.abs());
+                    }
+                }
+            }
+            _ => points.extend(seg.polyline(1e-6)),
+        }
+    }
     let mut least = f64::INFINITY;
     let mut reach = 0.0_f64;
-    for q in regions.iter().flat_map(|r| r.outer.polyline(1e-2)) {
-        let q = plane.to_world(q);
-        let gap = (level_on(plane, q, to)? - level_on(plane, q, from)?) * d.signum();
-        least = least.min(gap);
-        reach = reach.max(gap.abs());
+    for q in points {
+        let g = gap(q)?;
+        least = least.min(g);
+        reach = reach.max(g.abs());
     }
     Ok(least < -1e-9 * (1.0 + reach))
 }
@@ -11086,13 +11152,17 @@ fn eval_feature_kind(
             // whether the cut went through sheet metal's flat pattern or the generic path. A body
             // the cut rebuilt with the volume it had lost nothing either: a tool lying in an
             // empty slot, touching its walls, splits their faces and removes nothing (#18825).
-            // A cut that removes material leaves a face on a surface of its own (a wall of the
-            // pocket), so the volumes are only compared when the body shows none: measuring
-            // them takes far longer than the cut.
+            // A cut that removes material usually leaves a face on a surface the body didn't
+            // have (a wall of the pocket). Measuring volumes takes far longer than the cut, so
+            // they are only compared when the body shows no such face.
             let before: Option<Vec<Body>> = (*operation == Operation::Cut).then(|| st.bodies.iter().map(|b| b.body.clone()).collect());
             let unchanged = |st: &ModelState, warning: &mut Option<String>| {
+                // Equal to rounding only: a body the cut rebuilt without removing anything has the
+                // same exact volume (the faces it split add up to the faces they were), while a cut
+                // can remove very little of a large body (a 0.005 mm wall between two pockets in a
+                // 1 m cube is 5e-10 of it).
                 let same_volume = |old: &Body, new: &Body| match (old.volume_at(0.0), new.volume_at(0.0)) {
-                    (Some(a), Some(b)) => (a - b).abs() <= 1e-9 * a.abs().max(b.abs()),
+                    (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
                     _ => false,
                 };
                 let kept = |b: &ModelBody, old: &Body| {

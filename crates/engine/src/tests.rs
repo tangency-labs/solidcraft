@@ -5269,6 +5269,56 @@ fn extrude_from_a_slanted_face_with_to_and_a_second_side_crossing_planes_or_to_t
     assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
 }
 
+/// The "removes no material" warning on cuts that remove very little from a large body, and From
+/// and To planes that cross over a curved profile by a hair (#18825). A groove 0.2 mm across
+/// turned round Z at radius 5 into the top of a 1 m cube removes 2 pi 5 pi 0.01 / 2 = 0.49 mm3.
+/// A cut that takes away a wall 0.005 mm thick between two pockets removes 0.005 * 10 * 10 = 0.5
+/// mm3, and every face it leaves lies on a plane the pockets had already. Neither warns. A circle
+/// of radius 1 at y -4 on the plane x 3, From the slot's slanted wall To the plane x 3.4303,
+/// which the wall's plane crosses 0.003 mm above the circle's lowest point, is refused.
+#[test]
+fn a_cut_that_removes_very_little_says_nothing_and_planes_crossing_a_curved_profile_are_refused() {
+    let warning = |s: &Session| s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+    let big = |s: &mut Session| {
+        run(s, "solid.box", json!({"corner": [-500, -500, 0], "length": 1000, "width": 1000, "height": 1000, "body_name": "Big", "name": "Big"}));
+    };
+
+    let mut s = Session::default();
+    big(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [5, -1000], "radius": 0.1}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Ring", "axis": "Z", "operation": "cut", "name": "Groove"}));
+    let removed = 1e9 - volume(&mut s);
+    assert!((removed - PI * PI * 0.05).abs() < 1e-3, "{removed}");
+    assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    big(&mut s);
+    run(&mut s, "solid.box", json!({"corner": [-500, -500, 990], "length": 10, "width": 10, "height": 10, "operation": "cut", "name": "PocketA"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [-489.995, -500, 990], "length": 10, "width": 10, "height": 10, "operation": "cut", "name": "PocketB"}),
+    );
+    let pockets = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 1000, "name": "Wall"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-491, -500], "p1": [-489, -490]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Wall", "distance": -10, "operation": "cut", "name": "WallGone"}));
+    let removed = pockets - volume(&mut s);
+    assert!((removed - 0.5).abs() < 1e-3, "{removed}");
+    assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    run(&mut s, "sketch.circle.center", json!({"center": [-4, 5], "radius": 1}));
+    run(&mut s, "sketch.finish", json!({}));
+    let p = json!({"sketch": "Across", "from": [20.0 / 7.0, -6, 5], "to": [3.430285714285714, 30, 30], "operation": "new", "body_name": "Fill"});
+    let crossed = s.execute("solid.extrude", &p);
+    assert!(crossed.as_ref().is_err_and(|e| e.to_string().contains("cross over the profile")), "{crossed:?}");
+}
+
 /// Revolve Two Sides, Symmetric and To Object.
 #[test]
 fn revolve_two_sides_symmetric_and_to_object() {
