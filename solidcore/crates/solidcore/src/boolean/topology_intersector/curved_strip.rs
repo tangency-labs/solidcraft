@@ -579,7 +579,7 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
         // the strip over each slab of the boxes' span in u, enclosed
         // (`extra` is the test seam's perturbation, 0 outside the unit tests)
         let (extra, _) = perturbed(k);
-        if !strip_within(&a.net, a.net_bound + extra[0], &boxes, implicit, self.tol)? {
+        if !strip_within(&a.net, a.net_bound + extra[0], &boxes, implicit, self.tol) {
             return Ok(false);
         }
 
@@ -869,21 +869,21 @@ fn strip_within(
     boxes: &[Extent2d],
     implicit: &Implicit,
     tol: f64,
-) -> Result<bool> {
+) -> bool {
     let mut worst = 0.0_f64;
     for slab in slabs(boxes) {
         let Some(slab) = slab else {
-            return Ok(false);
+            return false;
         };
-        let Some(bound) = net_bound_over(net, &slab, implicit)? else {
-            return Ok(false);
+        let Some(bound) = net_bound_over(net, &slab, implicit) else {
+            return false;
         };
         worst = worst.max(bound);
         if !within(worst, net_bound, tol) {
-            return Ok(false);
+            return false;
         }
     }
-    Ok(true)
+    true
 }
 
 /// An edge E the strip may lie beside: E, its end V away from the curve's end at E,
@@ -947,20 +947,12 @@ fn net_of(surface: &Surface) -> Option<(BSplineSurface, f64)> {
 /// A bound that cannot be made is `None` too, a refusal: the drop is then not decided and
 /// the pair goes down today's path (an interior knot of multiplicity `d + 1` makes the
 /// Bézier decomposition fail, and that must not fail the boolean).
-fn net_bound_over(
-    net: &BSplineSurface,
-    box_uv: &Extent2d,
-    implicit: &Implicit,
-) -> Result<Option<f64>> {
-    let Some(cut) = net_cut(net, box_uv) else {
-        return Ok(None);
-    };
+fn net_bound_over(net: &BSplineSurface, box_uv: &Extent2d, implicit: &Implicit) -> Option<f64> {
+    let cut = net_cut(net, box_uv)?;
     // (borrowed: no knot fixup)
-    Ok(
-        off_surface_bound(&BSplineSurface::from_nurb(cut, true), implicit, net)
-            .ok()
-            .flatten(),
-    )
+    off_surface_bound(&BSplineSurface::from_nurb(cut, true), implicit, net)
+        .ok()
+        .flatten()
 }
 
 /// [`net_bound_over`]'s sub-patch of `net` covering `box_uv`, its knots `net`'s own;
@@ -1319,11 +1311,11 @@ mod tests {
             Extent2d::from_bounds(0.0, 0.0, 0.5, 0.0),
             Extent2d::from_bounds(0.0, 1.0, 0.5, 1.0),
         ];
-        assert!(strip_within(&net, 0.0, &boxes, &plane, 1e-3).unwrap());
-        assert!(!strip_within(&net, 0.0, &boxes, &plane, 4e-4).unwrap());
-        assert!(!strip_within(&net, 6e-4, &boxes, &plane, 1e-3).unwrap());
+        assert!(strip_within(&net, 0.0, &boxes, &plane, 1e-3));
+        assert!(!strip_within(&net, 0.0, &boxes, &plane, 4e-4));
+        assert!(!strip_within(&net, 6e-4, &boxes, &plane, 1e-3));
         // (not a number is not within)
-        assert!(!strip_within(&net, f64::NAN, &boxes, &plane, 1e-3).unwrap());
+        assert!(!strip_within(&net, f64::NAN, &boxes, &plane, 1e-3));
     }
 
     /// [`gap_within`] of a line 4.2e-7 above the plane patch z = 0 at the UV line under it
@@ -1411,10 +1403,10 @@ mod tests {
             normal: crate::math::Vec3::Z,
         };
         let inside = Extent2d::from_bounds(0.25, 0.25, 0.75, 0.75);
-        let on = net_bound_over(&net, &inside, &plane).unwrap().unwrap();
+        let on = net_bound_over(&net, &inside, &plane).unwrap();
         assert!((0.0..=1e-13).contains(&on), "{on:e}");
         let past = Extent2d::from_bounds(0.25, 0.25, 1.01, 0.75);
-        assert_eq!(net_bound_over(&net, &past, &plane).unwrap(), None);
+        assert_eq!(net_bound_over(&net, &past, &plane), None);
     }
 
     /// r4 B8: the sub-patch whose bound is taken is A's own surface. A cubic net in u with
@@ -1464,12 +1456,12 @@ mod tests {
         let u = &cut.u_knots()[..=r];
         assert_eq!(u.iter().filter(|&&k| k == 0.5).count(), 1, "{u:?}");
         assert!(u[0] <= lo && 0.9 <= u[r], "{u:?}");
-        assert!(net_bound_over(&net, &near, &plane).unwrap().is_some());
+        assert!(net_bound_over(&net, &near, &plane).is_some());
         // within the snapping: the cut starts at the knot
         let snapped = Extent2d::from_bounds(0.5 + 2.5e-8, 0.25, 0.9, 0.75);
         let cut = net_cut(&net, &snapped).unwrap();
         assert_eq!(cut.u_knots()[0], 0.5);
-        assert!(net_bound_over(&net, &snapped, &plane).unwrap().is_some());
+        assert!(net_bound_over(&net, &snapped, &plane).is_some());
     }
 
     /// r5 B9: where A has distinct knots closer than the snapping, the extraction would
@@ -1546,7 +1538,7 @@ mod tests {
             origin: crate::math::Vec3::ZERO,
             normal: crate::math::Vec3::Z,
         };
-        assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+        assert_eq!(net_bound_over(&net, &bx, &plane), None);
     }
 
     /// r6 B10: the extraction takes the net as clamped. On a cubic net with unclamped u
@@ -1609,7 +1601,7 @@ mod tests {
                 let bound = net_bound_over(&net, &bx, &plane);
                 panic!("box [{a}, {b}]: a cut over [{ca}, {cb}] was given, {worst:e} off A, bound {bound:?}");
             }
-            assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+            assert_eq!(net_bound_over(&net, &bx, &plane), None);
         }
     }
 
@@ -1678,7 +1670,7 @@ mod tests {
                 let height = sampled_height(&nurb, &bx);
                 panic!("box [{a}, {b}]: a cut was given, bound {bound:?}, A sampled {height:e}");
             }
-            assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+            assert_eq!(net_bound_over(&net, &bx, &plane), None);
         }
     }
 
@@ -1704,7 +1696,7 @@ mod tests {
                     let height = sampled_height(&nurb, &bx);
                     panic!("knots {u:?} box [{a}, {b}]: a cut was given, bound {bound:?}, A sampled {height:e}");
                 }
-                assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+                assert_eq!(net_bound_over(&net, &bx, &plane), None);
             }
         }
     }
@@ -1723,7 +1715,7 @@ mod tests {
         };
         let bx = Extent2d::from_bounds(0.3, 0.0, 0.9, 1.0);
         assert!(net_cut(&net, &bx).is_some());
-        assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+        assert_eq!(net_bound_over(&net, &bx, &plane), None);
     }
 
     /// The fixture of `tests/wr_614_coincident_strip_crossing.rs`
