@@ -345,6 +345,13 @@ impl Product {
         };
         presentation
     }
+    /// The panel's search box in its header (#19042): the Browser's, opened by its magnifier.
+    fn search(self, app: &crate::SolveApp) -> Option<HeaderSearch> {
+        (self == Self::Browser).then(|| HeaderSearch {
+            action: ControlId("magnifier".into()),
+            open: crate::browser_search::bar_shown(app).then(|| crate::ui_kit::PanelSearch::min_width(true)),
+        })
+    }
     fn empty_presentation(self) -> PanelPresentation {
         PanelPresentation {
             title: solidcraft_ui_text::tr(self.title_key()).into(),
@@ -384,6 +391,7 @@ struct PanelSnapshot {
     product: Product,
     available: bool,
     presentation: PanelPresentation,
+    search: Option<HeaderSearch>,
     extent: Option<ContentExtent>,
 }
 
@@ -434,6 +442,7 @@ impl ProductionState {
                 product,
                 available: product.available(app),
                 presentation: product.presentation(app),
+                search: product.search(app),
                 extent: None,
             }),
             actions: VecDeque::new(),
@@ -551,6 +560,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     for panel in &mut snapshot.panels {
         panel.available = panel.product.available(app);
         panel.presentation = panel.product.presentation(app);
+        panel.search = panel.product.search(app);
     }
     Ok(())
 }
@@ -1185,6 +1195,10 @@ impl PanelController for ProductionController {
             .and_then(|snapshot| snapshot.panels.iter().find(|panel| panel.product == self.product).map(|panel| panel.presentation.clone()))
             .unwrap_or_else(|| self.product.empty_presentation())
     }
+    fn header_search(&self) -> Option<HeaderSearch> {
+        let snapshot = self.state.0.try_borrow().ok()?;
+        snapshot.panels.iter().find(|panel| panel.product == self.product)?.search.clone()
+    }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
         Ok(Arc::new(ProductionMetrics {
@@ -1440,14 +1454,7 @@ impl FramePanelContent for ProductionFrame<'_> {
         _content: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
-        if slot == ContentSlot::Title {
-            // Only the Browser asks for the title's place (`set_header_content`): its search field.
-            if Product::from_instance(&context.instance)? == Product::Browser && crate::browser_search::bar_shown(self.app) {
-                crate::browser_search::header_field(self.app, ui);
-            }
-            return Ok(());
-        }
-        if !matches!(slot, ContentSlot::Body | ContentSlot::Inline) {
+        if !matches!(slot, ContentSlot::Title | ContentSlot::Body | ContentSlot::Inline) {
             return Ok(());
         }
         let _catalog_labels = solidcraft_ui_text::catalog_labels();
@@ -1456,6 +1463,13 @@ impl FramePanelContent for ProductionFrame<'_> {
         let owner = ContentOwner::Document(DocumentId::new(self.app.session.document_id.clone())?);
         if context.owner != owner || !product.available(self.app) {
             return Err(error(Rule::Availability, "application panel content owner changed"));
+        }
+        if slot == ContentSlot::Title {
+            // The panel's search box in its title's place (`Product::search`).
+            if product == Product::Browser {
+                crate::browser_search::header_field(self.app, ui);
+            }
+            return Ok(());
         }
         match product {
             Product::RenderLibrary | Product::RenderInspector | Product::RenderShots if !context.preview_geometry => {

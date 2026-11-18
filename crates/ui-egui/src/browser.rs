@@ -1565,10 +1565,10 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
         return;
     }
     prepare_model(app);
-    if crate::browser_search::bar_shown(app) && !crate::browser_search::in_header(ui.ctx()) {
+    if crate::browser_search::bar_shown(app) && !crate::panel_runtime::title_drawn(ui.ctx(), "browser") {
         // The field is in the panel's header, in the title's place (#1634); a Browser grouped with
         // other panels has tabs there, so the field is the first row under them.
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), crate::ui_kit::row_height() + Tokens::get().space_8), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), crate::ui_kit::PanelSearch::row_height()), Sense::hover());
         crate::browser_search::field_row(app, ui, rect);
     }
     if app.tree.search.on() {
