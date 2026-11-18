@@ -37,8 +37,8 @@
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
 //! - `ui.shortcut {command, key?, slot?, replace?}`: a command's keys, or bind one ("" clears)
 //! - `ui.help {item?: about|updates|shortcuts|report}`: the Help menu; returns the version and diagnostics
-//! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
-//!   length_decimals, angle_decimals); returns them all
+//! - `ui.prefs {...}`: the preferences (default_units, default_projection, nav, zoom_reverse,
+//!   orbit_around, msaa, length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
 //! - `ui.recover {action?: recover|discard|later, id?}`: the "Recover unsaved design?" prompt
 //! - `ui.agent_cursor {show?, speed?: 1–5 (times) | "instant", follow_camera?}`: the agent cursor
@@ -688,7 +688,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.operations" => wrap(crate::operations::control(app, p)),
         "ui.home" => with(p, |q| ui_home(app, q)),
         "ui.set" => ui_set(app, p),
-        "ui.view" => with(p, |q| ui_view(app, q)),
+        "ui.view" => with(p, |q| ui_view(app, ctx, q)),
         "ui.camera" => wrap(camera(app, p)),
         "ui.palette" => ui_palette(app, p),
         "ui.start" => with(p, |q| ui_start(app, q)),
@@ -971,14 +971,25 @@ fn ui_browser(app: &SolveApp) -> Outcome {
     }))
 }
 
-/// `ui.workspace {workspace?}`: enter the design or render workspace; returns the one shown.
+/// `ui.workspace {workspace?}`: enter the design, render or drawing workspace; returns the one shown.
 fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
     if let Some(w) = q.workspace
-        && let Err(e) = crate::render_workspace::enter(app, w == params::Workspace::Render)
+        && let Err(e) = crate::workspace::enter(app, w.as_str())
     {
         return err(e);
     }
-    ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
+    ok(json!({"workspace":current_workspace(app)}))
+}
+
+/// The workspace shown: drawing, render or design.
+fn current_workspace(app: &SolveApp) -> &'static str {
+    if crate::drawing_workspace::active(app) {
+        "drawing"
+    } else if crate::render_workspace::active(app) {
+        "render"
+    } else {
+        "design"
+    }
 }
 
 /// `ui.agent_cursor {show?, speed?, follow_camera?}`: the agent cursor's settings.
@@ -1003,6 +1014,7 @@ fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
 fn ui_inspect(app: &SolveApp) -> Outcome {
     ok(json!({
         "render": crate::render_workspace::inspect_state(app),
+        "sheet_page": crate::drawing_sheet_page::inspect(app),
         "ui": ui_state(app),
         "visibility": app.session.visibility,
         "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
@@ -1122,10 +1134,17 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
                     v.hidden_folders.push(SKETCHES_FOLDER.to_string());
                 }
             }
-            if crate::workspace::render_tab(&u.tab) != crate::render_workspace::active(app)
-                && let Err(e) = crate::render_workspace::enter(app, crate::workspace::render_tab(&u.tab))
+            let destination = if crate::workspace::drawing_tab(&u.tab) {
+                "drawing"
+            } else if crate::workspace::render_tab(&u.tab) {
+                "render"
+            } else {
+                "design"
+            };
+            if destination != current_workspace(app)
+                && let Err(error) = crate::workspace::enter(app, destination)
             {
-                return err(e);
+                return err(error);
             }
             u.ribbon_context = app.ui.ribbon_context.clone();
             app.ui = u;
@@ -1137,8 +1156,20 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `ui.view {view, animate?}`: a standard view, snapped or animated.
-fn ui_view(app: &mut SolveApp, q: params::View) -> Outcome {
+fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome {
     let v = q.view.as_str();
+    if crate::drawing_workspace::active(app) {
+        if crate::dialogs_sheet::flat_active(app) && matches!(v, "fit" | "home") {
+            app.flat_view.fitted = false;
+            return ok(json!({"flat_pattern":true,"fitted":false}));
+        }
+        match v {
+            "fit" | "home" => crate::drawing_sheet_page::fit(app),
+            "actual_size" => crate::drawing_sheet_page::actual_size(app, ctx),
+            _ => return err(format!("unknown drawing view `{v}`")),
+        };
+        return ok(json!({"sheet_page": true}));
+    }
     // A name it doesn't know is refused before the view changes at all.
     if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
         return err(format!("unknown view `{v}`"));

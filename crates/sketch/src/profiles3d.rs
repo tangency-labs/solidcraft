@@ -41,7 +41,8 @@ pub struct Profile3D {
 /// End points within this (mm) are one node; plane coincidence is tested to it too.
 const MERGE_TOL: f64 = 1e-5;
 /// Triple enumeration is O(n³): more plane-spanning points than this give up rather than stall
-/// evaluation. Only a curve's key points span planes (see `key_points`), not every sample of it.
+/// evaluation. A sketch with more points spans planes by its curves' key points only (see
+/// `key_points`), not every sample of them.
 const MAX_NODES: usize = 64;
 /// A wire with more points than this spans planes by its ends and a few points along it.
 const KEY_SAMPLES: usize = 5;
@@ -162,6 +163,11 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     }
     key.sort_unstable();
     key.dedup();
+    // A sketch with few enough points spans planes by all of them: a plane can hold just part of
+    // a wire (one tooth of a zigzag) and none of its key points but the ends of that part.
+    if nodes.pts.len() <= MAX_NODES {
+        key = (0..nodes.pts.len()).collect();
+    }
     if edges.is_empty() || key.len() < 3 || key.len() > MAX_NODES {
         return Vec::new();
     }
