@@ -1672,20 +1672,27 @@ fn accepted_plugin_sketch_exits_clear_the_window_tool() {
             "(func $open i32.const 2048 i32.const 11 i32.const 3072 i32.const {} i32.const 0 call $run)\n    (func $execute",
             open_args.len()
         );
-        let wat = include_str!("../../engine/src/plugin/fixture.wat")
-            .replace("__PACKAGE__", package)
-            .replace("__VERSION__", version)
-            .replace("call $box\n      call $box", "call $open\n      call $box")
-            .replacen("(func $execute (;3;)", &format!("{open} (;3;)"), 1)
-            .replace("file.export", "sketch.edit")
-            .replacen("    (@producers", &format!("    (data (i32.const 3072) \"{}\")\n    (@producers", open_args.replace('"', r"\22")), 1)
-            .replace(
-                "i32.const 9\n      i32.const 1024\n      i32.const 33",
-                &format!("i32.const {}\n      i32.const 1024\n      i32.const 2", command.len()),
-            )
-            .replace("solid.box", command)
-            .replace(r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#, "{}");
-        std::fs::write(path.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+        let fixture = include_str!("../../engine/src/plugin/fixture.wat").replace("\r\n", "\n");
+        let component = |source: &str| {
+            let wat = source
+                .replace("\r\n", "\n")
+                .replace("__PACKAGE__", package)
+                .replace("__VERSION__", version)
+                .replace("call $box\n      call $box", "call $open\n      call $box")
+                .replacen("(func $execute (;3;)", &format!("{open} (;3;)"), 1)
+                .replace("file.export", "sketch.edit")
+                .replacen("    (@producers", &format!("    (data (i32.const 3072) \"{}\")\n    (@producers", open_args.replace('"', r"\22")), 1)
+                .replace(
+                    "i32.const 9\n      i32.const 1024\n      i32.const 33",
+                    &format!("i32.const {}\n      i32.const 1024\n      i32.const 2", command.len()),
+                )
+                .replace("solid.box", command)
+                .replace(r#"{\22length\22:2,\22width\22:3,\22height\22:4}"#, "{}");
+            wat::parse_str(wat).unwrap()
+        };
+        let wasm = component(&fixture);
+        assert_eq!(component(&fixture.replace('\n', "\r\n")), wasm, "fixture line endings must not change the invoked command");
+        std::fs::write(path.join("plugin.wasm"), wasm).unwrap();
         let mut manifest: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path.join("plugin.json")).unwrap()).unwrap();
         manifest["runtime"]["commands"] = json!(["sketch.edit", command]);
         std::fs::write(path.join("plugin.json"), manifest.to_string()).unwrap();
