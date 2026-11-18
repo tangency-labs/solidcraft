@@ -458,7 +458,7 @@ pub(super) fn edit_solve<T>(
     strict: bool,
     f: impl FnOnce(&mut Sketch, &mut solidcraft_doc::Document) -> Result<T>,
 ) -> Result<(T, Option<SketchSolve>)> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return sketch_store::edit_sheet(s, p, cmd, f);
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -1498,7 +1498,7 @@ fn restore_on_exit(cmd: &str, p: &Value) -> Result<bool> {
 /// step since taken in this sketch. Otherwise the steps since can't be told apart from others,
 /// and Undo is the way back.
 fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return super::drawing_sketch::cancel(s, p);
     }
     let cmd = "sketch.cancel";
@@ -1550,7 +1550,7 @@ fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let restore = restore_on_exit("sketch.finish", p)?;
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return super::drawing_sketch::finish(s, p);
     }
     let id = s.active_sketch.take();
@@ -1637,7 +1637,7 @@ fn named_id(cmd: &str, id: Option<&str>) -> Result<Option<String>> {
 
 fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line";
-    let paper = s.open_drawing.is_some();
+    let paper = s.sheet_sketching();
     // The shared preprocessor refuses model snaps before a sheet tool reads them.
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let list = p.get("points").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`points` must be a list"))?;
@@ -1875,8 +1875,7 @@ pub(super) fn place_point(sk: &mut Sketch, i: Option<&usize>, exprs: PointExprs)
 
 fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.two_point";
-    let ((a, ea), (b, eb)) =
-        (corner_arg(&s.doc, p, "p0", cmd, s.open_drawing.is_some())?, corner_arg(&s.doc, p, "p1", cmd, s.open_drawing.is_some())?);
+    let ((a, ea), (b, eb)) = (corner_arg(&s.doc, p, "p0", cmd, s.sheet_sketching())?, corner_arg(&s.doc, p, "p1", cmd, s.sheet_sketching())?);
     if (a.x - b.x).abs() < 1e-9 || (a.y - b.y).abs() < 1e-9 {
         return Err(bad(cmd, "the corners must differ in x and y"));
     }
@@ -1904,7 +1903,7 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.rounded";
     // The corners may be typed as expressions: `sketch.rectangle.two_point` below places them, so
     // here they are only worked out to check the radius against the sides.
-    let ((a, _), (b, _)) = (corner_arg(&s.doc, p, "p0", cmd, s.open_drawing.is_some())?, corner_arg(&s.doc, p, "p1", cmd, s.open_drawing.is_some())?);
+    let ((a, _), (b, _)) = (corner_arg(&s.doc, p, "p0", cmd, s.sheet_sketching())?, corner_arg(&s.doc, p, "p1", cmd, s.sheet_sketching())?);
     let r_expr = req_expr(cmd, p, "radius")?;
     let r = s.doc.eval(&r_expr, Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
     if !(r > 1e-9 && r < 1e8) {
@@ -1988,8 +1987,7 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.center";
-    let ((c, ec), (k, ek)) =
-        (corner_arg(&s.doc, p, "center", cmd, s.open_drawing.is_some())?, corner_arg(&s.doc, p, "corner", cmd, s.open_drawing.is_some())?);
+    let ((c, ec), (k, ek)) = (corner_arg(&s.doc, p, "center", cmd, s.sheet_sketching())?, corner_arg(&s.doc, p, "corner", cmd, s.sheet_sketching())?);
     let h = Vec2::new((k.x - c.x).abs(), (k.y - c.y).abs());
     if h.x < 1e-9 || h.y < 1e-9 {
         return Err(bad(cmd, "the corner must differ from the centre in x and y"));
@@ -2133,7 +2131,7 @@ pub(super) fn slot_width_dimension(
 
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
-    let paper = s.open_drawing.is_some();
+    let paper = s.sheet_sketching();
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (r, size) = circle_size(s, p, cmd)?;
     let id = named_id(cmd, str_(p, "id"))?;
@@ -2218,7 +2216,7 @@ fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.three_point";
-    let paper = s.open_drawing.is_some();
+    let paper = s.sheet_sketching();
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = named_id(cmd, str_(p, "id"))?;
     let (out, info) = draw(s, p, cmd, |sk, doc| {
@@ -2246,7 +2244,7 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.center_point";
-    let paper = s.open_drawing.is_some();
+    let paper = s.sheet_sketching();
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let id = named_id(cmd, str_(p, "id"))?;
     let sweep = num(p, "sweep");
@@ -2482,7 +2480,7 @@ fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.point";
-    let paper = s.open_drawing.is_some();
+    let paper = s.sheet_sketching();
     let id = named_id(cmd, str_(p, "id"))?;
     // A point snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, `"x:<a>+<b>:x,y"`, a
     // model vertex or edge): the snap makes it, held by its constraint, as it does for a line's
@@ -3694,12 +3692,12 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     // The model's optional-value compatibility stays untouched. A sheet value,
     // when explicitly supplied, must parse: an overlong/invalid expression must
     // not silently become an omitted value and drive the current measurement.
-    let value = if s.open_drawing.is_some() && p.get("value").is_some() { Some(crate::params::req_expr(cmd, p, "value")?) } else { expr(p, "value") };
+    let value = if s.sheet_sketching() && p.get("value").is_some() { Some(crate::params::req_expr(cmd, p, "value")?) } else { expr(p, "value") };
     let text_at = p.get("text_at").and_then(vec2);
     let driven = bool_(p, "driven").unwrap_or(false);
     // Sheet dimensions have their own authored paper expression and never define
     // a parameter on the source model. Reference dimensions remain value-less.
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     if on_sheet && driven && value.is_some() {
         return Err(bad(cmd, "a sheet sketch reference dimension cannot define or take a value"));
     }
@@ -4265,24 +4263,16 @@ fn solved_measure(s: &Session, p: &Value, cmd: &str, id: &str) -> Option<(f64, &
 }
 
 /// The type of a dimension between `a` and `b` (two points or a line's ends). `auto` takes it
-/// from where the text is placed. Across from the two, between the perpendiculars through them
-/// on either side, it is the distance between them, and a little past those too (a tenth of
-/// that distance), so it takes a clear pull past an end to change it. Pulled past an end, the
-/// pull as seen from that end decides: up or down the horizontal distance, sideways the
-/// vertical one (#257, #7295). The two meet on the diagonals through the end, so each has a
-/// wide zone however shallow or steep the line is. With no text, or when the two already line
-/// up with an axis, `auto` stays the distance between them; other types are returned unchanged.
+/// from where the text is placed ([`solidcraft_sketch::linear_axis`], the rule a drawing's
+/// Dimension tool shares); with no text it stays the distance between them; other types are
+/// returned unchanged.
 fn auto_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
     let Some(t) = text_at.filter(|_| ty == "auto") else { return ty };
-    let d = b - a;
-    let len = d.len();
-    let along = (t - a).dot(d) / len;
-    let margin = len / 10.0;
-    if d.x.abs() <= 1e-9 * len || d.y.abs() <= 1e-9 * len || !along.is_finite() || (-margin..=len + margin).contains(&along) {
-        return ty;
+    match solidcraft_sketch::linear_axis(a, b, t) {
+        solidcraft_sketch::LinearAxis::Aligned => ty,
+        solidcraft_sketch::LinearAxis::Horizontal => "horizontal",
+        solidcraft_sketch::LinearAxis::Vertical => "vertical",
     }
-    let pull = t - if along < 0.0 { a } else { b };
-    if pull.y.abs() >= pull.x.abs() { "horizontal" } else { "vertical" }
 }
 
 /// Midpoint pairs choose an axis as soon as the text passes their bounding box: above or below
@@ -4615,7 +4605,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
     if ids.is_empty() {
         return Err(bad(cmd, "`entities` must list sketch entity ids"));
     }
-    let model_edit = s.open_drawing.is_none();
+    let model_edit = !s.sheet_sketching();
     let (n, info) = edit_solve(s, p, cmd, false, |sk, doc| {
         let mut curves = Vec::new();
         let mut points = Vec::new();
@@ -4707,7 +4697,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
 fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.move_point";
     let to = req_vec2(cmd, p, "to")?;
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         // Reuse the existing point drag on solved paper coordinates. Only the
         // shared sheet receiver publishes one drawing-local undo step.
         let (_, report) = edit(s, p, cmd, false, |sk, _| {
@@ -4820,7 +4810,7 @@ fn drag_frame(s: &mut Session, p: &Value, live: bool) -> Result<(Value, Option<c
         None | Some(Value::Null) => to,
         Some(v) => vec2(v).ok_or_else(|| bad(cmd, "`from` must be a point [x, y]"))?,
     };
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         // The drawing editor publishes a complete gesture once. Live frames remain
         // model-only until the common UI gesture host owns a sheet transaction.
         if live || p.get("live").is_some_and(|v| !v.is_null() && v != &Value::Bool(false)) {
@@ -4970,7 +4960,7 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         let options = OptionsReply::Read { options: options_of(&sk.view) };
         return reply(cmd, OptionsResult { options, param_warnings: Vec::new() });
     }
-    if s.open_drawing.is_some() && (set("slice") == Some(true) || set("sketch_3d") == Some(true)) {
+    if s.sheet_sketching() && (set("slice") == Some(true) || set("sketch_3d") == Some(true)) {
         return Err(bad(cmd, "slice and 3D sketch options are model-only"));
     }
     let (v, info) = edit_solve(s, p, cmd, false, |sk, _| {
@@ -5004,7 +4994,7 @@ fn chain_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.solve";
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         let entry = sketch_store::sheet_target(s, p, cmd)?;
         let solved = s.drawing(cmd)?.solve_sheet_sketch(&s.doc, entry.sketch)?;
         let profiles = solidcraft_sketch::find_drawn_profiles(&solved.sketch).len();
