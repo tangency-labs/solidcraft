@@ -4896,23 +4896,37 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_is_six_ball_triangles() {
             [HEX_RC * a.cos(), -69.5 + HEX_RC * a.sin()]
         })
         .collect();
-    let mut rim = Vec::new();
-    for i in 0..6 {
+    // the arc about corner `i`: its middle, one out from the axis, away from the centre
+    let arc = |i: usize| {
         let c = corners[i];
-        let n = corners[(i + 1) % 6];
-        // the arc's middle: one out from the axis, away from the centre
         let (dx, dy) = (c[0], c[1] + 69.5);
-        rim.push(nearest_edge(
-            &b,
-            [c[0] + dx / HEX_RC, c[1] + dy / HEX_RC, top],
-        ));
-        // the side's middle: one out from the midpoint of the axes
+        nearest_edge(&b, [c[0] + dx / HEX_RC, c[1] + dy / HEX_RC, top])
+    };
+    // the side from corner `i` to the next: its middle, one out from the axes' midpoint
+    let side = |i: usize| {
+        let (c, n) = (corners[i], corners[(i + 1) % 6]);
         let m = [0.5 * (c[0] + n[0]), 0.5 * (c[1] + n[1])];
         let (mx, my) = (m[0], m[1] + 69.5);
         let len = mx.hypot(my);
-        rim.push(nearest_edge(&b, [m[0] + mx / len, m[1] + my / len, top]));
-    }
-    let mut distinct = rim.clone();
+        nearest_edge(&b, [m[0] + mx / len, m[1] + my / len, top])
+    };
+    // in SolidCraft's order: the picked side x = 6.928, then its tangent chain outward both
+    // ways (the order the chain's start and its corners are taken in)
+    let rim = [
+        side(1),
+        arc(1),
+        arc(2),
+        side(0),
+        side(2),
+        arc(0),
+        arc(3),
+        side(5),
+        side(3),
+        arc(5),
+        arc(4),
+        side(4),
+    ];
+    let mut distinct = rim.to_vec();
     distinct.sort_unstable();
     distinct.dedup();
     assert_eq!(distinct.len(), 12, "the rim's twelve edges");
@@ -4923,6 +4937,22 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_is_six_ball_triangles() {
     // 12, the rounds' 12 contacts with the walls, 6 on the top and their 12 sections; the
     // bottom's 12 vertices, the contacts' 12 ends and the six poles on the top
     assert_eq!(b.counts().unwrap(), [26, 54, 30]);
+    // the top, the bottom and the six sides; the six corner walls and the six straight
+    // rounds, cylinders; the six corner pieces, each the ball's triangle on its sphere
+    // (26 in all: no face of another kind)
+    let (_, brep) = kernel_copy(&b);
+    let count = |name: &str| {
+        brep.face_list()
+            .iter()
+            .filter(|&&f| {
+                surface_kind_name(brep.face(f).unwrap().surface.as_ref().unwrap()) == name
+            })
+            .count()
+    };
+    assert_eq!(
+        [count("plane"), count("cone"), count("ball-patch")],
+        [8, 12, 6]
+    );
     let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
     let after = b.volume(1e-11).unwrap();
     assert!(
