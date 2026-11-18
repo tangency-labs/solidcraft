@@ -867,10 +867,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // past the B-rep's bound on them (1000 times its tolerance), and the full check
             // refused the result.
             let stored = access.parameters_edge_tolerance(edge)?;
-            let accuracy = access
-                .parameters_edge_gap(k, edge)?
-                .max(access.parameters_tolerance(k, brep, false)?)
-                .min(stored);
+            let brep_tol = access.parameters_tolerance(k, brep, false)?;
+            // An edge stored at the B-rep's tolerance or finer keeps it whatever its gap
+            // measures, so the gap (which evaluates the faces' surfaces, a reopened round's
+            // definition among them) is measured only where it can change the result.
+            let accuracy = if stored <= brep_tol {
+                stored
+            } else {
+                access
+                    .parameters_edge_gap(k, edge)?
+                    .max(brep_tol)
+                    .min(stored)
+            };
             let approx_tol = TOL_FACTOR * accuracy;
 
             let spec = match radius_type {

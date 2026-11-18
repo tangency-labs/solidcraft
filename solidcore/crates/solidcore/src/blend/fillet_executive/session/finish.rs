@@ -836,9 +836,13 @@ impl FilletSession<'_> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
         let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
         NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))?;
-        // Measured outside the net scope, as every later reader of the body (the full check
-        // among them) evaluates the round's surfaces.
-        self.raise_fillet_tolerances_to_measured_gaps(k)
+        // Measured to a tenth of the target's tolerance: a face whose net is certified within
+        // that (a reopened round's, about 1e-9) is read on its net, any other on its definition,
+        // so each gap is within that much of the exact one and far inside the tolerances it sets.
+        let measure = 0.1 * self.objects.target.tolerance();
+        NetScope::within_mut(k, measure, |k| {
+            self.raise_fillet_tolerances_to_measured_gaps(k)
+        })
     }
 
     /// A round is approximated as finely as its edge is known (`SetFilletParameters`), and its

@@ -6322,6 +6322,12 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
             return Err(invalid("edge is not in the target"));
         };
         let mut gap = None::<f64>;
+        // The gap only decides a tolerance at the B-rep's scale: a face that is a blend by its
+        // definition is measured on its certified net wherever the net's bound is far inside
+        // that (a reopened round's definition is otherwise evaluated at every sample, as no
+        // scope is open yet).
+        let _scope =
+            crate::surface::procedural_blend::NetScope::within(k, 0.1 * self.target.tolerance());
         for eu in self.target.edge(id)?.edgeuses.clone() {
             let measured =
                 crate::topology::edgeuse::p1::max_edge_face_gap(k, self.target, eu, false)?;
