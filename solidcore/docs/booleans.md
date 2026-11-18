@@ -498,7 +498,14 @@ all of whose edges are such seams: `inside_face`, `topology/vertex.rs`) bound no
 are where the surface's parametrisation ends or degenerates, and the face goes on across them. So
 their tolerance adds nothing to a contact: a curve meets a seam edge or a pole only where the
 curve's own uncertainty region reaches it (`SourceReach` and `in_reach_region`,
-`intersect/curve_class/p1.rs`; `edge_solutions`, `p9.rs`; `intersect_vertices_in`, `p5.rs`).
+`intersect/curve_class/p1.rs`; `edge_solutions`, `p9.rs`; `intersect_vertices_in`, `p5.rs`). For the
+same reason no other face pair meets a curve that runs along a seam: the face on the seam's
+other side is the face itself. Such a run, proved within the intersection tolerance of the seam
+(`Curve::proved_near`), is kept as on the seam rather than removed as mislabelled
+(`are_coincident_maybe`, `intersect/curve_class/p7.rs`), and its end is where it leaves the seam,
+known to its tolerance, not a crossing of the seam (`runs_along_seam`,
+`proto_topology/p3.rs`): a drill whose wall passed within the tolerance of a cut ball's rim
+vertex on the seam was left open there (tangency-labs/solidcore#3339).
 
 The region depends on what fixes the curve. An edge's curve is given: it is known to its
 tolerance. An intersection curve of two surfaces is known across itself only to
