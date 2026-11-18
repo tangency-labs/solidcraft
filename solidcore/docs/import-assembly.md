@@ -68,7 +68,7 @@ A body is refused, with the face named, when:
 - the pcurves of a use cannot be made;
 - the finished record fails its checks.
 
-What a reader does with a refusal is up to it. Both readers read a refused solid again without the face the refusal names, as an open surface of the faces that remain (`Kind::Open`), up to eight times, so a solid that cannot be closed still comes in as the faces that read; the STEP reader also reads each face alone and has SMLib stitch them where a refusal names no face. A refusal the readers cannot work around leaves out that body region and keeps the others.
+What a reader does with a refusal is up to it. Both readers read a refused solid again without the face the refusal names, as an open surface of the faces that remain (`Kind::Open`; a void whose outer shell lost every face stays a void, `outer: false`), up to eight times, so a solid that cannot be closed still comes in as the faces that read; the STEP reader also reads each face alone and has SMLib stitch them where a refusal names no face. A refusal the readers cannot work around leaves out that body region and keeps the others.
 
 ## Where it is
 

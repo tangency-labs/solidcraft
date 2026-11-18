@@ -107,6 +107,9 @@ pub enum Kind {
     Open {
         /// The solid's shells after the first are its voids.
         voids: bool,
+        /// The first shell is the solid's outer one. False where every face of the outer shell
+        /// was left out: then each shell is one of its voids, a cavity still.
+        outer: bool,
     },
 }
 
@@ -745,7 +748,7 @@ impl<'t> Assembly<'t> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open { voids } => {
+            Kind::Open { voids, outer } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
                 }
@@ -753,7 +756,7 @@ impl<'t> Assembly<'t> {
                 // the inside of an outer shell or a model's shell still whole.
                 for (k, c) in closed.iter().enumerate() {
                     if *c {
-                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                        regions.push(Region { shells: vec![index(k)?], void: voids && (k > 0 || !outer) });
                     }
                 }
             }

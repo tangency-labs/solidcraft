@@ -128,7 +128,6 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
         };
         for (k, region) in body.regions.iter().enumerate() {
             let name = body.name.clone().unwrap_or_default();
-            let before = budget;
             let none = HashSet::new();
             let read = model
                 .region(
@@ -141,7 +140,6 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                     &mut budget,
                 )
                 .or_else(|message| {
-                    budget = before;
                     model.without_named_faces(
                         region.as_str(),
                         kind,
@@ -283,6 +281,7 @@ impl<'a> Model<'a> {
         let open = Kind::Open {
             voids: matches!(kind, Kind::Solid)
                 && self.regions.get(id).is_some_and(|r| r.shells.len() > 1),
+            outer: true,
         };
         let open = if matches!(kind, Kind::Model) {
             Kind::Model
@@ -292,7 +291,8 @@ impl<'a> Model<'a> {
         let mut skip = HashSet::new();
         let mut left_out = Vec::new();
         let mut why = refusal.clone();
-        let before = *budget;
+        // Each read is charged to the file's face budget, as the first one was: a region read
+        // again costs what it reads again, so refused regions cannot read past the budget.
         for _ in 0..MAX_LEFT_OUT_ROUNDS {
             let Some(face) =
                 named_face(&why).filter(|f| of_region.contains(f) && !skip.contains(f))
@@ -304,7 +304,6 @@ impl<'a> Model<'a> {
             if skip.len() >= of_region.len() {
                 break;
             }
-            *budget = before;
             match self.region(id, open, name.clone(), tol, trims, &skip, budget) {
                 Ok(mut solid) => {
                     solid.notes.insert(
@@ -319,7 +318,6 @@ impl<'a> Model<'a> {
                 Err(m) => why = m,
             }
         }
-        *budget = before;
         Err(refusal)
     }
 
@@ -369,7 +367,8 @@ impl<'a> Model<'a> {
         b.join_collapsed(&region.shells);
         let mut shells = Vec::new();
         let mut left_out = 0usize;
-        for s in &region.shells {
+        let mut outer_left_out = false;
+        for (k, s) in region.shells.iter().enumerate() {
             if shells.len() >= solidcore_record::brep::MAX_SHELLS {
                 return Err(format!(
                     "more than {} shells",
@@ -399,11 +398,21 @@ impl<'a> Model<'a> {
                     .ok_or_else(|| format!("more than {MAX_FILE_FACES} faces in one model"))?;
                 faces.push(b.face(f.as_str())?);
             }
-            // A shell all of whose faces a refusal left out is no shell of the open surface.
-            if !(faces.is_empty() && !skip.is_empty()) {
+            // A shell all of whose faces a refusal left out is no shell of the open surface. Where
+            // that is the outer shell, the shells left are all cavities, and stay voids.
+            if faces.is_empty() && !skip.is_empty() {
+                outer_left_out |= k == 0;
+            } else {
                 shells.push(faces);
             }
         }
+        let kind = match kind {
+            Kind::Open { voids, .. } if outer_left_out => Kind::Open {
+                voids,
+                outer: false,
+            },
+            k => k,
+        };
         let mut solid = b.asm.finish(0, name, shells, kind)?;
         if left_out > 0 {
             solid.notes.push(format!(
