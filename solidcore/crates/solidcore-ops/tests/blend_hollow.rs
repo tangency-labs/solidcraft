@@ -221,3 +221,142 @@ fn an_inside_round_meeting_another_round_is_no_fill() {
         [0.0, 32.0, 42.0],
     );
 }
+
+/// #1668's box with its hollow stepped short of the end: [-50, 48.6] as before, and
+/// [48.6, 50] with the +y wall 1.5 thick (its inside face at y = 30.5).
+fn stepped_hollow() -> Body {
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    built(|k| {
+        let outer = create_box(k, v([-52.0, -32.0, 0.0]), 104.0, 64.0, 42.0)?;
+        let a = create_box(k, v([-50.0, -30.0, -1.0]), 98.6, 60.0, 41.0)?;
+        let b = create_box(k, v([48.6, -30.0, -1.0]), 1.4, 60.5, 41.0)?;
+        let part = boolean_difference(k, outer, a)?;
+        boolean_difference(k, part, b)
+    })
+}
+
+/// The inside round counts as a fill only where both ends of its edge are closed square. With
+/// the hollow stepped short of its end (`stepped_hollow`), the inside corner edge (30, 40)
+/// stops at x = 48.6, on a step face 0.5 wide that does not close the round's corner, and
+/// the hollow runs on past it to x = 50 with its corner at (30.5, 40). There, between the
+/// 32 steps (47.125 and 50.375), the outer round's arc (centre (32 - r, 42 - r)) uncovers
+/// that corner at (r - 1.5)^2 + (r - 2)^2 = r^2: r = 3.5 + sqrt6 = 5.949. The outer round
+/// is judged in every stretch where the section meets the part alike, so R7 (with the
+/// inside round R7, or alone) is refused with that fit, not the 6.828 of the steps only.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_hollow_running_on_past_the_inside_round_is_refused() {
+    all_fixes();
+    let wall = stepped_hollow();
+    let top = edge_at(&wall, [0.0, 32.0, 42.0]);
+    let inside = edge_at(&wall, [0.0, 30.0, 40.0]);
+    let limit = 3.5 + 6.0_f64.sqrt();
+    breaks_through(
+        round(&wall, &[top, inside], &[7.0]),
+        limit,
+        [0.0, 32.0, 42.0],
+    );
+    breaks_through(round(&wall, &[top], &[7.0]), limit, [0.0, 32.0, 42.0]);
+}
+
+/// #1668's box with the hollow's +x end cut oblique, on the plane x - 0.1 y = 46 (square to
+/// neither wall's corner edge).
+#[allow(clippy::disallowed_methods)] // the test's own placement, not ops computing geometry
+fn oblique_end() -> Body {
+    use solidcore_ops::boolean::boolean;
+    let hollow = make_box([-50.0, -30.0, -1.0], [110.0, 60.0, 41.0]).unwrap();
+    let cut = make_box([0.0, -100.0, -10.0], [100.0, 200.0, 70.0]).unwrap();
+    // turned about z so that its x = 0 face has normal (1, -0.1, 0), then moved to x = 46
+    let a = (-0.1_f64).atan();
+    let (c, s) = (a.cos(), a.sin());
+    // (rows are the images of x, y, z and the move, as `Body::transform` reads them)
+    cut.transform(&[
+        [c, s, 0.0, 0.0],
+        [-s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [46.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    let hollow = boolean(hollow, cut, BooleanOp::Subtract).unwrap().unwrap();
+    let outer = make_box([-52.0, -32.0, 0.0], [104.0, 64.0, 42.0]).unwrap();
+    boolean(outer, hollow, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The inside round counts as a fill only where both ends of its edge are closed by a plane
+/// square to it. On `oblique_end` the inside corner edge (30, 40) ends at x = 49 on the
+/// oblique end face, so the inside round is no fill and the R7 outer round is refused with the
+/// fit of the outer round alone, 4 + 2 sqrt2.
+#[test]
+fn an_inside_round_ending_on_an_oblique_face_is_no_fill() {
+    all_fixes();
+    let wall = oblique_end();
+    // 104 64 42 less the hollow's 40 high (96 + 0.1 y) over y in [-30, 30]
+    close(volume(&wall), 279_552.0 - 40.0 * 96.0 * 60.0);
+    let top = edge_at(&wall, [0.0, 32.0, 42.0]);
+    let inside = edge_at(&wall, [0.0, 30.0, 40.0]);
+    breaks_through(
+        round(&wall, &[top, inside], &[7.0]),
+        4.0 + 2.0 * std::f64::consts::SQRT_2,
+        [0.0, 32.0, 42.0],
+    );
+}
+
+/// What a session on #1668's box with the top and inside edges rounded R7 says, with `setup`
+/// run on it first: whether it built, and its no-room reason.
+fn session_on_thin_wall(
+    setup: impl FnOnce(
+        &mut solidcore::blend::fillet_executive::session::FilletSession,
+        solidcore::topology::VertexId,
+    ),
+) -> (
+    bool,
+    Option<solidcore::blend::fillet_executive::p3::NoRoomReason>,
+) {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    let wall = thin_walled();
+    let picks = [
+        edge_at(&wall, [0.0, 32.0, 42.0]),
+        edge_at(&wall, [0.0, 30.0, 40.0]),
+    ];
+    let end = vertex_at(&wall, [50.0, 30.0, 40.0]);
+    let (mut k, mut brep) = kernel_copy(&wall);
+    let edges: Vec<solidcore::EdgeId> = picks.iter().map(|&i| brep.edge_list()[i]).collect();
+    let end = brep.vertex_list()[end];
+    let mut session = FilletSession::new(&mut k, &mut brep).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &edges, 7.0, 1, 1, 1.0)
+        .unwrap();
+    setup(&mut session, end);
+    let done = session.do_fillet(&mut k);
+    (done.is_ok(), session.error_info().no_room_reason())
+}
+
+/// The inside round counts as a fill neither in the Roll-over's second pass (whose concave
+/// overflow across a cliff is accepted and trimmed, so its rounds need not add their whole
+/// section) nor where an end of its edge is a set-back vertex (a set-back patch replaces the
+/// round there). On the session that builds #1668's R7 pair, each refuses it for breaking
+/// through. The set-back's other door, a set-back fill asked at that end, never reaches the
+/// judgement: the corners step refuses a fill asked at a vertex with one blend first, so the
+/// pair is refused, but not for breaking through.
+#[test]
+fn an_inside_round_is_no_fill_in_a_roll_over_pass_or_at_a_set_back_end() {
+    use solidcore::blend::fillet_executive::p3::NoRoomReason;
+    all_fixes();
+    assert_eq!(session_on_thin_wall(|_, _| {}), (true, None));
+    assert_eq!(
+        session_on_thin_wall(|s, end| s.set_roll_over_pass(vec![end])),
+        (false, Some(NoRoomReason::BreaksThrough))
+    );
+    assert_eq!(
+        session_on_thin_wall(|s, end| {
+            s.add_set_back_vertex(end);
+        }),
+        (false, Some(NoRoomReason::BreaksThrough))
+    );
+    assert_eq!(
+        session_on_thin_wall(|s, end| s.set_set_back_fill(end, 3.0, 0.0, false)),
+        (false, None)
+    );
+}

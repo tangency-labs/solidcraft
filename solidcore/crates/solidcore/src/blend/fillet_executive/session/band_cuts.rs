@@ -22,7 +22,8 @@
 //! Deviations: the fork's out-params are returned (`None` for no cut). The solutions of
 //! `SmSurface::GlobalCurveIntersect` carry no object handles (the fork reads only their
 //! parameters). Every loop is bounded by fixed counts (32 steps, 40 bisections, halvings
-//! down to a millionth of the radius); there is no recursion.
+//! down to a millionth of the radius) or by the part's edges and faces (the stretches
+//! between a band's events); there is no recursion.
 
 // the fork's NaN-safe tests (`!(a > b)`) are kept as written
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -54,7 +55,7 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1 as eu;
-use crate::topology::{face, vertex, Brep, FaceId};
+use crate::topology::{face, vertex, Brep, FaceId, VertexId};
 use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::band_cuts";
@@ -550,6 +551,10 @@ struct ThroughFaces {
     reached: BTreeSet<FaceId>,
     /// The material the concave rounds of the same blend add ([`ConcaveFill`]).
     fills: Vec<ConcaveFill>,
+    /// Which of `fills` count at the station being judged: those whose edge runs along the
+    /// blended edge and whose span holds every stretch of the blended edge the station
+    /// lies in where the section meets the part alike ([`Band::events`]).
+    usable: Vec<bool>,
 }
 
 /// A section's shape between its rails (`section_breaks_through`).
@@ -595,6 +600,8 @@ pub(crate) struct ConcaveFill {
     radius: f64,
     /// The edge's ends along `dir`, measured from `edge`.
     span: [f64; 2],
+    /// The edge's two faces, which bound the hollow's corner the round fills.
+    faces: [FaceId; 2],
 }
 
 /// The least of `a + b cos θ + c sin θ` over `θ` in `[t0, t1]` (`t1 - t0` under a turn):
@@ -619,6 +626,122 @@ fn least_on_arc(a: f64, b: f64, c: f64, t0: f64, t1: f64) -> f64 {
         }
     }
     least
+}
+
+/// Not the fork's (WR-707): whether the hollow's corner a concave round fills is closed at
+/// the round's end vertex `v`: the one face at `v` besides the round's two `blended` faces is
+/// a plane square to the edge (`dir`, within `tol` over the section's size) that holds the
+/// whole corner triangle, from `v` out along the two faces by the section's `legs`. Then the
+/// round is trimmed square there, so it adds its whole section right up to `v`, and the face
+/// bounds the part's material over the whole triangle, so the hollow's corner does not run on
+/// past `v`. The triangle lies in the face where no edge of the face runs into its inside
+/// (`tol` in from its sides) and its centroid classifies on the face; an edge that is not a
+/// line, or a face that is not a plane, is no closure.
+///
+/// # Errors
+/// Those of the topology queries, the evaluations and the classification.
+fn capped(
+    k: &Kernel,
+    target: &mut Brep,
+    v: VertexId,
+    blended: [FaceId; 2],
+    legs: [Vec3; 2],
+    dir: Vec3,
+    tol: f64,
+) -> Result<bool> {
+    let corner = vertex::point(target, v)?;
+    let others: BTreeSet<FaceId> = vertex::faces(target, v)?
+        .into_iter()
+        .filter(|f| !blended.contains(f))
+        .collect();
+    let mut others = others.into_iter();
+    let (Some(end), None) = (others.next(), others.next()) else {
+        return Ok(false);
+    };
+    let [leg0, leg1] = legs;
+    let triangle = [corner, corner + leg0, corner + leg1];
+    let centroid = corner + (leg0 + leg1) / 3.0;
+    let Some((normal, uv)) = face::p2::surface(target, end)?.and_then(|s| match s.kind() {
+        SurfaceKind::Plane(plane) => Some((
+            plane.evaluate_normal(),
+            plane.project_point_to_uv_domain(centroid),
+        )),
+        _ => None,
+    }) else {
+        return Ok(false);
+    };
+    let Some((_, normal)) = normal.length_and_unit() else {
+        return Ok(false);
+    };
+    let cos = normal.dot(dir);
+    let off = (1.0 - cos * cos).max(0.0).sqrt();
+    if !(off * (leg0.length() + leg1.length()) <= tol) {
+        return Ok(false);
+    }
+    for e in face::p4::edges(target, end, None, false, None)? {
+        let Some(curve) = edge::evaluation_curve(target, e)? else {
+            return Ok(false);
+        };
+        if !matches!(curve.kind(), CurveKind::Line(_)) {
+            return Ok(false);
+        }
+        let ivl = edge::interval(target, e)?;
+        let (p, q) = (
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        );
+        if segment_enters_triangle(p, q, triangle, tol) {
+            return Ok(false);
+        }
+    }
+    let zone = brep_zone_tol_3d(k, target, SmallTopoType::default());
+    let mut class = PointClassification::<EntityRef>::new(zone);
+    crate::query::face::p2::point_classify(
+        k,
+        target,
+        end,
+        uv,
+        &mut class,
+        crate::query::face::p2::PointClassifyOptions {
+            src_zone_tol_3d: zone,
+            do_boundary_intersections: true,
+            use_uv_classification: true,
+            ..crate::query::face::p2::PointClassifyOptions::default()
+        },
+    )?;
+    Ok(class.point_class() == PointClassType::Face)
+}
+
+/// Whether the segment from `p` to `q` runs into the inside of `triangle`, `tol` in from each
+/// of its sides (the segment and the triangle in one plane): what is left of the segment
+/// after clipping it to the three half-planes has length. A degenerate triangle, or a value
+/// that is not finite, counts as entering (the side that refuses a closure).
+fn segment_enters_triangle(p: Point3, q: Point3, triangle: [Point3; 3], tol: f64) -> bool {
+    let [a, b, c] = triangle;
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for (from, to, opposite) in [(a, b, c), (b, c, a), (c, a, b)] {
+        let Some((_, along)) = (to - from).length_and_unit() else {
+            return true;
+        };
+        let reach = opposite - from;
+        let Some((_, inward)) = (reach - along * reach.dot(along)).length_and_unit() else {
+            return true;
+        };
+        // the clearance inside this side, less `tol`, at each end: `f0 + t (f1 - f0) > 0`
+        let (f0, f1) = (inward.dot(p - from) - tol, inward.dot(q - from) - tol);
+        if !(f0.is_finite() && f1.is_finite()) {
+            return true;
+        }
+        if f0 <= 0.0 && f1 <= 0.0 {
+            return false;
+        }
+        if f0 < 0.0 {
+            lo = lo.max(f0 / (f0 - f1));
+        } else if f1 < 0.0 {
+            hi = hi.min(f0 / (f0 - f1));
+        }
+    }
+    hi > lo
 }
 
 impl ConcaveFill {
@@ -658,7 +781,11 @@ impl ConcaveFill {
             return Ok(None);
         }
         let faces = edge::faces(target, edge_id, None)?;
-        if faces.len() != 2 {
+        let [f0, f1] = faces.as_slice() else {
+            return Ok(None);
+        };
+        let faces = [*f0, *f1];
+        if f0 == f1 {
             return Ok(None);
         }
         for f in faces {
@@ -688,6 +815,18 @@ impl ConcaveFill {
             return Ok(None);
         }
         let (s0, s1) = ((p0 - at).dot(dir), (p1 - at).dot(dir));
+        // the hollow's corner closed at both ends of the edge (`capped`): the round runs its
+        // whole section from end to end, and the hollow does not run on past either end
+        let legs = [rail0 - at, rail1 - at];
+        let (start, end) = edge::start_end_vertices(target, edge_id)?;
+        let (Some(start), Some(end)) = (start, end) else {
+            return Ok(None);
+        };
+        for v in [start, end] {
+            if !capped(k, target, v, faces, legs, dir, tol)? {
+                return Ok(None);
+            }
+        }
         Ok(Some(Self {
             edge: at,
             centre,
@@ -695,7 +834,45 @@ impl ConcaveFill {
             dir,
             radius,
             span: [s0.min(s1), s0.max(s1)],
+            faces,
         }))
+    }
+
+    /// Whether this fill counts at the station `s` of `band` (with its `events`): its edge
+    /// runs along the band's (within `tol` over the band's length), and its span holds
+    /// every stretch between events that the station lies in (`tol` beyond its ends), so
+    /// the section meets the part alike all along a stretch inside the round.
+    fn covers(&self, band: &Band, events: &[f64], s: f64, tol: f64) -> bool {
+        let cos = self.dir.dot(band.dir);
+        let off = (1.0 - cos * cos).max(0.0).sqrt();
+        if !(off * (band.span[1] - band.span[0]) <= tol) {
+            return false;
+        }
+        let sigma = |e: f64| (band.at + band.dir * e - self.edge).dot(self.dir);
+        let [lo, hi] = self.span;
+        let mut any = false;
+        for pair in events.windows(2) {
+            let [e0, e1] = pair else {
+                continue;
+            };
+            if !(s >= e0 - tol && s <= e1 + tol) {
+                continue;
+            }
+            any = true;
+            let (a, b) = (sigma(*e0), sigma(*e1));
+            if !(a.min(b) >= lo - tol && a.max(b) <= hi + tol) {
+                return false;
+            }
+        }
+        any
+    }
+
+    /// Whether the piece between meets on `faces` is bounded by this fill's two faces, one
+    /// at each end: the hollow's corner the round fills.
+    fn bounds(&self, faces: [FaceId; 2]) -> bool {
+        let [a, b] = faces;
+        let [f0, f1] = self.faces;
+        (a == f0 && b == f1) || (a == f1 && b == f0)
     }
 
     /// Whether the piece of a section from `ends[0]` to `ends[1]` (along `shape`) lies in
@@ -788,6 +965,382 @@ impl ConcaveFill {
             }
         }
     }
+}
+
+/// Not the fork's (WR-707): a convex blend's band, where it is a constant section swept along
+/// a straight edge between two planes. The section (the ball's arc, or the chamfer's chord)
+/// is the same at every station, moved along the edge, so the band is a piece of a circular
+/// cylinder (or a strip of a plane) and the faces and edges of the part meet it in closed
+/// form ([`Band::events`]).
+struct Band {
+    /// The section's shape at the edge's middle.
+    shape: SectionShape,
+    /// The section's rails there.
+    rails: [Point3; 2],
+    /// The edge's middle, from where the band runs along `dir`.
+    at: Point3,
+    /// The edge's unit direction.
+    dir: Vec3,
+    /// The edge's ends along `dir`, measured from `at`.
+    span: [f64; 2],
+    /// The arc's turn from its first rail to its second (0 for a chord).
+    phi: f64,
+}
+
+impl Band {
+    /// The band of the section `centre`, `rails` at the edge's point `at` (`chord` for a
+    /// chamfer), along `dir` over `span`. `None` where the rails are opposite or together
+    /// (no section, as `section_breaks_through`).
+    fn new(
+        centre: Point3,
+        rails: [Point3; 2],
+        chord: bool,
+        at: Point3,
+        dir: Vec3,
+        span: [f64; 2],
+    ) -> Option<Self> {
+        let [rail1, rail2] = rails;
+        let a = rail1 - centre;
+        let b = rail2 - centre;
+        let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
+        let det = aa * bb - ab * ab;
+        if !(det > EFF_ZERO * aa * bb) {
+            return None;
+        }
+        if chord {
+            return Some(Self {
+                shape: SectionShape::Chord,
+                rails,
+                at,
+                dir,
+                span,
+                phi: 0.0,
+            });
+        }
+        let rho = aa.sqrt();
+        let e1 = a / rho;
+        let e2 = (b - a * (ab / aa)).unitize().ok()?;
+        let phi = b.dot(e2).atan2(b.dot(e1));
+        Some(Self {
+            shape: SectionShape::Arc {
+                centre,
+                e1,
+                e2,
+                rho,
+            },
+            rails,
+            at,
+            dir,
+            span,
+            phi,
+        })
+    }
+
+    /// Where along the edge the station through `x` lies.
+    fn along(&self, x: Point3) -> f64 {
+        (x - self.at).dot(self.dir)
+    }
+
+    /// `v` square to the edge.
+    fn across(&self, v: Vec3) -> Vec3 {
+        v - self.dir * v.dot(self.dir)
+    }
+
+    /// A box holding the band, `tol` larger.
+    fn bounds(&self, tol: f64) -> Extent3d {
+        let mut corners = Vec::new();
+        for s in self.span {
+            match self.shape {
+                SectionShape::Arc {
+                    centre,
+                    e1,
+                    e2,
+                    rho,
+                    ..
+                } => {
+                    let base = centre + self.dir * (s - self.along(centre));
+                    for (x, y) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+                        corners.push(base + e1 * (x * rho) + e2 * (y * rho));
+                    }
+                }
+                SectionShape::Chord => {
+                    for r in self.rails {
+                        corners.push(r + self.dir * (s - self.along(r)));
+                    }
+                }
+            }
+        }
+        let mut b = Extent3d::from_points(self.at, self.at);
+        for c in corners {
+            b.add_point(c);
+        }
+        let grow = Vec3::new(tol, tol, tol);
+        Extent3d::from_points(b.min - grow, b.max + grow)
+    }
+
+    /// Whether the section's point `x` (on the band's cylinder) lies on the arc between its
+    /// rails, `tol` past them (`-tol`: `tol` short of them).
+    fn on_arc(&self, x: Point3, tol: f64) -> bool {
+        let SectionShape::Arc {
+            centre,
+            e1,
+            e2,
+            rho,
+        } = self.shape
+        else {
+            return false;
+        };
+        let v = self.across(x - centre);
+        let theta = v.dot(e2).atan2(v.dot(e1));
+        let slack = tol / rho;
+        theta >= -slack && theta <= self.phi + slack
+    }
+
+    /// Not the fork's (WR-707): the stations along the edge, measured from `at`, where the
+    /// way the section meets the part can change. Between two of them the section meets the
+    /// same faces, inside them or at the same edges, in the same order, so what
+    /// `section_breaks_through` decides at one station of the stretch holds for all of it:
+    /// a section's meet with a face moves onto or off the face only where the band crosses
+    /// one of the face's edges, and a meet is made or lost on a plane only where the band's
+    /// curve along the plane turns back along the edge (a fold, at the extremes of a
+    /// `a + b cos θ + c sin θ`) or reaches a rail. Both ends of the edge are stations.
+    ///
+    /// `None` where this is not known in closed form: an edge that is not a line, or a face
+    /// that is not a plane, near the band, or a line or a plane lying on it.
+    ///
+    /// # Errors
+    /// Those of the evaluations.
+    fn events(&self, k: &Kernel, cache: &BandCutCache, tol: f64) -> Result<Option<Vec<f64>>> {
+        let bounds = self.bounds(tol);
+        let mut out = vec![self.span[0], self.span[1]];
+        for e in &cache.edges {
+            if let Some(b) = &e.bbox {
+                if b.are_disjoint(&bounds, tol) {
+                    continue;
+                }
+            }
+            if !matches!(e.curve.kind(), CurveKind::Line(_)) {
+                return Ok(None);
+            }
+            let p = e.curve.evaluate_point(k, e.interval.min())?;
+            let q = e.curve.evaluate_point(k, e.interval.max())?;
+            if !self.line_crossings(p, q, tol, &mut out) {
+                return Ok(None);
+            }
+        }
+        for f in &cache.faces {
+            if let Some(b) = &f.bbox {
+                if b.are_disjoint(&bounds, tol) {
+                    continue;
+                }
+            }
+            let SurfaceKind::Plane(plane) = f.surface.kind() else {
+                return Ok(None);
+            };
+            let (origin, normal, _) = plane.is_planar();
+            let Some((_, normal)) = normal.length_and_unit() else {
+                return Ok(None);
+            };
+            if !self.plane_folds(origin, normal, tol, &mut out) {
+                return Ok(None);
+            }
+        }
+        let [lo, hi] = self.span;
+        let mut out: Vec<f64> = out
+            .into_iter()
+            .filter(|s| *s >= lo - tol && *s <= hi + tol)
+            .map(|s| s.clamp(lo, hi))
+            .collect();
+        if out.iter().any(|s| !s.is_finite()) {
+            return Ok(None);
+        }
+        out.sort_by(f64::total_cmp);
+        out.dedup_by(|b, a| *b - *a <= tol);
+        Ok(Some(out))
+    }
+
+    /// The stations where the segment `p`-`q` crosses the band (onto `out`); `false` where
+    /// it lies on the band.
+    fn line_crossings(&self, p: Point3, q: Point3, tol: f64, out: &mut Vec<f64>) -> bool {
+        let [lo, hi] = self.span;
+        let in_span = |s: f64| s >= lo - tol && s <= hi + tol;
+        let overlaps = |a: f64, b: f64| a.min(b) <= hi + tol && a.max(b) >= lo - tol;
+        let length = p.distance(q);
+        match self.shape {
+            SectionShape::Arc { centre, rho, .. } => {
+                let a = self.across(p - centre);
+                let d = self.across(q - p);
+                let dd = d.dot(d);
+                if !(dd.sqrt() > tol) {
+                    // along the edge: on the band, or a crossing of no extent along it
+                    if (a.length() - rho).abs() <= 2.0 * tol && self.on_arc(p, tol) {
+                        let (sp, sq) = (self.along(p), self.along(q));
+                        if (sq - sp).abs() > 2.0 * tol && overlaps(sp, sq) {
+                            return false;
+                        }
+                        out.push(sp);
+                    }
+                    return true;
+                }
+                // |a + t d| = rho, and the closest approach where it grazes the cylinder
+                let (aa, ad) = (a.dot(a), a.dot(d));
+                let closest = -ad / dd;
+                let mut ts = vec![closest];
+                let disc = ad * ad - dd * (aa - rho * rho);
+                if disc >= 0.0 {
+                    let root = disc.sqrt();
+                    ts.push((-ad - root) / dd);
+                    ts.push((-ad + root) / dd);
+                }
+                let slack = if length > 0.0 { tol / length } else { 0.0 };
+                for t in ts {
+                    if !(t >= -slack && t <= 1.0 + slack) {
+                        continue;
+                    }
+                    let x = p + (q - p) * t.clamp(0.0, 1.0);
+                    let r = self.across(x - centre).length();
+                    if (r - rho).abs() <= 2.0 * tol && self.on_arc(x, tol) && in_span(self.along(x))
+                    {
+                        out.push(self.along(x));
+                    }
+                }
+                true
+            }
+            SectionShape::Chord => {
+                let [r1, r2] = self.rails;
+                let Some((width, w)) = (r2 - r1).length_and_unit() else {
+                    return false;
+                };
+                let Some((_, m)) = w.cross(self.dir).length_and_unit() else {
+                    return false;
+                };
+                let (dp, dq) = (m.dot(p - r1), m.dot(q - r1));
+                let on_strip = |x: Point3| {
+                    let u = (x - r1).dot(w);
+                    u >= -tol && u <= width + tol
+                };
+                if dp.abs() <= tol && dq.abs() <= tol {
+                    // in the strip's plane
+                    let (up, uq) = ((p - r1).dot(w), (q - r1).dot(w));
+                    let meets = up.min(uq) <= width + tol && up.max(uq) >= -tol;
+                    return !(meets && overlaps(self.along(p), self.along(q)));
+                }
+                if dp * dq > 0.0 && dp.abs() > tol && dq.abs() > tol {
+                    return true;
+                }
+                let t = if dp == dq { 0.0 } else { dp / (dp - dq) };
+                let x = p + (q - p) * t.clamp(0.0, 1.0);
+                if on_strip(x) && in_span(self.along(x)) {
+                    out.push(self.along(x));
+                }
+                true
+            }
+        }
+    }
+
+    /// The stations where the meets of the section with the plane through `origin` with unit
+    /// `normal` can be made or lost (onto `out`): where its curve along the band turns back
+    /// along the edge, or reaches a rail. `false` where the plane lies on the band.
+    fn plane_folds(&self, origin: Point3, normal: Vec3, tol: f64, out: &mut Vec<f64>) -> bool {
+        let nd = normal.dot(self.dir);
+        // the station of the section's point `x` moved along the edge onto the plane
+        let onto = |x: Point3| self.along(x) + normal.dot(origin - x) / nd;
+        match self.shape {
+            SectionShape::Arc {
+                centre,
+                e1,
+                e2,
+                rho,
+            } => {
+                let (b, c) = (normal.dot(e1), normal.dot(e2));
+                if nd.abs() <= EFF_ZERO {
+                    // along the edge: it meets each section alike, unless it touches the
+                    // cylinder along a line of the arc between its rails (touching it at a
+                    // rail, as each blended face does, meets each section alike there)
+                    let gap = normal.dot(centre - origin);
+                    if (gap.abs() - rho).abs() <= tol {
+                        let touch = centre - normal * (gap.signum() * rho);
+                        if self.on_arc(touch, -tol) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                let at_angle = |theta: f64| centre + (e1 * theta.cos() + e2 * theta.sin()) * rho;
+                let pi = std::f64::consts::PI;
+                let turn = c.atan2(b);
+                for theta in [0.0, self.phi, turn - pi, turn, turn + pi] {
+                    if theta >= 0.0 && theta <= self.phi {
+                        out.push(onto(at_angle(theta)));
+                    }
+                }
+                true
+            }
+            SectionShape::Chord => {
+                let [r1, r2] = self.rails;
+                if nd.abs() <= EFF_ZERO {
+                    let Some((_, w)) = (r2 - r1).length_and_unit() else {
+                        return false;
+                    };
+                    // the strip's own plane
+                    return !(normal.dot(w).abs() <= EFF_ZERO
+                        && normal.dot(r1 - origin).abs() <= tol);
+                }
+                out.push(onto(r1));
+                out.push(onto(r2));
+                true
+            }
+        }
+    }
+}
+
+/// Not the fork's (WR-707): the band of the convex `solver` along its edge `edge_id` (curve
+/// `curve` over `ivl`), with its events ([`Band::events`]), where it is known in closed form:
+/// a straight edge between two planes, its section solved at the edge's middle. `None`
+/// otherwise.
+///
+/// # Errors
+/// Those of the topology queries, the section's solve and the evaluations.
+#[allow(clippy::too_many_arguments)]
+fn band_with_events(
+    k: &Kernel,
+    target: &mut Brep,
+    cache: &BandCutCache,
+    solver: &mut SolverObject,
+    curve: &Curve,
+    ivl: &Extent1d,
+    chord: bool,
+    edge_id: crate::topology::EdgeId,
+    tol: f64,
+) -> Result<Option<(Band, Vec<f64>)>> {
+    if !matches!(curve.kind(), CurveKind::Line(_)) {
+        return Ok(None);
+    }
+    for f in edge::faces(target, edge_id, None)? {
+        let planar = face::p2::surface(target, f)?
+            .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
+        if !planar {
+            return Ok(None);
+        }
+    }
+    let t = ivl.evaluate(0.5);
+    let Some((_, [centre, rail1, rail2])) = section_points(k, target, solver, curve, t, None)?
+    else {
+        return Ok(None);
+    };
+    let at = curve.evaluate_point(k, t)?;
+    let (p0, p1) = (
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    );
+    let Some((_, dir)) = (p1 - p0).length_and_unit() else {
+        return Ok(None);
+    };
+    let span = [(p0 - at).dot(dir), (p1 - at).dot(dir)];
+    let Some(band) = Band::new(centre, [rail1, rail2], chord, at, dir, span) else {
+        return Ok(None);
+    };
+    Ok(band.events(k, cache, tol)?.map(|events| (band, events)))
 }
 
 /// Not the fork's (WR-707, #2299): whether the section of a convex blend at a station,
@@ -940,6 +1493,7 @@ fn section_breaks_through(
             };
             meets.push(Meet {
                 t,
+                face: f,
                 inside,
                 judged: !faces.skip.contains(&f),
                 reached: faces.reached.contains(&f),
@@ -975,20 +1529,16 @@ fn section_breaks_through(
         if pieces.material_to_rail(k, body, (0..piece).rev())?
             || pieces.material_to_rail(k, body, piece + 1..at.len() - 1)?
         {
-            // the hollow there filled by a concave round of the same blend: the section
-            // stays in the material that round adds
-            let (Some(&t0), Some(&t1)) = (at.get(piece), at.get(piece + 1)) else {
-                return Err(SolidError::blend_missing(OP, "the piece's end parameters"));
-            };
+            // the hollow there filled by a concave round of the same blend: the piece runs
+            // between that round's two faces and stays in the material it adds (piece
+            // `j + 1` runs from meet `j` to meet `j + 1`)
             let piece_ends = [
-                section.evaluate_point(k, t0)?,
-                section.evaluate_point(k, t1)?,
+                section.evaluate_point(k, m0.t)?,
+                section.evaluate_point(k, m1.t)?,
             ];
-            if faces
-                .fills
-                .iter()
-                .any(|f| f.holds(&shape, piece_ends, ends))
-            {
+            if faces.fills.iter().zip(&faces.usable).any(|(f, &usable)| {
+                usable && f.bounds([m0.face, m1.face]) && f.holds(&shape, piece_ends, ends)
+            }) {
                 continue;
             }
             return Ok(true); // a hollow behind a wall: the section breaks through
@@ -1075,6 +1625,8 @@ enum Piece {
 struct Meet {
     /// The section's parameter there.
     t: f64,
+    /// The face.
+    face: FaceId,
     /// Inside the face, not on its boundary.
     inside: bool,
     /// The face is judged: not one at the blended edge's ends.
@@ -1304,11 +1856,14 @@ pub(crate) fn band_cuts_the_part_cached(
 /// through the part somewhere along its edge (it leaves the part and comes back into it
 /// through an inner face, one sharing no edge with the blended faces: a hollow behind a
 /// wall, `section_breaks_through`), and where it would, the largest size that keeps every
-/// section from breaking through. At the same 32 sections as [`band_cuts_the_part`]; faces
-/// at the blended edge's ends (the corners trim the blend there) are not judged. The limit at
-/// each crossing section is found as the cut's is (halving from the ball's radius, then
-/// 40 bisections), least over the sections. A constant ball only. `None` where no
-/// section breaks through.
+/// section from breaking through. At the same 32 sections as [`band_cuts_the_part`] and,
+/// where the band is known in closed form (a straight edge between two planes, with only
+/// lines and planes near it: [`Band::events`]), at one more inside each stretch of the edge
+/// between the stations where the way the section meets the part can change, so that every
+/// stretch is judged and the judgement is exact there; faces at the blended edge's ends (the
+/// corners trim the blend there) are not judged. The limit at each crossing section is found
+/// as the cut's is (halving from the ball's radius, then 40 bisections), least over the
+/// sections. A constant ball only. `None` where no section breaks through.
 ///
 /// # Errors
 ///
@@ -1366,19 +1921,51 @@ pub(crate) fn band_breaks_through_the_part_cached(
             reached.extend(edge::faces(target, e, None)?);
         }
     }
-    let faces = ThroughFaces {
+    let mut faces = ThroughFaces {
         skip,
         reached,
+        usable: vec![false; fills.len()],
         fills,
     };
     let cache = match cache_slot {
         Some(c) => c,
         None => cache_slot.insert(BandCutCache::new(k, target)?),
     };
+    // the 32 steps; and where the band is known in closed form, one station inside each
+    // stretch between its events, where the section meets the part alike all along, so
+    // that every stretch is judged (a fill counts only there)
+    let mut stations: Vec<f64> = (0..STEPS)
+        .map(|j| ivl.evaluate((j as f64 + 0.5) / STEPS as f64))
+        .collect();
+    let tol = target.tolerance();
+    let band = band_with_events(k, target, cache, solver, &curve, &ivl, chord, edge_id, tol)?;
+    match &band {
+        Some((band, events)) => {
+            let [sa, sb] = band.span;
+            for pair in events.windows(2) {
+                let [e0, e1] = pair else {
+                    continue;
+                };
+                if e1 - e0 > 2.0 * tol && sb > sa {
+                    let s = 0.5 * (e0 + e1);
+                    stations.push(ivl.min() + (s - sa) / (sb - sa) * (ivl.max() - ivl.min()));
+                }
+            }
+        }
+        // no fill counts where a stretch may go unjudged
+        None => faces.fills.clear(),
+    }
     let mut out: Option<BandCut> = None;
     let mut near: Option<TsectPnt> = None;
-    for j in 0..STEPS {
-        let t = ivl.evaluate((j as f64 + 0.5) / STEPS as f64);
+    for t in stations {
+        faces.usable.clear();
+        if let Some((band, events)) = &band {
+            let s = band.along(curve.evaluate_point(k, t)?);
+            for fill in &faces.fills {
+                faces.usable.push(fill.covers(band, events, s, tol));
+            }
+        }
+        faces.usable.resize(faces.fills.len(), false);
         let judged = keeps(
             k,
             target,
@@ -1457,10 +2044,43 @@ pub(crate) fn band_breaks_through_the_part_cached(
 
 #[cfg(test)]
 mod tests {
-    use super::least_on_arc;
+    use super::{least_on_arc, segment_enters_triangle};
+    use crate::math::Point3;
 
     /// `least_on_arc` is the least of `a + b cos θ + c sin θ`: inside the arc at the angle
     /// of `-(b, c)`, `a - sqrt(b² + c²)`; at an end otherwise; and NaN where an input is.
+    /// `segment_enters_triangle`: a segment along a side, or outside, does not enter; one
+    /// across the inside, or wholly inside, does; a degenerate triangle counts as entered.
+    #[test]
+    fn a_segment_enters_a_triangle_only_through_its_inside() {
+        let tri = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(0.0, 4.0, 0.0),
+        ];
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let tol = 1e-6;
+        // along a side, and past it
+        assert!(!segment_enters_triangle(
+            p(-1.0, 0.0),
+            p(9.0, 0.0),
+            tri,
+            tol
+        ));
+        // outside, beyond the long side
+        assert!(!segment_enters_triangle(p(5.0, 0.0), p(0.0, 5.0), tri, tol));
+        // across the inside, and wholly inside
+        assert!(segment_enters_triangle(p(-1.0, 1.0), p(5.0, 1.0), tri, tol));
+        assert!(segment_enters_triangle(p(0.5, 0.5), p(1.0, 1.0), tri, tol));
+        // a degenerate triangle
+        assert!(segment_enters_triangle(
+            p(9.0, 9.0),
+            p(10.0, 9.0),
+            [tri[0]; 3],
+            tol
+        ));
+    }
+
     #[test]
     fn least_on_arc_is_the_closed_form_minimum_and_keeps_nan() {
         let pi = std::f64::consts::PI;

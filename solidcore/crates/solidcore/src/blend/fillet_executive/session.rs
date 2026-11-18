@@ -3957,6 +3957,18 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         {
             return Ok(None);
         }
+        // judged against the part alone first: the fills below are built only for a blend
+        // that would break through without them
+        let Some(alone) = band_cuts::band_breaks_through_the_part_cached(
+            k,
+            self.target,
+            current,
+            Vec::new(),
+            &mut self.band_cut_cache,
+        )?
+        else {
+            return Ok(None);
+        };
         // the material the concave rounds of the same blend add, which the section may run
         // through (the rig's 1668-fillet-both-sides-of-thin-wall-r7). Counted only where
         // the round adds its whole section along its whole edge:
@@ -3964,9 +3976,11 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         //   accepted and trimmed flush with the cliff (`choose_cliff_overflow`); anywhere
         //   else a concave round whose rail leaves its face is refused there
         //   (`ConcaveOverflow`), so a fillet that builds has every rail on its face;
-        // - not where an end of its edge is a set-back vertex or meets the edge of another
-        //   blend of this fillet: a corner or set-back patch replaces the round there, and
-        //   its shape is not known yet (the corners are made after this judgement)
+        // - not where an end of its edge is a set-back vertex, by either door (marked, or
+        //   asked a fill), or meets the edge of another blend of this fillet: a corner or
+        //   set-back patch replaces the round there, and its shape is not known yet (the
+        //   corners are made after this judgement);
+        // - and only where both ends of its edge are closed square (`ConcaveFill::of_round`)
         let mut fills = Vec::new();
         if self.roll_over_ends.is_empty() {
             let mut edges = Vec::new();
@@ -3984,6 +3998,15 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                     edges.push((index, edge));
                 }
             }
+            let set_back = |v: VertexId| {
+                self.set_back_vertices.contains(&v)
+                    || crate::blend::blend_corner::setback::set_back_fill_of(
+                        &self.set_back_fills,
+                        v,
+                    )
+                    .is_some()
+            };
+            let mut candidates = Vec::new();
             for &(index, other_edge) in &edges {
                 if index == id.0 as usize
                     || !crate::blend::fillet_solver::p5::is_concave_edge(
@@ -3999,8 +4022,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                 let (Some(start), Some(end)) = (start, end) else {
                     continue;
                 };
-                let mut alone = !self.set_back_vertices.contains(&start)
-                    && !self.set_back_vertices.contains(&end);
+                let mut alone = !set_back(start) && !set_back(end);
                 for &(j, edge) in &edges {
                     if !alone || j == index {
                         continue;
@@ -4008,9 +4030,11 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                     let (s, e) = crate::topology::edge::start_end_vertices(self.target, edge)?;
                     alone = ![s, e].iter().flatten().any(|v| *v == start || *v == end);
                 }
-                if !alone {
-                    continue;
+                if alone {
+                    candidates.push(index);
                 }
+            }
+            for index in candidates {
                 let Some(other) = self.solvers.get_mut(index).and_then(Option::as_mut) else {
                     continue;
                 };
@@ -4031,15 +4055,19 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             .get_mut(id.0 as usize)
             .and_then(Option::as_mut)
             .ok_or_else(|| invalid("solver is not live in this session"))?;
-        let Some(cut) = band_cuts::band_breaks_through_the_part_cached(
-            k,
-            self.target,
-            current,
-            fills,
-            &mut self.band_cut_cache,
-        )?
-        else {
-            return Ok(None);
+        let cut = if fills.is_empty() {
+            alone
+        } else {
+            match band_cuts::band_breaks_through_the_part_cached(
+                k,
+                self.target,
+                current,
+                fills,
+                &mut self.band_cut_cache,
+            )? {
+                Some(cut) => cut,
+                None => return Ok(None),
+            }
         };
         let chamfer = current.base().fsg.as_ref().is_some_and(|fsg| {
             fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear
