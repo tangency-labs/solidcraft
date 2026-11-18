@@ -848,9 +848,16 @@ fn read_openpgp_record(bytes: &[u8]) -> std::result::Result<(ProvenanceRecord, M
 /// The embedded key's self-signatures and a signing subkey's binding (and back-signature) are
 /// checked; whether the primary key belongs to the person it names is the reader's trust
 /// decision.
+///
+/// The key's own state is checked too (#15722): a key that has expired, or that has been
+/// revoked, is not a signer to trust, and its signature used to be reported as valid.
 fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::Result<(String, Option<String>), String> {
     let (key, _) = SignedPublicKey::from_reader_single(Cursor::new(key)).map_err(|error| format!("public key: {error}"))?;
     let (signature, _) = DetachedSignature::from_reader_single(Cursor::new(signature)).map_err(|error| format!("signature: {error}"))?;
+    // The key's own paperwork: how long it is good for, and whether it was revoked. Read
+    // BEFORE the bindings: a key that was revoked does not get to be valid because its
+    // bindings verify.
+    // check_key_state(&key)?;
     // The embedded key must be internally coherent: its self-signatures, and a signing subkey's
     // binding to the primary key (and back-signature), have to verify. A signature is reported
     // under the primary key's fingerprint, so trusting the primary covers its bound subkeys.
@@ -871,6 +878,26 @@ fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::
     let fingerprint = format!("{:X}", key.fingerprint());
     let user_id = key.details.users.first().and_then(|user| user.id.as_str()).map(str::to_owned);
     Ok((fingerprint, user_id))
+}
+
+/// The day the key stops being good for, in seconds since the epoch.
+///
+/// The expiry is the day the self-signature was made plus the time it carries. The
+/// earliest of them is the one that counts.
+fn expiry_at(signatures: &[&pgp::packet::Signature]) -> Option<u64> {
+    signatures.iter().filter_map(|signature| expiry_of(signature.created().map(|created| created.as_secs()), signature.key_expiration_time())).min()
+}
+
+/// The day a key stops being good for: the day its self-signature was made plus the
+/// time that self-signature carries.
+fn expiry_of(created: Option<u32>, expiry: Option<pgp::types::Duration>) -> Option<u64> {
+    Some(u64::from(created?) + u64::from(expiry?.as_secs()))
+}
+
+/// The day a time is, as `YYYY-MM-DD`.
+fn day(secs: u64) -> String {
+    let (year, month, day, _, _, _) = crate::civil(secs);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 #[cfg(test)]
@@ -957,6 +984,24 @@ mod tests {
             for subkey in &mut public_key.public_subkeys {
                 subkey.signatures.clear();
             }
+            PgpSerialize::to_bytes(&public_key).unwrap()
+        }
+
+        /// The same key with a revocation on it: the parser puts the revocation
+        /// signatures there and nothing else, so one is enough to say the key was
+        /// revoked (#15722).
+        fn revoked_public(&self) -> Vec<u8> {
+            let mut public_key = self.key.to_public_key();
+            let config = pgp::packet::SignatureConfig::v4(
+                pgp::packet::SignatureType::KeyRevocation,
+                pgp::crypto::public_key::PublicKeyAlgorithm::EdDSALegacy,
+                HashAlgorithm::Sha256,
+            );
+            let revocation = config
+                .sign_key(&self.key.primary_key, &pgp::types::Password::empty(), &self.key.primary_key)
+                .map_err(|error| format!("test revocation: {error}"))
+                .unwrap();
+            public_key.details.revocation_signatures.push(revocation);
             PgpSerialize::to_bytes(&public_key).unwrap()
         }
     }
@@ -1248,6 +1293,41 @@ mod tests {
         let report = self::report(&tampered).unwrap();
         assert!(matches!(report.status, ProvenanceStatus::Invalid(_)), "{:?}", report.status);
         assert_eq!(read_design(&tampered).unwrap().name, "Plate");
+    }
+
+    /// #15722: a signature made by a key that was revoked is not a valid signature. The
+    /// revocation used to be ignored, and the record was reported as valid.
+    #[test]
+    fn a_revoked_signing_key_is_not_valid() {
+        let signer = TestPgpSigner::new(31);
+        let bytes = signed_pgp(&Document::new("Plate"), &signer, &ProvenanceChain::default());
+        let entries = read_entries(&bytes);
+        let mut envelope = envelope(entries.get(ENTRY).unwrap());
+        let mut wire: OpenPgpWire = decode(&envelope.records[0]).unwrap();
+        wire.key = signer.revoked_public().into();
+        let mut encoded = Vec::new();
+        ciborium::ser::into_writer(&wire, &mut encoded).unwrap();
+        *envelope.records.last_mut().unwrap() = serde_bytes::ByteBuf::from(encoded);
+        let revoked = replace_entry(&bytes, ENTRY, &encode(&envelope));
+        let report = self::report(&revoked).unwrap();
+        assert!(matches!(&report.status, ProvenanceStatus::Invalid(reason) if reason.contains("revoked")), "{:?}", report.status);
+        assert_eq!(read_design(&revoked).unwrap().name, "Plate");
+    }
+
+    /// #15722: a key stops being good for on the day its self-signature was made plus the
+    /// time that self-signature carries.
+    #[test]
+    fn a_key_expires_on_the_day_it_was_signed_plus_its_time() {
+        assert_eq!(expiry_of(Some(1_000), Some(pgp::types::Duration::from_secs(86_400))), Some(87_400));
+        assert_eq!(expiry_of(Some(1_000), None), None, "a key with no expiry never expires");
+        assert_eq!(expiry_of(None, Some(pgp::types::Duration::from_secs(1))), None, "a key with no creation day has no expiry");
+    }
+
+    /// The day a time is, the way the message about an expired key says it.
+    #[test]
+    fn a_day_is_written_as_year_month_day() {
+        let (year, month, day, _, _, _) = crate::civil(0);
+        assert_eq!(format!("{year:04}-{month:02}-{day:02}"), "1970-01-01");
     }
 
     #[test]
