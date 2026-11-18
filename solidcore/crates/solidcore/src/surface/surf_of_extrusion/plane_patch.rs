@@ -72,10 +72,14 @@
 //! evaluation and projection (`Frame::uv_err`), a side's point at a `mu` from that
 //! `mu`'s error over the sweep's component along the side (`side_vertex`), a cut of
 //! the slab from its ends' and its bound's (`cut_vertex`). Two vertices are one
-//! point when every coordinate differs by at most the sum of their bounds, or when
-//! they are closer than `SM_EFF_ZERO` (no shorter line exists): the slab's polygon
-//! merges them (it stays closed), and a monotone region drops a segment whose ends
-//! are one point when the gap it leaves is within `SM_EFF_ZERO m` (`segment`).
+//! point when every coordinate differs by at most the sum of their bounds
+//! (`one_point`). One predicate decides every drop and merge (`merges`): the two
+//! vertices are closer than `SM_EFF_ZERO` (no shorter line exists), or they are one
+//! point and within `SM_EFF_ZERO m` of each other (`m` their largest coordinate), a
+//! gap the boundary always closed to. The slab's polygon merges such neighbours
+//! until none is left (`close_ring`: it stays closed), and a monotone region drops
+//! such a segment (`segment`). A bound that is too large can thus only drop what
+//! `SM_EFF_ZERO m` allowed anyway, and one that is too small only keeps an edge.
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result};
@@ -221,11 +225,43 @@ fn net_points(piece: &Curve) -> Option<Net> {
 /// numerator and denominator within `gamma(6p + 2)` of the positive sums and the
 /// quotient within `2 gamma(6p + 3) max |P_i|` (a weighted mean of the control
 /// points: the weights cancel). An analytic evaluation (a conic's) rounds less.
-/// `None` for non-finite data or a non-positive weight.
-fn gen_eval_err(gen: &Curve) -> Option<f64> {
+///
+/// Only evaluations at parameters in `[lo, hi]` are bounded, so only the control
+/// points they read count: those whose basis support `[T_i, T_(i+p+1)]` meets
+/// `[lo, hi]` (closed, a superset of the span's `p + 1`; an out-of-bounds
+/// evaluation past an end reads that end's span, whose points meet it too). A line
+/// (evaluated analytically) or a knot vector of unexpected length counts every
+/// control point. `None` for non-finite data or a non-positive weight among the
+/// points counted.
+fn gen_eval_err(gen: &Curve, lo: f64, hi: f64) -> Option<f64> {
     let canon = gen_base(gen).ok()?.canonical().ok()?;
+    let p = canon.degree;
+    let n = canon.control_points.len();
+    let mut knots: Vec<f64> = Vec::new();
+    for (&t, &mult) in canon.knots.iter().zip(&canon.knot_multiplicities) {
+        knots.extend(std::iter::repeat_n(t, mult));
+    }
+    let local =
+        !matches!(gen.kind(), CurveKind::Line(_)) && n.checked_add(p + 1) == Some(knots.len());
+    // (`[lo, hi]` clamped into the knots: past an end, the end span is read)
+    let (lo, hi) = match (knots.first(), knots.last()) {
+        (Some(&t0), Some(&t1)) => (lo.min(t1).max(t0), hi.max(t0).min(t1)),
+        _ => (lo, hi),
+    };
+    let reads = |i: usize| -> bool {
+        !local
+            || matches!(
+                (knots.get(i), i.checked_add(p + 1).and_then(|j| knots.get(j))),
+                (Some(&a), Some(&b)) if a <= hi && b >= lo
+            )
+    };
     let mut max_p = 0.0_f64;
-    for (i, p) in canon.control_points.iter().enumerate() {
+    let mut any = false;
+    for (i, pt) in canon.control_points.iter().enumerate() {
+        if !reads(i) {
+            continue;
+        }
+        any = true;
         let w = if canon.weights.is_empty() {
             1.0
         } else {
@@ -235,10 +271,10 @@ fn gen_eval_err(gen: &Curve) -> Option<f64> {
         if !valid {
             return None;
         }
-        max_p = max_p.max(p.max_dimension());
+        max_p = max_p.max(pt.max_dimension());
     }
-    let err = 2.0 * gamma(6 * canon.degree + 3) * max_p;
-    err.is_finite().then_some(err)
+    let err = 2.0 * gamma(6 * p + 3) * max_p;
+    (any && err.is_finite()).then_some(err)
 }
 
 /// The generator piece over `[lo, hi]`, split exactly at its ends (zone tolerance 0:
@@ -530,7 +566,9 @@ fn extreme(
 /// rounding of zero taken as zero, so a side of the domain parallel to the sweep to
 /// the working precision is parallel), and the 3D functionals of the UV coordinates
 /// and of `mu = -ew u + eu w` (across the sweep). `pt_err` bounds the error of an
-/// evaluated generator point (`gen_eval_err`), `dmu1` is `|ew| |du|_1 + |eu| |dw|_1`.
+/// evaluated generator point (`gen_eval_err` over the range evaluated: each range's
+/// frame carries its own, `with_pt_err`), `dmu1` is `|ew| |du|_1 + |eu| |dw|_1`.
+#[derive(Clone)]
 struct Frame {
     eu: f64,
     ew: f64,
@@ -578,13 +616,24 @@ impl Frame {
         })
     }
 
+    /// The frame with `pt_err` bounding the generator evaluations it is used for.
+    fn with_pt_err(&self, pt_err: f64) -> Frame {
+        Frame {
+            pt_err,
+            ..self.clone()
+        }
+    }
+
     /// A bound on the error of each UV coordinate of `project_point_to_uv_domain(p)`,
     /// `p` an evaluated generator point, against the generator's exact point: the
     /// evaluation's error (`pt_err`, per coordinate), the projection's rounding
     /// (`p - O` relative to each difference, a dot product of three terms and the
     /// division by the scale: `gamma(5)`, with `gamma(2)` for the frame's axes), and
-    /// `gamma(3) |p|`, the rounding of a point the plane's map made (ARGUED: a
-    /// generator drawn through a domain corner is taken to pass through it).
+    /// `gamma(3) |p|`, a modelling term (ARGUED) for a generator drawn through plane
+    /// points such as a domain corner, taken to pass through them. It is not the
+    /// plane map's rounding, about `gamma(4) (|O| + |u s x| + |w s y|)`, which it
+    /// underestimates under cancellation (a far plane origin, the patch near the
+    /// world origin). That is the safe side: a smaller bound only keeps an edge.
     fn uv_err(&self, p: Point3) -> Point2 {
         let e =
             (self.pt_err + gamma(3) * p.max_dimension() + gamma(5) * (p - self.o).max_dimension())
@@ -753,16 +802,26 @@ impl Vertex {
 }
 
 /// Whether `a` and `b` may be one point: each UV coordinate within the sum of the
-/// two error bounds (and the rounding of the difference), or the points closer than
-/// `SM_EFF_ZERO`, the shortest line the kernel builds. The UV test counts each
+/// two error bounds (and the rounding of the difference). The test counts each
 /// coordinate's error where it was computed: a `mu` error `d` puts a side's point
 /// `d / |e|` along the side (`e` the sweep's component along it), however far the
 /// patch is from the origin and however oblique the sweep.
 fn one_point(a: &Vertex, b: &Vertex) -> bool {
     let k = 1.0 + gamma(2);
-    let within = (a.uv.x - b.uv.x).abs() <= (a.r.x + b.r.x) * k
-        && (a.uv.y - b.uv.y).abs() <= (a.r.y + b.r.y) * k;
-    within || a.p.distance(b.p) < EFF_ZERO
+    (a.uv.x - b.uv.x).abs() <= (a.r.x + b.r.x) * k && (a.uv.y - b.uv.y).abs() <= (a.r.y + b.r.y) * k
+}
+
+/// Whether the edge `a`-`b` is no edge: the one predicate of every drop (`segment`)
+/// and merge (`close_ring`). Its ends are closer than `SM_EFF_ZERO` (no line that
+/// short exists), or they are one point to their computed errors (`one_point`) and
+/// within `SM_EFF_ZERO m` (`m` the ends' largest coordinate), a gap the boundary
+/// always closed to. So an error bound decides only between keeping an edge (at
+/// least `SM_EFF_ZERO` long, which builds) and dropping one within that gap: an
+/// underestimate keeps an edge, an overestimate drops nothing beyond it.
+fn merges(a: &Vertex, b: &Vertex) -> bool {
+    let d = a.p.distance(b.p);
+    let m = a.p.max_dimension().max(b.p.max_dimension());
+    d < EFF_ZERO || (one_point(a, b) && d <= EFF_ZERO * m)
 }
 
 /// The vertex of the (non-parallel) side `side` at `mu`, `mu` known to `mu_err`:
@@ -893,30 +952,25 @@ fn directrix(
 enum Edge {
     /// The edge.
     Line(Box<Curve>),
-    /// No edge: its ends are one point (`one_point`).
+    /// No edge: its ends merge (`merges`).
     Nothing,
     /// An end is not finite: the patch declines.
     Unbuildable,
 }
 
 /// The segment `a`-`b` of a monotone region (whose edges are separate curves:
-/// dropping one leaves a gap its length). `Nothing` below `SM_EFF_ZERO` (no line
-/// that short exists), or when its ends are one point to their computed errors
-/// (`one_point`) and it is within `SM_EFF_ZERO m` (`m` the ends' largest
-/// coordinate: the gap left is one the boundary always closed to, as before this
-/// change). Every other segment is an edge of the region, however small against
-/// the coordinates: a real closing edge of a small region far from the origin is
-/// kept, and an edge that may be rounding noise but is longer than that gap closes
-/// the boundary rather than open it. `Unbuildable` for non-finite data.
+/// dropping one leaves a gap its length). `Nothing` when its ends merge (`merges`:
+/// the gap left is one the boundary always closed to, as before this change). Every
+/// other segment is an edge of the region, however small against the coordinates:
+/// a real closing edge of a small region far from the origin is kept, and an edge
+/// that may be rounding noise but is longer than that gap closes the boundary
+/// rather than open it. `Unbuildable` for non-finite data.
 fn segment(a: Vertex, b: Vertex) -> Result<Edge> {
     let finite = a.finite() && b.finite();
     if !finite {
         return Ok(Edge::Unbuildable);
     }
-    let d = a.p.distance(b.p);
-    let m = a.p.max_dimension().max(b.p.max_dimension());
-    let gap = d < EFF_ZERO || (one_point(&a, &b) && d <= EFF_ZERO * m);
-    if gap {
+    if merges(&a, &b) {
         return Ok(Edge::Nothing);
     }
     Ok(Edge::Line(Box::new(Curve::from(
@@ -936,9 +990,11 @@ fn push_edge(out: &mut Vec<Curve>, edge: Edge) -> Option<()> {
 
 /// A generator range, split from the generator and certified in the plane, with its
 /// `mu` extent (its least and greatest `mu`, each with a bound on its error against
-/// the exact extreme), whether its `mu` is certified monotone, and bounds on its `nu`.
+/// the exact extreme), whether its `mu` is certified monotone, bounds on its `nu`,
+/// and the error bound of its generator evaluations (`gen_eval_err`).
 struct RangePiece {
     ivl: Extent1d,
+    pt_err: f64,
     alpha: f64,
     beta: f64,
     alpha_err: f64,
@@ -1008,6 +1064,11 @@ fn range_piece(
     if !certify_in_plane(&net, inputs.extrusion_vec, inputs.plane) {
         return Ok(Measured::Declined);
     }
+    // (every evaluation of the generator for this range is in the piece's interval)
+    let Some(pt_err) = gen_eval_err(gen, lo.min(ivl.min()), hi.max(ivl.max())) else {
+        return Ok(Measured::Declined);
+    };
+    let frame = &frame.with_pt_err(pt_err);
 
     // mu monotone on the control polygon (each step not against the direction beyond
     // the values' errors) makes it monotone on the curve: for positive weights the
@@ -1099,6 +1160,7 @@ fn range_piece(
     }
     Ok(Measured::Piece(RangePiece {
         ivl,
+        pt_err,
         alpha,
         beta,
         alpha_err,
@@ -1342,6 +1404,8 @@ fn monotone_region(
     let dom = inputs.plane_domain;
     let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
     let (s0, s1) = (rp.ivl.min(), rp.ivl.max());
+    // (every generator evaluation here is in the range's interval)
+    let frame = &frame.with_pt_err(rp.pt_err);
     let uv_at = |s: f64| -> Result<Point2> {
         Ok(plane.project_point_to_uv_domain(gen.evaluate_point(k, s)?))
     };
@@ -1628,39 +1692,15 @@ fn slab_region(
         // the slab misses the domain: no coincidence over it
         return Ok(Some(()));
     }
-    // vertices that are one point (`one_point`) merge, keeping the better known (the
-    // other's exact place is within the two bounds of it): the boundary stays closed,
-    // with no edge of rounding noise and none too short to build
     let mut ring: Vec<Vertex> = Vec::new();
     for &(uv, r) in &poly {
         let v = Vertex::on_plane(plane, uv, r);
         if !v.finite() {
             return Ok(None);
         }
-        match ring.last_mut() {
-            Some(last) if one_point(last, &v) => {
-                if v.spread() < last.spread() {
-                    *last = v;
-                }
-            }
-            _ => ring.push(v),
-        }
+        ring.push(v);
     }
-    // (the last against the first, a few times at most: each merge drops a vertex)
-    while ring.len() > 1 {
-        let (Some(&first), Some(&last)) = (ring.first(), ring.last()) else {
-            break;
-        };
-        if !one_point(&first, &last) {
-            break;
-        }
-        ring.pop();
-        if last.spread() < first.spread() {
-            if let Some(f) = ring.first_mut() {
-                *f = last;
-            }
-        }
-    }
+    let ring = close_ring(ring);
     // a slab touching the domain along a side or at a point bounds no area
     let mut area2 = 0.0;
     let mut scale = 0.0_f64;
@@ -1686,13 +1726,56 @@ fn slab_region(
             return Ok(None);
         }
     }
-    // (each vertex with its successor, the last with the first)
+    // (each vertex with its successor, the last with the first; no neighbours merge
+    // after `close_ring`, so every segment is an edge and the polygon is closed, but
+    // a `Nothing` would open it: decline rather than answer an open boundary)
     for (&a, &b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
-        if push_edge(out, segment(a, b)?).is_none() {
-            return Ok(None);
+        match segment(a, b)? {
+            Edge::Line(c) => out.push(*c),
+            Edge::Nothing | Edge::Unbuildable => return Ok(None),
         }
     }
     Ok(Some(()))
+}
+
+/// The slab's polygon (its vertices in order, the last joined to the first) with
+/// neighbours that merge (`merges`, the predicate of `segment`) merged until none
+/// is left, each merge keeping the better known of the two (the other's exact place
+/// is within the two bounds of it; on a tie the earlier). The polygon stays closed
+/// by construction: `segment` of any two neighbours is an edge. `merges` is not
+/// transitive (with `A`, `B`, `C` in order, `A` and `B` apart, `B` and `C` merging
+/// into `C`, `A` and `C` may merge), so a merge is followed by a new pass over every
+/// pair, the last with the first included. Each merge drops a vertex: at most `n`
+/// passes of `n` pairs (`n <= 6`, a box cut by two half-planes).
+fn close_ring(mut ring: Vec<Vertex>) -> Vec<Vertex> {
+    loop {
+        let n = ring.len();
+        if n < 2 {
+            return ring;
+        }
+        let pair = (0..n).find_map(|i| {
+            // (the successor, the last's the first)
+            let j = if i + 1 < n { i + 1 } else { 0 };
+            let (a, b) = (ring.get(i)?, ring.get(j)?);
+            (i != j && merges(a, b)).then_some((i.min(j), i.max(j)))
+        });
+        let Some((keep, drop)) = pair else {
+            return ring;
+        };
+        if let (Some(&a), Some(&b)) = (ring.get(keep), ring.get(drop)) {
+            if b.spread() < a.spread() {
+                if let Some(x) = ring.get_mut(keep) {
+                    *x = b;
+                }
+            }
+        }
+        ring = ring
+            .into_iter()
+            .enumerate()
+            .filter(|&(i, _)| i != drop)
+            .map(|(_, v)| v)
+            .collect();
+    }
 }
 
 /// The solver's ranges cut to the generator interval, each extended span by span
@@ -1776,11 +1859,9 @@ pub(super) fn coincident_patch(
     if !sweeps {
         return Ok(None);
     }
-    // (a generator with no B-spline form has no certified piece either: no patch)
-    let Some(pt_err) = gen_eval_err(inputs.gen) else {
-        return Ok(None);
-    };
-    let Some(frame) = Frame::new(inputs.plane, inputs.extrusion_vec, pt_err) else {
+    // (no generator evaluation is bounded at the patch's level: each range's frame
+    // carries its own bound, `range_piece`)
+    let Some(frame) = Frame::new(inputs.plane, inputs.extrusion_vec, 0.0) else {
         return Ok(None);
     };
     let mut budget = PIECE_BUDGET;
@@ -1886,4 +1967,46 @@ pub(super) fn coincident_patch(
             .collect(),
         ranges: covered,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A vertex of the plane `z = 0` at unit scale: its point is its UV point.
+    fn v(x: f64, y: f64, r: f64) -> Vertex {
+        Vertex {
+            p: Point3::new(x, y, 0.0),
+            uv: Point2::new(x, y),
+            r: Point2::new(r, 0.0),
+        }
+    }
+
+    /// Review r2 of #18771, M1: `merges` is not transitive. With `A`, `B`, `C` in
+    /// order (`m = 1000`, so the cap `SM_EFF_ZERO m` is `1e-9`), `A` and `B` are
+    /// `4e-10` apart beyond their bounds (`0`, `3e-10`), `B` and `C` merge into the
+    /// better known `C` (`1.5e-10`), and `A` and `C` (`1e-10` apart) merge too. A
+    /// single pass left `A`, `C` neighbours, whose segment is no edge: the slab was
+    /// open. Merged until no neighbours merge, every rotation of the ring closes to
+    /// the triangle `A`, `D`, `E` with every side an edge.
+    #[test]
+    fn slab_ring_merges_non_transitive_chains_until_closed() {
+        let a = v(1000.0, 0.0, 0.0);
+        let b = v(1000.0 + 4e-10, 0.0, 3e-10);
+        let c = v(1000.0 + 1e-10, 0.0, 1.5e-10);
+        let (d, e) = (v(1000.0, 10.0, 0.0), v(990.0, 5.0, 0.0));
+        assert!(!merges(&a, &b) && merges(&b, &c) && merges(&a, &c));
+        let ring = [a, b, c, d, e];
+        for turn in 0..ring.len() {
+            let mut rotated = ring.to_vec();
+            rotated.rotate_left(turn);
+            let closed = close_ring(rotated);
+            assert_eq!(closed.len(), 3, "rotation {turn}");
+            assert!(closed.iter().any(|x| x.uv == a.uv), "rotation {turn}");
+            for (&p, &q) in closed.iter().zip(closed.iter().cycle().skip(1)) {
+                let edge = segment(p, q).unwrap();
+                assert!(matches!(edge, Edge::Line(_)), "rotation {turn}: open");
+            }
+        }
+    }
 }

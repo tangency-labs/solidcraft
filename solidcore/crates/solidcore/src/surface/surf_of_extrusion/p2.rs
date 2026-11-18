@@ -2985,6 +2985,48 @@ mod tests {
         assert_region(&r, &plane, area);
     }
 
+    /// Review r2 of #18771, B1: a slab in the box `[0, 1e-3]^2` of `z = 0`, swept at
+    /// 30 degrees, from the fold `a`-`c`-`b` whose generator then leaves the plane to
+    /// `z = 1e5`. The slab's `beta` line passes `1e-10` in `mu` above the corner
+    /// `(0, 0)`, so the polygon has a real edge `1.15e-10` long there (above
+    /// `SM_EFF_ZERO` and far above `SM_EFF_ZERO m`, `m = 1e-3`). The far control
+    /// point (read by the evaluations at `b`) makes the error bound of the
+    /// generator's evaluations about `2e-10`, which puts the two ends within their
+    /// bounds: at a8f0d30cd the slab merged them (without the `SM_EFF_ZERO m` cap)
+    /// and lost the edge. The edge stays, with the region's five sides and exact area.
+    #[test]
+    fn slab_keeps_a_real_short_edge_beside_a_far_generator() {
+        let k = k();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1e-3, 1e-3);
+        let plane = xy_plane(dom);
+        let th = std::f64::consts::FRAC_PI_6;
+        let (sn, cs) = th.sin_cos();
+        let mu = |p: (f64, f64)| -sn * p.0 + cs * p.1;
+        let at_mu = |u: f64, m: f64| (u, (m + sn * u) / cs);
+        let (a, c, b) = (at_mu(5e-4, 1e-10), at_mu(6e-4, -2e-4), at_mu(3e-4, -1e-4));
+        let far = (b.0, b.1, 1e5);
+        let pts = [(a.0, a.1, 0.0), (c.0, c.1, 0.0), (b.0, b.1, 0.0), far];
+        let s = swept(&k, &pts, None, Vec3::new(cs, sn, 0.0));
+        let gdom = Extent2d::from_bounds(0.0, -1.0, 3.0, 1.0);
+        let r = s
+            .intersect_with_plane(&k, &gdom, &plane, &plane.natural_uv_domain(), None)
+            .unwrap();
+        let (alpha, beta) = (mu(c), mu(a).max(mu(b)));
+        let boxp = [
+            Point2::new(0.0, 0.0),
+            Point2::new(1e-3, 0.0),
+            Point2::new(1e-3, 1e-3),
+            Point2::new(0.0, 1e-3),
+        ];
+        let region = cut(&boxp, &|p: Point2| mu((p.x, p.y)) - alpha);
+        let region = cut(&region, &|p: Point2| beta - mu((p.x, p.y)));
+        assert_eq!(region.len(), 5);
+        assert_eq!(r.curves_3d.len(), 5, "{:?}", r.curves_3d.len());
+        let short = shortest_curve(&r);
+        assert!(short > 1e-10 && short < 2e-10, "{short:e}");
+        assert_region(&r, &plane, uv_area(&region).abs());
+    }
+
     #[test]
     fn non_parallel_extrusions_need_more() {
         let k = k();
