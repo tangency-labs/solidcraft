@@ -3091,7 +3091,7 @@ impl SolveApp {
     fn return_from_extrude_view(&mut self) {
         // Put aside for its New Sketch, Extrude is still open (#6383).
         let parked = self.inline_sketch.as_ref().and_then(command_sketch::InlineSketch::parked);
-        if self.dialog.as_ref().or(parked).is_some_and(|d| matches!(d.kind, dialogs::Kind::Extrude { .. })) {
+        if self.dialog.iter().chain(parked).any(|d| matches!(d.kind, dialogs::Kind::Extrude { .. })) {
             return;
         }
         if let Some(before) = self.pre_extrude_cam.take() {

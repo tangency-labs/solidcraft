@@ -206,19 +206,28 @@ fn a_script_extrude_is_unchanged() {
 }
 
 /// With Extrude turning the view and turning it back (#9176), the dialog put aside for its
-/// sketch is still open: the view must not go back while the sketch is drawn.
+/// sketch is still open: the view must not go back while the sketch is drawn, whether a plane was
+/// clicked or New Sketch asked for one first.
 #[test]
 fn the_extrude_view_waits_while_its_sketch_is_drawn() {
-    let mut h = Harness::new();
-    h.app.preferences.extrude_view_isometric = true;
-    h.app.preferences.extrude_view_return = true;
-    h.app.start("solid.extrude");
-    h.frames(2);
-    assert!(h.app.pre_extrude_cam.is_some());
-    crate::viewport::dialog_pick(&mut h.app, &xy(), Sel::Plane { name: "XY".into() });
-    h.frames(3);
-    assert!(h.app.session.active_sketch.is_some());
-    assert!(h.app.pre_extrude_cam.is_some(), "Extrude still waits to turn the view back");
+    for button in [false, true] {
+        let mut h = Harness::new();
+        h.app.preferences.extrude_view_isometric = true;
+        h.app.preferences.extrude_view_return = true;
+        h.app.start("solid.extrude");
+        h.frames(2);
+        assert!(h.app.pre_extrude_cam.is_some());
+        if button {
+            click(&mut h, "dialog:new_sketch");
+            h.frames(2);
+            assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Sketch)), "Create Sketch asks for the plane");
+            assert!(h.app.pre_extrude_cam.is_some(), "Extrude waits while the plane is picked");
+        }
+        crate::viewport::dialog_pick(&mut h.app, &xy(), Sel::Plane { name: "XY".into() });
+        h.frames(3);
+        assert!(h.app.session.active_sketch.is_some());
+        assert!(h.app.pre_extrude_cam.is_some(), "Extrude still waits to turn the view back (button: {button})");
+    }
 }
 
 /// With "Keep dialogs and tools open when switching designs", the waiting Extrude stays with
