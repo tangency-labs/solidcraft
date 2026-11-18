@@ -1016,6 +1016,65 @@ fn cloned_datum_references_follow_the_copy() {
     );
 }
 
+#[test]
+fn pasted_coil_and_datum_keep_the_selected_ancestor_occurrences() {
+    use solidcraft_doc::construct::{AxisDef, GeoRef};
+    use solidcraft_doc::{AxisRef, FeatureKind};
+
+    for (repeated, different_parent) in [(false, false), (true, false), (true, true)] {
+        let mut s = Session::default();
+        let assembly = component(&mut s, "Assembly");
+        let assembly_occ = s.doc.occurrence_of(assembly).unwrap().id;
+        let parent = component(&mut s, "Parent");
+        let parent_occ = s.doc.occurrence_of(parent).unwrap().id;
+        let leaf = component(&mut s, "Leaf");
+        let leaf_occ = s.doc.occurrence_of(leaf).unwrap().id;
+        let box_id = box2(&mut s);
+        run(&mut s, "component.activate", json!({"component":assembly}));
+        let selected = if repeated {
+            run(&mut s, "occurrence.copy", json!({"component":parent,"parent":assembly,"translate":[80,0,0]}))["occurrence"].as_u64().unwrap()
+        } else {
+            parent_occ
+        };
+        let path = [assembly_occ, selected, leaf_occ];
+        let edge = format!("F{box_id}:-x|F{box_id}:-y");
+        run(
+            &mut s,
+            "solid.coil",
+            json!({"axis":{"type":"placed_edge","body":"Cube","path":path,"author_path":[assembly_occ],"at":[0,0,1],"name":edge},
+                   "diameter":12,"section_size":1,"pitch":4,"revolutions":1,"body_name":"Winding"}),
+        );
+        run(&mut s, "construct.axis.two_points", json!({"a":format!("o:{assembly_occ}/{selected}/{leaf_occ}/origin/O"),"b":{"point":[0,0,12]}}));
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        let (cloned, mut author) = if different_parent {
+            let target = component(&mut s, "Target");
+            let target_occ = s.doc.occurrence_of(target).unwrap().id;
+            let cloned = run(&mut s, "component.paste_new", json!({"component":assembly,"parent":target,"translate":[20,0,0]}));
+            (cloned, vec![target_occ])
+        } else {
+            (copy(&mut s, assembly), Vec::new())
+        };
+        let owner = cloned["component"].as_u64().unwrap();
+        let root = cloned["occurrence"].as_u64().unwrap();
+        author.push(root);
+        let cloned_parent = s.doc.occurrences.iter().filter(|o| o.parent == owner).nth(usize::from(repeated)).unwrap();
+        let cloned_leaf = s.doc.occurrences.iter().find(|o| o.parent == cloned_parent.component).unwrap();
+        let expected = [author.as_slice(), &[cloned_parent.id, cloned_leaf.id]].concat();
+        let mut features = s.doc.features.iter().filter(|f| f.component == owner);
+        let FeatureKind::Coil { axis_ref: Some(AxisRef::Model { geo: GeoRef::PlacedEdge { path, author_path, .. } }), .. } =
+            &features.next().unwrap().kind
+        else {
+            panic!("expected the copied Coil");
+        };
+        assert_eq!(path, &expected);
+        assert_eq!(author_path, &author);
+        let FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a: GeoRef::Datum { datum }, .. } } = &features.next().unwrap().kind else {
+            panic!("expected the copied datum axis");
+        };
+        assert_eq!(datum.path, expected);
+    }
+}
+
 /// Paste New of an imported assembly: the copy's parts are held by a rigid group of its own,
 /// so the copy moves as one too, and unlocking one leaves the other held.
 #[test]

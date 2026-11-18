@@ -97,7 +97,7 @@ pub use sketch_construction::{
 };
 pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
 pub use sketch_import::drawing_import_command;
-pub use sketch_modify::{TrimHover, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
+pub use sketch_modify::{TrimHover, break_shared_end, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
@@ -187,6 +187,7 @@ mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::{MAX_PROJECTED_ENTITIES, RefForm, model_ref, ref_form};
+mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
 mod surface;

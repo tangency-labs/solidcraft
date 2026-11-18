@@ -17,7 +17,7 @@ pub mod pbr_appearance;
 pub use body_transfer::{valid_transfer_matrix, validate_body_transfer};
 pub mod canvas;
 mod clipboard;
-pub use clipboard::{clone_expression, remap_topology, remap_topology_faces};
+pub use clipboard::{ClonePlacements, clone_expression, remap_topology, remap_topology_faces};
 pub mod component_color;
 mod component_removal;
 pub use component_removal::RemovedTree;

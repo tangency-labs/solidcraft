@@ -207,13 +207,19 @@ pub fn clone_expression(source: &str, parameters: &BTreeMap<String, String>) -> 
     result
 }
 
+/// The occurrence IDs allocated for a component copy and the root of the copied subtree.
+pub struct ClonePlacements<'a> {
+    pub occurrences: &'a BTreeMap<u64, u64>,
+    pub root: u64,
+    pub doc: &'a crate::Document,
+}
+
 fn remap_geo(
     g: &mut crate::construct::GeoRef,
     ids: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
     depth: usize,
-    occurrences: &BTreeMap<u64, u64>,
-    doc: &crate::Document,
+    placements: Option<&ClonePlacements<'_>>,
 ) -> crate::Result<()> {
     use crate::construct::GeoRef;
     if depth > 64 {
@@ -229,7 +235,7 @@ fn remap_geo(
         GeoRef::PlacedEdge { path, author_path, name, .. } => {
             *name = remap_topology(name, ids, bodies);
             for path in [path, author_path].into_iter().filter(|path| !path.is_empty()) {
-                remap_occurrence_path(path, occurrences, doc)?;
+                remap_occurrence_path(path, placements)?;
             }
         }
         GeoRef::Vertex { edges: Some(names), .. } => {
@@ -237,9 +243,9 @@ fn remap_geo(
                 *n = remap_topology(n, ids, bodies);
             }
         }
-        GeoRef::Plane { plane } => remap_plane(plane, ids, bodies, depth + 1, occurrences, doc)?,
-        GeoRef::Datum { datum } => remap_datum_path(datum, occurrences, doc)?,
-        GeoRef::Snap { of, .. } => remap_geo(of, ids, bodies, depth + 1, occurrences, doc)?,
+        GeoRef::Plane { plane } => remap_plane(plane, ids, bodies, depth + 1, placements)?,
+        GeoRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements)?,
+        GeoRef::Snap { of, .. } => remap_geo(of, ids, bodies, depth + 1, placements)?,
         _ => {}
     }
     Ok(())
@@ -250,26 +256,25 @@ fn remap_plane(
     ids: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
     depth: usize,
-    occurrences: &BTreeMap<u64, u64>,
-    doc: &crate::Document,
+    placements: Option<&ClonePlacements<'_>>,
 ) -> crate::Result<()> {
     if depth > 64 {
         return Err(crate::DocError::Invalid("clone plane reference depth exceeded".into()));
     }
     match p {
-        PlaneRef::Datum { datum } => remap_datum_path(datum, occurrences, doc)?,
-        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1, occurrences, doc)?,
+        PlaneRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements)?,
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1, placements)?,
         PlaneRef::ThroughPoint { base, point } => {
-            remap_plane(base, ids, bodies, depth + 1, occurrences, doc)?;
-            remap_geo(point, ids, bodies, depth + 1, occurrences, doc)?;
+            remap_plane(base, ids, bodies, depth + 1, placements)?;
+            remap_geo(point, ids, bodies, depth + 1, placements)?;
         }
         PlaneRef::AtAngle { base, line, pivot, .. } => {
-            remap_plane(base, ids, bodies, depth + 1, occurrences, doc)?;
+            remap_plane(base, ids, bodies, depth + 1, placements)?;
             if let Some(g) = line {
-                remap_geo(g, ids, bodies, depth + 1, occurrences, doc)?;
+                remap_geo(g, ids, bodies, depth + 1, placements)?;
             }
             if let Some(g) = pivot {
-                remap_geo(g, ids, bodies, depth + 1, occurrences, doc)?;
+                remap_geo(g, ids, bodies, depth + 1, placements)?;
             }
         }
         PlaneRef::Face { name, anchor, .. } => {
@@ -282,29 +287,36 @@ fn remap_plane(
         }
         _ => {
             for r in p.refs_mut() {
-                remap_geo(r, ids, bodies, depth + 1, occurrences, doc)?;
+                remap_geo(r, ids, bodies, depth + 1, placements)?;
             }
         }
     }
     Ok(())
 }
 
-/// A datum reference names an exact placement by its complete occurrence path. A copy within one
-/// design rewrites the path to the copy's own walk (the copied subtree's source ancestors are not
-/// in the map); an empty occurrence map (a paste from another design) or a path that leaves the
-/// copied tree is refused - the reference could not follow, and a dangling one would resolve
-/// against whatever then sits at those ids.
-fn remap_datum_path(d: &mut crate::construct::DatumRef, occurrences: &BTreeMap<u64, u64>, doc: &crate::Document) -> crate::Result<()> {
-    remap_occurrence_path(&mut d.path, occurrences, doc)
-}
-
-fn remap_occurrence_path(path: &mut Vec<u64>, occurrences: &BTreeMap<u64, u64>, doc: &crate::Document) -> crate::Result<()> {
-    let last = path.last().copied().ok_or_else(|| crate::DocError::Invalid("a copied reference names no placement".into()))?;
-    let new = occurrences
-        .get(&last)
-        .copied()
-        .ok_or_else(|| crate::DocError::Invalid("the copied reference names a placement outside the copied tree".into()))?;
-    *path = doc.occurrence_path(new).ok_or_else(|| crate::DocError::Invalid("the copied placement's path is broken".into()))?;
+/// Keep every selected occurrence within the copied subtree. The new root supplies the
+/// destination's ancestors, which are outside the copy.
+fn remap_occurrence_path(path: &mut Vec<u64>, placements: Option<&ClonePlacements<'_>>) -> crate::Result<()> {
+    if path.is_empty() {
+        return Err(crate::DocError::Invalid("a copied reference names no placement".into()));
+    }
+    let outside = || crate::DocError::Invalid("the copied reference names a placement outside the copied tree".into());
+    let placements = placements.ok_or_else(outside)?;
+    let mapped = path
+        .iter()
+        .skip_while(|id| !placements.occurrences.contains_key(id))
+        .map(|id| placements.occurrences.get(id).copied())
+        .collect::<Option<Vec<_>>>()
+        .filter(|path| !path.is_empty())
+        .ok_or_else(outside)?;
+    let broken = || crate::DocError::Invalid("the copied placement's path is broken".into());
+    let mut remapped = placements.doc.occurrence_path(placements.root).ok_or_else(broken)?;
+    if mapped.first() == Some(&placements.root) {
+        remapped.pop();
+    }
+    remapped.extend(mapped);
+    placements.doc.placement_frame(&remapped).map_err(|_| broken())?;
+    *path = remapped;
     Ok(())
 }
 
@@ -356,8 +368,7 @@ impl crate::Feature {
         names: &BTreeMap<String, String>,
         bodies: &BTreeMap<String, String>,
         parameters: &BTreeMap<String, String>,
-        occurrences: &BTreeMap<u64, u64>,
-        doc: &crate::Document,
+        placements: Option<&ClonePlacements<'_>>,
     ) -> crate::Result<()> {
         use FeatureKind as K;
         match &self.kind {
@@ -422,7 +433,7 @@ impl crate::Feature {
         self.kind.remap_bodies(bodies);
         match &mut self.kind {
             K::Sketch { plane, sketch } => {
-                remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
+                remap_plane(plane, ids, bodies, 0, placements)?;
                 for n in sketch.dimension_params_mut().into_iter().flatten() {
                     mapped_name(n, parameters);
                 }
@@ -449,33 +460,33 @@ impl crate::Feature {
             }
             K::FrameEndCap { ends, .. } => {
                 for end in ends {
-                    remap_plane(&mut end.plane, ids, bodies, 0, occurrences, doc)?;
+                    remap_plane(&mut end.plane, ids, bodies, 0, placements)?;
                 }
             }
             K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
             | K::Mirror { plane, .. }
-            | K::SurfaceTrim { plane, .. } => remap_plane(plane, ids, bodies, 0, occurrences, doc)?,
-            K::Draft { neutral, .. } => remap_plane(neutral, ids, bodies, 0, occurrences, doc)?,
-            K::ReplaceFace { target, .. } => remap_plane(target, ids, bodies, 0, occurrences, doc)?,
-            K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0, occurrences, doc)?,
-            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0, occurrences, doc)?,
+            | K::SurfaceTrim { plane, .. } => remap_plane(plane, ids, bodies, 0, placements)?,
+            K::Draft { neutral, .. } => remap_plane(neutral, ids, bodies, 0, placements)?,
+            K::ReplaceFace { target, .. } => remap_plane(target, ids, bodies, 0, placements)?,
+            K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0, placements)?,
+            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0, placements)?,
             K::ConstructionAxis { def } => {
                 for r in def.refs_mut() {
-                    remap_geo(r, ids, bodies, 0, occurrences, doc)?;
+                    remap_geo(r, ids, bodies, 0, placements)?;
                 }
             }
             K::ConstructionPoint { def } => {
                 for r in def.refs_mut() {
-                    remap_geo(r, ids, bodies, 0, occurrences, doc)?;
+                    remap_geo(r, ids, bodies, 0, placements)?;
                 }
             }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Coil { axis_ref: Some(crate::AxisRef::Model { geo }), .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
-            | K::Move { rotate_about: Some(geo), .. } => remap_geo(geo, ids, bodies, 0, occurrences, doc)?,
+            | K::Move { rotate_about: Some(geo), .. } => remap_geo(geo, ids, bodies, 0, placements)?,
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
             // own face names are found.
             K::Align { from_frame, to_frame, .. } => {
@@ -578,7 +589,7 @@ mod clone_tests {
             value["name"] = json!("Copy");
             let mut feature: crate::Feature = serde_json::from_value(value).unwrap();
             let before = serde_json::to_string(&feature).unwrap();
-            feature.remap_clone(&BTreeMap::new(), &names, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(), &crate::Document::default()).unwrap();
+            feature.remap_clone(&BTreeMap::new(), &names, &BTreeMap::new(), &BTreeMap::new(), None).unwrap();
             assert_eq!(serde_json::to_string(&feature).unwrap(), before.replace("\"Old\"", "\"New\""));
         }
     }
