@@ -678,7 +678,8 @@ pub struct SurfaceIntersector<'s> {
     /// ([`SurfaceIntersector::span_on_found_curve`], which requires that point within
     /// `this_approx_tol_3d` of a found curve). [`SurfaceIntersector::flush_curve`]
     /// flushes nothing for that point alone: it is a point of a curve already found,
-    /// not a touching point.
+    /// not a touching point. Cleared with `curve_points` (a new trace, a flush, and each
+    /// `curve_points.clear()`).
     pub lone_start_on_found_curve: Option<TsectId>,
     /// `m_bCheckForInteriorCurves` (no longer used upstream).
     pub check_for_interior_curves: bool,

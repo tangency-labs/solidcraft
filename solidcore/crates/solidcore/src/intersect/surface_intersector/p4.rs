@@ -1368,6 +1368,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             {
                 // no curve to add here
                 v.intersector_mut().curve_points.clear();
+                v.intersector_mut().lone_start_on_found_curve = None;
                 return Ok(());
             }
             v.intersector_mut().curve_trace_direction *= -1.0; // Reverse curve tracing direction
@@ -2197,6 +2198,7 @@ fn join_from_singular_point<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // init the lists for the nested call
     v.intersector_mut().curve_points.clear();
+    v.intersector_mut().lone_start_on_found_curve = None;
     v.intersector_mut().start_points.clear();
     v.intersector_mut().through_points.clear();
 

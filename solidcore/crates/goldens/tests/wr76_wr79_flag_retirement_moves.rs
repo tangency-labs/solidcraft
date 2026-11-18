@@ -13,9 +13,11 @@
 //! `cargo test --profile goldens -p goldens --test wr76_wr79_flag_retirement_moves -- --include-ignored --nocapture`
 //! The replay, `moved_rows_are_equal_or_closer`, is `#[ignore]`d because it re-runs whole
 //! golden units; CI's goldens job already checks the new rows themselves. The file's other
-//! two tests run by default: `shortened_trace_ends_on_the_found_curve` (the offset trace's
-//! end, `gen0696`) and `trace_keeps_a_curve_beside_the_found_segment` (the strict span
-//! test, `intersect.surface_intersector_p4` `gen1081`); each fails with its fix reverted.
+//! three tests run by default: `shortened_trace_ends_on_the_found_curve` (the offset trace's
+//! end, `gen0696`), `trace_keeps_a_curve_beside_the_found_segment` (the strict span test,
+//! `intersect.surface_intersector_p4` `gen1081`) and
+//! `trace_stopped_at_its_start_on_the_found_curve_flushes_nothing` (the lone start point,
+//! p4 `gen0500`); each fails with its fix reverted.
 //!
 //! # The proof (replayed row by row)
 //!
@@ -39,11 +41,15 @@
 //!   lie within the tolerance of that segment's line, of its span and of both planes: every
 //!   old curve is a retrace of the found curve. The new curves span a sub-interval of the
 //!   segment the old ones span, strictly shorter (or no curve), so the trace retraces less of
-//!   a curve already found; no new curve is a touching point (two planes crossing along a
-//!   line touch nowhere) and every new curve type is one the old flush gave.
-//!   (In `gen0153` the new curve still spans 1.7e-4 of the segment, 118 tolerances: it runs
-//!   exactly from start point 0 to start point 2, the points the case adds to the curve
-//!   itself with `add_curve`; the trace from point 3 adds none.)
+//!   a curve already found; the planes cross along a line (`planes_cross`: `sin^2` of their
+//!   angle has a positive certified lower bound), so they touch nowhere, no new curve is a
+//!   touching point, and every new curve type is one the old flush gave.
+//!   (In `gen0153` the new curve's control hull still spans 1.7e-4 of the segment, 118
+//!   tolerances: the curve's ends are exactly start points 0 and 2, the points the case adds
+//!   to the curve itself with `add_curve`, and the trace from point 3 adds none. The curve
+//!   itself spans about 1.12e-4 along the segment against 1.0e-4 between points 0 and 2:
+//!   between its ends it bulges past each of them by about 6e-6, four tolerances, along the
+//!   case's own `cpv` tangents at those points.)
 //! - **`wr76-p5-duplicate`** (closer): the status is unchanged, the state only in its count
 //!   of through points left, and the new curves are the old ones (bit for bit, in order) less
 //!   some. Each dropped curve `D` lies within the tolerance of a kept curve `K`: for the line
@@ -69,8 +75,9 @@
 //!   runs from `b1` to past `a1`. Over the dropped angles `[b1, a1]` both the old curve and
 //!   `C` are within the tolerance of the circle, so within twice the tolerance of each other
 //!   at every angle (same plane band, radii each within the bound of `R`): the dropped arc was
-//!   a second trace of `C`. The new curve as a whole is no farther from the circle than the
-//!   old one (or the tolerance).
+//!   a second trace of `C`. The new curve's certified bound to the circle is within the
+//!   tolerance and no larger than the old curve's bound (bounds compared, not the curves'
+//!   exact distances).
 //!
 //! Every computed distance, position and bound is compared at the far side of its rounding
 //! bound, `gamma(k) M` (`gamma(k) = k u / (1 - k u)`, `M` the sum of the magnitudes of the
@@ -447,6 +454,98 @@ fn plane_of(s: &Value) -> PlaneOf {
     }
 }
 
+/// A closed interval holding an exact real. Each operation rounds its ends to nearest and then
+/// widens them one step outward (`next_down`, `next_up`), which covers the rounding's half
+/// step (also at a binade edge and in the subnormal range), so the exact result of the same
+/// operation on any reals in the operands lies inside.
+#[derive(Clone, Copy)]
+struct Iv {
+    lo: f64,
+    hi: f64,
+}
+
+impl Iv {
+    fn exact(x: f64) -> Self {
+        assert!(x.is_finite());
+        Self { lo: x, hi: x }
+    }
+    fn out(lo: f64, hi: f64) -> Self {
+        assert!(lo.is_finite() && hi.is_finite());
+        Self {
+            lo: lo.next_down(),
+            hi: hi.next_up(),
+        }
+    }
+    fn add(self, o: Self) -> Self {
+        Self::out(self.lo + o.lo, self.hi + o.hi)
+    }
+    fn sub(self, o: Self) -> Self {
+        Self::out(self.lo - o.hi, self.hi - o.lo)
+    }
+    fn mul(self, o: Self) -> Self {
+        let p = [
+            self.lo * o.lo,
+            self.lo * o.hi,
+            self.hi * o.lo,
+            self.hi * o.hi,
+        ];
+        Self::out(
+            p.iter().copied().fold(f64::INFINITY, f64::min),
+            p.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        )
+    }
+    fn sqr(self) -> Self {
+        let (a, b) = (self.lo.abs(), self.hi.abs());
+        if self.lo <= 0.0 && self.hi >= 0.0 {
+            Self::out(0.0, a.max(b) * a.max(b)).max0()
+        } else {
+            Self::out(a.min(b) * a.min(b), a.max(b) * a.max(b))
+        }
+    }
+    fn max0(self) -> Self {
+        Self {
+            lo: self.lo.max(0.0),
+            hi: self.hi,
+        }
+    }
+}
+
+fn iv_cross(a: [Iv; 3], b: [Iv; 3]) -> [Iv; 3] {
+    [
+        a[1].mul(b[2]).sub(a[2].mul(b[1])),
+        a[2].mul(b[0]).sub(a[0].mul(b[2])),
+        a[0].mul(b[1]).sub(a[1].mul(b[0])),
+    ]
+}
+
+fn iv_norm2(a: [Iv; 3]) -> Iv {
+    a[0].sqr().add(a[1].sqr()).add(a[2].sqr())
+}
+
+/// A certified lower bound on `sin^2` of the angle between the planes `a` and `b` of a p4 case,
+/// computed in interval arithmetic from the inputs' exact axes: with `N = x x y` per plane,
+/// `sin^2 = |N_a x N_b|^2 / (|N_a|^2 |N_b|^2)`. The test requires it positive, so the exact
+/// planes are not parallel and cross along a line.
+fn planes_cross(a: &Value, b: &Value) -> f64 {
+    let normal = |s: &Value| {
+        assert_eq!(s["kind"], "plane");
+        let (x, y) = (p3(&s["x"]), p3(&s["y"]));
+        iv_cross(x.map(Iv::exact), y.map(Iv::exact))
+    };
+    let (na, nb) = (normal(a), normal(b));
+    let num = iv_norm2(iv_cross(na, nb));
+    let den = iv_norm2(na).mul(iv_norm2(nb));
+    assert!(den.hi > 0.0, "a degenerate plane");
+    let sin2 = (num.lo / den.hi).next_down().max(0.0);
+    assert!(
+        sin2 > 0.0,
+        "the planes are not certified to cross (|N_a x N_b|^2 in [{:e}, {:e}])",
+        num.lo,
+        num.hi
+    );
+    sin2
+}
+
 /// `TsectCurveType::Touching`'s code in the record.
 const TOUCHING: f64 = 1.0;
 
@@ -470,7 +569,9 @@ fn check_p4(inputs: &Value, old: &Output, new: &Output) -> String {
     assert_eq!(tol, nd.tol);
     let (oc, otypes) = od.flush.unwrap();
     let (nc, ntypes) = nd.flush.unwrap();
-    // two planes crossing along a line: no touching point, and no type main did not give
+    // the planes cross along a line (certified), so they touch nowhere: no touching point,
+    // and no type main did not give
+    let sin2 = planes_cross(&inputs["a"], &inputs["b"]);
     assert!(
         !ntypes.contains(&TOUCHING),
         "a touching point between transversal planes: {ntypes:?}"
@@ -499,7 +600,7 @@ fn check_p4(inputs: &Value, old: &Output, new: &Output) -> String {
     );
     let cps = |cs: &[Spline]| cs.iter().map(|c| c.cps.len()).collect::<Vec<_>>();
     format!(
-        "{} old curve(s) {otypes:?} ({:?} control points) retrace {:.3e} of the found segment, {} new {ntypes:?} ({:?}) retrace {:.3e} (tol {tol:.3e})",
+        "planes cross (sin^2 >= {sin2:.3e}); {} old curve(s) {otypes:?} ({:?} control points) retrace {:.3e} of the found segment, {} new {ntypes:?} ({:?}) retrace {:.3e} (tol {tol:.3e})",
         oc.len(),
         cps(&oc),
         (o1 - o0) * len,
@@ -1048,10 +1149,12 @@ fn check_offset(inputs: &Value, old: &Output, new: &Output) -> String {
         s * (c1 - c0) > 0.0 && s * (c1 - a1) >= 0.0,
         "the earlier curve does not cover the dropped arc"
     );
-    // the new curve is no farther from the circle than main's curve or the tolerance
+    // the new curve's certified bound to the circle is within the tolerance and no larger
+    // than main's curve's (both are upper bounds with their rounding already counted, so
+    // they are compared as they are)
     assert!(
-        new_all <= old_all.max(tol) + gamma(2) * old_all.max(tol),
-        "the new curve is {new_all:.3e} from the circle, main's {old_all:.3e}"
+        new_all <= tol && new_all <= old_all,
+        "the new curve's bound to the circle is {new_all:.3e}, main's {old_all:.3e} (tol {tol:.3e})"
     );
     // over the angles the new curve no longer traces, main's curve and `C` are both within
     // the tolerance of the circle: the dropped arc was a second trace of `C`
@@ -1281,5 +1384,30 @@ fn trace_keeps_a_curve_beside_the_found_segment() {
     assert!(
         ends <= tol,
         "the curve's ends are {ends:e} from the closed form's"
+    );
+}
+
+/// WR-76: a trace that stops at its lone start point, because its first span lies on a curve
+/// already found, flushes nothing there. In `intersect.surface_intersector_p4` case `gen0500`
+/// two planes cross at a right angle, the found curve is a segment of their line, and the
+/// trace starts from a point of that segment: its first span lies on the segment, so the
+/// trace stops with the start point as its only point. Main's flush emitted that point as a
+/// touching point (its uniqueness test reads only the found curves' ends), which two planes
+/// crossing along a line cannot have. The test certifies that the planes cross
+/// (`planes_cross`) and requires a flush with no curve at all.
+#[test]
+fn trace_stopped_at_its_start_on_the_found_curve_flushes_nothing() {
+    let (inputs, out) = run_case("intersect.surface_intersector_p4", "gen0500");
+    let sin2 = planes_cross(&inputs["a"], &inputs["b"]);
+    let d = p4_decode(&out.values["rec"], inputs["ops"].as_array().unwrap());
+    let (flushed, types) = d.flush.expect("the case flushes");
+    assert!(
+        !types.contains(&TOUCHING),
+        "a touching point between planes that cross (sin^2 >= {sin2:e}): {types:?}"
+    );
+    assert!(
+        types.is_empty() && flushed.is_empty(),
+        "the flush gave {} curve(s) {types:?}",
+        flushed.len()
     );
 }
