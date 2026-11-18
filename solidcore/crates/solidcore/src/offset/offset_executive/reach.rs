@@ -3765,6 +3765,52 @@ mod tests {
             .unwrap()
     }
 
+    /// A plane `z = h` moved off a sphere r 50 about the origin, which it cut at an angle,
+    /// is past the sphere above z = 50 or below z = -50: the room is 50 ∓ h (#18564). Within
+    /// the sphere, or from a plane that touched it, nothing is decided here; nor for a cone,
+    /// whose extent is unbounded. A cylinder r 20 along x spans z = ±20.
+    #[test]
+    #[allow(clippy::float_cmp)] // exact differences of short decimals
+    fn a_plane_moved_past_a_quadrics_extent_names_its_room() {
+        let at = |z: f64| Tangent {
+            point: Vec3::new(0.0, 0.0, z),
+            normal: Vec3::Z,
+            raw: Vec3::Z,
+        };
+        let ball = Implicit::Sphere {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            radius: 50.0,
+        };
+        let tol = 1e-5;
+        assert_eq!(past_extent(at(30.0), at(55.0), &ball, tol), Some(20.0));
+        assert_eq!(past_extent(at(30.0), at(-60.0), &ball, tol), Some(80.0));
+        assert_eq!(past_extent(at(30.0), at(49.0), &ball, tol), None);
+        // a plane that touched the sphere at its top, moved off it: a wall closes that gap
+        assert_eq!(past_extent(at(50.0), at(51.0), &ball, tol), None);
+        let rod = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::X,
+            radius: 20.0,
+            tan_angle: 0.0,
+        };
+        assert_eq!(past_extent(at(10.0), at(25.0), &rod, tol), Some(10.0));
+        assert_eq!(past_extent(at(20.0), at(25.0), &rod, tol), None);
+        let upright = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: 20.0,
+            tan_angle: 0.0,
+        };
+        assert_eq!(past_extent(at(10.0), at(1e4), &upright, tol), None);
+        let cone = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::X,
+            radius: 20.0,
+            tan_angle: 0.2,
+        };
+        assert_eq!(past_extent(at(10.0), at(1e4), &cone, tol), None);
+    }
+
     fn plane_at_x(x: f64) -> Surface {
         Surface::from(crate::surface::plane::Plane::from_normal(
             Point3::new(x, 0.0, 0.0),
