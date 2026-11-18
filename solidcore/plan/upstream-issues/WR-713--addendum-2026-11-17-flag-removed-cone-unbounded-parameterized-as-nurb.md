@@ -51,7 +51,8 @@ Running with the fix always on exposed further defects in the same constructors.
   12 rows moved because the neighbour did. The other 12 moved because the Coons refinement in `make_coons_patch_tangent_to_sides` now compares copies side by side instead of by one rounded maximum:
   - Every copy is measured at the same stations: the union of the bare patch's and every refined copy's knot stations, against side normals read once from the bare patch.
   - A station counts only where its angle bound is certified (error below a right angle).
-  - A copy is taken only when, against every copy held so far, each side the held copy certifies is certified and no worse: its upper bound is at most the held lower bound plus a resolution of 0.5 degrees. A side certainly worse vetoes the copy even when the overall maximum improves, an undecided side counts as not no-worse, and comparing against every held copy keeps a chain of ties from drifting.
+  - No corner stations are placed at a collapsed corner (the apex of a three-sided corner, next to a side with no surface). Those stations assume a corner normal the loop curves fix, which an apex lacks; next to it the patch normal is a cross product of a vanishing derivative, and the stations read rounding. All of that end's corner stations go (from `2^-2.25` of the end gap down to `2^-16`), so a rise inside the last gap of the common span stations is unseen there.
+  - A copy is taken only when, against every copy held so far, each side the held copy certifies is certified and either no worse (its upper bound at most the held lower bound plus a resolution of 0.5 degrees) or rises: certainly above the held copy, but by at most the resolution. A rising side is accepted only in exchange for a lower seam: the copy's largest angle, at the stations the held copy certifies, must be certainly lower than the held copy's by more than the resolution. Otherwise a side certainly worse vetoes the copy even when the overall maximum improves, an undecided side counts as not no-worse, and comparing against every held copy keeps a chain of ties from drifting.
 
   The proof replays each refinement:
   - Every station's derivative and angle bounds are recomputed in independent interval arithmetic. They enclose the exact values at most 0.23 to 0.38 of their width.
@@ -70,11 +71,13 @@ Running with the fix always on exposed further defects in the same constructors.
   - a chain of ties (`a_chain_of_ties_does_not_drift`);
   - a bound of a right angle (`a_bound_of_a_right_angle_certifies_nothing`);
   - common stations (`candidates_are_measured_at_common_stations`);
-  - a patch with no certified station, and a collapsed corner.
+  - a patch with no certified station, and a collapsed corner;
+  - no corner stations at a collapsed corner (`no_corner_stations_at_a_collapsed_corner`), which the L-shaped box's three-sided corner needs (`fork_cae8618_l_box_corner_patch_is_tangent`, a regression test that samples the seam);
+  - the rise-for-a-lower-seam exchange (`a_certain_rise_within_the_resolution_trades_only_for_a_lower_seam`), which `blend_crossing`'s crease corner needs, and which enclosure ends it compares (`lowers_sup_compares_the_candidate_upper_end_with_the_held_lower_end`).
 
   The rule also moves one `topology.brep_p1` row, `Endcap_corner_blend_3`, a whole-solid corner blend:
   - Main took a refined copy whose bottom side reaches 1.1353 ± 2.6e-5 at a station where the bare patch is certified at 1.0752 ± 3e-4. Every refined copy is certainly worse there, so the bare patch is kept.
-  - Its neighbours have no implicit form, so only the replay and the pointwise comparison apply. Main's copy is also certainly nearer at other stations, so the row is EQUAL.
+  - Its neighbours have no implicit form, so only the replay and the pointwise comparison apply. Main's copy is also certainly nearer at other stations, so neither copy dominates the other: the row is EQUAL as certified pointwise incomparability, not as equal sup-norm angles.
   - `vase_rev_corner_blend_3` is vetoed the same way and equals main.
 
   The certificates:

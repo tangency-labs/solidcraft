@@ -2338,8 +2338,8 @@ enum SideVerdict {
     /// resolution, by the enclosures, and not certainly above the copy's.
     NoWorse,
     /// Certainly above the copy's largest angle, but by at most the resolution: a veto
-    /// unless the candidate's largest angle over the whole patch is certainly lower by
-    /// more than the resolution ([`SideAngle::no_worse_than`]).
+    /// unless the candidate's largest angle, at the stations the held copy certifies, is
+    /// certainly lower by more than the resolution ([`SideAngle::no_worse_than`]).
     Rises,
     /// The candidate leaves out a station the copy certifies: no worse is not shown there.
     Uncertified,
@@ -2450,8 +2450,9 @@ impl SideAngle {
 
     /// Whether `self` is shown no worse than `held`: every side is
     /// [`SideVerdict::NoWorse`] or [`SideVerdict::Rises`] (certainly above, but within the
-    /// resolution), and where any rises, the largest angle over all sides is certainly
-    /// lower than `held`'s by more than the resolution ([`Self::lowers_sup`]). A side may
+    /// resolution), and where any rises, the largest angle at the stations `held`
+    /// certifies is certainly lower than `held`'s there by more than the resolution
+    /// ([`Self::lowers_sup`]). A side may
     /// give up at most the resolution only in exchange for a certainly smaller seam:
     /// `blend_crossing`'s crease corner (bare patch 12 and 29 degrees off along two sides,
     /// 0 along the third; its refined copies 0.3 degrees along the two and 0.4 along the
@@ -2796,6 +2797,14 @@ const QUARTER_OCTAVES: [f64; 4] = [
 /// within `1e-5` of the apex with bounds of `0.2` to `1.5` radians on every candidate,
 /// and with them no refined copy could be shown no worse than the bare patch, which
 /// leaves its neighbours by 38.5 degrees where the 64-span copy is within 0.4.
+///
+/// The trade-off: at a collapsed end every corner station goes, from `2^-2.25` of the
+/// gap down to `2^-16`, not only those within `1e-5` of the apex that read rounding. The
+/// stations nearest the apex are then the common span stations, the closest a quarter
+/// of the 64-span refinement's end span (`1/256` of a uniformly knotted side), and a
+/// rise inside that last gap is unseen. That is accepted because the stations' premise,
+/// a corner normal the loop fixes, is absent at an apex. A side whose corner meets a
+/// side with a surface keeps its corner stations there, as before.
 fn coons_corner_stations(stations: &[f64], fixed: [bool; 2]) -> Vec<f64> {
     let mut corners = Vec::new();
     let (Some(&s0), Some(&s1)) = (stations.first(), stations.get(1)) else {
@@ -3266,10 +3275,11 @@ fn project_coons_side_rows(
 /// over the stations the held copy certifies. So
 /// - a tie within the resolution goes to the finer copy, the refinement's intent;
 /// - a side certainly worse vetoes the copy even where the largest angle over all sides
-///   improves (WR-713: `vase_rev_corner_blend_3`'s bottom side, 1.3896 radians on the
+///   (at the stations the held copy certifies) improves (WR-713: `vase_rev_corner_blend_3`'s bottom side, 1.3896 radians on the
 ///   bare patch against 1.5708 on every refined copy), save one exchange: a side
 ///   certainly worse by at most the resolution does not veto a copy whose largest angle
-///   over all sides is certainly lower by more than the resolution (`blend_crossing`'s
+///   at the stations the held copy certifies is certainly lower by more than the
+///   resolution (`blend_crossing`'s
 ///   crease corner: 29 degrees off on the bare patch, 0.4 on its refined copies, which
 ///   give up 0.4 degrees along a side the bare patch fits exactly);
 /// - a comparison the bounds leave undecided, or a station the held copy certifies and
@@ -4124,6 +4134,33 @@ mod tests {
             SideVerdict::Worse
         );
         assert!(!coons_takes(&[bare], &past));
+    }
+
+    /// `lowers_sup` compares the candidate's upper end with the held copy's lower end
+    /// less the resolution, rounded down a step: a candidate is certainly lower by more
+    /// than the resolution only then. Swapping either end, or dropping the step, trades
+    /// a rise for a seam that is not certainly lower.
+    #[test]
+    fn lowers_sup_compares_the_candidate_upper_end_with_the_held_lower_end() {
+        let res = COONS_RESOLUTION;
+        let held_station = (0.5, 0.1);
+        let held = one_station([Some(held_station), None, None, None]);
+        let (h_lo, h_hi) = station_enclosure(held_station);
+        let edge = h_lo - res;
+        // the candidate's enclosure straddles `h_lo - res`, below `h_hi - res`: by the
+        // held copy's upper end, or by the candidate's lower end, it would trade
+        let straddle = (edge, 0.05);
+        let (c_lo, c_hi) = station_enclosure(straddle);
+        assert!(c_lo < edge && edge < c_hi && c_hi < h_hi - res);
+        assert!(!one_station([Some(straddle), None, None, None]).lowers_sup(&held, res));
+        // an exact candidate whose upper end is `edge` itself: not below it by a step
+        let at_edge = (next_down(edge), 0.0);
+        assert_eq!(station_enclosure(at_edge).1, edge);
+        assert!(!one_station([Some(at_edge), None, None, None]).lowers_sup(&held, res));
+        // a step lower: certainly lower by more than the resolution
+        let below = (next_down(next_down(edge)), 0.0);
+        assert_eq!(station_enclosure(below).1, next_down(edge));
+        assert!(one_station([Some(below), None, None, None]).lowers_sup(&held, res));
     }
 
     /// A tie of the largest angles hides a side read precisely: `vase_rev_corner_blend_3`'s
