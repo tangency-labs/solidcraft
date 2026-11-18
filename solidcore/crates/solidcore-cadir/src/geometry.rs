@@ -36,7 +36,10 @@
 //! differs from a similarity by (its rounding), and the rounding of the map itself, moves a
 //! point of the carrier by at most a fixed fraction (its `slack`) of its distance from the
 //! origin; the carrier is refused unless that, over the largest distance from the origin of a
-//! point of it that the model uses ([`Fit`]), is within the model's tolerance.
+//! point of it that the model uses ([`Fit`]), is within the model's tolerance. A placed carrier
+//! whose basis is placed too is held to the tolerance as a whole: the bound of the inner
+//! placements is carried out through each outer one, which stretches it by at most its scale
+//! (and its slack), and each adds its own.
 
 use cadmpeg_ir::geometry::{
     CurveGeometry, ProceduralSurfaceDefinition, SolvedCurveGeometry, SolvedSurfaceGeometry,
@@ -156,18 +159,23 @@ impl Similarity {
         Ok(Similarity { rows, scale, slack })
     }
 
-    /// The converted carrier, when it lies within the model's tolerance of the placement's
-    /// exact image over `reach` (the largest distance from the origin of a point of it the
-    /// model uses): else refused, with why.
-    fn certify(&self, reach: f64, fit: Fit) -> R<()> {
+    /// How far the converted carrier may lie from the exact image of the placement chain that
+    /// ends in this one, when that is within the model's tolerance: else refused, with why.
+    /// `reach` is the largest distance from the origin of a point of the converted carrier the
+    /// model uses, and `inner` the bound of the placements inside this one (0 for none), in
+    /// their coordinates. This placement's own term is its slack over `reach` and the move; the
+    /// inner bound is carried through its matrix, whose columns are `s(I + E)` with every entry
+    /// of `E` within twice `uneven` ([`Similarity::of`]), so it stretches a difference by at
+    /// most `s(1 + 6 uneven)`, within `s(1 + slack)`.
+    fn certify(&self, reach: f64, inner: f64, fit: Fit) -> R<f64> {
         let r = self.rows;
         let moved = Vec3::new(r[0][3], r[1][3], r[2][3]).length();
-        let bound = self.slack * (reach + moved);
+        let bound = self.scale * (1.0 + self.slack) * inner + self.slack * (reach + moved);
         if bound <= fit.tolerance {
-            Ok(())
+            Ok(bound)
         } else {
             Err(unsupported(format!(
-                "a placed carrier reaching {reach:.3e} mm from the origin, which its placement's \
+                "a placed carrier reaching {reach:.3e} mm from the origin, which its placements' \
                  rounding may move by {bound:.1e} mm, past the tolerance {}",
                 fit.tolerance
             )))
@@ -427,7 +435,7 @@ pub(crate) fn curve(g: &CurveGeometry, fit: Fit) -> R<Option<Carrier>> {
     let solved = g
         .solved()
         .ok_or_else(|| unsupported("a procedural curve without its solved form"))?;
-    solved_curve(solved, 0, fit)
+    Ok(solved_curve(solved, 0, fit)?.map(|(carrier, _)| carrier))
 }
 
 /// An edge's carrier as the record takes it.
@@ -453,8 +461,12 @@ pub(crate) enum Carrier {
     },
 }
 
-fn solved_curve(g: &SolvedCurveGeometry, depth: usize, fit: Fit) -> R<Option<Carrier>> {
-    Ok(Some(match g {
+/// [`curve`] at `depth` placements in, with how far its placements' rounding may move it from
+/// their exact image (0 for an unplaced carrier): [`Similarity::certify`] carries that bound out
+/// through each placement, so a chain of placements is held to the tolerance as a whole.
+fn solved_curve(g: &SolvedCurveGeometry, depth: usize, fit: Fit) -> R<Option<(Carrier, f64)>> {
+    let mut bound = 0.0;
+    let carrier = match g {
         SolvedCurveGeometry::Parabola(p) => {
             let f = p.frame();
             Carrier::Parabola {
@@ -477,7 +489,7 @@ fn solved_curve(g: &SolvedCurveGeometry, depth: usize, fit: Fit) -> R<Option<Car
             if depth >= MAX_PLACEMENTS {
                 return Err("placed curves nested too deeply".into());
             }
-            let Some(basis) = solved_curve(placed.basis(), depth + 1, fit)? else {
+            let Some((basis, inner)) = solved_curve(placed.basis(), depth + 1, fit)? else {
                 return Ok(None);
             };
             let s = Similarity::of(placed.transform().rows3())?;
@@ -517,7 +529,7 @@ fn solved_curve(g: &SolvedCurveGeometry, depth: usize, fit: Fit) -> R<Option<Car
                     fit.extent + 2.0 * norm(*o)
                 }
             };
-            s.certify(reach, fit)?;
+            bound = s.certify(reach, inner, fit)?;
             placed
         }
         _ => {
@@ -527,7 +539,8 @@ fn solved_curve(g: &SolvedCurveGeometry, depth: usize, fit: Fit) -> R<Option<Car
                 None => return Ok(None),
             }
         }
-    }))
+    };
+    Ok(Some((carrier, bound)))
 }
 
 /// The record curve of a carrier that is one, with CADIR's parameter, or `None` for a degenerate
@@ -626,7 +639,7 @@ pub(crate) fn surface(g: &SurfaceGeometry, fit: Fit) -> R<Option<(FaceSurface, b
         Some(SolvedSurfaceGeometry::Unknown { .. }) if g.procedural_construction().is_some() => {
             Ok(None)
         }
-        Some(solved) => solved_surface(solved, 0, fit).map(Some),
+        Some(solved) => solved_surface(solved, 0, fit).map(|(read, _)| Some(read)),
         None => Ok(None),
     }
 }
@@ -697,9 +710,16 @@ pub(crate) fn swept(d: &ProceduralSurfaceDefinition, profile: Carrier) -> R<(Swe
     })
 }
 
-fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize, fit: Fit) -> R<(FaceSurface, bool)> {
+/// [`surface`]'s solved form at `depth` placements in, with how far its placements' rounding may
+/// move it from their exact image, as [`solved_curve`] has it.
+fn solved_surface(
+    g: &SolvedSurfaceGeometry,
+    depth: usize,
+    fit: Fit,
+) -> R<((FaceSurface, bool), f64)> {
     let record = |s: BSurface, reversed: bool| (FaceSurface::Record(s), reversed);
-    Ok(match g {
+    let mut bound = 0.0;
+    let read = match g {
         SolvedSurfaceGeometry::Plane(p) => {
             let f = frame(point(p.origin().get()), p.frame());
             record(
@@ -794,7 +814,7 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize, fit: Fit) -> R<(FaceS
             if depth >= MAX_PLACEMENTS {
                 return Err("placed surfaces nested too deeply".into());
             }
-            let (basis, reversed) = solved_surface(placed.basis(), depth + 1, fit)?;
+            let ((basis, reversed), inner) = solved_surface(placed.basis(), depth + 1, fit)?;
             let s = Similarity::of(placed.transform().rows3())?;
             let (placed, reach) = match basis {
                 FaceSurface::Record(b) => {
@@ -820,7 +840,7 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize, fit: Fit) -> R<(FaceS
                     return Err(unsupported("a placed linear sweep or revolution"));
                 }
             };
-            s.certify(reach, fit)?;
+            bound = s.certify(reach, inner, fit)?;
             (placed, reversed)
         }
         SolvedSurfaceGeometry::Polygonal(_) => return Err(unsupported("a polygonal surface")),
@@ -829,7 +849,8 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize, fit: Fit) -> R<(FaceS
                 "a surface of a kind the producer did not state",
             ));
         }
-    })
+    };
+    Ok((read, bound))
 }
 
 /// The rows of CADIR's affine placement, `[[f64; 4]; 3]`.

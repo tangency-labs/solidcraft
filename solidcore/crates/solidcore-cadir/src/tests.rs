@@ -487,6 +487,104 @@ fn a_placement_off_a_similarity_is_refused_on_a_carrier_too_large_for_its_roundi
     );
 }
 
+/// `diag(1, 1, 1 + 1e-14)` twice, then a uniform scale of 600, about the origin.
+fn nested_placements() -> [cadmpeg_ir::transform::Transform; 3] {
+    let near = cadmpeg_ir::transform::Transform::affine([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0 + 1e-14, 0.0],
+    ])
+    .unwrap();
+    let scale = cadmpeg_ir::transform::Transform::affine([
+        [600.0, 0.0, 0.0, 0.0],
+        [0.0, 600.0, 0.0, 0.0],
+        [0.0, 0.0, 600.0, 0.0],
+    ])
+    .unwrap();
+    [near, near, scale]
+}
+
+/// A chain of placements is held to the tolerance as a whole. A ball of radius `r` at the origin
+/// placed by [`nested_placements`] is the ellipsoid of semi-axes 600 r, 600 r and
+/// 600 r (1 + 1e-14)², which the sphere of radius 600 r it is read as misses by 1.2e-11 r at its
+/// poles. For r = 1e5 that is 1.2e-6 mm, past the tolerance 1e-6, though each placement alone
+/// is within it (2 × 3.3e-13 × 1e5 and 1.4e-14 × 6e7 mm): refused. For r = 1e3 it is 1.2e-8 mm,
+/// and the bound carried through the chain, 4e-7 mm, is within it: read.
+#[test]
+fn a_chain_of_placements_is_refused_when_their_rounding_together_is_past_the_tolerance() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::SphereSurface;
+    let placed = |radius: f64| {
+        let ball = SphereSurface::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            radius,
+        )
+        .unwrap();
+        let mut g = SolvedSurfaceGeometry::Sphere(ball);
+        for t in nested_placements() {
+            g = SolvedSurfaceGeometry::Transformed(PlacedSurface::try_new(Box::new(g), t).unwrap());
+        }
+        whole_ball(g)
+    };
+    let small = placed(1e3);
+    assert_eq!(tolerance(&small), 1e-6);
+    let s = one(&small);
+    assert!(
+        matches!(s.brep.faces[0].surface, solidcore_record::brep::Surface::Sphere { radius, .. }
+            if (radius - 6e5).abs() < 1e-9),
+        "{:?}",
+        s.brep.faces[0].surface
+    );
+    let bodies = read_bodies(&placed(1e5), None);
+    assert!(bodies.read.is_empty());
+    assert!(
+        bodies.failures[0].message.contains("past the tolerance"),
+        "{:?}",
+        bodies.failures
+    );
+}
+
+/// The same for a curve: a circle of radius `r` about the x axis at the origin, placed by
+/// [`nested_placements`], is the ellipse of semi-axes 600 r along y and 600 r (1 + 1e-14)² along
+/// z, which the circle of radius 600 r it is read as misses by 1.2e-11 r at its top. Each
+/// placement alone is within the tolerance for r = 1e5, but the chain is not: refused. Read for
+/// r = 1e3.
+#[test]
+fn a_chain_of_placements_on_a_curve_is_held_to_the_tolerance_as_a_whole() {
+    use cadmpeg_ir::geometry::analytic::CircleCurve;
+    use cadmpeg_ir::geometry::{CurveGeometry, PlacedCurve, SolvedCurveGeometry};
+    let placed = |radius: f64| {
+        let circle = CircleCurve::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+            radius,
+        )
+        .unwrap();
+        let mut g = SolvedCurveGeometry::Circle(circle);
+        for t in nested_placements() {
+            g = SolvedCurveGeometry::Transformed(PlacedCurve::try_new(Box::new(g), t).unwrap());
+        }
+        geometry::curve(&CurveGeometry::Solved(g), fit())
+    };
+    match placed(1e3) {
+        Ok(Some(geometry::Carrier::Curve {
+            curve: solidcore_record::brep::Curve::Circle { frame, radius },
+            ..
+        })) => {
+            assert!((radius - 6e5).abs() < 1e-9, "{radius}");
+            assert_eq!(frame.origin, [0.0; 3]);
+        }
+        other => panic!("{other:?}"),
+    }
+    match placed(1e5) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
 /// A sheet square 10 mm across bounded by two edges on one periodic spline (the degree-one square
 /// on knots -1..5, period 4), one of them over [3.5, 4.5], past the spline's range and across its
 /// seam at the corner (0, 0, 0): read through the reader, its edges meet their vertices and the
