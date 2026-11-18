@@ -10,7 +10,8 @@
 //! What "put in place" means per installation:
 //! - AppImage: the new AppImage is written next to the old one and renamed over it (atomic on
 //!   one file system; the running copy keeps its old inode), then SolidCraft offers a restart.
-//! - Windows installer: the `.msi` is started with `msiexec /i … /passive` as SolidCraft exits.
+//! - Windows installer: the `.msi` uses `msiexec /i … /passive REBOOT=ReallySuppress`
+//!   as SolidCraft exits, preventing an unattended system restart (#18774).
 //! - Windows portable `.zip` / standalone `.exe`: the running `solidcraft.exe` is renamed to
 //!   `solidcraft.exe.old` (Windows allows renaming a running executable), the new one takes its
 //!   name, and SolidCraft offers a restart; the `.old` file is deleted at the next start.
@@ -325,7 +326,12 @@ pub fn apply(method: &Method, package: &Path) -> Result<Outcome, String> {
             }
             Ok(Outcome::Restart(exe.clone()))
         }
-        Method::Msi => Ok(Outcome::Installer(PathBuf::from("msiexec"), vec!["/i".into(), package.to_string_lossy().to_string(), "/passive".into()])),
+        // /passive is non-interactive. Without REBOOT=ReallySuppress, Windows Installer may
+        // restart the user's computer to replace a still-running solidcraft-cli.exe (#18774).
+        Method::Msi => Ok(Outcome::Installer(
+            PathBuf::from("msiexec"),
+            vec!["/i".into(), package.to_string_lossy().to_string(), "/passive".into(), "REBOOT=ReallySuppress".into()],
+        )),
         Method::Dmg => Ok(Outcome::Opened(package.to_path_buf())),
     }
 }
