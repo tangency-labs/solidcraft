@@ -16,6 +16,58 @@ VR adds two render targets and a camera per eye to the existing viewport. It doe
 add a second renderer: the scene description, the tessellation plans and the draw calls
 stay where they are.
 
+## What makes it pleasant to use
+
+A view that works is not the same as a view people want to use. Two standards apply:
+one established, one still being written.
+
+**Nielsen's ten usability heuristics** are the baseline. Four of them already bite in a
+view-only Phase 1:
+
+- *Visibility of system status*: starting a session shows progress, and a session that
+  fails says so before the desktop view is disturbed.
+- *Match between system and the real world*: the model appears at true scale, upright,
+  in front of the user - not wherever the desktop camera happened to point.
+- *User control and freedom*: one obvious way out. The system button returns to the
+  desktop view with the design exactly as it was.
+- *Consistency and standards*: the same viewport, materials and colours as the desktop.
+  VR is a second display, not a second application.
+
+The other six wait for Phase 2, when there is a UI for them to be consistent about.
+
+**Comfort** matters more in a headset than on a screen, because discomfort is physical:
+
+- Never draw a frame from stale tracking; skip it.
+- Keep pose latency low. A dropped frame is better than a lagging one.
+- Start at 1x, with no post-processing that smears the image.
+- Enter at a comfortable viewpoint - roughly the desktop camera's height and distance,
+  not at floor level - and let the user move from there.
+
+Guidance on VR usability and cognitive ergonomics is newer and thinner than Nielsen's,
+and most of it is about interaction, which Phase 1 does not have. The plan is to name
+what is being followed - Jerald's *The VR Book* for comfort, the runtime vendors' own
+best-practice guides for the rest - rather than invent a standard, and to revisit it
+when controllers arrive.
+
+**Judging size** is the one usability feature Phase 1 should carry, because it is the
+reason to put a design in a headset at all. Scale is only convincing if it can be
+checked:
+
+- A **life-size hand**, open and as a fist, that can be placed beside the model. It is
+  hidden by default and appears only on request, so it is a size reference, not a
+  permanent fixture. Sized from anthropometric data rather than invented: TU Delft's
+  DINED database (`dined.io.tudelft.nl`) publishes hand dimensions by percentile, so the
+  hand can be 5th, 50th or 95th percentile instead of one made-up size.
+- A **ruler** in millimetres that the user can hold and lay against the model. It reads
+  whatever unit the design file is in - millimetres for a metric file, inches for an
+  imperial one - and the user can override that choice.
+- Both live in the stage space at the same 1:1 scale as the design, so they are right
+  by construction rather than a second unit system.
+
+Whether the hand is a mesh in the scene or a fixed overlay is an implementation
+detail. The requirement is that a user can answer "is this part the size I think it
+is?" without leaving VR.
+
 ## What the hardware says
 
 Four reports from real hardware, collected with `xr-info` through the discussion on
@@ -236,3 +288,21 @@ renderer, and no report so far has done it.
 5. **MSAA.** Both runtimes recommend 1x. Oculus supports up to 4x; SteamVR reports a
    maximum of 1, so 4x is not available there at all. Start at 1x: it is what both
    runtimes ask for, and 4x would be an Oculus-only path until there is a measurement.
+
+## Sources
+
+- **Nielsen's heuristics** are the original ten: Nielsen, J. (1994). *Heuristic
+  evaluation*. How they carry over to headsets is surveyed in *A Systematic Review
+  and Taxonomy of VR Usability Heuristics* (ACM Computing Surveys, 2025,
+  DOI 10.1145/3832771), which confirms the field still combines Nielsen with
+  VR-specific sets.
+- **Comfort and sickness**: Souchet, A. D. et al. (2023), *Design guidelines for
+  limiting and eliminating virtual reality-induced symptoms and effects*, Frontiers
+  in Virtual Reality, PMC10288216.
+- **3D user interfaces**: Bowman, D. et al. (2001), *An Introduction to 3D User
+  Interface Design*, Presence 10(1), 96-108 - the classic survey of 3D interaction
+  techniques.
+- **Recent VR UI guidance**: *Virtual Reality User Interface Design: Best Practices
+  and Implications* (2025), arXiv:2508.09358.
+- **Hand dimensions** come from TU Delft's DINED database (`dined.io.tudelft.nl`).
+  Unreachable when this note was written; verify before relying on it.
