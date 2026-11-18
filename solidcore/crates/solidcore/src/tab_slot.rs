@@ -330,16 +330,63 @@ pub fn tab_outline(
     length: f64,
     level: f64,
 ) -> Result<std::result::Result<Region2, TabSkip>> {
+    tab_outline_chamfered(start, width, length, level, 0.0)
+}
+
+/// [`tab_outline`] with the two outer corners of the tab's free end (`z = −h`) chamfered by
+/// `chamfer` along both edges, so the tab enters its slot easily. The slot is not chamfered.
+/// `chamfer` 0 is the plain rectangle.
+///
+/// # Errors
+///
+/// Those of [`tab_outline`], and [`SolidError::InvalidInput`] for a chamfer that is negative or
+/// not finite, or that is not less than half the width or not less than the tab's length.
+pub fn tab_outline_chamfered(
+    start: f64,
+    width: f64,
+    length: f64,
+    level: f64,
+    chamfer: f64,
+) -> Result<std::result::Result<Region2, TabSkip>> {
     if !(start.is_finite() && length.is_finite() && level.is_finite()) {
         return Err(invalid("a tab's start, length and level must be finite"));
     }
     if !(width.is_finite() && width > 0.0) {
         return Err(invalid("the tab width must be finite and positive"));
     }
+    if !non_negative(chamfer) {
+        return Err(invalid("the tip chamfer must be finite and non-negative"));
+    }
     if length <= 0.0 {
         return Ok(Err(TabSkip::TooShort { length }));
     }
-    Ok(Ok(rectangle((start, -length), (start + width, level))))
+    if chamfer == 0.0 {
+        return Ok(Ok(rectangle((start, -length), (start + width, level))));
+    }
+    if chamfer >= width / 2.0 || chamfer >= length {
+        return Err(invalid(
+            "the tip chamfer must be less than half the tab width and less than the tab's length",
+        ));
+    }
+    let (x0, x1, z) = (start, start + width, -length);
+    let p = [
+        Point2::new(x0 + chamfer, z),
+        Point2::new(x1 - chamfer, z),
+        Point2::new(x1, z + chamfer),
+        Point2::new(x1, level),
+        Point2::new(x0, level),
+        Point2::new(x0, z + chamfer),
+    ];
+    Ok(Ok(Region2 {
+        outer: Loop2 {
+            segs: p
+                .iter()
+                .zip(p.iter().cycle().skip(1))
+                .map(|(&a, &b)| Seg2::Line { a, b })
+                .collect(),
+        },
+        holes: Vec::new(),
+    }))
 }
 
 /// [`tab_outline`] with the tab's length `h = t_S + protrusion` (design 6.1), `t_S` S's
@@ -355,12 +402,13 @@ pub fn tab_outline_for(
     slot_thickness: Option<f64>,
     protrusion: f64,
     level: f64,
+    chamfer: f64,
 ) -> Result<std::result::Result<Region2, TabSkip>> {
     let t_s = slot_thickness.ok_or_else(|| invalid("the slot plate has no face below P"))?;
     if !protrusion.is_finite() {
         return Err(invalid("the protrusion must be finite"));
     }
-    tab_outline(start, width, t_s + protrusion, level)
+    tab_outline_chamfered(start, width, t_s + protrusion, level, chamfer)
 }
 
 /// Slot `k`'s laser outline in P's frame `(u, w)` (design 7.2): `u ∈ [u_k − c, u_k + W + c]`,

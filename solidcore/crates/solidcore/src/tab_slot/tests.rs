@@ -173,6 +173,35 @@ fn laser_outlines() {
 }
 
 #[test]
+fn a_tip_chamfer_cuts_the_two_free_corners_only() {
+    // Tab [30, 50], h 6, level 0, chamfer 2: 20 x 6 minus two 2 x 2 triangles = 120 - 4.
+    let t = tab_outline_chamfered(30.0, 20.0, 6.0, 0.0, 2.0).unwrap().unwrap();
+    assert_eq!(t.outer.segs.len(), 6);
+    assert!((t.signed_area().unwrap().value - 116.0).abs() < 1e-9);
+    // Chamfer 0 is the plain rectangle, as tab_outline.
+    assert_eq!(
+        tab_outline_chamfered(30.0, 20.0, 6.0, 0.0, 0.0).unwrap(),
+        tab_outline(30.0, 20.0, 6.0, 0.0).unwrap()
+    );
+    // The slot has no chamfer: its outline is the same rectangle.
+    let slot = slot_outline(30.0, 20.0, (30.0, 36.0), 0.1).unwrap();
+    assert_eq!(slot.outer.segs.len(), 4);
+    // Via tab_outline_for: t_S 5 + protrusion 1 = 6.
+    let f = tab_outline_for(30.0, 20.0, Some(5.0), 1.0, 0.0, 2.0).unwrap().unwrap();
+    assert_eq!(f, t);
+}
+
+#[test]
+fn a_tip_chamfer_too_big_or_bad_is_refused() {
+    // Half the width (10) or more, the length (6) or more, negative, not finite.
+    assert!(tab_outline_chamfered(0.0, 8.0, 6.0, 0.0, 4.0).is_err());
+    assert!(tab_outline_chamfered(0.0, 20.0, 6.0, 0.0, 6.0).is_err());
+    assert!(tab_outline_chamfered(0.0, 20.0, 6.0, 0.0, -0.1).is_err());
+    assert!(tab_outline_chamfered(0.0, 20.0, 6.0, 0.0, f64::NAN).is_err());
+    assert!(tab_outline_chamfered(0.0, 20.0, 6.0, 0.0, 3.9).is_ok());
+}
+
+#[test]
 fn refusals() {
     let s = (0.0, 100.0);
     assert!(place((f64::NAN, 1.0), Layout::Auto, 1.0, 0.0, LASER).is_err());

@@ -48,6 +48,9 @@ pub struct TabSlotSpec {
     pub seed: u64,
     /// The width variation, a `±` bound on each tab's width (0: every tab is `width` wide).
     pub width_jitter: f64,
+    /// The chamfer on the two outer corners of each tab's free end (0: none). The slot is not
+    /// chamfered.
+    pub tip_chamfer: f64,
 }
 
 /// The recipe applied ([`Body::tab_slot_cut`]): T with its tabs joined, S with its slots cut,
@@ -366,7 +369,7 @@ impl Body {
                                 t_s
                             }
                         };
-                        let tab = ts::tab_outline_for(start, width, t_k, spec.protrusion, level)
+                        let tab = ts::tab_outline_for(start, width, t_k, spec.protrusion, level, spec.tip_chamfer)
                             .map_err(status)?;
                         tabs.push(TabPlan {
                             start,
@@ -879,6 +882,7 @@ mod tests {
             overshoot: 0.5,
             seed: 0,
             width_jitter: 0.0,
+            tip_chamfer: 0.0,
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let (d, plan) = wall
@@ -977,6 +981,7 @@ mod tests {
             overshoot: 0.5,
             seed: 42,
             width_jitter: 3.0,
+            tip_chamfer: 0.0,
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let widths = |spec: TabSlotSpec| -> Vec<f64> {
@@ -1003,6 +1008,37 @@ mod tests {
         assert!((v(&cut.slot_plate) - (96000.0 - slots)).abs() < 1e-6);
     }
 
+    /// Request 4: a tip chamfer takes a 2 x 2 triangle off each of a tab's two free corners
+    /// (4 mm2, 6 mm deep: 24 mm3 a tab); the slot keeps its full rectangle; too big is refused.
+    #[test]
+    fn a_tip_chamfer_trims_the_tab_and_not_the_slot() {
+        let (s, p) = bottom();
+        let spec = TabSlotSpec {
+            layout: Layout::Count(2),
+            width: 10.0,
+            end_distance: 5.0,
+            clearance: 0.1,
+            min_land: 0.5,
+            protrusion: 1.0,
+            overshoot: 0.5,
+            seed: 1,
+            width_jitter: 0.0,
+            tip_chamfer: 2.0,
+        };
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let plain = wall
+            .tab_slot_cut(&s, p, TabSlotSpec { tip_chamfer: 0.0, ..spec }, TOL)
+            .unwrap()
+            .expect("joint");
+        let cham = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
+        let v = |b: &Body| b.mass_properties(1e-9).unwrap().volume;
+        assert!((v(&plain.tab_plate) - v(&cham.tab_plate) - 2.0 * 24.0).abs() < 1e-6);
+        assert!((v(&plain.slot_plate) - v(&cham.slot_plate)).abs() < 1e-9);
+        // Half the width (5) or more is refused.
+        let big = TabSlotSpec { tip_chamfer: 5.0, ..spec };
+        assert!(wall.tab_slot_plan(&s, p, big, TOL).is_err());
+    }
+
     /// 16.2 the recipe applied: Wall on Bottom, count 2: T gains two 10 x 6 x 7 tabs (43200 +
     /// 840), S loses two 10.2 x 6.2 slots through its 6 (96000 - 758.88); the inputs are
     /// untouched. Lifted: `no_contact`, nothing made.
@@ -1019,6 +1055,7 @@ mod tests {
             overshoot: 0.5,
             seed: 0,
             width_jitter: 0.0,
+            tip_chamfer: 0.0,
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let cut = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
@@ -1058,6 +1095,7 @@ mod tests {
             overshoot: 0.5,
             seed: 0,
             width_jitter: 0.0,
+            tip_chamfer: 0.0,
         }
     }
 
