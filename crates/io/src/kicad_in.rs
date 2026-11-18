@@ -961,7 +961,11 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
             let mut placed_here = std::collections::HashSet::new();
             for model in &footprint.models {
                 let ext = Path::new(&model.path).extension().and_then(|e| e.to_str()).unwrap_or("");
-                if !ext.eq_ignore_ascii_case("step") && !ext.eq_ignore_ascii_case("stp") && !ext.eq_ignore_ascii_case("wrl") {
+                if !ext.eq_ignore_ascii_case("step")
+                    && !ext.eq_ignore_ascii_case("stp")
+                    && !ext.eq_ignore_ascii_case("stpz")
+                    && !ext.eq_ignore_ascii_case("wrl")
+                {
                     warnings.push(format!("{}: unsupported 3D model format", model_label(&model.path)));
                     continue;
                 }
@@ -1017,6 +1021,15 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                 } else if model_bytes.len() > crate::MAX_STEP_BYTES {
                     (Vec::new(), Some("the model file is too large".to_string()), Vec::new())
                 } else {
+                    // KiCad 10's library ships `….stpZ`: one STEP file inside a zip archive.
+                    let unpacked = if format.eq_ignore_ascii_case("stpz") { unzip_stpz(&model_bytes) } else { Ok(model_bytes) };
+                    let model_bytes = match unpacked {
+                        Ok(bytes) => bytes,
+                        Err(reason) => {
+                            warnings.push(format!("{}: not imported ({reason})", model_label(&model_path)));
+                            continue;
+                        }
+                    };
                     let text = String::from_utf8_lossy(&model_bytes);
                     match step_model_meshes(&text, model_label(&model_path), &mut totals) {
                         Ok((meshes, notes)) => (meshes, None, notes),
@@ -1119,6 +1132,22 @@ const KICAD_VRML_UNIT_MM: f64 = 2.54;
 fn component_name(footprint: &KicadFootprint, path: &str) -> String {
     let label = footprint.reference.trim();
     if label.is_empty() { path.to_string() } else { label.to_string() }
+}
+
+/// The STEP file inside a KiCad `….stpZ` (a zip archive holding one `….step`).
+fn unzip_stpz(bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| short_reason(&e.to_string()))?;
+    if archive.is_empty() {
+        return Err("the stpZ archive is empty".into());
+    }
+    let entry = archive.by_index(0).map_err(|e| short_reason(&e.to_string()))?;
+    let mut out = Vec::new();
+    entry.take(crate::MAX_STEP_BYTES as u64 + 1).read_to_end(&mut out).map_err(|e| short_reason(&e.to_string()))?;
+    if out.len() > crate::MAX_STEP_BYTES {
+        return Err("the model file is too large".into());
+    }
+    Ok(out)
 }
 
 /// A model's name as a warning shows it: its file name, not the whole resolved path.
