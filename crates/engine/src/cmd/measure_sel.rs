@@ -353,7 +353,13 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             })
         }
         Sel::ConstructionPoint { name } => {
-            let p = crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)?;
+            let p = if name == "O" {
+                Some(Vec3::ZERO)
+            } else if let Some(p) = s.origin_point(name) {
+                Some(p)
+            } else {
+                crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+            }?;
             Some(Item {
                 geo: Geo::Points(vec![p]),
                 dir: None,

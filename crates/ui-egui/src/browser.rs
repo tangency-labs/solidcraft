@@ -2167,9 +2167,10 @@ fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
 
 /// The origin point, axes and planes, as `(key, icon, thing lit for it)`.
 fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
-    let (axis, plane) = (|k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
+    let (point, axis, plane) =
+        (|k: &str| Some(Thing::Point(k.into())), |k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
     [
-        ("O", "point", None),
+        ("O", "point", point("O")),
         ("X", "axis", axis("X")),
         ("Y", "axis", axis("Y")),
         ("Z", "axis", axis("Z")),
@@ -2298,6 +2299,7 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             let target = match icon {
                 "plane" => Some(Target::OriginPlane { name: name.clone() }),
                 "axis" => Some(Target::OriginAxis { name: name.clone() }),
+                "point" => Some(Target::OriginPoint { name: name.clone() }),
                 _ => None,
             };
             if let Some(target) = target {
@@ -2316,7 +2318,21 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
         if r.clicked
             && let Some(x) = sel
         {
-            pick_from_browser(app, x);
+            if app.dialog.is_some() {
+                pick_from_browser(app, x);
+            } else {
+                let ctrl = rows.ui().input(|i| i.modifiers.command || i.modifiers.ctrl);
+                if ctrl {
+                    if app.session.selection.contains(&x) {
+                        let rest: Vec<Sel> = app.session.selection.iter().filter(|s| **s != x).cloned().collect();
+                        let _ = app.run("select.set", json!({ "items": rest }));
+                    } else {
+                        let _ = app.run("select.set", json!({ "items": [x], "add": true }));
+                    }
+                } else {
+                    pick_from_browser(app, x);
+                }
+            }
         }
     }
 }
@@ -2734,8 +2750,7 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcore_record::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
         Sel::ConstructionPoint { name } => crate::viewport::Hit::ConstructionPoint { name: name.clone() },
-        // The origin point goes only into a dialog input that takes it.
-        Sel::Vertex { body, point } if body.is_empty() && app.dialog.is_some() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
+        Sel::Vertex { body, point } if body.is_empty() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
         _ => return,
     };
     if let Some(mut d) = app.dialog.take() {
