@@ -556,7 +556,14 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     } else {
         match split_by(body, tool) {
             Ok(p) if closed_solids(&p)? => p,
-            _ if sheet.is_surface() => split_by_sheet(body, sheet, *face, &smooth)?,
+            Ok(p) if sheet.is_surface() => match split_by_sheet(body, sheet, *face, &smooth) {
+                Ok(sheet_parts) if closed_solids(&sheet_parts)? => sheet_parts,
+                _ => p,
+            },
+            Err(e) if sheet.is_surface() => match split_by_sheet(body, sheet, *face, &smooth) {
+                Ok(sheet_parts) if closed_solids(&sheet_parts)? => sheet_parts,
+                _ => return Err(e),
+            },
             Ok(p) => p,
             Err(e) => return Err(e),
         }
