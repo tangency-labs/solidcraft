@@ -35,7 +35,7 @@
 //! also checks that bound against the accuracy the value claims (`within_accuracy`), and
 //! lists the entries whose enclosure is too wide for it ([`WIDE`], [`CORPUS_WIDE`]).
 //!
-//! Result: 616 moved fillet entries (72 rows) are all EQUAL. Their moves are at most 1.5e-9
+//! Result: 617 moved fillet entries (72 rows) are all EQUAL. Their moves are at most 1.5e-9
 //! of their scale, and each enclosure is 8.8e-6 to 1.6e-4 of its scale wide; some bodies'
 //! enclosures spend their cell budget and stay valid, wider (41 entries past the rows'
 //! accuracy). Of the 19 moved corpus entries (14 files), `test1.smb`'s volume is CLOSER: its

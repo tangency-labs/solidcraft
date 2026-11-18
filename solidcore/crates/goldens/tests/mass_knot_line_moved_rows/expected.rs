@@ -1,5 +1,5 @@
 // Every moved entry of `ROWS` with its class against the certified enclosure.
-static EXPECTED: [(&str, usize, Side); 616] = [
+static EXPECTED: [(&str, usize, Side); 617] = [
     ("curve-sih-box_diff_cyl-all-edges-r0.1", 3, Side::Equal),
     ("curve-sih-box_diff_cyl-all-edges-r0.1", 4, Side::Equal),
     ("curve-sih-box_diff_cyl-all-edges-r0.1", 5, Side::Equal),
@@ -27,6 +27,7 @@ static EXPECTED: [(&str, usize, Side); 616] = [
     ("curve-sih-box_diff_cyl-all-edges-r0.5", 11, Side::Equal),
     ("curve-sih-box_diff_cyl-all-edges-r1.0", 3, Side::Equal),
     ("curve-sih-box_diff_cyl-all-edges-r1.0", 4, Side::Equal),
+    ("curve-sih-box_diff_cyl-all-edges-r1.0", 8, Side::Equal),
     ("curve-sih-box_diff_cyl-all-edges-r1.0", 10, Side::Equal),
     ("curve-sih-box_diff_cyl-all-edges-r1.0", 11, Side::Equal),
     ("curve-sih-box_diff_cyl-all-edges-step2", 3, Side::Equal),
