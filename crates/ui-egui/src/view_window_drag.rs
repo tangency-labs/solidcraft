@@ -26,6 +26,7 @@ struct Drag {
     origin: Rect,
     source: DragSource,
     picture: Picture,
+    capture_frame: Option<u64>,
     keyboard: Option<usize>,
     target: Option<Target>,
     pointer: Pos2,
@@ -200,10 +201,10 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
 
 type Picture = Arc<Mutex<Option<egui::TextureHandle>>>;
 
-fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> Picture {
+fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> (Picture, Option<u64>) {
     let picture = Picture::default();
     if cfg!(target_arch = "wasm32") || ctx.embed_viewports() {
-        return picture;
+        return (picture, None);
     }
     let frame = if app.docs.views.active().id == view {
         app.viewport.rect
@@ -213,6 +214,7 @@ fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> Picture {
         None
     };
     if let Some(frame) = frame.map(|frame| frame.intersect(ctx.viewport_rect())).filter(|frame| frame.is_positive() && frame.is_finite()) {
+        let capture_frame = ctx.cumulative_frame_nr();
         let output = Arc::downgrade(&picture);
         let scale = ctx.pixels_per_point();
         let ctx = ctx.clone();
@@ -244,12 +246,14 @@ fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> Picture {
                 ui.request_repaint_of(viewport);
             }
         });
+        return (picture, Some(capture_frame));
     }
-    picture
+    (picture, None)
 }
 
 fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool) -> Option<Drag> {
     let design_view = app.docs.views.get(view)?.clone();
+    let (picture, capture_frame) = capture_picture(app, ctx, view);
     Some(Drag {
         viewport: ctx.viewport_id(),
         tab: app.docs.current_tab(),
@@ -257,7 +261,8 @@ fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool)
         view: design_view,
         origin,
         source: crate::view_windows::drag_source(app, view, ctx.viewport_rect()),
-        picture: capture_picture(app, ctx, view),
+        picture,
+        capture_frame,
         keyboard: keyboard.then_some(0),
         target: None,
         pointer: origin.center(),
@@ -507,6 +512,12 @@ fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
 
 fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
     update_slot(ctx, drag.target.as_ref(), drag.origin.width());
+    // Native readback uses the frame that requested it. Paint the ghost starting
+    // with the next frame so its outline and tint stay out of the captured picture.
+    if drag.capture_frame == Some(ctx.cumulative_frame_nr()) {
+        ctx.request_repaint();
+        return;
+    }
     let picture = drag.picture.lock().ok().and_then(|image| image.clone());
     if let Some(target) = drag.target.as_ref().filter(|target| target.viewport(drag.viewport) != drag.viewport) {
         ctx.request_repaint_of(target.viewport(drag.viewport));
