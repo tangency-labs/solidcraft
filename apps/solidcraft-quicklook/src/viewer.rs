@@ -2,7 +2,8 @@
 //!
 //! [`ModelView`] is a layer-hosting view with a `CAMetalLayer`. It uploads the model's triangle
 //! corners once, then draws a frame only when something changes: the view's size or scale, a
-//! drag (turn, as the app's own orbit), a scroll or a pinch (zoom). Between those the GPU does nothing. The shading is a
+//! drag (the model turns as a ball under the pointer, about every axis), a scroll or a pinch
+//! (zoom). Between those the GPU does nothing. The shading is a
 //! light from the viewer, as the app's own; the background is Quick Look's own (the layer is
 //! clear where there is no model).
 //!
@@ -27,7 +28,7 @@ use objc2_metal::{
     MTLTextureDescriptor, MTLTextureUsage,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
-use solidcraft_design_preview::{Matrices, Model, Orbit, Vertex};
+use solidcraft_design_preview::{Grab, Matrices, Model, Orbit, Vertex};
 
 /// The shaders: corners in, a light from the viewer (with a little ambient and a soft highlight)
 /// out. Normals face the viewer whichever way a triangle winds, so nothing is culled.
@@ -74,6 +75,8 @@ pub struct Ivars {
     gpu: Gpu,
     radius: f32,
     orbit: Cell<Orbit>,
+    /// Where the drag in progress started.
+    grab: Cell<Option<Grab>>,
 }
 
 define_class!(
@@ -91,10 +94,17 @@ define_class!(
             true
         }
 
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let (x, y, width, height) = self.pointer(event);
+            self.ivars().grab.set(self.ivars().orbit.get().grab(x, y, width, height));
+        }
+
         #[unsafe(method(mouseDragged:))]
         fn mouse_dragged(&self, event: &NSEvent) {
-            // AppKit's deltas grow right and down, as the orbit takes them.
-            self.turn(|orbit| orbit.drag(event.deltaX() as f32, event.deltaY() as f32));
+            let Some(grab) = self.ivars().grab.get() else { return };
+            let (x, y, width, height) = self.pointer(event);
+            self.turn(|orbit| orbit.drag_to(&grab, x, y, width, height));
         }
 
         #[unsafe(method(scrollWheel:))]
@@ -130,13 +140,20 @@ impl ModelView {
     pub fn new(mtm: MainThreadMarker, model: Model) -> Option<Retained<Self>> {
         let gpu = Gpu::new(&model.vertices)?;
         let layer = gpu.layer.clone();
-        let this = Self::alloc(mtm).set_ivars(Ivars { gpu, radius: model.radius, orbit: Cell::new(Orbit::default()) });
+        let this = Self::alloc(mtm).set_ivars(Ivars { gpu, radius: model.radius, orbit: Cell::new(Orbit::default()), grab: Cell::new(None) });
         // SAFETY: NSView's designated initializer, with an empty frame the host resizes.
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: NSRect::ZERO] };
         // Layer-hosting: the view's layer is ours, set before the view wants one.
         view.setLayer(Some(&layer));
         view.setWantsLayer(true);
         Some(view)
+    }
+
+    /// Where `event` happened in this view, in points from the bottom left, and the view's size.
+    fn pointer(&self, event: &NSEvent) -> (f32, f32, f32, f32) {
+        let at = self.convertPoint_fromView(event.locationInWindow(), None);
+        let size = self.bounds().size;
+        (at.x as f32, at.y as f32, size.width as f32, size.height as f32)
     }
 
     /// Change the orbit with `change`, then draw.

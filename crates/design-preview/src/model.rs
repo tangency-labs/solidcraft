@@ -190,26 +190,70 @@ struct Entry {
     color: Option<[f32; 3]>,
 }
 
-/// How a file browser looks at a model: the app's own orbit (its "free orbit, upright"
-/// navigation preference, `Camera::orbit_unlimited` in crates/viewport). Sideways turns about the
-/// model's up axis (Z), up and down tilts on over the top, and dragging back to where a drag
-/// started brings the view back to where it was. Then zoomed, with an orthographic projection as
-/// the app's default camera. It starts at the app's isometric Home view.
+/// How a file browser looks at a model: turned with the pointer as a ball under it (an arcball),
+/// then zoomed, with an orthographic projection as the app's default camera. It starts at the
+/// app's isometric Home view, Z up.
+///
+/// A drag turns the model about every axis: from the middle of the view it tips the model the way
+/// the pointer goes, near the edge it turns it about the line of sight. The turn depends only on
+/// where the drag started and where the pointer is now, so going back to the start of a drag
+/// brings the model back to where it was.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Orbit {
-    /// Radians about Z, as the app's camera yaw.
-    pub yaw: f32,
-    /// Radians above the XY plane, as the app's camera pitch; past a right angle the view is
-    /// upside down.
-    pub pitch: f32,
+    /// The view's right, up and back (towards the eye) directions in model space, orthonormal.
+    pub axes: [[f32; 3]; 3],
     /// 1 fits the model in the view; larger is closer.
     pub zoom: f32,
+}
+
+/// Where a drag started: the view then, and the point on the ball under the pointer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Grab {
+    axes: [[f32; 3]; 3],
+    from: [f32; 3],
 }
 
 impl Default for Orbit {
     /// The isometric view, as the saved picture and the app's Home view.
     fn default() -> Self {
-        Orbit { yaw: -std::f32::consts::FRAC_PI_4, pitch: 0.615_479_7, zoom: 1.0 }
+        let (yaw, pitch) = (-std::f32::consts::FRAC_PI_4, 0.615_479_7_f32);
+        let (sy, cy) = yaw.sin_cos();
+        let (sp, cp) = pitch.sin_cos();
+        let back = [-sy * cp, -cy * cp, sp];
+        let right = [cy, -sy, 0.0];
+        Orbit { axes: [right, ball::cross(back, right), back], zoom: 1.0 }
+    }
+}
+
+/// The arcball's geometry, in single precision as the GPU takes it.
+mod ball {
+    pub fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    }
+
+    pub fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    /// `v` scaled to length 1, or `None` when it has no direction.
+    pub fn unit(v: [f32; 3]) -> Option<[f32; 3]> {
+        let length = dot(v, v).sqrt();
+        (length.is_finite() && length > 1e-6).then(|| v.map(|c| c / length))
+    }
+
+    /// The point on the ball under view point `x`, `y` (points from the bottom left) of a view
+    /// `width` by `height`, as a unit direction in the view's frame (right, up, towards the eye).
+    /// The ball fills the shorter side; outside it a sheet that meets it smoothly takes over
+    /// (Bell's trackball), so a drag around the edge turns about the line of sight.
+    pub fn point(x: f32, y: f32, width: f32, height: f32) -> Option<[f32; 3]> {
+        let size = width.min(height);
+        if !(size.is_finite() && size > 0.0 && x.is_finite() && y.is_finite()) {
+            return None;
+        }
+        let (px, py) = ((2.0 * x - width) / size, (2.0 * y - height) / size);
+        let d = px * px + py * py;
+        let pz = if d <= 0.5 { (1.0 - d).sqrt() } else { 0.5 / d.sqrt() };
+        unit([px, py, pz])
     }
 }
 
@@ -224,21 +268,46 @@ pub struct Matrices {
 }
 
 impl Orbit {
-    /// Radians per point of pointer travel, as the app's orbit.
-    const TURN: f32 = 0.008;
+    /// Start a drag at view point `x`, `y` (points from the bottom left) of a view `width` by
+    /// `height`. `None` for a point or size that isn't one.
+    pub fn grab(&self, x: f32, y: f32, width: f32, height: f32) -> Option<Grab> {
+        Some(Grab { axes: self.axes, from: ball::point(x, y, width, height)? })
+    }
 
-    /// Turn by a pointer drag of `dx`, `dy` points (right and down are positive, as AppKit and
-    /// the app give them). The model follows the pointer; upside down, sideways turns the other
-    /// way so it still does.
-    pub fn drag(&mut self, dx: f32, dy: f32) {
-        if !(dx.is_finite() && dy.is_finite()) {
+    /// Turn the model so the ball point the drag started on lies under the pointer at `x`, `y`.
+    pub fn drag_to(&mut self, grab: &Grab, x: f32, y: f32, width: f32, height: f32) {
+        let Some(to) = ball::point(x, y, width, height) else { return };
+        let Some(axis) = ball::unit(ball::cross(grab.from, to)) else {
+            // Back at the start (or exactly opposite, which the sheet never reaches).
+            self.axes = grab.axes;
             return;
-        }
-        let upright = self.pitch.cos() >= 0.0;
-        let turn = if upright { dx } else { -dx } * Self::TURN;
-        self.yaw = (self.yaw + turn) % std::f32::consts::TAU;
-        // Kept within one turn either way, so it never loses precision.
-        self.pitch = (self.pitch + dy * Self::TURN + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        };
+        let angle = ball::dot(grab.from, to).clamp(-1.0, 1.0).acos();
+        // The turn in the view's frame (Rodrigues), applied to the view's axes at the start:
+        // each row of the result is a combination of the starting rows.
+        let (s, c) = angle.sin_cos();
+        let turn: [[f32; 3]; 3] = std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                let identity = if i == j { c } else { 0.0 };
+                let skew = match (i, j) {
+                    (0, 1) => -axis[2],
+                    (0, 2) => axis[1],
+                    (1, 0) => axis[2],
+                    (1, 2) => -axis[0],
+                    (2, 0) => -axis[1],
+                    (2, 1) => axis[0],
+                    _ => 0.0,
+                };
+                identity + s * skew + (1.0 - c) * axis[i] * axis[j]
+            })
+        });
+        // A model point's view coordinates are its dot products with the axes; turning those by
+        // `turn` makes new axis k the sum over i of turn[k][i] times old axis i.
+        let rows: [[f32; 3]; 3] = std::array::from_fn(|k| std::array::from_fn(|j| (0..3).map(|i| turn[k][i] * grab.axes[i][j]).sum()));
+        // Square them up again so rounding never skews the view.
+        let Some(back) = ball::unit(rows[2]) else { return };
+        let Some(right) = ball::unit(std::array::from_fn(|i| rows[0][i] - back[i] * ball::dot(rows[0], back))) else { return };
+        self.axes = [right, ball::cross(back, right), back];
     }
 
     /// Zoom by `factor` (above 1 is closer), within 1/20 and 50 times the fitted view.
@@ -252,12 +321,7 @@ impl Orbit {
     pub fn matrices(&self, radius: f32, aspect: f32) -> Matrices {
         let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
         let radius = if radius.is_finite() && radius > 0.0 { radius } else { 1.0 };
-        // The app's camera basis (`Camera::basis` in crates/viewport), without roll.
-        let (sy, cy) = self.yaw.sin_cos();
-        let (sp, cp) = self.pitch.sin_cos();
-        let back = [-sy * cp, -cy * cp, sp];
-        let right = [cy, -sy, 0.0];
-        let up = [back[1] * right[2] - back[2] * right[1], back[2] * right[0] - back[0] * right[2], back[0] * right[1] - back[1] * right[0]];
+        let [right, up, back] = self.axes;
         // Half the visible height: the model's sphere fits the shorter side, with a margin.
         let half = radius * 1.1 / (self.zoom * aspect.min(1.0));
         let (x, y) = (1.0 / (half * aspect), 1.0 / half);

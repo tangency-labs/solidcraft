@@ -108,44 +108,69 @@ fn the_orbit_starts_isometric_and_keeps_the_model_in_view() {
     assert!(project(&narrow, [7.0, 7.0, 0.0])[0].abs() < 1.0);
 }
 
+/// A model point's coordinates in the view's frame (right, up, towards the eye).
+fn in_view(orbit: &Orbit, p: [f32; 3]) -> [f32; 3] {
+    orbit.axes.map(|axis| axis.iter().zip(p).map(|(a, b)| a * b).sum())
+}
+
 #[test]
-fn dragging_orbits_as_the_app_does_and_drags_back_to_the_start() {
+fn the_model_turns_as_a_ball_under_the_pointer_about_every_axis() {
+    let (w, h) = (400.0, 300.0);
     let start = Orbit::default();
+    // The model's point on the ball under the middle of the view faces the eye.
+    let front: [f32; 3] = std::array::from_fn(|j| start.axes[2][j]);
+    let grab = start.grab(200.0, 150.0, w, h).unwrap();
+    // Dragging right and up carries that point right and up, after the pointer.
     let mut orbit = start;
-    // The app's rate: 0.008 radians per point, right turns the yaw, down raises the pitch.
-    orbit.drag(100.0, 0.0);
-    assert!((orbit.yaw - (start.yaw + 0.8)).abs() < 1e-5);
-    orbit.drag(0.0, 50.0);
-    assert!((orbit.pitch - (start.pitch + 0.4)).abs() < 1e-5);
-    // Dragging back to where the drag started brings the view back.
-    orbit.drag(0.0, -50.0);
-    orbit.drag(-100.0, 0.0);
-    assert!((orbit.yaw - start.yaw).abs() < 1e-5 && (orbit.pitch - start.pitch).abs() < 1e-5);
-    // A long drag down goes over the top: the view is upside down, Z points down on screen.
+    orbit.drag_to(&grab, 260.0, 190.0, w, h);
+    let [x, y, z] = in_view(&orbit, front);
+    assert!(x > 0.0 && y > 0.0 && z > 0.0, "{x} {y} {z}");
+    assert!((y / x - 40.0 / 60.0).abs() < 1e-3, "along the drag");
+    // Back to where the drag started, the model is where it was.
+    orbit.drag_to(&grab, 200.0, 150.0, w, h);
+    assert_eq!(orbit.axes, start.axes);
+    // A drag up over the top shows the model upside down: no pole stops it.
     let mut over = start;
-    for _ in 0..100 {
-        over.drag(0.0, 2.0);
+    let low = over.grab(200.0, 10.0, w, h).unwrap();
+    over.drag_to(&low, 200.0, 290.0, w, h);
+    let mut again = over;
+    let next = again.grab(200.0, 10.0, w, h).unwrap();
+    again.drag_to(&next, 200.0, 290.0, w, h);
+    assert!(in_view(&again, [0.0, 0.0, 1.0])[1] < 0.0, "Z points down after going over");
+    // A drag around the edge turns the model mostly about the line of sight (roll).
+    let mut rolled = start;
+    let edge = rolled.grab(390.0, 150.0, w, h).unwrap();
+    // The same distance from the middle, an eighth of the way round anticlockwise.
+    rolled.drag_to(&edge, 200.0 + 190.0 * std::f32::consts::FRAC_1_SQRT_2, 150.0 + 190.0 * std::f32::consts::FRAC_1_SQRT_2, w, h);
+    let before = in_view(&start, [0.0, 0.0, 1.0]);
+    let after = in_view(&rolled, [0.0, 0.0, 1.0]);
+    // Z on screen has turned anticlockwise about the middle, as the pointer did.
+    let turned = after[1].atan2(after[0]) - before[1].atan2(before[0]);
+    assert!(turned > 0.3, "{before:?} -> {after:?}");
+    // The axes stay square however far it turns.
+    for (i, a) in again.axes.iter().enumerate() {
+        for (j, b) in again.axes.iter().enumerate() {
+            let d: f32 = (0..3).map(|k| a[k] * b[k]).sum();
+            assert!((d - if i == j { 1.0 } else { 0.0 }).abs() < 1e-4);
+        }
     }
-    assert!(over.pitch.cos() < 0.0);
-    let m = over.matrices(10.0, 1.0);
-    assert!(project(&m, [0.0, 0.0, 5.0])[1] < 0.0, "upside down after going over the top");
-    // Upside down, a drag to the right still turns the side facing the viewer to the right.
-    let mut flipped = over;
-    flipped.drag(10.0, 0.0);
-    assert!((flipped.yaw - (over.yaw - 0.08)).abs() < 1e-5);
-    // The pitch stays within one turn.
-    let mut far = start;
-    far.drag(0.0, 1e6);
-    assert!(far.pitch.abs() <= std::f32::consts::PI);
     // Hostile input changes nothing.
+    assert!(start.grab(f32::NAN, 1.0, w, h).is_none());
+    assert!(start.grab(1.0, 1.0, 0.0, h).is_none());
+    let mut same = start;
+    same.drag_to(&grab, f32::INFINITY, 1.0, w, h);
+    same.drag_to(&grab, 1.0, 1.0, w, -1.0);
+    assert_eq!(same, start);
+}
+
+#[test]
+fn zoom_is_clamped_and_hostile_sizes_give_finite_matrices() {
+    let mut orbit = Orbit::default();
     let before = orbit;
-    orbit.drag(f32::NAN, 1.0);
-    orbit.drag(1.0, f32::INFINITY);
     orbit.zoom_by(f32::INFINITY);
     orbit.zoom_by(-1.0);
     assert_eq!(orbit, before);
     orbit.zoom_by(1e9);
     assert_eq!(orbit.zoom, 50.0);
-    // Hostile sizes still give finite matrices.
     assert!(orbit.matrices(0.0, f32::NAN).clip.iter().all(|v| v.is_finite()));
 }
