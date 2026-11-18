@@ -2581,7 +2581,7 @@ mod tests {
     }
 
     /// Frames until `done` says stop, collecting the addresses opened in the browser.
-    fn frames_until(app: &mut SolveApp, ctx: &egui::Context, mut done: impl FnMut(&SolveApp) -> bool) {
+    fn frames_until(app: &mut SolveApp, ctx: &egui::Context, mut done: impl FnMut(&SolveApp) -> bool) -> Vec<String> {
         let mut opened = Vec::new();
         for _ in 0..400 {
             let mut out = ctx.run_ui(Default::default(), |ui| tickets::tick(app, ui.ctx()));
