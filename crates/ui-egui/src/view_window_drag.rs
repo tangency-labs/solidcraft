@@ -801,7 +801,7 @@ fn paint_tab(ctx: &Context, view: &DesignView, origin: Rect, slot: Slot, pointer
         let tab_painter = p.with_clip_rect(tab);
         draw_shape(ctx, &tab_painter, view, tab, GhostStyle { form: Form::Tab, tilt: 0.0, detail: 0.0, ink: t.accent, shadow: false }, None);
     }
-    paint_hint(&p, client, view, pointer, Some(label), false);
+    paint_hint_label(&p, client, pos2(pointer.x, slot.hit.top() + 48.0), label, false);
 }
 
 fn paint_flight(ctx: &Context, flight: &Flight) -> bool {
@@ -943,13 +943,18 @@ fn paint_hint(painter: &egui::Painter, client: Rect, view: &DesignView, pointer:
     painter.circle_stroke(token.center(), 9.5, Stroke::new(1.0, t.app_bar_text.gamma_multiply(0.5)));
     paint_kind(painter, token.center(), view, t.app_bar_text, 12.0);
     if let Some(label) = label {
-        let galley = painter.layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::semibold(t.font_button), t.app_bar_text);
-        let size = vec2(galley.size().x + 24.0, 24.0);
         let y = if pointer.y >= client.bottom() - 40.0 { -39.0 } else { 16.0 };
-        let hint = held_rect(client, token.center() + vec2(0.0, y), size, vec2(size.x * 0.5, 0.0));
-        painter.rect_filled(hint, 12, if blocked { t.error } else { t.app_bar });
-        painter.with_clip_rect(hint.shrink(3.0)).galley(hint.center() - galley.size() * 0.5, galley, t.app_bar_text);
+        paint_hint_label(painter, client, token.center() + vec2(0.0, y), label, blocked);
     }
+}
+
+fn paint_hint_label(painter: &egui::Painter, client: Rect, at: Pos2, label: &str, blocked: bool) {
+    let t = Tokens::get();
+    let galley = painter.layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::semibold(t.font_button), t.app_bar_text);
+    let size = vec2(galley.size().x + 24.0, 24.0);
+    let hint = held_rect(client, at, size, vec2(size.x * 0.5, 0.0));
+    painter.rect_filled(hint, 12, if blocked { t.error } else { t.app_bar });
+    painter.with_clip_rect(hint.shrink(3.0)).galley(hint.center() - galley.size() * 0.5, galley, t.app_bar_text);
 }
 
 fn held_rect(client: Rect, pointer: Pos2, size: egui::Vec2, grab: egui::Vec2) -> Rect {
