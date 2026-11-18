@@ -440,7 +440,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-open_shell-e5-r0.5",
-        0x9805c86e98e80312,
+        0x334a4ac3e43d998c,
         1,
         &[
             (0, false, 1, 0x3eea3799c0cc6c9e, 0x3ee4f8b588e368f1),
