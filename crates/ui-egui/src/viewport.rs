@@ -4642,7 +4642,7 @@ pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
             let at = crate::selection::line_midpoint(sk, sk.curve_index(id)?)?;
             Hit::SketchMidpoint { sketch, id: id.clone(), at }
         }
-        Sel::Body { .. } | Sel::Feature { .. } | Sel::Occurrence { .. } | Sel::SketchConstraint { .. } => return None,
+        Sel::Body { .. } | Sel::Feature { .. } | Sel::Occurrence { .. } | Sel::SketchConstraint { .. } | Sel::Drawing { .. } => return None,
     })
 }
 

@@ -1097,9 +1097,6 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
     if solidcraft_engine::io::is_design_ext(ext) || ext.eq_ignore_ascii_case("json") {
         return app.tr("home.design_workspace").to_string();
     }
-    if solidcraft_engine::io::is_drawing_path(path) {
-        return app.tr_label("Drawing").to_string();
-    }
     let label = match ext.to_ascii_lowercase().as_str() {
         "step" | "stp" => "STEP",
         "igs" | "iges" => "IGES",

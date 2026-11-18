@@ -35,16 +35,56 @@ fn local_path(path: &mut Vec<u64>, own: &BTreeSet<u64>) {
     }
 }
 
-/// Whether two solids measure the same, within what a STEP round trip changes in the measure
-/// of a curved face (a cylinder's volume by about 1e-5).
+/// What a solid is compared by: its volume, area, centre and box, measured once. A solid the
+/// kernel cannot measure (such as a piece of a body whose region integrates to no volume) is
+/// compared by its exact box and its face and edge counts instead.
+enum Shape {
+    Measured(solidcraft_kernel::MassMeasure),
+    Unmeasured { bbox: solidcraft_geom::Aabb3, faces: usize, edges: usize },
+}
+
+impl Shape {
+    fn of(b: &solidcraft_kernel::Body) -> Result<Shape> {
+        Shape::from_measure(b, solidcraft_kernel::measure_mass(b))
+    }
+
+    fn from_measure(b: &solidcraft_kernel::Body, measured: solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>) -> Result<Shape> {
+        Ok(match measured {
+            Ok(m) => Shape::Measured(m),
+            Err(_) => Shape::Unmeasured { bbox: b.exact_bounds()?, faces: b.face_count(), edges: b.edge_count() },
+        })
+    }
+
+    /// Whether two solids are the same, within what a STEP round trip changes in the measure
+    /// of a curved face (a cylinder's volume by about 1e-5).
+    fn matches(&self, other: &Shape) -> bool {
+        let same_box = |a: &solidcraft_geom::Aabb3, b: &solidcraft_geom::Aabb3| {
+            let tolerance = 1e-4 * (1.0 + (a.max - a.min).len());
+            (a.min.dist(b.min) <= tolerance && a.max.dist(b.max) <= tolerance).then_some(tolerance)
+        };
+        match (self, other) {
+            (Shape::Measured(ma), Shape::Measured(mb)) => same_box(&ma.bbox, &mb.bbox).is_some_and(|tolerance| {
+                (ma.volume - mb.volume).abs() <= 1e-4 * (1.0 + ma.volume.abs())
+                    && (ma.area - mb.area).abs() <= 1e-4 * (1.0 + ma.area.abs())
+                    && ma.centroid.dist(mb.centroid) <= tolerance
+            }),
+            (Shape::Unmeasured { bbox: ba, faces: fa, edges: ea }, Shape::Unmeasured { bbox: bb, faces: fb, edges: eb }) => {
+                fa == fb && ea == eb && same_box(ba, bb).is_some()
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether two solids measure the same (see [`Shape::matches`]).
 fn same_solid(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> Result<bool> {
-    let (ma, mb) = (solidcraft_kernel::measure(a)?, solidcraft_kernel::measure(b)?);
-    let tolerance = 1e-4 * (1.0 + (ma.bbox.max - ma.bbox.min).len());
-    Ok((ma.volume - mb.volume).abs() <= 1e-4 * (1.0 + ma.volume.abs())
-        && (ma.area - mb.area).abs() <= 1e-4 * (1.0 + ma.area.abs())
-        && ma.centroid.dist(mb.centroid) <= tolerance
-        && ma.bbox.min.dist(mb.bbox.min) <= tolerance
-        && ma.bbox.max.dist(mb.bbox.max) <= tolerance)
+    Ok(Shape::of(a)?.matches(&Shape::of(b)?))
+}
+
+/// Whether two B-rep bodies hold equal records: a body built again from the same inputs, which
+/// costs a comparison rather than two integrations of its faces.
+fn same_record(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
+    !a.is_mesh() && !b.is_mesh() && a.record() == b.record()
 }
 
 /// Whether two bodies are the same solid, each moved by its offset.
@@ -61,8 +101,11 @@ fn same_solids(a: &[&ModelBody], b: &[&ModelBody]) -> Result<bool> {
 }
 
 /// The first body of `a` that `b` has no same solids for, or what `b` has more of, whatever they
-/// are called. Bodies that changed are compared piece by piece: a link brings a body made of
-/// separate pieces back as one body per piece.
+/// are called. A body rebuilt under the same name is compared with that body first, by its record
+/// and then by its measure: a change early in the timeline rebuilds every later body, and
+/// measuring them all against each other cost a large assembly minutes. The others are compared
+/// piece by piece: a link brings a body made of separate pieces back as one body per piece. Each
+/// piece is measured once.
 fn unmatched(a: &[&ModelBody], b: &[&ModelBody]) -> Result<Option<String>> {
     let mut left: Vec<&ModelBody> = b.to_vec();
     let mut rest = Vec::new();
@@ -72,20 +115,26 @@ fn unmatched(a: &[&ModelBody], b: &[&ModelBody]) -> Result<Option<String>> {
             None => rest.push(*x),
         }
     }
+    let mut changed = Vec::new();
+    for x in rest {
+        if let Some(i) = left.iter().position(|y| y.name == x.name)
+            && (same_record(&x.body, &left[i].body) || same_solid(&x.body, &left[i].body)?)
+        {
+            left.swap_remove(i);
+        } else {
+            changed.push(x);
+        }
+    }
     let mut pieces = Vec::new();
     for y in left {
-        pieces.extend(y.body.lumps()?);
+        for lump in y.body.lumps()? {
+            pieces.push(Shape::of(&lump)?);
+        }
     }
-    for x in rest {
+    for x in changed {
         for lump in x.body.lumps()? {
-            let mut found = None;
-            for (i, y) in pieces.iter().enumerate() {
-                if same_solid(&lump, y)? {
-                    found = Some(i);
-                    break;
-                }
-            }
-            match found {
+            let shape = Shape::of(&lump)?;
+            match pieces.iter().position(|y| shape.matches(y)) {
                 Some(i) => drop(pieces.swap_remove(i)),
                 None => return Ok(Some(format!("body {}", x.name))),
             }
@@ -1271,5 +1320,51 @@ mod tests {
         assert_eq!(s.doc.occurrences.iter().filter(|o| o.component == linked).map(|o| o.id).collect::<Vec<_>>(), [plate_occ]);
         assert_eq!(shapes(&s), shapes_before);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two designs that build the same boxes, each on its own: equal bodies that are not the
+    /// very same, as a change early in the timeline leaves every body after it.
+    fn boxes(names: &[&str]) -> Session {
+        let mut s = Session::default();
+        for (i, name) in names.iter().enumerate() {
+            run(&mut s, "solid.box", json!({"length": 10 + i, "width": 10, "height": 10, "corner": [20 * i, 0, 0], "body_name": name}));
+        }
+        s
+    }
+
+    #[test]
+    fn rebuilt_bodies_are_matched_by_name_then_by_shape() {
+        let names = ["A", "B", "C"];
+        let (one, two) = (boxes(&names), boxes(&names));
+        let (was, now) = (one.model.state(), two.model.state());
+        let (was, mut now): (Vec<ModelBody>, Vec<ModelBody>) = (was.bodies.clone(), now.bodies.clone());
+        assert!(!was[0].body.same(&now[0].body) && same_record(&was[0].body, &now[0].body));
+        fn refs(v: &[ModelBody]) -> Vec<&ModelBody> {
+            v.iter().collect()
+        }
+        assert_eq!(unmatched(&refs(&was), &refs(&now)).unwrap(), None);
+
+        // Renamed, it is still found by its shape; changed, it is named
+        now[1].name = "Renamed".into();
+        assert_eq!(unmatched(&refs(&was), &refs(&now)).unwrap(), None);
+        let wider = boxes(&["A", "B", "C", "D"]).model.state().bodies[3].body.clone();
+        now[1].body = wider;
+        assert_eq!(unmatched(&refs(&was), &refs(&now)).unwrap(), Some("body B".to_string()));
+    }
+
+    #[test]
+    fn a_solid_the_kernel_cannot_measure_is_compared_by_its_box_and_counts() {
+        // As a body read from STEP whose pieces integrate to no volume ("no mass")
+        let refused = || Err(solidcraft_kernel::KernelError::Invalid("no mass".into()));
+        let bodies = boxes(&["A", "B"]).model.state().bodies.clone();
+        let again = boxes(&["A", "B"]).model.state().bodies.clone();
+        let mut moved = solidcraft_doc::IDENTITY;
+        moved[3][1] = 5.0;
+        let moved = solidcraft_kernel::transform_matrix(&bodies[0].body, moved).unwrap();
+        let unmeasured = |b: &solidcraft_kernel::Body| Shape::from_measure(b, refused()).unwrap();
+        assert!(unmeasured(&bodies[0].body).matches(&unmeasured(&again[0].body)));
+        assert!(!unmeasured(&bodies[0].body).matches(&unmeasured(&moved)));
+        assert!(!unmeasured(&bodies[0].body).matches(&unmeasured(&bodies[1].body)));
+        assert!(!unmeasured(&bodies[0].body).matches(&Shape::of(&again[0].body).unwrap()));
     }
 }
