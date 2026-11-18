@@ -25,6 +25,21 @@ fn plate_sheet() -> (Harness, String) {
     (h, front)
 }
 
+#[test]
+fn note_tool_places_text_on_the_active_sheet() {
+    let (mut h, _) = plate_sheet();
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.note"));
+    h.frames(4);
+    let field = crate::scenario::rect_of("drawing:note:text").unwrap().center();
+    h.step(&json!({"click": [field.x, field.y]})).unwrap();
+    h.step(&json!({"text": "Deburr all edges"})).unwrap();
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap().center();
+    h.step(&json!({"click": [paper.x, paper.y]})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let note = &drawing.notes[0];
+    assert_eq!(note.content.0, vec![solidcraft_engine::geom::cell::Part::Text("Deburr all edges".to_owned())]);
+}
+
 /// Frames until no view or dimension is waiting to be drawn.
 fn settle(h: &mut Harness) {
     for _ in 0..5_000 {

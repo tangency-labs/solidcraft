@@ -118,7 +118,13 @@ pub(super) fn compile(config: &Config, bytes: &[u8], stack_bytes: usize, cache: 
 }
 
 pub(super) fn from_binary(engine: &Engine, bytes: &[u8]) -> Result<Component> {
-    Component::from_binary(engine, bytes).map_err(|e| trap(format!("component compilation failed: {e:#}")))
+    Component::from_binary(engine, bytes).map_err(|e| {
+        // Inspect the parser error itself, not plugin names in the compilation context.
+        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
+            return super::component_parse_error(error);
+        }
+        trap(format!("component compilation failed: {e:#}"))
+    })
 }
 
 /// Wasmtime's cache for one entry. Its own clean-up and recompression are off: they would change
