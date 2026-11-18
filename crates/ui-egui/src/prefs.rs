@@ -1880,9 +1880,11 @@ preference_settings! {
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
     /// An image (Canvas or Decal) placed on the plane of the sketch being edited gets a
     /// construction rectangle around it in that sketch and follows it, so the sketch's constraints
-    /// and dimensions place and size the image (#18405). Off by default, so placing an image
-    /// works as it always has: on its own, with Frame Sketch to tie it to a rectangle when asked.
-    frame_images_in_sketch: bool = false, PAGE_SKETCH;
+    /// and dimensions place and size the image (#18405). A mode of the Canvas and Decal tools, set
+    /// in the Sketch Palette while one runs and kept for the next time; no Preferences page shows
+    /// or resets it. Off by default, so placing an image works as it always has: on its own, with
+    /// Frame Sketch to tie it to a rectangle when asked.
+    frame_images_in_sketch: bool = false;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -7318,7 +7320,6 @@ mod tests {
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
-            ("frame_images_in_sketch", json!(true), PAGE_SKETCH),
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),

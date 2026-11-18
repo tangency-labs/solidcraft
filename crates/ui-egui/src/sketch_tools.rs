@@ -1305,7 +1305,8 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             });
             let Some((plane, at)) = target else { return };
             // On the plane of the sketch being edited, the image follows a construction rectangle
-            // drawn around it in that sketch (#18405), when the preference asks for it. The engine
+            // drawn around it in that sketch (#18405), when the tool's option in the Sketch Palette
+            // asks for it (`sketch_palette`, "Frame the image in the sketch"). The engine
             // decides whether the image lies on that plane ("auto"); off it, the image is free.
             let frame = app.preferences.frame_images_in_sketch && app.session.active_sketch.is_some();
             let mut p = if decal {

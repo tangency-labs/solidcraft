@@ -1,6 +1,6 @@
 //! The Sketch Palette: a panel docked at the right while a sketch is being edited, like a
 //! command dialog. Feature Options: the modes of the creation tool that is running, as icon
-//! buttons. Options: the line type of the selected curves (normal, construction, centerline),
+//! buttons, or for Canvas and Decal whether the placed image follows a frame in the sketch. Options: the line type of the selected curves (normal, construction, centerline),
 //! Look At, and the display toggles kept with the sketch (grid, snap, slice, profiles, points,
 //! dimensions, constraints, projected geometry, construction geometry, 3D sketch); the sketch's
 //! degrees of freedom. Finish Sketch sits at the bottom, beside the ribbon's Exit group. Toggles run `sketch.options`, line types
@@ -371,6 +371,12 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut tie = false;
     let mut start = None;
     let feature = active_feature(app);
+    // The Canvas and Decal tools' mode (#18405): whether the image they place on this sketch's
+    // plane gets a construction rectangle in it to follow. A tool's mode, so it is here and not
+    // in Preferences; it is kept for the next time either tool runs.
+    let image_tool = app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "canvas.insert" | "canvas.decal"));
+    let framing = app.preferences.frame_images_in_sketch;
+    let mut frame_image = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -428,6 +434,14 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             start = section.flatten();
             section_alias("sketch_palette:feature_fold", "Feature Options");
             // The tool icons' last row otherwise all but touches the Line Type row.
+            ui.add_space(t.space_6);
+        }
+        if image_tool {
+            let section = crate::ui_kit::section(ui, "feature", "Feature Options", true, |ui| {
+                crate::ui_kit::checkbox_row(ui, "frame_image", solidcraft_ui_text::tr("ui.palette_frame_image"), framing)
+            });
+            frame_image = section.unwrap_or(false);
+            section_alias("sketch_palette:feature_fold", "Feature Options");
             ui.add_space(t.space_6);
         }
         crate::ui_kit::row(ui, "Line Type", |ui| {
@@ -543,6 +557,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if construction {
         toggle_construction(app);
     }
+    if frame_image {
+        app.preferences.frame_images_in_sketch = !framing;
+    }
     if let Some(id) = start {
         app.start(id);
     }
@@ -606,6 +623,26 @@ mod tests {
         h.call("ui.click", json!({"x":infinite.x,"y":infinite.y}));
         assert_eq!(mode(&h.app), 3);
         set_mode(&mut h.app, 0);
+    }
+
+    /// Whether a placed image follows a frame in the sketch is the Canvas and Decal tools' own
+    /// mode (#18405): it shows in the palette while either runs, not with other tools, and the
+    /// choice is kept for the next image.
+    #[test]
+    fn canvas_and_decal_show_their_frame_mode_in_the_palette() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.tool = crate::tools::Tool::for_command("sketch.line");
+        h.settle();
+        assert!(crate::scenario::handle_at("sketch_palette:toggle:frame_image").is_none(), "the Line tool has no image to frame");
+        for (cmd, on) in [("canvas.insert", true), ("canvas.decal", false)] {
+            crate::sketch_tools::start_image_placement(&mut h.app, cmd, "picture.png".into());
+            h.settle();
+            assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(cmd), "{cmd} waits for its click");
+            let at = crate::scenario::handle_at("sketch_palette:toggle:frame_image").unwrap_or_else(|| panic!("{cmd}: no frame mode"));
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            assert_eq!(h.app.preferences.frame_images_in_sketch, on, "{cmd}");
+        }
     }
 
     #[test]
