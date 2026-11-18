@@ -2290,10 +2290,11 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
 
 /// Opens the shared view menu at a card's header control.
 pub fn open_card_view_menu(ctx: &egui::Context, strip: egui::Id, view: usize, anchor: &egui::Response) {
-    let popup: PopupState = Some((Popup::View(view), anchor.rect.left_bottom(), anchor.rect, ctx.cumulative_frame_nr()));
+    let opened = ctx.cumulative_frame_nr();
+    let popup: PopupState = Some((Popup::View(view), anchor.rect.left_bottom(), anchor.rect, opened));
     ctx.data_mut(|data| {
         data.insert_temp(strip.with("view_popup"), popup);
-        data.insert_temp(strip.with("view_menu_focus"), (ctx.cumulative_frame_nr(), anchor.id));
+        data.insert_temp(strip.with("view_menu_focus"), (opened, anchor.id));
     });
     ctx.request_repaint();
 }
