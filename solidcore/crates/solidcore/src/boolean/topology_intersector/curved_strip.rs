@@ -100,7 +100,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::geom::Rectangle;
-use crate::nurbs::nurbs_crv::is_clamped;
+use crate::nurbs::nurbs_crv::{is_clamped, nonempty_spans};
 use crate::nurbs::srf_basic::Surface as NurbSurface;
 use crate::nurbs::srf_tool::p1::{extract_patch, PATCH_SNAP_TOL};
 use crate::query::curve_surface_gap::curve_uv_gap_bound;
@@ -924,9 +924,12 @@ fn net_of(surface: &Surface) -> Option<(BSplineSurface, f64)> {
     (bound >= 0.0 && bound.is_finite()).then(|| (net.clone(), bound))
 }
 
-/// The bound of [`off_surface_bound`] over the net's sub-patch covering `box_uv`: the net
-/// must be clamped in u and v (the extraction takes it as clamped; on an unclamped net its
-/// patch at an end on the valid domain's end knot is not A), the box
+/// The bound of [`off_surface_bound`] over the net's sub-patch covering `box_uv`: the
+/// net's knots in u and in v must be finite and non-decreasing (each knot insertion's
+/// ratio then lies in `[0, 1]`, as the rounding count assumes) and clamped with end
+/// multiplicity exactly `d + 1` (the extraction takes the net as clamped: on an unclamped
+/// net its patch at an end on the valid domain's end knot is not A, and above `d + 1` A's
+/// point at the domain end is a control point the cut drops), the box
 /// must lie in the net's domain within the extraction's snapping (a box past it would
 /// hold points of no face, or of the surface across a seam), and the sub-patch is
 /// extracted over the box widened by that snapping and must cover the box; else `None`.
@@ -940,6 +943,10 @@ fn net_of(surface: &Surface) -> Option<(BSplineSurface, f64)> {
 /// `from_gw_nurb` spread knots closer than 1.2e-8 without moving the control points, a
 /// different surface the bound would not count). Its knots must then be bit-equal to A's
 /// inside its domain and its ends the snapped box's, else `None`.
+///
+/// A bound that cannot be made is `None` too, a refusal: the drop is then not decided and
+/// the pair goes down today's path (an interior knot of multiplicity `d + 1` makes the
+/// Bézier decomposition fail, and that must not fail the boolean).
 fn net_bound_over(
     net: &BSplineSurface,
     box_uv: &Extent2d,
@@ -949,11 +956,17 @@ fn net_bound_over(
         return Ok(None);
     };
     // (borrowed: no knot fixup)
-    off_surface_bound(&BSplineSurface::from_nurb(cut, true), implicit, net)
+    Ok(
+        off_surface_bound(&BSplineSurface::from_nurb(cut, true), implicit, net)
+            .ok()
+            .flatten(),
+    )
 }
 
 /// [`net_bound_over`]'s sub-patch of `net` covering `box_uv`, its knots `net`'s own;
-/// `None` where there is none, and for a net whose knots are not clamped.
+/// `None` where there is none, and for a net whose knots do not meet
+/// [`net_bound_over`]'s conditions (unclamped, non-monotone, non-finite, or an end
+/// multiplicity other than `d + 1`).
 fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
     let nurb = net.gw_nurb()?;
     let natural = net.natural_uv_domain();
@@ -985,6 +998,13 @@ fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
     // `[k_p, k_{r-p}]` too), so only clamped nets are cut, as `srf_piece_box` requires
     let (p, q) = nurb.degrees();
     if !is_clamped(uk, p) || !is_clamped(vk, q) {
+        return None;
+    }
+    // and as a net of finite, non-decreasing knots (each insertion's ratio in [0, 1], as
+    // the rounding count assumes) whose ends have multiplicity exactly `d + 1` (a first
+    // or last point with no support is still A's point at the domain end, and the cut
+    // would drop it), else no cut
+    if !knots_fit_a_cut(uk, p, nurb.n()) || !knots_fit_a_cut(vk, q, nurb.m()) {
         return None;
     }
     // the widened box in the domain (as `copy_sub_patch` cut it), each end snapped as
@@ -1019,6 +1039,20 @@ fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
         && knots_are_nets(cut.v_knots().get(..=cs)?, vk, q, rect.vb, rect.vt);
     let covers = rect.ul <= lo.x && rect.vb <= lo.y && hi.x <= rect.ur && hi.y <= rect.vt;
     (own && covers).then_some(cut)
+}
+
+/// Whether a clamped knot vector of degree `d` with last control index `n` can be cut:
+/// `n + d + 2` finite, non-decreasing knots ([`nonempty_spans`], as `srf_piece_box`
+/// requires) whose first and last values occur exactly `d + 1` times.
+fn knots_fit_a_cut(knots: &[f64], d: usize, n: usize) -> bool {
+    let len = knots.len();
+    let simple_end = |i: Option<usize>| {
+        i.and_then(|i| Some((knots.get(i)?, knots.get(i.checked_add(1)?)?)))
+            .is_some_and(|(a, b)| a < b)
+    };
+    nonempty_spans(knots, d, n).is_some()
+        && simple_end(Some(d))
+        && simple_end(len.checked_sub(d.saturating_add(2)))
 }
 
 /// Whether the knots `cut` of a patch of degree `d` cut from a net with knots `net` over
@@ -1577,6 +1611,119 @@ mod tests {
             }
             assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
         }
+    }
+
+    /// A cubic × linear net of 8 × 2 points at heights `z` (one per u row), built clamped
+    /// and then given the u knots `u` without a knot fixup (borrowed).
+    fn cubic_net_with_u_knots(u: &[f64; 12], z: &[f64; 8]) -> (BSplineSurface, NurbSurface) {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+        let points: Vec<Point3> = (0..8u32)
+            .flat_map(|i| {
+                (0..2u32).map(move |j| Point3::new(f64::from(i), f64::from(j), z[i as usize]))
+            })
+            .collect();
+        let base = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[4, 1, 1, 1, 1, 4],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let mut nurb = base.gw_nurb().unwrap().clone();
+        let (_, _, r, _) = nurb.array_sizes();
+        assert_eq!(r, 11);
+        nurb.u_knots_mut()[..=r].copy_from_slice(u);
+        (BSplineSurface::from_nurb(nurb.clone(), true), nurb)
+    }
+
+    /// The largest `|A.z|` over the box at 101 × 5 parameters, for a panic's diagnostic only.
+    fn sampled_height(nurb: &NurbSurface, bx: &Extent2d) -> f64 {
+        use crate::nurbs::knots::Side;
+        let (lo, hi) = (bx.min(), bx.max());
+        (0..=100)
+            .flat_map(|s| (0..=4).map(move |t| (s, t)))
+            .filter_map(|(s, t)| {
+                let u = lo.x + (hi.x - lo.x) * f64::from(s) / 100.0;
+                let v = lo.y + (hi.y - lo.y) * f64::from(t) / 4.0;
+                nurb.eval(u, v, Side::Left, Side::Left).ok()
+            })
+            .fold(0.0f64, |m, p| m.max(p.z.abs()))
+    }
+
+    /// r7 B11: knots that are clamped but not non-decreasing (`0⁴, 0.6, 0.4, 0.7, 0.8, 1⁴`)
+    /// break the extraction's insertion ratios in `[0, 1]`, and the bitwise knot check
+    /// matches them in order; the review measured a bound of 1.6949e-4 against A 1.6980e-4
+    /// off the plane inside such a box. The net is not cut.
+    #[test]
+    fn a_net_with_decreasing_knots_is_not_cut() {
+        let u = [0.0, 0.0, 0.0, 0.0, 0.6, 0.4, 0.7, 0.8, 1.0, 1.0, 1.0, 1.0];
+        let z = [0.3, -0.2, 1.0, 0.5, -0.7, 0.2, 0.9, -0.4];
+        let (net, nurb) = cubic_net_with_u_knots(&u, &z);
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        for (a, b) in [(-5e-9, 0.6), (0.3, 0.9), (0.0, 1.0)] {
+            let bx = Extent2d::from_bounds(a, 0.0, b, 1.0);
+            if net_cut(&net, &bx).is_some() {
+                let bound = net_bound_over(&net, &bx, &plane);
+                let height = sampled_height(&nurb, &bx);
+                panic!("box [{a}, {b}]: a cut was given, bound {bound:?}, A sampled {height:e}");
+            }
+            assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+        }
+    }
+
+    /// r7 B11: a start knot of multiplicity `p + 2` (`0⁵, 0.4, 0.6, 0.8, 1⁴`): the first
+    /// control point has no support, but the evaluator still returns it at exactly `u = 0`,
+    /// and the cut starts at the second one, so the bound missed A's point at the domain
+    /// end (review: 4.342e-5 against 6.482e-5). The same at both ends. The net is not cut.
+    #[test]
+    fn a_net_with_an_end_knot_above_degree_plus_one_is_not_cut() {
+        let z = [0.3, -0.2, 1.0, 0.5, -0.7, 0.2, 0.9, -0.4];
+        let start = [0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, 1.0];
+        let both = [0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.6, 1.0, 1.0, 1.0, 1.0, 1.0];
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        for u in [start, both] {
+            let (net, nurb) = cubic_net_with_u_knots(&u, &z);
+            for (a, b) in [(-5e-9, 0.0), (0.0, 0.37), (0.55, 1.0)] {
+                let bx = Extent2d::from_bounds(a, 0.25, b, 0.75);
+                if net_cut(&net, &bx).is_some() {
+                    let bound = net_bound_over(&net, &bx, &plane);
+                    let height = sampled_height(&nurb, &bx);
+                    panic!("knots {u:?} box [{a}, {b}]: a cut was given, bound {bound:?}, A sampled {height:e}");
+                }
+                assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+            }
+        }
+    }
+
+    /// r7 M1: an interior knot of multiplicity `p + 1` (`0⁴, 0.5⁴, 1⁴`) is a valid clamped
+    /// net, and its cut is A's, but the Bézier decomposition fails on it. That is no
+    /// bound (a refusal, the pair goes down today's path), not an error of the boolean.
+    #[test]
+    fn a_bound_that_cannot_be_made_is_a_refusal() {
+        let u = [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let z = [0.3, -0.2, 1.0, 0.5, -0.7, 0.2, 0.9, -0.4];
+        let (net, _) = cubic_net_with_u_knots(&u, &z);
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        let bx = Extent2d::from_bounds(0.3, 0.0, 0.9, 1.0);
+        assert!(net_cut(&net, &bx).is_some());
+        assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
     }
 
     /// The fixture of `tests/wr_614_coincident_strip_crossing.rs`
