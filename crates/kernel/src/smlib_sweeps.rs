@@ -1103,11 +1103,12 @@ mod imp {
     }
 
     /// Which segments of `route` are bends the profile on `plane`, carried along the route turning
-    /// with it, reaches to or past the centre of: arcs whose axis the section meets. SMLib sweeps an
+    /// with it, reaches past the centre of: arcs whose axis the section crosses. SMLib sweeps an
     /// arc as a turn about its axis, and a section across that axis makes a body that passes
-    /// through itself. The section's place at each arc is exact past lines and arcs
-    /// ([`carried_along`]); past another curve it is unknown, and an arc there counts as reached
-    /// when the profile reaches as far as its radius from the route's start in any direction.
+    /// through itself; a section that only touches the axis (a tube as wide as its bend) it sweeps
+    /// whole. The section's place at each arc is exact past lines and arcs ([`carried_along`]);
+    /// past another curve it is unknown, and an arc there counts as reached when the profile
+    /// reaches further than its radius from the route's start in any direction.
     fn bends_reached(plane: &Plane, pieces: &[Piece], route: &[crate::PathSeg]) -> Vec<bool> {
         let start = route.first().map(crate::PathSeg::start).unwrap_or(plane.origin);
         let reach = pieces
@@ -1124,8 +1125,8 @@ mod imp {
                         let radius = a.dist(center);
                         let tol = 1e-9 * (1.0 + radius);
                         match ((center - a).normalized(), carried_along(route, along)) {
-                            (Some(u), Some(m)) => reach_along(&placed(plane, &m), pieces, a, u) >= radius - tol,
-                            _ => reach >= radius - tol,
+                            (Some(u), Some(m)) => reach_along(&placed(plane, &m), pieces, a, u) > radius + tol,
+                            _ => reach > radius + tol,
                         }
                     }
                     _ => false,

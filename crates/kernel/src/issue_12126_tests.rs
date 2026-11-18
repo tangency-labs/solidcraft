@@ -186,3 +186,13 @@ fn a_profile_reaching_far_from_where_it_starts_is_swept_whole_round_a_bend() {
         / 3.0;
     close(volume(&b), FRAC_PI_2 * moment, "circle round a tight bend");
 }
+
+#[test]
+fn a_profile_touching_the_centre_of_a_bend_is_swept_whole() {
+    // The square reaches 2 mm towards a 2 mm bend's centre: it touches the axis, crosses nothing,
+    // and SMLib sweeps it in one piece as before (the reference case 50-sweep-tight-bend).
+    crate::smlib_sweeps::UNION_LOAD.with(|l| l.set(0));
+    let b = sweep(&across_start(), &square(4.0), &line_then_bend(2.0)).unwrap();
+    assert_eq!(crate::smlib_sweeps::UNION_LOAD.with(std::cell::Cell::get), 0, "a profile touching the axis takes no unions");
+    close(volume(&b), 320.0 + FRAC_PI_2 / 2.0 * 4.0 * 4.0 * 4.0, "line then bend as tight as the profile");
+}
