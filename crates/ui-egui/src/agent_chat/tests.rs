@@ -585,7 +585,9 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        active_sheet_sketch: None,
         pending_moves: Default::default(),
+        part: None,
         visibility: Default::default(),
         section: None,
     };
@@ -609,6 +611,11 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
     let gone = UndoMark { depth: 3, top: Some(Box::new(snap(&doc(8)))) };
     assert_eq!(merge_undo(&mut undo, &doc(9), &gone, "Agent"), 0);
+    assert_eq!(undo.len(), 5);
+    // A drawing's step among the model's: each part keeps its own steps.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    undo[3].part = Some(7);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
     assert_eq!(undo.len(), 5);
     // A turn that made no step leaves the user's own last step alone, though a section step
     // keeps the design it began with.
@@ -6238,4 +6245,73 @@ fn plugin_runs_always_keep_per_run_consent() {
             assert!(reply.try_recv().is_err(), "consent must precede dispatch");
         }
     }
+}
+
+/// A plugin tool the agent calls by name (`<plugin>.<entry>`) waits for the user's answer in
+/// every mode, even one that allows everything or remembers the tool; listing the plugin tools
+/// asks nothing; legacy named calls pass undeclared arguments through after approval.
+#[test]
+fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-plugin-tool-{}", std::process::id()));
+    let folder = dir.join("gears");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"gears","name":"Gears","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["solid.box"],"limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000},
+        "entries":[{"name":"make","effect":"edit","input_schema":{"type":"object","properties":{"teeth":{"type":"integer"}}}}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        let (mut app, tx) = app_in_a_turn();
+        app.session.plugin_state.packages.insert("gears".into(), folder.to_string_lossy().into_owned());
+        app.agent_chat.running_id = "claude".into();
+        app.preferences.ai_permissions = mode;
+        agents::remember(&mut app.preferences, "claude", "gears.make");
+        agents::remember(&mut app.preferences, "claude", "plugin.run");
+        let call = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"teeth":20}}}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: an edit entry asks first");
+        assert!(call.try_recv().is_err(), "{mode:?}: nothing runs before the answer");
+        let undeclared = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"colour":"red"}}}));
+        pump_tools(&mut app);
+        assert!(undeclared.try_recv().is_err(), "legacy named inputs still wait for approval");
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: undeclared inputs pass through the legacy call");
+        let list = ask(&tx, "engine.execute", json!({"command":"plugin.tools"}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: listing asks nothing");
+        drop(list);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An importer plugin's code runs only after the user's answer, in every mode and after "always
+/// allow": a plugin importer tool (`file.import`), and `doc.open` of a file an installed importer
+/// opens, alone or in a batch. A file SolidCraft reads itself keeps the mode's answer.
+#[test]
+fn importer_plugins_always_ask_like_plugin_runs() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-importer-tool-{}", std::process::id()));
+    let folder = dir.join("plugins").join("smp");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    let file = dir.join("part.smp").to_string_lossy().into_owned();
+    let (mut app, tx) = app_in_a_turn();
+    app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.ai_permissions = agents::Mode::All;
+    for command in ["file.import", "doc.open", "batch"] {
+        agents::remember(&mut app.preferences, "claude", command);
+    }
+    let calls = [
+        ask(&tx, "engine.execute", json!({"command":"file.import","params":{"path":file,"format":"smp.convert","options":{}}})),
+        ask(&tx, "engine.execute", json!({"command":"doc.open","params":{"path":file}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"solid.box","params":{}},{"command":"file.import","params":{"path":file}}]})),
+    ];
+    pump_tools(&mut app);
+    assert_eq!(app.agent_chat.waiting(), 3, "each plugin import waits for an answer");
+    assert!(calls.iter().all(|c| c.try_recv().is_err()), "nothing runs before the answer");
+    let session = &app.session;
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":file}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":"/tmp/part.step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
+    let _ = std::fs::remove_dir_all(&dir);
 }
