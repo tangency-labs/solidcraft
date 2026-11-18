@@ -397,6 +397,7 @@ mod tests {
     /// The report lines read the preview's reply, lengths in the design's unit.
     #[test]
     fn living_hinge_report_lines_from_the_reply() {
+        crate::i18n::install();
         let s = Session::default();
         let reply = json!({"slots": 95, "rows": 27, "run_out": 28, "shortened": 0, "left_out": 26,
             "cut_length_mm": 1757.8, "outline_length_mm": 3566.5, "band_width_mm": 40.0});
@@ -409,6 +410,7 @@ mod tests {
     /// One slot in one row says "1 slot in 1 row", not "1 slots in 1 rows".
     #[test]
     fn living_hinge_report_says_one_slot_and_one_row() {
+        crate::i18n::install();
         let s = Session::default();
         let line = |slots: u64, rows: u64| report_lines(&s.doc, &json!({"slots": slots, "rows": rows}))[0].clone();
         assert_eq!(line(1, 1), "1 slot in 1 row");
