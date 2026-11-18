@@ -7,7 +7,9 @@
 //!   title block. Strokes are flattened within a fifth of a pixel and stroked at their paper width
 //!   (never under a pixel); fills, and text as its glyphs' outlines, are triangulated, a glyph at a
 //!   time. That work is done once per scene generation and zoom octave ([`Marks`]); a frame only
-//!   moves and scales it, and skips what lies off the canvas. A picture shows only its frame here.
+//!   moves and scales it, and skips what lies off the canvas. A picture (a shaded view's) shows the
+//!   pixels the provider drew for it, uploaded once each ([`PictureTextures`]); until it has them, its
+//!   frame.
 //! - **Pan and zoom** are the shared navigation with orbit off, on the page's own camera, so the
 //!   Design camera stays where it was. Zoom stays between 5 % and 3200 %.
 //! - **100 % is true size**: one paper millimetre is (96 / 25.4) × calibration / UI zoom points, so
@@ -26,14 +28,17 @@
 
 mod view_tools;
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
-use solidcraft_engine::drawing_scene::{self, SheetObject, Status};
+use solidcraft_engine::drawing_scene::{self, SheetObject, SheetPicture, Status};
 use solidcraft_engine::geom::paper::text::TextRun;
-use solidcraft_engine::geom::paper::{Dashes, Item, ObjectKind, Scene};
+use solidcraft_engine::geom::paper::{Clip, Dashes, Item, ObjectKind, Scene};
+use solidcraft_engine::geom::pixel_grid::{GridWindow, PixelGrid};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::geom::{Aabb2, Region2Geom, Seg2Geom};
 use solidcraft_viewport::Camera;
@@ -113,8 +118,11 @@ fn lightness(c: Color32) -> f32 {
 /// How far apart in [`lightness`] the paper and the backdrop must be for the sheet's edge to show.
 pub const STAND_OFF: f32 = 0.06;
 
+/// The lightest colour; as a picture's tint, it keeps the picture's own colours.
+const WHITE: Color32 = Color32::WHITE;
+
 /// Lightest and darkest: what the stage, or failing that the paper, moves toward.
-const ENDS: [Color32; 2] = [Color32::WHITE, Color32::BLACK];
+const ENDS: [Color32; 2] = [WHITE, Color32::BLACK];
 
 /// The first of twenty steps from `from` toward `to`, at most `steps` of them, that stands off `other`.
 fn toward(from: Color32, to: Color32, other: Color32, steps: u8) -> Option<Color32> {
@@ -182,6 +190,8 @@ pub struct Page {
     sheet: Option<u64>,
     drawing: Option<(u64, u64)>,
     marks: Option<Marks>,
+    /// The sheet's pictures' pixels on the GPU: they change apart from the marks, as each is drawn.
+    pictures: PictureTextures,
     view_tools: view_tools::State,
     /// What the last frame showed, for `ui.inspect`.
     shown: Option<Value>,
@@ -198,6 +208,7 @@ impl Default for Page {
             sheet: None,
             drawing: None,
             marks: None,
+            pictures: PictureTextures::default(),
             view_tools: Default::default(),
             shown: None,
         }
@@ -226,6 +237,7 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
         page.fitted = None;
         page.fitted_on = None;
         page.marks = None;
+        page.pictures = PictureTextures::default();
         page.view_tools = Default::default();
         page.shown = None;
     }
@@ -320,7 +332,8 @@ impl OnScreen {
     pub(crate) fn paint_preview(self, painter: &egui::Painter, marks: &Marks, position: Vec2, ink: Color32) {
         let shifted = Self { centre: self.screen(position), target: Vec2::ZERO, scale: self.scale };
         let clip = painter.clip_rect();
-        marks.paint(painter, &shifted, shifted.visible(clip), ink, painter.ctx().pixels_per_point());
+        // A preview shows the frames of its pictures: its pixels aren't drawn until it is placed.
+        marks.paint(painter, &shifted, shifted.visible(clip), ink, painter.ctx().pixels_per_point(), &PictureTextures::default());
     }
 
     fn visible(&self, canvas: Rect) -> Aabb2 {
@@ -450,6 +463,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if page.marks.as_ref().is_none_or(|m| m.generation != view.generation || m.tolerance != tolerance) {
         page.marks = Some(Marks::of(&view.scene, view.generation, tolerance));
     }
+    let max_side = ui.ctx().input(|i| i.max_texture_side);
+    page.pictures.sync(ui.ctx(), &view.pictures, max_side);
     let painter = ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
     let sheet_rect = at.rect(&Aabb2 { min: Vec2::ZERO, max: size });
     backdrop.paint(&painter, canvas, sheet_rect.center(), &t);
@@ -457,8 +472,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     painter.add(t.shell_shadow().as_shape(sheet_rect, PAPER_CORNER));
     painter.rect_filled(sheet_rect, PAPER_CORNER, paper);
     let visible = at.visible(canvas);
-    if let Some(marks) = &app.drawing_workspace.page.marks {
-        marks.paint(&painter, &at, visible, ink, ppp as f32);
+    let page = &app.drawing_workspace.page;
+    if let Some(marks) = &page.marks {
+        marks.paint(&painter, &at, visible, ink, ppp as f32, &page.pictures);
     }
     crate::scenario::publish_rect("sheet:paper", sheet_rect);
     let hover = response.hover_pos().filter(|p| !crate::shell::covered(app, *p)).map(|p| at.paper(p));
@@ -531,6 +547,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "ink": hex(ink),
         "generation": view.generation,
         "views": states,
+        "pictures": app.drawing_workspace.page.pictures.inspect(),
         "working": working,
         "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "outlined": true})),
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
@@ -820,8 +837,16 @@ pub(crate) enum Mark {
         outlines: Vec<Vec<Vec2>>,
         bounds: Aabb2,
     },
-    /// A picture's frame: its pixels aren't drawn on the page yet.
-    Picture(Aabb2),
+    /// A picture: its pixels from [`PictureTextures`] over `rect` at `opacity`, else its frame. Only
+    /// what lies `within` (the sheet, inside its object's clip's box) is drawn, and inside `clip`'s
+    /// circle, as every writer cuts it.
+    Picture {
+        source: u64,
+        rect: Aabb2,
+        opacity: f64,
+        clip: Option<Clip>,
+        within: Aabb2,
+    },
 }
 
 impl Marks {
@@ -842,7 +867,7 @@ impl Marks {
         Marks { generation, tolerance, marks: Vec::new(), error: Some(solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned()) }
     }
 
-    fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32) {
+    fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32, pictures: &PictureTextures) {
         let hair = 1.0 / ppp.max(0.1);
         let mut mesh = egui::Mesh::default();
         for mark in &self.marks {
@@ -872,19 +897,234 @@ impl Marks {
                         painter.add(egui::Shape::closed_line(points, Stroke::new(hair * 0.5, ink)));
                     }
                 }
-                Mark::Picture(rect) => {
-                    if rect.meets(&visible) {
-                        let r = at.rect(rect);
-                        let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
-                        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(hair, ink.gamma_multiply(0.6)), 6.0, 4.0));
+                Mark::Picture { source, rect, opacity, clip, within } => {
+                    // The fills before it lie under it, as in the scene; those after it, on it.
+                    flush(painter, &mut mesh);
+                    let uploaded = pictures.get(*source);
+                    match uploaded.filter(|u| !u.tiles.is_empty()) {
+                        Some(u) => {
+                            // Cut to its place, as the writers cut it; a stale picture is its last one,
+                            // shown over its own grid, where it was drawn, until the new one comes.
+                            let (x0, y0, x1, y1) = u.grid.covers();
+                            let over = if u.stale { Aabb2 { min: Vec2::new(x0, y0), max: Vec2::new(x1, y1) } } else { *rect };
+                            let shown = within.intersection(&over);
+                            if shown.is_empty() || !shown.meets(&visible) {
+                                continue;
+                            }
+                            // A fifth of a pixel, in millimetres, for a circle clip's edge.
+                            let tol = (TOLERANCE_PX / (at.scale * f64::from(ppp))).max(1e-5);
+                            for tile in &u.tiles {
+                                if let Some(mesh) = tile_mesh(at, &u.grid, tile, shown, clip.as_ref(), *opacity, tol) {
+                                    painter.add(egui::Shape::mesh(mesh));
+                                }
+                            }
+                        }
+                        None if !rect.meets(&visible) => {}
+                        None => {
+                            let r = at.rect(rect);
+                            let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+                            let dim = ink.gamma_multiply(0.6);
+                            painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(hair, dim), 6.0, 4.0));
+                            // Can't be drawn: why, in words beside the frame (D26), not colour alone.
+                            if let Some(why) = uploaded.and_then(|u| u.why.as_deref()) {
+                                let t = Tokens::get();
+                                let text = solidcraft_ui_text::format("ui.sheet_page.picture_failed", &[("reason", why)]);
+                                let at = r.left_top() + vec2(t.space_4, t.space_4);
+                                painter.text(at, egui::Align2::LEFT_TOP, text, egui::FontId::proportional(t.font_label), dim);
+                            }
+                        }
                     }
                 }
             }
         }
-        if !mesh.is_empty() {
-            painter.add(egui::Shape::mesh(mesh));
+        flush(painter, &mut mesh);
+    }
+}
+
+/// Paints the fills gathered so far into `mesh`, and empties it.
+fn flush(painter: &egui::Painter, mesh: &mut egui::Mesh) {
+    if !mesh.is_empty() {
+        painter.add(egui::Shape::mesh(std::mem::take(mesh)));
+    }
+}
+
+/// The pixels of a sheet's pictures as textures, by picture source, kept between frames. The
+/// provider makes a new `rows` for each new picture, so a picture is uploaded once when its rows are
+/// new (another `Arc`) and never again for the same rows; one that leaves the sheet is let go.
+#[derive(Default)]
+pub(crate) struct PictureTextures {
+    pictures: HashMap<u64, Uploaded>,
+    /// Pictures uploaded so far: one each time a picture's rows are new.
+    uploads: u64,
+}
+
+/// One picture as the page has it.
+struct Uploaded {
+    view: u64,
+    /// The rows its textures were made from, to tell new rows by their address.
+    rows: Option<Arc<[u8]>>,
+    grid: PixelGrid,
+    /// Its textures, each at most the GPU's largest side: none until it is drawn, or when it can't be.
+    tiles: Vec<Tile>,
+    stale: bool,
+    why: Option<String>,
+}
+
+/// Columns and rows `window` of a picture's grid, as one texture.
+struct Tile {
+    texture: egui::TextureHandle,
+    window: GridWindow,
+}
+
+impl PictureTextures {
+    /// Brings the textures up to `pictures`, the sheet's answer this frame: textures at most
+    /// `max_side` pixels a side.
+    fn sync(&mut self, ctx: &egui::Context, pictures: &[SheetPicture], max_side: usize) {
+        self.pictures.retain(|source, _| pictures.iter().any(|p| p.source == *source));
+        for p in pictures {
+            if let Some(u) = self.pictures.get_mut(&p.source)
+                && same_rows(&u.rows, &p.rows)
+            {
+                // The same pixels; the engine moves their grid with their view, stale or not.
+                (u.grid, u.stale, u.why) = (p.grid, p.stale, p.why.clone());
+                continue;
+            }
+            let tiles = p.rows.as_ref().map(|rows| tiles(ctx, p.source, &p.grid, rows, max_side)).unwrap_or_default();
+            self.uploads += u64::from(!tiles.is_empty());
+            let uploaded = Uploaded { view: p.view, rows: p.rows.clone(), grid: p.grid, tiles, stale: p.stale, why: p.why.clone() };
+            self.pictures.insert(p.source, uploaded);
         }
     }
+
+    fn get(&self, source: u64) -> Option<&Uploaded> {
+        self.pictures.get(&source)
+    }
+
+    /// Each picture, for `ui.inspect`: how it shows where it is on screen, as its pixels, its frame (not
+    /// drawn yet) or failed (with why). Off screen, none of them is painted.
+    fn inspect(&self) -> Vec<Value> {
+        let mut out: Vec<(u64, Value)> = self
+            .pictures
+            .iter()
+            .map(|(source, u)| {
+                let shown = if !u.tiles.is_empty() {
+                    "pixels"
+                } else if u.why.is_some() {
+                    "failed"
+                } else {
+                    "frame"
+                };
+                let view = solidcraft_engine::doc::ids::encode(u.view);
+                (*source, json!({"source": source, "view": view, "shown": shown, "tiles": u.tiles.len(), "stale": u.stale, "why": u.why}))
+            })
+            .collect();
+        out.sort_by_key(|(source, _)| *source);
+        out.into_iter().map(|(_, v)| v).collect()
+    }
+}
+
+/// The same rows: both none, or the same allocation (the provider's new picture is a new one).
+fn same_rows(a: &Option<Arc<[u8]>>, b: &Option<Arc<[u8]>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// `rows` (straight alpha sRGB RGBA, top row first, `grid`'s size) as textures of at most `max_side`
+/// a side, left to right then top to bottom. None when the rows aren't the grid's size.
+fn tiles(ctx: &egui::Context, source: u64, grid: &PixelGrid, rows: &[u8], max_side: usize) -> Vec<Tile> {
+    let (width, height) = (grid.width as usize, grid.height as usize);
+    if max_side == 0 || width.checked_mul(height).and_then(|n| n.checked_mul(4)) != Some(rows.len()) {
+        return Vec::new();
+    }
+    // Zoomed out, mipmaps keep a picture smooth rather than speckled where the renderer makes them
+    // (egui_glow); egui-wgpu makes one level only, so there it is filtered linearly (H5-F4).
+    let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
+    let mut out = Vec::new();
+    for y0 in (0..height).step_by(max_side) {
+        for x0 in (0..width).step_by(max_side) {
+            let (x1, y1) = ((x0 + max_side).min(width), (y0 + max_side).min(height));
+            let mut pixels = Vec::with_capacity((x1 - x0) * (y1 - y0) * 4);
+            for row in y0..y1 {
+                let start = (row * width + x0) * 4;
+                let Some(part) = rows.get(start..start + (x1 - x0) * 4) else { return Vec::new() };
+                pixels.extend_from_slice(part);
+            }
+            let image = egui::ColorImage::from_rgba_unmultiplied([x1 - x0, y1 - y0], &pixels);
+            let texture = ctx.load_texture(format!("sheet-picture-{source}-{x0}-{y0}"), image, options);
+            let window = GridWindow { x0: x0 as u32, y0: y0 as u32, x1: x1 as u32, y1: y1 as u32 };
+            out.push(Tile { texture, window });
+        }
+    }
+    out
+}
+
+/// The part of `tile` inside `shown` (and inside a circle `clip`) as a textured mesh, at `opacity`;
+/// a circle's edge within `tol` millimetres. None when nothing of it shows.
+fn tile_mesh(at: &OnScreen, grid: &PixelGrid, tile: &Tile, shown: Aabb2, clip: Option<&Clip>, opacity: f64, tol: f64) -> Option<egui::Mesh> {
+    // The tile's paper rectangle: its first column's left edge to its last's right, its last row's
+    // bottom edge to its first row's top (a tile is never empty).
+    let w = tile.window;
+    let tile_rect = Aabb2 {
+        min: Vec2::new(grid.column(w.x0).0, grid.row(w.y1.saturating_sub(1)).0),
+        max: Vec2::new(grid.column(w.x1.saturating_sub(1)).1, grid.row(w.y0).1),
+    };
+    let area = tile_rect.intersection(&shown);
+    if area.is_empty() {
+        return None;
+    }
+    let corners = vec![area.min, Vec2::new(area.max.x, area.min.y), area.max, Vec2::new(area.min.x, area.max.y)];
+    let outline = match clip {
+        Some(Clip::Circle { center, radius }) => cut_to(circle(*center, *radius, tol), &area),
+        _ => corners,
+    };
+    if outline.len() < 3 {
+        return None;
+    }
+    let size = tile_rect.size();
+    let uv = |q: Vec2| pos2(((q.x - tile_rect.min.x) / size.x) as f32, ((tile_rect.max.y - q.y) / size.y) as f32);
+    // The texture is premultiplied, so the tint scales every channel.
+    let tint = WHITE.gamma_multiply(opacity.clamp(0.0, 1.0) as f32);
+    let mut mesh = egui::Mesh::with_texture(tile.texture.id());
+    for q in &outline {
+        mesh.vertices.push(egui::epaint::Vertex { pos: at.screen(*q), uv: uv(*q), color: tint });
+    }
+    for i in 1..outline.len() as u32 - 1 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    Some(mesh)
+}
+
+/// A circle as a polygon whose edges stray at most `tol` from it, counter-clockwise.
+fn circle(center: Vec2, radius: f64, tol: f64) -> Vec<Vec2> {
+    let step = 2.0 * (1.0 - (tol / radius.max(tol)).min(1.0)).acos();
+    let n = (std::f64::consts::TAU / step.max(1e-3)).ceil().clamp(16.0, 1024.0) as usize;
+    (0..n).map(|i| center + Vec2::from_angle(std::f64::consts::TAU * i as f64 / n as f64) * radius).collect()
+}
+
+/// `polygon` (convex) cut to the rectangle `b`: what lies inside both (Sutherland and Hodgman).
+fn cut_to(polygon: Vec<Vec2>, b: &Aabb2) -> Vec<Vec2> {
+    // How far inside each side a point is: each side keeps its points and adds where an edge crosses it.
+    let sides: [fn(Vec2, &Aabb2) -> f64; 4] = [|q, b| q.x - b.min.x, |q, b| b.max.x - q.x, |q, b| q.y - b.min.y, |q, b| b.max.y - q.y];
+    let mut out = polygon;
+    for inside in sides {
+        let input = std::mem::take(&mut out);
+        let Some(&last) = input.last() else { return out };
+        let mut prev = last;
+        for &q in &input {
+            let (dq, dp) = (inside(q, b), inside(prev, b));
+            if (dq >= 0.0) != (dp >= 0.0) {
+                out.push(prev + (q - prev) * (dp / (dp - dq)));
+            }
+            if dq >= 0.0 {
+                out.push(q);
+            }
+            prev = q;
+        }
+    }
+    out
 }
 
 enum Fault {
@@ -897,7 +1137,12 @@ fn marks(scene: &Scene, tol: f64) -> Result<Vec<Mark>, Fault> {
     let prepared = scene.prepare().map_err(|e| Fault::Invalid(e.to_string()))?;
     let mut budget = MAX_POINTS;
     let mut out = Vec::new();
+    let sheet = Aabb2 { min: Vec2::ZERO, max: scene.size_mm };
+    // `prepare` checked there is one clip an object.
+    let clips: HashMap<u64, Clip> = scene.clips.iter().copied().collect();
     for group in prepared.groups() {
+        // Pixels aren't geometry: `prepare` leaves a picture whole and each writer cuts it to the clip.
+        let clip = clips.get(&group.object).copied();
         for item in &group.items {
             match item {
                 Item::Stroke { path, closed, width_mm, pattern } => {
@@ -931,7 +1176,10 @@ fn marks(scene: &Scene, tol: f64) -> Result<Vec<Mark>, Fault> {
                         out.extend(fill(&loops, tol, &mut budget)?);
                     }
                 }
-                Item::Picture(picture) => out.push(Mark::Picture(picture.rect)),
+                Item::Picture(picture) => {
+                    let within = clip.map_or(sheet, |clip| sheet.intersection(&clip.bounds()));
+                    out.push(Mark::Picture { source: picture.source, rect: picture.rect, opacity: picture.opacity, clip, within });
+                }
             }
         }
     }
