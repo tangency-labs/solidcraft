@@ -112,6 +112,9 @@ fn offset_refused(
         OffsetFailure::Collapses {
             distance, radius, ..
         } => OffsetRefusal::Collapses { distance, radius },
+        OffsetFailure::WallsMeetAcross {
+            distance, largest, ..
+        } => OffsetRefusal::WallsMeetAcross { distance, largest },
         OffsetFailure::LoopsCross { crossing, .. } => OffsetRefusal::LoopsCross { crossing },
         OffsetFailure::DistanceUnresolved {
             distance,
@@ -126,6 +129,7 @@ fn offset_refused(
         OffsetFailure::SeamOpened { .. } => OffsetRefusal::SeamOpened,
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
+        OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {

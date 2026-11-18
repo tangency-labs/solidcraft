@@ -2311,7 +2311,7 @@ fn resolver_order_is_feature_first_at_every_site() {
     run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": &axis_key, "angle": "30 deg", "name": "Axis line"}));
     let f = s.doc.features.iter().find(|f| f.name == "Axis line").unwrap();
     let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { axis_origin, .. } } = &f.kind else { panic!("{:?}", f.kind) };
-    assert!(axis_origin.dist(Vec3::ZERO) < 1e-9, "{axis_origin:?}");
+    assert!(s.doc.eval_point(axis_origin).unwrap().dist(Vec3::ZERO) < 1e-9, "{axis_origin:?}");
 
     // axis_param: a revolve saves the construction axis by name, not the datum.
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
@@ -2353,7 +2353,10 @@ fn world_axis_names_keep_their_precedence_at_the_axis_resolvers() {
         run(&mut s, "construct.plane.at_angle", json!({"base":"XY","axis":name,"angle":"30 deg","name":format!("Angled {name}")}));
         let f = s.doc.features.iter().find(|f| f.name == format!("Angled {name}")).unwrap();
         let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { axis_origin, .. } } = &f.kind else { panic!("{:?}", f.kind) };
-        assert!(axis_origin.dist(Vec3::ZERO) < 1e-9, "{name}: the world axis, not the construction axis at {axis_origin:?}");
+        assert!(
+            s.doc.eval_point(axis_origin).unwrap().dist(Vec3::ZERO) < 1e-9,
+            "{name}: the world axis, not the construction axis at {axis_origin:?}"
+        );
     }
 }
 
