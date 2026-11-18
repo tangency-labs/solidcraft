@@ -1068,12 +1068,14 @@ mod tests {
         let features = h.app.session.doc.features.len();
         h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
         assert_eq!(h.app.session.doc.features.len(), features + 1, "the model changes with the sheet sketch open");
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features, "undo in Design takes back the model's step");
+        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch being edited");
         h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
         h.app.run("sketch.circle.center", serde_json::json!({"center": [0, 0], "radius": 3})).unwrap();
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "the model's sketch leaves the sheet sketch alone");
-        h.app.run("edit.undo", serde_json::json!({})).unwrap();
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and so does the model's undo");
+        assert!(h.app.session.active_sketch.is_none(), "Finish in Design finishes the model's sketch");
+        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch alone");
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
         assert!(h.app.session.sheet_sketching(), "back in Drawing the sheet sketch is still being edited");
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();

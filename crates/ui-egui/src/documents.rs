@@ -4445,6 +4445,8 @@ mod tests {
     fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
         let mut a = app();
         let [sheet, _] = two_sheet_drawing(&mut a);
+        // A sheet sketch is made, and finished, in Drawing.
+        crate::workspace::enter(&mut a, "drawing").unwrap();
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
         assert!(a.session.open_drawing.is_some(), "with the drawing still open");
         a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
@@ -4455,7 +4457,9 @@ mod tests {
         assert!(a.session.active_sheet_sketch.is_none());
         switch(&mut a, 0);
         assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
+        crate::workspace::enter(&mut a, "drawing").unwrap();
         a.run("sketch.finish", json!({})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
     }
 
