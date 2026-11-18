@@ -24,7 +24,8 @@
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
 //! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
 //! region booleans and extrusion, prism sections),
-//! [`cell_grid`] (the cells of a grid over a profile).
+//! [`cell_grid`] (the cells of a grid over a profile), [`weld`] (the named looks of a spot weld;
+//! not upstream).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -81,6 +82,7 @@ pub mod tangent;
 pub mod trim;
 pub mod untrim;
 pub mod vertex_meet;
+pub mod weld;
 
 pub use blend::{
     band_room, blend, blend_ordered, blend_with, carried_faces, carried_faces_ordered,

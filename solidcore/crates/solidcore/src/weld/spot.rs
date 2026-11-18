@@ -1,99 +1,150 @@
 //! Spot welds: the display bodies of one resistance spot weld between two lapped sheets.
 //!
 //! Not upstream: SolidCraft's own (#15132). The bodies are built at the spot from exact
-//! primitives (cylinders, spheres) and booleans between them only. They take no part as
-//! input, so building them can never change a part.
+//! surfaces only: each mark and pin is its profile (lines and circular arcs) revolved about
+//! the spot's axis, a ball is a sphere, and nothing is cut by a boolean. They take no part
+//! as input, so building them can never change a part.
 //!
-//! | Rust                          | What it is                                              |
-//! |-------------------------------|---------------------------------------------------------|
-//! | [`SpotWeld`]                  | One spot: where, which way, the two sheet thicknesses   |
-//! | [`SpotLook`]                  | How the spot is drawn (six looks)                       |
-//! | [`SpotZone`]                  | Which part of the look a body is (for the app's colours)|
-//! | [`spot_weld`]                 | The spot's bodies                                       |
-//! | [`proposed_spot_diameter`]    | The diameter the weld tool proposes, `5 √t`             |
-//! | [`pin_dish_depth`]            | How deep the concave pin ends are dished                |
+//! | Rust                       | What it is                                                  |
+//! |----------------------------|-------------------------------------------------------------|
+//! | [`SpotWeld`]               | One spot: where, which way, the two sheets, the diameter    |
+//! | [`SpotStyle`]              | What the spot is drawn with, as data: marks, ball, pin      |
+//! | [`SpotZone`], [`SpotSide`] | Which part of the style a body is, and where it lies        |
+//! | [`spot_weld`]              | The spot's bodies                                           |
+//! | [`proposed_spot_diameter`] | The diameter a weld tool proposes, `5 √t`                   |
 //!
 //! # The geometry
 //!
 //! A spot sits on the *faying face*, the face where the two sheets touch. `normal` points
 //! from the lower sheet into the upper one; the upper sheet's outer face lies
 //! `upper_thickness` along it, the lower sheet's outer face `lower_thickness` against it.
-//! Every size of a look is a fixed fraction of the spot diameter `d` (marks, balls, dent),
-//! or follows the sheets (pins), so a look keeps its proportions at any size the user sets.
+//! A [`SpotStyle`] gives every size as a fraction: of the spot diameter `d` (marks, ball,
+//! pin), or of a sheet's thickness (a pin's dish), so a style keeps its proportions at any
+//! diameter. Named styles (looks) and which one a user picked are not the kernel's: they
+//! live with the operations and the application, as data of this type.
 //!
-//! The *marks* show the spot on both outer faces, as a real spot's electrode imprint does:
-//! a light core of diameter `0.55 d`, a soft band out to `d` and a thin dark edge out to
-//! `1.05 d`, each a flat body `0.006 d` thick lying on the face. Resistance spot welding
-//! adds no filler, so a body inside the sheets ([`SpotZone::Inside`]) overlaps metal the
-//! parts already have: it is drawn, never counted as volume or mass.
+//! The *marks* show the spot on an outer face, as a real spot's electrode imprint does: a
+//! core, a band and an edge, three bodies lying on the face, flat or with a dished top.
+//! Resistance spot welding adds no filler, so a body inside the sheets
+//! ([`SpotZone::Inside`]) overlaps metal the parts already have: every body is for
+//! display only, never volume, mass or anything a model depends on.
+//!
+//! The bodies of one spot touch where their pieces meet: a zone's walls are its
+//! neighbours' (core and band, band and edge), and a pin's flat end lies on the core's base
+//! when their diameters match. They are separate bodies that share those faces; they must
+//! never be united, and an application that colours them draws coincident faces.
 //!
 //! # Not covered
 //!
-//! Flat sheets only: the marks are flat and the pins are straight, so the outer faces must
-//! be planes square to `normal` at the spot. The caller (the weld tool) measures the
-//! thicknesses and checks the faces; this module does not see the parts.
+//! Flat sheets only: the marks are flat or revolved and the pins straight, so the outer
+//! faces must be planes square to `normal` at the spot. Until the kernel's site query
+//! (#18407) measures the sheets and checks their faces, the caller passes the thicknesses;
+//! this module does not see the parts.
 
-use crate::boolean::api_brep::boolean_difference;
+use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::kernel::Kernel;
+use crate::limits::MAX_COORDINATE_MAGNITUDE;
 use crate::math::{Point3, Vec3};
-use crate::primitive::api_primitives::{create_cylinder, create_sphere};
+use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
+use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::primitive::api_primitives::create_sphere;
+use crate::sweep::api_brep::create_rotational_sweep;
 use crate::topology::brep::p5::transform;
 use crate::topology::Brep;
 
 const OP_SPOT: &str = "weld::spot";
 
-/// Core of the marks: diameter as a fraction of the spot diameter.
-pub const CORE: f64 = 0.55;
-/// Outer edge of the marks: diameter as a fraction of the spot diameter.
-pub const EDGE: f64 = 1.05;
-/// Thickness of the flat marks as a fraction of the spot diameter (0.03 mm at 5 mm).
-pub const MARK_THICKNESS: f64 = 0.006;
-/// Small ball ([`SpotLook::MarksSmallBall`]): diameter as a fraction of the spot diameter.
-pub const SMALL_BALL: f64 = 0.6;
-/// Concave pin ends ([`SpotLook::MarksPinConcaveEnds`]): dish depth as a fraction of the
-/// thinner sheet, held to the pin's radius ([`pin_dish_depth`]).
-pub const PIN_DISH: f64 = 0.3;
-/// Dent ([`SpotLook::Dent`]): height at the rim as a fraction of the spot diameter
-/// (0.20 mm at 5 mm).
-pub const DENT_RIM: f64 = 0.04;
-/// Dent: height in the middle as a fraction of the spot diameter (0.02 mm at 5 mm).
-pub const DENT_MIDDLE: f64 = 0.004;
-
-/// How a spot weld is drawn. Alexander's shortlist of 17 Nov 2026; the weld tool may
-/// offer them as a look option.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SpotLook {
-    /// The marks on both outer faces, nothing else.
-    Marks,
-    /// A ball of the spot diameter centred on the faying face, standing proud of both outer
-    /// faces; no marks.
-    Ball,
-    /// The marks and a ball of `0.6 d` centred on the faying face.
-    MarksSmallBall,
-    /// The marks and a pin of the core diameter through both sheets, flush with the
-    /// outer faces.
-    MarksThinPin,
-    /// The marks and a pin of the spot diameter through both sheets, both ends dished in by
-    /// `0.3` of the thinner sheet, at most a half sphere ([`pin_dish_depth`]).
-    MarksPinConcaveEnds,
-    /// The marks as a shallow inverted dome on each outer face: `0.04 d` high at the rim,
-    /// `0.004 d` in the middle, read as the electrode's dent. Lies on the face; the face
-    /// itself is not dented.
-    Dent,
+/// The top of a spot's marks.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MarkTop {
+    /// Flat, `thickness` (a fraction of `d`) off the face.
+    Flat {
+        /// Height off the face, as a fraction of `d`.
+        thickness: f64,
+    },
+    /// Dished: a sphere's cap, `rim` (a fraction of `d`) off the face at the edge's outer
+    /// radius and `middle` on the axis, `0 < middle < rim`. The face itself is not dented.
+    Dish {
+        /// Height off the face at the edge's outer radius, as a fraction of `d`.
+        rim: f64,
+        /// Height off the face on the axis, as a fraction of `d`.
+        middle: f64,
+    },
 }
 
-/// Which part of a look a body is, so the app can colour it.
+/// On which outer faces a spot's marks are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MarkFaces {
+    /// On both outer faces.
+    Both,
+    /// Only on an outer face the spot's ball does not reach (its radius is no more than
+    /// that sheet's thickness), so the spot shows on both faces whatever the sheets; on
+    /// both faces when the style has no ball.
+    WhereBallHidden,
+}
+
+/// The marks of a [`SpotStyle`]: three zones on an outer face, a core out to diameter
+/// `core`, a band out to `band` and an edge out to `edge` (fractions of `d`,
+/// `0 < core < band < edge`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpotMarks {
+    /// The core's diameter, as a fraction of `d`.
+    pub core: f64,
+    /// The band's outer diameter, as a fraction of `d`.
+    pub band: f64,
+    /// The edge's outer diameter, as a fraction of `d`.
+    pub edge: f64,
+    /// Flat or dished.
+    pub top: MarkTop,
+    /// On which outer faces.
+    pub faces: MarkFaces,
+}
+
+/// The ball of a [`SpotStyle`]: a sphere of diameter `diameter` (a fraction of `d`)
+/// centred on the faying face. It shows on an outer face only where its radius is more
+/// than that sheet's thickness.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpotBall {
+    /// The ball's diameter, as a fraction of `d`.
+    pub diameter: f64,
+}
+
+/// The pin of a [`SpotStyle`]: a cylinder of diameter `diameter` (a fraction of `d`)
+/// through both sheets, flush with the outer faces, each end dished in when `dish` is set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpotPin {
+    /// The pin's diameter, as a fraction of `d`.
+    pub diameter: f64,
+    /// Each end's dish depth as a fraction of the thickness of the sheet that end lies in,
+    /// held to the pin's radius: a deeper dish would need a sphere wider than the pin, so
+    /// it is held at a half sphere, whose rim meets the pin's wall tangentially (a knife
+    /// edge on the outer face).
+    pub dish: Option<f64>,
+}
+
+/// What a spot is drawn with: any of marks, a ball and a pin, each sized as fractions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpotStyle {
+    /// The marks on the outer faces.
+    pub marks: Option<SpotMarks>,
+    /// A ball centred on the faying face.
+    pub ball: Option<SpotBall>,
+    /// A pin through both sheets.
+    pub pin: Option<SpotPin>,
+}
+
+/// Which part of a style a body is, so the app can colour it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpotZone {
-    /// A mark's light core.
+    /// A mark's core.
     Core,
-    /// A mark's soft band.
+    /// A mark's band.
     Band,
-    /// A mark's thin dark edge.
+    /// A mark's edge.
     Edge,
-    /// A body through or between the sheets (ball, pin), or the ball of [`SpotLook::Ball`].
+    /// A body through or between the sheets: the ball or the pin.
     Inside,
 }
 
@@ -113,7 +164,7 @@ pub enum SpotSide {
 pub struct SpotPiece {
     /// The body.
     pub body: Brep,
-    /// Which part of the look it is.
+    /// Which part of the style it is.
     pub zone: SpotZone,
     /// Which face it lies on.
     pub side: SpotSide,
@@ -130,51 +181,53 @@ pub struct SpotWeld {
     pub upper_thickness: f64,
     /// Distance from the faying face to the lower sheet's outer face, against `normal`.
     pub lower_thickness: f64,
-    /// The spot diameter: a user setting; [`proposed_spot_diameter`] is the tool's proposal.
+    /// The spot diameter: a user setting; [`proposed_spot_diameter`] is a tool's proposal.
     pub diameter: f64,
-    /// How the spot is drawn.
-    pub look: SpotLook,
+    /// What the spot is drawn with.
+    pub style: SpotStyle,
 }
 
-/// The spot diameter the weld tool proposes: `5 √t`, `t` the thinner sheet in mm.
+/// The spot diameter a weld tool proposes: `5 √t`, `t` the thinner sheet in mm.
 ///
 /// Sources: TWI's FAQ on interface failures in resistance spot welds gives `5 √t` as the
 /// typical target diameter; the AWS C1.1 guidelines take the thinner sheet's parameters
 /// for sheets of different thickness. The user can always set another diameter.
-#[must_use]
-pub fn proposed_spot_diameter(upper_thickness: f64, lower_thickness: f64) -> f64 {
-    5.0 * upper_thickness.min(lower_thickness).sqrt()
-}
-
-/// The depth of each dished end of [`SpotLook::MarksPinConcaveEnds`]' pin: `0.3` of the
-/// thinner sheet, held to the pin's radius `d / 2`. A deeper dish would need a sphere wider
-/// than the pin, which cuts the pin short below the outer faces instead of dishing its end
-/// (a spot diameter under `0.6` of the thinner sheet); held there, the dish is a half
-/// sphere and the pin's rim stays on the faces.
-#[must_use]
-pub fn pin_dish_depth(diameter: f64, upper_thickness: f64, lower_thickness: f64) -> f64 {
-    (PIN_DISH * upper_thickness.min(lower_thickness)).min(diameter / 2.0)
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a thickness that is not finite and positive.
+pub fn proposed_spot_diameter(upper_thickness: f64, lower_thickness: f64) -> Result<f64> {
+    if !positive(upper_thickness) || !positive(lower_thickness) {
+        return Err(SolidError::invalid_input(
+            OP_SPOT,
+            "a sheet thickness that is not finite and positive",
+        ));
+    }
+    Ok(5.0 * upper_thickness.min(lower_thickness).sqrt())
 }
 
 /// The bodies of `spot`, placed at the spot.
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a non-finite point, a zero or non-finite normal, or a
-/// thickness or diameter that is not finite and positive; the errors of the primitives,
-/// booleans and the placement they come from.
+/// [`SolidError::InvalidInput`] for a non-finite point, a zero or non-finite normal, a
+/// thickness or diameter that is not finite and positive, a style with no piece or a
+/// fraction out of its range (see [`SpotStyle`]), and for sizes the model cannot hold: a
+/// diameter or sheet so small that a piece is thinner than the zone tolerance, or so large
+/// that the spot passes [`MAX_COORDINATE_MAGNITUDE`]. The errors of the sweeps, the sphere
+/// and the placement otherwise.
 pub fn spot_weld(k: &mut Kernel, spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
-    let positive = |v: f64| v.is_finite() && v > 0.0;
-    if !positive(spot.upper_thickness) || !positive(spot.lower_thickness) {
+    let (t_u, t_l, d) = (spot.upper_thickness, spot.lower_thickness, spot.diameter);
+    if !positive(t_u) || !positive(t_l) {
         return Err(SolidError::invalid_input(
             OP_SPOT,
-            "a sheet thickness that is not positive",
+            "a sheet thickness that is not finite and positive",
         ));
     }
-    if !positive(spot.diameter) {
+    if !positive(d) {
         return Err(SolidError::invalid_input(
             OP_SPOT,
-            "a spot diameter that is not positive",
+            "a spot diameter that is not finite and positive",
         ));
     }
     let finite = |p: Vec3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
@@ -184,150 +237,330 @@ pub fn spot_weld(k: &mut Kernel, spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
             "a spot point or normal that is not finite",
         ));
     }
-    let Some((_, z)) = spot.normal.length_and_unit() else {
+    if spot.normal.length_and_unit().is_none() {
         return Err(SolidError::invalid_input(OP_SPOT, "a zero normal"));
-    };
-    let mut pieces = local_pieces(k, spot)?;
-    let placement = placement(spot.at, z);
+    }
+    check_style(&spot.style)?;
+    let layout = Layout::of(spot);
+    check_sizes(k, spot, &layout)?;
+    let mut pieces = local_pieces(k, &layout)?;
+    let mut placement = Axis2Placement::default();
+    placement.set_step_canonical(spot.at, spot.normal, Vec3::X)?;
     for piece in &mut pieces {
         transform(k, &mut piece.body, &placement, None, false)?;
     }
     Ok(pieces)
 }
 
-/// The placement taking the local frame (faying face at the origin, normal along +Z) to
-/// the spot.
-fn placement(at: Point3, z: Vec3) -> Axis2Placement {
-    let axis = if z.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
-    let x = axis - z * axis.dot(z);
-    let x = x * (1.0 / x.length());
-    let y = z.cross(x);
-    Axis2Placement::new(at, x, y)
+fn positive(v: f64) -> bool {
+    v.is_finite() && v > 0.0
 }
 
-/// The pieces in the local frame: faying face `z = 0`, upper outer face `z = t_u`,
-/// lower outer face `z = -t_l`.
-fn local_pieces(k: &mut Kernel, spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
-    let d = spot.diameter;
-    let (t_u, t_l) = (spot.upper_thickness, spot.lower_thickness);
-    let at = |z: f64| Point3::new(0.0, 0.0, z);
+/// Refuses a style with no piece, or a fraction out of its range.
+fn check_style(style: &SpotStyle) -> Result<()> {
+    let bad = |reason| Err(SolidError::invalid_input(OP_SPOT, reason));
+    if style.marks.is_none() && style.ball.is_none() && style.pin.is_none() {
+        return bad("a spot style with no marks, ball or pin");
+    }
+    if let Some(m) = style.marks {
+        if !(positive(m.core) && positive(m.band) && positive(m.edge))
+            || m.core >= m.band
+            || m.band >= m.edge
+        {
+            return bad("spot marks whose diameters are not positive and increasing");
+        }
+        match m.top {
+            MarkTop::Flat { thickness } if !positive(thickness) => {
+                return bad("flat spot marks whose thickness is not positive");
+            }
+            MarkTop::Dish { rim, middle }
+                if !(positive(rim) && positive(middle) && middle < rim) =>
+            {
+                return bad("a spot dish whose middle is not between 0 and its rim");
+            }
+            _ => {}
+        }
+    }
+    if style.ball.is_some_and(|b| !positive(b.diameter)) {
+        return bad("a spot ball whose diameter is not positive");
+    }
+    if let Some(p) = style.pin {
+        if !positive(p.diameter) || p.dish.is_some_and(|c| !positive(c)) {
+            return bad("a spot pin whose diameter or dish is not positive");
+        }
+    }
+    Ok(())
+}
+
+/// The marks' top in model units.
+#[derive(Debug, Clone, Copy)]
+enum Top {
+    /// Flat, this high off the face.
+    Flat(f64),
+    /// Dished: `rim` and `middle` off the face, the sphere's radius `rs` and the height of
+    /// its centre off the face.
+    Dish {
+        rim: f64,
+        middle: f64,
+        rs: f64,
+        centre: f64,
+    },
+}
+
+/// Every size of a spot in model units, local frame: faying face `z = 0`, upper outer face
+/// `z = t_u`, lower outer face `z = -t_l`.
+struct Layout {
+    t_u: f64,
+    t_l: f64,
+    /// Zone radii: core, band, edge.
+    zones: Option<[f64; 3]>,
+    /// The marks' top.
+    mark_top: Option<Top>,
+    /// Marks on the upper and on the lower face.
+    marks_on: [bool; 2],
+    ball: Option<f64>,
+    pin: Option<PinLayout>,
+}
+
+/// A pin's radius, and each end's dish (upper, lower): its depth and its sphere's radius.
+#[derive(Debug, Clone, Copy)]
+struct PinLayout {
+    r: f64,
+    ends: [Option<(f64, f64)>; 2],
+}
+
+impl Layout {
+    fn of(spot: &SpotWeld) -> Self {
+        let (d, t_u, t_l) = (spot.diameter, spot.upper_thickness, spot.lower_thickness);
+        let style = &spot.style;
+        let ball = style.ball.map(|b| b.diameter * d / 2.0);
+        let zones = style
+            .marks
+            .map(|m| [m.core * d / 2.0, m.band * d / 2.0, m.edge * d / 2.0]);
+        let mark_top = style.marks.map(|m| match m.top {
+            MarkTop::Flat { thickness } => Top::Flat(thickness * d),
+            MarkTop::Dish { rim, middle } => {
+                let (rim, middle) = (rim * d, middle * d);
+                let ro = m.edge * d / 2.0;
+                let c = rim - middle;
+                let rs = (ro * ro + c * c) / (2.0 * c);
+                Top::Dish {
+                    rim,
+                    middle,
+                    rs,
+                    centre: middle + rs,
+                }
+            }
+        });
+        let shows = |t: f64| ball.is_some_and(|r| r > t);
+        let marks_on = match style.marks.map(|m| m.faces) {
+            None => [false, false],
+            Some(MarkFaces::Both) => [true, true],
+            Some(MarkFaces::WhereBallHidden) => [!shows(t_u), !shows(t_l)],
+        };
+        let pin = style.pin.map(|p| {
+            let r = p.diameter * d / 2.0;
+            let end = |t: f64| {
+                p.dish.map(|f| {
+                    let c = (f * t).min(r);
+                    (c, (r * r + c * c) / (2.0 * c))
+                })
+            };
+            PinLayout {
+                r,
+                ends: [end(t_u), end(t_l)],
+            }
+        });
+        Self {
+            t_u,
+            t_l,
+            zones,
+            mark_top,
+            marks_on,
+            ball,
+            pin,
+        }
+    }
+
+    /// Every length the spot builds with: its pieces' radii, heights, widths and depths.
+    fn lengths(&self) -> Vec<f64> {
+        let mut out = vec![self.t_u, self.t_l];
+        if let Some([core, band, edge]) = self.zones {
+            out.extend([core, band - core, edge - band, edge]);
+        }
+        match self.mark_top {
+            Some(Top::Flat(h)) => out.push(h),
+            Some(Top::Dish {
+                rim, middle, rs, ..
+            }) => out.extend([rim, middle, rim - middle, rs]),
+            None => {}
+        }
+        out.extend(self.ball);
+        if let Some(PinLayout { r, ends }) = self.pin {
+            out.push(r);
+            for (c, rs) in ends.into_iter().flatten() {
+                out.extend([c, rs]);
+            }
+        }
+        out
+    }
+}
+
+/// Refuses sizes the model cannot hold, before any piece is built (a primitive would
+/// refuse them with its own, misleading reason).
+fn check_sizes(k: &Kernel, spot: &SpotWeld, layout: &Layout) -> Result<()> {
+    let lengths = layout.lengths();
+    let largest = lengths.iter().fold(0.0_f64, |m, &l| m.max(l));
+    let reach = spot.at.x.abs().max(spot.at.y.abs()).max(spot.at.z.abs()) + largest;
+    if lengths.iter().any(|l| !l.is_finite()) || reach > MAX_COORDINATE_MAGNITUDE {
+        return Err(SolidError::invalid_input(
+            OP_SPOT,
+            "a spot diameter or sheet so large that the spot passes the model's size limit",
+        ));
+    }
+    let smallest = lengths.iter().fold(f64::INFINITY, |m, &l| m.min(l));
+    if smallest < k.tolerances.zone_tol_3d {
+        return Err(SolidError::invalid_input(
+            OP_SPOT,
+            "a spot diameter or sheet so small that a piece of the spot is thinner than the zone tolerance",
+        ));
+    }
+    Ok(())
+}
+
+/// The pieces in the local frame.
+fn local_pieces(k: &mut Kernel, layout: &Layout) -> Result<Vec<SpotPiece>> {
+    let (t_u, t_l) = (layout.t_u, layout.t_l);
     let mut pieces = Vec::new();
     let inside = |body| SpotPiece {
         body,
         zone: SpotZone::Inside,
         side: SpotSide::Through,
     };
-    match spot.look {
-        SpotLook::Marks | SpotLook::Ball | SpotLook::Dent => {}
-        SpotLook::MarksSmallBall => {
-            pieces.push(inside(create_sphere(k, at(0.0), SMALL_BALL * d / 2.0)?));
-        }
-        SpotLook::MarksThinPin => {
-            pieces.push(inside(create_cylinder(
-                k,
-                at(-t_l),
-                CORE * d / 2.0,
-                t_u + t_l,
-            )?));
-        }
-        SpotLook::MarksPinConcaveEnds => {
-            let r = d / 2.0;
-            let c = pin_dish_depth(d, t_u, t_l);
-            let rs = (r * r + c * c) / (2.0 * c);
-            let mut pin = create_cylinder(k, at(-t_l), r, t_u + t_l)?;
-            let upper = create_sphere(k, at(t_u - c + rs), rs)?;
-            pin = boolean_difference(k, pin, upper)?;
-            let lower = create_sphere(k, at(-t_l + c - rs), rs)?;
-            pin = boolean_difference(k, pin, lower)?;
-            pieces.push(inside(pin));
-        }
+    if let Some(r) = layout.ball {
+        pieces.push(inside(create_sphere(k, Point3::new(0.0, 0.0, 0.0), r)?));
     }
-    if spot.look == SpotLook::Ball {
-        pieces.push(inside(create_sphere(k, at(0.0), d / 2.0)?));
-        return Ok(pieces);
+    if let Some(PinLayout {
+        r,
+        ends: [upper, lower],
+    }) = layout.pin
+    {
+        pieces.push(inside(pin(k, r, t_u, t_l, upper, lower)?));
     }
-    for (side, face_z, sense) in [(SpotSide::Upper, t_u, 1.0), (SpotSide::Lower, -t_l, -1.0)] {
-        if spot.look == SpotLook::Dent {
-            pieces.extend(dent(k, d, face_z, sense, side)?);
-        } else {
-            pieces.extend(marks(k, d, face_z, sense, side)?);
+    if let (Some(zones), Some(top)) = (layout.zones, layout.mark_top) {
+        let faces = [(SpotSide::Upper, t_u, 1.0), (SpotSide::Lower, -t_l, -1.0)];
+        for ((side, face, sense), on) in faces.into_iter().zip(layout.marks_on) {
+            if !on {
+                continue;
+            }
+            let mut inner = 0.0;
+            for (outer, zone) in
+                zones
+                    .into_iter()
+                    .zip([SpotZone::Core, SpotZone::Band, SpotZone::Edge])
+            {
+                let body = zone_body(k, inner, outer, face, sense, top)?;
+                pieces.push(SpotPiece { body, zone, side });
+                inner = outer;
+            }
         }
     }
     Ok(pieces)
 }
 
-/// The three zones as (inner diameter, outer diameter) fractions of the spot diameter.
-const ZONES: [(f64, f64, SpotZone); 3] = [
-    (0.0, CORE, SpotZone::Core),
-    (CORE, 1.0, SpotZone::Band),
-    (1.0, EDGE, SpotZone::Edge),
-];
+/// The line from `a` to `b`, each `(ρ, z)` in the profile plane (local XZ).
+fn line(a: (f64, f64), b: (f64, f64)) -> Result<Curve> {
+    let p = |(r, z): (f64, f64)| Point3::new(r, 0.0, z);
+    Ok(Curve::from(BSplineCurve::create_line_segment(
+        3,
+        p(a),
+        p(b),
+    )?))
+}
 
-/// A zone's flat body of `height`, its base on `base_z`: a disc for the core, a ring
-/// otherwise.
+/// The arc of radius `rs` about the axis point `z = centre` in the profile plane, from
+/// angle `from` to `to` (degrees from the radial direction towards +Z). The angles must
+/// ascend: an arc given from the larger angle makes a revolved ring whose loops fail the
+/// B-rep check.
+fn arc(centre: f64, rs: f64, from: f64, to: f64) -> Result<Curve> {
+    let mut frame = Axis2Placement::default();
+    frame.set_canonical(Point3::new(0.0, 0.0, centre), Vec3::X, Vec3::Z)?;
+    Ok(Curve::from(BSplineCurve::create_circle_segment(
+        3,
+        &frame,
+        rs,
+        from.min(to),
+        from.max(to),
+        NurbCircleParam::Quadratic,
+    )?))
+}
+
+/// The body swept by revolving the closed profile `curves` once about the local Z axis.
+fn revolve(k: &mut Kernel, curves: &[Curve]) -> Result<Brep> {
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    create_rotational_sweep(k, &refs, Point3::new(0.0, 0.0, 0.0), Vec3::Z, 360.0, true)
+}
+
+/// A mark zone between radii `inner` and `outer` on the outer face at `face`, standing
+/// out along `sense`: flat, or dished by a sphere about the axis.
 fn zone_body(
     k: &mut Kernel,
-    d: f64,
     inner: f64,
     outer: f64,
-    base_z: f64,
-    height: f64,
-) -> Result<Brep> {
-    let base = Point3::new(0.0, 0.0, base_z);
-    let disc = create_cylinder(k, base, outer * d / 2.0, height)?;
-    if inner <= 0.0 {
-        return Ok(disc);
-    }
-    let hole = create_cylinder(
-        k,
-        Point3::new(0.0, 0.0, base_z - height),
-        inner * d / 2.0,
-        3.0 * height,
-    )?;
-    boolean_difference(k, disc, hole)
-}
-
-/// The flat marks on the outer face at `face_z`, standing out along `sense`.
-fn marks(
-    k: &mut Kernel,
-    d: f64,
-    face_z: f64,
+    face: f64,
     sense: f64,
-    side: SpotSide,
-) -> Result<Vec<SpotPiece>> {
-    let h = MARK_THICKNESS * d;
-    let base_z = if sense > 0.0 { face_z } else { face_z - h };
-    ZONES
-        .iter()
-        .map(|&(inner, outer, zone)| {
-            Ok(SpotPiece {
-                body: zone_body(k, d, inner, outer, base_z, h)?,
-                zone,
-                side,
-            })
-        })
-        .collect()
+    top: Top,
+) -> Result<Brep> {
+    let mut curves = vec![line((inner, face), (outer, face))?];
+    match top {
+        Top::Flat(h) => {
+            let z = face + sense * h;
+            curves.push(line((outer, face), (outer, z))?);
+            curves.push(line((outer, z), (inner, z))?);
+            curves.push(line((inner, z), (inner, face))?);
+        }
+        Top::Dish { rs, centre, .. } => {
+            // the dish is the sphere's side nearest the face
+            let height = |rho: f64| face + sense * (centre - (rs * rs - rho * rho).sqrt());
+            let angle = |rho: f64| -sense * (rho / rs).acos().to_degrees();
+            let centre = face + sense * centre;
+            curves.push(line((outer, face), (outer, height(outer)))?);
+            curves.push(arc(centre, rs, angle(inner), angle(outer))?);
+            curves.push(line((inner, height(inner)), (inner, face))?);
+        }
+    }
+    revolve(k, &curves)
 }
 
-/// The dent on the outer face at `face_z`: each zone cut down by one sphere so the top is
-/// dished, `DENT_RIM d` high at the edge's outer rim and `DENT_MIDDLE d` in the middle.
-fn dent(k: &mut Kernel, d: f64, face_z: f64, sense: f64, side: SpotSide) -> Result<Vec<SpotPiece>> {
-    let (rim, middle) = (DENT_RIM * d, DENT_MIDDLE * d);
-    let ro = EDGE * d / 2.0;
-    let c = rim - middle;
-    let rs = (ro * ro + c * c) / (2.0 * c);
-    let base_z = if sense > 0.0 { face_z } else { face_z - rim };
-    let centre = Point3::new(0.0, 0.0, face_z + sense * (middle + rs));
-    ZONES
-        .iter()
-        .map(|&(inner, outer, zone)| {
-            let block = zone_body(k, d, inner, outer, base_z, rim)?;
-            let sphere = create_sphere(k, centre, rs)?;
-            Ok(SpotPiece {
-                body: boolean_difference(k, block, sphere)?,
-                zone,
-                side,
-            })
-        })
-        .collect()
+/// The pin of radius `r` from `z = -t_l` to `z = t_u`, each end flat or dished by the
+/// `(depth, sphere radius)` given.
+fn pin(
+    k: &mut Kernel,
+    r: f64,
+    t_u: f64,
+    t_l: f64,
+    upper: Option<(f64, f64)>,
+    lower: Option<(f64, f64)>,
+) -> Result<Brep> {
+    let mut curves = vec![line((r, -t_l), (r, t_u))?];
+    match upper {
+        None => curves.push(line((r, t_u), (0.0, t_u))?),
+        Some((c, rs)) => {
+            let angle = -(r / rs).acos().to_degrees();
+            curves.push(arc(t_u - c + rs, rs, -90.0, angle)?);
+        }
+    }
+    let (top, bottom) = (
+        upper.map_or(t_u, |(c, _)| t_u - c),
+        lower.map_or(-t_l, |(c, _)| -t_l + c),
+    );
+    curves.push(line((0.0, top), (0.0, bottom))?);
+    match lower {
+        None => curves.push(line((0.0, -t_l), (r, -t_l))?),
+        Some((c, rs)) => {
+            let angle = (r / rs).acos().to_degrees();
+            curves.push(arc(-t_l + c - rs, rs, angle, 90.0)?);
+        }
+    }
+    revolve(k, &curves)
 }
