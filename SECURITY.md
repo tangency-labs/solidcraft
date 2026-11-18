@@ -36,6 +36,8 @@ access to your computer or your account. For example:
 - the web app reaches beyond the page's own storage
 - a release package or an update can be tampered with
 - an API key or token gets sent somewhere it shouldn't go
+- `solidcraft-cli serve` (the server edition, [docs/server-edition.md](docs/server-edition.md)) answers a
+  request without its token, or a request or an MCP tool call reaches a file outside its data folder
 
 ## What to report as a normal bug
 
@@ -44,8 +46,10 @@ still worth fixing, but they aren't security issues:
 
 - anything that needs a program already running on your computer, or the control token. A program
   running as you can already do what you can.
-- MCP's allowed folders. They guard against accidents, they aren't a security boundary, and an agent
-  with a shell of its own can already reach those files. Getting around them isn't a vulnerability.
+- MCP's allowed folders on your own computer (`solidcraft-cli mcp`). They guard against accidents, they
+  aren't a security boundary, and an agent with a shell of its own can already reach those files.
+  Getting around them isn't a vulnerability. The data folder of `solidcraft-cli serve` is the
+  exception: its clients have no shell, so there it is a boundary.
 - crashes, hangs, or heavy memory or CPU use, unless they also lead to something in the list above
 - anything that only happens in an unusual setup you'd have to choose on purpose
 

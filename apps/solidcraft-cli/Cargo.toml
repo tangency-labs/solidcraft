@@ -28,6 +28,10 @@ solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }
+# `serve`: session ids from the operating system's random numbers (the control token's maker).
+solidcraft-control = { workspace = true }
+# `serve`: the token compared as fixed-length digests.
+sha2 = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

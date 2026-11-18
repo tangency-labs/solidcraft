@@ -21,6 +21,8 @@
 //! solidcraft-cli mcp [--headless] [--in design|script] [--connect HOST:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]
 //!                    [--param-check off|warn|strict] [--compact]
 //!                                                             MCP server on stdio (docs/mcp.md)
+//! solidcraft-cli serve --data DIR [--listen 127.0.0.1:8787] [--web DIR] [--token-file FILE] [--allow-plugins] ...
+//!                                                             the server edition: MCP over HTTP, the data folder, the browser app (docs/server-edition.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
 //! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
 //! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases] run the plugin's tests/*.json on the real host
@@ -50,6 +52,7 @@ mod preview;
 mod profiling;
 mod recipe;
 mod render;
+mod serve;
 mod spatial;
 
 use std::process::ExitCode;
@@ -145,6 +148,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "fuzz", usage: USAGE_FUZZ, listed: true },
     Command { name: "fuzz-one", usage: USAGE_FUZZ_ONE, listed: false },
     Command { name: "mcp", usage: USAGE_MCP, listed: true },
+    Command { name: "serve", usage: serve::USAGE, listed: true },
     Command { name: "plugin", usage: USAGE_PLUGIN, listed: true },
     Command { name: "crashes", usage: USAGE_CRASHES, listed: true },
     Command { name: "licences", usage: USAGE_LICENCES, listed: true },
@@ -224,6 +228,11 @@ fn main() -> ExitCode {
         Some("fuzz-one") => fuzz::one(&args[1..]),
         Some("mcp") => {
             let result = cmd_mcp(&args[1..]);
+            solidcraft_mcp::cleanup_scratch_dir();
+            result
+        }
+        Some("serve") => {
+            let result = serve::run(&args[1..]);
             solidcraft_mcp::cleanup_scratch_dir();
             result
         }
