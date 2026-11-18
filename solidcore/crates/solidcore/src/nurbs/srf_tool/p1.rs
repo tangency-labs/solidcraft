@@ -48,7 +48,7 @@ use crate::nurbs::math::CPoint;
 use crate::nurbs::srf_basic::{Direction, Surface};
 
 /// Snap tolerance of [`extract_patch`] (hard coded upstream).
-const PATCH_SNAP_TOL: f64 = 1.0e-08;
+pub(crate) const PATCH_SNAP_TOL: f64 = 1.0e-08;
 
 /// A control net, `Pw[i][j]`.
 pub(super) type Net = Vec<Vec<CPoint>>;
@@ -1262,7 +1262,7 @@ pub fn insert_knots(sur: &Surface, x: &[f64], dir: Direction) -> Result<Surface>
 
 /// Snaps `x` to the first of `knots[0..k]` within [`PATCH_SNAP_TOL`]; returns whether
 /// it snapped.
-fn snap(x: &mut f64, knots: &[f64], k: isize) -> bool {
+pub(crate) fn snap(x: &mut f64, knots: &[f64], k: isize) -> bool {
     for &kn in knots.iter().take(usize::try_from(k).unwrap_or(0)) {
         if *x > kn - PATCH_SNAP_TOL && *x < kn + PATCH_SNAP_TOL {
             *x = kn;

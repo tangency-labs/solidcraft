@@ -34,7 +34,7 @@ use serde_json::{Value, json};
 use super::check::{located, whole};
 use super::component::{ExprMatrixParam, MatrixTolerance};
 use super::diagnostics::ProfileReport;
-use super::file::{HistoryParam, NamesParam, UpParam};
+use super::file::{HistoryParam, NamesParam, ReaderParam, UpParam};
 use super::types::not_blank_pattern;
 
 /// What `folder` says when it is neither true nor false, as `step_options` has it.
@@ -123,6 +123,10 @@ pub struct InsertStepKeys {
     #[serde(default, deserialize_with = "flatten_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub flatten: Option<bool>,
+    /// For a STEP (`.step`, `.stp`), FreeCAD or Rhino file (ignored for other files): which
+    /// reader reads it, `solidcraft` (the default) or `cadmpeg`.
+    #[serde(default)]
+    pub reader: Option<ReaderParam>,
     /// Where the import goes in the active component, as a rigid move applied after `up`: a
     /// row-major 3×4 (12 numbers) or 4×4 (16 numbers) matrix, flat or as rows, as
     /// `occurrence.move` takes it; its translation column may be length expressions that name
@@ -145,7 +149,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_step_path(path) {
         // A file of another kind is refused before any other key is read.
-        for key in ["name", "up", "names", "folder", "history", "flatten", "matrix", "tolerance"] {
+        for key in ["name", "up", "names", "folder", "history", "flatten", "reader", "matrix", "tolerance"] {
             keys.remove(key);
         }
         return;

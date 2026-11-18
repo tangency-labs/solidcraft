@@ -2543,6 +2543,43 @@ mod tests {
         assert!(out.files.iter().all(|f| f.kind != "design"));
     }
 
+    /// A failed importer reads a separate file; the report must never suggest the unrelated
+    /// design that happens to be open. Keep the filename and explicit importer, but never
+    /// expose option values or full local paths in recent steps (#18760).
+    #[test]
+    fn failed_plugin_import_report_omits_unrelated_design_and_keeps_safe_context() {
+        let mut app = app();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"PrivateWidget"})).unwrap();
+        let params = json!({
+            "path":"/Users/testuser/private/part.xyz",
+            "format":"example.import",
+            "options":{"scale":10,"api_key":"private-secret-123"}
+        });
+        ticket::record_step(&mut app, "file.import", &Err("importer refused the file".into()));
+        ticket::step_params(&mut app, "file.import", &params);
+        let ev = ticket::evidence(&app, None, None, None);
+        assert!(ev.design.is_none(), "an unrelated design cannot replay a failed importer");
+        assert_eq!(ev.design_from, Some("report.design_unrelated_import"));
+        assert_eq!(ev.session["session_start"], "new", "an unrelated design did not come from recovery");
+        assert!(ev.session.get("design_sha256").is_none(), "do not hash an unrelated design");
+        let step = ev.steps.last().unwrap();
+        assert_eq!(step["command"], "file.import");
+        assert_eq!(step["file"], "part.xyz");
+        assert_eq!(step["importer"], "example.import");
+        assert_eq!(step["option_keys"], json!(["api_key", "scale"]));
+        let text = step.to_string();
+        assert!(!text.contains("private-secret-123") && !text.contains("/Users/testuser/") && !text.contains("PrivateWidget"), "{text}");
+        let out = payload::build(&form(), payload::Ticks { design: true, repro: true, ..Default::default() }, &ev, "test");
+        assert!(out.files.iter().all(|file| file.kind != "design"), "even ticking Design cannot send an unrelated file");
+
+        // A failed modeling command still offers its design. A successful import step
+        // also does not suppress design attachments to a later report.
+        let failed = payload::Failing { command: Some("solid.fillet".into()), params: None, error: "too large".into(), origin: None, code: None };
+        assert!(ticket::evidence(&app, None, Some(failed), None).design.is_some());
+        app.issue_report.steps.back_mut().unwrap()["ok"] = json!(true);
+        assert!(ticket::evidence(&app, None, None, None).design.is_some());
+    }
+
     /// Frames until `done` says stop, collecting the addresses opened in the browser.
     fn frames_until(app: &mut SolveApp, ctx: &egui::Context, mut done: impl FnMut(&SolveApp) -> bool) -> Vec<String> {
         let mut opened = Vec::new();
@@ -2612,7 +2649,7 @@ mod tests {
         frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
         // The step that went unanswered is named (#17932), after one more try.
         assert!(
-            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at POST /api/drafts")),
+            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at create report draft (POST /api/drafts)")),
             "{:?}",
             app.tickets.outcome
         );
@@ -2662,7 +2699,7 @@ mod tests {
         assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened(draft_page())));
         assert!(tickets::queue::list(&dir).is_empty(), "nothing kept");
         assert!(
-            app.session.log.iter().any(|l| l.contains("no answer to PUT /api/uploads/") && l.contains("timeout: global")),
+            app.session.log.iter().any(|l| l.contains("no answer to upload part 1 of log.txt (PUT /api/uploads/") && l.contains("timeout: global")),
             "{:?}",
             app.session.log
         );

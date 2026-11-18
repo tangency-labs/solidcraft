@@ -24,7 +24,7 @@ neg_cmp_op_on_partial_ord = "allow"
 [dependencies]
 # The model read (Apache-2.0); pinned to the release SolidCraft links, whose wire form and
 # conventions this reader was written against.
-cadmpeg-ir = "=0.6.7"
+cadmpeg-ir = "=0.6.12"
 solidcore = { path = "../solidcore" }
 solidcore-ops = { path = "../solidcore-ops" }
 solidcore-record = { path = "../solidcore-record" }
@@ -32,5 +32,5 @@ solidcore-step = { path = "../solidcore-step" }
 
 # cadmpeg's own example models (a unit cube) as test input.
 [dev-dependencies]
-cadmpeg-ir = { version = "=0.6.7", features = ["examples"] }
+cadmpeg-ir = { version = "=0.6.12", features = ["examples"] }
 serde_json = "1"
