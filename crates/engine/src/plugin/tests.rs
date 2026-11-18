@@ -1747,6 +1747,38 @@ mod install_zip {
     }
 
     #[test]
+    fn a_legacy_plugin_without_effects_installs_and_reads_back_exactly_as_before() {
+        let (mut s, root) = session("legacy-effects");
+        let path = put(&root, "gears.zip", &gears("0.1.0"));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["capabilities"], json!(["commands@0.1"]));
+        assert_eq!(reply["entries"], json!(["gears.make"]));
+        assert!(reply.get("effects").is_none(), "{reply}");
+        let package = read_package(&root.join("plugins/gears").to_string_lossy()).unwrap();
+        assert!(!serde_json::to_string(&package.manifest).unwrap().contains("effects"));
+        let list = s.execute("plugin.list", &json!({})).unwrap();
+        assert!(list["plugins"][0]["manifest"].get("effects").is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_effect_plugin_installs_and_an_unknown_kind_is_refused_at_install() {
+        let (mut s, root) = session("effects");
+        let text = |kind: &str| {
+            serde_json::to_vec(&json!({"id": "wave", "name": "Wave", "version": "1.0.0", "capabilities": ["effects@0.1"],
+                "effects": [{"id": "rgb-wave", "name": "RGB wave", "kind": kind}]}))
+            .unwrap()
+        };
+        let path = put(&root, "wave.zip", &zip(&[("plugin.json", &text("hue-wave")[..])]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["effects"], json!(["wave/rgb-wave"]));
+        let bad = put(&root, "bad.zip", &zip(&[("plugin.json", &text("neon-rain")[..])]));
+        let err = s.execute("plugin.install", &json!({"path": bad})).unwrap_err().to_string();
+        assert!(err.contains("needs effect kind neon-rain; update SolidCraft or the plugin"), "{err}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_zip_replaced_after_review_is_refused_before_files_or_grants_are_written() {
         let (mut s, root) = session("swapped-after-review");
         let path = requested_package(&root);
