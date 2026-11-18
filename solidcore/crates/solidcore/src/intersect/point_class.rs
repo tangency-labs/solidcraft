@@ -2749,7 +2749,6 @@ pub const fn space_unbend_is_kind_of(t: i64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::UpstreamFixes;
     use crate::math::Vec2;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::surface::plane::Plane;
@@ -2958,80 +2957,42 @@ mod tests {
         p
     }
 
+    /// An object point with no single drop point on the surface, even within a hundred
+    /// times its tolerance (WR-58), has no in-surface measure: the answer is the
+    /// classification's stored gap, not `SM_ERR` read as a distance and not an error.
     #[test]
-    fn wr58_flag_default_off_and_lookup_by_name() {
-        let mut k = Kernel::default();
-        assert!(!k.fixes.point_class_gap_3d_propagates_no_drop_error);
-        assert!(UpstreamFixes::all().point_class_gap_3d_propagates_no_drop_error);
-        assert!(UpstreamFixes::NAMES.contains(&"point_class_gap_3d_propagates_no_drop_error"));
-
-        let slot = k
-            .fixes
-            .flag_mut("point_class_gap_3d_propagates_no_drop_error")
-            .expect("flag should be registered in UpstreamFixes");
-        *slot = true;
-        assert!(k.fixes.point_class_gap_3d_propagates_no_drop_error);
-    }
-
-    #[test]
-    fn wr58_gap_3d_far_from_bounded_plane_and_bspline_propagates_sm_err_when_enabled() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.point_class_gap_3d_propagates_no_drop_error = true;
-
-        let p = classified_point();
+    fn wr58_gap_3d_without_a_drop_point_is_the_stored_gap() {
+        let k = Kernel::default();
+        let mut p = classified_point();
+        p.set_gap_3d(0.375);
         let plane = bounded_unit_plane();
         let bspline = bounded_unit_bspline();
 
         for surface in [&plane, &bspline] {
+            // far above the patch, and far beside it in its plane
             for pt in [Point3::new(0.0, 0.0, 50.0), Point3::new(50.0, 0.5, 0.0)] {
-                let geo = PointGeo(pt);
-                assert_eq!(
-                    p.gap_3d(&k_default, &geo, Some(surface)).unwrap(),
-                    f64::from(SM_ERR),
-                );
-                let err = p
-                    .gap_3d(&k_fixed, &geo, Some(surface))
-                    .expect_err("opt-in WR-58 should return Err(SM_ERR) instead of 1001.0");
-                assert_eq!(
-                    err,
-                    SolidError::intersect_failed(
-                        OP_GAP,
-                        "no single nearest point on the face's surface was found within 100 times its tolerance",
-                    )
-                );
+                let gap = p.gap_3d(&k, &PointGeo(pt), Some(surface)).unwrap();
+                assert_eq!(gap.to_bits(), 0.375_f64.to_bits());
             }
         }
+
+        // A B-spline surface without a NURB has no point for any object point to drop to.
+        let empty_bspline = Surface::from(BSplineSurface::new());
+        let geo = PointGeo(Point3::new(0.5, 0.5, 0.0));
+        let gap = p.gap_3d(&k, &geo, Some(&empty_bspline)).unwrap();
+        assert_eq!(gap.to_bits(), 0.375_f64.to_bits());
     }
 
     #[test]
-    fn wr58_gap_3d_propagates_surface_solve_and_obj_point_errors_when_enabled() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.point_class_gap_3d_propagates_no_drop_error = true;
-
-        // 1. Failing surface drop (empty BSplineSurface without NURB -> SM_ERR from surface drop).
-        let p = classified_point();
-        let empty_bspline = Surface::from(BSplineSurface::new());
+    fn wr58_gap_3d_passes_on_object_point_errors() {
+        let k = Kernel::default();
         let geo = PointGeo(Point3::new(0.5, 0.5, 0.0));
-        assert_eq!(
-            p.gap_3d(&k_default, &geo, Some(&empty_bspline)).unwrap(),
-            f64::from(SM_ERR),
-        );
-        let solve_err = p
-            .gap_3d(&k_fixed, &geo, Some(&empty_bspline))
-            .expect_err("opt-in WR-58 should propagate surface solve failure");
-        assert_eq!(solve_err.sm_status(), Some(SM_ERR));
 
-        // 2. Failing object-point lookup (unclassified PointClassification: default drops
-        // Vec3::UNDEF near (0, 0, 0) onto the unit plane, fabricating ~0.0; opt-in propagates
-        // find_obj_point_3d's SM_ERR).
+        // An unclassified point has no object point: no gap is made up from `Vec3::UNDEF`.
         let unset = pc();
-        let plane = bounded_unit_plane();
-        assert!(unset.gap_3d(&k_default, &geo, Some(&plane)).unwrap() <= 1.0e-50);
         let obj_err = unset
-            .gap_3d(&k_fixed, &geo, Some(&plane))
-            .expect_err("opt-in WR-58 should propagate find_obj_point_3d failure");
+            .gap_3d(&k, &geo, Some(&bounded_unit_plane()))
+            .expect_err("a failing object-point lookup is passed on");
         assert_eq!(
             obj_err,
             SolidError::intersect_failed(
@@ -3042,37 +3003,28 @@ mod tests {
     }
 
     #[test]
-    fn wr58_gap_3d_within_drop_range_and_without_surface_unchanged() {
-        let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.point_class_gap_3d_propagates_no_drop_error = true;
-
+    fn wr58_gap_3d_within_drop_range_and_without_surface() {
+        let k = Kernel::default();
         let mut p = classified_point();
+        // a stored gap unlike either in-surface measure: neither answer may come from it
+        p.set_gap_3d(0.375);
         let plane = bounded_unit_plane();
 
         // Within 1x zone tolerance (5e-6 <= 1e-5): purely normal offset has zero tangential gap.
         let geo_1x = PointGeo(Point3::new(0.25, 0.75, 5.0e-6));
-        let g_def_1x = p.gap_3d(&k_default, &geo_1x, Some(&plane)).unwrap();
-        let g_fix_1x = p.gap_3d(&k_fixed, &geo_1x, Some(&plane)).unwrap();
-        assert_eq!(g_def_1x, 0.0);
-        assert_eq!(g_def_1x.to_bits(), g_fix_1x.to_bits());
+        assert_eq!(p.gap_3d(&k, &geo_1x, Some(&plane)).unwrap(), 0.0);
 
         // Outside 1x zone tolerance (~1.044e-4 > 1e-5) but within 100x retry (<= 1e-3):
         // clamps to (1.0, 0.5, 0.0) and strips normal z = 3e-5, leaving tangential gap 1e-4.
         let geo_100x = PointGeo(Point3::new(1.0 + 1.0e-4, 0.5, 3.0e-5));
-        let g_def_100x = p.gap_3d(&k_default, &geo_100x, Some(&plane)).unwrap();
-        let g_fix_100x = p.gap_3d(&k_fixed, &geo_100x, Some(&plane)).unwrap();
-        assert!((g_def_100x - 1.0e-4).abs() < 1.0e-15);
-        assert_eq!(g_def_100x.to_bits(), g_fix_100x.to_bits());
+        let g_100x = p.gap_3d(&k, &geo_100x, Some(&plane)).unwrap();
+        assert!((g_100x - 1.0e-4).abs() < 1.0e-15);
 
         // Cached gap without an optional surface (`opt_surface = None`) returns stored gap.
-        p.set_gap_3d(0.375);
-        assert_eq!(p.gap_3d(&k_default, &geo_1x, None).unwrap(), 0.375);
-        assert_eq!(p.gap_3d(&k_fixed, &geo_1x, None).unwrap(), 0.375);
+        assert_eq!(p.gap_3d(&k, &geo_1x, None).unwrap(), 0.375);
 
         let mut unset = pc();
         unset.set_gap_3d(0.625);
-        assert_eq!(unset.gap_3d(&k_default, &NoGeometry, None).unwrap(), 0.625);
-        assert_eq!(unset.gap_3d(&k_fixed, &NoGeometry, None).unwrap(), 0.625);
+        assert_eq!(unset.gap_3d(&k, &NoGeometry, None).unwrap(), 0.625);
     }
 }
