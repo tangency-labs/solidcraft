@@ -229,6 +229,65 @@ so put a reverse proxy with a certificate in front (Caddy, Traefik, nginx); the 
 any URL path, such as `https://example.com/cad/`. To build the image without Compose, from the
 repository root: `docker build -f packaging/docker/Dockerfile -t solidcraft-web .`
 
+### The server edition: designs in a folder on your own server
+
+The server edition serves the web app from `solidcraft-cli serve`, with the designs in a folder on
+that machine, any folder you choose: a git checkout works, and saves go back into its files in
+place, so `git status` shows them as ordinary changes. Everyone with the token opens and saves
+there from a browser, and AI agents can model in the same folder over MCP. It is open source and
+self-hosted, like the rest of SolidCraft.
+
+**Without Docker**, on the machine that has the folder. You need `solidcraft-cli` (in every
+release package) and the release's `solidcraft-web-<version>.zip`, unzipped (here into
+`~/solidcraft-web`):
+
+```sh
+umask 077; openssl rand -hex 32 > ~/.solidcraft-token
+solidcraft-cli serve --dir ~/Sources/pi-case/mechanical --web ~/solidcraft-web --token-file ~/.solidcraft-token
+```
+
+It listens on `127.0.0.1:8787`, this computer only. `--dir` can name one design instead
+(`--dir ~/Sources/pi-case/mechanical/case.sc`): its folder is served and that design opens. To
+reach it from your other machines over [Tailscale](https://tailscale.com), add HTTPS in front of
+it on the same machine:
+
+```sh
+tailscale serve --bg 8787
+```
+
+then open `https://<machine>.<tailnet>.ts.net/` on any of them. The page shows the folder: go into
+subfolders, open a design, make a folder, and File › Save As picks where a design goes. Enter the
+token the first time; the browser keeps it. On the server itself, `--no-token` skips the token, and
+works only with the default `127.0.0.1`.
+
+**With Docker**, as a service with a volume, using the `server` profile of the same compose file:
+
+```sh
+cd packaging/docker
+printf 'SOLIDCRAFT_SERVE_TOKEN=%s\n' "$(openssl rand -hex 32)" > server.env
+docker compose --profile server up -d solidcraft-server
+```
+
+It also listens on the host's `127.0.0.1:8787` (`SOLIDCRAFT_SERVER_PORT` picks another port), with
+the designs in the `solidcraft-data` volume (or a folder of yours: see the comments in
+`compose.yaml`). Put `tailscale serve` or a reverse proxy with a certificate in front. With Caddy:
+
+```text
+cad.example.com {
+	request_body {
+		max_size 256MB
+	}
+	reverse_proxy 127.0.0.1:8787
+}
+```
+
+The server speaks plain HTTP and the browser app won't send the token over plain HTTP to another
+computer, so always reach it over HTTPS from elsewhere. Anyone with the token can read and change
+every design in the folder; nothing else on the machine (other files, `.git`, hidden files) is
+ever served. Agents connect to `https://…/mcp` with the token as a bearer token: the
+[server edition guide](https://github.com/tangency-labs/solidcraft/blob/main/docs/server-edition.md#connecting-an-agent)
+has the settings for Claude Code, Codex and OpenCode, and every option of `solidcraft-cli serve`.
+
 ### 3D mouse in the browser
 
 The web app reads a 3Dconnexion SpaceMouse or SpaceNavigator through the browser's Gamepad API,

@@ -42,6 +42,12 @@ Picking screenshot `pixels` requires a connection to the running SolidCraft app;
 "model"` chooses the pixels of a rendered model image and does not enable headless pixel picks.
 See `ui.pick` in the [control protocol](control-protocol.md) for pixel and ray parameters.
 
+### Over the network: the server edition
+
+`solidcraft-cli serve` serves the same tools over MCP's streamable-HTTP transport, at `/mcp`,
+with a token, one headless design per MCP session and every file confined to the server's data
+folder. See [server-edition.md](server-edition.md), which also has client settings for agents.
+
 ### The app listens when turned on
 
 The desktop app opens its control channel on `127.0.0.1:27878` (or the next free port when that
