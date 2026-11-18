@@ -38,6 +38,7 @@ solidcraft-ui-text = { workspace = true }
 solidcraft-theme = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
+egui_glass = { path = "../../vendor/egui-glass" }
 solidcraft-gpu = { workspace = true }
 solidcraft-space-mouse = { workspace = true, features = ["serde"] }
 serde = { workspace = true }

@@ -7625,6 +7625,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             sky: sky_uniform(crate::safe_graphics::dark_parts_shading(app), crate::safe_graphics::material_finish(app), proj.cam.up),
             moving,
         };
+        crate::glass::note_view(ui.ctx(), rect);
         match app.viewport.scene_slot() {
             // A tile is its own paint callback: it does not go through the blur's source.
             Some(slot) => {

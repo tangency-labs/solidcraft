@@ -1,0 +1,11 @@
+{
+  "en": {
+    "prefs.glass_blur": "Glass blur",
+    "prefs.glass_see_through": "See-through",
+    "prefs.glass_refraction": "Edge bend",
+    "prefs.glass_reach": "Edge reach",
+    "prefs.glass_tint": "Glass tint",
+    "prefs.glass_tint_clear": "Clear",
+    "prefs.glass_tint_accent": "Accent"
+  }
+}

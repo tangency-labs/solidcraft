@@ -1,0 +1,20 @@
+[package]
+name = "egui_glass"
+version = "0.1.5"
+edition = "2021"
+rust-version = "1.92"
+license = "MIT"
+description = "Apple Liquid Glass style widgets for egui, rendered on the GPU via egui-wgpu"
+repository = "https://github.com/heonny/egui-glass"
+
+# SolidCraft: vendored from heonny/egui-glass 63b467e (see vendor/README.md); dependencies are
+# the workspace's egui 0.37 / wgpu 30 instead of 0.35 / 29.
+[dependencies]
+egui = "0.37"
+egui-wgpu = "0.37"
+wgpu = { version = "30", default-features = false, features = ["wgsl"] }
+bytemuck = { version = "1", features = ["derive"] }
+
+[features]
+# SolidCraft: declared so the source's `cfg(feature = "serde")` is known; built without serde.
+serde = []
