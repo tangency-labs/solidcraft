@@ -49,7 +49,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split => Some("solid.split_body"),
-        Kind::DeleteFaces => Some("face.delete"),
+        Kind::DeleteFaces { .. } => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
         Kind::ReplaceFace => Some("solid.replace_face"),
@@ -1012,6 +1012,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         | Kind::ChatContext
         | Kind::PluginPick { .. }
         | Kind::Construct { t: None, .. } => {}
+        Kind::DeleteFaces { heal } => {
+            ui_kit::options(ui, "delete_face_options", &mut [("ui.delete_face_heal", heal)]);
+        }
         Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);

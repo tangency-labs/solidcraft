@@ -1,0 +1,20 @@
+{
+  "en": {
+    "ui.delete_face_heal": "Heal"
+  },
+  "ar": {
+    "ui.delete_face_heal": "التئام"
+  },
+  "he": {
+    "ui.delete_face_heal": "איחוי"
+  },
+  "ja": {
+    "ui.delete_face_heal": "修復"
+  },
+  "vi": {
+    "ui.delete_face_heal": "Hàn gắn"
+  },
+  "zh": {
+    "ui.delete_face_heal": "修复"
+  }
+}

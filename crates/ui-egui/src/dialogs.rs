@@ -304,8 +304,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Run the curves' open ends on to the body.
                 extend: bool,
             },
-            /// Move planar faces onto a target plane or face.
-            DeleteFaces,
+            /// Delete picked faces, optionally healing the gap left behind.
+            DeleteFaces { heal: bool },
             ReplaceFace,
             /// Boundary Fill: the cells the tool bodies make (a point inside, a description, filled
             /// or not), found again when the tools change.
@@ -1018,7 +1018,11 @@ impl Dialog {
                 Kind::ReplaceFace,
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
-            "face.delete" => Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)]),
+            "face.delete" => {
+                let in_surface = app.ui.tab == "SURFACE" || app.command_tab_before_start.as_deref() == Some("SURFACE");
+                let heal = !in_surface;
+                Dialog::new(Kind::DeleteFaces { heal }, vec![SelInput::new("Faces", FACES, true)])
+            }
             "solid.boundary_fill" => {
                 Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
             }
@@ -1501,7 +1505,7 @@ impl Dialog {
                 | Kind::Rib { .. }
                 | Kind::Emboss { .. }
                 | Kind::ReplaceFace
-                | Kind::DeleteFaces
+                | Kind::DeleteFaces { .. }
                 | Kind::Align { .. }
                 | Kind::Remove
                 | Kind::PathPattern { .. }
@@ -2932,7 +2936,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Rib { web: false, .. } => "RIB",
         Kind::Rib { web: true, .. } => "WEB",
         Kind::ReplaceFace => "REPLACE FACE",
-        Kind::DeleteFaces => "DELETE FACE",
+        Kind::DeleteFaces { .. } => "DELETE FACE",
         Kind::Align { .. } => "ALIGN",
         Kind::BoundaryFill { .. } => "BOUNDARY FILL",
         Kind::Remove => "REMOVE",
@@ -4738,6 +4742,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::Construct { .. }
             | Kind::PathPlane { .. }
             | Kind::Rib { .. }
+            | Kind::DeleteFaces { .. }
             | Kind::Thread { .. }
             | Kind::BoundaryFill { .. }
             | Kind::Align { .. }
@@ -6488,9 +6493,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.replace_face", p)
         }
-        Kind::DeleteFaces => {
+        Kind::DeleteFaces { heal } => {
             need(0, "faces")?;
-            ("face.delete", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
+            ("face.delete", with_single_body(json!({"faces": face_points(0), "heal": heal}), sels(d, 0)))
         }
         Kind::Align { flip, components, axes, angle } => {
             need(0, if *components { "components" } else { "bodies" })?;
@@ -8883,13 +8888,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::DeleteFace { faces, body, heal } => {
             let mut d = start("face.delete")?;
+            d.kind = Kind::DeleteFaces { heal: *heal };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, p.0)).collect();
             }
             if let Some(b) = body {
                 d.extra.insert("body".into(), json!(b));
             }
-            d.extra.insert("heal".into(), json!(heal));
             d
         }
         FeatureKind::Remove { bodies } => {
