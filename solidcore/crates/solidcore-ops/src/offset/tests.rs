@@ -85,6 +85,35 @@ fn a_cylinder_shells_open_at_its_top() {
     assert!(rel(volume(&c), PI * 25.0 * 10.0 - PI * 16.0 * 9.0) < 1e-9);
 }
 
+/// Stress corpus S1983: the blind hole leaves 0.00002 mm at the outer rim of a
+/// half torus. Opening the annular bottom must produce a closed hollow body.
+#[test]
+#[ignore = "needs disappearing periodic seam reconstruction (#18803)"]
+fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
+    crate::test_corpus::rig_fixes();
+    let torus = crate::make_torus([0.0; 3], 30.0, 8.0).unwrap();
+    let upper = make_box([-40.0, -40.0, 0.0], [80.0, 80.0, 16.0]).unwrap();
+    let half = crate::boolean::boolean(torus, upper, crate::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let drill = make_cylinder([37.049_98, 0.0, 0.0], 0.95, 4.0).unwrap();
+    let body = crate::boolean::boolean(half, drill, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let input_report = body.copy().unwrap().check(crate::CheckLevel::All).unwrap();
+    assert!(input_report.is_valid(), "{}", input_report.text);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -0.8).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // Half-torus wall volume minus the original drill/torus overlap, plus the
+    // expanded drill/cavity overlap; the polar integral is derived in the finding.
+    assert!(rel(volume(&body), 3_607.142_961_425_14) < 1e-9);
+}
+
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
 /// 20 at its floor 20 down), shelled open at its bottom, each wall moved in by t with sharp
 /// edges. The cavity is the slab shrunk by t (open at z = 0) less the pocket grown by t, each
