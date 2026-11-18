@@ -40,6 +40,7 @@ pub mod parabola;
 pub mod path;
 pub mod plane_of;
 pub mod projected_curve;
+pub mod proximity;
 pub mod step_edge;
 pub mod stretch;
 pub mod tangent_field;

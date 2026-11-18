@@ -74,7 +74,9 @@ fn plate_doc() -> (Document, u64) {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -181,7 +183,9 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -779,7 +783,16 @@ fn a_construction_plane_edit_recomputes_only_its_users() {
     let b = doc.find_component("B").unwrap();
     // A peg in B on A's plane: B now reads A through it.
     let a_top = doc.find_feature("A_top").unwrap().id;
-    circle_extrude(&mut doc, b, "B peg", PlaneRef::Construction { feature: a_top.into() }, Vec2::new(40.0, 20.0), 2.0, "3", "new_body");
+    circle_extrude(
+        &mut doc,
+        b,
+        "B peg",
+        PlaneRef::Construction { feature: a_top.into(), placement: None },
+        Vec2::new(40.0, 20.0),
+        2.0,
+        "3",
+        "new_body",
+    );
     let mut m = Model::new();
     m.evaluate(&doc);
     no_errors(&m);
@@ -799,6 +812,49 @@ fn a_construction_plane_edit_recomputes_only_its_users() {
     scratch.no_cache = true;
     scratch.evaluate(&doc);
     assert_eq!(st.construct, scratch.state().construct);
+}
+
+/// A part built on another component's plane keeps its creation context through assembly
+/// motion and a cold rebuild, while the plane's defining dimensions remain live.
+#[test]
+fn a_captured_foreign_plane_moves_with_its_part_and_follows_source_dimensions() {
+    use solidcraft_geom::PlaneGeom;
+    let mut doc = Document::new("plane reference");
+    let source = doc.add_component(Some("Skeleton"), 0).unwrap();
+    let part = doc.add_component(Some("Knob"), 0).unwrap();
+    doc.set_param("height", "5 mm", Some("mm"), None).unwrap();
+    let plane = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "height".into() },
+            },
+            Some("Guide"),
+        )
+        .unwrap();
+    doc.feature_mut(plane).unwrap().component = source;
+    let mut sketch = Sketch::new();
+    sketch.add_circle(Vec2::new(10., 0.), 2., None, None).unwrap();
+    let reference: PlaneRef = serde_json::from_value(serde_json::json!({"type":"construction", "feature":plane, "placement":IDENTITY})).unwrap();
+    let id = doc.add_feature(FeatureKind::Sketch { plane: reference, sketch }, Some("Profile")).unwrap();
+    doc.feature_mut(id).unwrap().component = part;
+    let check = |doc: &Document, model: &mut Model, expected: Vec3| {
+        model.evaluate(doc);
+        no_errors(model);
+        let state = model.state();
+        let sketch = state.sketch(id).unwrap();
+        let center = apply_point(&doc.component_transform(part), sketch.plane.to_world(Vec2::new(10., 0.)));
+        assert!(center.dist(expected) < 1e-9, "center {center:?}; expected {expected:?}");
+    };
+    let mut model = Model::new();
+    check(&doc, &mut model, Vec3::new(10., 0., 5.));
+    doc.occurrences.iter_mut().find(|o| o.component == part).unwrap().transform = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    doc.occurrences.iter_mut().find(|o| o.component == source).unwrap().transform = rigid(Vec3::new(20., 0., 7.), Vec3::ZERO, Vec3::Z, 0.);
+    check(&doc, &mut model, Vec3::new(0., 10., 5.));
+    check(&doc, &mut Model::new(), Vec3::new(0., 10., 5.));
+    let mut reopened = Document::from_json(&doc.to_json()).unwrap();
+    check(&reopened, &mut Model::new(), Vec3::new(0., 10., 5.));
+    reopened.set_param("height", "9 mm", None, None).unwrap();
+    check(&reopened, &mut Model::new(), Vec3::new(0., 10., 9.));
 }
 
 /// A coil sweeping a sketch's profile is made again when that sketch changes, not restored as
@@ -886,7 +942,9 @@ fn box_fillet_cut_timeline() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -1241,7 +1299,7 @@ fn feature_added_with_the_marker_at_the_end_is_active() {
 #[test]
 fn self_referencing_construction_planes_are_errors() {
     // Feature ids are assigned from 1, so each design below knows its own feature's id.
-    let selfref = |id: u64| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: id.into() } });
+    let selfref = |id: u64| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: id.into(), placement: None } });
     let xz = || Box::new(construct::GeoRef::Plane { plane: PlaneRef::Origin { name: "XZ".into() } });
 
     // Directly its own first side.
@@ -1263,7 +1321,11 @@ fn self_referencing_construction_planes_are_errors() {
     let mut doc = Document::new("perpplane");
     let line = Box::new(construct::GeoRef::World { axis: "X".into() });
     doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Perpendicular { plane: selfref(1), line } }, Some("P1")).unwrap();
-    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { feature: 1.into() }, sketch: Sketch::new() }, Some("Sketch1")).unwrap();
+    doc.add_feature(
+        FeatureKind::Sketch { plane: PlaneRef::Construction { feature: 1.into(), placement: None }, sketch: Sketch::new() },
+        Some("Sketch1"),
+    )
+    .unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a cyclic perpendicular plane must report an error: {:?}", m.results);
@@ -1407,6 +1469,32 @@ fn construction_plane_name_collisions_leave_the_document_unchanged() {
         assert_eq!(doc.feature(other).unwrap().name, "Upper");
         assert_eq!(other, before.next_id);
     }
+}
+
+#[test]
+fn a_second_sketch_cannot_take_an_existing_sketch_name() {
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    let mut doc = Document::new("names");
+    doc.add_feature(sketch(), Some("Sketch2")).unwrap();
+    let before = doc.clone();
+    let error = doc.add_feature(sketch(), Some("Sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `Sketch2`"), "{error}");
+    assert_eq!(doc, before);
+    // Automatic names skip the taken one.
+    let auto = doc.add_feature(sketch(), None).unwrap();
+    assert_ne!(doc.feature(auto).unwrap().name, "Sketch2");
+    // Lookup ignores case, so a name that differs only in case is the same name.
+    let error = doc.add_feature(sketch(), Some("sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `sketch2`"), "{error}");
+    assert_eq!(doc.find_feature("SKETCH2").unwrap().name, "Sketch2");
+    // A free name for a sketch skips the taken ones.
+    assert_eq!(doc.free_sketch_name("Sketch2"), "Sketch2 (2)");
+    assert_eq!(doc.free_sketch_name("Other"), "Other");
+    // Planes keep matching on the exact name, so two planes may differ only in case.
+    let plane = |base: &str| FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: base.into() } };
+    doc.add_feature(plane("XY"), Some("Angled x")).unwrap();
+    doc.add_feature(plane("XY"), Some("Angled X")).unwrap();
+    assert!(doc.add_feature(plane("XY"), Some("Angled X")).is_err());
 }
 
 #[test]
@@ -1590,7 +1678,9 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -1610,6 +1700,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 body: "Body1".into(),
                 plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
                 tool: None,
+                tool_plane: false,
                 sketch: None,
                 line: None,
             },
@@ -1790,6 +1881,7 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
         transform: IDENTITY,
         grounded: false,
         expressed_moves: Vec::new(),
+        bom_type: None,
     });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
@@ -1863,6 +1955,7 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
             name: format!("P{id}"),
             transform: IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         });
     }
@@ -1934,7 +2027,9 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_offset: None,
             from: None,
             to_body_apart: false,
+            from_level: false,
             picked_placements: Vec::new(),
+            one_sided_direction: None,
         },
         operation: Operation::NewBody,
         targets: vec![],
@@ -2006,7 +2101,7 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     let a = sketch.add_point(Vec2::new(0.0, 0.0), None).unwrap();
     let b = sketch.add_point(Vec2::new(10.0, 5.0), None).unwrap();
     sketch.add_line_pts(a, b, None).unwrap();
-    let on_plane = FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane.into() }, sketch };
+    let on_plane = FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane.into(), placement: None }, sketch };
     let id = doc.add_feature(on_plane, Some("Sketch3")).unwrap();
     doc.feature_mut(id).unwrap().component = sketcher;
 

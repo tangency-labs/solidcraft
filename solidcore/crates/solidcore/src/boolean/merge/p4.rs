@@ -33,15 +33,18 @@
 //! its void flags follow the nesting): upstream's union that seals a void left the
 //! void's shell first and failed `SmBrep::AssertValid` test 12 (the fork's fix,
 //! tangency-labs/smlib `abastran/void-shell-check`; WR-265,
-//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Opt-in
-//! (`Kernel::fixes`, off by default): with
-//! `boolean_union_refuses_solid_leak` (own design, WR-619), a union whose step 6 would
-//! delete a face between the infinite region and a solid region is refused with `SM_ERR`
-//! (the face in the error) instead of returning a body whose solid merged into the outside.
+//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Own design
+//! (WR-619): a union whose step 6 deletes a face between the infinite region and a solid
+//! region, and after which that solid's side (the uses of its faces that stay) no longer lies
+//! in a solid region (the solid merged into the outside), is refused with `SM_ERR` (the face
+//! in the error) instead of returning that body. Where none of those uses is left, the union
+//! is refused when it has no solid region at all.
 //! Own design, not upstream: in step 6 a region that a deleted face joins to another, neither
 //! with merge data (no face of the other body was copied into them, as when a union fills a
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
 //! upstream leaves it the flag it had, so the filled void stayed void.
+
+use std::collections::BTreeSet;
 
 use super::p1::{self, MergeOptions};
 use crate::error::boolean::BooleanFailure;
@@ -459,12 +462,22 @@ fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
     ))
 }
 
-/// Not upstream (WR-619): the first of `delete` with the infinite region on one side and a
-/// solid region on the other, whose deletion would merge that solid into the outside.
-fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
+/// Not upstream (WR-619): a face to be deleted with the infinite region on one side and a
+/// solid region on the other, and the face uses, on faces that stay, that bound that solid.
+struct SolidLeak {
+    face: FaceId,
+    region: RegionId,
+    bounding: Vec<FaceuseId>,
+}
+
+/// Not upstream (WR-619): one [`SolidLeak`] per solid region that a face of `delete` lies
+/// between it and the infinite region (the first such face names it). Deleting such a face
+/// joins the solid to the outside unless the other body's solid lies just across it.
+fn solid_leaks(b: &Brep, delete: &[FaceId]) -> Result<Vec<SolidLeak>> {
     let Some(infinite) = b.infinite_region() else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
+    let mut leaks: Vec<SolidLeak> = Vec::new();
     for &f in delete {
         let Some(fu) = face::faceuses(b, f)?.0 else {
             continue;
@@ -475,11 +488,72 @@ fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
             (false, true) => r1,
             _ => continue,
         };
-        if void(b, inside)? == 0 {
-            return Ok(Some(f));
+        if void(b, inside)? == 0 && !leaks.iter().any(|l| l.region == inside) {
+            leaks.push(SolidLeak {
+                face: f,
+                region: inside,
+                bounding: Vec::new(),
+            });
         }
     }
-    Ok(None)
+    if leaks.is_empty() {
+        return Ok(leaks);
+    }
+    let deleted: BTreeSet<FaceId> = delete.iter().copied().collect();
+    for f in bp::faces(b, None)? {
+        if deleted.contains(&f) {
+            continue;
+        }
+        let (fu1, fu2) = face::faceuses(b, f)?;
+        for fu in [fu1, fu2].into_iter().flatten() {
+            let Some(r) = eu::faceuse_region(b, fu)? else {
+                continue;
+            };
+            for leak in leaks.iter_mut().filter(|l| l.region == r) {
+                leak.bounding.push(fu);
+            }
+        }
+    }
+    Ok(leaks)
+}
+
+/// Not upstream (WR-619): whether the solid a [`SolidLeak`]'s face bounded still lies in a
+/// solid region. Each face use that bounded it and is left must lie in a region that is
+/// neither the infinite one nor a void: the solid's material is in one of the operands, so
+/// a use whose side ends outside or in a void shows a wrong union. When no such use is left
+/// the solid cannot be located; the test is then the whole-body one, `b` has a solid region
+/// ([`has_solid_region`]), so that case refuses exactly what it refused before the per-leak
+/// check.
+fn leak_stays_solid(b: &Brep, leak: &SolidLeak) -> Result<bool> {
+    let infinite = b.infinite_region();
+    let mut located = false;
+    for &fu in &leak.bounding {
+        if b.faceuses().get(fu).is_none() {
+            continue;
+        }
+        let Some(r) = eu::faceuse_region(b, fu)? else {
+            continue;
+        };
+        if Some(r) == infinite || void(b, r)? != 0 {
+            return Ok(false);
+        }
+        located = true;
+    }
+    if located {
+        return Ok(true);
+    }
+    has_solid_region(b)
+}
+
+/// Not upstream (WR-619): whether `b` has a solid region other than the infinite one.
+fn has_solid_region(b: &Brep) -> Result<bool> {
+    let infinite = b.infinite_region();
+    for r in bp::regions(b, None)? {
+        if Some(r) != infinite && void(b, r)? == 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn void(b: &Brep, r: RegionId) -> Result<i32> {
@@ -1076,7 +1150,6 @@ fn remember_split(
     original: RegionId,
     new_face: FaceId,
     other_face: FaceId,
-    pass_on: bool,
 ) -> Result<()> {
     let (r1, r2) = region_pair(primary, required(face::upward_faceuse(primary, new_face)?)?)?;
     let (o1, o2) = region_pair(other, required(face::upward_faceuse(other, other_face)?)?)?;
@@ -1108,10 +1181,7 @@ fn remember_split(
             )?;
             let first = required(data.this_region(0))?;
             // (fork e7ebc8d passes this status on: `SER`)
-            ignored(crate::error::passed_on(
-                data.set_regions(0, first, this_type, other_key, other_type),
-                pass_on,
-            )?)?;
+            data.set_regions(0, first, this_type, other_key, other_type)?;
         } else {
             let h = attributes.insert(Attribute::merge_region(
                 key(original),
@@ -1184,7 +1254,6 @@ fn make_other_faces(
                     required(made.old_region)?,
                     new_face,
                     f,
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
                 )?;
             }
         }
@@ -1424,10 +1493,7 @@ fn editing_stages(
     for _ in 0..10 {
         for &f in faces.keep.iter().chain(&faces.delete) {
             if let Some(of) = intersector.face_mate(f) {
-                ignored(crate::error::passed_on(
-                    intersector.remove_relationship(f, of),
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                intersector.remove_relationship(f, of)?;
             }
         }
         faces.keep.clear();
@@ -1544,15 +1610,17 @@ fn editing_stages(
             }
         }
     }
-    // Not upstream unless opted in (`fixes.boolean_union_refuses_solid_leak`, WR-619): a
-    // union never deletes a face that bounds a solid against the outside.
-    if kernels.primary.fixes.boolean_union_refuses_solid_leak
-        && operation == BooleanOperation::Union
-    {
-        if let Some(f) = face_leaking_solid(primary, &faces.delete)? {
-            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
-        }
-    }
+    // Not upstream (WR-619): a union whose face deletion merges a solid into the outside is
+    // refused after post-processing, if the solid side of any deleted face between a solid
+    // and the outside no longer lies in a solid region. A leak whose solid's remaining face
+    // uses all lie in solid regions is kept, as the region count kept it; no known input
+    // records such a leak: coincident-wall joins delete no face between a solid and the
+    // outside.
+    let leaks = if operation == BooleanOperation::Union {
+        solid_leaks(primary, &faces.delete)?
+    } else {
+        Vec::new()
+    };
     let joined = joined_without_data(primary, intersector, attributes, &faces.delete)?;
     intersector.delete_faces(
         kernels,
@@ -1573,22 +1641,16 @@ fn editing_stages(
         }
     }
     if !infinite_current || void(primary, required(primary.infinite_region())?)? == 0 {
-        ignored(crate::error::passed_on(
-            find_and_set_infinite(
-                kernels,
-                primary,
-                None,
-                bp::SetRegionVoidType::InfiniteRegionSwap,
-                None,
-            ),
-            kernels.primary.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        find_and_set_infinite(
+            kernels,
+            primary,
+            None,
+            bp::SetRegionVoidType::InfiniteRegionSwap,
+            None,
+        )?;
     }
     put_outer_shells_first(kernels, primary, operation)?;
-    ignored(crate::error::passed_on(
-        intersector.propagate_regions(kernels, primary, other, attributes, operation),
-        kernels.primary.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    intersector.propagate_regions(kernels, primary, other, attributes, operation)?;
     if options.boolean_post_process
         && matches!(
             operation,
@@ -1600,6 +1662,13 @@ fn editing_stages(
         )
     {
         intersector.post_process(kernels, primary, attributes, state, false)?;
+    }
+    for leak in &leaks {
+        if !leak_stays_solid(primary, leak)? {
+            return Err(
+                Failure::new(OP, BooleanFailure::SolidLeaks { face: leak.face }).into_error(),
+            );
+        }
     }
     Ok(false)
 }
@@ -1728,10 +1797,7 @@ fn manifold_boolean_translated(
         }
         if !is_oriented_sheet(kernels, b)? {
             let first = required(bp::faces(b, None)?.first().copied())?;
-            ignored(crate::error::passed_on(
-                orient_sheet_surfaces(kernels, b, first, true),
-                kernels.primary.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            orient_sheet_surfaces(kernels, b, first, true)?;
         }
     }
     kernels.doing_boolean(true);
@@ -1835,17 +1901,14 @@ fn manifold_boolean_translated(
                     None,
                 )?;
                 // Native defaults: new_faces=NULL, use_merge=TRUE, merge_object=NULL.
-                ignored(crate::error::passed_on(
-                    intersector.copy_component_faces(
-                        kernels,
-                        source,
-                        reverse,
-                        set,
-                        &mut component,
-                        attributes,
-                    ),
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                intersector.copy_component_faces(
+                    kernels,
+                    source,
+                    reverse,
+                    set,
+                    &mut component,
+                    attributes,
+                )?;
                 components.push(component);
             }
         }
@@ -1916,10 +1979,7 @@ fn finish_boolean(
         *other = None;
     }
     if let Some(a) = primary.as_mut() {
-        ignored(crate::error::passed_on(
-            delete_caches(a),
-            kernels.primary.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        delete_caches(a)?;
     }
     kernels.doing_boolean(false);
     Ok(operation != BooleanOperation::ExtractSeparate)
@@ -2006,8 +2066,10 @@ mod tests {
                         other.is_none(),
                         !keep && operation != BooleanOperation::PartialMerge
                     );
-                    assert_eq!(result.is_err(), late == 2);
-                    assert_eq!(kernels.primary.context.doing_boolean(), late == 2);
+                    // DeleteStaleCaches' ordinary failure is passed on too (WR-658,
+                    // tangency-labs/smlib e7ebc8d), before the boolean flag is cleared
+                    assert_eq!(result.is_err(), late != 0);
+                    assert_eq!(kernels.primary.context.doing_boolean(), late != 0);
                 }
             }
         }
@@ -2122,6 +2184,73 @@ mod tests {
             );
         }
         out
+    }
+
+    /// WR-619's per-leak check on a cube [0, 1]^3: its region `solid` and every face's use
+    /// on each side. A leak names `solid` and the face uses that bounded it.
+    fn cube_leak_parts() -> (Kernel, Brep, RegionId, Vec<FaceuseId>, Vec<FaceuseId>) {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let infinite = b.infinite_region().unwrap();
+        let solid = bp::regions(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&r| r != infinite)
+            .unwrap();
+        let (mut inside, mut outside) = (Vec::new(), Vec::new());
+        for f in bp::faces(&b, None).unwrap() {
+            let (fu1, fu2) = face::faceuses(&b, f).unwrap();
+            for fu in [fu1.unwrap(), fu2.unwrap()] {
+                match eu::faceuse_region(&b, fu).unwrap() {
+                    Some(r) if r == solid => inside.push(fu),
+                    Some(r) if r == infinite => outside.push(fu),
+                    other => panic!("face use {fu:?} in region {other:?}"),
+                }
+            }
+        }
+        assert_eq!((inside.len(), outside.len()), (6, 6));
+        (k, b, solid, inside, outside)
+    }
+
+    /// A leak whose remaining face uses lie in the solid region stays solid; one with a use
+    /// in the infinite region, or in a region flagged void, does not.
+    #[test]
+    fn wr_619_leak_with_a_use_left_follows_that_use() {
+        let (_k, mut b, solid, inside, outside) = cube_leak_parts();
+        let face = bp::faces(&b, None).unwrap()[0];
+        let leak = |bounding: Vec<FaceuseId>| SolidLeak {
+            face,
+            region: solid,
+            bounding,
+        };
+        assert!(leak_stays_solid(&b, &leak(inside.clone())).unwrap());
+        let mut mixed = inside.clone();
+        mixed.push(outside[0]);
+        assert!(!leak_stays_solid(&b, &leak(mixed)).unwrap());
+        assert!(!leak_stays_solid(&b, &leak(outside)).unwrap());
+        b.region_mut(solid).unwrap().set_is_void(1);
+        assert!(!leak_stays_solid(&b, &leak(inside)).unwrap());
+    }
+
+    /// A leak with none of its face uses left falls back to the whole-body test: it stays
+    /// solid exactly when the body still has a solid region (the check before per-leak
+    /// tracking), so this branch refuses nothing that test did not refuse.
+    #[test]
+    fn wr_619_leak_with_no_use_left_falls_back_to_a_solid_region() {
+        let (_k, mut b, solid, _inside, _outside) = cube_leak_parts();
+        let face = bp::faces(&b, None).unwrap()[0];
+        let unlocated = SolidLeak {
+            face,
+            region: solid,
+            bounding: Vec::new(),
+        };
+        assert!(has_solid_region(&b).unwrap());
+        assert!(leak_stays_solid(&b, &unlocated).unwrap());
+        b.region_mut(solid).unwrap().set_is_void(1);
+        assert!(!has_solid_region(&b).unwrap());
+        assert!(!leak_stays_solid(&b, &unlocated).unwrap());
     }
 
     /// WR-265: the outer shell comes first, as `SmBrep::AssertValid` test 12 wants

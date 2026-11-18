@@ -950,6 +950,69 @@ pub fn sweep_placed(
     Ok((body, placed, route))
 }
 
+/// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
+/// plane's coordinates, end to end.
+#[derive(Clone, Debug)]
+pub struct LoftSection {
+    /// The section's plane.
+    pub plane: solidcore_record::Plane,
+    /// The loop, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+}
+
+/// A section as a loft's walls are built through it ([`match_loft_sections`]): its segments,
+/// and for each the indices of the given section's segments it runs over (increasing).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchedSection {
+    /// The segments, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+    /// For each segment, the given segments it runs over.
+    pub from: Vec<Vec<usize>>,
+}
+
+/// A loft's closed sections, in loft order, matched as its walls are built through them (the
+/// kernel's `sweep::loft_sections::match_loft_sections`): each wound the way the one before it
+/// is, cut to the vertices it shares with the others (a corner pairs with the corner it lines up
+/// with, a vertex only one section has splits the others' segments where it lands, a full circle
+/// splits at the directions of the section it follows), and started at the segment that joins the
+/// first segment of the section before it. `None` when the match would give a section more than
+/// `max_segments` segments, or the sections are too large to pair: valid sections the caller
+/// builds another way.
+///
+/// # Errors
+/// [`Error::Argument`] for a section with no segments, no length or a point that is not finite,
+/// plane axes that move its points by more than the zone tolerance (their skew from a frame of
+/// perpendicular unit vectors times the section's extent past 1e-5), or a circle whose centre,
+/// radius or angles are not finite; [`Error::Invariant`] when the pairing breaks down.
+pub fn match_loft_sections(
+    sections: &[LoftSection],
+    max_segments: usize,
+) -> Result<Option<Vec<MatchedSection>>> {
+    use solidcore::sweep::loft_sections as kl;
+    let given: Vec<kl::LoftSection> = sections
+        .iter()
+        .map(|s| kl::LoftSection {
+            origin: convert::vec3(s.plane.origin),
+            x: convert::vec3(s.plane.x),
+            y: convert::vec3(s.plane.y),
+            segs: s.segs.iter().map(convert::seg2).collect(),
+        })
+        .collect();
+    let matched = match kl::match_loft_sections(&given, max_segments) {
+        Err(e) if kl::too_large(&e) => return Ok(None),
+        r => r.map_err(argument_or_status)?,
+    };
+    Ok(Some(
+        matched
+            .into_iter()
+            .map(|m| MatchedSection {
+                segs: m.segs.iter().map(convert::record_seg2).collect(),
+                from: m.from,
+            })
+            .collect(),
+    ))
+}
+
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.
 ///
 /// # Errors

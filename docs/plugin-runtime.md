@@ -81,7 +81,7 @@ another version of the `craft:plugin` interfaces is refused the same way before 
 Entry inputs are object schemas; selection and target fields are arrays. Named slots use
 `{"kind":"menu","name":"…"}` or `{"kind":"ribbon","name":"…"}`; the app decides which
 slots exist. SolidCraft matches File and Help menu names ignoring case; other menu names draw no
-host menu items. The app bar's Plugins menu lists every installed entry regardless of its slots.
+host menu items. The Model tab's Plugins group (and its Plugins menu) lists every installed entry regardless of its slots.
 Ribbon names match the existing Design tabs ignoring case; other names use the Plugins tab.
 Only enabled plugins contribute host slots. Each plugin's ribbon group carries its name, and every
 slot item has a plugin badge. Slot clicks resolve the namespaced entry against the Plugins menu's
@@ -94,7 +94,9 @@ expose the entry declarations. A read entry can call only commands marked read i
 `files.read-file` and `files.write-file` resolve paths only within matching app-approved folder
 grants with the requested access. The caller's file scope is checked against each complete
 path on every read and write; hidden paths require explicit authorization. Declaring a folder
-name does not itself grant access. Writes use temporary sibling files, and reads in the same call
+name does not itself grant access. Reading a file that does not exist returns `invalid-input`
+(field `path`, reason "no such file") without failing the run, so an entry can create its file
+on first use. Writes use temporary sibling files, and reads in the same call
 see their staged content. Targets are replaced only after successful guest execution and app
 transaction commit. A trap, refusal, cancellation or failed app commit removes staged files
 without replacing targets. If publication fails after app commit, the error reports that files
@@ -130,18 +132,24 @@ a scope of exactly the approved folders that the manifest requests for both read
 by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
 `read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
 replace the stored set, so stale grants cannot survive an update. Desktop preferences persist grants
-and pass them to the session and its worker copies. `plugin.run` intersects
+and pass them to the session and its worker copies; the plugins folder's grant store
+(`crates/engine/src/plugin/grant_store.rs`) keeps them for the command line and headless MCP too
+([Headless use](plugins.md#headless-use)). `plugin.run` intersects
 that id's stored grants with the manifest's requests; another plugin's grants never apply.
 A hand-installed package with no grant record receives no groups or folders. Removing a package
-through `plugin.remove` deletes its grant record. These are host preferences, never design data.
+through `plugin.remove` deletes its grant record; `plugin.revoke` deletes the record and keeps the
+package. These are host preferences, never design data.
 
 ## Versions and capabilities
 
-The WIT package is `craft:plugin@0.1.0`. Its interfaces (`types`, `commands`, `log`, `control`,
-`files`, `clock` and the exported `entry`) make up the capability `commands@0.1`. Later
+The WIT package is `craft:plugin@0.2.0`. Its interfaces (`types`, `commands`, `log`, `control`,
+`files`, `clock` and the exported `entry`) make up the capability `commands@0.2`. Later
 capabilities arrive as their own interfaces, each named and versioned on its own in the manifest:
 `ui`, `viewport`, `formats` and `storage`. While a version is 0.x, a minor version may break the
-previous one, so a host for `commands@0.1` runs only `commands@0.1` plugins.
+previous one. 0.2 added `plugin-error.unsupported`; the host also serves the frozen
+`craft:plugin@0.1.0` (`crates/craft-plugin/wit-0.1/plugin.wit`, `OLDER_CAPABILITIES`), choosing
+the bindings by the version the component's imports and exports name, so plugins built against
+0.1 run unchanged and see `invalid-input` where 0.2 has `unsupported`.
 
 ## Per-design plugin data
 
@@ -233,6 +241,9 @@ zero, fractional and out-of-range values are refused. The CLI reads it once befo
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI
 startup files are separate user settings; a package or saved design cannot supply either.
+Approvals given at install last for the run; with `--keep-plugin-approvals` these processes read
+and write the same grant store as the desktop app, or the one in `--plugins-dir DIR`
+([Headless use](plugins.md#headless-use)).
 
 Both host and manifest accept positive integer fuel through 18446744073709551615 (`u64::MAX`),
 without conversion through floating-point controls. Memory accepts 1..4096 MiB: the remaining

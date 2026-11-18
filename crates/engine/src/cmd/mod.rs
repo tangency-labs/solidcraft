@@ -20,6 +20,8 @@ macro_rules! planned {
     };
 }
 
+mod board_import;
+mod board_layers;
 mod bom;
 pub(crate) mod browser;
 mod cell_grid;
@@ -37,21 +39,42 @@ mod construct;
 mod construct_auto;
 mod delete;
 pub(crate) mod diagnostics;
+mod drawing;
+mod drawing_balloon;
+mod drawing_check;
+mod drawing_dimension;
+mod drawing_export;
+mod drawing_fill;
+mod drawing_image;
+mod drawing_model_dimensions;
+mod drawing_note;
+mod drawing_revision;
+mod drawing_scene;
+mod drawing_sheet;
+mod drawing_sketch;
+mod drawing_symbol;
+mod drawing_table;
+mod drawing_ui;
+mod drawing_view;
 mod edit;
 mod face;
 mod features;
 mod features_more;
 mod join_pieces;
+pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
 pub(crate) use component::follow_expressed_moves;
+pub(crate) use component::{path_ids, refuse_filled_virtual};
+pub(crate) use config::put_row;
 pub use construct::picked_plane_refs;
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
 pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
 pub use design_link::{LinkProblem, LinkState};
+pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
-pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, shown_scope};
+pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, large_thread_size, shown_scope};
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub(crate) use file::import::realign_imports;
@@ -79,6 +102,8 @@ pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
 mod file;
+mod file_library;
+pub(crate) use file_library::uses_file as file_library_uses_file;
 mod frame;
 mod frame_end_cap;
 pub(crate) mod inspect;
@@ -89,7 +114,7 @@ pub mod mass_properties;
 mod material_properties;
 mod materials;
 mod measure_exact;
-mod measure_sel;
+pub(crate) mod measure_sel;
 mod measure_shape;
 mod mesh;
 mod metadata;
@@ -98,6 +123,7 @@ mod notes;
 mod parts;
 mod plugin;
 mod point_cloud;
+mod point_cloud_deviation;
 mod script;
 mod section;
 mod selection;
@@ -128,7 +154,7 @@ mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
     DxfCurves, DxfText, FlangeType, ThenStep, bend_table_format, dxf_curves, dxf_layers, dxf_note_height, dxf_text, flange_edge, flange_edge_list,
-    flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points, sheet_rule_name, then_list,
+    flange_position, flange_type, flat_reply, fold_points, fold_position, perforation_pattern, sheet_points, sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
@@ -161,6 +187,7 @@ mod surface_match;
 mod tab_views;
 mod view_dxf;
 mod view_navigation;
+mod view_pick;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -174,6 +201,20 @@ pub type Run = fn(&mut Session, &Value) -> Result<Value>;
 pub type LiveRun = fn(&mut Session, &Value) -> Result<(Value, Option<crate::LiveEdit>)>;
 pub type Enabled = fn(&Session) -> std::result::Result<(), String>;
 pub type SchemaFn = fn() -> schemars::Schema;
+
+/// The part of the design a command works on (#3890): the model (most commands), the open
+/// drawing, or either (files, undo, selection, diagnostics, choosing a drawing).
+/// [`CommandSpec::allowed`] checks it before the command's own `enabled`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Model,
+    Drawing,
+    /// A shared sketch tool: model or the explicitly active sheet sketch.
+    Sketch,
+    Any,
+    /// Either, and what it changes is a step of the part open: a delete of what is selected.
+    Open,
+}
 
 pub struct CommandSpec {
     pub id: &'static str,
@@ -205,6 +246,8 @@ pub struct CommandSpec {
     pub contract: Option<&'static dyn crate::schema::Contract>,
     /// The JSON Schema of a successful result; `None` until described.
     pub output: Option<SchemaFn>,
+    /// The part of the design it works on: the model unless it says otherwise.
+    pub part: Part,
 }
 
 impl CommandSpec {
@@ -226,6 +269,7 @@ impl CommandSpec {
             planned: None,
             contract: None,
             output: None,
+            part: Part::Model,
         }
     }
     /// Not built yet; `issue` tracks building it.
@@ -283,10 +327,45 @@ impl CommandSpec {
         self.undoable = false;
         self
     }
-    /// Run inside another command: when it is enabled, its `run` (the caller's command owns the
+    /// Works with a drawing open or with none.
+    pub const fn any_part(mut self) -> Self {
+        self.part = Part::Any;
+        self
+    }
+    /// Works with a drawing open or with none, and its undo step belongs to whichever is open.
+    pub const fn open_part(mut self) -> Self {
+        self.part = Part::Open;
+        self
+    }
+    /// Works on the open drawing.
+    pub const fn in_drawing(mut self) -> Self {
+        self.part = Part::Drawing;
+        self
+    }
+    /// Uses the shared sketch tool on its active model or explicit sheet receiver.
+    pub const fn in_sketch_part(mut self) -> Self {
+        self.part = Part::Sketch;
+        self
+    }
+    /// Whether the command can run in `s` now: on the part open, and enabled. The one check
+    /// running a command, running it inside another and listing it make.
+    pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
+        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+            return Err("finish or cancel the sheet sketch before switching drawings".into());
+        }
+        match (self.part, s.open_drawing.is_some()) {
+            (Part::Model, true) => Err("a drawing is open: close it to change the model (drawing.close)".into()),
+            (Part::Drawing, false) => Err("open a drawing first (drawing.open, or drawing.create)".into()),
+            (Part::Sketch, true) if !s.active_sheet_sketch.as_ref().is_some_and(|entry| Some(entry.drawing) == s.open_drawing) => {
+                Err("a drawing is open: enter a sheet sketch first (drawing.sketch.create or drawing.sketch.edit)".into())
+            }
+            _ => (self.enabled)(s),
+        }
+    }
+    /// Run inside another command: when it is allowed, its `run` (the caller's command owns the
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
-        (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
+        self.allowed(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
         let r = (self.run)(s, p);
         // A parameter error that did not name the command names it here (see `Session::execute`).
         match r {
@@ -298,10 +377,10 @@ impl CommandSpec {
     /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
     /// the message can tell it from a failure of the command itself.
     pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
-        (self.enabled)(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
+        self.allowed(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
-        let e = (self.enabled)(s);
+        let e = self.allowed(s);
         CommandInfo {
             id: self.id,
             label: self.label,
@@ -337,7 +416,11 @@ pub fn always(_: &Session) -> std::result::Result<(), String> {
 }
 
 pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
-    if s.active_sketch.is_some() { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
+    let active = match s.open_drawing {
+        Some(drawing) => s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.drawing == drawing),
+        None => s.active_sketch.is_some(),
+    };
+    if active { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
 }
 
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
@@ -361,6 +444,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_canvas::COMMANDS.iter());
     v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(point_cloud::COMMANDS.iter());
+    v.extend(point_cloud_deviation::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
@@ -401,6 +485,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(file_library::COMMANDS.iter());
+    v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
@@ -413,20 +499,68 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
+    v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
+    v.extend(drawing::COMMANDS.iter());
+    v.extend(drawing_balloon::COMMANDS.iter());
+    v.extend(drawing_check::COMMANDS.iter());
+    v.extend(drawing_image::COMMANDS.iter());
+    v.extend(drawing_note::COMMANDS.iter());
+    v.extend(drawing_symbol::COMMANDS.iter());
+    v.extend(drawing_dimension::COMMANDS.iter());
+    v.extend(drawing_model_dimensions::COMMANDS.iter());
+    v.extend(drawing_export::COMMANDS.iter());
+    v.extend(drawing_fill::COMMANDS.iter());
+    v.extend(drawing_revision::COMMANDS.iter());
+    v.extend(drawing_table::COMMANDS.iter());
+    v.extend(drawing_scene::COMMANDS.iter());
+    v.extend(drawing_sheet::COMMANDS.iter());
+    v.extend(drawing_sketch::COMMANDS.iter());
+    v.extend(drawing_view::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
+    v.extend(drawing_ui::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
     v
 }
 
+/// The command an id names: its exact id, else the one it spells in another case. Surrounding
+/// whitespace is ignored. Command ids are ASCII, so an id with any other character names none
+/// (a look-alike letter such as a Cyrillic `е` or a fullwidth `ｆ` is never a command).
+///
+/// Everything that decides what a command id may do (the agent chat's gate, the read-only
+/// classification, a host's check) decides on the id this returns, never the id as sent, so it
+/// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    let id = normalize_command_id(id)?;
     let all = command_specs();
     all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
 }
 
-/// The end of an unknown command's error: up to three ids like `id`, nearest first. Ids a few
+/// Whether two ids use common alternative verbs in the same namespace. This only ranks
+/// suggestions; it never makes either id an execution alias for the other.
+pub fn command_verb_alternative(id: &str, candidate: &str) -> bool {
+    let Some((namespace, verb)) = id.rsplit_once('.') else { return false };
+    let Some((other_namespace, other_verb)) = candidate.rsplit_once('.') else { return false };
+    if namespace.is_empty() || !namespace.eq_ignore_ascii_case(other_namespace) {
+        return false;
+    }
+    let groups: &[&[&str]] = &[&["add", "create", "new"], &["delete", "remove"]];
+    groups
+        .iter()
+        .any(|words| words.iter().any(|word| verb.eq_ignore_ascii_case(word)) && words.iter().any(|word| other_verb.eq_ignore_ascii_case(word)))
+}
+
+/// A command id as [`find_command`] reads it: without surrounding whitespace, and `None` when it
+/// holds anything but printable ASCII (no command id does).
+pub fn normalize_command_id(id: &str) -> Option<&str> {
+    let id = id.trim();
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_graphic())).then_some(id)
+}
+
+/// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in
+/// the same namespace (`note.create` → `note.add`) come first. Otherwise, ids a few
 /// letters away (`solid.extrud` → `solid.extrude`) come before ids that end in the same word
 /// (`file.open` → `doc.open`). Empty when nothing is close.
 pub(crate) fn did_you_mean(id: &str) -> String {
@@ -436,15 +570,16 @@ pub(crate) fn did_you_mean(id: &str) -> String {
     }
     let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
     let near = (id.chars().count() / 4).max(2);
-    let mut found: Vec<(bool, usize, &str)> = command_specs()
+    let mut found: Vec<(bool, bool, usize, &str)> = command_specs()
         .iter()
         .filter_map(|c| {
             let d = edit_distance(&id, c.id);
-            (d <= near || last(&id) == last(c.id)).then_some((d > near, d, c.id))
+            let alternative = command_verb_alternative(&id, c.id);
+            (alternative || d <= near || last(&id) == last(c.id)).then_some((!alternative, d > near, d, c.id))
         })
         .collect();
     found.sort();
-    let ids: Vec<String> = found.iter().take(3).map(|(_, _, c)| format!("`{c}`")).collect();
+    let ids: Vec<String> = found.iter().take(3).map(|(_, _, _, c)| format!("`{c}`")).collect();
     match ids.as_slice() {
         [] => String::new(),
         [one] => format!(" (did you mean {one}?)"),
@@ -452,12 +587,16 @@ pub(crate) fn did_you_mean(id: &str) -> String {
     }
 }
 
+/// The longest name the "did you mean" search compares, in bytes: a body name of 128 characters
+/// (up to 512 bytes) still gets its suggestion, and a longer text costs no edit-distance work.
+const MAX_SUGGESTED_NAME_BYTES: usize = 512;
+
 /// "no body `name`", and the closest of `bodies` when it is near enough to be a typo or another
 /// case of the same name (`b` for `B`): `no body `Bdy`; did you mean `Body`?` (#9740).
 pub(crate) fn no_body<'a>(name: &str, bodies: impl IntoIterator<Item = &'a str>) -> String {
     let want = name.to_lowercase();
     let near = (want.chars().count() / 3).max(1);
-    let closest = (want.len() <= 256)
+    let closest = (want.len() <= MAX_SUGGESTED_NAME_BYTES)
         .then(|| bodies.into_iter().map(|b| (edit_distance(&want, &b.to_lowercase()), b)).filter(|(d, _)| *d <= near).min_by_key(|(d, _)| *d))
         .flatten();
     match closest {

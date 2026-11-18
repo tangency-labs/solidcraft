@@ -13,7 +13,7 @@
 //! | [`Surface::evaluate_geometric`], [`evaluate_geometric_of`] | `SmSurface::EvaluateGeometric`          |
 //! | [`Surface::evaluate_normal_section`], [`evaluate_normal_section_of`], [`SurfaceNormalSection`] | `SmSurface::EvaluateNormalSection` |
 //! | [`Surface::get_singularities`], [`Surface::get_singularities_of_face`], [`Singularities`] | `SmSurface::GetSingularities`                    |
-//! | [`Surface::cover_coincident_surface_deferring_trims`], [`CoverCoincident`] | `SmSurface::CoverCoincidentSurface`     |
+//! | [`Surface::cover_coincident_surface_deferring_trims`], [`CoverCoincident`], [`ContinuationFold`] | `SmSurface::CoverCoincidentSurface` |
 //! | [`Surface::calculate_tight_bounding_box`]        | `SmSurface::CalculateTightBoundingBox`           |
 //! | [`check_shape_match`]                             | `smsurf_CheckShapeMatch`                         |
 //! | [`FindPsNormalEnfo`] (`EvalNFunctions`)           | `SmFindPSNormalENFO::Evaluate` (struct: `surface.surface_p1`) |
@@ -58,14 +58,31 @@
 //!   B-rep runs `topology::face::p1::remove_uv_trim_curves` right after the call (nothing
 //!   runs in between, so the order is upstream's). There is no entry point that skips
 //!   the deletion: every caller receives the face.
-//! - **A folded continuation is not covered** (opt-in
-//!   `Kernel::fixes.cover_refuses_folded_continuation`, WR-407; off by default, which
-//!   merges as upstream does). SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
-//!   `AdjustSTEPUVDomain`): when a B-spline-based surface would be extended past its
-//!   natural domain, its normal may neither vanish nor turn back between neighbouring
-//!   samples of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails
-//!   (the faces keep the edge between them) instead of merging onto a continuation that
-//!   is not one sheet. tangency-labs/solidcore#434.
+//! - **A folded continuation is not covered** (WR-407; upstream merges onto it).
+//!   SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`,
+//!   before its `AdjustSTEPUVDomain`): when a B-spline-based surface would be extended
+//!   past its natural domain, its normal may not turn back between neighbouring samples
+//!   of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails (the
+//!   faces keep the edge between them) instead of merging onto a continuation that is not
+//!   one sheet, and [`CoverCoincident::fold`] names the reversed pair
+//!   ([`ContinuationFold`]). tangency-labs/solidcore#434. The fork also refused any
+//!   sample whose normal is not longer than `SM_EFF_ZERO_SQRT` times the normal at the
+//!   centre of the natural domain. Past the natural domain this rule is kept, and a
+//!   normal within its rounding bound refuses there too ([`ContinuationFold::Vanishes`]):
+//!   the continuation may run into a pole or a cusp, such as the pole a hemisphere's
+//!   continuation reaches, and the merged face would take it on. The refusal is
+//!   sampled and conservative: a sample just past one of the surface's own degenerate
+//!   edges can fall below the cut-off and refuse too. ("Natural domain" is the surface's
+//!   current STEP domain, which an earlier cover may already have grown.)
+//!   Inside the natural domain (boundary included) it refused covers at the surface's
+//!   own degenerate points (an edge where `Du` and `Dv` are parallel, whose normal is
+//!   exactly zero, or a collapsed edge, whose evaluated normal is short but has its limit
+//!   direction), which the face already has. There a sample whose computed normal is no
+//!   longer than the cross product's own rounding bound (`2 γ_4 |Du| |Dv|`) has no
+//!   direction and witnesses nothing: each comparison bridges it to the last sample with
+//!   a direction along its grid row and column, so a reversal across it is still a fold.
+//!   Any other normal, however short, is compared by its direction. A non-finite normal
+//!   refuses (the fork's NaN unit vector passed its comparisons).
 //! - **A face across a wrapped seam is covered** (WR-599; the fork's
 //!   tangency-labs/smlib@16bf1cb; upstream refuses every crossing). A boundary step across this surface's seam in a
 //!   direction it is closed in over its natural domain is no failure, and the domain
@@ -99,6 +116,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::plane::Plane;
 use std::sync::Mutex;
 
+use super::fold_certificate::{FoldCertificate, NotProvedReason};
 use super::p1::{
     crossed_seam_or_pole, evaluate_1st_derivatives, evaluate_2nd_derivatives,
     evaluate_normal_section as smsurf_evaluate_normal_section, FindPsNormalEnfo, SsNormalizeEnfo,
@@ -122,7 +140,7 @@ const NUM_SAMPLES: usize = 6;
 /// `lNumBdrySamples` of `CoverCoincidentSurface`: the samples along each boundary.
 const NUM_BDRY_SAMPLES: usize = 15;
 /// `lNumFoldSamples` of the fork's `CoverCoincidentSurface`: the `21 x 21` grid over the
-/// extended domain whose normals must neither vanish nor turn back.
+/// extended domain whose normals must not turn back, nor vanish past the natural domain.
 const NUM_FOLD_SAMPLES: usize = 21;
 /// `lNumFoldSamples - 1.0`: the grid's step in fractions of the domain.
 const NUM_FOLD_SAMPLES_DENOM: f64 = (NUM_FOLD_SAMPLES - 1) as f64;
@@ -326,6 +344,62 @@ pub struct CoverCoincident {
     /// (`topology::face::p1::remove_uv_trim_curves`) right after the call. `None` on
     /// failure and for a surface no face owns.
     pub remove_uv_trim_curves_of: Option<ObjectRef>,
+    /// Why the cover failed when the continuation it would merge onto is not one sheet
+    /// (WR-407); `None` on success and on every other failure.
+    pub fold: Option<ContinuationFold>,
+}
+
+/// The witness that the continuation of a B-spline-based surface past its natural
+/// domain folds over the domain a cover would merge onto (WR-407), found on the
+/// `21 x 21` grid over that domain. The points are in the surface's STEP parameters. `uv`
+/// is the later sample in grid order (u major, then v) and `neighbour` the sample it was
+/// compared with: the one before it along its grid row or column, past any sample whose
+/// normal has no direction (no longer than its rounding bound).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ContinuationFold {
+    /// The unit normals at `uv` and `neighbour` turn back: their dot product `dot` is not
+    /// positive.
+    TurnsBack {
+        /// The later sample.
+        uv: Point2,
+        /// The sample compared with it.
+        neighbour: Point2,
+        /// The dot product of the two unit normals.
+        dot: f64,
+    },
+    /// At `uv`, outside the surface's natural domain, the normal vanishes: its length
+    /// `length` is not above `cutoff`, `SM_EFF_ZERO_SQRT` times the length of the normal
+    /// at the centre of the natural domain, or not above its own rounding bound `noise`. The
+    /// continuation may run into a degenerate point (a pole or a cusp) there; the
+    /// refusal is conservative and also catches a sample just past one of the surface's
+    /// own degenerate edges.
+    Vanishes {
+        /// The sample.
+        uv: Point2,
+        /// The length of the normal there.
+        length: f64,
+        /// The fork's cut-off.
+        cutoff: f64,
+        /// The rounding bound of the normal there (`2 γ_4 |Du| |Dv|`).
+        noise: f64,
+    },
+    /// The first derivatives could not be evaluated at `uv` (or at the centre of the
+    /// natural domain, for the cut-off of [`ContinuationFold::Vanishes`]), or the normal
+    /// at `uv` is not finite.
+    NotEvaluated {
+        /// The sample.
+        uv: Point2,
+    },
+    /// No sample witnesses a fold, but the continuation could not be proved free of
+    /// folds near `uv` ([`super::fold_certificate::certify_no_fold`]): `reason` says
+    /// what was not proved. Sampling alone cannot accept a cover: a fold can lie between
+    /// samples.
+    NotCertified {
+        /// The centre of the piece that failed (or of the merge domain).
+        uv: Point2,
+        /// What was not proved.
+        reason: NotProvedReason,
+    },
 }
 
 /// A two-surface local solution ([`Surface::local_surface_solve`] and
@@ -1102,6 +1176,7 @@ impl Surface {
             max_dist: BIG_DOUBLE,
             covered_step_domain: None,
             remove_uv_trim_curves_of: None,
+            fold: None,
         };
 
         // We're going to have to expand ourselves right away.
@@ -1220,6 +1295,21 @@ impl Surface {
             // our domain with our original domain, and update our domain to it.
             let orig_domain = self.step_uv_domain();
             let update_domain = orig_domain.union(&new_domain);
+            // Four corners determine the bilinear patches, not that this one's
+            // continuation over the union is free of folds: the fold rule below holds
+            // here too (WR-407; a planar 2 x 2 net can fold, as #434's swept sector
+            // does). The rule excludes folds only, not a continuation that comes back
+            // over the face without folding (`fold_certificate`, "What is not proved").
+            if out_of_bounds_enabled(self).is_some()
+                && !update_domain.is_contained_by(&orig_domain, 0.0)
+            {
+                if let Some(fold) = self.continuation_fold(k, &update_domain)? {
+                    return Ok(CoverCoincident {
+                        fold: Some(fold),
+                        ..failure
+                    });
+                }
+            }
             // (status ignored upstream; passed on as the fork does)
             self.adjust_step_uv_domain(k, &update_domain)?;
 
@@ -1230,6 +1320,7 @@ impl Surface {
                 max_dist,
                 covered_step_domain: Some(new_domain),
                 remove_uv_trim_curves_of: self.face_owner(),
+                fold: None,
             });
         }
 
@@ -1505,47 +1596,17 @@ impl Surface {
         // face's UV domain spans the fold, and the face rebuilt on it gets UV trims far from
         // its edges (two swept arc walls sharing their top and bottom planes, joined: UV gaps
         // and the wrong volume). The continued surface must not fold over the domain the
-        // merge will use: its normal must not vanish or turn back between neighbouring
-        // samples of a grid over that domain. Opt-in (`Kernel::fixes.cover_refuses_folded_continuation`,
-        // WR-407); upstream merges onto the continuation.
-        if k.fixes.cover_refuses_folded_continuation
-            && out_of_bounds_enabled(self).is_some()
+        // merge will use: its normal must not turn back between neighbouring samples of a
+        // grid over that domain, nor vanish at a sample past the natural domain (WR-407);
+        // upstream merges onto the continuation.
+        if out_of_bounds_enabled(self).is_some()
             && !update_domain.is_contained_by(&orig_domain, 0.0)
         {
-            let Some((_, reference)) = self.step_normal(k, orig_domain.evaluate(0.5, 0.5))? else {
-                return Ok(failure);
-            };
-            let mut previous: Vec<Vec3> = Vec::new();
-            for ii in 0..NUM_FOLD_SAMPLES {
-                let mut row: Vec<Vec3> = Vec::with_capacity(NUM_FOLD_SAMPLES);
-                for jj in 0..NUM_FOLD_SAMPLES {
-                    let uv = update_domain.evaluate(
-                        ii as f64 / NUM_FOLD_SAMPLES_DENOM,
-                        jj as f64 / NUM_FOLD_SAMPLES_DENOM,
-                    );
-                    let Some((normal, length)) = self.step_normal(k, uv)? else {
-                        return Ok(failure);
-                    };
-                    // A normal of no length is a fold or a pole (`!(length > limit)`, so an
-                    // incomparable length refuses too).
-                    if length.partial_cmp(&(EFF_ZERO_SQRT * reference))
-                        != Some(core::cmp::Ordering::Greater)
-                    {
-                        return Ok(failure);
-                    }
-                    let unit = normal / length;
-                    if row
-                        .last()
-                        .is_some_and(|previous_in_row| unit.dot(*previous_in_row) <= 0.0)
-                        || previous
-                            .get(jj)
-                            .is_some_and(|above| unit.dot(*above) <= 0.0)
-                    {
-                        return Ok(failure);
-                    }
-                    row.push(unit);
-                }
-                previous = row;
+            if let Some(fold) = self.continuation_fold(k, &update_domain)? {
+                return Ok(CoverCoincident {
+                    fold: Some(fold),
+                    ..failure
+                });
             }
         }
 
@@ -1559,7 +1620,100 @@ impl Surface {
             max_dist,
             covered_step_domain: Some(new_domain),
             remove_uv_trim_curves_of: self.face_owner(),
+            fold: None,
         })
+    }
+
+    /// The first fold of this surface (with out-of-bounds evaluation on) over `domain`
+    /// in its STEP parameters, on the `21 x 21` grid `CoverCoincidentSurface`'s fold rule
+    /// samples (WR-407): two neighbouring samples whose unit normals turn back
+    /// (`!(dot > 0)`, so a NaN dot refuses), a sample past the natural domain whose normal
+    /// vanishes (not longer than `SM_EFF_ZERO_SQRT` times the normal at the natural
+    /// domain's centre, the fork's cut-off, or than its own rounding bound), or a sample
+    /// that cannot be evaluated or whose normal is not finite. Inside the natural domain
+    /// (boundary included), a sample whose computed normal is no longer than its own
+    /// rounding bound ([`Surface::step_normal_with_noise`]; an exact zero included, as
+    /// at a degenerate edge where `Du` and `Dv` are parallel) has no direction and
+    /// witnesses nothing; the next sample along its row and its column is compared with
+    /// the last one before it that has a direction, so a reversal across it is still
+    /// found.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation.
+    fn continuation_fold(&self, k: &Kernel, domain: &Extent2d) -> Result<Option<ContinuationFold>> {
+        // The natural domain and the length of the normal at its centre, the scale of the
+        // continuation's vanishing-normal cut-off.
+        let natural = self.step_uv_domain();
+        let centre = natural.evaluate(0.5, 0.5);
+        let Some((_, reference)) = self.step_normal(k, centre)? else {
+            return Ok(Some(ContinuationFold::NotEvaluated { uv: centre }));
+        };
+        let cutoff = EFF_ZERO_SQRT * reference;
+        // The last sample with a direction in each grid column (fixed v), and its uv.
+        let mut column: [Option<(Point2, Vec3)>; NUM_FOLD_SAMPLES] = [None; NUM_FOLD_SAMPLES];
+        for ii in 0..NUM_FOLD_SAMPLES {
+            // The last sample with a direction in this grid row (fixed u).
+            let mut row: Option<(Point2, Vec3)> = None;
+            for (jj, above) in column.iter_mut().enumerate() {
+                let uv = domain.evaluate(
+                    ii as f64 / NUM_FOLD_SAMPLES_DENOM,
+                    jj as f64 / NUM_FOLD_SAMPLES_DENOM,
+                );
+                let Some((normal, length, noise)) = self.step_normal_with_noise(k, uv)? else {
+                    return Ok(Some(ContinuationFold::NotEvaluated { uv }));
+                };
+                // A non-finite normal, or a bound that overflowed (it would skip a sample
+                // that has a direction), refuses.
+                if !length.is_finite() || !noise.is_finite() {
+                    return Ok(Some(ContinuationFold::NotEvaluated { uv }));
+                }
+                // Past the natural domain, a normal that vanishes (not above the fork's
+                // cut-off, `!(length > cutoff)`, so an incomparable cut-off refuses too)
+                // refuses, as one with no direction (within its rounding bound) does:
+                // neither is skipped there. A pole or a cusp the continuation runs into
+                // would become a singularity of the merged face. The refusal is sampled and
+                // conservative: a continuation sample just past one of the surface's own
+                // degenerate edges can be below the cut-off too, and also refuses. (A NaN
+                // `uv` would count as inside; the grid of a finite domain has none.)
+                if !Extent2d::from_points(uv, uv).is_contained_by(&natural, 0.0)
+                    && (length.partial_cmp(&cutoff) != Some(core::cmp::Ordering::Greater)
+                        || length <= noise)
+                {
+                    return Ok(Some(ContinuationFold::Vanishes {
+                        uv,
+                        length,
+                        cutoff,
+                        noise,
+                    }));
+                }
+                // Inside the natural domain, no direction: within the cross product's own
+                // rounding (also an exact zero, and a normal whose length underflows).
+                if length <= noise {
+                    continue;
+                }
+                let unit = normal / length;
+                for (neighbour, other) in [row, *above].into_iter().flatten() {
+                    let dot = unit.dot(other);
+                    if dot.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+                        return Ok(Some(ContinuationFold::TurnsBack { uv, neighbour, dot }));
+                    }
+                }
+                row = Some((uv, unit));
+                *above = Some((uv, unit));
+            }
+        }
+        // No sampled witness: the samples alone prove nothing between them, so the
+        // continuation must be proved free of folds
+        // ([`super::fold_certificate::certify_no_fold`]).
+        Ok(
+            match super::fold_certificate::certify_no_fold(k, self, &natural, domain)? {
+                FoldCertificate::Proved => None,
+                FoldCertificate::NotProved { uv, reason } => {
+                    Some(ContinuationFold::NotCertified { uv, reason })
+                }
+            },
+        )
     }
 
     /// The normal (`Du × Dv`) and its length at `uv` in the STEP parameterisation
@@ -1570,6 +1724,25 @@ impl Surface {
     ///
     /// Those of the evaluation.
     fn step_normal(&self, k: &Kernel, uv: Point2) -> Result<Option<(Vec3, f64)>> {
+        Ok(self
+            .step_normal_with_noise(k, uv)?
+            .map(|(n, length, _)| (n, length)))
+    }
+
+    /// [`Surface::step_normal`] with the length below which the computed normal has no
+    /// direction: `2 γ_4 |Du| |Dv|` of the computed derivatives. Each component of
+    /// `Du × Dv` is `a b - c d` in two products and a difference, so the computed
+    /// normal `n'` is off the exact cross product `n` of the computed derivatives by
+    /// `|e| <= √2 γ_2 |Du| |Dv|`. A computed length (three squares, a sum of three and
+    /// a root) is within `γ_4` relative of the true one. So a computed `|n'|` above
+    /// `2 γ_4 |Du| |Dv|` (computed lengths) gives `|n'| > |e|` in exact arithmetic,
+    /// hence `n' · n >= |n'| (|n'| - |e|) > 0`: the computed direction is within 90
+    /// degrees of the cross product's. At or below it the direction is not determined.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation.
+    fn step_normal_with_noise(&self, k: &Kernel, uv: Point2) -> Result<Option<(Vec3, f64, f64)>> {
         let Some(d) = ignored(self.evaluate_step(k, uv, 1, 1, EvaluateFlags::default()))? else {
             return Ok(None);
         };
@@ -1580,7 +1753,8 @@ impl Surface {
             return Ok(None);
         };
         let normal = du.cross(dv);
-        Ok(Some((normal, normal.length())))
+        let noise = 2.0 * crate::nurbs::math::gamma(4) * du.length() * dv.length();
+        Ok(Some((normal, normal.length(), noise)))
     }
 
     /// The face that owns this surface directly (`GetOwner()` when it is an `SmFace`),
@@ -2236,38 +2410,561 @@ mod tests {
         Ok((covered, this.step_uv_domain().u_interval().max()))
     }
 
-    /// With `fixes.cover_refuses_folded_continuation` (WR-407, #434; SolidCraft change,
-    /// tangency-labs/smlib 1b6f5fa) the cover across the fold fails and changes nothing.
-    #[test]
-    fn issue_434_cover_refuses_a_continuation_that_folds() -> Result<()> {
-        let mut k = Kernel::default();
-        k.fixes.cover_refuses_folded_continuation = true;
-        let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
-        assert!(
-            !covered.success,
-            "the fold at u = 1.5 must not be covered: {covered:?}"
-        );
-        // Nothing was changed by the refused cover.
-        assert_eq!(u_max, 1.0);
-        Ok(())
-    }
-
-    /// Default (SMLib v1.0.1): the flat sheet is now planar to `SM_EFF_ZERO` (`IsPlanar`
-    /// tests the unpadded pseudo box, `SmSurface.cpp:22371` at `3fd5b95`), so
-    /// `GetMaxAnalyticDomain` expands it relatively by 100 instead of by half a span per
-    /// cubic direction. The search over that domain reaches the folded continuation and
-    /// the cover fails, changing nothing. At `c9c5979` the padded box was not planar; the
-    /// domain ended at the fold (u = 1.5) and the cover succeeded (WR-407).
+    /// The flat sheet is planar to `SM_EFF_ZERO` (`IsPlanar` tests the unpadded pseudo
+    /// box, `SmSurface.cpp:22371` at `3fd5b95`), so `GetMaxAnalyticDomain` expands it
+    /// relatively by 100 instead of by half a span per cubic direction. The search over
+    /// that domain reaches the folded continuation and the cover fails, changing nothing.
+    /// At `c9c5979` the padded box was not planar; the domain ended at the fold
+    /// (u = 1.5) and only the fold rule (WR-407, #434) refused the cover.
     #[test]
     fn issue_434_default_refuses_the_fold_of_a_planar_sheet() -> Result<()> {
         let k = Kernel::default();
-        assert!(!k.fixes.cover_refuses_folded_continuation);
         let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
             !covered.success,
             "the planar sheet's cover across the fold fails: {covered:?}"
         );
+        // The search failed before the fold rule ran.
+        assert_eq!(covered.fold, None);
         assert_eq!(u_max, 1.0);
+        Ok(())
+    }
+
+    /// The Bezier surface over `[0, 1]^2` with control net `net` (`net[i][j]`: u index
+    /// `i`, v index `j`), with out-of-bounds evaluation on, as `CoverCoincidentSurface`
+    /// evaluates it.
+    fn wr_407_bezier_sheet(net: &[&[[f64; 2]]]) -> Result<Surface> {
+        use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let bezier = |n: usize| [vec![0.0; n], vec![1.0; n]].concat();
+        let (rows, cols) = (net.len(), net.first().map_or(0, |r| r.len()));
+        let net = net
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|[x, y]| CPoint::from_point(Vec3::new(*x, *y, 0.0)))
+                    .collect()
+            })
+            .collect();
+        let nl = NlSurface::new(net, rows - 1, cols - 1, bezier(rows), bezier(cols))?;
+        let mut s = Surface::from(Bss::from_nurb(nl, false));
+        set_out_of_bounds_enabled(&mut s, true);
+        Ok(s)
+    }
+
+    /// WR-407, tangency-labs/solidcraft#17215: a degenerate edge of the surface's own
+    /// domain is no fold. `P(u, v) = (u + v, v^3)` has `Du = (1, 0)` and
+    /// `Dv = (1, 3 v^2)`, parallel on its edge v = 0, so its normal `(0, 0, 3 v^2)` is
+    /// exactly zero on the grid column v = 0 of `[0, 1] x [-1, 1]` (sample 10 of 20) and
+    /// points along +z everywhere else, on the continuation v < 0 too. The fork's rule
+    /// refused this cover (a zero normal is below any cut-off).
+    #[test]
+    fn wr_407_degenerate_edge_of_the_domain_is_no_fold() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 0.0], [1.0, 1.0]],
+            &[[1.0, 0.0], [4.0 / 3.0, 0.0], [5.0 / 3.0, 0.0], [2.0, 1.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        let edge = domain.evaluate(0.25, 0.5);
+        assert_eq!(edge.y, 0.0);
+        assert_eq!(
+            s.step_normal(&k, edge)?.map(|(_, length)| length),
+            Some(0.0)
+        );
+        assert_eq!(s.continuation_fold(&k, &domain)?, None);
+        Ok(())
+    }
+
+    /// The real defect next to the case above is still caught: `P(u, v) = (u + v, v^2)`
+    /// has the normal `(0, 0, 2 v)`, exactly zero on its edge v = 0 and reversed on the
+    /// continuation v < 0. The zero sample is passed over, and v = 0.1 is compared with
+    /// v = -0.1 on the first grid row: their normals are +z and -z.
+    #[test]
+    fn wr_407_fold_through_a_zero_normal_is_still_a_fold() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.5, 0.0], [1.0, 1.0]],
+            &[[1.0, 0.0], [1.5, 0.0], [2.0, 1.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        let edge = domain.evaluate(0.0, 0.5);
+        assert_eq!(edge.y, 0.0);
+        assert_eq!(
+            s.step_normal(&k, edge)?.map(|(_, length)| length),
+            Some(0.0)
+        );
+        let fold = s.continuation_fold(&k, &domain)?;
+        assert_eq!(
+            fold,
+            Some(ContinuationFold::TurnsBack {
+                uv: domain.evaluate(0.0, 11.0 / 20.0),
+                neighbour: domain.evaluate(0.0, 9.0 / 20.0),
+                dot: -1.0,
+            })
+        );
+        Ok(())
+    }
+
+    /// A fold between samples is not accepted (tangency-labs/solidcraft#17453 review):
+    /// `P(u, v) = (u + v, 64 v^3 + 3 v^2)` (Bezier y controls `0, 0, 1, 67`) has the
+    /// normal `(0, 0, 192 v^2 + 6 v)`, zero on its own edge v = 0 and at v = -1/32, and
+    /// negative between them, on the continuation. Over `[0, 1] x [-1, 1]` the grid's
+    /// samples step 0.1 in v, so none lies in `(-1/32, 0)`; the zero at v = 0 is passed
+    /// over and every sampled normal is +z. The certificate finds the turn back.
+    #[test]
+    fn wr_407_fold_between_samples_is_not_accepted() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 1.0], [1.0, 67.0]],
+            &[[1.0, 0.0], [4.0 / 3.0, 0.0], [5.0 / 3.0, 1.0], [2.0, 67.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        // the normal there is reversed, and no grid sample lies there
+        let (normal, _) = s.step_normal(&k, Point2::new(0.5, -1.0 / 64.0))?.unwrap();
+        assert!(normal.z < 0.0, "{normal:?}");
+        let fold = s.continuation_fold(&k, &domain)?;
+        assert!(
+            matches!(fold, Some(ContinuationFold::NotCertified { uv, reason })
+                if uv.y < 0.0 && matches!(reason, NotProvedReason::NormalZero
+                    | NotProvedReason::TurnBackAcrossSide)),
+            "{fold:?}"
+        );
+        Ok(())
+    }
+
+    /// The certificate proves what it should: the degenerate edge `(u + v, v^3)` (normal
+    /// `3 v^2 z`, zero on the natural domain's edge, positive elsewhere) and the
+    /// collapsed edge `(u, u^2 v)` continue without a fold, and a planar bilinear sheet
+    /// whose normal `(1 - u / 2) z` vanishes at u = 2 does not, past it.
+    #[test]
+    fn wr_407_fold_certificate_proves_and_refuses() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        let k = Kernel::default();
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let cubic = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 0.0], [1.0, 1.0]],
+            &[[1.0, 0.0], [4.0 / 3.0, 0.0], [5.0 / 3.0, 0.0], [2.0, 1.0]],
+        ])?;
+        let below = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+        assert_eq!(
+            certify_no_fold(&k, &cubic, &natural, &below)?,
+            FoldCertificate::Proved
+        );
+        let collapsed = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.0, 0.0]],
+            &[[0.5, 0.0], [0.5, 0.0]],
+            &[[1.0, 0.0], [1.0, 1.0]],
+        ])?;
+        let left = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
+        assert_eq!(
+            certify_no_fold(&k, &collapsed, &natural, &left)?,
+            FoldCertificate::Proved
+        );
+        // (u, v (1 - u / 2)): bilinear, planar, normal (1 - u / 2) z
+        let sheet = wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, 1.0]], &[[1.0, 0.0], [1.0, 0.5]]])?;
+        let short = Extent2d::from_bounds(0.0, 0.0, 1.9, 1.0);
+        assert_eq!(
+            certify_no_fold(&k, &sheet, &natural, &short)?,
+            FoldCertificate::Proved
+        );
+        let past = Extent2d::from_bounds(0.0, 0.0, 2.5, 1.0);
+        // refused at the zero of the normal (u = 2), not for want of a direction
+        let refused = certify_no_fold(&k, &sheet, &natural, &past)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { uv, reason }
+                if uv.x < 2.0 + 0.25
+                    && matches!(reason, NotProvedReason::NormalZero
+                    | NotProvedReason::TurnBackAcrossSide)),
+            "{refused:?}"
+        );
+        Ok(())
+    }
+
+    /// The bilinear shortcut of `CoverCoincidentSurface` runs the fold rule
+    /// (tangency-labs/solidcraft#17453 review): the planar bilinear sheet
+    /// `(u, v (1 - u / 2))` on `[0, 1]^2`, covering the bilinear patch that is the same
+    /// sheet over `[0, 2.5] x [0, 1]`, folds at u = 2 (its normal `(1 - u / 2) z`
+    /// reverses), so the cover is refused; the patch over `[0, 1.9] x [0, 1]` is covered.
+    #[test]
+    fn wr_407_bilinear_shortcut_runs_the_fold_rule() -> Result<()> {
+        let k = Kernel::default();
+        let sheet = || wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, 1.0]], &[[1.0, 0.0], [1.0, 0.5]]]);
+        let over = |u: f64| {
+            wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, 1.0]], &[[u, 0.0], [u, 1.0 - u / 2.0]]])
+        };
+        let mut this = sheet()?;
+        let other = over(2.5)?;
+        assert!(this.is_bilinear(&k) && other.is_bilinear(&k));
+        let covered = this.cover_coincident_surface_deferring_trims(&k, &other, 1.0e-6, None)?;
+        assert!(!covered.success && covered.fold.is_some(), "{covered:?}");
+        assert_eq!(
+            this.step_uv_domain(),
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0)
+        );
+        let mut this = sheet()?;
+        let covered =
+            this.cover_coincident_surface_deferring_trims(&k, &over(1.9)?, 1.0e-6, None)?;
+        assert!(covered.success && covered.fold.is_none(), "{covered:?}");
+        Ok(())
+    }
+
+    /// The certificate's rational branch: a quarter cylinder (the rational quadratic
+    /// arc `(1, 0)`, `(1, 1)` weight `sqrt(2) / 2`, `(0, 1)`, extruded along z) continues
+    /// along its circle past both arc ends (the weight stays positive on
+    /// `[-0.25, 1.25]`; the normal is radial), and past its two knot spans' joint.
+    #[test]
+    fn wr_407_fold_certificate_proves_a_rational_cylinder() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let row = |x: f64, y: f64, wt: f64| {
+            vec![
+                CPoint::new(x * wt, y * wt, 0.0, wt),
+                CPoint::new(x * wt, y * wt, wt, wt),
+            ]
+        };
+        // two quadratic spans in u, a quarter circle each, joined at the double knot 0.5
+        let net = vec![
+            row(1.0, 0.0, 1.0),
+            row(1.0, 1.0, w),
+            row(0.0, 1.0, 1.0),
+            row(-1.0, 1.0, w),
+            row(-1.0, 0.0, 1.0),
+        ];
+        let nl = NlSurface::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )?;
+        let mut s = Surface::from(Bss::from_nurb(nl, false));
+        set_out_of_bounds_enabled(&mut s, true);
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let wider = Extent2d::from_bounds(-0.1, -0.5, 1.1, 1.5);
+        assert_eq!(
+            certify_no_fold(&k, &s, &natural, &wider)?,
+            FoldCertificate::Proved
+        );
+        Ok(())
+    }
+
+    /// A piece an ulp wide keeps its precision (thickening an L of two flat faces,
+    /// `issue_1973_a_thickened_l_of_two_flat_faces_keeps_its_edges_marks`): the bilinear
+    /// trapezoid `x = v (20 - 2 u)`, `y = 2 u` has the normal `2 (20 - 2 u) z`, at least
+    /// `20` on `u <= 5`. Over `[0, 5 + 2 ulp] x [0, 2]` the grid line `5 (1 + ulp) / 5`
+    /// falls an ulp past the natural side u = 1, so the cut there leaves a piece
+    /// `[1, 1 + 4e-16]`, where the differences of the restricted coefficients lose all
+    /// of their size: the derivatives are taken before the restriction.
+    #[test]
+    fn wr_407_fold_certificate_keeps_precision_on_a_thin_piece() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [20.0, 0.0]],
+            &[[8.881784197001252e-16, 2.0], [18.0, 2.0]],
+        ])?;
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        for domain in [
+            Extent2d::from_bounds(0.0, 0.0, 5.000000000000002, 2.0),
+            Extent2d::from_bounds(0.0, 0.0, 5.0, 2.000000000000003),
+        ] {
+            assert_eq!(
+                certify_no_fold(&k, &s, &natural, &domain)?,
+                FoldCertificate::Proved,
+                "{domain:?}"
+            );
+        }
+        // a genuine zero, u = 10, past the merge domain's side is still refused
+        let past = Extent2d::from_bounds(0.0, 0.0, 12.0, 2.0);
+        assert!(
+            matches!(
+                certify_no_fold(&k, &s, &natural, &past)?,
+                FoldCertificate::NotProved { uv, .. } if uv.x > 9.0 && uv.x < 11.0
+            ),
+            "{past:?}"
+        );
+        Ok(())
+    }
+
+    /// A turn back across a `C0` knot line of the continuation is not proved away (#17724
+    /// review): the degree-1 (in u) sheet with u rows at x = 0, 1, 0 (knots
+    /// `0, 0, 1, 2, 2`) folds flat back onto itself at the knot u = 1, where its normal
+    /// jumps from +z to -z without vanishing: each piece alone has a normal that never
+    /// vanishes. Over `[0, 1.5] x [0, 1]` past the natural `[0, 0.9] x [0, 1]` it is
+    /// refused, at the knot line. The real crease next to it, x = 0, 1, 2 with
+    /// z = 0, 0, 1 (the normal turns from +z to `(-1, 0, 1)`, never back), is proved.
+    #[test]
+    fn wr_407_fold_certificate_refuses_a_turn_back_at_a_c0_knot() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let sheet = |rows: [[f64; 2]; 3]| -> Result<Surface> {
+            let net = rows
+                .iter()
+                .map(|&[x, z]| {
+                    vec![
+                        CPoint::from_point(Vec3::new(x, 0.0, z)),
+                        CPoint::from_point(Vec3::new(x, 1.0, z)),
+                    ]
+                })
+                .collect();
+            let nl = NlSurface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 2.0, 2.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )?;
+            let mut s = Surface::from(Bss::from_nurb(nl, false));
+            set_out_of_bounds_enabled(&mut s, true);
+            Ok(s)
+        };
+        let natural = Extent2d::from_bounds(0.0, 0.0, 0.9, 1.0);
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.5, 1.0);
+        let folded = sheet([[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]])?;
+        // the fold: u = 1.1 lands on u = 0.9, on the face
+        let at = |s: &Surface, u: f64| {
+            s.evaluate_step(&k, Point2::new(u, 0.5), 0, 0, EvaluateFlags::default())
+                .map(|p| p[0][0])
+        };
+        assert!(at(&folded, 1.1)?.distance(at(&folded, 0.9)?) < 1e-12);
+        let refused = certify_no_fold(&k, &folded, &natural, &domain)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { uv, reason }
+                if reason == NotProvedReason::TurnBackAcrossKnot && (uv.x - 1.0).abs() < 0.1),
+            "{refused:?}"
+        );
+        let crease = sheet([[0.0, 0.0], [1.0, 0.0], [2.0, 1.0]])?;
+        assert_eq!(
+            certify_no_fold(&k, &crease, &natural, &domain)?,
+            FoldCertificate::Proved
+        );
+        Ok(())
+    }
+
+    /// Overflowing arithmetic proves nothing (#17724 review): the planar bilinear sheet
+    /// `(S u, S v)`, `S = 1e80`, has the normal `S^2 z`, so `N . d = S^4` overflows on
+    /// every piece; its bounds are not finite either. The same sheet at `S = 1` is proved.
+    #[test]
+    fn wr_407_fold_certificate_refuses_overflowing_coefficients() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        let k = Kernel::default();
+        let natural = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.5, 1.0);
+        let sheet = |s: f64| wr_407_bezier_sheet(&[&[[0.0, 0.0], [0.0, s]], &[[s, 0.0], [s, s]]]);
+        assert_eq!(
+            certify_no_fold(&k, &sheet(1.0)?, &natural, &domain)?,
+            FoldCertificate::Proved
+        );
+        let refused = certify_no_fold(&k, &sheet(1e80)?, &natural, &domain)?;
+        assert!(
+            matches!(
+                refused,
+                FoldCertificate::NotProved {
+                    reason: NotProvedReason::NotFinite,
+                    ..
+                }
+            ),
+            "{refused:?}"
+        );
+        Ok(())
+    }
+
+    /// An extrusion of a B-spline generator continues along the generator's end spans
+    /// (`wr_593_nx1_tangent_corner_edge`: the two half-cylinder walls of a peg join as
+    /// one face): the rational quadratic half circle about `(20, 0)` of radius 5,
+    /// extruded along z, continues past both ends (its normal is radial, its weight
+    /// positive there). The parabola `C(t) = (t + t^2, t^2, 0)`, extruded along y, has
+    /// the normal `C' x E = (1 + 2 t) (0, 0, 1)` (its tangent is along y at `t = -0.5`):
+    /// it continues to `t = -0.4` but not past its turn back at `t = -0.5`.
+    #[test]
+    fn wr_407_extruded_b_spline_generator_continues_to_its_turn() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::curve::curve::{Curve, CurveKind};
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+        use crate::surface::surf_of_extrusion::p1::SurfOfExtrusion;
+        let k = Kernel::default();
+        let extrude = |pw: Vec<CPoint>, p: usize, knots: Vec<f64>, e: Vec3| -> Result<Surface> {
+            let c = BSplineCurve::from_nurb(NlCurve::new(pw, p, knots)?, 3, false);
+            let mut x = SurfOfExtrusion::create_canonical(&k, Curve::from(c), e)?;
+            x.set_out_of_bounds_enabled(true);
+            let s = Surface::from(x);
+            assert!(matches!(
+                s.kind(),
+                SurfaceKind::SurfOfExtrusion(x)
+                    if matches!(x.gen_curve().map(Curve::kind), Some(CurveKind::BSpline(_)))
+            ));
+            Ok(s)
+        };
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let hw = |x: f64, y: f64, wt: f64| CPoint::new(x * wt, y * wt, 0.0, wt);
+        let wall = extrude(
+            vec![
+                hw(20.0, -5.0, 1.0),
+                hw(25.0, -5.0, w),
+                hw(25.0, 0.0, 1.0),
+                hw(25.0, 5.0, w),
+                hw(20.0, 5.0, 1.0),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+            Vec3::new(0.0, 0.0, 10.0),
+        )?;
+        let natural = wall.step_uv_domain();
+        let wider = Extent2d::from_bounds(
+            natural.u_min() - 0.02,
+            natural.v_min() - 1.0,
+            natural.u_max() + 0.02,
+            natural.v_max() + 1.0,
+        );
+        assert_eq!(
+            certify_no_fold(&k, &wall, &natural, &wider)?,
+            FoldCertificate::Proved
+        );
+        let p = |x: f64, y: f64| CPoint::from_point(Vec3::new(x, y, 0.0));
+        let turn = extrude(
+            vec![p(0.0, 0.0), p(0.5, 0.0), p(2.0, 1.0)],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            Vec3::new(0.0, 1.0, 0.0),
+        )?;
+        let natural = turn.step_uv_domain();
+        assert_eq!((natural.u_min(), natural.u_max()), (0.0, 1.0));
+        let (v0, v1) = (natural.v_min(), natural.v_max());
+        let short = Extent2d::from_bounds(-0.4, v0, 1.0, v1);
+        assert_eq!(
+            certify_no_fold(&k, &turn, &natural, &short)?,
+            FoldCertificate::Proved
+        );
+        let past = Extent2d::from_bounds(-1.0, v0, 1.0, v1);
+        let refused = certify_no_fold(&k, &turn, &natural, &past)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { uv, .. } if uv.x < -0.4),
+            "{refused:?}"
+        );
+        Ok(())
+    }
+
+    /// A revolution of a line continues past its rim but not through its pole: the cone
+    /// swept by `C(v) = v (1, 0, 1)` about the z axis has `M(v) = v (1, 0, -1)` (module
+    /// `fold_certificate`, `swept`), zero at the apex v = 0 (the face's own pole, on its
+    /// natural domain's side) and reversed past it, on the cone's other nappe.
+    #[test]
+    fn wr_407_revolved_line_continues_past_its_rim_not_its_pole() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::surface::surf_of_revolution::p1::SurfOfRevolution;
+        let k = Kernel::default();
+        let mut line = Line::from_points(Vec3::ZERO, Vec3::new(1.0, 0.0, 1.0), 3);
+        line.make_nurb()?;
+        let mut r = SurfOfRevolution::create_canonical(
+            &k,
+            Curve::from(line),
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+            false,
+        )?;
+        r.set_out_of_bounds_enabled(true);
+        let s = Surface::from(r);
+        let natural = s.step_uv_domain();
+        let (v0, v1) = (natural.v_min(), natural.v_max());
+        // the pole is the generator's start
+        let pole = s.evaluate_step(
+            &k,
+            Point2::new(natural.u_min(), v0),
+            0,
+            0,
+            EvaluateFlags::default(),
+        )?;
+        assert!(pole[0][0].length() < 1e-12, "{pole:?}");
+        let h = 0.02 * (v1 - v0);
+        let rim = Extent2d::from_bounds(natural.u_min(), v0, natural.u_max(), v1 + h);
+        assert_eq!(
+            certify_no_fold(&k, &s, &natural, &rim)?,
+            FoldCertificate::Proved
+        );
+        let apex = Extent2d::from_bounds(natural.u_min(), v0 - h, natural.u_max(), v1);
+        let refused = certify_no_fold(&k, &s, &natural, &apex)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { reason, .. }
+                if reason == NotProvedReason::GeneratorTurnsOrVanishes),
+            "{refused:?}"
+        );
+        Ok(())
+    }
+
+    /// A degenerate point that only the continuation has still refuses, as the fork's
+    /// rule did (the pole a hemisphere's continuation reaches; solidcore-ops'
+    /// `a_dome_1e_8_off_its_circle_joins_to_its_mirror`). `P(u, v) = (u, (u + 1)^2 v)`
+    /// has the normal `(0, 0, (u + 1)^2)`, along +z everywhere but on the line u = -1,
+    /// which it collapses to a point. The natural domain `[0, 1]^2` has no such point;
+    /// over `[-1, 1] x [0, 1]` the first grid row lies on it, so the cover would give the
+    /// face a collapsed edge it does not have.
+    #[test]
+    fn wr_407_collapsed_edge_of_the_continuation_refuses() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.0, 1.0]],
+            &[[0.5, 0.0], [0.5, 2.0]],
+            &[[1.0, 0.0], [1.0, 4.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
+        let fold = s.continuation_fold(&k, &domain)?;
+        let Some(ContinuationFold::Vanishes {
+            uv,
+            length,
+            cutoff,
+            noise,
+        }) = fold
+        else {
+            panic!("the collapsed edge at u = -1 refuses: {fold:?}");
+        };
+        assert_eq!(uv, Point2::new(-1.0, 0.0));
+        assert!(length <= cutoff && cutoff > 0.0, "{length} {cutoff}");
+        assert!(noise.is_finite() && noise >= 0.0, "{noise}");
+        // Within the natural domain the same surface is no fold.
+        let inside = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert_eq!(s.continuation_fold(&k, &inside)?, None);
+        Ok(())
+    }
+
+    /// A collapsed edge: `P(u, v) = (u, u^2 v)` collapses its edge u = 0 to the origin.
+    /// The evaluation replaces the zero `Dv` there by a short tangent along the limit
+    /// direction +y, so the normal on the grid row u = 0 of `[-1, 1] x [0, 1]` is
+    /// shorter than the fork's cut-off (`SM_EFF_ZERO_SQRT` times the normal at the
+    /// centre of the natural domain) but points along +z, as `(0, 0, u^2)` does on every
+    /// other row and on the continuation u < 0. The fork refused this cover; it is no
+    /// fold.
+    #[test]
+    fn wr_407_collapsed_edge_of_the_domain_is_no_fold() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.0, 0.0]],
+            &[[0.5, 0.0], [0.5, 0.0]],
+            &[[1.0, 0.0], [1.0, 1.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
+        let edge = domain.evaluate(0.5, 0.25);
+        assert_eq!(edge.x, 0.0);
+        let (normal, length) = s.step_normal(&k, edge)?.unwrap();
+        let (_, reference) = s.step_normal(&k, Point2::new(0.5, 0.5))?.unwrap();
+        assert!(
+            length > 0.0 && length <= EFF_ZERO_SQRT * reference,
+            "{length} {reference}"
+        );
+        assert!(normal.z / length > 0.999, "{normal:?}");
+        assert_eq!(s.continuation_fold(&k, &domain)?, None);
         Ok(())
     }
 

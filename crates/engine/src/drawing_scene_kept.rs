@@ -1,0 +1,94 @@
+//! What the sheet scene's provider keeps of a drawing once it closes: each view's last lines, how the
+//! view drew them and what they showed, and each dimension's last reading, so the drawing opened
+//! again starts from them, each note's of a view, which rides with them, and, for the drawing closed
+//! last, each view's pictures' last pixels, shown stale until drawn again. No world state is held, so a
+//! closed drawing keeps no model. Only in memory, never saved.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use solidcraft_doc::drawing::view::ResolvedView;
+
+use super::{Annotation, Drawn, DrawnDimension, DrawnFill, DrawnSketch, Lettering, Pixels, SketchContext, SourceInputs, SourceKey};
+
+/// Each closed drawing's last lines, by drawing.
+#[derive(Default)]
+pub(super) struct KeptLines(BTreeMap<u64, Kept>);
+
+/// A closed drawing's last lines: its views' and its dimensions', by id.
+#[derive(Clone, Default)]
+pub(super) struct Kept {
+    pub(super) views: BTreeMap<u64, KeptView>,
+    pub(super) dimensions: BTreeMap<u64, KeptDimension>,
+    pub(super) sketches: BTreeMap<u64, KeptSketch>,
+    pub(super) fills: BTreeMap<u64, KeptFill>,
+}
+
+/// The authored sketch's last marks and the definitions used to solve them. Neither
+/// the definitions nor the drawing-only context holds a document or a world state.
+#[derive(Clone)]
+pub(super) struct KeptSketch {
+    pub(super) source: Arc<SourceInputs>,
+    pub(super) context: Arc<SketchContext>,
+    pub(super) drawn: DrawnSketch,
+}
+
+/// A closed drawing's last fill paint, without a document or a model state.
+#[derive(Clone)]
+pub(super) struct KeptFill {
+    pub(super) source: Arc<SourceInputs>,
+    pub(super) context: Arc<SketchContext>,
+    pub(super) drawn: DrawnFill,
+}
+
+/// A view's last lines: drawn as `view` drew, from a world state that showed `shows`.
+#[derive(Clone)]
+pub(super) struct KeptView {
+    pub(super) view: ResolvedView,
+    pub(super) drawn: Drawn,
+    pub(super) shows: Option<Arc<SourceKey>>,
+    pub(super) pixels: BTreeMap<u64, Pixels>,
+}
+
+/// A dimension's last reading, or a note's: of `record`, on its view's drawing `view_serial`, with
+/// `lettering`.
+#[derive(Clone)]
+pub(super) struct KeptDimension {
+    pub(super) record: Annotation,
+    pub(super) view_serial: u64,
+    pub(super) lettering: Lettering,
+    pub(super) drawn: DrawnDimension,
+}
+
+impl KeptLines {
+    /// Keeps `kept` as drawing `drawing`'s. It has none kept already: they were taken back when it
+    /// opened. Only the drawing closed last keeps its pictures' pixels (a picture can be 64 MB), so
+    /// what is kept stays within one drawing's pictures.
+    pub(super) fn keep(&mut self, drawing: u64, kept: Kept) {
+        for other in self.0.values_mut() {
+            other.views.values_mut().for_each(|view| view.pixels.clear());
+        }
+        self.0.insert(drawing, kept);
+    }
+
+    /// Drawing `drawing`'s, taken out.
+    pub(super) fn take(&mut self, drawing: u64) -> Kept {
+        self.0.remove(&drawing).unwrap_or_default()
+    }
+
+    /// Drawing `drawing`'s alone, copied, if it has any kept.
+    pub(super) fn copy_of(&self, drawing: Option<u64>) -> KeptLines {
+        KeptLines(drawing.and_then(|d| Some((d, self.0.get(&d)?.clone()))).into_iter().collect())
+    }
+
+    /// Forgets each drawing `exists` says is gone.
+    pub(super) fn retain(&mut self, exists: impl Fn(u64) -> bool) {
+        self.0.retain(|drawing, _| exists(*drawing));
+    }
+
+    /// Drawing `drawing`'s.
+    #[cfg(test)]
+    pub(super) fn of(&self, drawing: u64) -> Option<&Kept> {
+        self.0.get(&drawing)
+    }
+}
