@@ -377,6 +377,16 @@ fn construction_rows_include_points_and_axes() {
     }
     h.app.session.visibility.hidden_origin.push("Point1".into());
     assert!(!super::entries(&h.app, 0, "construction")[0].visible);
+    // The cached rows outlive a visibility change (Show/Hide Reference Geometry, #18131): their
+    // eyes read the session, as a plane's does, not what the row held when it was built.
+    h.app.session.visibility.hidden_origin.push("Axis1".into());
+    for row in &rows {
+        assert!(!row.is_visible(&h.app), "{} still shows an open eye", row.label);
+    }
+    h.app.session.visibility.hidden_origin.clear();
+    for row in &rows {
+        assert!(row.is_visible(&h.app), "{} still shows a closed eye", row.label);
+    }
     h.app.run("selection.delete", json!({"items": rows.iter().map(|r| r.sel.clone().unwrap()).collect::<Vec<_>>()})).unwrap();
     super::prepare_model(&mut h.app);
     assert!(super::entries(&h.app, 0, "construction").is_empty());

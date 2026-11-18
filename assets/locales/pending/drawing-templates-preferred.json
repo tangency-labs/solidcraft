@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_template_list": "List Drawing Templates"
+  },
+  "ar": {
+    "cmd.drawing_template_list": "سرد قوالب اللوحات"
+  },
+  "de": {
+    "cmd.drawing_template_list": "Zeichnungsvorlagen auflisten"
+  },
+  "he": {
+    "cmd.drawing_template_list": "רשימת תבניות שרטוט"
+  },
+  "ja": {
+    "cmd.drawing_template_list": "図面テンプレートを一覧表示"
+  },
+  "ko": {
+    "cmd.drawing_template_list": "도면 템플릿 목록"
+  },
+  "vi": {
+    "cmd.drawing_template_list": "Liệt kê mẫu bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_template_list": "列出绘图模板"
+  }
+}

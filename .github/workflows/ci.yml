@@ -199,13 +199,13 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu and kernel, their scripts, the control server (its refusals,
+          # glue, the vendored egui and kernel, their scripts, the control server (its refusals,
           # #10967), or a lockfile change that moves the graphics stack (wgpu, naga, egui, winit,
           # windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -496,6 +496,16 @@ jobs:
         run: python3 -I scripts/ci/test_affected.py
       - name: Merge-of-main detection self-test
         run: python3 -I scripts/ci/test_main_merge.py
+      # Static acceptance recipes are checked on every non-draft CI run; tests/fixtures
+      # are introduced by separate Drawing PRs, so run each validator when present.
+      - name: Drawing acceptance fixture contracts
+        run: |
+          if test -f tests/fixtures/w23a-drawing-updates/validate.py; then
+            python3 -I tests/fixtures/w23a-drawing-updates/validate.py
+          fi
+          if test -f tests/fixtures/w23-assembly-sheet/validate.py; then
+            python3 -I tests/fixtures/w23-assembly-sheet/validate.py
+          fi
       - name: Claim, triage and PR-check bot tests
         run: node --test scripts/claim/*.test.js scripts/triage/*.test.js scripts/pr-checks/*.test.js
 

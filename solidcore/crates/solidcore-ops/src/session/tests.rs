@@ -104,6 +104,28 @@ fn a_solid_test_of_an_operand_moves_no_random_draw() {
     assert!(unmoved.unwrap());
 }
 
+/// A call that fails with a kernel error leaves the kernel's own words for the thread to
+/// take, once: the typed error keeps only the kernel's kind. A call that ends well leaves none.
+#[test]
+fn a_kernel_failure_leaves_its_own_words_to_take() {
+    all_fixes();
+    drop(take_failure_detail());
+    let kernel = SolidError::invalid_input("the routine", "what was wrong");
+    let words = kernel.to_string();
+    let r: Result<()> = run("fails", move |_| Err(kernel));
+    assert_eq!(
+        r,
+        Err(Error::Refused {
+            operation: "the routine",
+            reason: "what was wrong"
+        })
+    );
+    assert_eq!(take_failure_detail(), Some(words));
+    assert_eq!(take_failure_detail(), None, "taken once");
+    run("ends well", |_| Ok(())).unwrap();
+    assert_eq!(take_failure_detail(), None);
+}
+
 /// A panicking failure callback loses nothing of the call's result.
 #[test]
 fn a_panicking_hook_keeps_the_calls_result() {

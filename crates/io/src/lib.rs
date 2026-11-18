@@ -39,6 +39,7 @@ mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_to_step};
 pub mod paper;
+mod pat;
 mod ply;
 mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
@@ -70,6 +71,7 @@ pub use gerber_set::{
     BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
 };
 pub use legacy_dir::{APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
+pub use pat::{PatImportOptions, PatUnits, read_pat};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{CurveWarning, SvgDrawing, decode_svg, read_svg, read_svg_drawing, svg_nothing_to_import, svg_sheet};
@@ -368,7 +370,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         name,
         body_names,
         invisible,
-        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip },
+        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip, records: None },
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,
     })
@@ -625,10 +627,21 @@ fn mesh_notes(stats: &solidcraft_kernel::PlanStats, spec: &solidcraft_kernel::Me
         });
     }
     for o in &stats.over_tolerance {
-        let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
-        let how = if o.within { "still within it" } else { "past it" };
+        let reason = if o.caps.is_empty() {
+            String::from("its shared boundary was kept")
+        } else {
+            let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
+            format!("its refinement stopped at a bound ({caps})")
+        };
+        let how = if o.within {
+            "still within it"
+        } else if o.sag > o.tol {
+            "past it"
+        } else {
+            "within it where measured"
+        };
         notes.push(format!(
-            "face {}: its refinement stopped at a bound ({caps}); its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
+            "face {}: {reason}. Its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
             o.face,
             o.sag,
             o.tol,
@@ -912,8 +925,8 @@ pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality
 
 /// The OBJ export of the given bodies: the mesh file and the material library beside it.
 fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
-    let (meshes, warnings) = noted(per_placed_body(sel, |b, body| body_mesh(b, body, quality))?);
-    let bodies: Vec<ObjBody<'_>> = sel.iter().zip(&meshes).map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
+    let (items, warnings) = per_placed_body(sel, |b, body| body_mesh(b, body, quality))?;
+    let bodies: Vec<ObjBody<'_>> = items.iter().map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
     Ok(ObjFiles { warnings, ..obj_files(&bodies, mtl_name) })
 }
 
@@ -1051,22 +1064,52 @@ fn placed_vertices_match(original: &solidcraft_kernel::Body, copy: &solidcraft_k
 
 /// `f` for each body of an export and the body it is meshed as ([`shared_placements`]), on
 /// threads (a body at a time each), the results in the order of the bodies. The bodies are
-/// meshed and welded on their own, so the file is the same, byte for byte, as made one body
-/// after the other; of several failing bodies the first one's error is the export's, as it was
-/// then. An assembly of many bodies meshed on one core took most of the export's time.
-fn per_placed_body<R: Send>(
-    sel: &[&solidcraft_doc::ModelBody],
-    f: impl Fn(&solidcraft_doc::ModelBody, &Placed) -> Result<R> + Sync,
-) -> Result<Vec<R>> {
+/// Mesh each placed body on threads. If a body fails to mesh (e.g. an untessellatable sliver face),
+/// but other bodies in the export succeed, the failing body is skipped with a warning note so the
+/// rest of the assembly can still be exported (#18780). If all bodies fail (or only one body was
+/// selected and failed), the first error is returned.
+fn per_placed_body<'a, R: Send>(
+    sel: &[&'a solidcraft_doc::ModelBody],
+    f: impl Fn(&solidcraft_doc::ModelBody, &Placed) -> Result<(R, Vec<String>)> + Sync,
+) -> Result<(Vec<(&'a solidcraft_doc::ModelBody, R)>, Vec<String>)> {
     let meshed = shared_placements(sel);
     let pairs: Vec<(&solidcraft_doc::ModelBody, &Placed)> = sel.iter().copied().zip(&meshed).collect();
-    solidcraft_kernel::map_on_threads(&pairs, EXPORT_THREADS, |(b, body)| f(b, body))
-        .into_iter()
-        .zip(sel)
-        .map(|(r, b)| r.unwrap_or_else(|| Err(IoError::Invalid(format!("body {}: meshing it failed", b.name)))))
-        .collect()
+    let thread_results = solidcraft_kernel::map_on_threads(&pairs, EXPORT_THREADS, |(b, body)| f(b, body));
+
+    let mut successful = Vec::new();
+    let mut notes = Vec::new();
+    let mut first_err = None;
+
+    for (r, b) in thread_results.into_iter().zip(sel) {
+        match r {
+            Some(Ok((val, item_notes))) => {
+                successful.push((*b, val));
+                notes.extend(item_notes);
+            }
+            Some(Err(e)) => {
+                notes.push(format!("{}: skipped: meshing failed ({e})", b.name));
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
+            None => {
+                let e = IoError::Invalid(format!("body {}: meshing it failed", b.name));
+                notes.push(format!("{}: skipped: meshing failed ({e})", b.name));
+                if first_err.is_none() {
+                    first_err = Some(e);
+                }
+            }
+        }
+    }
+
+    if successful.is_empty() {
+        return Err(first_err.unwrap_or(IoError::Empty));
+    }
+
+    Ok((successful, notes))
 }
 
+#[allow(dead_code)]
 /// Results with their notes, as the results and every note in the results' order.
 fn noted<R>(results: Vec<(R, Vec<String>)>) -> (Vec<R>, Vec<String>) {
     let mut notes = Vec::new();
@@ -1175,42 +1218,43 @@ pub fn export_with_parts_noted(
     thumbnail: Option<&[u8]>,
 ) -> Result<(Vec<u8>, Vec<String>)> {
     let sel = selected(state, bodies)?;
-    let mut notes = Vec::new();
-    let bytes = match format {
+    let (bytes, notes) = match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
-            let meshes: Vec<Mesh>;
-            (meshes, notes) = noted(per_placed_body(&sel, |b, body| {
+            let (items, notes) = per_placed_body(&sel, |b, body| {
                 let (m, n) = body_mesh(b, body, quality)?;
                 let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
                 Ok((Mesh { positions, triangles, ..Mesh::default() }, n))
-            })?);
-            if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
+            })?;
+            let meshes: Vec<Mesh> = items.into_iter().map(|(_, m)| m).collect();
+            let bytes = if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() };
+            (bytes, notes)
         }
         Format::Obj => {
             // One file, so no material library: a mesh file that names a library nobody wrote
             // would come out in the reader's default grey.
-            let meshes: Vec<(String, Mesh)>;
-            (meshes, notes) = noted(per_placed_body(&sel, |b, body| body_mesh(b, body, quality).map(|(m, n)| ((b.name.clone(), m), n)))?);
-            obj(&meshes).into_bytes()
+            let (items, notes) = per_placed_body(&sel, |b, body| body_mesh(b, body, quality))?;
+            let meshes: Vec<(String, Mesh)> = items.into_iter().map(|(b, m)| (b.name.clone(), m)).collect();
+            (obj(&meshes).into_bytes(), notes)
         }
         Format::Step => {
             let bs: Vec<solidcraft_kernel::ExportBody> =
                 sel.iter().map(|b| solidcraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
-            solidcraft_kernel::step_export_bodies(&bs, &step_header(format!("{name}.step"), meta))?.into_bytes()
+            (solidcraft_kernel::step_export_bodies(&bs, &step_header(format!("{name}.step"), meta))?.into_bytes(), Vec::new())
         }
         Format::Iges => {
             let bs: Vec<solidcraft_kernel::ExportBody> =
                 sel.iter().map(|b| solidcraft_kernel::ExportBody { name: b.name.clone(), body: &b.body, color: b.body.color() }).collect();
-            solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes()
+            (solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes(), Vec::new())
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let objs: Vec<MeshObject>;
-            (objs, notes) = noted(per_placed_body(&sel, |b, body| mesh_object(b, body, format == Format::ThreeMfTagged, quality))?);
-            let index = |n: &String| sel.iter().position(|b| &b.name == n);
+            let (items, notes) = per_placed_body(&sel, |b, body| mesh_object(b, body, format == Format::ThreeMfTagged, quality))?;
+            let (kept_bodies, objs): (Vec<_>, Vec<_>) = items.into_iter().unzip();
+            let index = |n: &String| kept_bodies.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
-            write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
+            let bytes = write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?;
+            (bytes, notes)
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
@@ -1394,6 +1438,22 @@ pub fn read_stl(bytes: &[u8]) -> Result<Vec<[[f32; 3]; 3]>> {
 
 /// Most triangles we read from one STL file.
 pub const MAX_STL_TRIANGLES: usize = 20_000_000;
+
+/// `secs` since 1970 as (year, month, day, hour, minute, second) in UTC: crash reports' stamps and
+/// sheet PDFs' dates.
+pub fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
+    let days = i64::try_from(secs / 86_400).unwrap_or(0);
+    let rem = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
+}
 
 #[cfg(test)]
 mod tests {
@@ -1701,6 +1761,41 @@ mod tests {
         assert!(!model_xml(export(&m.state(), &[], Format::ThreeMf, "t").unwrap()).contains("Title"));
     }
 
+    /// #18780: in an export of multiple bodies, if one body fails to mesh, it is skipped with a
+    /// warning note and the remaining valid bodies are exported.
+    #[test]
+    fn untessellated_body_is_skipped_with_warning_on_multi_body_export() -> Result<()> {
+        let (_, m) = model();
+        let valid_body = &m.state().bodies[0];
+        let mut broken_model_body = valid_body.clone();
+        broken_model_body.name = "BrokenSliver".into();
+
+        let sel = [valid_body, &broken_model_body];
+        let res = per_placed_body(&sel, |b, body| {
+            if b.name == "BrokenSliver" {
+                Err(IoError::Invalid("not supported yet: tessellation: face 0 (cylinder)".into()))
+            } else {
+                body_mesh(b, body, MeshQuality::default())
+            }
+        });
+
+        let (items, notes) = res?;
+        assert_eq!(items.len(), 1, "only the valid body is kept");
+        assert_eq!(items[0].0.name, "Body1");
+        assert!(
+            notes.iter().any(|n| n.contains("BrokenSliver: skipped: meshing failed")),
+            "warning note must be reported for skipped body: {notes:?}"
+        );
+
+        // However, if all bodies fail (or only the broken body is exported), it must return Err
+        let only_broken = [&broken_model_body];
+        let err_res = per_placed_body(&only_broken, |_b, _body| -> Result<(Mesh, Vec<String>)> {
+            Err(IoError::Invalid("not supported yet: tessellation".into()))
+        });
+        assert!(err_res.is_err(), "single failing body must fail the export");
+        Ok(())
+    }
+
     #[test]
     fn step_names_in_a_legacy_encoding() {
         // Exporters that write names in the system encoding instead of Part 21 escapes (#2344).
@@ -1865,6 +1960,7 @@ mod tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )
@@ -2111,6 +2207,7 @@ mod tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )
