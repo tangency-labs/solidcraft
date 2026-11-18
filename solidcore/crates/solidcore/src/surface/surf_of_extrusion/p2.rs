@@ -2347,6 +2347,11 @@ mod tests {
     /// exact place by as much (the generator's points are plane evaluations), which
     /// moves the area by at most the perimeter times that in UV (`2 gap`).
     fn assert_region(r: &ExtrusionIntersection, plane: &Plane, want: f64) {
+        assert_region_closing_to(r, plane, want, 16.0 * f64::EPSILON);
+    }
+
+    /// `assert_region` with the closing gap `rel m` (`16 eps` there).
+    fn assert_region_closing_to(r: &ExtrusionIntersection, plane: &Plane, want: f64, rel: f64) {
         assert!(!r.needs_more_intersections);
         assert!(!r.curves_3d.is_empty());
         assert!(
@@ -2375,7 +2380,7 @@ mod tests {
             .flatten()
             .map(|p| p.max_dimension())
             .fold(0.0, f64::max);
-        let gap = 16.0 * f64::EPSILON * m;
+        let gap = rel * m;
         let mut mate = vec![0; ends.len()];
         for (a, &(_, p)) in ends.iter().enumerate() {
             let near: Vec<usize> = (0..ends.len())
@@ -2795,6 +2800,188 @@ mod tests {
                 assert_region(&r, &plane, 0.25);
             }
         }
+    }
+
+    /// The review r1 corner probes of #18771: the UV box `[o, o + 10 s]^2` of the
+    /// plane (`rotated_plane` or `xy_plane`), swept along the UV direction at angle
+    /// `th`, with `c` the box corner of least `mu` (`-sin th u + cos th w`) and
+    /// `inner(a, b) = o + (1 + 8 (a, b)) s`, `f = (f0, f1, f2)`:
+    /// - kind 0: the generator `c`-`inner(f0, f1)` over `v` in `[-30 s, 30 s]` (its
+    ///   directrix at `c` touches the box only there): the box cut to
+    ///   `mu <= mu(inner(f0, f1))`;
+    /// - kind 1: the fold `inner(f0, f1)`-`c`-`inner(f2, f0)` over `[-1e4 s, 1e4 s]`
+    ///   (the slab, its `alpha` line touching the box at `c`): the box cut to `mu`
+    ///   at most the larger of the two inner points';
+    /// - kind 2: the line through `c` along `d = inner(f0, f1) - c`, from `c - d/2` to
+    ///   `c + d`, over `[0, 3 s]` (its copy at `v = 0` crosses both sides at `c`): the
+    ///   parallelogram cut to the box.
+    ///
+    /// The answer and the region's UV area.
+    fn corner_probe(
+        k: &Kernel,
+        kind: usize,
+        rot: bool,
+        o: f64,
+        s: f64,
+        th: f64,
+        f: (f64, f64, f64),
+    ) -> (ExtrusionIntersection, Plane, f64) {
+        let dom = Extent2d::from_bounds(o, o, o + 10.0 * s, o + 10.0 * s);
+        let plane = if rot {
+            rotated_plane(dom)
+        } else {
+            xy_plane(dom)
+        };
+        let euv = (th.cos(), th.sin());
+        let mu = |p: (f64, f64)| -euv.1 * p.0 + euv.0 * p.1;
+        let corners = [
+            (o, o),
+            (o + 10.0 * s, o),
+            (o + 10.0 * s, o + 10.0 * s),
+            (o, o + 10.0 * s),
+        ];
+        let c = corners
+            .iter()
+            .copied()
+            .min_by(|a, b| mu(*a).total_cmp(&mu(*b)))
+            .unwrap();
+        let inner = |a: f64, b: f64| (o + (1.0 + 8.0 * a) * s, o + (1.0 + 8.0 * b) * s);
+        let pt = |p: (f64, f64)| Point2::new(p.0, p.1);
+        let boxp: Vec<Point2> = corners.iter().map(|&p| pt(p)).collect();
+        let below = |top: f64| cut(&boxp, &|p: Point2| top - mu((p.x, p.y)));
+        let (gen, v, region): (Vec<(f64, f64)>, (f64, f64), Vec<Point2>) = match kind {
+            0 => {
+                let a = inner(f.0, f.1);
+                (vec![c, a], (-30.0 * s, 30.0 * s), below(mu(a)))
+            }
+            1 => {
+                let (a, b) = (inner(f.0, f.1), inner(f.2, f.0));
+                (vec![a, c, b], (-1e4 * s, 1e4 * s), below(mu(a).max(mu(b))))
+            }
+            _ => {
+                let a = inner(f.0, f.1);
+                let d = (a.0 - c.0, a.1 - c.1);
+                let (p0, p1) = ((c.0 - 0.5 * d.0, c.1 - 0.5 * d.1), (c.0 + d.0, c.1 + d.1));
+                let h = (3.0 * s * euv.0, 3.0 * s * euv.1);
+                let par = [p0, p1, (p1.0 + h.0, p1.1 + h.1), (p0.0 + h.0, p0.1 + h.1)];
+                let par: Vec<Point2> = par.iter().map(|&p| pt(p)).collect();
+                (vec![p0, p1], (0.0, 3.0 * s), cut_to_box(&par, &dom))
+            }
+        };
+        let r = uv_polyline(k, &plane, &gen, euv, v);
+        (r, plane, uv_area(&region).abs())
+    }
+
+    /// The length of the shortest answer curve (end to end).
+    fn shortest_curve(r: &ExtrusionIntersection) -> f64 {
+        r.curves_3d
+            .iter()
+            .map(|c| {
+                let n = gen_base(c)
+                    .unwrap()
+                    .canonical()
+                    .unwrap()
+                    .control_points
+                    .clone();
+                n[0].distance(*n.last().unwrap())
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Review r1 of #18771, items 2 and 4: at unit scale a directrix or slab line
+    /// through a domain corner, the sweep near a side, gives two computed points
+    /// `1e-13` apart that are one point of the region. They are one point to their
+    /// computed errors (a `mu` error over the sweep's component along the side), so
+    /// the region builds, closed and of the right area, as on main; the head of
+    /// #18771 declined each (the gap above `16 eps m`, below `SM_EFF_ZERO`).
+    #[test]
+    fn corner_coincident_regions_at_unit_scale_build() {
+        let k = k();
+        let cases = [
+            (
+                0,
+                4.714_068_012_625_690_86,
+                (
+                    0.784_676_612_296_307_9,
+                    0.082_079_752_251_084_21,
+                    0.121_534_392_499_686_12,
+                ),
+            ),
+            (
+                1,
+                -1.153_269_977_747_679e-3,
+                (
+                    0.848_373_173_117_043_3,
+                    0.887_478_476_998_965_9,
+                    0.135_842_471_966_865_72,
+                ),
+            ),
+            (
+                1,
+                4.714_645_337_743_938_57,
+                (
+                    0.907_369_364_922_563_3,
+                    0.338_473_897_099_659_25,
+                    0.037_817_098_211_816_56,
+                ),
+            ),
+            (
+                2,
+                3.563_739_902_634_357_03,
+                (
+                    0.716_500_464_656_385,
+                    0.904_557_459_929_209,
+                    0.726_036_532_991_460_3,
+                ),
+            ),
+        ];
+        for (i, &(kind, th, f)) in cases.iter().enumerate() {
+            let o = if i == 3 { 0.0 } else { 1.0 };
+            let (r, plane, area) = corner_probe(&k, kind, true, o, 1.0, th, f);
+            assert_region(&r, &plane, area);
+        }
+    }
+
+    /// Review r1 of #18771, item 3: far from the origin the same coincidences leave
+    /// two computed points of rounding noise apart (`6e-9` at `1e6` with `s = 1e3`,
+    /// `2e-12` at `37`), above `16 eps m`: the head of #18771 emitted each as a tiny
+    /// boundary edge. Within their computed errors and `SM_EFF_ZERO m` they are no
+    /// edge: every curve is longer than `1e-3 s` and the boundary closes (to rounding
+    /// at `37`, to the dropped noise below `SM_EFF_ZERO m` at `1e6`) around the
+    /// region's area.
+    #[test]
+    fn corner_noise_far_from_the_origin_gives_no_tiny_edge() {
+        let k = k();
+        let (r, plane, area) = corner_probe(
+            &k,
+            0,
+            true,
+            1e6,
+            1e3,
+            4.689_916_370_853_183_03,
+            (
+                0.831_315_404_509_208_6,
+                0.327_520_607_221_003_6,
+                0.206_703_038_557_221_83,
+            ),
+        );
+        assert!(shortest_curve(&r) > 1.0, "{}", shortest_curve(&r));
+        assert_region_closing_to(&r, &plane, area, EFF_ZERO);
+        let (r, plane, area) = corner_probe(
+            &k,
+            2,
+            false,
+            37.0,
+            1.0,
+            3.469_142_466_323_665_16e-3,
+            (
+                0.677_557_068_372_655_4,
+                0.888_683_823_425_455_3,
+                0.834_298_343_197_838_4,
+            ),
+        );
+        assert!(shortest_curve(&r) > 1e-3, "{}", shortest_curve(&r));
+        assert_region(&r, &plane, area);
     }
 
     #[test]

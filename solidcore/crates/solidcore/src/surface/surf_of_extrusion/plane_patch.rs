@@ -66,6 +66,16 @@
 //!
 //! Every slack is relative to the magnitudes it compares (no absolute floor), so the
 //! certificates hold at every model scale.
+//!
+//! The boundary's straight edges join computed vertices, each carried with a bound
+//! on the error of its UV coordinates (`Vertex`): a generator point's from its
+//! evaluation and projection (`Frame::uv_err`), a side's point at a `mu` from that
+//! `mu`'s error over the sweep's component along the side (`side_vertex`), a cut of
+//! the slab from its ends' and its bound's (`cut_vertex`). Two vertices are one
+//! point when every coordinate differs by at most the sum of their bounds, or when
+//! they are closer than `SM_EFF_ZERO` (no shorter line exists): the slab's polygon
+//! merges them (it stays closed), and a monotone region drops a segment whose ends
+//! are one point when the gap it leaves is within `SM_EFF_ZERO m` (`segment`).
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result};
@@ -201,6 +211,34 @@ fn net_points(piece: &Curve) -> Option<Net> {
         weight_err,
         degree: canon.degree,
     })
+}
+
+/// A bound on the error of each coordinate of `evaluate_point` of the generator
+/// (ARGUED, from the operation count, not certified on the implementation): the
+/// point is `sum N_i w_i P_i / sum N_i w_i`, each basis value within `gamma(5p)`
+/// relative (`p` levels of two differences, a division, a product and a sum, all of
+/// non-negative terms), the sums of `p + 1` products within `gamma(p + 2)` more, so
+/// numerator and denominator within `gamma(6p + 2)` of the positive sums and the
+/// quotient within `2 gamma(6p + 3) max |P_i|` (a weighted mean of the control
+/// points: the weights cancel). An analytic evaluation (a conic's) rounds less.
+/// `None` for non-finite data or a non-positive weight.
+fn gen_eval_err(gen: &Curve) -> Option<f64> {
+    let canon = gen_base(gen).ok()?.canonical().ok()?;
+    let mut max_p = 0.0_f64;
+    for (i, p) in canon.control_points.iter().enumerate() {
+        let w = if canon.weights.is_empty() {
+            1.0
+        } else {
+            canon.weights.get(i).copied().unwrap_or(f64::NAN)
+        };
+        let valid = w > 0.0 && w.is_finite();
+        if !valid {
+            return None;
+        }
+        max_p = max_p.max(p.max_dimension());
+    }
+    let err = 2.0 * gamma(6 * canon.degree + 3) * max_p;
+    err.is_finite().then_some(err)
 }
 
 /// The generator piece over `[lo, hi]`, split exactly at its ends (zone tolerance 0:
@@ -491,7 +529,8 @@ fn extreme(
 /// The plane's UV frame of the sweep: `E` in UV (`(eu, ew)`, a component within its
 /// rounding of zero taken as zero, so a side of the domain parallel to the sweep to
 /// the working precision is parallel), and the 3D functionals of the UV coordinates
-/// and of `mu = -ew u + eu w` (across the sweep).
+/// and of `mu = -ew u + eu w` (across the sweep). `pt_err` bounds the error of an
+/// evaluated generator point (`gen_eval_err`), `dmu1` is `|ew| |du|_1 + |eu| |dw|_1`.
 struct Frame {
     eu: f64,
     ew: f64,
@@ -500,11 +539,13 @@ struct Frame {
     dw: Vec3,
     dmu: Vec3,
     dnu: Vec3,
+    pt_err: f64,
+    dmu1: f64,
 }
 
 impl Frame {
     /// The frame, or `None` when the sweep has no UV component.
-    fn new(plane: &Plane, e: Vec3) -> Option<Frame> {
+    fn new(plane: &Plane, e: Vec3, pt_err: f64) -> Option<Frame> {
         let position = *plane.position();
         let scale = plane.uv_scale();
         let du = position.x_axis() / scale.x;
@@ -532,7 +573,38 @@ impl Frame {
             dw,
             dmu: dw * eu - du * ew,
             dnu: (du * eu + dw * ew) / e2,
+            pt_err,
+            dmu1: ew.abs() * norm1(du) + eu.abs() * norm1(dw),
         })
+    }
+
+    /// A bound on the error of each UV coordinate of `project_point_to_uv_domain(p)`,
+    /// `p` an evaluated generator point, against the generator's exact point: the
+    /// evaluation's error (`pt_err`, per coordinate), the projection's rounding
+    /// (`p - O` relative to each difference, a dot product of three terms and the
+    /// division by the scale: `gamma(5)`, with `gamma(2)` for the frame's axes), and
+    /// `gamma(3) |p|`, the rounding of a point the plane's map made (ARGUED: a
+    /// generator drawn through a domain corner is taken to pass through it).
+    fn uv_err(&self, p: Point3) -> Point2 {
+        let e =
+            (self.pt_err + gamma(3) * p.max_dimension() + gamma(5) * (p - self.o).max_dimension())
+                * (1.0 + gamma(2));
+        Point2::new(norm1(self.du) * e, norm1(self.dw) * e)
+    }
+
+    /// A bound on the error of `mu(uv)` for a UV point known to `r` (per coordinate):
+    /// the propagated errors and the rounding of two products and a sum.
+    fn mu_err(&self, uv: Point2, r: Point2) -> f64 {
+        let (eu, ew) = (self.eu.abs(), self.ew.abs());
+        ew * r.x + eu * r.y + gamma(2) * (ew * uv.x.abs() + eu * uv.y.abs())
+    }
+
+    /// A bound on the error of `mu` of any evaluated generator point `p` with
+    /// `|p| <= p_max` and `|p - O| <= po_max` (largest coordinates): `mu_err` of
+    /// `uv_err`, each UV coordinate within `|d|_1 po_max` (`d` its axis over its
+    /// scale) up to rounding.
+    fn mu_err_within(&self, p_max: f64, po_max: f64) -> f64 {
+        self.dmu1 * (self.pt_err + gamma(3) * p_max + gamma(8) * po_max) * (1.0 + gamma(3))
     }
 
     /// `mu` of a UV point.
@@ -647,10 +719,84 @@ fn chord(
     meets.then_some((lo.0, lo.1, hi.0, hi.1))
 }
 
+/// A boundary vertex: its point, its UV point and a bound on each UV coordinate's
+/// error against the exact vertex of the computed data (`r`, `0` for a coordinate
+/// that is exact, as a side's fixed coordinate or a domain corner).
+#[derive(Clone, Copy, Debug)]
+struct Vertex {
+    p: Point3,
+    uv: Point2,
+    r: Point2,
+}
+
+impl Vertex {
+    /// The vertex at the UV point `uv` known to `r`, its point the plane's.
+    fn on_plane(plane: &Plane, uv: Point2, r: Point2) -> Vertex {
+        Vertex {
+            p: plane.evaluate_point_fast(uv),
+            uv,
+            r,
+        }
+    }
+
+    /// Whether the vertex's data are finite.
+    fn finite(&self) -> bool {
+        let p = self.p.x.is_finite() && self.p.y.is_finite() && self.p.z.is_finite();
+        let uv = self.uv.x.is_finite() && self.uv.y.is_finite();
+        p && uv && self.r.x.is_finite() && self.r.y.is_finite()
+    }
+
+    /// The radius sum of the vertex (to keep the better known of two).
+    fn spread(&self) -> f64 {
+        self.r.x + self.r.y
+    }
+}
+
+/// Whether `a` and `b` may be one point: each UV coordinate within the sum of the
+/// two error bounds (and the rounding of the difference), or the points closer than
+/// `SM_EFF_ZERO`, the shortest line the kernel builds. The UV test counts each
+/// coordinate's error where it was computed: a `mu` error `d` puts a side's point
+/// `d / |e|` along the side (`e` the sweep's component along it), however far the
+/// patch is from the origin and however oblique the sweep.
+fn one_point(a: &Vertex, b: &Vertex) -> bool {
+    let k = 1.0 + gamma(2);
+    let within = (a.uv.x - b.uv.x).abs() <= (a.r.x + b.r.x) * k
+        && (a.uv.y - b.uv.y).abs() <= (a.r.y + b.r.y) * k;
+    within || a.p.distance(b.p) < EFF_ZERO
+}
+
+/// The vertex of the (non-parallel) side `side` at `mu`, `mu` known to `mu_err`:
+/// `side_point`, its running coordinate's error the `mu` error and the rounding of
+/// `side_point`'s sum and division, over the sweep's component along the side
+/// (clamping to the box does not increase it).
+fn side_vertex(
+    frame: &Frame,
+    plane: &Plane,
+    dom: &Extent2d,
+    side: Side,
+    mu: f64,
+    mu_err: f64,
+) -> Vertex {
+    let uv = side_point(frame, dom, side, mu);
+    let (along, fixed) = if side.axis == 0 {
+        (frame.eu, frame.ew)
+    } else {
+        (frame.ew, frame.eu)
+    };
+    let run = (mu_err + gamma(3) * (mu.abs() + (fixed * side.value).abs())) * (1.0 + gamma(2))
+        / along.abs();
+    let r = if side.axis == 0 {
+        Point2::new(0.0, run)
+    } else {
+        Point2::new(run, 0.0)
+    };
+    Vertex::on_plane(plane, uv, r)
+}
+
 /// The directrix through the generator point `p`, swept over `V` and cut to the
 /// domain: the line `uv + v (eu, ew)` from `p`'s UV point (`v` measured from `p`, so
 /// its precision does not depend on `|V| |E|`), over `V` cut to its chord of the box.
-/// An end cut by a side is that side's point at the directrix's `mu` (`side_point`:
+/// An end cut by a side is that side's point at the directrix's `mu` (`side_vertex`:
 /// the side's coordinate exactly, the same point as the side segments' ends at that
 /// `mu`); an uncut end is `p + v E` (the copies' end there). `on_side`: the directrix
 /// lies along that side parallel to the sweep, whose coordinate it keeps exactly.
@@ -666,12 +812,19 @@ fn directrix(
     let e = inputs.extrusion_vec;
     let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
     let mut uv = plane.project_point_to_uv_domain(p);
-    let fix = |q: &mut Point2| match on_side {
-        Some(Side { axis: 0, value }) => q.x = value,
-        Some(Side { value, .. }) => q.y = value,
+    let mut r = frame.uv_err(p);
+    let fix = |q: &mut Point2, rq: &mut Point2| match on_side {
+        Some(Side { axis: 0, value }) => {
+            q.x = value;
+            rq.x = 0.0;
+        }
+        Some(Side { value, .. }) => {
+            q.y = value;
+            rq.y = 0.0;
+        }
         None => {}
     };
-    fix(&mut uv);
+    fix(&mut uv, &mut r);
     let finite = uv.x.is_finite() && uv.y.is_finite();
     if !finite {
         return Ok(Edge::Nothing);
@@ -680,19 +833,43 @@ fn directrix(
         return Ok(Edge::Nothing);
     };
     let mu = frame.mu(uv);
-    let end = |v: f64, cut: Option<Side>| -> Point3 {
+    let mu_err = frame.mu_err(uv, r);
+    // (the UV end at `v`: the sum's rounding with `uv`'s error; for `p + v E` also
+    // the error of `(eu, ew)` against `E` (each within `gamma(4) |d|_1 |E|_1`, its
+    // rounding or its snap to zero) and the 3D sum's rounding, over `v`)
+    let along = |v: f64, free: bool| -> (Point2, Point2) {
+        let q = Point2::new(uv.x + v * frame.eu, uv.y + v * frame.ew);
+        let sum = |x: f64, ex: f64| gamma(2) * (x.abs() + (v * ex).abs());
+        let mut rq = Point2::new(r.x + sum(uv.x, frame.eu), r.y + sum(uv.y, frame.ew));
+        if free {
+            let e1 = norm1(e);
+            let pe = p.max_dimension() + v.abs() * e.max_dimension();
+            let spread = |d: Vec3| norm1(d) * (v.abs() * gamma(4) * e1 + gamma(2) * pe);
+            rq.x += spread(frame.du);
+            rq.y += spread(frame.dw);
+        }
+        (q, rq)
+    };
+    let end = |v: f64, cut: Option<Side>| -> Vertex {
         match (cut, on_side) {
             (Some(side), _) => {
-                let mut q = side_point(frame, &dom, side, mu);
-                fix(&mut q);
-                plane.evaluate_point_fast(q)
+                let mut x = side_vertex(frame, plane, &dom, side, mu, mu_err);
+                fix(&mut x.uv, &mut x.r);
+                Vertex::on_plane(plane, x.uv, x.r)
             }
             (None, Some(_)) => {
-                let mut q = Point2::new(uv.x + v * frame.eu, uv.y + v * frame.ew);
-                fix(&mut q);
-                plane.evaluate_point_fast(q)
+                let (mut q, mut rq) = along(v, false);
+                fix(&mut q, &mut rq);
+                Vertex::on_plane(plane, q, rq)
             }
-            (None, None) => p + e * v,
+            (None, None) => {
+                let (q, rq) = along(v, true);
+                Vertex {
+                    p: p + e * v,
+                    uv: q,
+                    r: rq,
+                }
+            }
         }
     };
     let (v0, cut0) = if dlo > vmin {
@@ -712,36 +889,38 @@ fn directrix(
     segment(end(v0, cut0), end(v1, cut1))
 }
 
-/// A straight boundary edge between two computed points.
+/// A straight boundary edge between two computed vertices.
 enum Edge {
     /// The edge.
     Line(Box<Curve>),
-    /// No edge: its ends are one point to the rounding of their coordinates.
+    /// No edge: its ends are one point (`one_point`).
     Nothing,
-    /// An edge longer than that rounding but too short to build (a line needs
-    /// `SM_EFF_ZERO`): the patch declines rather than leave its boundary open.
+    /// An end is not finite: the patch declines.
     Unbuildable,
 }
 
-/// The segment `a`-`b`. Its ends are each a few roundings of their coordinates off
-/// their exact place, so within `16 eps m` (`m` their largest coordinate) they are one
-/// point and the segment is `Nothing` (the boundary still closes to that gap). Every
-/// longer segment is an edge of the region, however small against `m`: a threshold
-/// relative to the coordinates (as `SM_EFF_ZERO m`) would drop real closing edges of a
-/// small region far from the origin. One too short to build is `Unbuildable`.
-fn segment(a: Point3, b: Point3) -> Result<Edge> {
-    let d = a.distance(b);
-    let one_point = d <= 16.0 * f64::EPSILON * a.max_dimension().max(b.max_dimension());
-    if one_point {
-        return Ok(Edge::Nothing);
-    }
-    // (create_line_segment's own check; a NaN distance fails it too)
-    let buildable = d >= EFF_ZERO;
-    if !buildable {
+/// The segment `a`-`b` of a monotone region (whose edges are separate curves:
+/// dropping one leaves a gap its length). `Nothing` below `SM_EFF_ZERO` (no line
+/// that short exists), or when its ends are one point to their computed errors
+/// (`one_point`) and it is within `SM_EFF_ZERO m` (`m` the ends' largest
+/// coordinate: the gap left is one the boundary always closed to, as before this
+/// change). Every other segment is an edge of the region, however small against
+/// the coordinates: a real closing edge of a small region far from the origin is
+/// kept, and an edge that may be rounding noise but is longer than that gap closes
+/// the boundary rather than open it. `Unbuildable` for non-finite data.
+fn segment(a: Vertex, b: Vertex) -> Result<Edge> {
+    let finite = a.finite() && b.finite();
+    if !finite {
         return Ok(Edge::Unbuildable);
     }
+    let d = a.p.distance(b.p);
+    let m = a.p.max_dimension().max(b.p.max_dimension());
+    let gap = d < EFF_ZERO || (one_point(&a, &b) && d <= EFF_ZERO * m);
+    if gap {
+        return Ok(Edge::Nothing);
+    }
     Ok(Edge::Line(Box::new(Curve::from(
-        BSplineCurve::create_line_segment(3, a, b)?,
+        BSplineCurve::create_line_segment(3, a.p, b.p)?,
     ))))
 }
 
@@ -756,12 +935,14 @@ fn push_edge(out: &mut Vec<Curve>, edge: Edge) -> Option<()> {
 }
 
 /// A generator range, split from the generator and certified in the plane, with its
-/// `mu` extent (its least and greatest `mu`), whether its `mu` is certified
-/// monotone, and bounds on its `nu`.
+/// `mu` extent (its least and greatest `mu`, each with a bound on its error against
+/// the exact extreme), whether its `mu` is certified monotone, and bounds on its `nu`.
 struct RangePiece {
     ivl: Extent1d,
     alpha: f64,
     beta: f64,
+    alpha_err: f64,
+    beta_err: f64,
     monotone: bool,
     nu_lo: f64,
     nu_hi: f64,
@@ -878,15 +1059,19 @@ fn range_piece(
     let short_flats = flat_stretches_shorter_than(&mus, &nus, sweep);
     let monotone = mus.len() >= 2 && (rising || falling) && short_flats;
 
-    // the extremes of mu: at the ends when monotone, else the certified search
-    let mu_at = |s: f64| -> Result<f64> {
-        Ok(frame.mu(inputs
-            .plane
-            .project_point_to_uv_domain(gen.evaluate_point(k, s)?)))
+    // the extremes of mu: at the ends when monotone (each an evaluated point's mu,
+    // with its error), else the certified search (an attained value within `width`
+    // of the extreme, and an evaluated point's error: any point of the piece, within
+    // its hull)
+    let mu_at = |s: f64| -> Result<(f64, f64)> {
+        let p = gen.evaluate_point(k, s)?;
+        let uv = inputs.plane.project_point_to_uv_domain(p);
+        Ok((frame.mu(uv), frame.mu_err(uv, frame.uv_err(p))))
     };
-    let (alpha, beta) = if monotone {
+    let (alpha, beta, alpha_err, beta_err) = if monotone {
         let (m0, m1) = (mu_at(ivl.min())?, mu_at(ivl.max())?);
-        (m0.min(m1), m0.max(m1))
+        let (lo, hi) = if m0.0 <= m1.0 { (m0, m1) } else { (m1, m0) };
+        (lo.0, hi.0, lo.1, hi.1)
     } else {
         let width = extreme_width(&mus);
         let lo = extreme(k, inputs, frame, &ivl, 1.0, width, budget)?;
@@ -894,7 +1079,18 @@ fn range_piece(
         let (Some(lo), Some(hi)) = (lo, hi) else {
             return Ok(Measured::Declined);
         };
-        (lo, -hi)
+        // (the piece within the hull of its control points, each known to `err`)
+        let (p_max, po_max) = net
+            .pts
+            .iter()
+            .fold((0.0_f64, 0.0_f64), |(a, b), &(p, err)| {
+                (
+                    a.max(p.max_dimension() + err),
+                    b.max((p - frame.o).max_dimension() * (1.0 + gamma(1)) + err),
+                )
+            });
+        let err = width + frame.mu_err_within(p_max, po_max);
+        (lo, -hi, err, err)
     };
     let spread = alpha < beta && alpha.is_finite() && beta.is_finite();
     if !spread {
@@ -905,6 +1101,8 @@ fn range_piece(
         ivl,
         alpha,
         beta,
+        alpha_err,
+        beta_err,
         monotone,
         nu_lo,
         nu_hi,
@@ -1099,22 +1297,22 @@ enum Bound {
 }
 
 /// A run of the swept boundary: its bound over the generator parameters
-/// `[a, b]`, with the `mu` at either end (for a side's end points).
+/// `[a, b]`, with the `mu` at either end and its error (for a side's end points).
 struct Run {
     bound: Bound,
     a: f64,
     b: f64,
-    mu_a: f64,
-    mu_b: f64,
+    mu_a: (f64, f64),
+    mu_b: (f64, f64),
 }
 
 /// Adds the interval `[a, b]` to the runs, extending the last run of the same bound
 /// that ends at `a`.
-fn push_run(runs: &mut Vec<Run>, bound: Bound, a: (f64, f64), b: (f64, f64)) {
+fn push_run(runs: &mut Vec<Run>, bound: Bound, a: (f64, f64, f64), b: (f64, f64, f64)) {
     if let Some(last) = runs.last_mut() {
         if last.bound == bound && last.b == a.0 {
             last.b = b.0;
-            last.mu_b = b.1;
+            last.mu_b = (b.1, b.2);
             return;
         }
     }
@@ -1122,8 +1320,8 @@ fn push_run(runs: &mut Vec<Run>, bound: Bound, a: (f64, f64), b: (f64, f64)) {
         bound,
         a: a.0,
         b: b.0,
-        mu_a: a.1,
-        mu_b: b.1,
+        mu_a: (a.1, a.2),
+        mu_b: (b.1, b.2),
     });
 }
 
@@ -1152,7 +1350,7 @@ fn monotone_region(
 
     // the breaks: the range ends, where mu passes a corner of the domain, and where a
     // copy crosses a side of the domain not parallel to the sweep
-    let mut breaks: Vec<(f64, Option<f64>)> = vec![(s0, None), (s1, None)];
+    let mut breaks: Vec<(f64, Option<(f64, f64)>)> = vec![(s0, None), (s1, None)];
     let corners = [
         Point2::new(dom.min().x, dom.min().y),
         Point2::new(dom.max().x, dom.min().y),
@@ -1169,8 +1367,9 @@ fn monotone_region(
         let Some(rs) = roots(k, gen, &rp.ivl, g, budget)? else {
             return Ok(None);
         };
+        let err = frame.mu_err(c, Point2::new(0.0, 0.0));
         for r in rs {
-            breaks.push((r, Some(mu)));
+            breaks.push((r, Some((mu, err))));
         }
     }
     for side in sides.iter().filter(|s| !parallel(s)) {
@@ -1193,7 +1392,7 @@ fn monotone_region(
     breaks.retain(|b| s0 <= b.0 && b.0 <= s1);
     breaks.sort_by(|p, q| p.0.total_cmp(&q.0));
     // (one break per parameter, keeping a corner's exact mu)
-    let mut merged: Vec<(f64, Option<f64>)> = Vec::new();
+    let mut merged: Vec<(f64, Option<(f64, f64)>)> = Vec::new();
     for (s, mu) in breaks {
         match merged.last_mut() {
             Some(last) if last.0 == s => {
@@ -1204,13 +1403,19 @@ fn monotone_region(
             _ => merged.push((s, mu)),
         }
     }
+    // (each break's mu with its error: a corner's from its exact UV point, else an
+    // evaluated point's)
     let mut with_mu = Vec::new();
     for (s, mu) in merged {
-        let mu = match mu {
+        let (mu, err) = match mu {
             Some(m) => m,
-            None => frame.mu(uv_at(s)?),
+            None => {
+                let p = gen.evaluate_point(k, s)?;
+                let uv = plane.project_point_to_uv_domain(p);
+                (frame.mu(uv), frame.mu_err(uv, frame.uv_err(p)))
+            }
         };
-        with_mu.push((s, mu));
+        with_mu.push((s, mu, err));
     }
 
     // the sweep: between breaks the slice's bounds keep their kind
@@ -1262,8 +1467,9 @@ fn monotone_region(
                     out.push(copy);
                 }
                 Bound::Side(side) => {
-                    let pa = plane.evaluate_point_fast(side_point(frame, &dom, side, run.mu_a));
-                    let pb = plane.evaluate_point_fast(side_point(frame, &dom, side, run.mu_b));
+                    let side_at =
+                        |(mu, err): (f64, f64)| side_vertex(frame, plane, &dom, side, mu, err);
+                    let (pa, pb) = (side_at(run.mu_a), side_at(run.mu_b));
                     if push_edge(out, segment(pa, pb)?).is_none() {
                         return Ok(None);
                     }
@@ -1323,6 +1529,48 @@ fn monotone_region(
     Ok(Some(()))
 }
 
+/// The point where the edge `p`-`q` of the clipped box (UV points with their errors)
+/// crosses `mu = bound.0` (`bound.1` its error), with its error: from
+/// `t = (bound - mu_p) / (mu_q - mu_p)` (numerator and denominator with the ends'
+/// `mu` errors and their rounding) and `p + t (q - p)` (the ends' errors, `t`'s over
+/// `|q - p|`, the rounding); a coordinate equal at both ends (a side's) is kept,
+/// within the larger of the ends' errors.
+fn cut_vertex(
+    frame: &Frame,
+    (p, rp): (Point2, Point2),
+    (q, rq): (Point2, Point2),
+    bound: (f64, f64),
+) -> (Point2, Point2) {
+    let (mp, mq) = (frame.mu(p), frame.mu(q));
+    let (ep, eq) = (frame.mu_err(p, rp), frame.mu_err(q, rq));
+    let den = mq - mp;
+    let num = bound.0 - mp;
+    let t = num / den;
+    let e_den = ep + eq + gamma(1) * den.abs();
+    let e_num = bound.1 + ep + gamma(1) * num.abs();
+    // (`t` is in `[0, 1]`, the bound between the ends' `mu`: never off by more than
+    // 1, the whole edge, as when `|den|` is within its error)
+    let e_t = if den.abs() > e_den {
+        let e =
+            (e_num + t.abs() * e_den) / (den.abs() - e_den) * (1.0 + gamma(2)) + gamma(1) * t.abs();
+        e.min(1.0)
+    } else {
+        1.0
+    };
+    let coord = |a: f64, b: f64, ra: f64, rb: f64| -> (f64, f64) {
+        if a == b {
+            return (a, ra.max(rb));
+        }
+        let x = a + t * (b - a);
+        let err = (ra * (1.0 - t).abs() + rb * t.abs() + e_t * (b - a).abs()) * (1.0 + gamma(2))
+            + gamma(3) * (a.abs() + (t * (b - a)).abs());
+        (x, err)
+    };
+    let (x, ex) = coord(p.x, q.x, rp.x, rq.x);
+    let (y, ey) = coord(p.y, q.y, rp.y, rq.y);
+    (Point2::new(x, y), Point2::new(ex, ey))
+}
+
 /// The boundary of the region of ranges whose `mu` ranges overlap, on the slab's
 /// cover certificate (see the module documentation), or `None` without it.
 fn slab_region(
@@ -1332,42 +1580,47 @@ fn slab_region(
     out: &mut Vec<Curve>,
 ) -> Result<Option<()>> {
     let dom = inputs.plane_domain;
-    let (mut alpha, mut beta) = (f64::INFINITY, f64::NEG_INFINITY);
+    let plane = inputs.plane;
+    let (mut alpha, mut beta) = ((f64::INFINITY, 0.0), (f64::NEG_INFINITY, 0.0));
     let (mut nu_lo, mut nu_hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for rp in group {
-        alpha = alpha.min(rp.alpha);
-        beta = beta.max(rp.beta);
+        if rp.alpha < alpha.0 {
+            alpha = (rp.alpha, rp.alpha_err);
+        }
+        if rp.beta > beta.0 {
+            beta = (rp.beta, rp.beta_err);
+        }
         nu_lo = nu_lo.min(rp.nu_lo);
         nu_hi = nu_hi.max(rp.nu_hi);
     }
     // the domain box cut to alpha <= mu <= beta (Sutherland-Hodgman; a vertex on a
-    // side of the box keeps that side's coordinate exactly)
+    // side of the box keeps that side's coordinate exactly), each vertex with its UV
+    // error (`cut_vertex`)
+    let exact = Point2::new(0.0, 0.0);
     let mut poly = vec![
-        Point2::new(dom.min().x, dom.min().y),
-        Point2::new(dom.max().x, dom.min().y),
-        Point2::new(dom.max().x, dom.max().y),
-        Point2::new(dom.min().x, dom.max().y),
+        (Point2::new(dom.min().x, dom.min().y), exact),
+        (Point2::new(dom.max().x, dom.min().y), exact),
+        (Point2::new(dom.max().x, dom.max().y), exact),
+        (Point2::new(dom.min().x, dom.max().y), exact),
     ];
     for (bound, keep_above) in [(alpha, true), (beta, false)] {
         let inside = |p: Point2| {
             let mu = frame.mu(p);
             if keep_above {
-                mu >= bound
+                mu >= bound.0
             } else {
-                mu <= bound
+                mu <= bound.0
             }
         };
         let mut next = Vec::new();
         // (each vertex with its successor, the last with the first)
         for (&p, &q) in poly.iter().zip(poly.iter().cycle().skip(1)) {
-            let (pin, qin) = (inside(p), inside(q));
+            let (pin, qin) = (inside(p.0), inside(q.0));
             if pin {
                 next.push(p);
             }
             if pin != qin {
-                let (mp, mq) = (frame.mu(p), frame.mu(q));
-                let t = (bound - mp) / (mq - mp);
-                next.push(Point2::new(p.x + t * (q.x - p.x), p.y + t * (q.y - p.y)));
+                next.push(cut_vertex(frame, p, q, bound));
             }
         }
         poly = next;
@@ -1376,23 +1629,57 @@ fn slab_region(
         // the slab misses the domain: no coincidence over it
         return Ok(Some(()));
     }
+    // vertices that are one point (`one_point`) merge, keeping the better known (the
+    // other's exact place is within the two bounds of it): the boundary stays closed,
+    // with no edge of rounding noise and none too short to build
+    let mut ring: Vec<Vertex> = Vec::new();
+    for &(uv, r) in &poly {
+        let v = Vertex::on_plane(plane, uv, r);
+        if !v.finite() {
+            return Ok(None);
+        }
+        match ring.last_mut() {
+            Some(last) if one_point(last, &v) => {
+                if v.spread() < last.spread() {
+                    *last = v;
+                }
+            }
+            _ => ring.push(v),
+        }
+    }
+    // (the last against the first, a few times at most: each merge drops a vertex)
+    while ring.len() > 1 {
+        let (Some(&first), Some(&last)) = (ring.first(), ring.last()) else {
+            break;
+        };
+        if !one_point(&first, &last) {
+            break;
+        }
+        ring.pop();
+        if last.spread() < first.spread() {
+            if let Some(f) = ring.first_mut() {
+                *f = last;
+            }
+        }
+    }
     // a slab touching the domain along a side or at a point bounds no area
     let mut area2 = 0.0;
     let mut scale = 0.0_f64;
     // (each vertex with its successor, the last with the first)
-    for (&p, &q) in poly.iter().zip(poly.iter().cycle().skip(1)) {
+    for (p, q) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+        let (p, q) = (p.uv, q.uv);
         area2 += p.x * q.y - q.x * p.y;
         scale = scale.max(p.x.abs()).max(p.y.abs());
     }
-    let flat = area2.abs() <= EFF_ZERO * scale * scale;
+    let flat = ring.len() < 3 || area2.abs() <= EFF_ZERO * scale * scale;
     if flat {
         return Ok(None);
     }
     // the cover: every nu of the polygon (its vertices bound it) within
     // [nu_hi + vmin, nu_lo + vmax], so every slice of the image covers the domain's
     let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
-    for &p in &poly {
-        let nu = frame.nu(p);
+    for v in &ring {
+        let nu = frame.nu(v.uv);
         let slack =
             REL_SLACK * (nu.abs() + nu_lo.abs().max(nu_hi.abs()) + vmin.abs().max(vmax.abs()));
         let covered = nu - nu_hi >= vmin - slack && nu - nu_lo <= vmax + slack;
@@ -1401,11 +1688,7 @@ fn slab_region(
         }
     }
     // (each vertex with its successor, the last with the first)
-    for (&p, &q) in poly.iter().zip(poly.iter().cycle().skip(1)) {
-        let (a, b) = (
-            inputs.plane.evaluate_point_fast(p),
-            inputs.plane.evaluate_point_fast(q),
-        );
+    for (&a, &b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
         if push_edge(out, segment(a, b)?).is_none() {
             return Ok(None);
         }
@@ -1494,7 +1777,11 @@ pub(super) fn coincident_patch(
     if !sweeps {
         return Ok(None);
     }
-    let Some(frame) = Frame::new(inputs.plane, inputs.extrusion_vec) else {
+    // (a generator with no B-spline form has no certified piece either: no patch)
+    let Some(pt_err) = gen_eval_err(inputs.gen) else {
+        return Ok(None);
+    };
+    let Some(frame) = Frame::new(inputs.plane, inputs.extrusion_vec, pt_err) else {
         return Ok(None);
     };
     let mut budget = PIECE_BUDGET;
