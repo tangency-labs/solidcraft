@@ -322,6 +322,22 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_failure_is_worded_from_the_catalog_and_the_cli_english_matches_it() {
+        use solidcraft_engine::plugin::{PluginFailure, messages::MESSAGES};
+        install();
+        for (id, english) in MESSAGES {
+            assert_eq!(Locale::for_language("en").text(id), *english, "{id}: the engine's English is the catalog's");
+        }
+        let failure = PluginFailure {
+            plugin: "Dutchman".into(),
+            file: Some("cube.f3d".into()),
+            error: solidcraft_engine::plugin::HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
+        };
+        let _scope = scope("de");
+        assert!(failure.text().starts_with("Dutchman konnte cube.f3d nicht öffnen: Es verlangt 2048 MiB Arbeitsspeicher, Plugins dürfen 128 MiB"));
+    }
+
+    #[test]
     fn component_ambiguity_is_translated_without_truncating_names() {
         install();
         let _scope = scope("de");
@@ -838,6 +854,7 @@ mod tests {
             include_str!("documents.rs"),
             include_str!("dialogs.rs"),
             include_str!("browser.rs"),
+            include_str!("browser_search.rs"),
             include_str!("sketch_palette.rs"),
             include_str!("design_properties.rs"),
             include_str!("home.rs"),
@@ -1587,6 +1604,7 @@ mod tests {
         KitCall { name: "search_field", args: &[3], id: false, trim: &[] },
         KitCall { name: "menu_filter", args: &[3], id: false, trim: &[] },
         KitCall { name: "placement_field", args: &[3], id: false, trim: &[] },
+        KitCall { name: "canvas_value_field", args: &[4], id: false, trim: &[] },
         KitCall { name: "library_cell", args: &[3], id: false, trim: &[] },
         // actions.rs
         KitCall { name: "icon_button_at", args: &[3], id: false, trim: &[] },

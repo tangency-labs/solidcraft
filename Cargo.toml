@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.44.0"
+version = "0.45.0-rc.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -134,6 +134,10 @@ image = { version = "0.25", default-features = false, features = ["png", "hdr"] 
 png = "0.18.1"
 # LZW for GIF animations (MIT OR Apache-2.0, pure Rust; already in the tree through image's tiff).
 weezl = "0.1.12"
+# sheet PDFs (MIT OR Apache-2.0, pure Rust; brings ryu, Apache-2.0 OR BSL-1.0)
+pdf-writer = "0.15"
+# deflate for PDF content streams (MIT OR Apache-2.0; already in the tree through zip)
+flate2 = "1.1"
 # rasterises the UI icon SVGs (BSD-3-Clause, pure Rust, builds for wasm)
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 # build scripts: reads the icon palette (MIT OR Apache-2.0)
@@ -196,8 +200,17 @@ debug = "line-tables-only"
 
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]
-# Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
-egui-wgpu = { path = "vendor/egui-wgpu" }
+# egui 0.37.0, vendored with `git subtree` so SolidCraft can carry its own changes (vendor/README.md).
+# egui-wgpu keeps OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
+ecolor = { path = "vendor/egui/crates/ecolor" }
+eframe = { path = "vendor/egui/crates/eframe" }
+egui = { path = "vendor/egui/crates/egui" }
+egui-wgpu = { path = "vendor/egui/crates/egui-wgpu" }
+egui-winit = { path = "vendor/egui/crates/egui-winit" }
+egui_glow = { path = "vendor/egui/crates/egui_glow" }
+emath = { path = "vendor/egui/crates/emath" }
+epaint = { path = "vendor/egui/crates/epaint" }
+epaint_default_fonts = { path = "vendor/egui/crates/epaint_default_fonts" }
 
 # Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
 # winit 0.30 never binds and eframe 0.37 still requires winit 0.30.

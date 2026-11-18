@@ -298,6 +298,39 @@ inside the face, became a vertex short of the edge with the loop open beside it.
 
 **A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
 
+**One image for each vertex.** Where two faces of one operand that are not adjacent come within the
+tolerance of each other, as the two faces of a wedge do near its knife edge, the operand is thinner
+than the tolerance there, and a vertex of the other operand lying on that stretch is on both faces.
+Each face pair through the vertex gives its proto vertex a definition, and each definition imprints
+its own vertex in the thin operand, the two a few tolerances apart. `set_relationships`
+(`topology_intersector/p2.rs`, `combine_images_of_one_vertex`) combines the second image into the
+first (`CombineCoincidentVertices`) when each relation would hold on its own and the two images
+share no edge, so the mate maps stay one-to-one; upstream dropped the second relation and left its
+vertex without a mate. A face of the other operand lying in that stretch can then be coincident,
+within the tolerance, with a face of the thin operand that was already classified at another edge,
+or that the coincidence repair (`FixFoundFaceCoincidence`) will not pair with it. When the two
+surfaces are of different analytic kinds, they coincide only over such a tangent patch, whose
+boundary the imprint need not draw in the other face. When the whole face lies within the tolerance
+of the other face's surface, the face is the patch, a copy within the tolerance of that part of the
+other face, and once every common edge has been visited it is classified as one
+(`resolve_tangent_patches`, `merge/p4.rs`, for union, difference and intersection). That the whole
+face lies there is proved, not sampled, and only for a face on a cylinder or cone against a plane
+(`cone_face_gap_to_plane`): the plane's distance over the cone is linear along each generator and a
+sinusoid round the axis, so its extremes over a box of angle and height are found exactly, and the
+box holds the face because it holds the convex hulls of the face's edges (their ends for a line,
+their Bezier control points for a B-spline) and the face's one loop does not wind round the axis. The
+rounding of that calculation is bounded too (the comment on `cone_box_gap`). The face must also lie
+within the other face's edges, not only on its plane: its vertices and three points along each of its
+edges must classify to the other face (`points_in_face`). That part is sampled, not proved. Any
+other pair of kinds, and a face that leaves the plane or the other face anywhere, is only possibly a
+copy and goes to the ray. Where the operation keeps no copy of coincident faces (a
+difference of faces facing the same way), the patch goes. Where it keeps one, the copy is the other
+face's when that face is kept, so the patch goes, and the patch's when the other face is deleted.
+This replaces a ray cast from a point within the tolerance of the other boundary, whose answer there
+can go either way. The patches are visited again until a pass classifies none, so a patch whose
+other face is classified by a later patch follows it; one whose other face is still unclassified
+then is left to the ray. Two faces of one kind are left as before.
+
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
 every later step. The port's strip rule is one such decision; a general one for curved faces within
@@ -594,7 +627,7 @@ small error.
 | near-coincident planar strip | a crossing fixed only to tol / sin θ, its ends unrelated | upstream's `make_faceuse` `SM_ERR`; the crossing is no event, decided before the face pair is intersected | curved strips; offsets where the crossing's distance to an event equals the tolerance |
 | an intersection loop stays open across a cut | two curve ends on an edge with a loose tolerance lie apart (each face's curve ends where its own surface meets the other face, up to tol / sin φ along the edge), or one ends inside a face; the face is not cut through and the flood crosses the gap | the two causes found are closed before the imprint: one proto vertex per crossing of an edge with a face, and a curve end classified by the face's trims (§5); a loop still open is classified as before, wrong for the set flooded across the gap | a refusal by name for a loop left open across a cut; a crossing whose piece of the edge is not proved inside the band |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
-| union deletes a face between the outside and a solid | the solid merges into the infinite region | a union left with no solid region after such a deletion is refused with `SM_ERR` naming the face (`merge/p4.rs`); a deletion where the other body's solid lies across the face is kept | a refusal that also catches a leak which leaves another solid region |
+| union deletes a face between the outside and a solid | the solid merges into the infinite region | after post-processing, a union is refused with `SM_ERR` naming the face (`merge/p4.rs`) if the solid side of any such face (the uses of that solid's faces that stay) lies in no solid region, even when another solid region is left; when none of those uses is left, it is refused if no solid region is left | a leak whose solid's remaining face uses all end in solid regions is kept without a check that the union is right (no known input records one) |
 | result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
 | result empty | no faces left | ops returns `None` (`boolean`) or `Error::Empty` (`union_all`, `imprint`) | |
 

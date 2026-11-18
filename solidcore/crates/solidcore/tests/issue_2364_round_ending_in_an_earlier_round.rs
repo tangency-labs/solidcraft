@@ -47,7 +47,6 @@ const TIP: Point3 = Point3::new(W + 21.0, 0.0, 5.0);
 /// SolidCraft's rig set: every fix but those it leaves off.
 fn kernel() -> Kernel {
     let mut f = UpstreamFixes::all();
-    f.cone_unbounded_parameterized_as_nurb = false;
     f.fillet_refuse_rounds_breaking_through = false;
     Kernel {
         fixes: f,

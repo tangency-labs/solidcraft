@@ -1084,6 +1084,7 @@ mod tests {
             name: format!("O{id}"),
             transform: IDENTITY,
             grounded,
+            bom_type: None,
             expressed_moves: Vec::new(),
         };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
@@ -1170,6 +1171,7 @@ mod tests {
             transform: IDENTITY,
             grounded,
             expressed_moves: Vec::new(),
+            bom_type: None,
         };
         let comp = |id: u64, name: &str| crate::Component { id, name: name.to_string(), ..crate::Component::default() };
 

@@ -197,7 +197,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (fixed) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (origin: [x,y,z] of numbers or length expressions, followed as the parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
@@ -1413,6 +1413,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to_body_apart: false,
         from_level: false,
         picked_placements: Vec::new(),
+        one_sided_direction: None,
     })
 }
 
@@ -2184,6 +2185,31 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.fillet";
     let picks = edge_points(s, p, cmd)?;
+    // Each picked edge's own radius, in the order of `edges` (all rounded in one blend).
+    let mut edge_radii = Vec::new();
+    if let Some(list) = p.get("edge_radii") {
+        let list = list.as_array().ok_or_else(|| bad(cmd, "`edge_radii` is a list of radii, one per picked edge in the order of `edges`"))?;
+        for r in list {
+            let r = match r {
+                Value::String(x) => x.clone(),
+                Value::Number(n) => n.to_string(),
+                _ => return Err(bad(cmd, "an edge radius is a number or an expression")),
+            };
+            check_expr(s, &r, Kind::Length, cmd, "edge radius")?;
+            edge_radii.push(Expr::from(r));
+        }
+        if edge_radii.len() != picks.points.len() {
+            return Err(bad(
+                cmd,
+                format!(
+                    "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                    edge_radii.len(),
+                    picks.points.len()
+                ),
+            ));
+        }
+    }
+    // `radius` stays the fillet's nominal radius (the first edge's, with `edge_radii`).
     let radius = req_expr(cmd, p, "radius")?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
     let style = match str_(p, "type").map(str::to_ascii_lowercase).as_deref() {
@@ -2282,6 +2308,12 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     if !turn.is_mitre() && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty()) {
         return Err(bad(cmd, solidcraft_doc::SWEPT_TAKES));
     }
+    let tangent_chain = bool_(p, "tangent_chain").unwrap_or(true);
+    if !edge_radii.is_empty()
+        && (!style.is_constant() || !fit.is_exact() || !corner.is_rolling() || !setbacks.is_empty() || !turn.is_mitre() || tangent_chain)
+    {
+        return Err(bad(cmd, solidcraft_doc::EDGE_RADII_TAKE));
+    }
     let mut out = add_feature(
         s,
         p,
@@ -2294,7 +2326,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             corner,
             setbacks,
             turn,
-            tangent_chain: bool_(p, "tangent_chain").unwrap_or(true),
+            tangent_chain,
+            edge_radii,
         },
     )?;
     // The radii the fillet used, when `fit: reduce` reduced it.
@@ -2730,7 +2763,7 @@ fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Opt
 pub(crate) fn axis_line_object(o: &Value) -> std::result::Result<(Vec3, Vec3), &'static str> {
     let origin = match o.get("origin") {
         None => Vec3::ZERO,
-        Some(v) => vec3(v).ok_or("axis.origin must contain three finite numeric coordinates in millimetres; expressions are not supported")?,
+        Some(v) => vec3(v).ok_or("axis.origin must contain three finite numeric coordinates in millimetres")?,
     };
     let dir = o.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or("axis needs a non-zero `dir`")?;
     Ok((origin, dir))
@@ -2828,9 +2861,10 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     finish_pattern(s, p, features, pattern, bodies)
 }
 
-/// The line a circular pattern turns about, as [`axis_line`] reads it, except that the origin of
-/// `{origin, dir}` may be length expressions, kept so the pattern follows them (#10852).
-fn pattern_axis(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
+/// The line a circular pattern or a plane at an angle turns about, as [`axis_line`] reads it,
+/// except that the origin of `{origin, dir}` may be length expressions, kept so the feature
+/// follows them (#10852).
+fn axis_line_exprs(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
     if let Some(a @ Value::Object(o)) = p.get("axis")
         && o.contains_key("origin")
         && !super::is_model_axis(a)
@@ -2847,7 +2881,7 @@ fn pattern_axis(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, O
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.circular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let (origin, axis, axis_ref, axis_feature) = pattern_axis(s, p, cmd)?;
+    let (origin, axis, axis_ref, axis_feature) = axis_line_exprs(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
@@ -3224,13 +3258,19 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.at_angle";
-    // The plane follows the edge, face or construction axis it turns about.
-    let (axis_origin, axis_dir, line, axis_feature) = axis_line(s, p, cmd)?;
+    // The plane follows the edge, face or construction axis it turns about, or the length
+    // expressions of an `{origin, dir}` axis's origin.
+    let (axis_origin, axis_dir, line, axis_feature) = axis_line_exprs(s, p, cmd)?;
     let line = line.or_else(|| axis_feature.map(|name| solidcraft_doc::construct::GeoRef::Axis { name }));
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
     let direction_only = crate::params::bool_(p, "direction_only").unwrap_or(false);
+    // With `direction_only` the plane turns about the pivot and never reads the origin, so a
+    // parameter in it would only block deleting that parameter.
+    if direction_only && line.is_none() && axis_origin.iter().any(|c| !solidcraft_doc::expr::references(c.as_str()).is_empty()) {
+        return Err(bad(cmd, "`axis.origin` is not used with `direction_only`: true, so it can't refer to parameters; give `pivot` instead"));
+    }
     let pivot = match p.get("pivot").filter(|t| !t.is_null()) {
         Some(_) if !direction_only => return Err(bad(cmd, "`pivot` needs `direction_only`: true")),
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
@@ -3238,7 +3278,7 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(base),
-        axis_origin,
+        axis_origin: axis_origin.clone(),
         axis_dir,
         angle: angle.clone(),
         line: line.clone(),
@@ -4789,6 +4829,88 @@ mod corner_tests {
         let e = s.execute("solid.fillet", &json!({"edges": rim, "radius": 1, "turn": "swept"})).unwrap_err().to_string();
         eprintln!("swept along a pocket's rim: {e}");
         assert!(e.contains("swept corner at (") && e.contains("round that edge at a radius of at least 1 first"), "{e}");
+    }
+
+    /// `solid.fillet edge_radii: [r, ...]`: each picked edge at its own radius in one blend. On a
+    /// 40 x 30 x 10 box, the two long top edges at 1 and 3 each take the spandrel (1 - π/4) r²
+    /// along their 40, exactly as two single fillets do; two top edges meeting at a corner at 1
+    /// and 3 make one valid solid, removing more than the larger round alone and less than both
+    /// rounds' full lengths. The radii are saved (and nothing is written without them), reopen to
+    /// the same body, and are refused with another option, the wrong count or chained edges.
+    #[test]
+    fn each_picked_edge_takes_its_own_radius_in_one_fillet() {
+        use std::f64::consts::PI;
+        let plate = || {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"}));
+            s
+        };
+        let measured = |s: &Session| {
+            let body = s.world_state().unwrap().body("B").unwrap().body.clone();
+            assert!(body.validity().is_empty(), "{:?}", body.validity());
+            solidcraft_kernel::measure(&body).unwrap()
+        };
+        let spandrel = |r: f64| (1.0 - PI / 4.0) * r * r;
+        let near = |v: f64, want: f64| (v - want).abs() < 1e-6 * want;
+        // Two parallel edges, two radii, one call.
+        let mut both = plate();
+        let reply = run(
+            &mut both,
+            "solid.fillet",
+            &json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, "3 mm"], "tangent_chain": false}),
+        );
+        assert_eq!(reply["warning"], json!(null), "{reply}");
+        let one_call = measured(&both).volume;
+        assert!(near(one_call, 12000.0 - 40.0 * (spandrel(1.0) + spandrel(3.0))), "{one_call}");
+        // The same as two single fillets.
+        let mut twice = plate();
+        run(&mut twice, "solid.fillet", &json!({"edges": [[20, 0, 10]], "radius": 1}));
+        run(&mut twice, "solid.fillet", &json!({"edges": [[20, 30, 10]], "radius": 3}));
+        assert!(near(one_call, measured(&twice).volume), "{one_call} vs {}", measured(&twice).volume);
+        // Saved with the feature, and reopened to the same body.
+        let json = both.doc.to_json();
+        assert!(json.contains("\"edge_radii\""), "{json}");
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&json).unwrap());
+        assert_eq!(measured(&reopened).volume.to_bits(), one_call.to_bits(), "reopened to another body");
+        assert!(!twice.doc.to_json().contains("edge_radii"), "written without per-edge radii");
+        // Two edges meeting at the corner (40, 0, 10), at 1 and 3.
+        let mut corner = plate();
+        let reply = run(
+            &mut corner,
+            "solid.fillet",
+            &json!({"edges": [[20, 0, 10], [40, 15, 10]], "radius": 1, "edge_radii": [1, 3], "tangent_chain": false}),
+        );
+        assert_eq!(reply["warning"], json!(null), "{reply}");
+        let v = measured(&corner).volume;
+        eprintln!("corner at 1 and 3: volume {v:.6}");
+        assert!(v < 12000.0 - 30.0 * spandrel(3.0) && v > 12000.0 - 40.0 * spandrel(1.0) - 30.0 * spandrel(3.0), "{v}");
+        // Refusals: another style or option, the wrong count, chained edges, a non-length.
+        let picks = json!([[20, 0, 10], [20, 30, 10]]);
+        let mut s = plate();
+        for extra in [
+            json!({"type": "chord"}),
+            json!({"fit": "reduce"}),
+            json!({"corner": "g2"}),
+            json!({"turn": "swept"}),
+            json!({"setbacks": [{"vertex": [0, 0, 10], "distance": 2}]}),
+            json!({"tangent_chain": true}),
+            json!({}),
+        ] {
+            let mut p = json!({"edges": picks, "radius": 1, "edge_radii": [1, 3], "tangent_chain": false});
+            for (k, v) in extra.as_object().unwrap() {
+                p[k] = v.clone();
+            }
+            if extra.as_object().unwrap().is_empty() {
+                p.as_object_mut().unwrap().remove("tangent_chain");
+            }
+            let e = s.execute("solid.fillet", &p).unwrap_err().to_string();
+            assert!(e.contains(solidcraft_doc::EDGE_RADII_TAKE), "{extra}: {e}");
+        }
+        let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "edge_radii": [1], "tangent_chain": false})).unwrap_err().to_string();
+        assert!(e.contains("gives 1 radii for 2 picked edges"), "{e}");
+        let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "edge_radii": 1, "tangent_chain": false})).unwrap_err().to_string();
+        assert!(e.contains("one per picked edge"), "{e}");
+        assert!(s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "edge_radii": [1, "30 deg"], "tangent_chain": false})).is_err());
     }
 }
 #[cfg(test)]
