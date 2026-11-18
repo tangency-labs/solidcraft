@@ -77,13 +77,13 @@ pub fn sdf_model(doc: &Document, world: &ModelState, options: &SdfOptions) -> Re
     if sel.is_empty() && options.decals.is_empty() {
         return Err(IoError::Empty);
     }
-    let (meshes, mut warnings) = crate::noted(crate::per_placed_body(&sel, |b, body| crate::body_mesh(b, body, options.quality))?);
+    let (meshed, mut warnings) = crate::per_placed_body(&sel, |b, body| crate::body_mesh(b, body, options.quality))?;
     let uri = |file: &str| if options.model_uris { format!("model://{}/{file}", options.folder) } else { file.to_string() };
     let mut out = SdfPackage::default();
     let mut names = Names::default();
     let mut visuals = String::new();
     let mut masses: Vec<BodyMass> = Vec::new();
-    for (b, mesh) in sel.iter().zip(&meshes) {
+    for (b, mesh) in &meshed {
         let (positions, triangles) = crate::weld(&mesh.positions, &mesh.triangles, crate::weld_eps(&b.body));
         let welded = Mesh { positions, triangles, ..Mesh::default() };
         if welded.triangles.is_empty() {
