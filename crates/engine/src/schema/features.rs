@@ -306,7 +306,8 @@ pub struct CylinderParams {
     pub base: Option<PointExpr3>,
     /// The direction from the bottom to the top: X, Y, Z or `[x, y, z]`, each a number or an
     /// expression with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the cylinder follows as
-    /// the parameters change. Default: Z.
+    /// the parameters change. A parameter added as a plain number is a length: divide it by its
+    /// unit (`"n / 1 mm"`). Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "AxisDirExpr")]
     pub axis: Option<AxisDirExpr>,

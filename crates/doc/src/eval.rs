@@ -4656,7 +4656,7 @@ fn direction(vals: &BTreeMap<String, Value>, d: &crate::DirExpr) -> Result<Vec3>
     if ![v.x, v.y, v.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
         return Err(DocError::Invalid("the axis is out of range".into()));
     }
-    v.normalized().ok_or_else(|| DocError::Invalid("the axis is zero: give it a direction [x, y, z] that isn't [0, 0, 0]".into()))
+    crate::unit_direction(v).ok_or_else(|| DocError::Invalid("the axis is zero: give it a direction [x, y, z] that isn't [0, 0, 0]".into()))
 }
 
 pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {

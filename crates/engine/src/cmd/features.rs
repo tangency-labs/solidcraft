@@ -1639,8 +1639,14 @@ pub(crate) fn axis_expr_form(v: &Value) -> std::result::Result<solidcraft_doc::D
         Value::Object(o) => ["x", "y", "z"].iter().filter_map(|k| o.get(*k)).collect(),
         _ => Vec::new(),
     };
-    // Three numbers that were refused are zero (or out of range); otherwise the message above.
-    if coords.len() != 3 || coords.iter().all(|c| c.is_number()) {
+    // Three numbers: a direction however short, refused only when zero (or out of range).
+    if coords.len() == 3 && coords.iter().all(|c| c.is_number()) {
+        return vec3(v)
+            .and_then(solidcraft_doc::unit_direction)
+            .map(solidcraft_doc::dir_expr)
+            .ok_or("`axis` must be X, Y, Z or a non-zero [x, y, z]");
+    }
+    if coords.len() != 3 {
         return axis_dir_form(v).map(solidcraft_doc::dir_expr);
     }
     let parts: Option<Vec<Expr>> = coords.into_iter().map(|c| expr(&json!({ "v": c }), "v")).collect();
@@ -1656,16 +1662,24 @@ fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc:
     let d = axis_expr_form(v).map_err(|why| bad(cmd, why))?;
     let mut now = [0.0; 3];
     for ((slot, e), axis) in now.iter_mut().zip(&d).zip(["x", "y", "z"]) {
-        let x = s.doc.eval(e, Kind::Unitless).map_err(|err| bad(cmd, format!("axis {axis}: {err}")))?;
+        // A parameter added as a plain number is a length, which an axis can't take as it is.
+        let x = s.doc.eval(e, Kind::Unitless).map_err(|err| {
+            let hint = if s.doc.eval(e, Kind::Length).is_ok() { " (an axis has no unit: divide a length by its unit, as in `n / 1 mm`)" } else { "" };
+            bad(cmd, format!("axis {axis}: {err}{hint}"))
+        })?;
         if !(x.is_finite() && x.abs() < 1e9) {
             return Err(bad(cmd, format!("axis {axis} is out of range")));
         }
         *slot = x;
     }
     let [x, y, z] = now;
-    let dir = Vec3::new(x, y, z)
-        .normalized()
+    let dir = solidcraft_doc::unit_direction(Vec3::new(x, y, z))
         .ok_or_else(|| bad(cmd, "`axis` is [0, 0, 0] with these parameter values: give a direction that isn't zero"))?;
+    // An axis that uses no parameter is a fixed direction: saved normalized, as numbers, the
+    // way an axis given as numbers is.
+    if d.iter().all(|e| solidcraft_doc::expr::references(e).is_empty()) {
+        return Ok((solidcraft_doc::dir_expr(dir), dir));
+    }
     Ok((d, dir))
 }
 

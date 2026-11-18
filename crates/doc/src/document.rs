@@ -3063,7 +3063,17 @@ pub fn dir_expr(d: Vec3) -> DirExpr {
 pub fn literal_dir(d: &DirExpr) -> Option<Vec3> {
     let num = |e: &Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
     let [x, y, z] = d;
-    Vec3::new(num(x)?, num(y)?, num(z)?).normalized()
+    unit_direction(Vec3::new(num(x)?, num(y)?, num(z)?))
+}
+
+/// `v` as a unit direction, however short it is: scaled by its largest component first, so
+/// only a vector that is exactly zero (or not finite) has none (#18822).
+pub fn unit_direction(v: Vec3) -> Option<Vec3> {
+    let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if !(m.is_finite() && m > 0.0) {
+        return None;
+    }
+    Vec3::new(v.x / m, v.y / m, v.z / m).normalized()
 }
 
 fn z_axis_expr() -> DirExpr {
