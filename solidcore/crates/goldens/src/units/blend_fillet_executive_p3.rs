@@ -816,6 +816,15 @@ fn output(values: &[f64]) -> Result<Output, HarnessError> {
 }
 
 fn rust(input: &Inputs) -> Result<Output, HarnessError> {
+    rust_with_fixes(input, &solidcore::kernel::UpstreamFixes::default())
+}
+
+/// [`rust`] with the opt-in `fixes` on the record's kernel (runner tests only; the gate
+/// runs the default).
+fn rust_with_fixes(
+    input: &Inputs,
+    fixes: &solidcore::kernel::UpstreamFixes,
+) -> Result<Output, HarnessError> {
     if let Some(example) = input.upstream_case {
         contract::validate_upstream_fixture(example).map_err(|e| HarnessError::new(e.to_string()))?;
         if !input.record.is_empty() {
@@ -831,6 +840,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         return Err(HarnessError::new("short executive record"));
     };
     let mut k = crate::runner_kernel();
+    k.fixes = *fixes;
     k.context.set_doing_boolean(*prior_boolean != 0.0);
     let mut b = solidcore::topology::Brep::new();
     // Apply SmZoneTol3d's default-sentinel/fabs conversion, then write the member.
@@ -1077,4 +1087,51 @@ pub(super) fn with_point_step(mut out: Output, step: f64) -> Output {
         out.values.insert(POINT_STEP.into(), vec![step]);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::kernel::UpstreamFixes;
+
+    /// `create_fillet_brep` on the fixture's target with no blend: every stage before and
+    /// after the hooks succeeds with nothing to do, so each hook is reached.
+    fn create_fillet_brep_record() -> Inputs {
+        let record = [
+            1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1e-5, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ];
+        serde_json::from_value(serde_json::json!({ "record": record })).unwrap()
+    }
+
+    /// The record with `fixes` on runs as with every flag off: with no blend, no face is
+    /// taken whole, no bands overlap and no corner patch changes the stitch.
+    fn reaches_hook_as_with_flags_off(set: impl FnOnce(&mut UpstreamFixes)) {
+        let mut fixes = UpstreamFixes::default();
+        set(&mut fixes);
+        let input = create_fillet_brep_record();
+        let off = rust_with_fixes(&input, &UpstreamFixes::default()).unwrap();
+        assert_eq!(off.deferred, None);
+        assert_eq!(off.ints["status_error_flags"][0], 0, "{off:?}");
+        let on = rust_with_fixes(&input, &fixes).unwrap();
+        assert_eq!(on, off);
+    }
+
+    /// WR-320: `FacesOutlastTheirBlends` (`geometry_faces_outlast`).
+    #[test]
+    fn faces_outlast_hook_answers_with_no_blend() {
+        reaches_hook_as_with_flags_off(|f| f.fillet_refuse_face_consuming_blends = true);
+    }
+
+    /// WR-542/649: `BandsClearOtherRails` (`geometry_bands_clear_other_rails`).
+    #[test]
+    fn bands_hook_answers_with_no_blend() {
+        reaches_hook_as_with_flags_off(|f| f.fillet_refuse_overlapping_bands = true);
+    }
+
+    /// WR-546: the stitch with `SmFilletPatchStitchCallback`
+    /// (`stitch_body_keeping_fillet_edges`).
+    #[test]
+    fn patch_stitch_hook_answers_with_no_corner() {
+        reaches_hook_as_with_flags_off(|f| f.fillet_patch_keeps_fillet_edges = true);
+    }
 }
