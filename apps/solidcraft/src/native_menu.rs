@@ -5,7 +5,7 @@
 //! Entries that are control actions use their ids and do the same there: `app.quit`,
 //! `ui.prefs {open}` (Settings and Keyboard Shortcuts), `ui.agent_chat {toggle}`, `ui.help {item}`. Undo and Redo are the commands
 //! `edit.undo` and `edit.redo`. The other entries' ids are defined here: `ui.file.new`,
-//! `ui.file.open`, `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`,
+//! `ui.file.new_drawing`, `ui.file.open`, `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`,
 //! `ui.file.save_as`, `ui.file.save_json`, `ui.file.export {format}`,
 //! `ui.file.export_mesh {format}`. Menus are `menu.file`, `menu.file.recent`, `menu.edit`,
 //! `menu.window` and `menu.help`.
@@ -54,6 +54,7 @@ const FIXED: &[FileAction] = &[
     FileAction::Shortcuts,
     FileAction::Quit,
     FileAction::New,
+    FileAction::NewDrawing,
     FileAction::Open,
     FileAction::ClearRecent,
     FileAction::Save,
@@ -98,6 +99,7 @@ fn id_of(action: &FileAction) -> (String, Option<Value>) {
         FileAction::Shortcuts => ("ui.prefs".into(), Some(json!({ "open": "Shortcuts" }))),
         FileAction::Quit => fixed("app.quit"),
         FileAction::New => fixed("ui.file.new"),
+        FileAction::NewDrawing => fixed("ui.file.new_drawing"),
         FileAction::Open => fixed("ui.file.open"),
         FileAction::OpenRecent(path) => (OPEN_RECENT.into(), Some(json!({ "path": path }))),
         FileAction::ClearRecent => fixed("ui.file.clear_recent"),
@@ -162,12 +164,13 @@ fn recent_items(app: &SolveApp, paths: &[String]) -> Vec<Item> {
 
 fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
     let more = |key: &str| format!("{}\u{2026}", app.tr(key));
-    let mut file = vec![
-        item(app.tr("ui.new_design"), &FileAction::New),
-        item(&more("ui.open"), &FileAction::Open),
-        submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)),
-        Item::sep(),
-    ];
+    let mut file = vec![item(app.tr("ui.new_design"), &FileAction::New)];
+    // Drawings are a preview (Preferences > Design > Drawings): the menu is made at start, so New
+    // Drawing is there when they were on then, and greyed while they are off.
+    if solidcraft_ui_egui::drawing_workspace::enabled(app) {
+        file.push(item(app.tr("ui.new_drawing"), &FileAction::NewDrawing));
+    }
+    file.extend([item(&more("ui.open"), &FileAction::Open), submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)), Item::sep()]);
     file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([
         Item::sep(),
@@ -337,16 +340,18 @@ mod tests {
                 }
             }
         }
-        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        // With drawings on (Preferences > Design > Drawings), so New Drawing is in the File menu.
+        app.preferences.drawings_preview = true;
         let bar = menu_bar(&app, &["/work/a.solidcraft".to_string()]);
         let mut entries = vec![];
         leaves(&bar.app, &mut entries);
         leaves(std::slice::from_ref(&bar.quit), &mut entries);
         leaves(&bar.menus, &mut entries);
         entries.retain(|i| i.id != "-");
-        // App menu 2 + Quit; File: New, Open, 1 recent, Clear, 3 inserts, Save, Save As, JSON,
-        // Verify Signature, 7 exports, Properties; Edit 2; Window 1; Help 7.
-        assert_eq!(entries.len(), 3 + 4 + 3 + 4 + 7 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
+        // App menu 2 + Quit; File: New, New Drawing, Open, 1 recent, Clear, 3 inserts, Save, Save As,
+        // JSON, Verify Signature, 7 exports, Properties; Edit 2; Window 1; Help 7.
+        assert_eq!(entries.len(), 3 + 5 + 3 + 4 + 7 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }
