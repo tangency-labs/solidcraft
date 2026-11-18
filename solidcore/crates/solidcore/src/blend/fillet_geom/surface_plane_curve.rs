@@ -517,7 +517,10 @@ pub fn ends_on_both(
             // plane, not to the plane's domain, which ends at the face's edge (an end past a
             // shallow concave crease lies on the side face's plane continued)
             let off = if k.fixes.fillet_plane_curve_ends_past_face
-                && matches!(surface.kind(), crate::surface::surface::p2::SurfaceKind::Plane(_))
+                && matches!(
+                    surface.kind(),
+                    crate::surface::surface::p2::SurfaceKind::Plane(_)
+                )
                 && normal.length() > crate::math::EFF_ZERO
             {
                 ((p - on).dot(*normal) / normal.length()).abs()
