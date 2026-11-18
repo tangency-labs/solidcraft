@@ -683,7 +683,7 @@ belong to the active design. The main window has id `0`.
 
 | Command | Parameters | Result |
 | --- | --- | --- |
-| `tab.view.move_to_window` | `view` (required, from `tab.view.list`), `window?` (a window id or `"new"`, default `"new"`). An existing window accepts `index?` (zero-based insertion position, counted after removing the view for a reorder). A new window accepts `display?` (name or zero-based index), `x?`, `y?`, `w?`, `h?` (logical points), and `level?` (`"views_only"`) | `{view, window, created, from, closed_source, placement}` |
+| `tab.view.move_to_window` | `view` (required, from `tab.view.list`), `window?` (a window id or `"new"`, default `"new"`). An existing window accepts `index?` (zero-based insertion position, counted after removing the view for a reorder) or `placement?` (the tile placement used by `tab.view.beside`, for transfers between windows). A new window accepts `display?` (name or zero-based index), `x?`, `y?`, `w?`, `h?` (logical points), and `level?` (`"views_only"`) | `{view, window, created, from, closed_source, placement}` |
 | `tab.window.list` | `{}` | `{windows: [{id, level, views, active, layout, display, placement, tool_window}]}` |
 | `tab.window.focus` | `{window}` | `{window}` |
 | `tab.window.close` | `{window}` (a pop-out id) | `{returned}`, the ids returned to the main strip in order |
