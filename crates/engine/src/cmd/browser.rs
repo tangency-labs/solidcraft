@@ -100,7 +100,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("camera")
         .contract(&VIEW_SAVE_CONTRACT)
         .output(output_schema_for::<ViewSaved>)
-        .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
+        .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?, roll?, up?: z|y} (replaces a view of the same name)"),
     CommandSpec::new("view.rename", "Rename Named View", crate::checked!("view.rename", view_rename))
         .icon("rename")
         .contract(&VIEW_RENAME_CONTRACT)
@@ -1236,7 +1236,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
 /// handler refuses it with.
 pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::NamedView, String> {
     let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| format!("bad camera: {e}"))?;
-    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov].iter().all(|x| x.is_finite()) && v.distance > 0.0;
+    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov, v.roll].iter().all(|x| x.is_finite()) && v.distance > 0.0;
     if ok { Ok(v) } else { Err("the camera must be finite with a positive distance".into()) }
 }
 
@@ -1312,9 +1312,9 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, CameraReply { camera: cam, param_warnings: Vec::new() })
 }
 
-/// The orbit camera of a named view (Z up, no roll).
+/// The full orbit camera of a named view, including its saved roll and up direction.
 fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
-    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
+    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, roll: v.roll, up: v.up }
 }
 
 fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -1936,6 +1936,53 @@ mod tests {
         assert!(s.model.state().body("KB").is_some_and(|b| !b.body.is_surface()), "the body both placements show is closed");
         let err = s.execute("body.repair", &json!({"body": "KB (K:9)"})).unwrap_err().to_string();
         assert!(err.contains("no body `KB (K:9)`"), "{err}");
+    }
+
+    /// #17689: a STEP part SMLib takes but whose check fails. The import says so, naming it; a
+    /// join on it is refused saying the part already failed the check; and Repair runs the same
+    /// check, saying what fails rather than that there is nothing to repair. The block's edge
+    /// curve lies 2 µm off its face (tests/step-regressions/README.md).
+    #[test]
+    fn a_step_part_the_check_fails_is_named_at_import_at_the_join_and_by_repair() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-17689-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut s = Session::default();
+        let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        assert_eq!(r["created_bodies"], json!(["Bloco"]), "{r}");
+        // The check runs on after the import returns (#17697): what it finds joins the import's
+        // result once it ends, and a window is told of it once.
+        let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
+        let report = s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check is pending or done");
+        report.settled().expect("the check ends");
+        // A copy of the model evaluated beside it (a scratch evaluation) takes no notice from it.
+        let mut copy = s.model.clone();
+        copy.settle_import_checks();
+        assert_eq!(copy.take_import_notices(), [id]);
+        s.model.settle_import_checks();
+        let result = s.model.result(id).unwrap();
+        let warning = result.warning.clone().unwrap_or_default();
+        assert!(warning.contains("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: "), "{warning}");
+        let issues = &result.import_report.as_ref().unwrap().issues;
+        assert!(issues.iter().any(|i| i.kind == solidcraft_kernel::IssueKind::NeedsRepair && i.part == "Bloco"), "{issues:?}");
+        assert_eq!(s.model.take_import_notices(), [id], "a window is told once");
+        s.model.settle_import_checks();
+        assert_eq!(s.model.take_import_notices(), Vec::<u64>::new());
+        // A box joined to it at its far corner: the default each_feature check refuses the result,
+        // and the message says the check fails the part as it was before the join.
+        let err = s
+            .execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("body `Bloco` (SMLib's check fails it as it was before this feature): "), "{err}");
+        assert!(err.contains("SMLib's check refuses the result"), "{err}");
+        // Repair: refused with the check's failures, nothing added.
+        let n = s.doc.features.len();
+        let err = s.execute("body.repair", &json!({"body": "Bloco"})).unwrap_err().to_string();
+        assert!(err.contains("SMLib's check fails the part") && !err.contains("nothing to repair"), "{err}");
+        assert_eq!(s.doc.features.len(), n);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2985,6 +3032,35 @@ mod tests {
         }
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.named_views.len(), 2);
+    }
+
+    /// A saved view keeps the roll and up axis through serialisation and restores them,
+    /// while a design from before #18713 still reads as Z-up with no roll.
+    #[test]
+    fn named_view_restores_roll_and_up_after_reopening() {
+        use solidcraft_viewport::UpAxis;
+
+        let mut s = Session::default();
+        let camera = json!({
+            "target": [1, 2, 3], "yaw": 0.25, "pitch": -0.3,
+            "distance": 150, "fov": 0.1, "roll": 0.6, "up": "y"
+        });
+        run(&mut s, "view.save", json!({"name": "Detail", "camera": camera}));
+        let reopened = serde_json::from_str::<solidcraft_doc::Document>(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+        assert_eq!(reopened.named_views[0].roll, 0.6);
+        assert_eq!(reopened.named_views[0].up, UpAxis::Y);
+        let mut restored = Session::new(reopened);
+        run(&mut restored, "view.apply", json!({"view": "Detail"}));
+        let applied = restored.camera.unwrap();
+        assert_eq!((applied.yaw, applied.pitch, applied.roll, applied.up), (0.25, -0.3, 0.6, UpAxis::Y));
+
+        let old = json!({"name":"Old","target":[0,0,0],"yaw":0,"pitch":0,"distance":100});
+        let previous: solidcraft_doc::NamedView = serde_json::from_value(old).unwrap();
+        assert_eq!((previous.roll, previous.up), (0.0, UpAxis::Z));
+        for roll in [json!(null), json!("NaN")] {
+            let invalid = json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100,"roll":roll}});
+            assert!(s.execute("view.save", &invalid).is_err());
+        }
     }
 
     #[test]
