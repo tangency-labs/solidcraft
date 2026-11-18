@@ -3569,7 +3569,7 @@ fn turn_to_nurbs(
 ) -> Result<()> {
     with_p3_notifications(k, b, notifications, |k, b, env| {
         let key_of = env.key_of;
-        let mut selection = std::collections::BTreeMap::new();
+        let mut selection = BTreeMap::new();
         for entity in brep_faces(b)?
             .into_iter()
             .map(crate::EntityRef::Face)
