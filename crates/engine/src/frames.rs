@@ -27,8 +27,9 @@ enum K {
     Make,
     /// A direction: turned with the command's frame.
     Dir,
-    /// A primitive's axis: a direction as `Dir`, or X, Y, Z or `[x, y, z]` / `{x, y, z}` with
-    /// unitless expressions (#18822), turned with the command's frame and kept as expressions.
+    /// A primitive's axis: a direction as `Dir`, or `[x, y, z]` / `{x, y, z}` with unitless
+    /// expressions (#18822), turned with the command's frame and kept as expressions. X, Y or Z
+    /// by name passes through: it names the component's own axis.
     PrimitiveAxis,
     /// A displacement with length expressions: turned without the frame's translation.
     Delta,
@@ -954,12 +955,17 @@ fn map_local_with_input(
                 Picks => m.picks(v, body.as_deref()),
                 Make => m.make(v),
                 Dir => m.dir(v),
-                // An axis named X, Y or Z, or holding expressions (#18822), in any of the forms
-                // the command reads, turns with the frame; expressions stay expressions.
+                // An axis holding expressions (#18822), as `[x, y, z]` or `{x, y, z}`, turns with
+                // the frame and stays expressions; a component's axis named X, Y or Z stays its
+                // own. One that comes out as numbers is written as numbers, as `Dir` writes them.
+                PrimitiveAxis if v.is_string() => None,
                 PrimitiveAxis => m.dir(v).or_else(|| {
                     let frame = m.first.unwrap_or(m.f.active);
                     let d = crate::cmd::axis_expr_form(v).ok()?;
-                    m.map_expr(&frame, &serde_json::json!(d.map(|e| e.to_string())), map_dir_expr)
+                    let turned = m.map_expr(&frame, &serde_json::json!(d.map(|e| e.to_string())), map_dir_expr)?;
+                    let nums: Option<Vec<f64>> =
+                        turned.as_array()?.iter().map(|c| c.as_str().and_then(|t| t.trim().parse::<f64>().ok()).filter(|x| x.is_finite())).collect();
+                    Some(nums.map_or(turned, |n| serde_json::json!(n)))
                 }),
                 Delta => m.dir(v).or_else(|| {
                     let frame = m.first.unwrap_or(m.f.active);

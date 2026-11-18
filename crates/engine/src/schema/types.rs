@@ -358,7 +358,8 @@ impl JsonSchema for AxisDirExpr {
         "AxisDirExpr".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let c = generator.subschema_for::<NumberExpr>();
+        // A number of any size gives a direction; an expression is a `NumberExpr`.
+        let c = json_schema!({"anyOf": [{"type": "number"}, generator.subschema_for::<NumberExpr>()]});
         json_schema!({
             "description": "An axis: X, Y or Z (any case), or a direction [x, y, z] that isn't zero, each a number or an expression with no unit such as \"-sin(t)\" (a parameter added as a plain number is a length: \"n / 1 mm\").",
             "anyOf": [

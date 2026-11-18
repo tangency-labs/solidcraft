@@ -1639,10 +1639,12 @@ pub(crate) fn axis_expr_form(v: &Value) -> std::result::Result<solidcraft_doc::D
         Value::Object(o) => ["x", "y", "z"].iter().filter_map(|k| o.get(*k)).collect(),
         _ => Vec::new(),
     };
-    // Three numbers: a direction however short, refused only when zero (or out of range).
+    // Three numbers: a direction however short or long, refused only when zero.
     if coords.len() == 3 && coords.iter().all(|c| c.is_number()) {
-        return vec3(v)
-            .and_then(solidcraft_doc::unit_direction)
+        let n: Option<Vec<f64>> = coords.iter().map(|c| c.as_f64().filter(|x| x.is_finite())).collect();
+        return n
+            .and_then(|n| <[f64; 3]>::try_from(n).ok())
+            .and_then(|[x, y, z]| solidcraft_doc::unit_direction(Vec3::new(x, y, z)))
             .map(solidcraft_doc::dir_expr)
             .ok_or("`axis` must be X, Y, Z or a non-zero [x, y, z]");
     }
@@ -1667,8 +1669,8 @@ fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc:
             let hint = if s.doc.eval(e, Kind::Length).is_ok() { " (an axis has no unit: divide a length by its unit, as in `n / 1 mm`)" } else { "" };
             bad(cmd, format!("axis {axis}: {err}{hint}"))
         })?;
-        if !(x.is_finite() && x.abs() < 1e9) {
-            return Err(bad(cmd, format!("axis {axis} is out of range")));
+        if !x.is_finite() {
+            return Err(bad(cmd, format!("axis {axis} is not a finite number")));
         }
         *slot = x;
     }
