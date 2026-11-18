@@ -1391,6 +1391,61 @@ mod tests {
         assert_eq!(h.app.preferences.background_shader, "", "Restore Defaults on Plugins turns it off");
     }
 
+    /// A chosen texture has a row under its background's switch: Choose… stores the picked file
+    /// for it, and Clear takes it back to the shipped picture.
+    #[test]
+    fn a_chosen_texture_has_a_row_to_pick_and_clear_its_picture() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        write(
+            &dir,
+            "own",
+            r#"{"id":"own","name":"Own","version":"1","description":"","capabilities":["shaders@0.1"],"shaders":[{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{"name":"picture","choose":"Picture","file":"default.png"}]}]}"#,
+        );
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let picked = h.dir.join("picked.png").to_string_lossy().into_owned();
+        h.app.services.pick_file = Some(Box::new(move |_label: &str, _exts: &[&str]| {
+            let picked = picked.clone();
+            Box::pin(async move { Some(picked) })
+        }));
+        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/0:choose");
+        // The picked file arrives through the app's own tick, which the page frame does not run.
+        for _ in 0..3 {
+            crate::file_picker::tick(&mut h.app, &ctx);
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        assert_eq!(h.app.preferences.background_shader_pictures.get("own/own/0"), Some(&h.dir.join("picked.png").to_string_lossy().into_owned()));
+        assert!(crate::scenario::handle_at("prefs:background_picture:own/own/0:clear").is_some(), "a chosen picture can be cleared");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/0:clear");
+        assert!(h.app.preferences.background_shader_pictures.is_empty(), "Clear takes the shipped picture back");
+    }
+
+    /// A shaders plugin with no chosen texture installs and shows its card as before: its
+    /// background switch, no picture rows, and no stored pictures.
+    #[test]
+    fn legacy_shader_plugins_show_no_picture_rows() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        write(&dir, "dusk", include_str!("../../../docs/plugin-examples/dusk/plugin.json"));
+        write(&dir, "panorama", include_str!("../../../docs/plugin-examples/panorama/plugin.json"));
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:dusk/dusk");
+        assert_eq!(h.app.preferences.background_shader, "dusk/dusk");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:panorama/panorama");
+        assert_eq!(h.app.preferences.background_shader, "panorama/panorama");
+        assert!(crate::scenario::handle_at("prefs:background_picture:dusk/dusk/0:choose").is_none());
+        assert!(crate::scenario::handle_at("prefs:background_picture:panorama/panorama/0:choose").is_none());
+        assert!(h.app.preferences.background_shader_pictures.is_empty());
+    }
+
     #[test]
     fn plugin_cards_open_their_own_folder_and_cancel_restores_enabled_state() {
         use std::{cell::RefCell, rc::Rc};
@@ -1686,6 +1741,7 @@ mod tests {
             images: Default::default(),
             swatches: Default::default(),
             shaders: Vec::new(),
+            pictures: Vec::new(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),

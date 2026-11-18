@@ -545,4 +545,106 @@ mod tests {
         super::forget(&mut h.app, "dusk");
         assert!(h.app.plugin_shaders.loading.is_none());
     }
+
+    const PICTURE_SHADER: &str = "fn background(px: ScPixel) -> vec4<f32> {\n    return textureSampleLevel(picture, sc_clamp, px.uv, 0.0);\n}\n";
+
+    /// A plugin `own` with one background whose texture `picture` is chosen, shipped as
+    /// `default.png` (solid blue) when `shipped` is set; returns its folder.
+    fn own_plugin(h: &crate::scenario::Harness, shipped: bool) -> std::path::PathBuf {
+        let dir = h.dir.join("own");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = if shipped { r#","file":"default.png""# } else { "" };
+        let manifest = format!(
+            r#"{{"id":"own","name":"Own","version":"1","capabilities":["shaders@0.1"],"shaders":[{{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{{"name":"picture","choose":"Picture"{file}}}]}}]}}"#
+        );
+        std::fs::write(dir.join("plugin.json"), manifest).unwrap();
+        std::fs::write(dir.join("own.wgsl"), PICTURE_SHADER).unwrap();
+        if shipped {
+            write_png(&dir.join("default.png"), [0, 0, 255]);
+        }
+        dir
+    }
+
+    fn write_png(path: &std::path::Path, rgb: [u8; 3]) {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(4, 2, image::Rgba([rgb[0], rgb[1], rgb[2], 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        std::fs::write(path, png.get_ref()).unwrap();
+    }
+
+    /// The first mip level of the texture's picture, the bytes that are drawn.
+    fn first_texel(loaded: &super::Loaded) -> Vec<u8> {
+        loaded.textures[0][0].1[..4].to_vec()
+    }
+
+    #[test]
+    fn a_chosen_picture_replaces_the_shipped_one_and_a_broken_one_falls_back() {
+        let h = crate::scenario::Harness::new();
+        let dir = own_plugin(&h, true);
+        let folder = dir.to_string_lossy().into_owned();
+        let shipped = super::load(folder.clone(), "own/own".into(), Default::default(), 512).unwrap();
+        assert_eq!(first_texel(&shipped), vec![0, 0, 255, 255]);
+        let red = dir.join("red.png");
+        write_png(&red, [255, 0, 0]);
+        let chosen: std::collections::BTreeMap<String, String> = [("own/own/0".to_owned(), red.to_string_lossy().into_owned())].into();
+        let loaded = super::load(folder.clone(), "own/own".into(), chosen.clone(), 512).unwrap();
+        assert_eq!(first_texel(&loaded), vec![255, 0, 0, 255], "the chosen picture is drawn");
+        assert_ne!(super::load_key("own/own", &chosen), super::load_key("own/own", &Default::default()), "a new picture is a new key");
+        let missing: std::collections::BTreeMap<String, String> =
+            [("own/own/0".to_owned(), h.dir.join("gone.png").to_string_lossy().into_owned())].into();
+        let fallback = super::load(folder.clone(), "own/own".into(), missing, 512).unwrap();
+        assert_eq!(first_texel(&fallback), vec![0, 0, 255, 255], "a missing chosen picture falls back to the shipped file");
+        let garbage = dir.join("garbage.png");
+        std::fs::write(&garbage, b"not a picture").unwrap();
+        let broken: std::collections::BTreeMap<String, String> = [("own/own/0".to_owned(), garbage.to_string_lossy().into_owned())].into();
+        assert_eq!(first_texel(&super::load(folder, "own/own".into(), broken, 512).unwrap()), vec![0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn a_chosen_texture_with_no_shipped_file_and_no_picture_fails_with_one_line() {
+        let h = crate::scenario::Harness::new();
+        let dir = own_plugin(&h, false);
+        let folder = dir.to_string_lossy().into_owned();
+        let error = super::load(folder.clone(), "own/own".into(), Default::default(), 512).err().unwrap();
+        assert!(error.contains("no picture chosen"), "{error}");
+        let gone: std::collections::BTreeMap<String, String> =
+            [("own/own/0".to_owned(), h.dir.join("gone.png").to_string_lossy().into_owned())].into();
+        assert!(super::load(folder, "own/own".into(), gone, 512).is_err());
+    }
+
+    #[test]
+    fn chosen_pictures_are_keyed_by_texture_and_checked_as_preferences() {
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("pick.png").to_string_lossy().into_owned();
+        assert!(super::valid_picture("own/own/0", &path));
+        assert!(super::valid_picture("own/own/3", &path));
+        for (key, path) in [
+            ("own/own/4", path.as_str()),
+            ("own/own", path.as_str()),
+            ("Own/own/0", path.as_str()),
+            ("own/own/x", path.as_str()),
+            ("own/own/0", "pick.png"),
+            ("own/own/0", ""),
+        ] {
+            assert!(!super::valid_picture(key, path), "{key} {path}");
+        }
+        assert!(!super::valid_picture("own/own/0", &format!("{}{}", path, "x".repeat(1024))));
+        let many: std::collections::BTreeMap<String, String> =
+            (0..=crate::plugins::MAX_PICTURES).map(|i| (format!("own/own/{}", i % 4) + &"-".repeat(i), path.clone())).collect();
+        assert!(!super::valid_pictures(&many));
+    }
+
+    /// Choose… stores the picture under the texture's key; the preference round trip is `ui.prefs`.
+    #[test]
+    fn the_preference_takes_pictures_the_card_stores_and_refuses_bad_ones() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("pick.png").to_string_lossy().into_owned();
+        let stored = crate::prefs::control(&mut h.app, &serde_json::json!({"background_shader_pictures": {"own/own/0": path}})).unwrap();
+        assert_eq!(stored["background_shader_pictures"]["own/own/0"], serde_json::json!(path));
+        assert_eq!(h.app.preferences.background_shader_pictures.get("own/own/0"), Some(&path));
+        assert!(crate::prefs::control(&mut h.app, &serde_json::json!({"background_shader_pictures": {"own/own/9": path}})).is_err());
+        assert!(crate::prefs::control(&mut h.app, &serde_json::json!({"background_shader_pictures": {"own/own/0": "pick.png"}})).is_err());
+        assert_eq!(h.app.preferences.background_shader_pictures.len(), 1, "a refused change stores nothing");
+        assert!(super::choose_picture(&mut h.app, "own/own/0", "x".repeat(2000)).is_err());
+        assert!(super::choose_picture(&mut h.app, "own/own/0", path.clone()).is_ok());
+    }
 }
