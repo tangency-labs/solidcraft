@@ -660,13 +660,7 @@ pub fn create_planar_surface(k: &Kernel, plane_pnts: &[Point3], tol_3d: f64) -> 
             let size = x_axis.length() + y_axis.length();
             let ext = Extent2d::from_points(Point2::new(-size, -size), Point2::new(size, size));
             // fork 66b02de passes this on (SER)
-            ignored(
-                crate::error::passed_on(
-                    plane.adjust_step_uv_domain(k, &ext),
-                    k.fixes.fillet_statuses_pass_on,
-                )?,
-                (),
-            )?;
+            plane.adjust_step_uv_domain(k, &ext)?;
             Ok(plane)
         }
         // Make NonRational Bilinear BSplineSurface interpolating given corners

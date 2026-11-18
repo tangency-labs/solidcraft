@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_scene_line": "Line Under a Point"
+  },
+  "ar": {
+    "cmd.drawing_scene_line": "الخط تحت نقطة"
+  },
+  "de": {
+    "cmd.drawing_scene_line": "Linie unter einem Punkt"
+  },
+  "he": {
+    "cmd.drawing_scene_line": "הקו שמתחת לנקודה"
+  },
+  "ja": {
+    "cmd.drawing_scene_line": "点の下にある線"
+  },
+  "ko": {
+    "cmd.drawing_scene_line": "점 아래의 선"
+  },
+  "vi": {
+    "cmd.drawing_scene_line": "Đường nằm dưới một điểm"
+  },
+  "zh": {
+    "cmd.drawing_scene_line": "点下方的线"
+  }
+}

@@ -260,6 +260,9 @@ thread_local! {
     /// kept or put back its body: [`run_with`] then answers the same, so a cancel landing between
     /// the two never leaves an edit in place under a `Cancelled` answer.
     static STOPPED: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The kernel's own statement of the last error a call on this thread failed with
+    /// ([`take_failure_detail`]).
+    static DETAIL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The call running on this thread ([`current_call`]).
     static CURRENT: Cell<Option<&'static str>> = const { Cell::new(None) };
 }
@@ -339,6 +342,19 @@ pub fn current_call() -> Option<String> {
         .ok()
         .flatten()
         .map(str::to_owned)
+}
+
+/// The kernel's own statement of why the last call on this thread failed with a kernel error:
+/// the error and the chain of what caused it, in the kernel's words, as it was before the call
+/// typed it into an [`Error`] (which keeps the kernel's status or its kind, not its words).
+/// For an application's logs and failure reports, beside the typed error it words for its
+/// users. Taken: the next call returns `None` until a call on this thread fails again, so an
+/// application takes it before a call (to drop an older one) and after the call fails. `None`
+/// too for a failure that is no kernel error (a refusal the call itself types, a panic, a
+/// cancellation).
+#[must_use]
+pub fn take_failure_detail() -> Option<String> {
+    DETAIL.with(std::cell::RefCell::take)
 }
 
 /// How a call's value reads: whether it is a refusal, for the calls whose answer can carry one.
@@ -485,7 +501,10 @@ fn run_with<T: Answer>(
         // kernel whose caches it may have left half-built is not used again.
         Ok(_) if stopped => (Err(Error::Cancelled), false),
         Ok(Ok(v)) => (Ok(v), true),
-        Ok(Err(e)) => (Err(status(e)), true),
+        Ok(Err(e)) => {
+            DETAIL.with(|d| d.replace(Some(e.to_string())));
+            (Err(status(e)), true)
+        }
         Err(p) => (
             Err(Error::Internal(format!("{call}: {}", message(p.as_ref())))),
             false,
@@ -631,6 +650,19 @@ pub(crate) fn read_body<T: Answer>(
     call: &'static str,
     body: &Body,
     f: impl FnOnce(&mut Kernel, &Brep) -> solidcore::Result<T>,
+) -> Result<T> {
+    read_held(call, body, |k, held| f(k, held))
+}
+
+/// [`read_body`] for a call that also reads what the body holds beside its B-rep (its proof,
+/// its template), under the one lock: `f` is given the body's guard.
+///
+/// # Errors
+/// As [`read_body`].
+pub(crate) fn read_held<T: Answer>(
+    call: &'static str,
+    body: &Body,
+    f: impl FnOnce(&mut Kernel, &crate::body::BodyGuard<'_>) -> solidcore::Result<T>,
 ) -> Result<T> {
     if body.is_poisoned() {
         return Err(unfinished(call));
