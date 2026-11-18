@@ -40,7 +40,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
     assert_eq!(
         keys.len(),
-        108,
+        109,
         "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
     );
     for key in [
@@ -48,6 +48,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "maya_horizontal_zoom",
         "mouse_gestures",
         "radial_context_menu",
+        "radial_tools",
         "zoom_reverse",
         "theme",
         "theme_day",
@@ -861,6 +862,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "project_options_dialog",
         "quick_measure",
         "radial_context_menu",
+        "radial_tools",
         "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
@@ -920,7 +922,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
-    assert_eq!(expected.len(), 108);
+    assert_eq!(expected.len(), 109);
     assert_eq!(actual, expected);
 }
 

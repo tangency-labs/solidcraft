@@ -124,7 +124,15 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
         let unrolls = setting::upright_orbit_unrolls(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.upright_orbit_unrolls.help"));
         crate::scenario::publish_target("prefs:upright_orbit_unrolls", unrolls.rect);
-        setting::radial_context_menu(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.navigation.radial_help"));
+        ui.horizontal_wrapped(|ui| {
+            setting::radial_context_menu(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.navigation.radial_help"));
+            let customize = ui_kit::button(ui, app.tr("radial.customize"), ui_kit::Button::Normal);
+            crate::scenario::publish_target("prefs:radial_customize", customize.rect);
+            if customize.clicked() {
+                app.menu.radial_editor = true;
+                app.menu.radial_editor_sketch = app.session.active_sketch.is_some();
+            }
+        });
         setting::quick_menu_after_selection(app, ui);
         let label = app.tr("Middle double-click");
         let width = ui_kit::ContentWidth::label(ui, label);

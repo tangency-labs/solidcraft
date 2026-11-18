@@ -97,6 +97,7 @@ const PROFILE_KEYS: &[&str] = &[
     "project_options_dialog",
     "quick_measure",
     "radial_context_menu",
+    "radial_tools",
     "ribbon_click_ends_tool",
     "ribbon_icon_grid",
     "ribbon_labels",
