@@ -1330,14 +1330,15 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             // drawn around it in that sketch (#18405), when the tool's option in the Sketch Palette
             // asks for it (`sketch_palette`, "Frame the image in the sketch"). The engine
             // decides whether the image lies on that plane ("auto"); off it, the image is free.
-            let frame = app.preferences.frame_images_in_sketch && app.session.active_sketch.is_some();
+            // With no sketch open, the image is framed in a new sketch on its own plane (true).
+            let frame = app.preferences.frame_images_in_sketch.then(|| if app.session.active_sketch.is_some() { json!("auto") } else { json!(true) });
             let mut p = if decal {
                 json!({"path": path, "face": if plane.get("face").is_some() { plane } else { Value::Null }})
             } else {
                 json!({"path": path, "plane": plane, "at": [at.x, at.y, at.z]})
             };
-            if let (true, Some(o)) = (frame, p.as_object_mut()) {
-                o.insert("frame".into(), json!("auto"));
+            if let (Some(frame), Some(o)) = (frame, p.as_object_mut()) {
+                o.insert("frame".into(), frame);
             }
             if let Ok(v) = app.run(cmd, p) {
                 IMAGE.with(|i| *i.borrow_mut() = None);
