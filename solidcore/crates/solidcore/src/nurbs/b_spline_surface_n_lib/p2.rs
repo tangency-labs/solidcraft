@@ -2240,8 +2240,8 @@ fn corner_blend_4(
     let tangent =
         make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?;
 
-    // Not upstream (WR-613): a patch that meets its face sides exactly, where its seams
-    // read no farther from tangent than the patch that ships otherwise, on every side
+    // Not upstream (WR-613): a patch that meets its face sides exactly, where it is proved
+    // closer to tangent than the patch that ships otherwise, on every side
     if let Some((mut face_bounds, mut face_tans)) = face_sided {
         let twisted = BSplineSurface::create_coons_patch_on_faces(
             tol,
@@ -3448,22 +3448,27 @@ const MAX_CORNER_GRADE: u32 = 3;
 
 /// Not the fork's (WR-613): a corner patch that meets every face side exactly (`twisted`,
 /// built with the blend side's twist at each corner between a face side and a blend side)
-/// and is shown no worse than `bar` on every side; `None` when no candidate is, and the
-/// caller keeps `bar`. `bar` is the patch that ships otherwise: the mean-twist patch as
-/// WR-547 leaves it.
+/// and is proved closer to tangent than `bar` on every side; `None` when no candidate is,
+/// and the caller keeps `bar`. `bar` is the patch that ships otherwise: the mean-twist
+/// patch as WR-547 leaves it.
 ///
 /// Candidates, in order: `twisted` as built; then `twisted` refined to 8, 16, 32 and 64
 /// spans each way, each with 0 to [`MAX_CORNER_GRADE`] halvings of the first span along
 /// each blend side toward each face-side/blend-side corner, its side rows projected with
-/// the face sides ([`project_coons_side_rows`]). The first no farther than `bar` on every
-/// side ([`no_farther_than_the_fallback`]) is taken. At most 1 + 4 x 4 candidates: bounded
-/// work.
+/// the face sides ([`project_coons_side_rows`]). The first that passes the screen
+/// ([`no_farther_than_the_fallback`]) and the proof below is taken. At most 1 + 4 x 4
+/// candidates: bounded work.
 ///
 /// The measure is the seam check's own: each side's seam reading ([`coons_side_seams`],
 /// through [`seam_normal_angle`]: the same function, stations and metric the seam check
 /// applies to the finished body's edges), and the same comparison
-/// ([`seam_angle_farther`]). A candidate is taken exactly when no side's reading is
-/// farther from tangent than `bar`'s beyond the two readings' rounding.
+/// ([`seam_angle_farther`]). A candidate passes this measured screen when no side's reading
+/// is farther from tangent than `bar`'s beyond the two readings' rounding. It is taken only
+/// if it is then proved closer ([`certified_closer`]): on every side with a surface, the
+/// proved upper bound of its largest normal angle over the whole side, not only at the
+/// stations ([`seam_angle_enclosure`]), is at most the proved lower bound of `bar`'s.
+///
+/// [`seam_angle_enclosure`]: crate::query::seam_bound::seam_angle_enclosure
 ///
 /// [`seam_normal_angle`]: crate::query::continuity::seam_normal_angle
 /// [`seam_angle_farther`]: crate::query::continuity::seam_angle_farther
@@ -3483,7 +3488,22 @@ fn face_sided_patch(
         return Ok(None);
     }
     let bar_seams = coons_side_seams(k, bar, sides)?;
-    if no_farther_than_the_fallback(&coons_side_seams(k, twisted, sides)?, &bar_seams) {
+    let mut bar_lower: Option<[Option<f64>; 4]> = None;
+    let mut taken = |cand: &BSplineSurface| -> Result<bool> {
+        let cand_seams = coons_side_seams(k, cand, sides)?;
+        if !no_farther_than_the_fallback(&cand_seams, &bar_seams) {
+            return Ok(false);
+        }
+        let lower = if let Some(lower) = bar_lower {
+            lower
+        } else {
+            let lower = coons_side_lower_bounds(k, bar, sides)?;
+            bar_lower = Some(lower);
+            lower
+        };
+        certified_closer(k, cand, &cand_seams, &lower, sides)
+    };
+    if taken(twisted)? {
         return Ok(Some(twisted.clone()));
     }
     for spans in COONS_REFINEMENTS {
@@ -3493,7 +3513,7 @@ fn face_sided_patch(
             refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
             grade_corner_spans(&mut attempt, face_sides, grade)?;
             project_coons_side_rows(k, &mut attempt, uv_curves, surfaces, face_sides)?;
-            if no_farther_than_the_fallback(&coons_side_seams(k, &attempt, sides)?, &bar_seams) {
+            if taken(&attempt)? {
                 return Ok(Some(attempt));
             }
         }
@@ -3563,6 +3583,110 @@ fn no_farther_than_the_fallback(cand: &[SideSeam; 4], bar: &[SideSeam; 4]) -> bo
         }
         _ => false,
     })
+}
+
+/// Not the fork's (WR-613): the proved enclosure of the largest normal angle between
+/// `patch` and side `i`'s surface along side `i`'s 3D curve over its natural interval
+/// ([`seam_angle_enclosure`]), bisecting while a piece is above `below`; `None` on a free
+/// side, a side whose curve is no B-spline, or where nothing is proved.
+///
+/// [`seam_angle_enclosure`]: crate::query::seam_bound::seam_angle_enclosure
+fn coons_side_enclosure(
+    k: &crate::kernel::Kernel,
+    patch: &SmSurface,
+    sides: &CoonsSides<'_, '_>,
+    i: usize,
+    below: f64,
+) -> Result<Option<crate::query::seam_bound::SeamAngleEnclosure>> {
+    let (Some(Some(surface)), Some(curve)) = (sides.surfaces.get(i), sides.curves.get(i)) else {
+        return Ok(None);
+    };
+    let Some(bs) = crate::query::seam_bound::curve_b_spline(curve) else {
+        return Ok(None);
+    };
+    crate::query::seam_bound::seam_angle_enclosure(
+        k,
+        bs,
+        curve.natural_interval(),
+        [patch, surface],
+        below,
+    )
+}
+
+/// Not the fork's (WR-613): on each side with a surface, a proved lower bound of the
+/// largest normal angle between `patch` and the side's surface along the side's 3D curve
+/// over its natural interval ([`seam_angle_lower_bound`]); `None` on a free side, a side
+/// whose curve is no B-spline, or where nothing is proved.
+///
+/// [`seam_angle_lower_bound`]: crate::query::seam_bound::seam_angle_lower_bound
+fn coons_side_lower_bounds(
+    k: &crate::kernel::Kernel,
+    patch: &BSplineSurface,
+    sides: &CoonsSides<'_, '_>,
+) -> Result<[Option<f64>; 4]> {
+    let patch = SmSurface::from(patch.clone());
+    let mut out = [None; 4];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let (Some(Some(surface)), Some(curve)) = (sides.surfaces.get(i), sides.curves.get(i))
+        else {
+            continue;
+        };
+        let Some(bs) = crate::query::seam_bound::curve_b_spline(curve) else {
+            continue;
+        };
+        *slot = crate::query::seam_bound::seam_angle_lower_bound(
+            k,
+            bs,
+            curve.natural_interval(),
+            [&patch, surface],
+        )?;
+    }
+    Ok(out)
+}
+
+/// Not the fork's (WR-613): whether `cand` is proved closer to tangent than the patch that
+/// ships otherwise on every side with a surface: its proved upper bound of the largest
+/// normal angle there ([`coons_side_enclosure`]) is at most the other patch's proved lower
+/// bound (`bar_lower`, from [`coons_side_lower_bounds`]). Where either bound is not proved
+/// on such a side, nothing proves `cand` closer, and it is refused. Where `cand`'s own
+/// reading on a side ([`coons_side_seams`], `cand_seams`) is above that lower bound, the
+/// reading is the angle at a station, so no upper bound of the largest angle can be at
+/// most the lower bound, and `cand` is refused without trying (refusing needs no proof).
+fn certified_closer(
+    k: &crate::kernel::Kernel,
+    cand: &BSplineSurface,
+    cand_seams: &[SideSeam; 4],
+    bar_lower: &[Option<f64>; 4],
+    sides: &CoonsSides<'_, '_>,
+) -> Result<bool> {
+    for (i, lower) in bar_lower.iter().enumerate() {
+        if !matches!(sides.surfaces.get(i), Some(Some(_))) {
+            continue;
+        }
+        let Some(lower) = *lower else {
+            return Ok(false);
+        };
+        match cand_seams.get(i) {
+            Some(SideSeam::Read(Some(reading))) if *reading <= lower => {}
+            _ => return Ok(false),
+        }
+    }
+    // the side with the least lower bound first, the hardest to prove below
+    let mut order: Vec<(usize, f64)> = bar_lower
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| matches!(sides.surfaces.get(*i), Some(Some(_))))
+        .filter_map(|(i, lower)| lower.map(|lower| (i, lower)))
+        .collect();
+    order.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    let patch = SmSurface::from(cand.clone());
+    for (i, lower) in order {
+        match coons_side_enclosure(k, &patch, sides, i, lower)? {
+            Some(e) if e.upper <= lower => {}
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
 }
 
 /// Not the fork's (WR-613): knots inserted in `surface` that halve its first knot span
