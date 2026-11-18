@@ -816,7 +816,7 @@ pub struct UpstreamFixes {
     /// solidcore-native, no fork commit).
     pub seam_vertex_stays_on_seam: bool,
     /// A corner's edge along a straight side edge (`SM_FE_ON_EDGE`) whose end points lie on
-    /// that edge's line past the edge's own end is the segment of the line between them,
+    /// that edge's line past the same end of the edge is the segment of the line between them,
     /// not the edge's curve trimmed to its points' drops: the drops clamp to the edge's
     /// interval, so two points past the same end both land on it and the corner's loop has
     /// a zero-length edge (`loop gap larger than tolerance`, "Corner Geometry Computation
@@ -824,8 +824,9 @@ pub struct UpstreamFixes {
     /// two blended edges: the rails run on the side faces continued past a cliff (the cliff
     /// overflow), and the crease between them ends at the cliff. A line continues exactly
     /// as itself, so the segment is the side edge continued; the trim at creases cuts the
-    /// fillet at the cliff afterwards. Other curves, and points within the edge, are
-    /// unchanged (solidcore-native, no fork commit).
+    /// fillet at the cliff afterwards. Other curves, points within the edge, a corner whose
+    /// rail rolls over (`roll_over`) and side edges away from a corner are unchanged
+    /// (solidcore-native, no fork commit).
     pub fillet_on_edge_continues_line: bool,
     /// `sm_SurfacePlaneCurve`'s test that the two given end points lie on both surfaces
     /// ([`crate::blend::fillet_geom::surface_plane_curve::ends_on_both`]) takes a point's
