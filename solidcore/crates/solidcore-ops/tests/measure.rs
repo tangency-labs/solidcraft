@@ -10,6 +10,7 @@ use solidcore_ops::surface::ruled;
 use solidcore_ops::sweep::{planar_faces, Curve as SweepCurve};
 use solidcore_ops::{
     make_box, make_cylinder, make_sphere, make_torus, Body, Error, Order, PointClass,
+    EDGE_POINTS_MAX,
 };
 use solidcore_record::brep::{Brep, Curve};
 
@@ -814,4 +815,49 @@ fn a_fired_ray_meets_the_exact_face_edge_or_nothing() {
         near(20.0 - hit.distance, 3.0 + 1.732_050_807_568_877_2, 1e-9),
         "{hit:?}"
     );
+}
+
+/// Along each straight edge of a 1 x 2 x 3 box, `edge_points` gives `n` points evenly inside
+/// the edge: one point is `edge_middle`'s, and of three points the middle one is at the edge's
+/// middle and each is a quarter of the edge's length from its neighbours, so none is at an end.
+/// A count of 0 gives 1 point and a count past `EDGE_POINTS_MAX` gives that many, all inside
+/// the edge. An edge the body does not have is refused.
+#[test]
+fn edge_points_spread_evenly_inside_an_edge_and_hold_their_count() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    // Squared distances: each check below compares them with a squared length.
+    let dist2 =
+        |p: [f64; 3], q: [f64; 3]| p.iter().zip(q).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
+    for edge in 0..12 {
+        let middle = b.edge_middle(&order, edge).unwrap();
+        let length = b.edge_length(&order, edge, 1e-9).unwrap();
+        let one = b.edge_points(&order, edge, 1).unwrap();
+        assert_eq!(one.len(), 1);
+        assert!(close(one[0], middle), "{one:?} vs {middle:?}");
+        let three = b.edge_points(&order, edge, 3).unwrap();
+        assert_eq!(three.len(), 3);
+        assert!(close(three[1], middle), "{three:?} vs {middle:?}");
+        for w in three.windows(2) {
+            assert!(
+                near(dist2(w[0], w[1]), length * length / 16.0, 1e-9),
+                "{three:?}"
+            );
+        }
+        let zero = b.edge_points(&order, edge, 0).unwrap();
+        assert_eq!(zero.len(), 1);
+        assert!(close(zero[0], middle), "{zero:?}");
+        let many = b.edge_points(&order, edge, 1000).unwrap();
+        assert_eq!(many.len(), EDGE_POINTS_MAX as usize);
+        for p in &many {
+            // Inside the edge: nearer the middle than half its length, never at an end.
+            let reach = length / 2.0 - length / 200.0;
+            assert!(
+                dist2(*p, middle) < reach * reach,
+                "{p:?} is at or past an end"
+            );
+        }
+    }
+    assert!(matches!(b.edge_points(&order, 12, 3), Err(Error::Argument)));
 }

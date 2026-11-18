@@ -1230,27 +1230,24 @@ pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 
 /// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
 /// themselves ([`tangent_chain`]): one list per such edge, in chain order, of `per_edge` points
-/// (1 to 64) spread evenly inside the edge's parameter interval, never at its ends. For a caller
-/// that checks which of those edges a blend left as they were: a blend may take part of an edge
-/// it runs past the end of, so its middle alone does not tell. Picks that find no edge are
-/// refused.
+/// spread evenly inside the edge, never at its ends (solidcore's
+/// [`solidcore_ops::Body::edge_points`], which holds the count to 1 … 64). For a caller that
+/// checks which of those edges a blend left as they were: a blend may take part of an edge it
+/// runs past the end of, so its middle alone does not tell. Picks that find no edge are
+/// refused; a mesh body has no chain.
 pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize) -> Result<Vec<Vec<Vec3>>> {
-    let (rec, chain, picked) = picked_chain(body, picks)?;
-    let n = if per_edge == 0 { 1 } else { per_edge.min(64) };
+    let (_, chain, picked) = picked_chain(body, picks)?;
+    let Some((ops, order)) = body.ops_body() else {
+        return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
+    };
     chain
         .into_iter()
         .skip(picked)
-        .map(|e| edge_inner_points(&rec, e, n).ok_or_else(|| KernelError::Failed("points along a chain edge".into())))
+        .map(|e| {
+            let points = ops.edge_points(order, e, per_edge).map_err(|err| KernelError::Failed(format!("points along a chain edge: {err}")))?;
+            Ok(points.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect())
+        })
         .collect()
-}
-
-/// `n` points spread evenly inside edge `e`'s parameter interval, never at its ends.
-fn edge_inner_points(rec: &Faces, e: usize, n: usize) -> Option<Vec<Vec3>> {
-    let edge = rec.rec.edges.get(e)?;
-    let curve = CurveEval::new(edge.parameters()).ok()?;
-    let [a, b] = edge.interval;
-    let steps = (n + 1) as f64;
-    (1..=n).map(|k| curve.point(a + (b - a) * (k as f64 / steps))).collect()
 }
 
 /// The body's record, the picked edges' tangent chain as its edge indices (the picked edges

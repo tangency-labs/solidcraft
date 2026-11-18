@@ -37,6 +37,7 @@ impl Answer for Vec<q::EdgeFaceGapSample> {}
 impl Answer for Distance {}
 impl Answer for solidcore::geom::extent3d::Extent3d {}
 impl Answer for [f64; 3] {}
+impl Answer for Vec<[f64; 3]> {}
 impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
@@ -1323,6 +1324,55 @@ impl Body {
         }
         Ok(p)
     }
+
+    /// Points of record edge `edge`'s curve spread evenly inside the edge's parameter interval,
+    /// never at its ends: at the fractions k / (n + 1), k = 1 … n, of the interval (the kernel's
+    /// evaluation of the curve there), where n is `count` held to
+    /// 1 … [`EDGE_POINTS_MAX`] (0 gives 1, more gives the most). One point is
+    /// [`Body::edge_middle`]'s. For a caller that checks what happened along an edge, not only at
+    /// its middle: a blend that runs on past the end of its edge takes part of the next one.
+    ///
+    /// # Errors
+    /// As [`Body::edge_middle`].
+    pub fn edge_points(&self, order: &Order, edge: usize, count: usize) -> Result<Vec<[f64; 3]>> {
+        let e = order::edge(order, edge)?;
+        let n = edge_point_count(count);
+        let points = with_body("edge_points", self, |k, b| {
+            let interval = edge::interval(b, e)?;
+            let curve = edge::curve(b, e)?
+                .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_points"))?;
+            let (lo, hi) = (interval.min(), interval.max());
+            (1..=n)
+                .map(|i| curve.evaluate_point(k, inside(lo, hi, i, n)).map(array))
+                .collect::<solidcore::Result<Vec<_>>>()
+        })?;
+        if !points.iter().flatten().all(|x| x.is_finite()) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok(points)
+    }
+}
+
+/// The most points [`Body::edge_points`] gives along one edge.
+pub const EDGE_POINTS_MAX: u32 = 64;
+
+/// `count` held to 1 … [`EDGE_POINTS_MAX`].
+fn edge_point_count(count: usize) -> u32 {
+    match u32::try_from(count) {
+        Ok(0) => 1,
+        Ok(n) if n <= EDGE_POINTS_MAX => n,
+        _ => EDGE_POINTS_MAX,
+    }
+}
+
+/// The parameter `i / (n + 1)` of the way along `[lo, hi]`: the `i`-th of `n` sample positions
+/// ops chooses inside the interval, as [`middle`] is the one position for `n` = 1.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a sample parameter ops chooses, not a geometric quantity (docs/layers.md)"
+)]
+fn inside(lo: f64, hi: f64, i: u32, n: u32) -> f64 {
+    lo + (hi - lo) * (f64::from(i) / (f64::from(n) + 1.0))
 }
 
 /// The use of face `f` that faces out of its material, chosen by the materiality of the

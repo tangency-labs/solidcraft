@@ -6509,7 +6509,7 @@ fn left_sharp_note(blended: &Body, beyond: &[Vec<Vec3>], picked: usize, kind: &F
     let from = if picked == 1 { "the picked edge runs" } else { "the picked edges run" };
     let (edges, are, them) = if n == 1 { ("1 edge".to_string(), "is", "it") } else { (format!("{n} edges"), "are", "them") };
     Some(format!(
-        "{edges} that {from} on into smoothly {are} still sharp, because {why}. To blend {them} too, pick {them} in another {feature}; that may fail where the edges meet"
+        "{edges} that {from} on into smoothly {are} still sharp because {why} (to blend {them} too, pick {them} in another {feature}, which may fail where the edges meet)"
     ))
 }
 
@@ -13901,8 +13901,8 @@ mod chain_tests {
         assert_eq!(
             warning.as_deref(),
             Some(
-                "2 edges that the picked edge runs on into smoothly are still sharp, because tangent_chain: false rounds only the \
-                 picked edges. To blend them too, pick them in another fillet; that may fail where the edges meet"
+                "2 edges that the picked edge runs on into smoothly are still sharp because tangent_chain: false rounds only the \
+                 picked edges (to blend them too, pick them in another fillet, which may fail where the edges meet)"
             )
         );
         // A quarter of the rim rounded: about a quarter of the 1.05 mm³ the whole rim's round takes.
@@ -13974,7 +13974,7 @@ mod chain_tests {
             };
         }
         let warning = build(variable);
-        assert!(warning.contains("because a variable or spline round runs along its picked edge only"), "{warning}");
+        assert!(warning.contains("still sharp because a variable or spline round runs along its picked edge only"), "{warning}");
         assert!(!warning.contains("tangent_chain"), "{warning}");
     }
 }
