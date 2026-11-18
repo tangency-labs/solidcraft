@@ -145,8 +145,8 @@ All `viewport_id() == ROOT` checks (`container.rs`: `BackingSlot::reserve`, `sho
 
 ### 3.6 Public API
 
-Keep `decorate(painter, frame, content, ordinary) -> Shape` as the low-level entry (53 call sites
-in the kit use it through the `Container` hosts). Add one small constructor for surfaces that have
+Keep `decorate(painter, frame, content, ordinary) -> Shape` as the low-level entry (the `Container`
+hosts, combo popups, modals and tooltips in the kit use it). Add one small constructor for surfaces that have
 no `Frame`:
 
 ```rust
@@ -211,8 +211,8 @@ refused by production policy, so they use `FixturePolicy::Rendering`):
 - Blur off (radius 0), and a frame with no marker: counters stay zero, no extra passes, pixels
   identical to the ordinary pass.
 - unorm and sRGB formats; rounded corners; clip; `opacity` below 1.
-- Over the old `blur-composition` fixtures: still pass, with the "resting source" assertion
-  replaced by one that asserts the frame has no source.
+- The existing blur fixtures (see #17280 for the composition one) still pass, with any
+  "resting source" assertion replaced by one that asserts the frame has no source.
 
 Measurements (recorded in the PR, on a real GPU, 1920x1080 and 3840x2160):
 
