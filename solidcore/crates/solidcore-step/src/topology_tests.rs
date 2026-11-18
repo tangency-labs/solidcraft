@@ -442,18 +442,11 @@ struct Cyl {
 }
 
 fn cylinder(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2]) -> Cyl {
-    cylinder_with(w, c, r, z, false)
-}
-
-/// [`cylinder`]; with `twin_ends`, each rim circle ends at a second VERTEX_POINT at its start's
-/// point instead of at its start's own vertex (as OpenCascade's booleans can write a hole's rim).
-fn cylinder_with(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2], twin_ends: bool) -> Cyl {
     let p = |h: f64| [c[0] + r, c[1], h];
     let (v0, v1) = (w.vertex(p(z[0])), w.vertex(p(z[1])));
     let circle = |w: &mut W, v: u64, h: f64| {
         let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
-        let end = if twin_ends { w.vertex(p(h)) } else { v };
-        w.add(format!("EDGE_CURVE('',#{v},#{end},#{k},.T.)"))
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
     };
     let circles = [circle(w, v0, z[0]), circle(w, v1, z[1])];
     let seam = w.line_edge((v0, p(z[0])), (v1, p(z[1])), true, 1.0);
@@ -1390,13 +1383,8 @@ fn a_faceted_brep_of_poly_loops_is_a_closed_solid() {
 /// A 20 × 20 × 5 plate with a hole of radius 3 through it; with `marked`, its square bounds are
 /// FACE_OUTER_BOUNDs, otherwise every bound is a FACE_BOUND and the hole is listed first.
 fn plate(marked: bool) -> p21::Exchange {
-    plate_with(marked, false)
-}
-
-/// [`plate`], its hole's rims written as [`cylinder_with`] writes them.
-fn plate_with(marked: bool, twin_ends: bool) -> p21::Exchange {
     let mut w = W::default();
-    let c = cylinder_with(&mut w, [10.0, 10.0], 3.0, [0.0, 5.0], twin_ends);
+    let c = cylinder(&mut w, [10.0, 10.0], 3.0, [0.0, 5.0]);
     let mut inner = |w: &mut W, up: f64| {
         // About the face's outward normal the hole runs clockwise.
         let oe = if up > 0.0 { w.oe(c.circles[1], false) } else { w.oe(c.circles[0], true) };
@@ -1447,20 +1435,60 @@ fn a_plate_with_a_through_hole() {
     }
 }
 
-/// The plate whose hole's rims are full circles each from one VERTEX_POINT to a second one at the
-/// same point (tangency-labs/solidcraft#18784): each rim is a full turn whose two ends are one
-/// vertex, so the hole's loops close and the plate reads as the same closed solid.
+/// [`cylinder`] with each rim circle from its vertex to a second VERTEX_POINT at the same point,
+/// as OpenCascade's booleans can write a hole's rim (tangency-labs/solidcraft#18784).
+fn cylinder_with_twin_rim_ends(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2]) -> Cyl {
+    let p = |h: f64| [c[0] + r, c[1], h];
+    let (v0, v1) = (w.vertex(p(z[0])), w.vertex(p(z[1])));
+    let circle = |w: &mut W, v: u64, h: f64| {
+        let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let end = w.vertex(p(h));
+        w.add(format!("EDGE_CURVE('',#{v},#{end},#{k},.T.)"))
+    };
+    let circles = [circle(w, v0, z[0]), circle(w, v1, z[1])];
+    let seam = w.line_edge((v0, p(z[0])), (v1, p(z[1])), true, 1.0);
+    let a = w.axis([c[0], c[1], 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    Cyl { circles, seam, surface }
+}
+
+/// A closed cylinder: its two caps (each bounded by one rim) and its side (rims and seam).
+fn closed_cylinder(twin_rim_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let c = if twin_rim_ends {
+        cylinder_with_twin_rim_ends(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    } else {
+        cylinder(&mut w, [1.0, 2.0], 5.0, [0.0, 10.0])
+    };
+    let side_face = side(&mut w, &c, true);
+    let ob = w.oe(c.circles[0], false);
+    let bottom_bound = w.bound(&[ob], true, true);
+    let bottom_plane = w.plane([1.0, 2.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom = w.face(&[bottom_bound], bottom_plane, false);
+    let ot = w.oe(c.circles[1], true);
+    let top_bound = w.bound(&[ot], true, true);
+    let top_plane = w.plane([1.0, 2.0, 10.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let top = w.face(&[top_bound], top_plane, true);
+    let shell = closed_shell(&mut w, &[bottom, side_face, top]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    w.file(&[solid])
+}
+
+/// A cylinder whose rims are full circles each from one VERTEX_POINT to a second one at the same
+/// point (tangency-labs/solidcraft#18784): each rim is a full turn whose two ends are one vertex,
+/// so its caps' one-edge loops and its side's loop close, and it reads as the same closed solid
+/// as the cylinder whose rims have one vertex each.
 #[test]
 fn a_full_circle_edge_between_two_vertices_at_one_point_closes_its_loop() {
-    for marked in [true, false] {
-        let s = one_solid(&plate_with(marked, true));
-        assert!(!s.sheet);
-        assert_eq!(counts(&s.brep), counts(&one_solid(&plate(marked)).brep), "marked {marked}");
-        for e in s.brep.edges.iter().filter(|e| matches!(e.curve, BCurve::Circle { .. })) {
-            let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
-            assert!((a1 - a0 - TAU).abs() < 1e-12, "a full turn: {a0} {a1}");
-            assert_eq!(e.vertices[0], e.vertices[1]);
-        }
+    let (one, two) = (one_solid(&closed_cylinder(false)), one_solid(&closed_cylinder(true)));
+    assert!(!two.sheet);
+    assert_eq!(counts(&two.brep), [2, 1, 3, 3, 2]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    faces_away(&two.brep, 0, |p| [1.0, 2.0, p[2].clamp(1.0, 9.0)]);
+    for e in two.brep.edges.iter().filter(|e| matches!(e.curve, BCurve::Circle { .. })) {
+        let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
+        assert!((a1 - a0 - TAU).abs() < 1e-12, "a full turn: {a0} {a1}");
+        assert_eq!(e.vertices[0], e.vertices[1]);
     }
 }
 
