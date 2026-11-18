@@ -1110,8 +1110,8 @@ preference_settings! {
     /// (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
     /// and exported sheets are always white, and nothing reaches the design or undo.
     drawing_sheet_colour: String = "auto".into(), PAGE_DESIGN;
-    /// The on-screen drawing canvas pattern: datum_cloud, grid or none.
-    drawing_sheet_backdrop: String = "datum_cloud".into(), PAGE_DESIGN;
+    /// The on-screen drawing canvas pattern: datum_cloud, grid or none (default none, a plain background).
+    drawing_sheet_backdrop: String = "none".into(), PAGE_DESIGN;
     /// Where the Drawing workspace shows its sheet chooser.
     drawing_sheets_visibility: String = "multiple".into(), PAGE_DESIGN;
     /// Scales true size on the drawing sheet so 100 % measures 1 mm as 1 mm on this screen, against

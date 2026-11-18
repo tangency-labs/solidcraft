@@ -707,9 +707,9 @@ pub(crate) fn shown_percent(zoom: f64) -> f32 {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum SheetBackdrop {
-    #[default]
     DatumCloud,
     Grid,
+    #[default]
     None,
 }
 
