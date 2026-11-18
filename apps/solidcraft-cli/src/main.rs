@@ -21,10 +21,14 @@
 //!                    [--param-check off|warn|strict] [--compact]
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
+//! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
+//! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] run the plugin's tests/*.json on the real host
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
 //! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
+//! --plugins-dir DIR (local sessions only)                     installed plugins (default: the app's own)
+//! --keep-plugin-approvals (local sessions only)               keep plugin approvals between runs, in the plugins folder's grant store
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
 //! --max-file-size SIZE (with any command)                     read STEP and design files up to SIZE (2GB, 1500MB; at most 16GB)
 //! ```
@@ -39,6 +43,7 @@ mod kernel_cases;
 mod kernel_cases_export;
 mod logger;
 mod oracle;
+mod plugin;
 mod preview;
 mod profiling;
 mod recipe;
@@ -94,6 +99,8 @@ const USAGE_FUZZ: &str =
 /// `mcp`'s lines in the usage.
 const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// `crashes`'s lines in the usage.
+const USAGE_PLUGIN: &str = "  solidcraft-cli plugin check <folder|plugin.zip> [--json]\n  solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]\n      (check: what Install and a call would refuse, without running the plugin: the manifest and its size, permissions\n       (net is refused), limits, the component's WIT world and version; each problem with how to fix it; exits non-zero on an error;\n       a folder is checked without its tests folder and hidden files)\n      (test: installs the package in a scratch folder and runs its test cases, tests/*.json, on the real host and limits;\n       an entry with no case runs once with its defaults when it can; --json prints pass or fail per case; --out DIR keeps\n       each case's resulting design and log; exits non-zero when a case fails; see the plugin guide in the docs)\n";
+
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
 const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
@@ -111,6 +118,8 @@ const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n"
 const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
 
 const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
+
+const USAGE_PLUGINS_DIR: &str = "  --plugins-dir DIR, with local commands: the folder plugin.install installs to and importers are found in;\n      default: the desktop app's plugins folder.\n  --keep-plugin-approvals, with local commands: keep plugin approvals between runs, in the plugins folder's grant\n      store (DIR/.grants), shared with the desktop app, so a plugin installed and approved there or in an earlier run\n      is used here; list them with plugin.grants and take one back with plugin.revoke. Without it, approvals last for\n      the run.\n";
 
 /// The commands the CLI takes, in the order the top-level usage lists them.
 const COMMANDS: &[Command] = &[
@@ -131,6 +140,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "fuzz", usage: USAGE_FUZZ, listed: true },
     Command { name: "fuzz-one", usage: USAGE_FUZZ_ONE, listed: false },
     Command { name: "mcp", usage: USAGE_MCP, listed: true },
+    Command { name: "plugin", usage: USAGE_PLUGIN, listed: true },
     Command { name: "crashes", usage: USAGE_CRASHES, listed: true },
     Command { name: "licences", usage: USAGE_LICENCES, listed: true },
     Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
@@ -163,6 +173,10 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugin_limits(&mut args) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = plugins_dir(&mut args) {
         eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
@@ -207,6 +221,7 @@ fn main() -> ExitCode {
             solidcraft_mcp::cleanup_scratch_dir();
             result
         }
+        Some("plugin") => plugin::run(&args[1..]),
         Some("crashes") => crashes::run(&args[1..]),
         Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {
@@ -309,6 +324,61 @@ fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
     solidcraft_engine::plugin::configure_process_host_limits(limits).map_err(|e| e.to_string())
 }
 
+/// `--plugins-dir DIR` (or `--plugins-dir=DIR`): the local sessions' plugins folder.
+/// `--keep-plugin-approvals`: local sessions keep plugin approvals between runs in that folder's
+/// grant store. Without it, approvals last for the session, as they always did.
+fn plugins_dir(args: &mut Vec<String>) -> Result<(), String> {
+    let mut dir = None;
+    let mut keep = false;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugins-dir" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugins-dir needs a folder")?;
+            args.drain(i..i + 2);
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("--plugins-dir=") {
+            let value = value.to_string();
+            args.remove(i);
+            Some(value)
+        } else if arg == "--keep-plugin-approvals" {
+            args.remove(i);
+            keep = true;
+            None
+        } else {
+            i += 1;
+            None
+        };
+        if let Some(value) = value
+            && (value.is_empty() || dir.replace(value).is_some())
+        {
+            return Err("provide one --plugins-dir folder".into());
+        }
+    }
+    if (dir.is_some() || keep)
+        && (args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
+            || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless")))
+    {
+        return Err(
+            "--plugins-dir and --keep-plugin-approvals control local sessions; use mcp --headless, or the connected desktop's own plugins".into()
+        );
+    }
+    let dir = match dir {
+        Some(dir) => {
+            let dir = std::path::PathBuf::from(dir);
+            let dir = if dir.is_absolute() { dir } else { std::env::current_dir().map_err(|e| format!("--plugins-dir: {e}"))?.join(dir) };
+            if dir.exists() && !dir.is_dir() {
+                return Err(format!("--plugins-dir: {} is not a folder", dir.display()));
+            }
+            Some(dir)
+        }
+        None => None,
+    };
+    if dir.is_none() && !keep {
+        return Ok(());
+    }
+    solidcraft_engine::plugin::configure_process_plugins(dir, keep).map_err(|e| e.to_string())
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -322,6 +392,7 @@ fn usage() -> String {
     }
     s.push_str(USAGE_DEBUG);
     s.push_str(USAGE_PLUGIN_LIMITS);
+    s.push_str(USAGE_PLUGINS_DIR);
     s
 }
 
