@@ -971,6 +971,35 @@ impl On {
             let inside = |by: f64| low - by >= lo - room && high - by <= hi + room;
             if low.is_finite() && !inside(base) && inside(base + period) {
                 base += period;
+            } else if low.is_finite() && high.is_finite() && !inside(base) {
+                // Within neither: a period lower, where the loop runs past the range by less than
+                // where its lowest point puts it, and by a step that moves the surface within
+                // `tol` (at the surface's fastest along `d` over the loop's points put on the
+                // range). A loop that starts on the range's start, its lowest point a writer's
+                // rounding below it, stays on the range rather than moving a whole period on;
+                // one farther below stays where its lowest point puts it.
+                let spill = |by: f64| (lo - (low - by)).max(0.0) + ((high - by) - hi).max(0.0);
+                let lower = base + period;
+                let over = spill(lower);
+                if over < spill(base) {
+                    let mut speed = 0.0f64;
+                    for ((c, _), s) in uses.iter().zip(&shift) {
+                        for mut q in points(c) {
+                            if let Some(x) = q.get_mut(d) {
+                                *x = (*x + s - lower).max(lo).min(hi);
+                            }
+                            let [qu, qv] = q;
+                            let along =
+                                self.surface
+                                    .derivs(qu, qv)
+                                    .map(|(_, du, dv)| if d == 0 { du } else { dv });
+                            speed = speed.max(along.map_or(f64::INFINITY, VecExt::len));
+                        }
+                    }
+                    if over * speed <= tol {
+                        base = lower;
+                    }
+                }
             }
             for (((c, _), s), (st, en)) in uses.iter_mut().zip(&shift).zip(ends.iter_mut()) {
                 let by = s - base;
