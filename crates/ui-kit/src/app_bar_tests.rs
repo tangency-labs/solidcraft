@@ -1595,6 +1595,8 @@ fn elsewhere_view_has_only_a_return_button_on_hover() {
 fn layout_test_data(visible: usize, window_count: usize) -> crate::view_layout_menu::LayoutMenu {
     use crate::view_layout_menu::{LayoutMenu, LayoutView, LayoutWindow};
     LayoutMenu {
+        saved: Vec::new(),
+        matching_saved: None,
         design: "One".into(),
         window: 0,
         native: true,

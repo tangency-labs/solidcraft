@@ -2,7 +2,7 @@
 
 use egui::{Context, Ui, ViewportClass, ViewportCommand, ViewportId};
 use serde_json::{Value, json};
-use solidcraft_views::{DesignView, PopOut, ViewSet, WindowId, WindowPlacement, WindowTarget};
+use solidcraft_views::{DesignView, PopOut, ViewSet, WindowId, WindowLevel, WindowPlacement, WindowTarget};
 
 use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Menu, Surface};
 use crate::{SolveApp, documents};
@@ -29,6 +29,10 @@ pub(crate) struct Windows {
     foreign_views: Vec<(WindowId, DesignView)>,
     strip_order: std::collections::BTreeMap<u64, Vec<u64>>,
     clean: std::collections::BTreeSet<(u64, WindowId)>,
+    root_placement: Option<WindowPlacement>,
+    pending_root_placement: Option<(u64, WindowPlacement)>,
+    pending_child_placements: std::collections::BTreeSet<(u64, WindowId)>,
+    setup_snapshot: Option<Value>,
     pending_action: Option<PendingAction>,
 }
 
@@ -47,6 +51,7 @@ enum PendingAction {
     Focus { view: u64, window: WindowId },
     Close { view: u64 },
     Bring { source: WindowId, target: WindowId },
+    Setup(crate::view_setups::DeferredSetup),
 }
 
 struct Host {
@@ -83,6 +88,10 @@ fn viewport_id(tab: u64, id: WindowId) -> ViewportId {
 }
 
 impl Windows {
+    pub(crate) fn setup_snapshot(&self) -> Option<&Value> {
+        self.setup_snapshot.as_ref()
+    }
+
     pub(crate) fn current_window(&self) -> WindowId {
         self.painting.unwrap_or_default()
     }
@@ -708,6 +717,105 @@ fn restore_and_focus(ctx: &Context) {
     ctx.send_viewport_cmd(ViewportCommand::Focus);
 }
 
+pub(crate) fn defer_setup(app: &mut SolveApp, action: crate::view_setups::DeferredSetup) {
+    app.view_windows.pending_action = Some(PendingAction::Setup(action));
+}
+
+pub(crate) fn setup_level(app: &SolveApp, window: WindowId) -> crate::view_setups::SetupLevel {
+    use crate::view_setups::SetupLevel;
+    if app.view_windows.clean.contains(&(app.docs.current_tab(), window)) {
+        SetupLevel::Clean
+    } else if window == 0 || app.docs.views.window(window).is_some_and(|window| window.level == WindowLevel::Full) {
+        SetupLevel::Full
+    } else {
+        SetupLevel::ViewsOnly
+    }
+}
+
+pub(crate) fn setup_placement(app: &SolveApp, window: WindowId) -> Option<&WindowPlacement> {
+    if window == 0 { app.view_windows.root_placement.as_ref() } else { app.docs.views.window(window)?.placement.as_ref() }
+}
+
+pub(crate) fn display_index(app: &SolveApp, name: &str) -> Option<usize> {
+    app.view_windows.displays.iter().position(|display| display.name == name)
+}
+
+pub(crate) fn resolve_setup_placement(app: &SolveApp, p: crate::view_setups::Placement) -> WindowPlacement {
+    let windows = &app.view_windows;
+    let saved = p.display.and_then(|index| windows.displays.get(index));
+    let root = windows.root_placement.as_ref().and_then(|placement| placement.display.as_deref());
+    let display = saved
+        .or_else(|| windows.displays.iter().find(|display| root == Some(display.name.as_str())))
+        .or_else(|| windows.displays.iter().find(|display| display.primary));
+    let (x, y) = display.map_or((p.x, p.y), |display| {
+        let size = display.bounds.size() / display.scale;
+        (p.x.clamp(0.0, (size.x - p.w.min(64.0)).max(0.0)), p.y.clamp(0.0, (size.y - p.h.min(48.0)).max(0.0)))
+    });
+    WindowPlacement { display: display.map(|display| display.name.clone()), x, y, w: p.w, h: p.h, maximised: p.maximised, fullscreen: p.fullscreen }
+}
+
+pub(crate) fn apply_setup_presentation(app: &mut SolveApp, presentation: Vec<(WindowLevel, Option<WindowPlacement>)>) {
+    let tab = app.docs.active_tab();
+    let ids: Vec<_> = std::iter::once(0).chain(app.docs.views.windows().iter().map(|window| window.id)).collect();
+    app.view_windows.clean.retain(|(owner, _)| *owner != tab);
+    if app.view_windows.pending_root_placement.as_ref().is_some_and(|(owner, _)| *owner == tab) {
+        app.view_windows.pending_root_placement = None;
+    }
+    app.view_windows.pending_child_placements.retain(|(owner, _)| *owner != tab);
+    for (id, (level, placement)) in ids.into_iter().zip(presentation) {
+        if level == WindowLevel::Clean {
+            app.view_windows.clean.insert((tab, id));
+        }
+        if let Some(placement) = placement {
+            if id == 0 {
+                app.view_windows.pending_root_placement = Some((tab, placement));
+            } else {
+                app.view_windows.pending_child_placements.insert((tab, id));
+            }
+        }
+    }
+}
+
+fn measured_placement(windows: &Windows, ctx: &Context) -> Option<WindowPlacement> {
+    let zoom = ctx.zoom_factor();
+    ctx.input(|i| {
+        let viewport = i.viewport();
+        let outer = viewport.outer_rect.filter(|rect| rect.is_finite() && rect.is_positive())?;
+        let inner = viewport.inner_rect.filter(|rect| rect.is_finite() && rect.is_positive())?;
+        let scale = viewport.native_pixels_per_point.unwrap_or(1.0) * zoom;
+        let physical = (outer.center().to_vec2() * scale).to_pos2();
+        let display = windows.displays.iter().find(|display| display.bounds.contains(physical));
+        let origin = display.map_or(egui::Vec2::ZERO, |display| display.bounds.min.to_vec2() / display.scale);
+        Some(WindowPlacement {
+            display: display.map(|display| display.name.clone()),
+            x: outer.left() - origin.x,
+            y: outer.top() - origin.y,
+            w: inner.width(),
+            h: inner.height(),
+            maximised: viewport.maximized.unwrap_or_default(),
+            fullscreen: viewport.fullscreen.unwrap_or_default(),
+        })
+    })
+}
+
+fn send_placement(windows: &Windows, ctx: &Context, p: &WindowPlacement) {
+    let origin = windows
+        .displays
+        .iter()
+        .find(|display| p.display.as_deref() == Some(display.name.as_str()))
+        .map_or(egui::Vec2::ZERO, |display| display.bounds.min.to_vec2() / display.scale);
+    ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
+    ctx.send_viewport_cmd(ViewportCommand::Maximized(false));
+    ctx.send_viewport_cmd(ViewportCommand::OuterPosition((origin + egui::vec2(p.x, p.y)).to_pos2()));
+    ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(p.w, p.h)));
+    if p.maximised {
+        ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
+    }
+    if p.fullscreen {
+        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
+    }
+}
+
 pub fn prepare(app: &mut SolveApp, ctx: &Context) {
     app.view_windows.native = !ctx.embed_viewports();
     app.view_windows.embedded = ctx.embed_viewports();
@@ -719,6 +827,16 @@ pub fn prepare(app: &mut SolveApp, ctx: &Context) {
     let zoom = ctx.zoom_factor();
     (app.view_windows.root_rect, app.view_windows.monitor_size, app.view_windows.root_scale) =
         ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size, i.viewport().native_pixels_per_point.map(|scale| scale * zoom)));
+    if app.view_windows.pending_root_placement.as_ref().is_some_and(|(tab, _)| *tab == app.docs.current_tab())
+        && let Some((_, placement)) = app.view_windows.pending_root_placement.take()
+    {
+        if app.view_windows.native {
+            send_placement(&app.view_windows, ctx, &placement);
+        }
+        app.view_windows.root_placement = Some(placement);
+    } else {
+        app.view_windows.root_placement = measured_placement(&app.view_windows, ctx);
+    }
     if app.view_windows.focus == Some((app.docs.current_tab(), 0)) {
         restore_and_focus(ctx);
         app.view_windows.focus = None;
@@ -948,6 +1066,8 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             continue;
         }
         app.view_windows.choices = collect_choices(app);
+        app.view_windows.setup_snapshot =
+            (!app.preferences.view_window_setups.is_empty()).then(|| crate::view_setups::current_snapshot(app)).flatten();
         let Some(mut window) = app.docs.views.take_window(id) else { continue };
         let os_id = viewport_id(tab, id);
         let custom = !cfg!(target_os = "macos");
@@ -998,7 +1118,11 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 refused = true;
                 return;
             }
-            if host.ready
+            if app.view_windows.pending_child_placements.remove(&(tab, id))
+                && let Some(p) = window.placement.as_ref()
+            {
+                send_placement(&app.view_windows, ui.ctx(), p);
+            } else if host.ready
                 && let Some(p) = window.placement.as_mut()
             {
                 let zoom = ui.ctx().zoom_factor();
@@ -1025,6 +1149,9 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             }
             if !host.ready {
                 host.ready = true;
+                if window.level == WindowLevel::Clean {
+                    app.view_windows.clean.insert((tab, id));
+                }
                 if let Some(p) = &window.placement {
                     ui.ctx().send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(p.w, p.h)));
                 }
@@ -1070,6 +1197,14 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             app.view_windows.painting = None;
             app.view_windows.parked = None;
             app.view_windows.foreign_views.clear();
+            app.view_windows.setup_snapshot = None;
+            window.level = if app.view_windows.clean.contains(&(tab, id)) {
+                WindowLevel::Clean
+            } else if window.level == WindowLevel::Clean {
+                WindowLevel::ViewsOnly
+            } else {
+                window.level
+            };
             host.swap(app);
             documents::exchange_window_views(app, tab, &mut window.views);
             if on_child_design {
@@ -1092,6 +1227,13 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 PendingAction::Focus { view, window } => focus_view(app, view, Some(window)).and_then(|()| focus(app, window)),
                 PendingAction::Close { view } => app.run("tab.view.close", json!({"id": view})).map(|_| ()),
                 PendingAction::Bring { source, target } => apply_bring(app, source, target),
+                PendingAction::Setup(action) => {
+                    if let Err(reason) = action.run(app) {
+                        let message = crate::view_setups_ui::message(app, &reason);
+                        app.set_status(message, true);
+                    }
+                    Ok(())
+                }
             };
             if let Err(reason) = result {
                 crate::design_view_ui::show_move_error(app, reason);
