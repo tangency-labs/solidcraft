@@ -33,7 +33,7 @@ const RECOVERY: &str = "recovery.sc";
 /// The autosaves earlier releases kept, newest first, one per entry of
 /// `solidcraft_engine::io::LEGACY_DESIGN_EXTS` (compatibility shim, docs/compatibility.md): the
 /// newest is recovered when there is no current one.
-const LEGACY_RECOVERY: [&str; 2] = ["recovery.solidcraft", "recovery.solvecraft"];
+const LEGACY_RECOVERY: [&str; 1] = ["recovery.solidcraft"];
 const RECOVERY_META: &str = "recovery.json";
 
 /// What to do with a file brought in from the computer.
@@ -80,6 +80,8 @@ pub struct Files {
     pub recovery: RefCell<Option<(String, Option<String>)>>,
     /// This page began an autosave, which may still be writing when the page leaves.
     pub autosave_owned: Cell<bool>,
+    /// The current explicit opt-out of offering recovery after a non-cached departure.
+    pub suppress_recovery_after_leave: Cell<bool>,
     /// The app's context, to wake it when a browser call finishes.
     pub ctx: RefCell<Option<egui::Context>>,
     /// This page's id: the copies it keeps are named after it (`keep::entry_id`).
@@ -128,9 +130,6 @@ thread_local! {
 
 /// Local storage keys of stored files (under the channel's name, see `channel.rs`).
 const LOCAL_PREFIX: &str = "solidcraft.file.";
-/// Local-storage files kept by earlier releases (compatibility shim, docs/compatibility.md):
-/// still listed and opened; removing one removes either key.
-const LEGACY_LOCAL_PREFIX: &str = "solvecraft.file.";
 
 fn local() -> Result<web_sys::Storage, String> {
     web_sys::window().and_then(|w| w.local_storage().ok().flatten()).ok_or_else(|| "this browser keeps no local storage".to_string())
@@ -231,7 +230,6 @@ async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
 async fn remove_file(name: &str) -> Result<(), String> {
     if local_only() {
         let st = local()?;
-        st.remove_item(&format!("{LEGACY_LOCAL_PREFIX}{name}")).map_err(err)?;
         return st.remove_item(&crate::channel::key(&format!("{LOCAL_PREFIX}{name}"))).map_err(err);
     }
     let dir = root().await?;
@@ -246,9 +244,7 @@ fn read_local() -> Result<Vec<(String, Vec<u8>, f64)>, String> {
     for i in 0..st.length().unwrap_or(0).min(10_000) {
         let Some(k) = st.key(i).ok().flatten() else { continue };
         let own = crate::channel::key(LOCAL_PREFIX);
-        // The old names belong to stable; a pre-release channel has none.
-        let legacy = crate::channel::current().is_empty().then_some(LEGACY_LOCAL_PREFIX);
-        let Some(name) = k.strip_prefix(own.as_str()).or_else(|| legacy.and_then(|l| k.strip_prefix(l))) else { continue };
+        let Some(name) = k.strip_prefix(own.as_str()) else { continue };
         if let Some(v) = st.get_item(&k).ok().flatten() {
             out.push((name.to_string(), decode(&v), 0.0));
         }
@@ -293,7 +289,8 @@ async fn read_all() -> Result<Vec<(String, Vec<u8>, f64)>, String> {
 
 /// Ask the browser to keep the storage (not evict it under pressure), then load every stored
 /// file into the engine's files.
-pub fn start(files: &Rc<Files>) {
+pub fn start(files: &Rc<Files>, suppress_recovery_after_leave: bool) {
+    files.suppress_recovery_after_leave.set(suppress_recovery_after_leave);
     if let Some(sm) = storage_manager().filter(|sm| has(sm, "persist"))
         && let Ok(p) = sm.persist()
     {
@@ -330,7 +327,7 @@ pub fn start(files: &Rc<Files>) {
                 let given_up = match (meta.as_ref(), payload) {
                     (Some(meta), Some(bytes)) => {
                         let left = crate::recovery_owner(meta).filter(|owner| was_left(owner));
-                        crate::autosave_given_up(meta, bytes, left, reload_owner.as_deref())
+                        crate::autosave_given_up(meta, bytes, left, reload_owner.as_deref(), files.suppress_recovery_after_leave.get())
                     }
                     _ => false,
                 };
@@ -508,15 +505,15 @@ fn left_key(slot: usize) -> String {
     crate::channel::key(&format!("solidcraft.recovery.left.{slot}"))
 }
 
-/// The page is going away for good (not into the browser's back/forward cache): the user
-/// answered the browser's "leave site?" with Leave, or there was nothing unsaved to ask about.
+/// The page is going away without the browser's back/forward cache. Only an explicit recovery
+/// opt-out permits a marker, because the browser may skip its native Leave prompt.
 /// Mark this page, not its last attempted timestamp: an older write may remain after a failed
 /// attempt, and an in-flight write may finish after this synchronous notification.
 pub fn leaving(files: &Files) {
     // This page may have returned from BFCache after another same-tab page changed the
     // session value. A real departure/reload must identify this page again, not that one.
     let _ = remember_page(&files.keep_page.borrow());
-    if !files.autosave_owned.get() {
+    if !files.suppress_recovery_after_leave.get() || !files.autosave_owned.get() {
         return;
     }
     let Ok(storage) = local() else { return };

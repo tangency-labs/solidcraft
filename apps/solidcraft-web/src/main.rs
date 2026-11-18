@@ -84,6 +84,16 @@ impl Launch {
     }
 }
 
+/// A design just opened from a link is a clean copy under the link's name: its saved state is
+/// the loaded state, so the tab shows no unsaved mark and the autosave (kept only while the
+/// design is dirty) records nothing until the first edit (#17519).
+#[cfg(any(target_arch = "wasm32", test))]
+fn adopt_linked_design(session: &mut solidcraft_engine::Session, name: String) {
+    session.path = None;
+    session.doc_mut().name = name;
+    session.mark_saved();
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn design_url(value: &str, page_origin: &str) -> Result<url::Url, String> {
     if value.len() > 16_384 {
@@ -154,13 +164,20 @@ fn recovery_digest(bytes: &[u8]) -> String {
     format!("{:x}", sha2::Sha256::digest(bytes))
 }
 
+/// Whether this browser explicitly opted out of offering the single autosave after departure.
+#[cfg(any(target_arch = "wasm32", test))]
+fn suppress_recovery_after_leave(prefs: &solidcraft_ui_egui::prefs::Prefs) -> bool {
+    !prefs.recover_after_browser_leave && !prefs.keep_unsaved_in_browser
+}
+
 /// Suppress only coherent recovery from the page that left. No files are deleted: another tab
 /// may write the shared recovery while this page is starting. Reload exempts only its own prior
 /// page, identified by this tab's session storage, rather than every abandoned recovery.
 #[cfg(any(target_arch = "wasm32", test))]
-fn autosave_given_up(meta: &serde_json::Value, bytes: &[u8], left: Option<&str>, reload_owner: Option<&str>) -> bool {
+fn autosave_given_up(meta: &serde_json::Value, bytes: &[u8], left: Option<&str>, reload_owner: Option<&str>, suppress: bool) -> bool {
     let Some(owner) = recovery_owner(meta) else { return false };
-    left == Some(owner)
+    suppress
+        && left == Some(owner)
         && reload_owner != Some(owner)
         && meta.get("recovery_sha256").and_then(serde_json::Value::as_str) == Some(recovery_digest(bytes).as_str())
 }
@@ -332,9 +349,8 @@ mod web {
         on_unload.forget();
     }
 
-    /// The page going away for good, after the browser's "leave site?" got Leave (a cancelled
-    /// prompt keeps the page, and a page kept in the back/forward cache may come back): its
-    /// unsaved work was given up, so its autosave is not offered on the next visit (#9621).
+    /// Record non-cached departures only when recovery was disabled by the user. Browsers do
+    /// not reveal whether their Leave prompt was shown, so this also applies when it was skipped.
     fn give_up_autosave_on_leave(window: &web_sys::Window, files: Rc<Files>) {
         let on_hide = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
             let kept = js_sys::Reflect::get(&e, &"persisted".into()).ok().and_then(|p| p.as_bool()).unwrap_or(false);
@@ -1229,12 +1245,14 @@ mod web {
             self.api.poll();
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
+            self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
             DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             // First, so everything after sees the buttons the browser holds.
-            crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
+            let taps = crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
+            solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
             if let Some(delay) = self.wheel_gestures.update(raw, now) {
                 ctx.request_repaint_after(delay);
@@ -1247,7 +1265,7 @@ mod web {
             }
             // Before the app's own hook, which adds the control channel's events.
             self.space_mouse.raw_input_hook(ctx, self.app.preferences.space_mouse_enabled, raw);
-            self.app.raw_input_hook(raw);
+            self.app.raw_input_hook_with_taps(ctx, raw, taps);
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.linked.tick(&mut self.app, ui.ctx());
@@ -1263,6 +1281,7 @@ mod web {
                 });
             }
             self.app.ui(ui);
+            self.files.suppress_recovery_after_leave.set(crate::suppress_recovery_after_leave(&self.app.preferences));
             let ctx = ui.ctx().clone();
             if self.launch.persists() {
                 self.file_panel(&ctx);
@@ -1370,10 +1389,18 @@ mod web {
             // The window's pass (egui's) has no depth buffer: the scene has its own
             // (`install_viewport`).
             let mut options = eframe::WebOptions { depth_buffer: 0, ..Default::default() };
-            if webgl()
-                && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
-            {
-                create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+            if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
+                if webgl() {
+                    create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+                }
+                // Indirect draws that start at an instance, where the browser has them: instanced
+                // meshes are drawn a call per pipeline (`solidcraft_viewport_gpu::INDIRECT_DRAWS`).
+                let base = create.device_descriptor.clone();
+                create.device_descriptor = std::sync::Arc::new(move |adapter| {
+                    let mut d = base(adapter);
+                    d.required_features |= adapter.features() & eframe::wgpu::Features::INDIRECT_FIRST_INSTANCE;
+                    d
+                });
             }
             let mouse_canvas = canvas.clone();
             let runner = eframe::WebRunner::new();
@@ -1384,12 +1411,6 @@ mod web {
                     Box::new(move |cc| {
                         solidcraft_ui_egui::fonts::setup_fonts(&cc.egui_ctx);
                         let files = Rc::new(Files::default());
-                        if launch.persists() {
-                            files::start(&files);
-                            if let Some(window) = web_sys::window() {
-                                give_up_autosave_on_leave(&window, files.clone());
-                            }
-                        }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer) = (files.clone(), files.clone());
                         let services = if !launch.persists() { Services::default() } else { Services {
@@ -1446,6 +1467,10 @@ mod web {
                         if launch.persists() && let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(&crate::channel::key(k)))) {
                             app.load_prefs(&p);
                         }
+                        if launch.persists() {
+                            files::start(&files, crate::suppress_recovery_after_leave(&app.preferences));
+                            give_up_autosave_on_leave(&window, files.clone());
+                        }
                         if let Some(rs) = &cc.wgpu_render_state {
                             install_viewport(&mut app, rs);
                         }
@@ -1460,8 +1485,10 @@ mod web {
                             // The empty design takes Units of new designs (#1205). The sample
                             // part is built in millimetres and is left that way.
                             solidcraft_ui_egui::prefs::apply_new_design(&mut app);
-                            let rev = app.session.revision;
-                            app.home.show(rev);
+                            if app.preferences.home_on_launch(false, false, false) {
+                                let rev = app.session.revision;
+                                app.home.show(rev);
+                            }
                         }
                         let mouse_buttons = crate::mouse_buttons::install(&window, &mouse_canvas, &cc.egui_ctx);
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
@@ -1521,6 +1548,8 @@ mod web {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     web::start();
 }
 
@@ -1568,6 +1597,16 @@ mod tests {
         let viewer = Launch::parse("?embed=viewer&open=https://example.org/a.sc");
         assert!(viewer.embed && !viewer.editor, "any other value is the viewer embed, as before");
         assert!(!Launch::parse("?other=editor").editor);
+    }
+
+    #[test]
+    fn a_design_opened_from_a_link_is_clean_until_edited() {
+        let mut session = solidcraft_engine::Session::default();
+        adopt_linked_design(&mut session, "arm".into());
+        assert_eq!(session.doc.name, "arm");
+        assert!(!session.is_dirty(), "a linked design is not unsaved work, so nothing is autosaved for it");
+        session.doc_mut().name = "arm 2".into();
+        assert!(session.is_dirty(), "an edit makes it unsaved");
     }
 
     #[test]
@@ -1651,40 +1690,62 @@ mod tests {
         assert!(!closes_design("s", true, false, false, true));
     }
 
-    /// A tab closed with Ctrl+W, "Leave" answered to the browser's prompt, doesn't have its
-    /// autosave offered as "Recover unsaved work?" on the next visit (#9621).
+    #[test]
+    fn browser_leave_recovery_requires_an_explicit_opt_in_even_for_old_markers() {
+        let mut prefs = solidcraft_ui_egui::prefs::Prefs::default();
+        let meta = serde_json::json!({"recovery_owner": "a1", "recovery_sha256": recovery_digest(b"abc")});
+        assert!(!suppress_recovery_after_leave(&prefs));
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        prefs.recover_after_browser_leave = false;
+        assert!(suppress_recovery_after_leave(&prefs));
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abcd", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abc", Some("b2"), None, suppress_recovery_after_leave(&prefs)));
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), Some("a1"), suppress_recovery_after_leave(&prefs)));
+        prefs.keep_unsaved_in_browser = true;
+        assert!(!suppress_recovery_after_leave(&prefs), "per-design kept copies have a separate recovery policy");
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)));
+        prefs.keep_unsaved_in_browser = false;
+        prefs.recover_after_browser_leave = true;
+        assert!(
+            !autosave_given_up(&meta, b"abc", Some("a1"), None, suppress_recovery_after_leave(&prefs)),
+            "turning recovery back on ignores a prior departure"
+        );
+    }
+
+    /// With recovery explicitly disabled, a non-cached departure suppresses its own autosave offer.
     #[test]
     fn leaving_without_saving_gives_up_the_autosave() {
         // SHA-256("abc"), independently specified by the standard test vector.
         let digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
         assert_eq!(recovery_digest(b"abc"), digest);
         let meta = serde_json::json!({"saved_at": 1, "recovery_owner": "a1", "recovery_sha256": digest});
-        assert!(autosave_given_up(&meta, b"abc", Some("a1"), None));
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), None, true));
         // A later attempted write can fail: the earlier committed payload has the same owner.
         let mut earlier = meta.clone();
         earlier["saved_at"] = serde_json::json!(0);
-        assert!(autosave_given_up(&earlier, b"abc", Some("a1"), None));
-        assert!(!autosave_given_up(&meta, b"abc", None, None), "Cancel or a crash leaves no intent");
-        assert!(!autosave_given_up(&meta, b"abc", Some("b2"), None), "another page's Leave cannot hide this one");
-        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), Some("a1")), "reload keeps its own prior page's recovery");
-        assert!(autosave_given_up(&meta, b"abc", Some("a1"), Some("b2")), "reloading a different tab grants no exemption");
+        assert!(autosave_given_up(&earlier, b"abc", Some("a1"), None, true));
+        assert!(!autosave_given_up(&meta, b"abc", None, None, true), "Cancel or a crash leaves no intent");
+        assert!(!autosave_given_up(&meta, b"abc", Some("b2"), None, true), "another page's Leave cannot hide this one");
+        assert!(!autosave_given_up(&meta, b"abc", Some("a1"), Some("a1"), true), "reload keeps its own prior page's recovery");
+        assert!(autosave_given_up(&meta, b"abc", Some("a1"), Some("b2"), true), "reloading a different tab grants no exemption");
         // A new payload and old metadata may remain after an interrupted two-file write.
-        assert!(!autosave_given_up(&meta, b"abcd", Some("a1"), None));
+        assert!(!autosave_given_up(&meta, b"abcd", Some("a1"), None, true));
         // A newer coherent payload from another page is still offered.
         let newer = serde_json::json!({"recovery_owner": "b2", "recovery_sha256": digest});
-        assert!(!autosave_given_up(&newer, b"abc", Some("a1"), None));
+        assert!(!autosave_given_up(&newer, b"abc", Some("a1"), None, true));
         for legacy in [serde_json::json!({"saved_at": 1}), serde_json::json!(null), serde_json::json!({})] {
-            assert!(!autosave_given_up(&legacy, b"abc", Some("a1"), None));
+            assert!(!autosave_given_up(&legacy, b"abc", Some("a1"), None, true));
         }
         let long_owner = "a".repeat(65);
         for owner in ["", "../a1", "NaN", "a1\n", &long_owner] {
             let hostile = serde_json::json!({"recovery_owner": owner, "recovery_sha256": digest});
-            assert!(!autosave_given_up(&hostile, b"abc", Some(owner), None));
+            assert!(!autosave_given_up(&hostile, b"abc", Some(owner), None, true));
         }
         for invalid in [serde_json::json!(null), serde_json::json!(2), serde_json::json!("bad"), serde_json::json!(digest.to_uppercase())] {
             let mut hostile = meta.clone();
             hostile["recovery_sha256"] = invalid;
-            assert!(!autosave_given_up(&hostile, b"abc", Some("a1"), None));
+            assert!(!autosave_given_up(&hostile, b"abc", Some("a1"), None, true));
         }
     }
 

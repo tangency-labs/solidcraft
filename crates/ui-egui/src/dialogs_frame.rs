@@ -190,7 +190,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             {
                 m.kind = index;
                 for (name, v) in k.required.iter().chain(k.optional).zip(values.iter_mut()) {
-                    *v = profile.dims.get(*name).map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default();
+                    *v = profile.dims.get(*name).map(|e| shown_expr(e, frame::dimension_kind(name))).unwrap_or_default();
                 }
             }
         }

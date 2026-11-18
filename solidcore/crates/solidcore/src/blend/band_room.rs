@@ -195,7 +195,7 @@ fn straight(b: &Brep, x: EdgeId) -> Result<bool> {
 /// The normal of the planar surface of face `f`: a plane's, or the normal of the plane a
 /// B-spline surface is proved to lie on ([`lies_on`], its candidate from the surface's
 /// `IsPlanar`); `None` for a face not proved planar.
-fn plane_normal(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Vec3>> {
+pub(crate) fn plane_normal(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Vec3>> {
     let Some(surface) = b.face(f)?.surface.as_ref() else {
         return Ok(None);
     };

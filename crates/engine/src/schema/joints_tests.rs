@@ -6,7 +6,8 @@ use super::{
     AsBuiltJointParams, CamParams, CamResult, CouplingResult, CreateConstraintParams, CreateJointParams, DeleteJointParams, DeleteJointResult,
     DriveJointParams, DriveJointResult, EditConstraintParams, EditJointParams, EditJointResult, GearParams, InspectJointParams, InspectJointResult,
     JointAddedResult, JointKindName, JointLimitsParams, ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult,
-    MotionLinkParams, RackPinionParams, ReachParams, ReachResult, RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveResult,
+    MotionLinkParams, MotionLinkResult, RackPinionParams, ReachParams, ReachResult, RigidGroupParams, RigidGroupResult, ScrewParams,
+    SolveJointsParams, SolveResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -14,10 +15,13 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<EditJointParams>(), &["a", "angle", "b", "flip", "joint", "name", "offset", "quiet", "suppressed", "type"]);
+    assert_keys(
+        input_schema_for::<EditJointParams>(),
+        &["a", "angle", "b", "flip", "joint", "name", "offset", "offset_x", "offset_y", "quiet", "suppressed", "type"],
+    );
     assert_keys(
         input_schema_for::<CreateJointParams>(),
-        &["a", "angle", "b", "flip", "limits", "name", "offset", "quiet", "type", "value", "values"],
+        &["a", "angle", "b", "flip", "limits", "name", "offset", "offset_x", "offset_y", "quiet", "type", "value", "values"],
     );
     assert_keys(input_schema_for::<EditConstraintParams>(), &["angle", "constraint", "flip", "name", "offset", "quiet", "suppressed", "type"]);
     assert_keys(input_schema_for::<CreateConstraintParams>(), &["a", "angle", "b", "flip", "name", "offset", "quiet", "type"]);
@@ -34,7 +38,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "joints", "occurrence", "point", "quiet", "z"]);
-    assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "offset", "quiet", "ratio"]);
+    assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "link", "offset", "quiet", "ratio"]);
     assert_keys(input_schema_for::<GearParams>(), &["a", "b", "internal", "link", "quiet", "ra", "rb", "reverse"]);
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
     assert_keys(input_schema_for::<ScrewParams>(), &["a", "b", "joint", "link", "pitch", "quiet", "reverse"]);
@@ -1569,9 +1573,9 @@ fn replies_of_the_rest_match_the_output_schema() {
     let apart = coupled(&mut s, "joint.screw", json!({"a": "K", "b": "Slide2", "pitch": 3}));
     assert_eq!(apart["link"], 3, "{apart}");
     let linked = put(&mut s, "joint.motion_link", json!({"a": "G1", "b": "X", "ratio": 2}));
-    ok(output_schema_for::<SolveResult>(), "joint.motion_link", &linked);
+    ok(output_schema_for::<MotionLinkResult>(), "joint.motion_link", &linked);
     let quiet = put(&mut s, "joint.motion_link", json!({"a": "G1", "b": "K", "ratio": 1, "offset": "5 deg", "ia": 0, "ib": 0, "quiet": true}));
-    ok(output_schema_for::<SolveResult>(), "joint.motion_link", &quiet);
+    ok(output_schema_for::<MotionLinkResult>(), "joint.motion_link", &quiet);
     assert!(quiet.get("dof").is_none() && quiet.get("fixed").is_none(), "{quiet}");
     let list = put(&mut s, "joint.list", json!({}));
     assert!(list["links"].as_array().is_some_and(|l| l.len() == 6), "{list}");

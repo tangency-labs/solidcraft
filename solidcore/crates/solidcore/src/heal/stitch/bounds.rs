@@ -481,6 +481,87 @@ fn curve_box(curve: &Curve, range: Ivl) -> Result<Box3> {
     }
 }
 
+/// Outward-rounded boxes that together hold every point of `curve` over the parameters
+/// between `a` and `b`: lines, positive-weight B-splines (and the conics evaluated through
+/// them) and planar conics; an error for the other kinds, as [`curve_to_point`]'s.
+///
+/// A B-spline is covered on each knot span that meets the range, in `parts` equal pieces of
+/// the span's part of it: each piece's interval evaluation, cut down to the box of the span's
+/// control points (with positive weights the span lies in their convex hull; an interval
+/// evaluation of a rational span can be far wider than the curve). A line or planar conic is
+/// covered by its enclosure over `parts` equal pieces of the range.
+pub(crate) fn curve_cover(curve: &Curve, a: f64, b: f64, parts: u32) -> Result<Vec<Box3>> {
+    let range = checked_range([a, b])?;
+    let parts = parts.max(1);
+    let cut = |t: Ivl, i: u32| {
+        let at = |j: u32| {
+            if j == parts {
+                t.hi
+            } else {
+                t.lo + (t.hi - t.lo) * f64::from(j) / f64::from(parts)
+            }
+        };
+        Ivl::new(at(i), at(i + 1))
+    };
+    let base = match curve.kind() {
+        CurveKind::Line(_) | CurveKind::Conic(_) => None,
+        _ => Some(rational_base(curve)?.ok_or_else(unsupported)?),
+    };
+    let mut out = Vec::new();
+    let Some(n) = base else {
+        for i in 0..parts {
+            out.push(curve_box(curve, cut(range, i))?);
+        }
+        return Ok(out);
+    };
+    validate(n, range)?;
+    let p = n.degree();
+    for (span, pair) in n.knots().windows(2).enumerate() {
+        let [ka, kb] = pair else {
+            continue;
+        };
+        if span < p || span >= n.cpts().len() || ka >= kb || *kb < range.lo || *ka > range.hi {
+            continue;
+        }
+        let first = span
+            .checked_sub(p)
+            .ok_or_else(|| invalid("invalid spline span"))?;
+        let mut hull: Option<Box3> = None;
+        for j in 0..=p {
+            let h = homogeneous(at(n.cpts(), first + j)?)?;
+            let w = at(&h, 3)?;
+            let point = [at(&h, 0)? / w, at(&h, 1)? / w, at(&h, 2)? / w];
+            hull = Some(match hull {
+                None => point,
+                Some(old) => core::array::from_fn(|i| {
+                    let (o, q) = (old.get(i).copied(), point.get(i).copied());
+                    o.unwrap_or(Ivl::whole()).hull(q.unwrap_or(Ivl::whole()))
+                }),
+            });
+        }
+        let hull = hull.ok_or_else(|| invalid("invalid spline span"))?;
+        let t = Ivl::new(range.lo.max(*ka), range.hi.min(*kb));
+        for i in 0..parts {
+            let eval = piece(n, span, cut(t, i))?;
+            let both: Box3 = core::array::from_fn(|axis| {
+                let h = hull.get(axis).copied().unwrap_or(Ivl::whole());
+                let e = eval.get(axis).copied().unwrap_or(Ivl::whole());
+                Ivl::new(h.lo.max(e.lo), h.hi.min(e.hi))
+            });
+            // both hold the curve, so they meet; if rounding says otherwise, the hull alone
+            out.push(if both.iter().all(|x| x.lo <= x.hi) {
+                both
+            } else {
+                hull
+            });
+        }
+    }
+    if out.is_empty() {
+        return Err(invalid("no knot span covers the curve interval"));
+    }
+    Ok(out)
+}
+
 /// An upper bound for point-to-curve distance using an exact point of the curve.
 pub(super) fn point_at_curve(point: Point3, curve: &Curve, parameter: f64) -> Result<f64> {
     norm(difference(

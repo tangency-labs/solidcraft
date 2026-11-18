@@ -104,6 +104,50 @@ fn a_section_pick_lands_on_the_cap_not_the_removed_face() {
     assert_eq!(r["hits"].as_array().map(Vec::len), Some(1));
 }
 
+/// A sheet has no inside, so one crossed in the removed half is not a cut: the pick looks
+/// through the section to the sheet behind it instead of stopping on a cap (#17177).
+#[test]
+fn a_section_pick_reaches_a_sheet_behind_a_sheet_in_the_removed_half() {
+    let mut h = Harness::new();
+    for (name, y) in [("W1", 5), ("W2", 8)] {
+        h.app.run("sketch.create", json!({"plane":"XY","name":name})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0, y], [10, y]],"ids":[format!("{name}c")]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.call(
+            "engine.execute",
+            json!({"command": "surface.extrude", "params": {"sketch": name, "curves": [format!("{name}c")], "distance": 10, "body_name": name}}),
+        );
+    }
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}}));
+    // Through W1 at z = 7 (removed), the cut plane at y = 7, then W2 at z = 4 (kept).
+    let r = pick(&mut h, json!({"rays": [{"origin": [5, 0, 12], "dir": [0, 1, -1]}]}));
+    let hit = &r["hits"][0];
+    assert!(hit.get("section_cap").is_none(), "{hit}");
+    assert_eq!(hit["body"], "W2", "{hit}");
+    assert!((hit["point"][2].as_f64().unwrap() - 4.0).abs() < 1e-6, "{hit}");
+}
+
+/// Each plane of a section hides its own side (x > 5 and z > 5 here): a pick down through
+/// the kept quarter lands on the second plane's cap and names it, one in from the side lands on
+/// the first's, and one down past the first plane finds nothing, the material beyond it hidden
+/// though the second keeps it.
+#[test]
+fn a_pick_names_the_section_plane_of_the_cap() {
+    let mut h = top_view();
+    for plane in [json!({"origin": [5, 0, 0], "normal": [1, 0, 0]}), json!({"origin": [0, 0, 5], "normal": [0, 0, 1]})] {
+        h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": plane, "add": true}}));
+    }
+    let down = |x: f64| json!({"origin": [x, 5, 100], "dir": [0, 0, -1]});
+    let side = json!({"origin": [100, 5, 2.5], "dir": [-1, 0, 0]});
+    let r = pick(&mut h, json!({"rays": [down(2.5), side, down(7.5)]}));
+    let (top, from_side, beyond) = (&r["hits"][0], &r["hits"][1], &r["hits"][2]);
+    assert_eq!((top["section_cap"].as_bool(), top["section_plane"].as_u64()), (Some(true), Some(2)), "{top}");
+    assert!((top["point"][2].as_f64().unwrap() - 5.0).abs() < 1e-9, "{top}");
+    assert_eq!((from_side["section_cap"].as_bool(), from_side["section_plane"].as_u64()), (Some(true), Some(1)), "{from_side}");
+    assert!((from_side["point"][0].as_f64().unwrap() - 5.0).abs() < 1e-9, "{from_side}");
+    assert!(beyond.is_null(), "material beyond the first plane is picked: {beyond}");
+}
+
 /// A pixel near a silhouette edge reports that edge with its distance; a pixel in the
 /// middle of the face reports none.
 #[test]
@@ -259,7 +303,7 @@ fn a_section_pick_skips_edges_and_vertices_in_the_removed_half() {
     // The same projection the model-frame pick builds, so a world point's pixel can be picked.
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(960.0, 600.0));
     let cam = h.app.cam;
-    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(&h.app)), rect };
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(&h.app)), rect, bounds: None };
     let px = |p: [f64; 3]| {
         let sp = proj.to_screen(Vec3::new(p[0], p[1], p[2])).unwrap();
         json!([sp.x as f64, sp.y as f64])

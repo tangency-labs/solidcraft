@@ -400,6 +400,102 @@ fn csv_and_json_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn json_import_resolves_forward_references() {
+    let mut session = Session::default();
+    let rows = json!([
+        {"name": "panel_width", "unit": "in", "expression": "opening_width - (panel_thickness * 2)"},
+        {"name": "opening_width", "unit": "in", "expression": "24 in"},
+        {"name": "panel_thickness", "unit": "in", "expression": "3/4 in"},
+        {"name": "panel_angle", "expression": "door_angle + 15 deg"},
+        {"name": "door_angle", "expression": "30 deg"}
+    ]);
+
+    run(&mut session, "parameters.import", json!({"text": rows.to_string()}));
+
+    let (values, errors) = session.doc.param_values();
+    assert!(errors.is_empty(), "{errors:?}");
+    // Inch and angle conversions can round at the last bit on different platforms.
+    for (name, expected) in [("panel_width", 22.5), ("panel_angle", 45.0)] {
+        let actual = session.doc.param_display_value(&values, name).expect("imported parameter has a value");
+        assert!(rel(actual, expected) < 1e-12, "{name}: expected {expected}, got {actual}");
+    }
+}
+
+#[test]
+fn parameter_import_preserves_input_and_existing_table_order() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let rows = json!([
+        {"name": "a", "expression": "b + 1 mm"},
+        {"name": "b", "expression": "2 mm"},
+        {"name": "c", "expression": "3 mm"}
+    ]);
+    let imported = run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(imported["imported"], json!(["a", "b", "c"]));
+    let names: Vec<_> = s.doc.params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["existing", "a", "b", "c"]);
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 3.0);
+}
+
+#[test]
+fn parameter_import_keeps_last_duplicate_and_inherited_metadata() {
+    let mut s = Session::default();
+    let rows = json!([
+        {"name": "a", "expression": "b", "unit": "", "comment": "kept"},
+        {"name": "b", "expression": "a", "unit": ""},
+        {"name": "a", "expression": "1", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    let list = run(&mut s, "parameters.list", json!({}));
+    assert_eq!(row(&list, "a")["value"], 1.0);
+    assert_eq!(row(&list, "b")["value"], 1.0);
+    assert_eq!(row(&list, "a")["comment"], "kept");
+    let rows = json!([
+        {"name": "a", "expression": "c", "unit": ""},
+        {"name": "a", "expression": "5", "unit": ""},
+        {"name": "c", "expression": "7", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 5.0);
+}
+
+#[test]
+fn parameter_import_keeps_text_literal_with_explicit_or_inherited_unit() {
+    let mut s = Session::default();
+    let rows = json!([{"name": "label", "unit": "Text", "expression": "label"}]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(s.doc.text_param("label").unwrap().text, "label");
+    // An existing text parameter stays text when unit is omitted.
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nlabel,label\n"}));
+    let exported = run(&mut s, "parameters.export", json!({"format": "csv"}));
+    let mut fresh = Session::default();
+    run(&mut fresh, "parameters.import", json!({"text": exported["text"]}));
+    assert_eq!(fresh.doc.text_param("label").unwrap().text, "label");
+    // The second definition inherits the first definition's text unit.
+    let rows = json!([
+        {"name": "other", "unit": "text", "expression": "first"},
+        {"name": "other", "expression": "other"}
+    ]);
+    run(&mut fresh, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(fresh.doc.text_param("other").unwrap().text, "other");
+}
+
+#[test]
+fn parameter_import_rejects_final_cycles_and_oversized_expressions_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let before = s.doc.to_json();
+    for rows in [
+        json!([{"name": "a", "expression": "b"}, {"name": "b", "expression": "a"}]),
+        json!([{"name": "a", "expression": "x".repeat(4097)}]),
+        json!([{"name": "a", "expression": "1", "unit": "invalid"}, {"name": "a", "expression": "2"}]),
+    ] {
+        assert!(s.execute("parameters.import", &json!({"text": rows.to_string()})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
 /// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
 /// imports back as it was (#12728). A plain number keeps its sign, and `;` makes a field quoted.
 #[test]
@@ -763,6 +859,72 @@ fn a_failed_auto_constrain_keeps_the_stored_sketch_consistent() {
 /// The stored sketch's points, by id.
 fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
+}
+
+/// Where the circle's centre is in the stored sketch `feature`.
+fn circle_centre(s: &Session, feature: u64) -> solidcore_record::Vec2 {
+    let sk = s.doc.sketch(feature).unwrap();
+    match sk.curves.iter().map(|c| &c.kind).find(|k| matches!(k, solidcraft_sketch::CurveKind::Circle { .. })) {
+        Some(solidcraft_sketch::CurveKind::Circle { c, .. }) => sk.points[*c].pos,
+        _ => solidcore_record::Vec2::new(f64::NAN, f64::NAN),
+    }
+}
+
+#[test]
+fn a_dimension_driven_to_zero_and_back_keeps_its_side() {
+    // #15766: a pin drawn at (-10, -5), dimensioned from the origin by `x` and `y`. At 0 its
+    // centre is on the axis; a value after that puts it back on the side it was drawn on.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "x", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "y", "expression": "5 mm"}));
+    let feature = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pin sketch"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [-10, -5], "radius": 2}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "x"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "y"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": "2 mm"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pin sketch", "distance": "1 mm"}));
+    for (name, value, want) in [
+        ("y", "0 mm", (-10.0, 0.0)),
+        ("y", "5 mm", (-10.0, -5.0)),
+        ("y", "0 mm", (-10.0, 0.0)),
+        ("y", "3 mm", (-10.0, -3.0)),
+        ("x", "0 mm", (0.0, -3.0)),
+        ("x", "4 mm", (-4.0, -3.0)),
+    ] {
+        run(&mut s, "parameters.change", json!({"name": name, "expression": value}));
+        let c = circle_centre(&s, feature);
+        assert!((c.x - want.0).abs() < 1e-9 && (c.y - want.1).abs() < 1e-9, "{name} = {value}: centre {c:?}, want {want:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{name} = {value}");
+    }
+}
+
+/// Where the line's two ends are in the stored sketch `feature`: `(start, end)`.
+fn line_ends(s: &Session, feature: u64) -> (solidcore_record::Vec2, solidcore_record::Vec2) {
+    let sk = s.doc.sketch(feature).unwrap();
+    match sk.curves.iter().map(|c| &c.kind).find(|k| matches!(k, solidcraft_sketch::CurveKind::Line { .. })) {
+        Some(solidcraft_sketch::CurveKind::Line { a, b }) => (sk.points[*a].pos, sk.points[*b].pos),
+        _ => (solidcore_record::Vec2::new(f64::NAN, f64::NAN), solidcore_record::Vec2::new(f64::NAN, f64::NAN)),
+    }
+}
+
+#[test]
+fn a_dimension_between_two_free_points_driven_to_zero_and_back_keeps_its_sides() {
+    // #15766 with neither end fixed: a line from (20, 5) back to (10, 0), its horizontal length
+    // `w`. Both ends share the change; at 0 they are level, and a value after that puts the end
+    // back on the side it was drawn on instead of mirroring the line.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    let feature = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Free sketch"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points": [[20, 5], [10, 0]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l.start", "l.end"], "type": "horizontal", "value": "w"}));
+    run(&mut s, "sketch.finish", json!({}));
+    for (value, want) in [("6 mm", (18.0, 12.0)), ("0 mm", (15.0, 15.0)), ("10 mm", (20.0, 10.0)), ("0 mm", (15.0, 15.0)), ("4 mm", (17.0, 13.0))] {
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": value}));
+        let (start, end) = line_ends(&s, feature);
+        assert!((start.x - want.0).abs() < 1e-6 && (end.x - want.1).abs() < 1e-6, "w = {value}: start {start:?}, end {end:?}, want x {want:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "w = {value}");
+    }
 }
 
 #[test]

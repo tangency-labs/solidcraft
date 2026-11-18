@@ -8,11 +8,13 @@
   },
   "calls": [
     {
-      "error": "solidcore failed (status 1001)",
       "inputs": [
         "b1"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -51,28 +53,31 @@
   ],
   "case": "12342-round-wall-edge-r5-past-the-wall-refused",
   "expected": {
-    "method": "the wall's round rolls on x = 20 and on the part of y = 20 beside the wall, which is 4 mm wide (x 16..20); at R4 the rail reaches the wall's inner face x = 16 and the round takes the strip whole, past it no round fits",
-    "outcome": "refused",
-    "refusal": "the largest radius that fits is 4",
+    "body_count": 1,
+    "method": "the wall's round R5 is centred on x = y = 15 and its rail on y = 20 lands at x = 15, past the wall's inner face x = 16: a cliff overflow, the round kept and trimmed at its crease with x = 16 (docs/generic-blend.md section 3.4). Each section z in (-40, 2) loses the square [16, 20] x [15, 20] less the disc's part in it, A(r) = 4 r - int_{16 - (20 - r)}^{r} sqrt(r^2 - t^2) dt = 5.331510 at r = 5, over the wall's 42: V = 9520 - 42 A(5) = 9296.076593955504 (R4 builds 9520 - (1 - pi/4) 16 * 42, R4.5 9337.675944093538)",
+    "outcome": "solid",
     "source": "invariants",
     "sources": [
       "tangency-labs/solidcraft#12342",
       "tangency-labs/solidcore#2845"
     ],
-    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. The wall's edge alone rounded R5, past the wall's 4 mm: refused naming the largest radius that fits, 4; it fails with status 1001 (R4.5 the same, R4 builds 9520 - (1 - pi/4) 16 * 42)"
+    "volume_mm3": 9296.076593955504,
+    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. The wall's edge alone rounded R5, past the wall's 4 mm: the round overflows onto the wall's inner face and is trimmed at its crease there (solidcraft#12342; it failed with status 1001 at a corner whose extended edge ran off the back face's bounded plane)"
   },
   "expressible": true,
-  "gallery_note": "the back face y = 20 highlighted, 4 mm wide beside the wall: the wall's edge at R5 should be refused naming 4, and fails with status 1001",
+  "gallery_note": "the wall's round R5 (highlighted) overflows the 4 mm wall: left, along the back face, its section ends on a crease with the wall's inner face x = 16; right, the whole part",
   "operation_expressible": true,
   "records": "12342-round-wall-edge-r5-past-the-wall-refused.bodies.json.gz",
-  "result": [],
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#12342",
     "tangency-labs/solidcore#2845"
   ],
-  "ungraded": [
-    "refusal \"the largest radius that fits is 4\""
-  ],
-  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. The wall's edge alone rounded R5, past the wall's 4 mm: refused naming the largest radius that fits, 4; it fails with status 1001 (R4.5 the same, R4 builds 9520 - (1 - pi/4) 16 * 42)",
+  "ungraded": [],
+  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. The wall's edge alone rounded R5, past the wall's 4 mm: the round overflows onto the wall's inner face and is trimmed at its crease there (solidcraft#12342; it failed with status 1001 at a corner whose extended edge ran off the back face's bounded plane)",
   "why_not": []
 }
