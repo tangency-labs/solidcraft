@@ -34,6 +34,8 @@ use crate::UnitDiff;
 mod data;
 use data::DATA;
 
+mod trim_certificate;
+
 /// Generated cases per unit, as `goldens` runs them (`main.rs` `DEFAULT_SEEDS`).
 const SEEDS: usize = 16;
 
