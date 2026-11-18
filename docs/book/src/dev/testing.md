@@ -5,9 +5,8 @@
 profile and the wasm build check.
 
 `cargo xtask fast` is the check before a commit and a push: it checks only what your change
-touches. It
-compares your branch with `origin/main` (`--base REF` for another), counting committed,
-uncommitted and untracked files, and:
+touches. It compares your branch with `origin/main` (`--base REF` for another), counting
+committed, uncommitted and untracked files, and:
 
 - formats the code;
 - runs the quick checks of `cargo xtask ci` (assets, lists, skills, layers, ui-containers,

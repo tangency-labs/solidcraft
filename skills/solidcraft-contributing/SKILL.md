@@ -225,7 +225,8 @@ cargo xtask fast
 ```
 
 Run `cargo xtask fast` before each implementation commit: it checks what the change
-touches. CI runs the full suite; run `cargo xtask ci` locally only to reproduce a CI
+touches (for a kernel change, pass `--units <id,...>` from the PR's `Units:` line to run
+their goldens). CI and the merge queue run the full suite; run `cargo xtask ci` locally only to reproduce a CI
 failure. Report exactly what passed and what could not run; do not claim the full
 suite passed. Follow
 [testing guidance](../../docs/book/src/dev/testing.md) for applicable checks.
