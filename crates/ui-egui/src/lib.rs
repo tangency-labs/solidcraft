@@ -1217,6 +1217,7 @@ impl SolveApp {
             samples: samples.max(1),
             tess: false,
             oit: false,
+            edges: false,
         };
         let built = Self::build_wgpu(rs, target, target, !self.cpu_meshing);
         self.adopt_wgpu(rs, built);
@@ -1243,8 +1244,9 @@ impl SolveApp {
             samples: samples.max(1),
             tess: false,
             oit: false,
+            edges: false,
         };
-        let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false };
+        let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false, edges: false };
         Self::build_wgpu(rs, scene, window, gpu_meshing)
     }
 
