@@ -78,6 +78,21 @@
 //! - **Recursion.** None: `EvaluateBinormal` calls `CreateUVTrimCurve` and
 //!   `CreateUVTrimCurve` calls `EvaluateBinormal` only with `bUse3DOnly = TRUE`, so
 //!   the depth is bounded by one level (as upstream comments).
+//! - **Trim fit tolerance** (not upstream): `CreateUVTrimCurve` fits at the edge
+//!   tolerance, except where that tolerance only covers the edge's edge/face gap (at
+//!   most the gap gain times it): there it fits at the healer's tolerance for that gap
+//!   without the edge/edge term, capped by the edge tolerance (`fit_tolerance`).
+//!   A tolerance raised to cover a gap so never loosens a trim fitted later. The
+//!   other edge uses' trims (`trim_other_uv_curves`, upstream `GetZoneTol3d` of the
+//!   curve, the edge tolerance) snap to knots within the same value. The
+//!   fillet's solver takes its approximation tolerance from the same value
+//!   (`blend::fillet_executive` `SetFilletParameters`). The edge is told apart by its
+//!   tolerance's value, not by what set it: a tolerance another operation set inside
+//!   `(max(def, face tolerance), zone_tol3d(gain * g)]` takes the same tighter fit,
+//!   which is never above the edge tolerance. Where the healer's edge/edge term
+//!   dominated, the fit is below the tolerance the edge had before the raise. Cost: each
+//!   call walks the edge's faces and, above that baseline with no gap cached, computes
+//!   the uses' edge/face gaps without caching them.
 //! - **Passed-on statuses (WR-663).** The statuses the fork passes on
 //!   (tangency-labs/smlib 666242b: `CreateUVTrimCurve`'s box, seam transforms, 2D
 //!   conversions, trims, end evaluations and drops, `NormalizedEvaluate`;
@@ -95,7 +110,10 @@ use crate::geom::geom_utility::p1::vec_lin_comb_two_vectors;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::ObjectRef;
 use crate::geom::solution_array::ObjectKind;
-use crate::geom::tol::{approx_tol_3d, are_same, xsect_tol_3d_from_zones, SmallTopoType};
+use crate::geom::tol::{
+    approx_tol_3d, are_same, brep_calc_edge_zone_tol_3d, gap_gain, xsect_tol_3d_from_zones,
+    zone_tol3d, SmallTopoType,
+};
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
@@ -353,6 +371,65 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
     Ok(vec![other, copy])
 }
 
+/// Not upstream: the tolerance geometry fitted along the edge `e` is made at (upstream:
+/// the edge tolerance): [`create_uv_trim_curve`]'s UV trim curves of its edge uses, and
+/// the approximation tolerance of a fillet solver along it
+/// (`blend::fillet_executive::p2` `SetFilletParameters`). The fit is the edge tolerance,
+/// except where that tolerance only covers the edge's gap: at most the gap gain times the
+/// largest edge/face gap `g` of the edge's uses, as the healer sets it to cover a gap
+/// (`Fix_TolSizes`). The fit is then the healer's own value for the edge without an
+/// edge/edge gap, `max(def, max face tolerance, gain * g - def)`
+/// ([`brep_calc_edge_zone_tol_3d`]), capped by the edge tolerance. A tolerance raised
+/// to cover a gap so never loosens the fit, and the fit is never above upstream's (the
+/// edge tolerance).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the unported, cancelled and
+/// preparation errors of [`crate::topology::edgeuse::p1::calc_max_edge_face_gap`].
+pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
+    use crate::topology::edgeuse::p1 as eu1;
+    let edge_tol = b.edge(e)?.tolerance;
+    // (the largest face tolerance of the edge, as `Fix_TolSizes` takes it)
+    let mut max_face_tol = zone_tol3d(k, 0.0);
+    for f in crate::topology::edge::faces(b, e, None)? {
+        let face_tol = crate::topology::face::p2::tolerance(b, f)?;
+        if face_tol > max_face_tol {
+            max_face_tol = face_tol;
+        }
+    }
+    // (no gap can lower the fit below the tolerance the edge has without gaps)
+    if edge_tol <= brep_calc_edge_zone_tol_3d(k, 0.0, 0.0, b, Some(max_face_tol)) {
+        return Ok(edge_tol);
+    }
+    // (the cached gap, else the gap calculated without caching it, so the fit leaves
+    // the edge uses' gap caches as it found them; a failed calculation, ignored as
+    // `GetMaxEdgeFaceGap` ignores it, adds no gap)
+    let mut gap = 0.0_f64;
+    for eu in b.edge(e)?.edgeuses.clone() {
+        let g = if !eu1::has_edge_face_gap(b, eu)? {
+            None
+        } else if eu1::is_max_edge_face_gap_init(b, eu)? {
+            eu1::cached_max_edge_face_gap(b, eu)?
+        } else {
+            ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?
+        };
+        if let Some(g) = g {
+            if g.gap_3d > gap {
+                gap = g.gap_3d;
+            }
+        }
+    }
+    // (NaN compares false: the edge tolerance stays the fit)
+    if edge_tol <= zone_tol3d(k, gap_gain(k) * gap) {
+        let healed = brep_calc_edge_zone_tol_3d(k, 0.0, gap, b, Some(max_face_tol));
+        if healed < edge_tol {
+            return Ok(healed);
+        }
+    }
+    Ok(edge_tol)
+}
+
 /// `CreateUVTrimCurve`: builds the UV trim curve of an edge use by dropping the edge's
 /// curve onto the face's surface. Tries, in order: the UV curve of an edge curve that
 /// is a curve on this surface (a copy; two copies for a seam); `DropCurve` and
@@ -395,6 +472,8 @@ pub fn create_uv_trim_curve(
     let fu = faceuse(b, eu)?
         .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face use"))?;
     let f = faceuse_face(b, fu)?.ok_or_else(|| null("CreateUVTrimCurve: face use without face"))?;
+    // not upstream: the fit tolerance, the edge tolerance unless that only covers a gap
+    let fit_tol = fit_tolerance(k, b, e)?;
     let face_rec = b.face(f)?;
     let face_surface = face_rec
         .surface
@@ -409,8 +488,9 @@ pub fn create_uv_trim_curve(
         .ok_or_else(|| null("CreateUVTrimCurve: edge without curve"))?
         .clone_for_evaluation()?;
     // the drops build the edge curve's cache at the edge's tolerance
-    // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the owner)
-    curve.set_owner_zone_tol_3d(Some(edge_rec.tolerance));
+    // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the owner;
+    // not upstream: at the fit tolerance, [`fit_tolerance`])
+    curve.set_owner_zone_tol_3d(Some(fit_tol));
     let mut edge_domain = edge_rec.interval;
     let uv_trim_at_start = uv_trim_curve(b, eu)?.0.is_some();
     let surface_handle = handle(ObjectKind::Surface, f.index());
@@ -546,7 +626,8 @@ pub fn create_uv_trim_curve(
         let mut surface = face_surface;
         let _ = surface.set_owner(None::<ObjectRef>);
 
-        let mut zone_tol = b.edge(e)?.tolerance;
+        // (not upstream: the fit tolerance, [`fit_tolerance`], for the edge tolerance)
+        let mut zone_tol = fit_tol;
 
         // iter 0 = DropCurve(), 1 = DropAndTrimCurve() only if DropCurve() fails
         // iters 2 and 3 = same with bigger tolerance.
@@ -1076,6 +1157,8 @@ fn finish(
 /// attached UV trim curve's `SmEdgeuse` owner to `e` and returns `pEdge->GetTolerance()`
 /// (`SM_USE_OLDTOL`), rather than the system zone tolerance that owner-less
 /// [`Curve::trim`] reads from `k` (as in `sm_TrimRail`, `blend::fillet_solver::p1`).
+/// Not upstream: that tolerance is the fit tolerance ([`fit_tolerance`]), so a tolerance
+/// raised to cover the edge's gap does not widen the knot snap either.
 fn trim_other_uv_curves(
     k: &Kernel,
     b: &mut Brep,
@@ -1085,7 +1168,7 @@ fn trim_other_uv_curves(
 ) -> Result<()> {
     let mut tk = Kernel::new(&crate::kernel::KernelOptions {
         tolerances: crate::kernel::Tolerances {
-            zone_tol_3d: crate::geom::tol::zone_tol3d(k, crate::topology::edge::tolerance(b, e)?),
+            zone_tol_3d: zone_tol3d(k, fit_tolerance(k, b, e)?),
             ..k.tolerances
         },
         ..crate::kernel::KernelOptions::default()
@@ -2487,9 +2570,15 @@ fn normalized_evaluate_3d(
 /// leaves the face's domain or crosses a seam), the longest run (in edge parameter) of
 /// pieces that meet end to end, as one UV trim curve: the second starts at the edge
 /// parameter where the first ends (`SM_ARE_SAME`) and at the same `(u, v)`, to within
-/// the drop's UV tolerances (`tol_3d` over one plus the surface's derivative lengths).
-/// A run of several pieces is joined exactly (`CreateByJoining`); no piece is
-/// reparameterized. `uv_curves` keeps the one run.
+/// the drop's UV tolerances (`tol_3d` over one plus the surface's derivative lengths)
+/// and within the join's own end-to-end tolerance
+/// ([`BSplineCurve::ends_meet_for_join`]). A run of several pieces is joined exactly
+/// (`CreateByJoining`); no piece is reparameterized. `uv_curves` keeps the one run.
+///
+/// The join's test matters where the drop's UV tolerances are the looser ones (a large
+/// `tol_3d` over a slow surface): pieces that end up to `u_tol` apart are not end to end,
+/// and joining them fails (`segments not end to end`) instead of the longest piece being
+/// kept. (Not in the fork, whose run test is the UV tolerances alone.)
 ///
 /// # Errors
 ///
@@ -2536,6 +2625,7 @@ fn longest_drop_run(
             if !are_same(prev.0.max(), next.0.min())
                 || (prev.2.x - next.1.x).abs() > u_tol
                 || (prev.2.y - next.1.y).abs() > v_tol
+                || !BSplineCurve::ends_meet_for_join(prev.2, next.1)
             {
                 break;
             }
@@ -2816,5 +2906,69 @@ mod tests {
         );
         let p = run.evaluate_point(&k, 0.4).unwrap();
         assert!((p.x - 0.4).abs() < 1e-12 && p.y.abs() < 1e-12, "{p:?}");
+    }
+
+    /// Two drop pieces on consecutive edge parameters whose ends are 0.54 apart in UV, the
+    /// pair `remove_topo_edges_mouse_two_struts` drops at its edge's zone tolerance 3.63.
+    /// The drop's UV tolerances (3.63 over one plus the plane's speeds, about 1.8) pass the
+    /// gap; the join's own end test (`1000 sqrt(eps) (1 + 28.56) = 0.0296`) does not. They
+    /// are no run: the longer piece is kept on its own, where joining them failed with
+    /// `segments not end to end`.
+    #[test]
+    fn longest_drop_run_does_not_join_pieces_the_join_refuses() {
+        use crate::math::Vec3;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let piece = |t0: f64, t1: f64, a: [f64; 2], b: [f64; 2]| {
+            let pts = vec![
+                CPoint::new(a[0], a[1], 0.0, NOW),
+                CPoint::new(b[0], b[1], 0.0, NOW),
+            ];
+            let nl = NlCurve::new(pts, 1, vec![t0, t0, t1, t1]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 2, false))
+        };
+        let k = Kernel::default();
+        let plane = Surface::from(
+            crate::primitive::api_primitives::create_plane_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                1.0,
+                1.0,
+            )
+            .unwrap(),
+        );
+        let (a_end, b_start) = (
+            [28.560_706_814_852_54, 2.175_278_413_029_963],
+            [28.465_894_268_602_494, 1.641_316_435_609_047_7],
+        );
+        // the gap passes the drop's UV tolerances and fails the join's end test
+        let gap = Vec3::new(a_end[0] - b_start[0], a_end[1] - b_start[1], 0.0).length();
+        assert!(gap > 0.5 && gap < 3.63 / 2.0, "{gap}");
+        assert!(!BSplineCurve::ends_meet_for_join(
+            Vec3::new(a_end[0], a_end[1], 0.0),
+            Vec3::new(b_start[0], b_start[1], 0.0)
+        ));
+        let mut pieces = vec![
+            piece(
+                0.0,
+                0.847_722_980_184_200_7,
+                [28.560_706_814_852_54, 0.0],
+                a_end,
+            ),
+            piece(
+                0.847_722_980_184_200_7,
+                26.992_802_825_478_737,
+                b_start,
+                [0.651_850_362_241_519_7, 1.726_906_332_096_931],
+            ),
+        ];
+        longest_drop_run(&k, &plane, 3.630_206_397_575_422_6, &mut pieces).unwrap();
+        assert_eq!(pieces.len(), 1);
+        let ivl = pieces[0].natural_interval();
+        assert!(
+            are_same(ivl.min(), 0.847_722_980_184_200_7)
+                && are_same(ivl.max(), 26.992_802_825_478_737),
+            "the longer piece is kept: {ivl:?}"
+        );
     }
 }

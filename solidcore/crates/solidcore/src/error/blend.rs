@@ -21,6 +21,7 @@
 //! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
 //! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
+//! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
@@ -31,7 +32,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`]              | `SM_ERR_NULL_POINTER`             |
 //! | [`BlendFailure::InvalidValue`]         | `SM_ERR_INVALID_INPUT`            |
@@ -140,6 +141,19 @@ pub enum BlendFailure {
         rate: f64,
         /// `|c'|`: how fast the balls' centres move along the trace.
         speed: f64,
+    },
+    /// The crease trim (#17673) has no construction to end a crease piece of curve kind
+    /// `kind` exactly on the meet at its start or end (`at_end`), at parameter `t` of the
+    /// crease: a curve with no control polygon (an offset, projected, composite, ...
+    /// curve). Unsupported
+    /// ([`ErrorKind::Unsupported`]): never a piece left ending short of its meet.
+    CreasePieceEndUnbuildable {
+        /// The piece's curve kind.
+        kind: &'static str,
+        /// True for the piece's end, false for its start.
+        at_end: bool,
+        /// The end's parameter on the crease.
+        t: f64,
     },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
@@ -357,6 +371,7 @@ impl BlendFailure {
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
@@ -378,7 +393,8 @@ impl BlendFailure {
     /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
     /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
     /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
-    /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`]. A phrase
+    /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`], and
+    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -393,6 +409,7 @@ impl BlendFailure {
                 ErrorKind::NotWithinTolerance
             }
             Self::BallsNest { .. } => ErrorKind::BallsFold,
+            Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -422,6 +439,7 @@ impl BlendFailure {
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -454,6 +472,7 @@ impl BlendFailure {
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -515,6 +534,12 @@ impl core::fmt::Display for BlendFailure {
                 f,
                 "{}: at s = {s} the balls' radius changes at {rate}, as fast as their centres move ({speed}): no rolling-ball surface exists there",
                 self.class()
+            ),
+            Self::CreasePieceEndUnbuildable { kind, at_end, t } => write!(
+                f,
+                "{}: the crease piece's {} at t = {t} cannot be ended on its meet: no construction for a {kind} curve there",
+                self.class(),
+                if *at_end { "end" } else { "start" },
             ),
             Self::Failed(what)
             | Self::InvalidValue(what)
@@ -1047,8 +1072,10 @@ mod tests {
             Failure::new("blend::op", BlendFailure::StageFailed).with_status(SM_ERR_NULL_POINTER);
         let after = line!();
         assert!((before..after).contains(&f.origin().line()));
+        // the path is written with the host's separator (`\` on Windows), so compare its
+        // components, not its text
         assert!(
-            f.origin().file().ends_with("error/blend.rs"),
+            std::path::Path::new(f.origin().file()).ends_with("error/blend.rs"),
             "{}",
             f.origin().file()
         );
@@ -1194,6 +1221,7 @@ mod tests {
             | BlendFailure::SkinPastStationCap { .. }
             | BlendFailure::SkinMeasureNotFinite { .. }
             | BlendFailure::BallsNest { .. }
+            | BlendFailure::CreasePieceEndUnbuildable { .. }
             | BlendFailure::NotCertified { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
@@ -1214,7 +1242,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1392;
+        const PHRASE_CAUSE_SITES: usize = 1335;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -1236,6 +1264,11 @@ mod tests {
                 s: 0.0,
                 rate: 0.0,
                 speed: 0.0,
+            },
+            BlendFailure::CreasePieceEndUnbuildable {
+                kind: "offset",
+                at_end: true,
+                t: 0.0,
             },
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,

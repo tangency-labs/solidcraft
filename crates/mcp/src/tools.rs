@@ -125,9 +125,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              after a delete (undo rewinds the counters with the design), usable right away \
              in sketch.dimension, sketch.constraint.* and sketch.delete. Feature commands return the feature's id \
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
-             When connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot. \
-             view.pick is unavailable in headless MCP, including with frame: \"model\". It is handled by the app and absent from list_commands and describe_command \
-             (read-only; docs/control-protocol.md). \
+             view.pick {rays: [{origin, dir}…]} answers, for each world ray, the body, face, exact world point, outward normal and depth where it first meets \
+             the design (null where it meets nothing), headless too. Connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the same \
+             under pixels of a screenshot; pixels are unavailable in headless MCP, including with frame: \"model\" (read-only; docs/control-protocol.md). \
              `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
             object(
                 json!({
@@ -414,7 +414,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
-             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
+             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
+             A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
+             titled \"Open .ext files with …\" list them).",
             object(
                 json!({
                     "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
@@ -559,6 +561,9 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
             .or_else(|| v.get("failed").and_then(|failed| failed.get("panel_error")).cloned())
     {
         r["structuredContent"] = json!({"panel_error":reason});
+    } else if is_error && let Some(refusal) = v.as_str().and_then(crate::plugin_tools::structured_error) {
+        // A plugin tool's missing grant or a read entry's refusal, as data.
+        r["structuredContent"] = json!({"plugin_error": refusal});
     }
     r
 }
@@ -574,6 +579,10 @@ pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Optio
     let empty = Map::new();
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
+        _ if crate::plugin_tools::is_plugin_tool(name) => match args.as_object() {
+            Some(args) => crate::plugin_tools::call(b, name, args),
+            None => Err(format!("`{name}`: arguments must be an object")),
+        },
         "screenshot" => return screenshot(b, a),
         "compare_picture" => return compare_picture(b, a, opts),
         "batch" => return batch(b, a, opts),
@@ -1621,9 +1630,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
             Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
-            // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
-            // the `pending` tool gets its result.
-            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
+            // Never sent: no app to send it to. Refused unrun: every connection the app serves is
+            // taken (#10967). Or sent and still running (it was not cancelled): the `pending` tool
+            // gets its result.
+            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
                 return (Value::String(e), true);
             }
             // The app may have run it: sending the steps again would apply them twice.

@@ -947,6 +947,27 @@ fn coincident_takes_a_line_midpoint_either_way_round() {
     }
 }
 
+/// A model edge's middle, `{midpoint: {edge}}`, is that edge's middle (#17920): the edge is
+/// projected (linked) and the point is tied to the projected line's middle, not put anywhere
+/// on the edge or at its end, wherever along the edge it was picked.
+#[test]
+fn coincident_takes_a_model_edge_midpoint() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": "20 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "30 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [40, 80], "id": "target"}));
+    let edge = json!({"edge": [100, 10, 20], "body": "Body1"});
+    let result = run(&mut s, "sketch.constraint.coincident", json!({"a": "target", "b": {"midpoint": edge}}));
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point("target").unwrap()).unwrap();
+    assert!(at.dist(Vec2::new(100.0, 25.0)) < 1e-6, "the right-hand edge's middle, not {at:?}: {result}");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })), "{result}");
+    assert!(!sk.links.is_empty(), "the edge is projected linked");
+}
+
 /// A middle Coincident can't take (not a line, an unknown curve, the same middle twice, or the
 /// point already tied there) is refused and leaves the sketch as it was.
 #[test]

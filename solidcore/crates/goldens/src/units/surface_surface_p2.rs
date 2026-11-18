@@ -3009,6 +3009,9 @@ mod tests {
     }
 
     /// Both full crossing branches are distinct, monotone in x, and enclosed on z=x²=y².
+    /// Each branch comes out in two pieces split at the node, where the normals are
+    /// parallel (WR-77); the two pieces of a branch meet there and together run from
+    /// x = 1 to x = -1.
     #[test]
     fn review_crossing_node_has_both_complete_branches() {
         let case = crate::case::regression_case(&Runner, "tc_parabolic_cylinders_crossing_node");
@@ -3037,9 +3040,10 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(result.curves_3d.len(), 2);
+        assert_eq!(result.curves_3d.len(), 4);
         let tol = tol.unwrap();
         let mut branches = Vec::new();
+        let mut spans = Vec::new();
         let mut worst = 0.0_f64;
         for curve in &result.curves_3d {
             let CurveKind::BSpline(curve) = curve.kind() else {
@@ -3049,9 +3053,11 @@ mod tests {
             assert_eq!(net.degree(), 3);
             let start = net.cpts().first().unwrap();
             let end = net.cpts().last().unwrap();
-            let sign = if start.x * start.y > 0.0 { 1 } else { -1 };
+            // the sign of y / x at the end away from the node
+            let far = if start.x.abs() > end.x.abs() { start } else { end };
+            let sign = if far.x * far.y > 0.0 { 1 } else { -1 };
             branches.push(sign);
-            assert!((start.x - 1.0).abs() < 1e-12 && (end.x + 1.0).abs() < 1e-12);
+            spans.push((sign, [start.x, start.y, start.z], [end.x, end.y, end.z]));
             for segment in solidcore::nurbs::nurbs_crv::create_bez_segments(net).unwrap() {
                 let points = segment.cpts();
                 assert_eq!(points.len(), 4);
@@ -3092,9 +3098,23 @@ mod tests {
         branches.sort_unstable();
         assert_eq!(
             branches,
-            [-1, 1],
+            [-1, -1, 1, 1],
             "opposite branches cannot duplicate one another"
         );
+        for sign in [-1, 1] {
+            let mut pieces: Vec<_> = spans.iter().filter(|s| s.0 == sign).collect();
+            pieces.sort_by(|a, b| b.1[0].total_cmp(&a.1[0]));
+            let [(_, s0, e0), (_, s1, e1)] = pieces[..] else {
+                panic!("two pieces per branch");
+            };
+            // from x = 1 to the node, and on from the node to x = -1
+            assert!((s0[0] - 1.0).abs() < 1e-12 && (e1[0] + 1.0).abs() < 1e-12);
+            assert!(
+                e0.iter().zip(s1).all(|(a, b)| (a - b).abs() <= 1e-12),
+                "the pieces of a branch meet: {e0:?} {s1:?}"
+            );
+            assert!(e0.iter().all(|c| c.abs() <= tol), "they meet at the node: {e0:?}");
+        }
         eprintln!("crossing node: complete branches y=±x; enclosed residual {worst:e} <= {tol:e}");
     }
 

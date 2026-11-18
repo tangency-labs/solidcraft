@@ -57,6 +57,10 @@ pub(crate) enum Tree<'a> {
     Flat,
     /// A STEP file's products and placements.
     Step(&'a StepImport),
+    /// A STEP file brought in flat (`file.insert_step`'s `flatten`): every solid a body of the
+    /// import's component, each placement of a part a body of its own where the file places it,
+    /// with no components below it and no joints.
+    StepFlat(&'a StepImport),
     /// A mesh file's components (glTF nodes), bodies already in their component's frame
     /// (checked with [`mesh_plan_fits`] first).
     Mesh(&'a solidcraft_io::MeshPlan),
@@ -66,7 +70,7 @@ pub(crate) enum Tree<'a> {
 /// bodies are meshes (a KiCad board's substrate next to its copper).
 pub(crate) fn add_step_in_component(s: &mut Session, component: u64, file: &str, step: String, feature_name: &str) -> Result<u64> {
     let imp = solidcraft_kernel::step_import_shared(&step).map_err(|e| EngineError::Other(format!("import: {e}")))?;
-    let kind = FeatureKind::Import { file: file.to_string(), step: step.into(), components: imp.tree.clone(), skip: Vec::new() };
+    let kind = FeatureKind::Import { file: file.to_string(), step: step.into(), components: imp.tree.clone(), skip: Vec::new(), records: None };
     let id = s.doc_mut().add_feature(kind, Some(feature_name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
         f.component = component;
@@ -116,9 +120,11 @@ impl Plan {
     fn of(imp: &StepImport) -> Plan {
         let mut plan = Plan::default();
         // One root product is the import's own component; several are components under it.
-        let nodes: Vec<&StepNode> = match imp.tree.as_slice() {
+        // (A root whose solids all failed holds no component.)
+        let roots: Vec<&StepNode> = imp.tree.iter().filter(|n| has_bodies(n, 0)).collect();
+        let nodes: Vec<&StepNode> = match roots.as_slice() {
             [root] => root.children.iter().collect(),
-            roots => roots.iter().collect(),
+            roots => roots.to_vec(),
         };
         let mut seen: HashMap<u64, usize> = HashMap::new();
         for n in nodes {
@@ -208,52 +214,138 @@ fn node_key(imp: &StepImport, node: &StepNode, depth: usize) -> u64 {
     h.finish()
 }
 
-/// For each body `now` gives, the index `stored` gave the same body, or `None` for a body
-/// `stored` doesn't have. A body is the same one when it has the same place in both trees: the
-/// same product at the same position among its siblings, and the same position among that
-/// product's bodies. `None` when the trees disagree about their products (a name or a number of
-/// children), or a body index is out of range or used twice: then nothing can be matched.
-fn matched_bodies(stored: &[StepNode], now: &[StepNode], count: usize) -> Option<Vec<Option<usize>>> {
-    let mut matched = vec![None; count];
+/// How the bodies of a stored tree are the bodies of a read of the same file.
+struct Matched {
+    /// For each body the read gives, the stored index of the same body (`None`: a body the
+    /// stored tree doesn't have).
+    by_new: Vec<Option<usize>>,
+    /// Stored bodies the read doesn't have (a solid this reader leaves out), each with the
+    /// read's node it belongs to (child indices from the roots) and its STEP item: its slot,
+    /// and with it its name, is kept for it.
+    kept: Vec<(Vec<usize>, usize, u64)>,
+}
+
+/// The STEP item of each of `node`'s bodies, as the stored tree says (`None` for a tree saved
+/// before items were kept, or one whose lists disagree).
+fn stored_items(node: &StepNode) -> Option<&[u64]> {
+    (!node.items.is_empty() && node.items.len() == node.bodies.len()).then_some(node.items.as_slice())
+}
+
+/// The product's solids in file order as the read has them: each one's body (`None`: left
+/// out) and STEP item.
+fn planned(node: &StepNode, imp: &StepImport) -> Vec<(Option<usize>, u64)> {
+    let total = node.bodies.len() + node.left_out.len();
+    let mut bodies = node.bodies.iter().enumerate();
+    (0..total)
+        .filter_map(|at| match node.left_out.iter().find(|l| l.at == at) {
+            Some(l) => Some((None, l.item)),
+            None => {
+                let (j, b) = bodies.next()?;
+                let item = node.items.get(j).copied().or_else(|| imp.bodies.get(*b).map(|b| b.source_item))?;
+                Some((Some(*b), item))
+            }
+        })
+        .collect()
+}
+
+/// Which body of `imp` each body of `stored` is (#13382, #16857). A body is the same one when it
+/// is a solid of the same product (same name and place in both trees) read from the same STEP
+/// item. A tree saved before items were kept says which solid each body was by its place among
+/// the product's solids in file order, which is how its reader numbered them when it read every
+/// one; when it read a different number of them, a body is the one with the same name, where
+/// the name says. Never by a body's place among the bodies that happened to be read: one solid
+/// that fails would give every later body the one before's name. `None` when the trees disagree
+/// about their products (a name or a number of children), or a body index is out of range or
+/// used twice: then nothing can be matched.
+fn matched_bodies(stored: &[StepNode], imp: &StepImport, stored_names: &[String]) -> Option<Matched> {
+    let count = imp.bodies.len();
+    let mut m = Matched { by_new: vec![None; count], kept: Vec::new() };
     let mut taken = std::collections::HashSet::new();
-    let mut pending: Vec<(&[StepNode], &[StepNode])> = vec![(stored, now)];
-    while let Some((was, is)) = pending.pop() {
+    let mut pending: Vec<(&[StepNode], &[StepNode], Vec<usize>)> = vec![(stored, &imp.tree, Vec::new())];
+    while let Some((was, is, path)) = pending.pop() {
         if was.len() != is.len() {
             return None;
         }
-        for (a, b) in was.iter().zip(is) {
+        for (k, (a, b)) in was.iter().zip(is).enumerate() {
             if a.name != b.name {
                 return None;
             }
-            for (old, new) in a.bodies.iter().zip(&b.bodies) {
-                let slot = matched.get_mut(*new)?;
-                if slot.is_some() || !taken.insert(*old) {
+            let mut here = path.clone();
+            here.push(k);
+            for old in &a.bodies {
+                if !taken.insert(*old) {
                     return None;
                 }
-                *slot = Some(*old);
             }
-            pending.push((&a.children, &b.children));
+            let now = planned(b, imp);
+            // Each stored body's solid, by its STEP item.
+            let solids: Vec<(usize, Option<u64>)> = match stored_items(a) {
+                Some(items) => a.bodies.iter().copied().zip(items.iter().copied().map(Some)).collect(),
+                None if a.bodies.len() == now.len() => a.bodies.iter().copied().zip(now.iter().map(|(_, item)| Some(*item))).collect(),
+                None => a.bodies.iter().map(|old| (*old, None)).collect(),
+            };
+            let mut used = std::collections::HashSet::new();
+            let mut unnamed = Vec::new();
+            for (old, item) in solids {
+                match item {
+                    Some(item) => match now.iter().find(|(_, i)| *i == item) {
+                        Some((Some(new), _)) => {
+                            let slot = m.by_new.get_mut(*new)?;
+                            if slot.is_some() {
+                                return None;
+                            }
+                            *slot = Some(old);
+                            used.insert(*new);
+                        }
+                        // Not read now: its slot is kept for it.
+                        _ => m.kept.push((here.clone(), old, item)),
+                    },
+                    None => unnamed.push(old),
+                }
+            }
+            // By name, where one stored body and one body read have it.
+            let name_of = |old: usize| stored_names.get(old).map(|n| n.trim()).filter(|n| !n.is_empty());
+            for old in unnamed {
+                let Some(name) = name_of(old) else { continue };
+                let stored_with = a.bodies.iter().filter(|o| name_of(**o) == Some(name)).count();
+                let mut read_with = b.bodies.iter().filter(|new| imp.bodies.get(**new).is_some_and(|x| x.name.trim() == name));
+                let (Some(new), None) = (read_with.next(), read_with.next()) else { continue };
+                if stored_with != 1 || used.contains(new) {
+                    continue;
+                }
+                let slot = m.by_new.get_mut(*new)?;
+                if slot.is_some() {
+                    return None;
+                }
+                *slot = Some(old);
+                used.insert(*new);
+            }
+            pending.push((&a.children, &b.children, here));
         }
     }
-    Some(matched)
+    Some(m)
 }
 
 /// An Import feature written against `imp`'s numbering of the file's bodies (#13382). The
 /// feature keeps its body names, skipped bodies and linked face names by body index, as the
 /// STEP reader that inserted the file numbered them. A later reader can number the same file's
-/// bodies differently, for example when it reads a body an earlier one left out. Each name
-/// then went to the wrong body, which its name put in another component: bodies opened moved
-/// and with another body's shape. The stored tree says which body each index was, so each
-/// stored value moves to the index `imp` gives that body. A body only `imp` has gets the
-/// reader's name, and is skipped when a new insert would skip it. Returns whether anything
-/// changed; the feature is left as it is when the trees can't be matched.
+/// bodies differently, for example when it reads a body an earlier one left out, or leaves out
+/// one an earlier one read (#16857). Each name then went to the wrong body, which its name put
+/// in another component: bodies opened moved and with another body's shape, and features
+/// after the import worked on the wrong body. The stored tree says which body each index was,
+/// so each stored value moves to the index `imp` gives that body. A body only `imp` has gets
+/// the reader's name, and is skipped when a new insert would skip it. A stored body `imp`
+/// doesn't have keeps its name in a slot after `imp`'s bodies, which nothing builds, so its
+/// name goes to no other body and comes back with the solid when a reader reads it again.
+/// Returns whether anything changed; the feature is left as it is when the trees can't be
+/// matched.
 pub(crate) fn realign_import(f: &mut solidcraft_doc::Feature, imp: &StepImport) -> bool {
     let FeatureKind::Import { components, skip, .. } = &f.kind else { return false };
     if components.is_empty() || *components == imp.tree {
         return false;
     }
     let count = imp.bodies.len();
-    let Some(matched) = matched_bodies(components, &imp.tree, count) else { return false };
+    let Some(matched) = matched_bodies(components, imp, &f.body_names) else { return false };
     let stored_count = {
         let mut all = Vec::new();
         for n in components {
@@ -261,30 +353,65 @@ pub(crate) fn realign_import(f: &mut solidcraft_doc::Feature, imp: &StepImport) 
         }
         all.len()
     };
-    if stored_count == count && matched.iter().enumerate().all(|(k, m)| *m == Some(k)) {
-        // The same numbering: only placements or names that don't move bodies differ.
+    if stored_count == count && matched.kept.is_empty() && matched.by_new.iter().enumerate().all(|(k, m)| *m == Some(k)) {
+        // The same numbering: only placements, names or items that don't move bodies differ.
         return false;
     }
     let old_skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
-    let new_skip: std::collections::HashSet<u64> = Plan::of(imp).skip.into_iter().collect();
+    let mut new_skip: std::collections::HashSet<u64> = Plan::of(imp).skip.into_iter().collect();
+    // A flat import (`flatten`) built the later instances a nested one skips: a body only `imp`
+    // has is then built too.
+    let flat = new_skip.iter().any(|k| matched.by_new.get(*k as usize).copied().flatten().is_some_and(|old| !old_skip.contains(&(old as u64))));
+    if flat {
+        new_skip.clear();
+    }
     let skip: Vec<u64> = (0..count as u64)
-        .filter(|k| match matched.get(*k as usize).copied().flatten() {
+        .filter(|k| match matched.by_new.get(*k as usize).copied().flatten() {
             Some(old) => old_skip.contains(&(old as u64)),
             None => new_skip.contains(k),
         })
         .collect();
-    f.body_names = by_new_index(&matched, &f.body_names);
-    if !f.link_faces.is_empty() {
-        f.link_faces = by_new_index(&matched, &f.link_faces);
+    // The tree as read, with a slot after the read's bodies for each stored body it lacks.
+    let mut tree = imp.tree.clone();
+    let mut slots = matched.by_new.clone();
+    for (path, old, item) in &matched.kept {
+        let Some(n) = node_at(&mut tree, path) else { continue };
+        if n.items.len() != n.bodies.len() {
+            continue;
+        }
+        n.bodies.push(slots.len());
+        n.items.push(*item);
+        slots.push(Some(*old));
     }
-    if !f.link_threads.is_empty() {
-        f.link_threads = by_new_index(&matched, &f.link_threads);
+    let names = by_new_index(&slots, &f.body_names);
+    let links = (!f.link_faces.is_empty()).then(|| by_new_index(&slots, &f.link_faces));
+    let threads = (!f.link_threads.is_empty()).then(|| by_new_index(&slots, &f.link_threads));
+    let unchanged = names == f.body_names
+        && links.as_ref().is_none_or(|l| *l == f.link_faces)
+        && threads.as_ref().is_none_or(|t| *t == f.link_threads)
+        && matches!(&f.kind, FeatureKind::Import { components, skip: stored, .. } if *components == tree && *stored == skip);
+    if unchanged {
+        return false;
+    }
+    f.body_names = names;
+    if let Some(links) = links {
+        f.link_faces = links;
+    }
+    if let Some(threads) = threads {
+        f.link_threads = threads;
     }
     if let FeatureKind::Import { components, skip: stored, .. } = &mut f.kind {
-        components.clone_from(&imp.tree);
+        *components = tree;
         *stored = skip;
     }
     true
+}
+
+/// The node at `path` (child indices from the roots).
+fn node_at<'a>(tree: &'a mut [StepNode], path: &[usize]) -> Option<&'a mut StepNode> {
+    let (first, rest) = path.split_first()?;
+    let n = tree.get_mut(*first)?;
+    if rest.is_empty() { Some(n) } else { node_at(&mut n.children, rest) }
 }
 
 /// `stored`, kept by the old body indices, as a list by the new ones (empty for a new body).
@@ -361,6 +488,9 @@ pub(crate) fn add_in_component(
     let (plan, imp) = match tree {
         Tree::Flat => (Plan::default(), None),
         Tree::Step(imp) => (Plan::of(imp), Some(imp)),
+        // The Import feature builds every body where the file places it, in the import's frame:
+        // with nothing to move and nothing skipped, that is the flat import.
+        Tree::StepFlat(imp) => (Plan::default(), Some(imp)),
         Tree::Mesh(m) => (Plan::of_mesh(m).ok_or_else(|| EngineError::Other("import: the file's node tree can't be placed".into()))?, None),
     };
     // The components, each made at its first placement; the others are further occurrences.
@@ -562,7 +692,11 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
             }
             _ => (Vec::new(), Vec::new()),
         };
-        let id = s.doc_mut().add_feature(kind, Some(&f.name))?;
+        // A sketch or plane named like one the design has is numbered, as a paste numbers it.
+        // The features after it reach it by id or through `names`, so they follow the new name.
+        let feature_name =
+            if s.doc.name_clash(&kind, &f.name) { solidcraft_doc::copy_name(&f.name, |n| s.doc.name_clash(&kind, n)) } else { f.name.clone() };
+        let id = s.doc_mut().add_feature(kind, Some(&feature_name))?;
         if let Some(nf) = s.doc_mut().feature_mut(id) {
             nf.component = top;
             nf.body_names = body_names;
@@ -631,6 +765,7 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
             })

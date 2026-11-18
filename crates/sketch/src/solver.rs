@@ -59,6 +59,9 @@ const STALL_RESIDUAL: f64 = 1e-4;
 /// How much less it costs a solve to move a point held on a curve than any other point: such a
 /// point is placed relative to the curve, so it follows the curve rather than the curve it.
 const SLIDE_WEIGHT: f64 = 0.01;
+/// A point that is an end of a mirror axis resists moving: damping it heavily keeps the axis
+/// put when the geometry it mirrors is edited.
+const MIRROR_AXIS_WEIGHT: f64 = 1e8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -159,6 +162,10 @@ struct Layout {
     /// Per variable: a coordinate of a point held on a curve (point on curve, midpoint), which
     /// a solve slides along it before moving the curve (see [`SLIDE_WEIGHT`]).
     slide: Vec<bool>,
+    /// Per variable: a coordinate of a point that is an end of a line used as a mirror axis
+    /// (a `Symmetric` constraint's line). Such a line is a reference for the mirrored geometry
+    /// and must not drift to satisfy an edit made to that geometry: it is made expensive to move.
+    heavy: Vec<bool>,
 }
 
 impl Layout {
@@ -235,7 +242,26 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
             }
         }
     }
-    Layout { pvar, rvar, n, points, slide }
+    let mut heavy = vec![false; n];
+    // Mirror axes: every point that is an end of a line used as the `l` of a Symmetric
+    // constraint is made expensive to move, so the axis stays put when the mirrored geometry
+    // is edited.
+    for c in &sk.constraints {
+        if let ConstraintKind::Symmetric { l, .. } = c.kind
+            && let Some(CurveKind::Line { a, b }) = sk.curves.get(l).map(|cc| &cc.kind)
+        {
+            for pt in [*a, *b] {
+                if let Some(Some(v)) = pvar.get(pt) {
+                    for k in [*v, *v + 1] {
+                        if let Some(h) = heavy.get_mut(k) {
+                            *h = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Layout { pvar, rvar, n, points, slide, heavy }
 }
 
 /// Read-only view of the sketch with variable values substituted.
@@ -880,7 +906,7 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
 /// What a dimension measures on the sketch as it stands (mm, radians for angles); `None` for a
 /// constraint that is not a dimension.
 pub fn measure_dimension(sk: &Sketch, k: &ConstraintKind) -> Option<f64> {
-    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     measure(&State { sk, lay: &lay, x: &[] }, k).filter(|v| v.is_finite())
 }
 
@@ -891,7 +917,7 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
     if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
         return None;
     }
-    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     crate::curves::point_along(&State { sk, lay: &lay, x: &[] }.segs(c), at).filter(|p| p.x.is_finite() && p.y.is_finite())
 }
 
@@ -1481,7 +1507,18 @@ fn lm_run(
         // cheap to move: a point held on a line made the line's far end swing round instead of
         // the point sliding along it.) A point held on a curve is cheaper still, so it slides
         // rather than the curve's ends moving.
-        let weight: Vec<f64> = vars.iter().map(|&v| if lay.slide.get(v).copied().unwrap_or(false) { SLIDE_WEIGHT } else { 1.0 }).collect();
+        let weight: Vec<f64> = vars
+            .iter()
+            .map(|&v| {
+                if lay.heavy.get(v).copied().unwrap_or(false) {
+                    MIRROR_AXIS_WEIGHT
+                } else if lay.slide.get(v).copied().unwrap_or(false) {
+                    SLIDE_WEIGHT
+                } else {
+                    1.0
+                }
+            })
+            .collect();
         for _attempt in 0..30 {
             let linear_work = n.saturating_mul(n).saturating_mul(n).saturating_add(evaluation_work);
             if !within_budget(&mut budget, linear_work) {
@@ -1975,14 +2012,32 @@ pub fn solve_after_edit(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
 /// [`solve_after_edit`] with only the requested diagnostics. Continuation, branch checks and
 /// geometry restoration are identical at every analysis level.
 pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
-    let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
     let drawn: Vec<Vec2> = stored.map_or_else(|| sk.points.iter().map(|p| p.pos).collect(), <[Vec2]>::to_vec);
+    // A constraint added since `old` has no value there. Measure what it reads on the drawn
+    // geometry and use that as the value it was edited from: otherwise neither the value's
+    // continuation nor the storage-side checks see the edit, and a sketch can turn over (a
+    // circle tangent to two lines jumping from inside their angle to outside it, #18364).
+    let mut old = old.clone();
+    if sk.constraints.iter().any(|c| !old.contains_key(&c.id)) {
+        let mut at_drawn = sk.clone();
+        for (p, pos) in at_drawn.points.iter_mut().zip(&drawn) {
+            p.pos = *pos;
+        }
+        for c in &sk.constraints {
+            if !old.contains_key(&c.id)
+                && let Some(value) = measure_dimension(&at_drawn, &c.kind)
+            {
+                old.insert(c.id.clone(), value);
+            }
+        }
+    }
+    let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
     let before = stored.is_none().then(|| sk.clone());
     let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full());
     let report = if report.keeps_orientation() {
         report
     } else {
-        match before.and_then(|before| solve_in_steps(&before, old, analysis)) {
+        match before.and_then(|before| solve_in_steps(&before, &old, analysis)) {
             Some((stepped, stepped_report)) => {
                 *sk = stepped;
                 stepped_report
@@ -2005,7 +2060,32 @@ pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
     let (points, constraints) = (&sk.points, &mut sk.constraints);
     let now = |p: usize| points.get(p).map(|x| x.pos);
     let was = |p: usize| before.get(p).copied();
+    // Pairs of points held level (`HorizontalPoints`) or plumb (`VerticalPoints`): a plain
+    // distance between two of them is a distance along that axis, and has a side all the same.
+    let aligned: Vec<(usize, usize, bool)> = constraints
+        .iter()
+        .filter(|c| !c.driven)
+        .filter_map(|c| match c.kind {
+            ConstraintKind::HorizontalPoints { p, q } => Some((p, q, true)),
+            ConstraintKind::VerticalPoints { p, q } => Some((p, q, false)),
+            _ => None,
+        })
+        .collect();
     for c in constraints.iter_mut() {
+        if let ConstraintKind::Distance { p, q, value } = c.kind
+            && value.abs() <= TOL
+            && !c.driven
+            && now(p).zip(now(q)).is_some_and(|(a, b)| a.dist(b) <= TOL)
+        {
+            let behind = aligned
+                .iter()
+                .filter(|&&(a, b, _)| (a, b) == (p, q) || (a, b) == (q, p))
+                .any(|&(_, _, level)| was(p).zip(was(q)).is_some_and(|(a, b)| if level { b.x < a.x - TOL } else { b.y < a.y - TOL }));
+            if behind && let ConstraintKind::Distance { p, q, .. } = &mut c.kind {
+                std::mem::swap(p, q);
+            }
+            continue;
+        }
         let behind = match c.kind {
             ConstraintKind::DistanceX { p, q, value } if value.abs() <= TOL => {
                 now(p).zip(now(q)).is_some_and(|(a, b)| (b.x - a.x).abs() <= TOL) && was(p).zip(was(q)).is_some_and(|(a, b)| b.x < a.x - TOL)
@@ -2025,8 +2105,11 @@ pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
 /// constraint solved: where [`keep_sides_at_zero`] swapped them, the stored sketch keeps that
 /// order with the solved positions.
 pub fn keep_point_order(stored: &mut ConstraintKind, solved: &ConstraintKind) {
-    use ConstraintKind::{DistanceX, DistanceY};
-    if let (DistanceX { p, q, .. }, DistanceX { p: sp, q: sq, .. }) | (DistanceY { p, q, .. }, DistanceY { p: sp, q: sq, .. }) = (stored, solved) {
+    use ConstraintKind::{Distance, DistanceX, DistanceY};
+    if let (DistanceX { p, q, .. }, DistanceX { p: sp, q: sq, .. })
+    | (DistanceY { p, q, .. }, DistanceY { p: sp, q: sq, .. })
+    | (Distance { p, q, .. }, Distance { p: sp, q: sq, .. }) = (stored, solved)
+    {
         (*p, *q) = (*sp, *sq);
     }
 }
@@ -3625,7 +3708,8 @@ fn solve_inner(
 /// Geometry can also be finalized by feasible cursor motion, without another solve.
 /// Both paths must measure reference dimensions from the pose they publish.
 fn refresh_driven_dimensions(sk: &mut Sketch) {
-    let fixed_lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    let fixed_lay =
+        Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     let measured: Vec<Option<f64>> =
         sk.constraints.iter().map(|c| if c.driven { measure(&State { sk, lay: &fixed_lay, x: &[] }, &c.kind) } else { None }).collect();
     for (c, m) in sk.constraints.iter_mut().zip(measured) {
@@ -3669,7 +3753,8 @@ mod continuation_unit_tests {
         let a = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
         let b = sk.add_point(Vec2::new(40.0, 0.0), None).unwrap();
         let c = sk.add_point(Vec2::new(20.0, 1e-6), None).unwrap();
-        let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+        let lay =
+            Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
         let turn = Orient::Turn([a, b, c]);
         let state =
             |sk: &Sketch| (orientation(&State { sk, lay: &lay, x: &[] }, turn), reference_orientation(&State { sk, lay: &lay, x: &[] }, turn));
@@ -3689,7 +3774,8 @@ mod continuation_unit_tests {
         let q = sk.add_point(Vec2::new(10.0, 5.0), None).unwrap();
         let r = sk.add_point(Vec2::new(0.0, 10.0), None).unwrap();
         let l = sk.add_line(Vec2::new(-5.0, -5.0), Vec2::new(5.0, -5.0), None, None, None).unwrap();
-        let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+        let lay =
+            Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
         let sign = |sk: &Sketch, o: Orient| orientation(&State { sk, lay: &lay, x: &[] }, o);
         let checks = [Orient::SideX(p, q, 10.0), Orient::SideY(p, q, 5.0), Orient::OfLine(q, l, 10.0), Orient::Turn([p, q, r])];
         let before: Vec<_> = checks.iter().map(|o| sign(&sk, *o)).collect();

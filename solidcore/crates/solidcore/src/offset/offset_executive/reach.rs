@@ -33,7 +33,9 @@
 //! the choice of asking again are `MarkusReichart`'s on #2926). Analytic faces are left as
 //! they were.
 
-use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+use crate::blend::fillet_section::certificate::{
+    curve_derivs_over, curve_derivs_over_about, NurbsCurve,
+};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
 use crate::curve::curve::CurveKind;
@@ -441,6 +443,51 @@ fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<E
         Implicit::Cone { .. } | Implicit::Sphere { .. } => Some(Exact::Quadric(equation)),
         Implicit::Torus { .. } => None,
     })
+}
+
+/// How far the plane `old` of a moved face could move and still meet the quadric `q` beside
+/// it, when its new plane `new` (parallel to it) passes the quadric's extent along their
+/// normal and `old` cut the quadric at an angle (strictly inside that extent, by more than
+/// `tolerance`): the distance from `old` to the extent on the side the plane moved to.
+/// `None` where the plane still meets the quadric, where `old` touched it (a plane moved off
+/// a round it was tangent to: a wall closes that gap), or where the quadric has no extent
+/// along the normal: a cone, or a cylinder whose axis is not parallel to the plane.
+///
+/// A sphere about `c` of radius `r` spans `n.c ± r` along a unit `n`; a cylinder about an
+/// axis through `o` square to `n`, `n.o ± r`. The heights are measured against these closed
+/// forms with `tolerance` (the B-rep's, far above their rounding) on either side, so a plane
+/// within the tolerance of the extent is not decided here (the pieces' bounds decide it).
+fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Option<f64> {
+    let n = new.normal;
+    // the move keeps the plane's direction
+    if old.normal.cross(n).length() > EFF_ZERO {
+        return None;
+    }
+    let (middle, half) = match *q {
+        Implicit::Sphere { centre, radius } => (n.dot(centre), radius.abs()),
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } if tan_angle.abs() <= EFF_ZERO && n.dot(axis).abs() <= EFF_ZERO => {
+            (n.dot(origin), radius.abs())
+        }
+        _ => return None,
+    };
+    let (lo, hi) = (middle - half, middle + half);
+    let (was, now) = (n.dot(old.point), n.dot(new.point));
+    // the old plane must cut the quadric at an angle
+    if was <= lo + tolerance || was >= hi - tolerance {
+        return None;
+    }
+    if now > hi + tolerance {
+        Some(hi - was)
+    } else if now < lo - tolerance {
+        Some(was - lo)
+    } else {
+        None
+    }
 }
 
 /// A certified upper bound on the distance from `x` to the surface of class `c` at a point
@@ -1833,16 +1880,49 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
 }
 
 /// The edge point and tangent over the parameters `s`, each with its rate (from the
-/// curve's derivatives to order 2 enclosed over `s`, [`curve_derivs_over`]); `None` where
-/// no piece of the curve covers `s`.
+/// curve's derivatives to order 2 enclosed over `s`, [`curve_derivs_over`], about a point
+/// near `s`, [`curve_derivs_over_about`]); `None` where no piece of the curve covers `s`.
+///
+/// Over a range the derivatives are enclosed about the curve's point at its middle, which
+/// is added back to the point: a rational edge's enclosures are of the size of the edge
+/// near `s`, not of its distance from the origin, which the quotient's weight terms
+/// would otherwise carry into every derivative.
 fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
-    let ders = match curve_derivs_over(cn, s, 2, None) {
-        Ok(d) => d,
-        Err(e @ SolidError::Cancelled { .. }) => return Err(e),
-        Err(_) => return Ok(None),
+    let enclosed = |found: Result<Vec<V3<Ivl>>>| match found {
+        Ok(d) => Ok(Some(d)),
+        Err(e @ SolidError::Cancelled { .. }) => Err(e),
+        Err(_) => Ok(None),
     };
-    let (Some(&d0), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+    // at a single parameter the enclosures are the rounding's only
+    if s.lo >= s.hi {
+        let Some(ders) = enclosed(curve_derivs_over(cn, s, 2, None))? else {
+            return Ok(None);
+        };
+        let (Some(&d0), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+            return Ok(None);
+        };
+        return Ok(Some((Dv::of(d0, d1), Dv::of(d1, d2))));
+    }
+    let Some(middle) = enclosed(curve_derivs_over(cn, Ivl::from(s.mid()), 0, None))? else {
         return Ok(None);
+    };
+    let Some(c) = middle.first().map(|p| [p.x.mid(), p.y.mid(), p.z.mid()]) else {
+        return Ok(None);
+    };
+    if !c.iter().all(|x| x.is_finite()) {
+        return Ok(None);
+    }
+    let Some(ders) = enclosed(curve_derivs_over_about(cn, s, 2, None, c))? else {
+        return Ok(None);
+    };
+    let [cx, cy, cz] = c;
+    let (Some(&moved), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+        return Ok(None);
+    };
+    let d0 = V3 {
+        x: moved.x + Ivl::from(cx),
+        y: moved.y + Ivl::from(cy),
+        z: moved.z + Ivl::from(cz),
     };
     Ok(Some((Dv::of(d0, d1), Dv::of(d1, d2))))
 }
@@ -2706,6 +2786,39 @@ pub fn local_extension_reach(
                 }
                 (&Exact::Plane(plane), Exact::Quadric(q))
                 | (Exact::Quadric(q), &Exact::Plane(plane)) => {
+                    // a moved plane past where the kept quadric beside it ends meets it
+                    // nowhere: refused, naming how far it could move
+                    let plane_face = if matches!(own, Exact::Plane(_)) {
+                        own_face
+                    } else {
+                        other_face
+                    };
+                    let quadric_face = if plane_face == own_face {
+                        other_face
+                    } else {
+                        own_face
+                    };
+                    if let (Some(face), Some(side)) = (plane_face, quadric_face) {
+                        if is_moved(Some(face)) && !is_moved(Some(side)) {
+                            let old = match crate::topology::face::p2::surface(b, face)? {
+                                Some(s) => exact_class(k, s, tolerance)?,
+                                None => None,
+                            };
+                            if let Some(Exact::Plane(old)) = old {
+                                if let Some(largest) = past_extent(old, plane, q, tolerance) {
+                                    return Err(Failure::new(
+                                        LOCAL_OP,
+                                        OffsetFailure::PastSide {
+                                            face,
+                                            side,
+                                            largest,
+                                        },
+                                    )
+                                    .into_error());
+                                }
+                            }
+                        }
+                    }
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
                         Ok(plane_quadric_piece(over, mid, dt, plane, q, tolerance))
                     };
@@ -3652,6 +3765,52 @@ mod tests {
             .unwrap()
     }
 
+    /// A plane `z = h` moved off a sphere r 50 about the origin, which it cut at an angle,
+    /// is past the sphere above z = 50 or below z = -50: the room is 50 ∓ h (#18564). Within
+    /// the sphere, or from a plane that touched it, nothing is decided here; nor for a cone,
+    /// whose extent is unbounded. A cylinder r 20 along x spans z = ±20.
+    #[test]
+    #[allow(clippy::float_cmp)] // exact differences of short decimals
+    fn a_plane_moved_past_a_quadrics_extent_names_its_room() {
+        let at = |z: f64| Tangent {
+            point: Vec3::new(0.0, 0.0, z),
+            normal: Vec3::Z,
+            raw: Vec3::Z,
+        };
+        let ball = Implicit::Sphere {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            radius: 50.0,
+        };
+        let tol = 1e-5;
+        assert_eq!(past_extent(at(30.0), at(55.0), &ball, tol), Some(20.0));
+        assert_eq!(past_extent(at(30.0), at(-60.0), &ball, tol), Some(80.0));
+        assert_eq!(past_extent(at(30.0), at(49.0), &ball, tol), None);
+        // a plane that touched the sphere at its top, moved off it: a wall closes that gap
+        assert_eq!(past_extent(at(50.0), at(51.0), &ball, tol), None);
+        let rod = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::X,
+            radius: 20.0,
+            tan_angle: 0.0,
+        };
+        assert_eq!(past_extent(at(10.0), at(25.0), &rod, tol), Some(10.0));
+        assert_eq!(past_extent(at(20.0), at(25.0), &rod, tol), None);
+        let upright = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: 20.0,
+            tan_angle: 0.0,
+        };
+        assert_eq!(past_extent(at(10.0), at(1e4), &upright, tol), None);
+        let cone = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::X,
+            radius: 20.0,
+            tan_angle: 0.2,
+        };
+        assert_eq!(past_extent(at(10.0), at(1e4), &cone, tol), None);
+    }
+
     fn plane_at_x(x: f64) -> Surface {
         Surface::from(crate::surface::plane::Plane::from_normal(
             Point3::new(x, 0.0, 0.0),
@@ -4593,6 +4752,57 @@ mod tests {
     #[test]
     fn a_half_spherical_bored_slab_drafts_five_degrees_to_its_closed_form_volume() {
         spherical_bored_slab_draft_volume(true, 5.0);
+    }
+
+    /// A 1000 x 200 x 1 plate about the origin less a blind hole r 0.2, 0.4 deep, at
+    /// (`x`, 0), its top face offset 0.4 (the stress corpus's S0475): the plate grows to
+    /// 1.4 and the hole to 0.8 deep, `V = 1000 · 200 · 1.4 − π 0.2² 0.8`, with the faces,
+    /// edges and vertices it had (the box's 6, 12 and 8, the hole's wall and floor, its
+    /// two rims and seam and their two vertices). The reach of the top's rim is bounded
+    /// from the rim's enclosures over pieces of it, a rational circle 0.2 across hundreds
+    /// from the origin.
+    fn plate_with_hole_offset(x: f64) {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::mass::integrator::properties::brep_volume_default;
+        use crate::offset::offset_faces::OffsetFacesExecutive;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::surface::plane::Plane;
+        let mut k = Kernel::default();
+        let plate =
+            create_box(&mut k, Point3::new(-500.0, -100.0, 0.0), 1000.0, 200.0, 1.0).unwrap();
+        let hole = create_cylinder(&mut k, Point3::new(x, 0.0, 0.6), 0.2, 1.4).unwrap();
+        let mut b = boolean_difference(&mut k, plate, hole).unwrap();
+        let top: Vec<FaceId> = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| {
+                let face = b.face(f).unwrap();
+                let s = face.surface.as_ref().unwrap();
+                s.is_kind_of(Plane::TYPE).unwrap()
+                    && (s.evaluate_point(&k, face.uv_domain.mid()).unwrap().z - 1.0).abs() < 1e-9
+            })
+            .collect();
+        assert_eq!(top.len(), 1);
+        let mut ex = OffsetFacesExecutive::new();
+        let made = ex.offset_faces(&mut k, &mut b, &top, 0.4);
+        assert!(made.is_ok(), "x {x}: {made:?}");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        assert_eq!(bp1::faces(&b, None).unwrap().len(), 8, "x {x}");
+        assert_eq!(b.edges().ids().count(), 15, "x {x}");
+        assert_eq!(bp1::vertices(&b, None).unwrap().len(), 10, "x {x}");
+        let volume = brep_volume_default(&k, &mut b, 1e-7).unwrap();
+        let expected = 1000.0 * 200.0 * 1.4 - core::f64::consts::PI * 0.04 * 0.8;
+        assert!(
+            (volume - expected).abs() < 1e-6,
+            "x {x}: {volume} against {expected}"
+        );
+    }
+
+    #[test]
+    fn a_plate_top_offset_beside_a_small_hole_far_from_the_origin_moves() {
+        for x in [-200.0, -300.0, -490.0] {
+            plate_with_hole_offset(x);
+        }
     }
 
     #[test]

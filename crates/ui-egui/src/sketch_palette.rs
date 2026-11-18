@@ -373,6 +373,18 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let feature = active_feature(app);
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
+    // A construction line tool that takes a length has a line type of its own, which the Line
+    // Type icons show and set while it runs, in place of the drawing line type it does not use
+    // (#15066).
+    // With the Construction/Normal switch (`construction_line_classic`) they leave the tool alone.
+    let tool_line_type = app.tool.as_ref().filter(|t| !has_curves && !t.classic).and_then(|t| {
+        let mode = solidcraft_engine::cmd::construction_line_mode(t.cmd)?;
+        crate::sketch_construction::takes_length(mode).then(|| crate::sketch_construction::shown_line_type(t))
+    });
+    let row_types: [bool; 4] = match tool_line_type {
+        Some(kind) => std::array::from_fn(|i| i == usize::from(kind)),
+        None => selected_types,
+    };
     let draw_body = |ui: &mut egui::Ui| {
         let t = Tokens::get();
         let status_label = crate::ui_kit::text(ui, &status, crate::ui_kit::Text::Report("sketch_constraints", !solved));
@@ -415,6 +427,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             start = section.flatten();
             section_alias("sketch_palette:feature_fold", "Feature Options");
+            // The tool icons' last row otherwise all but touches the Line Type row.
+            ui.add_space(t.space_6);
         }
         crate::ui_kit::row(ui, "Line Type", |ui| {
             // Normal, Construction, Centerline and the Infinite line, as icons. With a
@@ -428,14 +442,14 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 };
                 crate::ui_kit::IconSegment { key, icon, tip }
             });
-            let mut selected = selected_types.iter().position(|on| *on).unwrap_or(usize::MAX);
-            if crate::ui_kit::segmented_icons(ui, &mut selected, &segments, &selected_types) {
+            let mut selected = row_types.iter().position(|on| *on).unwrap_or(usize::MAX);
+            if crate::ui_kit::segmented_icons(ui, &mut selected, &segments, &row_types) {
                 linetype = u8::try_from(selected).ok();
             }
         });
-        // In words: the selection's line types (several for a mixed selection), or the
-        // mode new curves are drawn in.
-        let names: Vec<&str> = LINE_TYPES.iter().zip(selected_types).filter(|(_, on)| *on).map(|((_, _, name), _)| app.tr_label(name)).collect();
+        // In words: the selection's line types (several for a mixed selection), the mode new
+        // curves are drawn in, or what the construction line tool will draw.
+        let names: Vec<&str> = LINE_TYPES.iter().zip(row_types).filter(|(_, on)| *on).map(|((_, _, name), _)| app.tr_label(name)).collect();
         crate::ui_kit::caption(ui, "Line Type", &names.join(", "));
         for key in ["show_constraints", "show_dimensions", "show_points", "snap"] {
             if let Some((_, label)) = TOGGLES.iter().find(|(k, _)| *k == key)
@@ -448,7 +462,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui,
             "construction_mode",
             solidcraft_ui_text::tr("ui.palette_construction_mode"),
-            selected_types.get(1).copied().unwrap_or(false),
+            row_types.get(1).copied().unwrap_or(false),
         );
         crate::ui_kit::section(ui, "more", more, false, |ui| {
             for (key, label) in TOGGLES {
@@ -503,7 +517,21 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.set_status(error, true);
         }
     }
-    if let Some(kind) = linetype {
+    // With a construction line tool running, the Construction mode box switches the tool's
+    // segment between Construction and Normal, as the Line Type icons do.
+    if construction && tool_line_type.is_some() {
+        construction = false;
+        linetype = Some(if row_types[1] { 0 } else { 1 });
+    }
+    if let Some(kind) = linetype
+        && tool_line_type.is_some()
+    {
+        // The click would otherwise leave the shape's dimension box without the keyboard.
+        crate::sketch_dims::restore_box_focus(app, &ctx);
+        if let Some(t) = app.tool.as_mut() {
+            crate::sketch_construction::choose_line_type(&ctx, t, kind);
+        }
+    } else if let Some(kind) = linetype {
         if has_curves {
             set_linetype(app, kind);
         } else {
