@@ -34,10 +34,11 @@ use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::boolean::boolean;
+use solidcore_ops::BooleanOp;
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
     make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
-    BooleanOp, Error, FitKind, Order, SetBack, Turn, Unblendable,
+    Error, FitKind, Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
