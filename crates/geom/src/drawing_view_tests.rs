@@ -191,7 +191,7 @@ fn a_scale_reads_and_writes_as_paper_to_model() {
         assert_eq!(serde_json::from_value::<Scale>(serde_json::json!(text)).unwrap(), s);
     }
     let not_scales = [
-        "", "1", "1:", ":2", "1:2:3", "0:1", "1:0", "-1:2", "1:-2", "1:100001", "1001:1", "1/2", " 1:2", "1:2 ", "1e3:1", "NaN:1", "inf:1", "1..5:1",
+        "", "1", "1:", ":2", "1:2:3", "0:1", "1:0", "-1:2", "1:-2", "1:100001", "1001:1", "1/2", "1 0:1", "1e3:1", "NaN:1", "inf:1", "1..5:1",
         "1:2.", "١:٢",
     ];
     for text in not_scales {

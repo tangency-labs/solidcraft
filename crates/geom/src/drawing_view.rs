@@ -274,7 +274,7 @@ impl FromStr for Scale {
     type Err = Invalid;
 
     fn from_str(text: &str) -> Result<Scale> {
-        let parts = text.split_once(':').and_then(|(p, m)| Some((decimal(p)?, decimal(m)?)));
+        let parts = text.split_once(':').and_then(|(p, m)| Some((decimal(p.trim())?, decimal(m.trim())?)));
         let (paper, model) = parts.ok_or(Invalid("a scale is written paper:model, such as 1:2"))?;
         Scale::new(paper, model)
     }

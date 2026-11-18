@@ -741,6 +741,62 @@ fn hostile_view_creation_is_refused() {
     assert!(create_refused(&mut s, BASE, json!({"sheet": "Sheet 1"})).contains("draws no design"));
 }
 
+/// A scale typed with spaces or tabs round its numbers is the same scale, still written without
+/// them: through the parser, a file's reader, `drawing.view.base` and `drawing.view.edit`.
+#[test]
+fn a_scale_typed_with_spaces_round_its_numbers_is_the_same_scale() {
+    for (typed, plain) in [("1 : 1", "1:1"), (" 1 :2 ", "1:2"), ("1\t:\t2", "1:2"), ("2.5\u{a0}:\u{a0}1", "2.5:1")] {
+        let plain: Scale = plain.parse().unwrap();
+        assert_eq!(typed.parse::<Scale>().ok(), Some(plain), "{typed:?}");
+        assert_eq!(serde_json::from_value::<Scale>(json!(typed)).ok(), Some(plain), "{typed:?}");
+        assert_eq!(typed.parse::<Scale>().unwrap().to_string(), plain.to_string(), "{typed:?}");
+    }
+    let mut s = block_drawing();
+    let (made, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": " 1 :2 "}));
+    assert_eq!(made["scale"]["text"], "1:2");
+    assert_eq!(saved(&s, front).settings.scale, Some("1:2".parse().unwrap()));
+    for (typed, plain) in [("1 : 1", "1:1"), ("1\t:\t5", "1:5")] {
+        edit_view(&mut s, front, json!({"scale": typed}));
+        assert_eq!(saved(&s, front).settings.scale, Some(plain.parse().unwrap()), "{typed:?}");
+        assert_eq!(inspect_view(&mut s, front)["settings"]["scale"]["value"], plain, "{typed:?}");
+    }
+}
+
+/// Seeded runs of spaces, tabs and no-break spaces round the numbers of scales, valid and hostile,
+/// give the answer the text gets without them, from the parser and a file's reader alike. A space
+/// inside a number, a text with no colon and the ratio sign stay refused, and nothing panics.
+#[test]
+fn seeded_spaces_round_a_scales_numbers_change_nothing() {
+    let pick = |seed: u64, salt: u64, n: usize| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) as usize % n;
+    // Up to three of a space, a tab and a no-break space (U+00A0): `trim` removes each.
+    let blank =
+        |seed: u64, salt: u64| (0..pick(seed, salt, 4) as u64).map(|i| [' ', '\t', '\u{a0}'][pick(seed, salt * 8 + i, 3)]).collect::<String>();
+    let huge = "9".repeat(400);
+    // Each side is a plain number for 3 in 4 values of two bits of the seed, so exactly 9 in 16 texts
+    // have two, and any two plain numbers make a scale (their ratios stay within 1:400 and 400:1).
+    let plain = ["1", "2", "2.5", "0.5", "10", "0.25", "7", "100"];
+    let other = ["1000", "100000", "0.000001", "1000001", "0", "", "-1", "+1", "1e3", "NaN", "inf", "1.", ".5", "1..5", ":2", huge.as_str()];
+    let part = |seed: u64, side: u64| {
+        let (list, salt) = if !(seed >> (2 * side)).is_multiple_of(4) { (&plain[..], 1) } else { (&other[..], 7) };
+        list[pick(seed, salt + side, list.len())]
+    };
+    let read = |text: &str| (text.parse::<Scale>().ok(), serde_json::from_value::<Scale>(json!(text)).ok());
+    let mut scales = 0;
+    for seed in 1..=2000u64 {
+        let (paper, model) = (part(seed, 0), part(seed, 1));
+        let typed = format!("{}{paper}{}:{}{model}{}", blank(seed, 3), blank(seed, 4), blank(seed, 5), blank(seed, 6));
+        let plain = read(&format!("{paper}:{model}"));
+        assert_eq!(read(&typed), plain, "seed {seed}: {typed:?}");
+        scales += usize::from(plain.0.is_some());
+    }
+    assert!(scales >= 1125, "{scales} of the 2000 texts were scales: at least the 1125 (9 in 16) of two plain numbers are");
+    let refused =
+        ["1 1", ":", "1:", " : ", "1::2", "-1 : 2", "1e3:1", "0:1", "NaN:1", "inf:1", "", "1 0:1", "1:2 0", "2 .5:1", "1\u{2236}1", "1 \u{2236} 1"];
+    for text in refused {
+        assert_eq!(read(text), (None, None), "{text:?}");
+    }
+}
+
 /// A view's ids come from the session's id source: sessions seeded alike make the same ids.
 #[test]
 fn a_new_views_id_comes_from_the_sessions_seed() {
