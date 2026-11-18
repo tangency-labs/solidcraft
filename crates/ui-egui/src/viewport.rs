@@ -5086,7 +5086,7 @@ fn reference_line(sc: &mut GpuScene, a: [f32; 3], b: [f32; 3], col: [u8; 4], wid
 /// highlight (a whole scanned mesh is one face) is not built again, and the cached scene not
 /// drawn again, at every move of the pointer across it. An edge keeps its `mid`, which picks the
 /// part of a split edge that is lit (`edge_of`); a vertex or a sketch point is its position.
-fn hover_drawn(hover: &Option<Hit>) -> String {
+pub(crate) fn hover_drawn(hover: &Option<Hit>) -> String {
     match hover {
         Some(Hit::Face { body, index, .. }) => format!("face {body:?} {index}"),
         Some(Hit::Plane { name, .. }) => format!("plane {name:?}"),
@@ -8432,11 +8432,6 @@ const WOKEN_CENTRE_PX: f32 = 16.0;
 /// circle to reach the other side of it, but not wander off and leave the cross behind (#16346).
 const WOKEN_CENTRE_FAR: f64 = 1.2;
 
-/// Hovering a circle's or an arc's edge in the sketch being edited wakes its centre: drawn, and
-/// picked from further away, so a line or a dimension is easily taken to it, and it stays awake
-/// while the pointer crosses the circle's inside to it. Hovering another curve or point (but
-/// that centre) puts it back to sleep, as does leaving the sketch, taking the pointer past the
-/// circle's own size from the centre, and clicking empty space (#16346).
 /// What the last frame's view needs to tell, without a frame, that moving the pointer changes
 /// nothing on screen ([`follow_pointer_without_frame`]): the window then skips the frame that pointer
 /// motion asks for, instead of drawing the same picture again at every move.
@@ -8458,6 +8453,8 @@ pub struct QuietMotion {
     drag: Option<egui::Id>,
     /// What the hover highlight draws ([`hover_drawn`]).
     hover: String,
+    /// The joint glyphs drawn: one names its joint in a tooltip while the pointer is on it.
+    glyphs: Vec<crate::dialogs_assembly::JointGlyph>,
 }
 
 impl QuietMotion {
@@ -8495,14 +8492,19 @@ impl QuietMotion {
         if click != Some(resp.id) || drag != Some(resp.id) {
             return None;
         }
+        // A joint glyph under the pointer shows its tooltip at the pointer, which follows it.
+        let glyphs = if crate::joint_handles::visible(app) { Vec::new() } else { crate::dialogs_assembly::joint_glyph_plan(app, &proj) };
+        if ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| crate::dialogs_assembly::joint_glyph_at(&glyphs, p).is_some()) {
+            return None;
+        }
         let readout = crate::view_angles::readout_rect(ui.ctx(), rect).filter(|_| app.preferences.show_view_angles).unwrap_or(Rect::NOTHING);
-        Some(Self { rect, excluded: [axes, readout], proj, widgets, click, drag, hover: hover_drawn(&app.viewport.hover) })
+        Some(Self { rect, excluded: [axes, readout], proj, widgets, click, drag, hover: hover_drawn(&app.viewport.hover), glyphs })
     }
 }
 
 /// Answer a pointer move to `pos` (in points) without a frame when it changes nothing the last
-/// frame drew: the view was quiet ([`QuietMotion`]), the pointer stays on it with no other widget
-/// reached, and what is under it lights up the same. The model is picked again here, as the frame
+/// frame drew: the view was quiet ([`QuietMotion`]), the pointer stays on it with no other widget,
+/// joint glyph or Joint Move handle reached, and what is under it lights up the same. The model is picked again here, as the frame
 /// would; nothing else of a frame runs. `ctx` is the window's: its last pass's widgets are
 /// hit-tested at `pos`.
 ///
@@ -8515,6 +8517,10 @@ pub fn follow_pointer_without_frame(app: &mut SolveApp, ctx: &egui::Context, pos
         return false;
     };
     if !pos.is_finite() || !q.rect.contains(pos) || q.excluded.iter().any(|r| r.contains(pos)) || crate::shell::covered(app, pos) {
+        return false;
+    }
+    // A joint glyph's tooltip and a Joint Move handle's brightening are drawn by a frame.
+    if crate::dialogs_assembly::joint_glyph_at(&q.glyphs, pos).is_some() || crate::joint_handles::owns_pointer(app, &q.proj, pos) {
         return false;
     }
     let hits = ctx.widget_hits_at(pos);
@@ -8534,6 +8540,11 @@ pub fn follow_pointer_without_frame(app: &mut SolveApp, ctx: &egui::Context, pos
     true
 }
 
+/// Hovering a circle's or an arc's edge in the sketch being edited wakes its centre: drawn, and
+/// picked from further away, so a line or a dimension is easily taken to it, and it stays awake
+/// while the pointer crosses the circle's inside to it. Hovering another curve or point (but
+/// that centre) puts it back to sleep, as does leaving the sketch, taking the pointer past the
+/// circle's own size from the centre, and clicking empty space (#16346).
 fn wake_centre(app: &mut SolveApp, hits: &[Hit], pointer: Option<Pos2>, proj: &Proj) {
     let Some(active) = app.session.active_sketch else {
         app.viewport.woken_centre = None;
