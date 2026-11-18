@@ -51,7 +51,12 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   left: the 27 there were now keep upstream's tolerance or are raised to cover);
 /// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not (for
 ///   `single_face_fillet1019_8` the gap is a sampled Hausdorff distance: the trims' images
-///   run up to 6.8e-4 from the edge curve at the same parameter but 2.16e-4 from the curve);
+///   run up to 6.8e-4 from the edge curve at the same parameter but 2.16e-4 from the curve;
+///   for `fillet_each_fillet1019` and `single_face_fillet1019_3/6` the gap is sampled at the
+///   same parameter, 2.68e-4 and 2.76e-4 on the two trims, about half the new 5.43e-4, while
+///   face 0's trim, which comes out of the merged main's trim edits with its control points
+///   from the second on 5.1e-9 higher in `v`, has a `B` of 5.77e-3, 21 times its sampled
+///   gap; face 0's trim was certified before that merge, with `B` 2.67e-4);
 /// - `no-estimate`: the trim's image could not be sampled;
 /// - `face-bound-loose`: an edge whose B-rep keeps no UV trim, whose face-gap enclosure
 ///   exceeds the new tolerance.
