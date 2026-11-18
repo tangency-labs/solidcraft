@@ -54,6 +54,25 @@ pub(crate) fn splits(
     reach: f64,
     loops: &[seam::Loop],
 ) -> Vec<(usize, usize, f64)> {
+    let mut out: Vec<_> = events(s, reach, loops)
+        .into_iter()
+        .map(|e| (e.at.0, e.at.1, e.fraction))
+        .collect();
+    out.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)).then(a.2.total_cmp(&b.2)));
+    out.dedup();
+    out
+}
+
+/// A directed crossing, retaining the other chord's identity. `end` identifies a touching
+/// endpoint of the other chord; proper crossings have no endpoint.
+pub(crate) struct Event {
+    pub at: (usize, usize),
+    pub other: (usize, usize),
+    pub end: Option<usize>,
+    pub fraction: f64,
+}
+
+pub(crate) fn events(s: &super::poles::Face, reach: f64, loops: &[seam::Loop]) -> Vec<Event> {
     let dom = uv::domain(s);
     let pole = |q: [f64; 2]| (0..2).any(|d| s.pole(q, d, reach));
     let mut chords: Vec<Chord> = Vec::new();
@@ -123,7 +142,7 @@ pub(crate) fn splits(
     };
     // Sweep along u: only chords whose u ranges overlap can cross.
     chords.sort_by(|x, y| x.lo(0).total_cmp(&y.lo(0)));
-    let mut out: Vec<(usize, usize, f64)> = Vec::new();
+    let mut out: Vec<Event> = Vec::new();
     for (i, x) in chords.iter().enumerate() {
         for y in chords.iter().skip(i + 1) {
             if y.lo(0) > x.hi(0) {
@@ -143,10 +162,20 @@ pub(crate) fn splits(
                 let inside = |f: f64| f.is_finite() && f > 0.0 && f < 1.0;
                 let (fx, fy) = (det(q, s) / den, det(q, r) / den);
                 if inside(fx) {
-                    out.push((x.at.0, x.at.1, fx));
+                    out.push(Event {
+                        at: x.at,
+                        other: y.at,
+                        end: None,
+                        fraction: fx,
+                    });
                 }
                 if inside(fy) {
-                    out.push((y.at.0, y.at.1, fy));
+                    out.push(Event {
+                        at: y.at,
+                        other: x.at,
+                        end: None,
+                        fraction: fy,
+                    });
                 }
             }
             // A node of one chord lying on the other (inside it, not at its ends) is no crossing,
@@ -160,24 +189,33 @@ pub(crate) fn splits(
                 if along(a.a, a.b, b.a, b.b) {
                     continue;
                 }
-                for q in [b.a, b.b] {
+                for (end, q) in [b.a, b.b].into_iter().enumerate() {
                     if on(a.a, a.b, q) {
                         let dx = a.b[0] - a.a[0];
                         let dy = a.b[1] - a.a[1];
                         let f = ((q[0] - a.a[0]) * dx + (q[1] - a.a[1]) * dy) / (dx * dx + dy * dy);
-                        out.push((a.at.0, a.at.1, f));
+                        out.push(Event {
+                            at: a.at,
+                            other: b.at,
+                            end: Some(end),
+                            fraction: f,
+                        });
                     }
                 }
             }
         }
     }
-    out.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)).then(a.2.total_cmp(&b.2)));
-    out.dedup();
+    out.sort_by(|a, b| {
+        (a.at, a.other, a.end)
+            .cmp(&(b.at, b.other, b.end))
+            .then(a.fraction.total_cmp(&b.fraction))
+    });
+    out.dedup_by(|a, b| a.at == b.at && a.other == b.other && a.end == b.end);
     out
 }
 
 /// Whether `q` lies on the segment `ab` within [`STRADDLE`] (of the segment's squared length,
-/// off its line) strictly between its ends (not at either, by the same measure along it).
+/// off its line) strictly between its ends.
 fn on(a: [f64; 2], b: [f64; 2], q: [f64; 2]) -> bool {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let len2 = dx * dx + dy * dy;
@@ -187,7 +225,7 @@ fn on(a: [f64; 2], b: [f64; 2], q: [f64; 2]) -> bool {
     let (qx, qy) = (q[0] - a[0], q[1] - a[1]);
     let off = (dx * qy - dy * qx).abs();
     let along = (dx * qx + dy * qy) / len2;
-    off <= 1e3 * STRADDLE * len2 && along > 1e-6 && along < 1.0 - 1e-6
+    off <= 1e3 * STRADDLE * len2 && along > 0.0 && along < 1.0
 }
 
 /// Whether `c` and `d` both lie on the line of `ab` (within [`on`]'s measure).

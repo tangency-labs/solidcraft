@@ -673,3 +673,149 @@ fn crossing_refinement_keeps_the_crossing_parameter_near_an_end() {
         assert!(events.contains(&(1, 0, 0.5)), "{events:?}");
     }
 }
+
+/// Rebuild two four-edge loops from shared nodes, optionally traversing both backwards.
+fn crossing_test_boundary(nodes: &[edges::Nodes], reversed: bool, scale: [f64; 2]) -> Boundary {
+    let mut out = Boundary::default();
+    for group in 0..2 {
+        let mut lp = seam::Loop {
+            pts: Vec::new(),
+            uv: Vec::new(),
+        };
+        let mut segments = Vec::new();
+        let ids: Vec<usize> = (group * 4..group * 4 + 4).collect();
+        for e in if reversed {
+            ids.into_iter().rev().collect::<Vec<_>>()
+        } else {
+            ids
+        } {
+            let n = &nodes[e];
+            let js: Vec<usize> = (0..n.points.len() - 1).collect();
+            for j in if reversed {
+                js.into_iter().rev().collect::<Vec<_>>()
+            } else {
+                js
+            } {
+                let p = n.points[if reversed { j + 1 } else { j }];
+                lp.pts.push(p);
+                lp.uv.push([p.x * scale[0], p.y * scale[1]]);
+                segments.push((e as u32, j as u32));
+            }
+        }
+        out.loops.push(lp);
+        out.segments.push(segments);
+    }
+    out
+}
+
+fn crossing_test_nodes(f: f64) -> Vec<edges::Nodes> {
+    let loops = [
+        [[0.0, 0.0], [1.0, 0.0], [1.0, -2.0], [0.0, -2.0]],
+        [[f, -1.0], [f, 1.0], [-1.0, 1.0], [-1.0, -1.0]],
+    ];
+    loops
+        .into_iter()
+        .flat_map(|lp| {
+            (0..4).map(move |k| edges::Nodes {
+                points: [lp[k], lp[(k + 1) % 4]]
+                    .map(|q| Vec3::new(q[0], q[1], 0.0))
+                    .to_vec(),
+                params: vec![0.0, 1.0],
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
+    let b = crate::fixtures::fixture("box_10x6x4");
+    let evals = [poles::Face::new(
+        EvalSurface::Plane {
+            origin: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
+        },
+        0.0,
+    )];
+    let f = 2.0_f64.powi(-20);
+    for reversed in [false, true] {
+        let mut nodes = crossing_test_nodes(f);
+        let boundaries = [crossing_test_boundary(&nodes, reversed, [1.0; 2])];
+        let split = crossing_parameters(&[0], &boundaries, &evals, &nodes);
+        assert_eq!(split[&0], vec![f]);
+        for (e, ts) in split {
+            edges::insert_crossings(&b, e as usize, &mut nodes[e as usize], &ts).expect("inserted");
+        }
+        assert_eq!(nodes[0].params, vec![0.0, f, 1.0]);
+        let after = crossing_test_boundary(&nodes, reversed, [1.0; 2]);
+        assert!(
+            tangle::crossing(&evals[0], 0.0, &after.loops).is_empty(),
+            "one round parts every crossing"
+        );
+    }
+}
+
+#[test]
+fn two_faces_report_one_crossing_event_despite_metric_rounding() {
+    let b = crate::fixtures::fixture("box_10x6x4");
+    let mut nodes = crossing_test_nodes(0.3);
+    let evals: Vec<_> = (0..2)
+        .map(|_| {
+            poles::Face::new(
+                EvalSurface::Plane {
+                    origin: Vec3::ZERO,
+                    du: Vec3::X,
+                    dv: Vec3::Y,
+                },
+                0.0,
+            )
+        })
+        .collect();
+    let boundaries = [
+        crossing_test_boundary(&nodes, false, [1.0; 2]),
+        crossing_test_boundary(&nodes, true, [7.3, 0.9]),
+    ];
+    let first = crossing_parameters(&[0], &boundaries, &evals, &nodes);
+    let second = crossing_parameters(&[1], &boundaries, &evals, &nodes);
+    assert_ne!(first[&0][0], second[&0][0], "the metrics round differently");
+    let split = crossing_parameters(&[1, 0], &boundaries, &evals, &nodes);
+    assert_eq!(
+        split[&0], first[&0],
+        "one canonical parameter for both faces"
+    );
+    edges::insert_crossings(&b, 0, &mut nodes[0], &split[&0]).expect("inserted");
+    assert_eq!(nodes[0].points.len(), 3, "one node for the event");
+}
+
+#[test]
+fn terminal_touch_keeps_a_strictly_interior_near_end_node() {
+    let f = 2.0_f64.powi(-20);
+    let mut nodes = crossing_test_nodes(f);
+    nodes[4].points[0] = Vec3::new(f, 0.0, 0.0);
+    nodes[7].points[1] = nodes[4].points[0];
+    for reversed in [false, true] {
+        let fb = crossing_test_boundary(&nodes, reversed, [1.0; 2]);
+        let at = fb.segments[0]
+            .iter()
+            .position(|&seg| seg == (0, 0))
+            .expect("first edge");
+        assert_eq!(
+            touch(&fb, &nodes, (0, at), (0, 0), 0.0),
+            Some((f, nodes[4].points[0]))
+        );
+        let s = poles::Face::new(
+            EvalSurface::Plane {
+                origin: Vec3::ZERO,
+                du: Vec3::X,
+                dv: Vec3::Y,
+            },
+            0.0,
+        );
+        assert!(
+            tangle::events(&s, 0.0, &fb.loops)
+                .iter()
+                .any(|event| event.at == (0, at) && event.end.is_some())
+        );
+    }
+}

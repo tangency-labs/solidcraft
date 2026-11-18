@@ -989,35 +989,14 @@ fn untangle(
         // Keep the event's position. A crossing arbitrarily near an end can survive every
         // midpoint split; evaluating the curve at the event parts its chords directly. The
         // loop may traverse the edge backwards, while edge parameters always increase.
-        let mut split: std::collections::BTreeMap<u32, Vec<f64>> = std::collections::BTreeMap::new();
-        for (fi, _) in &tangled {
-            let (Some(fb), Some(s)) = (boundaries.get(*fi), evals.get(*fi)) else {
-                continue;
-            };
-            for (l, k, fraction) in tangle::splits(s, fb.reach, &fb.loops) {
-                let Some(&(e, j)) = fb.segments.get(l).and_then(|segs| segs.get(k)) else {
-                    continue;
-                };
-                let Some(n) = nodes.get(e as usize) else {
-                    continue;
-                };
-                let j = j as usize;
-                let (Some(&t), Some(&u)) = (n.params.get(j), n.params.get(j + 1)) else {
-                    continue;
-                };
-                let Some(start) = fb.loops.get(l).and_then(|lp| lp.pts.get(k)) else {
-                    continue;
-                };
-                let f = if n.points.get(j) == Some(start) { fraction } else { 1.0 - fraction };
-                split.entry(e).or_default().push(t + f * (u - t));
-            }
-        }
+        let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
+        let split = crossing_parameters(&faces, boundaries, evals, nodes);
         let mut redo: Vec<usize> = Vec::new();
         for (e, ts) in split {
             let Some(slot) = nodes.get_mut(e as usize) else {
                 continue;
             };
-            if let Err(err) = edges::insert_at(b, e as usize, slot, &ts) {
+            if let Err(err) = edges::insert_crossings(b, e as usize, slot, &ts) {
                 for &fi in edge_faces.get(e as usize).into_iter().flatten() {
                     refuse(fi, &err, why);
                 }
@@ -1051,6 +1030,81 @@ fn untangle(
         }
     }
     Ok(Vec::new())
+}
+
+/// One parameter per physical event, independent of the number or traversal of its faces.
+/// The first reporting face in index order supplies the event's metric. Its parameter is
+/// computed once, under the directed pair of edge-segment identities, and reused by every
+/// face. Touch events also identify which node of the other segment lies on this one.
+fn crossing_parameters(
+    faces: &[usize],
+    boundaries: &[Boundary],
+    evals: &[poles::Face],
+    nodes: &[edges::Nodes],
+) -> std::collections::BTreeMap<u32, Vec<f64>> {
+    let mut faces = faces.to_vec();
+    faces.sort_unstable();
+    let mut events = std::collections::BTreeMap::new();
+    for fi in faces {
+        let (Some(fb), Some(s)) = (boundaries.get(fi), evals.get(fi)) else {
+            continue;
+        };
+        for event in tangle::events(s, fb.reach, &fb.loops) {
+            let segment = |(l, k): (usize, usize)| fb.segments.get(l)?.get(k).copied();
+            let (Some(at @ (e, j)), Some(other @ (oe, oj))) =
+                (segment(event.at), segment(event.other))
+            else {
+                continue;
+            };
+            let (Some(n), Some(on)) = (nodes.get(e as usize), nodes.get(oe as usize)) else {
+                continue;
+            };
+            let (Some(&t), Some(&u)) = (n.params.get(j as usize), n.params.get(j as usize + 1))
+            else {
+                continue;
+            };
+            let Some(start) = fb
+                .loops
+                .get(event.at.0)
+                .and_then(|lp| lp.pts.get(event.at.1))
+            else {
+                continue;
+            };
+            let forward = n.points.get(j as usize) == Some(start);
+            let end = if let Some(end) = event.end {
+                let Some(other_start) = fb
+                    .loops
+                    .get(event.other.0)
+                    .and_then(|lp| lp.pts.get(event.other.1))
+                else {
+                    continue;
+                };
+                let other_forward = on.points.get(oj as usize) == Some(other_start);
+                Some(
+                    oj + if other_forward {
+                        end as u32
+                    } else {
+                        1 - end as u32
+                    },
+                )
+            } else {
+                None
+            };
+            events.entry((at, other, end)).or_insert_with(|| {
+                let f = if forward {
+                    event.fraction
+                } else {
+                    1.0 - event.fraction
+                };
+                t + f * (u - t)
+            });
+        }
+    }
+    let mut split: std::collections::BTreeMap<u32, Vec<f64>> = std::collections::BTreeMap::new();
+    for (((e, _), _, _), t) in events {
+        split.entry(e).or_default().push(t);
+    }
+    split
 }
 
 /// Rounds of [`snap_touches`] before a face that still crosses itself is refused.
@@ -1165,13 +1219,16 @@ fn touch(fb: &Boundary, nodes: &[edges::Nodes], at: (usize, usize), seg: (u32, u
             }
             let f = (p - a).dot(ac) / len2;
             let d = p.dist_to_segment(a, c);
-            if !(f > 1e-6 && f < 1.0 - 1e-6 && d <= tol) || best.is_some_and(|(bd, _, _)| bd <= d) {
+            let t = ta + f * (tc - ta);
+            if !(f > 0.0 && f < 1.0 && t > ta && t < tc && p != a && p != c && d <= tol)
+                || best.is_some_and(|(bd, _, _)| bd <= d)
+            {
                 continue;
             }
             if l == at.0 && inside_out(lp, at.1, k, tol) {
                 continue;
             }
-            best = Some((d, ta + f * (tc - ta), p));
+            best = Some((d, t, p));
         }
     }
     best.map(|(_, t, p)| (t, p))
