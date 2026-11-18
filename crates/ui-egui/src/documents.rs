@@ -3391,7 +3391,8 @@ mod tests {
         assert!(!stored["view_window_setups"].to_string().contains("Original angle"));
         let prefs = crate::prefs::lenient(&stored);
 
-        let mut target = SolveApp::new(Session::default(), prefs);
+        let mut target = SolveApp::new(Session::default(), Default::default());
+        target.preferences = prefs;
         let uid = target.session.uid;
         let main = target.docs.views.active().id;
         let a = view_duplicate(&mut target, main).unwrap();
