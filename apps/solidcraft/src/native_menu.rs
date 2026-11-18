@@ -165,11 +165,7 @@ fn recent_items(app: &SolveApp, paths: &[String]) -> Vec<Item> {
 fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
     let more = |key: &str| format!("{}\u{2026}", app.tr(key));
     let mut file = vec![item(app.tr("ui.new_design"), &FileAction::New)];
-    // Drawings are a preview (Preferences > Design > Drawings): the menu is made at start, so New
-    // Drawing is there when they were on then, and greyed while they are off.
-    if solidcraft_ui_egui::drawing_workspace::enabled(app) {
-        file.push(item(app.tr("ui.new_drawing"), &FileAction::NewDrawing));
-    }
+    file.push(item(app.tr("ui.new_drawing"), &FileAction::NewDrawing));
     file.extend([item(&more("ui.open"), &FileAction::Open), submenu(RECENT, app.tr("ui.open_recent"), recent_items(app, recent)), Item::sep()]);
     file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([
@@ -340,9 +336,7 @@ mod tests {
                 }
             }
         }
-        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        // With drawings on (Preferences > Design > Drawings), so New Drawing is in the File menu.
-        app.preferences.drawings_preview = true;
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         let bar = menu_bar(&app, &["/work/a.solidcraft".to_string()]);
         let mut entries = vec![];
         leaves(&bar.app, &mut entries);

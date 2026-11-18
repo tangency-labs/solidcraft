@@ -180,6 +180,9 @@ pub struct ViewportState {
     /// The graphics backend and adapter, as the frame-rate details show them.
     pub(crate) adapter: String,
     pub(crate) slot: SceneSlot,
+    /// The edges of each shared mesh simplified to each tolerance the view asked for
+    /// ([`SimplifiedEdges`]): every copy of a part placed many times draws them, moved.
+    simplified_edges: SimplifiedEdges,
     pub(crate) key: u64,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
@@ -1442,6 +1445,49 @@ fn taken_shared_tris(mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> Op
 
 /// One body as the model scene draws it. Its geometry lives in a block's canonical vertex
 /// buffer; its colours are palette indices, so appearance edits never touch vertex bytes.
+/// Each mesh's edges simplified to a tolerance (mm, by its bits), by the mesh's address, the mesh
+/// held so its address stays its own: one list per edge, in the mesh's own frame. A placement that
+/// keeps distances (turned, moved, mirrored) moves them where it stands, the same edges as
+/// simplifying its moved copy, so a part placed many times is simplified once per tolerance.
+#[derive(Clone, Default)]
+struct SimplifiedEdges(std::sync::Arc<std::sync::Mutex<SimplifiedMap>>);
+
+type SimplifiedMap = std::collections::HashMap<(usize, u64), (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<Vec<Vec<Vec3>>>)>;
+
+impl SimplifiedEdges {
+    /// `mesh`'s edges simplified to `tol`, made the first time.
+    fn of(&self, mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>, tol: f64) -> std::sync::Arc<Vec<Vec<Vec3>>> {
+        let key = (std::sync::Arc::as_ptr(mesh) as usize, tol.to_bits());
+        if let Ok(map) = self.0.lock()
+            && let Some((_, edges)) = map.get(&key).filter(|(held, _)| std::sync::Arc::ptr_eq(held, mesh))
+        {
+            return edges.clone();
+        }
+        let edges = std::sync::Arc::new(
+            mesh.edges.iter().map(|e| if e.len() > 2 { crate::edge_detail::simplify(e, tol) } else { e.clone() }).collect::<Vec<_>>(),
+        );
+        if let Ok(mut map) = self.0.lock() {
+            map.insert(key, (mesh.clone(), edges.clone()));
+        }
+        edges
+    }
+
+    /// Let go of the edges of meshes nothing else holds any more (a part no longer shown).
+    fn prune(&self) {
+        if let Ok(mut map) = self.0.lock() {
+            map.retain(|_, (mesh, _)| std::sync::Arc::strong_count(mesh) > 1);
+        }
+    }
+}
+
+/// Whether a placement keeps distances (its turn orthonormal, as a rigid move or a mirror is): its
+/// edges simplified before it moves them are the same as simplified after.
+fn keeps_distances(m: &solidcraft_engine::doc::Mat) -> bool {
+    let column = |c: usize| Vec3::new(m[c][0], m[c][1], m[c][2]);
+    let (x, y, z) = (column(0), column(1), column(2));
+    [x.dot(x), y.dot(y), z.dot(z)].iter().all(|l| (l - 1.0).abs() < 1e-9) && x.dot(y).abs() < 1e-9 && x.dot(z).abs() < 1e-9 && y.dot(z).abs() < 1e-9
+}
+
 struct BodyDraw {
     /// The body's name in the world state, for the highlight's lookup of its triangles.
     name: String,
@@ -1469,6 +1515,8 @@ struct BodyDraw {
     /// shows it ([`crate::edge_detail`]). Part of its block's key, not of [`BodyDraw::key`]: the
     /// blocks keep their bodies when the view changes it.
     edge_tol: f64,
+    /// The simplified edges of the meshes drawn, shared with every other body ([`SimplifiedEdges`]).
+    simplified: SimplifiedEdges,
 }
 
 impl BodyDraw {
@@ -1506,6 +1554,9 @@ impl BodyDraw {
         }
         let placed = |p: Vec3| self.place.as_ref().map_or(p, |m| solidcraft_engine::doc::apply_point(m, p));
         let at = |p: Vec3| placed(p).to_f32();
+        // A placed copy's edges: its part's simplified once for every copy that keeps distances
+        // (most do). A body drawn from its own mesh simplifies its own: nothing would share them.
+        let shared = (edges && self.edge_tol > 0.0 && self.place.as_ref().is_some_and(keeps_distances)).then(|| self.simplified.of(m, self.edge_tol));
         for (ei, e) in m.edges.iter().enumerate().filter(|_| edges) {
             if !m.edge_visible(ei) || (shaded && !m.shaded_edge_visible(ei)) {
                 continue;
@@ -1516,8 +1567,12 @@ impl BodyDraw {
                     out.hidden_line(a, b, self.hidden_edge, 1.0);
                 }
             };
-            if self.edge_tol > 0.0 && e.len() > 2 {
-                // Simplified where it stands (a placement may scale), to the view's tolerance.
+            if let Some(simplified) = shared.as_ref().and_then(|s| s.get(ei)) {
+                for w in simplified.windows(2) {
+                    emit(at(w[0]), at(w[1]));
+                }
+            } else if self.edge_tol > 0.0 && e.len() > 2 {
+                // Simplified where it stands (a placement that scales), to the view's tolerance.
                 let simplified = crate::edge_detail::simplify(&e.iter().map(|p| placed(*p)).collect::<Vec<_>>(), self.edge_tol);
                 for w in simplified.windows(2) {
                     emit(w[0].to_f32(), w[1].to_f32());
@@ -1906,6 +1961,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     // The blocks the last scene built, reused when their bodies come back as they were.
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
     let (mut sc, made) = body_scene(app, &st, |_| true, true, &mut kept);
+    app.viewport.simplified_edges.prune();
     keep_body_tris(app, &made);
     if let Ok(mut b) = app.viewport.blocks.lock() {
         *b = made;
@@ -2254,6 +2310,7 @@ fn body_scene(
                 edge: slots.edge,
                 hidden_edge: slots.hidden_edge,
                 edge_tol,
+                simplified: app.viewport.simplified_edges.clone(),
             },
             None => BodyDraw {
                 name,
@@ -2269,6 +2326,7 @@ fn body_scene(
                 edge: slots.edge,
                 hidden_edge: slots.hidden_edge,
                 edge_tol,
+                simplified: app.viewport.simplified_edges.clone(),
             },
         };
         let key = body.key(shaded, edges, hidden_edges, markers);
@@ -11426,6 +11484,90 @@ mod tests {
         app
     }
 
+    /// The edges of a part placed many times are simplified once for every copy (in the part's own
+    /// frame, then moved), the same lines as simplifying each moved copy: a large assembly copied a
+    /// hundred times simplified every copy's edges on the window's thread at each scene build. A
+    /// placement that scales simplifies its own.
+    #[test]
+    fn a_parts_edges_are_simplified_once_for_every_copy_that_keeps_distances() {
+        let part =
+            solidcraft_engine::doc::ModelBody::new("Part".into(), solidcraft_engine::kernel::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap(), 1);
+        let mesh = part.mesh();
+        assert!(mesh.edges.iter().any(|e| e.len() > 8), "round edges to simplify");
+        let simplified = SimplifiedEdges::default();
+        let tol = 0.05;
+        let draw = |place: solidcraft_engine::doc::Mat| BodyDraw {
+            name: "Copy".into(),
+            mesh: mesh.clone(),
+            place: Some(place),
+            face_colors: Vec::new(),
+            body_color: crate::gpu::PaletteIndex(0),
+            face_classes: Vec::new(),
+            faded: false,
+            closed: true,
+            on_gpu: true,
+            slot_base: 0,
+            edge: crate::gpu::PaletteIndex(1),
+            hidden_edge: crate::gpu::PaletteIndex(2),
+            edge_tol: tol,
+            simplified: simplified.clone(),
+        };
+        let lines = |d: &BodyDraw| {
+            let block = build_block(std::slice::from_ref(d), true, &|d, out| d.build(out, true, true, false, false));
+            let f = |b: &[u8], i: usize| f32::from_le_bytes(b[4 * i..4 * i + 4].try_into().unwrap());
+            block
+                .bytes
+                .lines
+                .as_chunks::<{ crate::gpu::LINE_SIZE }>()
+                .0
+                .iter()
+                .map(|r| [f(r, 0), f(r, 1), f(r, 2), f(r, 3), f(r, 4), f(r, 5)])
+                .collect::<Vec<_>>()
+        };
+        // Simplified where each copy stands, as before.
+        let expected = |m: &solidcraft_engine::doc::Mat| {
+            let mut out = Vec::new();
+            for (ei, e) in mesh.edges.iter().enumerate() {
+                if !mesh.edge_visible(ei) || !mesh.shaded_edge_visible(ei) {
+                    continue;
+                }
+                let moved: Vec<Vec3> = e.iter().map(|p| solidcraft_engine::doc::apply_point(m, *p)).collect();
+                let kept = if moved.len() > 2 { crate::edge_detail::simplify(&moved, tol) } else { moved };
+                for w in kept.windows(2) {
+                    let (a, b) = (w[0].to_f32(), w[1].to_f32());
+                    out.push([a[0], a[1], a[2], b[0], b[1], b[2]]);
+                }
+            }
+            out
+        };
+        let turned = solidcraft_engine::doc::rigid(Vec3::new(40.0, -5.0, 3.0), Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0), 0.6);
+        let moved = solidcraft_engine::doc::rigid(Vec3::new(-70.0, 12.0, 0.0), Vec3::ZERO, Vec3::Z, 2.1);
+        for m in [turned, moved] {
+            let (got, want) = (lines(&draw(m)), expected(&m));
+            assert_eq!(got.len(), want.len());
+            for (g, w) in got.iter().zip(&want) {
+                assert!(g.iter().zip(w).all(|(a, b)| (a - b).abs() < 1e-4), "{g:?} vs {w:?}");
+            }
+        }
+        assert_eq!(simplified.0.lock().unwrap().len(), 1, "simplified once for both copies");
+        // Scaled: simplified where it stands, not from the part's.
+        let mut scaled = moved;
+        for column in scaled.iter_mut().take(3) {
+            for v in column.iter_mut().take(3) {
+                *v *= 2.0;
+            }
+        }
+        let _ = lines(&draw(scaled));
+        assert_eq!(simplified.0.lock().unwrap().len(), 1);
+        // Let go of when the part is no longer drawn.
+        drop(part);
+        simplified.prune();
+        assert_eq!(simplified.0.lock().unwrap().len(), 1, "still held by the mesh drawn");
+        drop(mesh);
+        simplified.prune();
+        assert!(simplified.0.lock().unwrap().is_empty());
+    }
+
     /// On a device that evaluates plans, the placements of a part placed many times are drawn
     /// as instances of the part's triangles, not each from its own moved plan (every placement
     /// took its own copy of the part's triangles on the GPU), and they share the part's palette
@@ -16080,6 +16222,41 @@ mod tests {
                 assert!(gestures(&mut h, p), "a pinch and a two-finger scroll at {p:?} on the model must move it");
             }
         }
+    }
+
+    /// #17871: on Wayland a hi-res mouse wheel's scroll between two notches arrives as points
+    /// opened by a `Start`, and the wheel never sends an `End`. That bracket kept the view
+    /// "moving" for good, so the pick was never taken and a click selected nothing.
+    #[test]
+    fn a_wheel_zoom_on_wayland_leaves_clicks_selecting() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
+        h.call("ui.view", json!({"view": "fit"}));
+        h.app.ui.pick_bodies = true;
+        let p = h.app.viewport.rect.unwrap().center();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        let wheel = |phase, unit, y| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit,
+            delta: vec2(0.0, y),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        // Zoom in a notch and back out, as winit reports it on Wayland: a pixel scroll that
+        // starts, the notch in lines, then more pixels; no End.
+        for y in [1.0, -1.0] {
+            h.app.synthetic.push(wheel(egui::TouchPhase::Start, egui::MouseWheelUnit::Point, 4.0 * y));
+            h.frame();
+            h.app.synthetic.push(wheel(egui::TouchPhase::Move, egui::MouseWheelUnit::Line, y));
+            h.frame();
+            h.app.synthetic.push(wheel(egui::TouchPhase::Move, egui::MouseWheelUnit::Point, 4.0 * y));
+            h.frame();
+        }
+        h.frames(90);
+        assert!(!h.app.viewport.trackpad_gesture, "the wheel left no gesture open");
+        h.call("ui.move", json!({"x": p.x + 1.0, "y": p.y}));
+        h.call("ui.click", json!({"x": p.x + 1.0, "y": p.y}));
+        assert!(!h.app.session.selection.is_empty(), "a click after the wheel must select");
     }
 
     #[test]

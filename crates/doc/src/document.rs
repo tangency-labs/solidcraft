@@ -2274,7 +2274,7 @@ pub enum FeatureKind {
         skip: Vec<u64>,
         /// The import kept as B-rep records instead of STEP text (a FreeCAD or Rhino file read
         /// through cadmpeg's neutral model), `step` then empty; shared like `step`. Designs
-        /// from before `format/pending/import-records.rs` have none.
+        /// from before `format/v60/import-records.rs` have none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
@@ -3750,8 +3750,9 @@ pub struct Document {
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
+    /// Shared, so an edit that copies the design does not copy a plugin's large files.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
-    pub plugin_data: std::collections::BTreeMap<String, String>,
+    pub plugin_data: std::collections::BTreeMap<String, std::sync::Arc<str>>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -5080,7 +5081,9 @@ impl Document {
                             Self::eval_in(vals, y, Kind::Length)?,
                             Self::eval_in(vals, z, Kind::Length)?,
                         );
-                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
+                        // Up to and including 1e9 mm, the largest number a design file holds: an
+                        // origin saved at exactly that distance rebuilt before this check existed.
+                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() <= 1e9) {
                             return Err(DocError::Invalid("the plane's axis origin is out of range".into()));
                         }
                         (o, *axis_dir)
