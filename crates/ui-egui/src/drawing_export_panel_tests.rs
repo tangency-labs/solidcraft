@@ -14,6 +14,7 @@ fn drawing(h: &mut Harness) -> (u64, u64, u64) {
     let projected = h.app.run("drawing.view.projected", json!({"parent": ids::encode(front), "side": "above"})).unwrap();
     let top = ids::decode(projected["view"].as_str().unwrap()).unwrap();
     h.app.run("drawing.sheet.add", json!({})).unwrap();
+    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     (sheet, front, top)
 }
@@ -126,6 +127,7 @@ fn sheets_are_listed_with_their_paper_size() {
 fn export_opens_its_window_from_the_ribbon_and_never_from_a_programmatic_call() {
     let mut h = Harness::new();
     h.app.home.open = false;
+    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     h.app.start(ID);
     assert!(h.app.drawing_workspace.export.is_none(), "no drawing open: nothing opens");
@@ -139,7 +141,10 @@ fn export_opens_its_window_from_the_ribbon_and_never_from_a_programmatic_call() 
     h.frames(3);
     let export = h.app.drawing_workspace.export.as_ref().expect("the window is open");
     assert_eq!((export.format, export.paper, export.sheets.len()), (Format::Svg, Paper::White, 1));
-    assert!(crate::scenario::rect_of("drawing:settings").is_some());
+    assert!(
+        h.app.universal_panel_frame().is_some_and(|frame| frame.layout.sections.iter().any(|section| section.instance.0 == "drawing-inspector")),
+        "the window is in the Drawing inspector"
+    );
     assert!(h.widget(solidcraft_ui_text::tr("ui.drawing_export.title")).is_some());
     h.step(&json!({"click": {"handle": "drawing:export:close"}})).unwrap();
     h.frames(2);
@@ -193,8 +198,9 @@ fn the_window_writes_svg_and_png_on_the_chosen_paper() {
     assert!(h.app.drawing_workspace.export.is_none(), "OK closes the window once both sheets are written");
 
     // On white paper the PNG's colour is the window's choice: black and white is one bit a pixel.
+    h.frames(30);
     h.app.start(ID);
-    h.frames(3);
+    h.frames(30);
     h.step(&json!({"click": {"handle": "drawing:export:format:png"}})).unwrap();
     h.step(&json!({"click": {"handle": "drawing:export:paper:white"}})).unwrap();
     h.step(&json!({"click": {"handle": "drawing:export:colour"}})).unwrap();
@@ -313,7 +319,7 @@ fn cancel_while_sheets_are_written_stops_them_and_says_so() {
 #[test]
 fn the_status_is_read_again_only_when_what_it_says_can_change() {
     let mut h = Harness::new();
-    let (sheet, front, _) = drawing(&mut h);
+    let (_, front, _) = drawing(&mut h);
     h.app.start(ID);
     h.frames(3);
     let status = |h: &Harness| h.app.drawing_workspace.export.as_ref().and_then(|e| e.status.clone());
@@ -328,19 +334,11 @@ fn the_status_is_read_again_only_when_what_it_says_can_change() {
     h.frames(120);
     assert!(status(&h).is_none(), "read again with nothing changed");
 
-    // The views drawn, as the sheet page draws them, change what it says, not the design.
-    let revision = h.app.session.revision;
-    solidcraft_engine::drawing_scene::extract(&mut h.app.session, sheet).unwrap();
-    for _ in 0..10 {
-        if !solidcraft_engine::drawing_scene::step(&mut h.app.session) {
-            break;
-        }
-    }
-    assert_eq!(h.app.session.revision, revision);
-    h.frames(1);
-    let read = status(&h).expect("read again once the views are drawn");
-    let front_view = read["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(front)))).cloned();
-    assert_eq!(front_view.map(|v| v["status"].clone()), Some(json!("current")), "{read}");
+    // The sheet page draws the views by itself now, so they are drawn by the time the window reads:
+    // what it read says so.
+    let drawn = h.app.session.execute("drawing.status", &json!({})).unwrap();
+    let front_view = drawn["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(front)))).cloned();
+    assert_eq!(front_view.map(|v| v["status"].clone()), Some(json!("current")), "{drawn}");
 
     forget(&mut h);
     h.frames(3);
