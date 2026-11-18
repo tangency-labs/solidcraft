@@ -1435,6 +1435,22 @@ mod tests {
     }
 
     #[test]
+    fn small_icon_grids_fit_their_cells_and_name_known_commands_once() {
+        for g in GRIDS {
+            assert!(SECTIONS.iter().any(|s| s.tab == g.tab && s.panel == g.panel), "{}/{}", g.tab, g.panel);
+            let cells = solidcraft_ui_kit::ribbon::SMALL_ICON_ROWS * GRID_COLUMNS;
+            assert!(g.ids.len() <= cells, "{}/{} has {} cells", g.tab, g.panel, g.ids.len());
+            let unique: std::collections::BTreeSet<_> = g.ids.iter().collect();
+            assert_eq!(unique.len(), g.ids.len());
+            for id in g.ids {
+                assert!(solidcraft_engine::find_command(id).is_some(), "unknown grid id {id}");
+            }
+        }
+        // The small-icon grid keeps the gallery's commands first, in its order.
+        assert!(grid("SKETCH", "CONSTRAIN", true).starts_with(CONSTRAINT_GALLERY));
+    }
+
+    #[test]
     fn every_placed_command_is_reachable_and_every_layout_id_exists() {
         let specs = solidcraft_engine::command_specs();
         let lists: Vec<_> = SECTIONS.iter().map(|s| (s, layout(s.tab, s.panel, &specs).unwrap())).collect();
