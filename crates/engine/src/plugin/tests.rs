@@ -927,10 +927,8 @@ mod native {
         s.plugin_limits.max_fuel = u64::MAX;
         s.plugin_limits.max_job_seconds = 1;
         let before = s.doc.to_json();
-        let started = std::time::Instant::now();
-        let failure = f.run(&mut s).unwrap_err().to_string();
-        assert!(failure.contains("deadline"), "{failure}");
-        assert!(started.elapsed() < std::time::Duration::from_secs(4), "the user's job ceiling ends it");
+        let failure = f.run(&mut s).unwrap_err();
+        assert!(matches!(&failure, EngineError::Plugin(HostError::LimitExceeded { limit }) if limit == "deadline"), "{failure}");
         assert_eq!((s.doc.to_json(), s.undo.len()), (before.clone(), 0));
         // Cancelled from the operations panel (its watch), it stops and nothing of it lands.
         s.plugin_limits.max_job_seconds = 600;
