@@ -525,7 +525,15 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v
 }
 
+/// The command an id names: its exact id, else the one it spells in another case. Surrounding
+/// whitespace is ignored. Command ids are ASCII, so an id with any other character names none
+/// (a look-alike letter such as a Cyrillic `е` or a fullwidth `ｆ` is never a command).
+///
+/// Everything that decides what a command id may do (the agent chat's gate, the read-only
+/// classification, a host's check) decides on the id this returns, never the id as sent, so it
+/// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    let id = normalize_command_id(id)?;
     let all = command_specs();
     all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
 }
@@ -542,6 +550,13 @@ pub fn command_verb_alternative(id: &str, candidate: &str) -> bool {
     groups
         .iter()
         .any(|words| words.iter().any(|word| verb.eq_ignore_ascii_case(word)) && words.iter().any(|word| other_verb.eq_ignore_ascii_case(word)))
+}
+
+/// A command id as [`find_command`] reads it: without surrounding whitespace, and `None` when it
+/// holds anything but printable ASCII (no command id does).
+pub fn normalize_command_id(id: &str) -> Option<&str> {
+    let id = id.trim();
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_graphic())).then_some(id)
 }
 
 /// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in

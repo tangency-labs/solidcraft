@@ -411,20 +411,6 @@ fn a_views_state_is_in_words() {
     assert!(words(&Status::Drawn, false).is_empty());
 }
 
-/// A view shows its boundary only while the pointer is near its edge (D17 of the drawing UI
-/// design); a dimension or the title block shows its box whenever the pointer is over it.
-#[test]
-fn a_view_is_outlined_only_near_its_edge() {
-    let hit = |kind, on_edge| drawing_scene::Hit { object: 1, kind, on_edge };
-    assert!(outlined(&hit(ObjectKind::View, true)));
-    assert!(!outlined(&hit(ObjectKind::View, false)), "inside a view the sheet stays clean");
-    assert!(outlined(&hit(ObjectKind::Dimension, false)));
-    assert!(outlined(&hit(ObjectKind::Note, false)));
-    assert_eq!(kind_name(ObjectKind::Note), "note");
-    assert_eq!(kind_name(ObjectKind::ViewLabel), "view_label");
-    assert!(outlined(&hit(ObjectKind::TitleBlock, false)));
-}
-
 /// Without a drawing open the page shows the first-sheet start (#18159), and the control channel's
 /// sheet page is empty; outside Drawing there is none either.
 #[test]

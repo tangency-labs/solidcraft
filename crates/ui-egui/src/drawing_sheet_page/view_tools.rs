@@ -31,8 +31,8 @@ struct Drag {
     revision: u64,
 }
 
-fn edge(objects: &[SheetObject], point: Vec2, at: OnScreen) -> Option<u64> {
-    drawing_scene::hit(objects, point, HOVER_BAND / at.scale).filter(|hit| hit.kind == ObjectKind::View && hit.on_edge).map(|hit| hit.object)
+fn view_at(objects: &[SheetObject], point: Vec2, at: OnScreen) -> Option<u64> {
+    drawing_scene::hit(objects, point, HOVER_BAND / at.scale).filter(|hit| hit.kind == ObjectKind::View).map(|hit| hit.object)
 }
 
 fn origin(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[SheetObject]) -> Option<(u64, Vec2)> {
@@ -41,7 +41,7 @@ fn origin(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[Sh
         return None;
     }
     let pointer = at.paper(screen);
-    Some((edge(objects, pointer, at)?, pointer))
+    Some((view_at(objects, pointer, at)?, pointer))
 }
 
 pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[SheetObject]) -> bool {
@@ -82,7 +82,7 @@ impl Canvas<'_> {
             state.drag = Some(Drag { view, from, pointer, revision: app.session.revision });
         } else if self.response.clicked() && state.delete.is_none() {
             let hover = self.response.hover_pos().filter(|point| !crate::shell::covered(app, *point));
-            state.selected = hover.and_then(|point| edge(self.objects, self.at.paper(point), self.at));
+            state.selected = hover.and_then(|point| view_at(self.objects, self.at.paper(point), self.at));
         }
 
         if let Some(drag) = state.drag {

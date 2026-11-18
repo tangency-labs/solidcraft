@@ -89,7 +89,7 @@ use crate::blend::fillet_intersector;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex, TsectPnt};
@@ -403,17 +403,8 @@ impl FilletBrep {
             .mate(0)
             .ok_or_else(|| SolidError::blend_missing(OP_MATE, "the vertex's mate"))?;
         if !self.fillet_vertex(main_fv)?.is_processed() {
-            // fork 9b7cd48 passes this on (SER)
-            match main(self, target, solvers, main_fv) {
-                Err(e)
-                    if e.is_unported_or_cancelled()
-                        || is_depth_error(&e)
-                        || k.fixes.fillet_statuses_pass_on =>
-                {
-                    return Err(e)
-                }
-                _ => {} // status ignored
-            }
+            // upstream ignores this status; fork 9b7cd48 passes it on (SER)
+            main(self, target, solvers, main_fv)?;
         }
         if !self.fillet_vertex(main_fv)?.is_processed() {
             return Ok(());
@@ -972,10 +963,7 @@ impl FilletBrep {
         // trim 3DCurve and UVTrimCurves to dropPoint parameter values
         // (SetMinMax's status is ignored: an inverted pair leaves the interval); fork
         // 9b7cd48 passes this on (SER)
-        let _ = crate::error::passed_on(
-            trim_ivl.set_min_max(param1, param2),
-            k.fixes.fillet_statuses_pass_on,
-        )?;
+        trim_ivl.set_min_max(param1, param2)?;
         // each Trim reads SmTol::GetZoneTol3d of the curve's holding edge (the 3D curve's
         // owner is this edge, set by every producer with SetOwner; a UV trim curve's is
         // its edge use, whose owner is the edge)
@@ -1494,10 +1482,7 @@ impl FilletBrep {
                     if on_seam(self, &off(&*solver, 0)?, 0, SrfIndex::First, surf_closure1)? {
                         if !is_closed_solver_edge {
                             // fork 9b7cd48 passes this on (SER)
-                            ignore_status(crate::error::passed_on(
-                                move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
-                                k.fixes.fillet_statuses_pass_on,
-                            )?)?;
+                            move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu))?;
                         }
                         continue;
                     }
@@ -1513,10 +1498,7 @@ impl FilletBrep {
                     )? {
                         if !is_closed_solver_edge {
                             // fork 9b7cd48 passes this on (SER)
-                            ignore_status(crate::error::passed_on(
-                                move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
-                                k.fixes.fillet_statuses_pass_on,
-                            )?)?;
+                            move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu))?;
                         }
                         continue;
                     }
@@ -1526,10 +1508,7 @@ impl FilletBrep {
                     if on_seam(self, &off(&*solver, 1)?, 0, SrfIndex::Second, surf_closure2)? {
                         if !is_closed_solver_edge {
                             // fork 9b7cd48 passes this on (SER)
-                            ignore_status(crate::error::passed_on(
-                                move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
-                                k.fixes.fillet_statuses_pass_on,
-                            )?)?;
+                            move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu))?;
                         }
                         continue;
                     }
@@ -1546,10 +1525,7 @@ impl FilletBrep {
                 {
                     if !is_closed_solver_edge {
                         // fork 9b7cd48 passes this on (SER)
-                        ignore_status(crate::error::passed_on(
-                            move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
-                            k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu))?;
                     }
                     continue;
                 }
@@ -2003,6 +1979,7 @@ fn record_fillet_error(
 }
 
 /// Whether `e` is the mate-nesting bound of [`FilletBrep::calc_mate_geom`].
+#[cfg(test)]
 fn is_depth_error(e: &SolidError) -> bool {
     matches!(
         e,
@@ -2234,34 +2211,27 @@ mod tests {
 
     /// Fork 9b7cd48 (`CalcMateGeom`: `SER( pMainFV->CalcCornerVertGeom() )`): the main
     /// vertex's geometry fails. Upstream drops the status and the mate stays
-    /// unprocessed (success); with `fillet_statuses_pass_on` the error is returned.
+    /// unprocessed (success); the error is returned, as the fork does (WR-661).
     #[test]
-    fn fillet_statuses_pass_on_mate_returns_a_failed_main_vertex() {
-        for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.fillet_statuses_pass_on = pass_on;
-            let mut fb = FilletBrep::new();
-            let a = vertex(&mut fb, &k, Point3::new(0.0, 0.0, 0.0));
-            let b = vertex(&mut fb, &k, Point3::new(1.0, 0.0, 0.0));
-            let fv = fb.fillet_vertex_mut(a).unwrap();
-            fv.set_fillet_vertex_type(FilletVertexType::Mate);
-            fv.set_mate(0, Some(b));
-            let r = fb.calc_mate_geom_with(
-                &k,
-                a,
-                &mut Brep::new(),
-                &mut (),
-                0,
-                |_, _, (), _| Err(SolidError::sm_err("main vertex")),
-                |(), _, _, _| Ok(0),
-            );
-            if pass_on {
-                assert_eq!(r.unwrap_err(), SolidError::sm_err("main vertex"));
-            } else {
-                r.unwrap();
-            }
-            assert!(!fb.fillet_vertex(a).unwrap().is_processed());
-        }
+    fn mate_returns_a_failed_main_vertex() {
+        let k = Kernel::default();
+        let mut fb = FilletBrep::new();
+        let a = vertex(&mut fb, &k, Point3::new(0.0, 0.0, 0.0));
+        let b = vertex(&mut fb, &k, Point3::new(1.0, 0.0, 0.0));
+        let fv = fb.fillet_vertex_mut(a).unwrap();
+        fv.set_fillet_vertex_type(FilletVertexType::Mate);
+        fv.set_mate(0, Some(b));
+        let r = fb.calc_mate_geom_with(
+            &k,
+            a,
+            &mut Brep::new(),
+            &mut (),
+            0,
+            |_, _, (), _| Err(SolidError::sm_err("main vertex")),
+            |(), _, _, _| Ok(0),
+        );
+        assert_eq!(r.unwrap_err(), SolidError::sm_err("main vertex"));
+        assert!(!fb.fillet_vertex(a).unwrap().is_processed());
     }
 
     #[test]
