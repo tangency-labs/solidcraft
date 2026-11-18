@@ -827,6 +827,11 @@ pub fn tab_list_open(ctx: &egui::Context, id: egui::Id) -> bool {
     ctx.data(|d| d.get_temp::<bool>(id.with("more")).unwrap_or(false))
 }
 
+/// Whether a drop-down from this tab strip is holding its bar open.
+pub fn tab_popup_open(ctx: &egui::Context, id: egui::Id) -> bool {
+    tab_list_open(ctx, id) || ctx.data(|d| d.get_temp::<PopupState>(id.with("view_popup"))).flatten().is_some()
+}
+
 /// What the user chose on the tab strip this frame.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TabAction {

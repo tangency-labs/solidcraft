@@ -188,6 +188,10 @@ impl Strip {
 }
 
 /// Register the current window's strips before resolving any input in the frame.
+pub(crate) fn active(app: &SolveApp) -> bool {
+    app.view_window_drag.drag.is_some()
+}
+
 pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, ViewDropZone)>, drag_continues: bool) {
     let viewport = ctx.viewport_id();
     let native = Screen::current(ctx);

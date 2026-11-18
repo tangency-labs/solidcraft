@@ -1065,7 +1065,7 @@ pub(crate) fn pop_out_ribbon_focus(ctx: &egui::Context) -> bool {
 
 /// The usual full ribbon, painted in its own clipped layer. Its bounding box is an
 /// input shield, never an anchored shell card or an obstacle for fit.
-pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, fraction: f32, keyboard: bool) {
+pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, fraction: f32, keyboard: bool, stack_slide: Option<f32>) {
     use crate::ui_kit::LayoutMode;
     if fraction <= 0.0 || !content.is_positive() {
         app.shell.ribbon_overlay = None;
@@ -1074,8 +1074,14 @@ pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rec
     crate::workspace::sync_context(app);
     let t = Tokens::get();
     let height = ribbon_height(app.preferences.ribbon_labels);
-    let r = Rect::from_min_size(content.min - vec2(0.0, height * (1.0 - fraction)), vec2(content.width(), height));
+    let slide = stack_slide.unwrap_or(height * (1.0 - fraction));
+    let top = content.top() + if stack_slide.is_some() { crate::app_bar::HEIGHT } else { 0.0 };
+    let r = Rect::from_min_size(egui::pos2(content.left(), top - slide), vec2(content.width(), height));
     let visible = content.intersect(r);
+    if !visible.is_positive() {
+        app.shell.ribbon_overlay = None;
+        return;
+    }
     let cards = crate::ui_kit::Cards::new(r, LayoutMode::Docked, height, WORKSPACE_WIDTH);
     let ws = Rect::from_min_size(r.min, vec2(WORKSPACE_WIDTH.min(r.width()), height - 1.0));
     let host = Container::for_layout(LayoutMode::Docked, Surface::Chrome);
