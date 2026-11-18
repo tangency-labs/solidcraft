@@ -408,14 +408,19 @@ plugin and importer.
   with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
   fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
   nothing and never opens a dialog.
-- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]` checks the package, installs
-  it into a scratch plugins folder with the app's installer, and runs its test cases, `tests/*.json`,
-  through `plugin.run` and `file.import` with the app's limits. A case names the entry, its
-  parameters or file, the grants (default: everything the manifest asks for, stored in the scratch
-  folder's grant store as an install stores them, see [Headless use](#headless-use)), and what to expect:
-  an error kind, values in the reply, values `inspect.measure` gives, files written. An entry
-  with no case runs once with its defaults when it needs nothing else. It exits with an error when
-  a case fails.
+- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]` checks
+  the package, installs it into a scratch plugins folder with the app's installer, and runs its
+  test cases, `tests/*.json`, through `plugin.run` and `file.import` with the app's limits. A
+  folder's cases are in its `tests/` folder; a `.zip`'s are the `tests/` folder it holds, so a
+  `.zip` made without one has none. A case names the entry, its parameters or file, the grants
+  (default: everything the manifest asks for, stored in the scratch folder's grant store as an
+  install stores them, see [Headless use](#headless-use)), and what to expect: an error kind,
+  values in the reply, values `inspect.measure` gives, files written. An entry with no case runs
+  once with its defaults when it needs nothing else, and is reported as skipped otherwise. It exits with an
+  error when a case fails, and with `--require-cases` also when an entry is skipped, in a folder
+  or a `.zip` alike: use it in CI so an untested entry fails the run. A `tests/` folder that
+  cannot be read, a grant the manifest does not ask for, and a fixture folder (`from`) that is a
+  link fail the case or the run; nothing is skipped silently.
 
 ## Importers
 

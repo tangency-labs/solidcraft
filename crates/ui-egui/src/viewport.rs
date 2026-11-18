@@ -183,7 +183,21 @@ pub struct ViewportState {
     /// The edges of each shared mesh simplified to each tolerance the view asked for
     /// ([`SimplifiedEdges`]): every copy of a part placed many times draws them, moved.
     simplified_edges: SimplifiedEdges,
+    /// The model scene key of the last scene built (`scene_key`).
     pub(crate) key: u64,
+    /// The last model scene published to the renderer, kept so levels of detail made since can
+    /// be filled into it ([`publish_levels`]) without building it again.
+    last_scene: std::sync::Mutex<Option<GpuScene>>,
+    /// The instanced meshes of that scene still waiting for their levels: each one's place in
+    /// its `instanced` and its mesh.
+    lod_waiting: std::sync::Mutex<Vec<(usize, std::sync::Arc<solidcraft_engine::geom::Mesh>)>>,
+    /// The levels-of-detail generation the published scene has (`MeshLods::generation`).
+    lods_seen: u64,
+    /// Scenes published since the last one built, each with more levels filled in: the renderer
+    /// takes each as new ([`published_key`]).
+    patches: u64,
+    /// Model scenes built since the viewport started (a scene with levels filled in is not one).
+    pub(crate) scenes_built: u64,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
@@ -756,7 +770,8 @@ fn scene_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     base_scene_key(app).hash(&mut h);
     lod_generation(app).hash(&mut h);
-    app.viewport.mesh_lods.generation().hash(&mut h);
+    // Not the levels of detail: those made since are filled into the scene built
+    // ([`publish_levels`]), each rebuild of a large scene costing a frame.
     h.finish()
 }
 
@@ -1768,6 +1783,8 @@ struct Instances {
     lods: crate::mesh_lod::MeshLods,
     /// The parts of meshes drawn a look at a time, from the last scene and made in this one.
     parts: LookParts,
+    /// The meshes placed whose levels of detail are not made yet: each one's place in `meshes`.
+    waiting: Vec<(usize, std::sync::Arc<solidcraft_engine::geom::Mesh>)>,
     /// The parts this scene used (the others are dropped when it holds every shown body).
     parts_used: std::collections::HashSet<(usize, u64)>,
 }
@@ -1808,6 +1825,7 @@ impl Instances {
             lods: app.viewport.mesh_lods.clone(),
             parts,
             parts_used: std::collections::HashSet::new(),
+            waiting: Vec::new(),
         }
     }
 
@@ -1825,7 +1843,7 @@ impl Instances {
         if !lod_eligible && matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded) && !oit {
             return None;
         }
-        self.add_placement(&mesh, &m, lod_eligible, b.is_closed(), col, look)?;
+        self.add_placement(&mesh, &m, true, b.is_closed(), col, look)?;
         Some((mesh, m))
     }
 
@@ -1876,17 +1894,19 @@ impl Instances {
     }
 
     /// One placement `m` of `mesh` in colour `col`, drawn `look`, among the instances (its
-    /// triangles made, or kept from the last scene, the first time).
+    /// triangles made, or kept from the last scene, the first time; with its levels of detail
+    /// when `levels`).
     fn add_placement(
         &mut self,
         mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>,
         m: &solidcraft_engine::doc::Mat,
-        lod_eligible: bool,
+        levels: bool,
         closed: bool,
         col: crate::gpu::PaletteIndex,
         look: crate::gpu::InstanceLook,
     ) -> Option<()> {
         let mesh = mesh.clone();
+        let wants_levels = levels;
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
         let at = match self.by_mesh.get(&(key, look)).copied() {
@@ -1901,10 +1921,12 @@ impl Instances {
                             Some((_, t)) => t.clone(),
                             None => taken_shared_tris(&mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(&mesh))),
                         },
-                        // Keep the existing detail of newly instanced single reference meshes.
-                        if lod_eligible { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
+                        if levels { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
                     ),
                 };
+                if levels.is_empty() && wants_levels {
+                    self.waiting.push((self.meshes.len(), mesh.clone()));
+                }
                 self.meshes.push((mesh.clone(), crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, closed }));
                 self.by_mesh.insert((key, look), self.meshes.len() - 1);
                 self.meshes.len() - 1
@@ -1918,6 +1940,10 @@ impl Instances {
     /// The instanced meshes, keeping their triangles for the next scene (and, for a scene of
     /// only some bodies, the others' too: their levels of detail stay).
     fn finish(self, app: &SolveApp, whole: bool) -> Vec<crate::gpu::InstancedMesh> {
+        // A whole scene's meshes waiting for levels: filled in when made ([`publish_levels`]).
+        if whole && let Ok(mut w) = app.viewport.lod_waiting.lock() {
+            w.clone_from(&self.waiting);
+        }
         let kept: InstancedTris =
             self.meshes.iter().map(|(mesh, inst)| (std::sync::Arc::as_ptr(mesh) as usize, (mesh.clone(), inst.tris.clone()))).collect();
         if whole {
@@ -1953,6 +1979,76 @@ fn shared_mesh(
     }
     let q = current();
     Some(if q == DisplayQuality::Normal { b.mesh_in_place() } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()) })
+}
+
+/// Build the model scene (whose key is `key`) and hand it to the renderer, keeping it to fill in
+/// levels of detail made later ([`publish_levels`]).
+fn publish_model_scene(app: &mut SolveApp, key: u64) {
+    // Levels made while it is built are filled in afterwards.
+    let lods = app.viewport.mesh_lods.generation();
+    let sc = build_scene(app);
+    if let Ok(mut last) = app.viewport.last_scene.lock() {
+        *last = Some(sc.clone());
+    }
+    if let Ok(mut slot) = app.viewport.slot.lock() {
+        *slot = Some(sc);
+    }
+    app.viewport.key = key;
+    app.viewport.patches = 0;
+    app.viewport.lods_seen = lods;
+    app.viewport.scenes_built += 1;
+}
+
+/// Fill the levels of detail made since into the published model scene and hand it to the
+/// renderer again, without building it again: the renderer keeps every buffer it has and uploads
+/// only the new levels' triangles. Each part's levels come as they are made; a large scene built
+/// again for them would cost a frame each time. Whether a scene was published.
+fn publish_levels(app: &mut SolveApp) -> bool {
+    let generation = app.viewport.mesh_lods.generation();
+    if generation == app.viewport.lods_seen {
+        return false;
+    }
+    app.viewport.lods_seen = generation;
+    let lods = app.viewport.mesh_lods.clone();
+    let mut ready: Vec<(usize, crate::mesh_lod::Levels)> = Vec::new();
+    if let Ok(mut waiting) = app.viewport.lod_waiting.lock() {
+        waiting.retain(|(at, mesh)| match lods.levels(mesh) {
+            Some(levels) => {
+                ready.push((*at, levels));
+                false
+            }
+            None => true,
+        });
+    }
+    ready.retain(|(_, levels)| !levels.is_empty());
+    if ready.is_empty() {
+        return false;
+    }
+    let Some(mut sc) = app.viewport.last_scene.lock().ok().and_then(|last| last.clone()) else { return false };
+    for (at, levels) in ready {
+        if let Some(m) = sc.instanced.get_mut(at) {
+            m.levels = levels.as_ref().clone();
+        }
+    }
+    if let Ok(mut last) = app.viewport.last_scene.lock() {
+        *last = Some(sc.clone());
+    }
+    if let Ok(mut slot) = app.viewport.slot.lock() {
+        *slot = Some(sc);
+    }
+    app.viewport.patches += 1;
+    true
+}
+
+/// The key the renderer takes the published model scene by: the scene's own, and another for
+/// each time levels of detail were filled into it ([`publish_levels`]).
+fn published_key(app: &SolveApp) -> u64 {
+    if app.viewport.patches == 0 {
+        return app.viewport.key;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (app.viewport.key, app.viewport.patches).hash(&mut h);
+    h.finish()
 }
 
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
@@ -6597,14 +6693,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.preview.moving_layer()
         };
         if !layered && key != app.viewport.key {
-            let sc = build_scene(app);
-            if let Ok(mut slot) = app.viewport.slot.lock() {
-                *slot = Some(sc);
-            }
+            publish_model_scene(app, key);
             drag_layer::whole_scene_built(app);
-            app.viewport.key = key;
             app.viewport.build_ms = crate::now_ms() - t0;
             crate::frame_watch::step(app, "model scene");
+        } else if !layered {
+            publish_levels(app);
         }
         refresh_sketch_scene(app, &proj);
         if app.viewport.wireframe.busy() {
@@ -6630,7 +6724,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ao_samples,
             product: false,
             upload_error: None,
-            key: app.viewport.key,
+            key: published_key(app),
             slot: app.viewport.slot.clone(),
             sketch_key: app.viewport.sketch_key,
             sketch_slot: app.viewport.sketch_slot.clone(),
@@ -12063,16 +12157,27 @@ mod tests {
         app
     }
 
+    /// A single reference mesh drawn as an instance gets levels of detail like any other: no size
+    /// threshold. Its first scene draws it in full while they are made off the window thread;
+    /// then they are filled into that scene without building it again.
     #[test]
-    fn a_single_reference_mesh_below_the_former_instance_threshold_keeps_full_detail() {
-        let app = single_reference_grid(100);
-        let scene = build_scene(&app);
-        let instance = scene.instanced.first().unwrap();
+    fn a_single_reference_mesh_drawn_as_an_instance_gets_levels_too() {
+        let mut app = single_reference_grid(100);
+        let key = scene_key(&app);
+        publish_model_scene(&mut app, key);
+        let published = |app: &SolveApp| app.viewport.last_scene.lock().unwrap().clone().unwrap();
+        let scene = published(&app);
         assert_eq!(scene.instanced.len(), 1);
-        assert_eq!(instance.tris.indices.len(), 20_000 * 3);
-        assert!(instance.levels.is_empty());
-        assert!(!app.viewport.mesh_lods.busy(), "no simplification job is started");
-        assert_eq!(app.viewport.mesh_lods.generation(), 0);
+        assert_eq!(scene.instanced[0].tris.indices.len(), 20_000 * 3);
+        assert!(scene.instanced[0].levels.is_empty(), "drawn in full while its levels are made");
+        let began = std::time::Instant::now();
+        while app.viewport.mesh_lods.busy() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "made off the window thread");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(publish_levels(&mut app));
+        assert_eq!(app.viewport.scenes_built, 1, "filled in, not built again");
+        assert!(!published(&app).instanced[0].levels.is_empty());
     }
 
     #[test]
@@ -12169,7 +12274,9 @@ mod tests {
         let (mesh, _) = crate::open_meshing::session_world(&app.session).bodies[0].mesh_in_place();
         assert!(mesh.triangles.len() >= INSTANCE_ALONE);
         let key = scene_key(&app);
-        let first = build_scene(&app);
+        publish_model_scene(&mut app, key);
+        let published = |app: &SolveApp| app.viewport.last_scene.lock().unwrap().clone().unwrap();
+        let first = published(&app);
         assert_eq!(first.instanced.len(), 1);
         assert!(first.instanced[0].levels.is_empty(), "drawn in full meanwhile");
         let began = std::time::Instant::now();
@@ -12177,8 +12284,16 @@ mod tests {
             assert!(began.elapsed() < std::time::Duration::from_secs(120), "the levels are made");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert_ne!(scene_key(&app), key, "the scene is built again when they are");
-        let scene = build_scene(&app);
+        // Filled into the scene published, not built again: rebuilding a large scene for each
+        // part's levels cost a frame each time.
+        assert_eq!(scene_key(&app), key, "the scene is not built again for them");
+        let renderer_key = published_key(&app);
+        assert!(publish_levels(&mut app), "the scene is published again with them");
+        assert_ne!(published_key(&app), renderer_key, "the renderer takes it as new");
+        assert!(!publish_levels(&mut app), "and only once");
+        assert_eq!(app.viewport.scenes_built, 1, "built once");
+        let scene = published(&app);
+        assert!(std::sync::Arc::ptr_eq(&scene.instanced[0].tris, &first.instanced[0].tris), "the same triangles: kept on the GPU");
         let levels = &scene.instanced[0].levels;
         assert!(levels.len() >= 2, "{} levels", levels.len());
         // Small on screen: the sphere about 30 px across.
