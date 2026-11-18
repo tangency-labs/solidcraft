@@ -576,7 +576,7 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
         // The wall is the arc swept along its normal n = (s, 0, c), the chord's face the chord
         // swept along z, between the profile's plane and its translate by `distance` z. The
         // slice in that plane moved by h z holds the arc moved by h c n and the chord by h z:
-        // the arc lies h (z - c n) = h s X farther out than in the profile, and X is at
+        // the arc lies h (c n - z) = h s X farther out than in the profile, and X is at
         // cos(θ / 2) to the chord's normal, so the slice is the segment plus a strip of
         // chord · h s cos(θ / 2) = r sin θ h s. Over the slices, c dh apart:
         // c d A + c s r sin θ d² / 2, exactly: at each end the slice closes across the same
@@ -624,12 +624,15 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
     }
 }
 
+/// The start angle (radians) of [`short_arc`] about its centre.
+const SHORT_ARC_START: f64 = -1.4235;
+
 /// The cubic Bezier of a 0.005 degree arc of radius 88.3 about (-8.19, 145.98) at z = -53,
 /// its two inner control points an ulp or two off that plane, as a profile placed there by
 /// a transform holds them (SolidCraft #17462: 0.008 mm of a spline).
 fn short_arc() -> Curve {
     let (cx, cy, r) = (-8.185_840_780_2, 145.979_194_294, 88.295_980_686);
-    let (a0, sweep) = (-1.4235_f64, 0.005_f64.to_radians());
+    let (a0, sweep) = (SHORT_ARC_START, 0.005_f64.to_radians());
     let on = |a: f64| (cx + r * a.cos(), cy + r * a.sin());
     let tangent = |a: f64| (-a.sin(), a.cos());
     let h = 4.0 / 3.0 * (sweep / 4.0).tan() * r;
@@ -707,7 +710,7 @@ fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direc
     }
     // last, as its check turns the body; the chord's normal is the arc's middle direction
     // (`short_arc`'s start angle plus half its sweep)
-    let middle = -1.4235 + theta / 2.0;
+    let middle = SHORT_ARC_START + theta / 2.0;
     let chord_normal = Vec3::new(middle.cos(), middle.sin(), 0.0);
     assert_sliver(&mut k, b, r, theta, chord_normal, want, "short arc");
 }
