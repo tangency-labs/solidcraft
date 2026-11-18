@@ -51,6 +51,10 @@ pub struct ModelBody {
     pub feature: u64,
     // Timeline snapshots are cloned before meshes are requested. Share the cell itself so
     // meshing any snapshot also warms every unchanged copy of this body.
+    /// The box of the body's display mesh ([`ModelBody::mesh_bounds`]), worked out once: framing
+    /// the view goes over every body, and a placed copy's box moves every point of its part's
+    /// mesh. Shared by the copies of this body that keep its placement.
+    bounds: Arc<OnceLock<solidcraft_geom::Aabb3>>,
     mesh: Arc<OnceLock<Arc<Mesh>>>,
     /// Joint face measurements use their own tolerance, independent of display quality.
     /// Shared by snapshots of this geometry; the body identity guards direct replacement.
@@ -205,6 +209,7 @@ impl ModelBody {
             body,
             feature,
             mesh: Arc::new(OnceLock::new()),
+            bounds: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
             faces: Default::default(),
             mesh_placement: None,
@@ -493,19 +498,27 @@ impl ModelBody {
     }
 
     /// The box of [`ModelBody::mesh`] without making a placement's moved copy: the shared mesh's
-    /// points, moved.
+    /// points, moved. Worked out once (the background mesher works it out ahead, so framing a
+    /// large design reads it).
     pub fn mesh_bounds(&self) -> solidcraft_geom::Aabb3 {
-        if let Some(mesh) = self.cached_mesh() {
-            return mesh.bounds();
-        }
-        let (mesh, m) = self.mesh_in_place();
-        if crate::is_identity(&m) {
-            return mesh.bounds();
-        }
-        mesh.positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut b, p| {
-            b.add(crate::apply_point(&m, *p));
-            b
+        *self.bounds.get_or_init(|| {
+            if let Some(mesh) = self.cached_mesh() {
+                return mesh.bounds();
+            }
+            let (mesh, m) = self.mesh_in_place();
+            if crate::is_identity(&m) {
+                return mesh.bounds();
+            }
+            mesh.positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut b, p| {
+                b.add(crate::apply_point(&m, *p));
+                b
+            })
         })
+    }
+
+    /// Whether [`ModelBody::mesh_bounds`] is worked out already.
+    pub fn mesh_bounds_made(&self) -> bool {
+        self.bounds.get().is_some()
     }
 
     /// The box of [`ModelBody::mesh`] seen on a plane, in the plane's own coordinates
@@ -12695,6 +12708,7 @@ impl PlacedBodies {
         self.reused(b, m).map(|placed| {
             let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
             fresh.mesh = placed.mesh.clone();
+            fresh.bounds = placed.bounds.clone();
             fresh.measured = placed.measured.clone();
             fresh.joint_faces = placed.joint_faces.clone();
             fresh.faces = placed.faces.clone();
