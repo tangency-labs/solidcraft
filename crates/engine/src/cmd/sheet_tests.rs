@@ -720,6 +720,52 @@ fn contour_flange_takes_tangent_arcs_and_develops_their_bends() {
     assert!((f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-6, "{f}");
 }
 
+#[test]
+fn contour_flange_rounds_sharp_arc_corners_and_develops_their_bends() {
+    for flip in [false, true] {
+        for reverse in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 1.2, "k_factor": 0.5, "bend_radius": 2, "active": true}));
+            run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 45, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Wrap"}));
+            run(
+                &mut s,
+                "sketch.arc.three_point",
+                json!({"start": [106.6109, 328.1145], "end": [116.0753, 324.8869], "through": [-111.3548, -326.535], "id": "a1"}),
+            );
+            run(&mut s, "sketch.line", json!({"points": [[116.0753, 324.8869], [107.0126, 329.3509]], "ids": ["l2"]}));
+            run(
+                &mut s,
+                "sketch.arc.three_point",
+                json!({"start": [107.0126, 329.3509], "end": [58.6803, 341.2921], "through": [83.0613, 336.1912], "id": "a3"}),
+            );
+            run(&mut s, "sketch.finish", json!({}));
+            run(
+                &mut s,
+                "sheet.flange",
+                json!({"type": "contour", "sketch": "Wrap", "curves": ["a1", "l2", "a3"], "distance": 1000, "rule": "R", "flip": flip, "reverse": reverse}),
+            );
+            assert_eq!(s.model.state().bodies.len(), 1);
+            let sheet = &s.model.state().sheets[0];
+            assert_eq!(sheet.flanges.len(), 4);
+            let issues = s.model.state().bodies[0].body.validity();
+            assert!(issues.is_empty(), "{flip}/{reverse}: {issues:?}");
+            assert_eq!(s.model.state().bodies[0].body.lumps().unwrap().len(), 1);
+            assert!((sheet.flanges[1].radius - 2.0).abs() < 1e-9);
+            assert!((sheet.flanges[2].radius - 2.0).abs() < 1e-9);
+            let developed = sheet.flanges.iter().map(|f| f.leg + f.angle.abs() * (f.radius + 0.6)).sum::<f64>();
+            // Circle/line offset intersections give the exact tangent setbacks; each new bend
+            // develops at radius 2 + 0.5 * 1.2. Mirroring the extrusion preserves this length.
+            let expected = if flip { 2213.7726392733475 } else { 2221.4852874916614 };
+            assert!((developed - expected).abs() < 1e-6, "{flip}/{reverse}: {developed} vs {expected}");
+            let end = solidcraft_doc::apply_point(&sheet.fold(3), solidcore_record::Vec3::new(developed, 0.0, 0.0));
+            let end = sheet.frame.origin + sheet.frame.x * end.x + sheet.frame.y * end.y + sheet.frame.normal() * end.z;
+            assert!(end.dist(solidcore_record::Vec3::new(58.6803, 45.0, -341.2921)) < 1e-6, "{end:?}");
+            let f = flat(&mut s);
+            assert!((f["flat_size_mm"][0].as_f64().unwrap() - developed).abs() < 1e-6, "{f}");
+        }
+    }
+}
+
 /// A 150 x 100 base on a 2 mm rule with one 40 mm wall on its left edge: the part a chained
 /// flap (#4094) is made on.
 fn wall_bracket(s: &mut Session) {
