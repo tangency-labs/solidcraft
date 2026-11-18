@@ -310,7 +310,8 @@ fn a_sliver_shared_by_two_large_envelopes_is_listed_not_cleared() {
         run(&mut s, "component.activate", json!({"component": "root"}));
         run(&mut s, "solid.bounding_solid", json!({"component": name, "body_name": format!("{name} Envelope")}));
     }
-    // 0.5 mm cubed: 0.125 mm³, under the 8 mm³ a 2 m box's span allows.
+    // 0.5 mm cubed: 0.125 mm³, under the about 41.6 mm³ a 2 m box's span allows (1e-9 times
+    // the cube of its 3464 mm diagonal).
     let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
     assert_eq!(env["count"], 0, "{env}");
     let unchecked = env["unchecked"].as_array().unwrap();
