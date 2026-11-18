@@ -1859,14 +1859,13 @@ mod tests {
         assert_eq!(reported_value(Value::num(4.0)), 4.0);
     }
 
-    /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves
-    /// the quotient an ulp or two off: `3 in % 1 in` is 25.39999999999999 mm without that.
+    /// `sin`, `cos` and `tan` at a whole number of quarter turns are exact: a quarter turn as radians
+    /// is a rounded pi/2, so `cos(90 deg)` was 6.1e-17 and `sin(180 deg)` 1.2e-16, and `ceil` of
+    /// either was 1.
     #[test]
     fn trig_at_a_quarter_turn_is_exact() {
         let look = |_: &str| Err(DocError::Expr("no parameters".into()));
         let val = |e: &str| eval_with(e, &look).unwrap().v;
-        // A quarter turn as radians is a rounded pi/2, so `cos(90 deg)` came out 6.1e-17 and
-        // `sin(180 deg)` 1.2e-16, and `ceil` of either was 1.
         for (e, want) in [
             ("sin(0 deg)", 0.0),
             ("sin(90 deg)", 1.0),
@@ -1915,6 +1914,8 @@ mod tests {
         }
     }
 
+    /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves
+    /// the quotient an ulp or two off: `3 in % 1 in` is 25.39999999999999 mm without that.
     #[test]
     fn mod_ignores_float_noise_in_the_quotient() {
         let look = |_: &str| Err(DocError::Expr("no parameters".into()));
