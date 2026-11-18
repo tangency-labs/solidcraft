@@ -90,8 +90,8 @@ use crate::blend::fillet_corner::p1::{
     create_planar_surface, create_srf_of_revolution, fillet_radius,
 };
 use crate::blend::fillet_corner::p3::{
-    move_vertexuse, primary_eu, set_vertex_point, unchecked_point, CornerEnv, CornerPatchEnv,
-    FilletCorner, FilletExecutiveData,
+    move_vertexuse, primary_eu, set_vertex_point, CornerEnv, CornerPatchEnv, FilletCorner,
+    FilletExecutiveData,
 };
 use crate::blend::fillet_custom_solver::SurfaceId;
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
@@ -374,15 +374,8 @@ impl FilletCorner {
             .as_ref()
             .ok_or_else(|| null_deref("side edge without curve"))?;
         // fork 66b02de passes these on (SER)
-        let pass_on = k.fixes.fillet_statuses_pass_on;
-        let pnt1 = unchecked_point(crate::error::passed_on(
-            side_edge_curve.evaluate_point(k, edge_param1),
-            pass_on,
-        )?)?;
-        let pnt2 = unchecked_point(crate::error::passed_on(
-            side_edge_curve.evaluate_point(k, edge_param2),
-            pass_on,
-        )?)?;
+        let pnt1 = side_edge_curve.evaluate_point(k, edge_param1)?;
+        let pnt2 = side_edge_curve.evaluate_point(k, edge_param2)?;
 
         // See if we have coincident geometry, i.e. two rails intersect at this vertex.
         let gap_dist = pnt1.distance(pnt2);

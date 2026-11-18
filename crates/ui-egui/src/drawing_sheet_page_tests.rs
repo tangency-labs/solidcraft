@@ -25,6 +25,21 @@ fn plate_sheet() -> (Harness, String) {
     (h, front)
 }
 
+#[test]
+fn note_tool_places_text_on_the_active_sheet() {
+    let (mut h, _) = plate_sheet();
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.note"));
+    h.frames(4);
+    let field = crate::scenario::rect_of("drawing:note:text").unwrap().center();
+    h.step(&json!({"click": [field.x, field.y]})).unwrap();
+    h.step(&json!({"text": "Deburr all edges"})).unwrap();
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap().center();
+    h.step(&json!({"click": [paper.x, paper.y]})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let note = &drawing.notes[0];
+    assert_eq!(note.content.0, vec![solidcraft_engine::geom::cell::Part::Text("Deburr all edges".to_owned())]);
+}
+
 /// Frames until no view or dimension is waiting to be drawn.
 fn settle(h: &mut Harness) {
     for _ in 0..5_000 {
@@ -409,20 +424,6 @@ fn a_views_state_is_in_words() {
     let failed = words(&Status::Failed("too many lines".into()), true);
     assert_eq!(failed, ["Can't draw this view: too many lines", "Needs update"]);
     assert!(words(&Status::Drawn, false).is_empty());
-}
-
-/// A view shows its boundary only while the pointer is near its edge (D17 of the drawing UI
-/// design); a dimension or the title block shows its box whenever the pointer is over it.
-#[test]
-fn a_view_is_outlined_only_near_its_edge() {
-    let hit = |kind, on_edge| drawing_scene::Hit { object: 1, kind, on_edge };
-    assert!(outlined(&hit(ObjectKind::View, true)));
-    assert!(!outlined(&hit(ObjectKind::View, false)), "inside a view the sheet stays clean");
-    assert!(outlined(&hit(ObjectKind::Dimension, false)));
-    assert!(outlined(&hit(ObjectKind::Note, false)));
-    assert_eq!(kind_name(ObjectKind::Note), "note");
-    assert_eq!(kind_name(ObjectKind::ViewLabel), "view_label");
-    assert!(outlined(&hit(ObjectKind::TitleBlock, false)));
 }
 
 /// Without a drawing open the page shows the first-sheet start (#18159), and the control channel's

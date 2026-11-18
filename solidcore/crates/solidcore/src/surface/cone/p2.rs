@@ -319,9 +319,11 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
 /// normalised middle weight `w = cos α` instead of its legs: `r = |Q2 − Q0| / (2 sin α)`, the
 /// centre `r cos α` from the chord's midpoint, square to the chord in the circle's plane
 /// (The NURBS Book, Piegl and Tiller, §7.3). When the end nets are translates of each other,
-/// `axis`, the form's linear direction, gives the plane normal. A very short arc's legs and
-/// point angles amplify coordinate rounding past the tolerance; its chord and weight do not.
-/// The checks are [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
+/// `axis`, the form's linear direction, gives the plane normal, and the arc's control points
+/// must be within `scaled_zero` of the plane square to it through the start of the first
+/// segment at least half as wide as the widest (#17462). A very
+/// short arc's legs and point angles amplify coordinate rounding past the tolerance; its
+/// chord, weight and plane distances do not. The other checks are [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
 /// cylinder, so a form that was recognised keeps its circles to the last bit.
 ///
 /// # Errors
@@ -398,7 +400,14 @@ fn iso_arc_from_chord(
         return Ok(None);
     };
     let normal = if let Some(axis) = axis {
-        if !plane_normal.is_parallel_to(axis, EFF_ZERO_SQRT) {
+        // The arc lies on a plane square to the ruling when its control points are within
+        // the distance zero of the plane through the start of `base` (the first segment at
+        // least half as wide as the widest). Not the angle of the legs'
+        // normal to the ruling: that normal carries the rounding of the points over the
+        // sweep, 2e-8 rad on a 0.005 degree arc of radius 88 mm (#17462), past an angular
+        // zero, where the ruling is the form's own direction to the last bits.
+        let off = |p: Point3| (p - base.q0).dot(axis).abs() > scaled_zero;
+        if segments.iter().any(|s| off(s.q0) || off(s.q1) || off(s.q2)) {
             return Ok(None);
         }
         if plane_normal.dot(axis) < 0.0 {
@@ -767,18 +776,29 @@ impl Cone {
             // The kept cone runs between its new apex (where the offset radius reaches
             // zero) and the surviving end, at the original's slope: the radius spans
             // `old_top_radius - old_bot_radius` over `height`.
+            // (The ends are at the STEP domain's heights, not at the origin and `height`
+            // above it as upstream takes them: an unbounded cone runs from its apex, and an
+            // adjusted one from any height. Upstream placed the kept cone's origin as if the
+            // bottom were at the origin, off its apex by the bottom height, so the offset
+            // was another cone: the base radius at the wrong height. With the bottom at
+            // the origin, `0 + h` is `h` and nothing changes.)
+            let bot_height = self.bot_height();
             let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
                 let new_height = new_top_radius * height / (old_top_radius - old_bot_radius);
                 new_bot_radius = 0.0;
                 (
                     new_height,
-                    origin + (height + off_z_dist - new_height) * z_axis,
+                    origin + (bot_height + height + off_z_dist - new_height) * z_axis,
                     true,
                 )
             } else {
                 let new_height = new_bot_radius * height / (old_bot_radius - old_top_radius);
                 new_top_radius = 0.0;
-                (new_height, origin + off_z_dist * z_axis, false)
+                (
+                    new_height,
+                    origin + (bot_height + off_z_dist) * z_axis,
+                    false,
+                )
             };
 
             // New Cone Position - truncated at new apex position
@@ -942,6 +962,12 @@ impl Cone {
             SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
         })?;
         ignore_status(gen.transform(k, &mv, None))?;
+
+        // (The polar converter's circle is rebuilt on the offset cone, as the truncated
+        // branch above does: upstream's copy kept the original's circle, off the offset
+        // by the offset distance, so conversions through it named the original's
+        // parameters.) (status ignored)
+        ignore_status(off_cone.rebuild_cone_polar_converter(k))?;
 
         Ok(Some(off_cone))
     }
@@ -2211,6 +2237,70 @@ mod tests {
             let from_axis = placement.origin() + r * placement.x_axis() - Vec3::new(-95.0, y, z);
             assert!(from_axis.cross(axis).length() < 1e-11, "{from_axis:?}");
         }
+    }
+
+    /// #17462: the wall a linear sweep made from 0.008 mm of a spline, a 0.005 degree arc of
+    /// radius 88 mm swept 53 mm along -y, its NURBS form as the app's flat arrays carry it
+    /// (rows exact translates). The legs' normal of so short an arc is 2e-8 rad off the
+    /// ruling, past the angular zero both recoveries held it to, so the form, which is the
+    /// cylinder's own, was refused. It is a cylinder on the form with the ruling's axis.
+    #[test]
+    fn a_very_short_extruded_arc_is_a_cylinder_whatever_its_legs_normal() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let w = 0.999_999_998_985_303_8;
+        // (x w, y w, z w, w), as the record holds them
+        let row = |p: [[f64; 3]; 3]| -> Vec<CPoint> {
+            p.iter()
+                .zip([1.0, w, 1.0])
+                .map(|(&[x, y, z], w)| CPoint::new(x, y, z, w))
+                .collect()
+        };
+        let net = vec![
+            row([
+                [4.770_516_121_717_348, -29.0, 58.638_980_067_614_24],
+                [
+                    4.774_450_686_714_966,
+                    -28.999_999_970_573_803,
+                    58.639_563_676_146_95,
+                ],
+                [4.778_385_209_010_169, -29.0, 58.640_147_758_206_49],
+            ]),
+            row([
+                [4.770_516_121_717_353, -82.0, 58.638_980_067_614_24],
+                [
+                    4.774_450_686_714_971,
+                    -81.999_999_916_794_9,
+                    58.639_563_676_146_95,
+                ],
+                [4.778_385_209_010_175, -82.0, 58.640_147_758_206_49],
+            ]),
+        ];
+        let knot = 0.007_955_252_114_514_06;
+        let nurb = Nurb::new(
+            net,
+            1,
+            2,
+            vec![0.0, 0.0, 53.0, 53.0],
+            vec![0.0, 0.0, 0.0, knot, knot, knot],
+        )
+        .unwrap();
+        let form = BSplineSurface::from_nurb(nurb, false);
+        let cone = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
+            .unwrap()
+            .expect("a cylinder");
+        let surface = crate::surface::surface::Surface::from(cone);
+        let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+        assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+        let (AnalyticSupport::Cylinder { placement, .. } | AnalyticSupport::Cone { placement, .. }) =
+            support
+        else {
+            panic!("{support:?}");
+        };
+        let axis = placement.z_axis();
+        assert!(axis.x.abs() < 1e-15 && axis.z.abs() < 1e-15, "{axis:?}");
     }
 
     /// #16488: a form whose rows are not exact translates. A unit-radius arc of 1 rad about

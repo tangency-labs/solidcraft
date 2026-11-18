@@ -19,6 +19,9 @@ pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
+pub mod browser_search;
+#[cfg(test)]
+mod browser_search_tests;
 pub mod canvas;
 pub mod cli_link;
 #[cfg(test)]
@@ -1535,6 +1538,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
+        // The rules below name registered ids; a command spelled in another case is the same
+        // command (the engine runs it), so it meets the same rules.
+        let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(self.tr("prefs.plugin_busy").into());
@@ -3436,7 +3442,15 @@ impl SolveApp {
     /// A dropped CAD, mesh, drawing or point cloud (PLY, XYZ, PTS) file joins a design that has
     /// features or point clouds; otherwise it opens. A dropped PNG or JPEG is a canvas to place,
     /// not a design to open: it starts the Canvas tool with that image chosen (#13926).
+    /// A dropped ZIP goes through the plugin install review, which validates its contents
+    /// instead of trying to open it as a design (#18761).
     pub fn drop_path(&mut self, path: &str) {
+        if plugin_install::available()
+            && std::path::Path::new(path).extension().and_then(std::ffi::OsStr::to_str).is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+        {
+            plugin_install::review(self, path.to_string());
+            return;
+        }
         if sketch_tools::is_canvas_image(path) {
             sketch_tools::start_image_placement(self, "canvas.insert", path.to_string());
             return;
