@@ -1407,13 +1407,12 @@ fn monotone_region(
     // evaluated point's)
     let mut with_mu = Vec::new();
     for (s, mu) in merged {
-        let (mu, err) = match mu {
-            Some(m) => m,
-            None => {
-                let p = gen.evaluate_point(k, s)?;
-                let uv = plane.project_point_to_uv_domain(p);
-                (frame.mu(uv), frame.mu_err(uv, frame.uv_err(p)))
-            }
+        let (mu, err) = if let Some(m) = mu {
+            m
+        } else {
+            let p = gen.evaluate_point(k, s)?;
+            let uv = plane.project_point_to_uv_domain(p);
+            (frame.mu(uv), frame.mu_err(uv, frame.uv_err(p)))
         };
         with_mu.push((s, mu, err));
     }

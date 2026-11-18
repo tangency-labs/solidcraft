@@ -2826,6 +2826,7 @@ mod tests {
         th: f64,
         f: (f64, f64, f64),
     ) -> (ExtrusionIntersection, Plane, f64) {
+        type Probe = (Vec<(f64, f64)>, (f64, f64), Vec<Point2>);
         let dom = Extent2d::from_bounds(o, o, o + 10.0 * s, o + 10.0 * s);
         let plane = if rot {
             rotated_plane(dom)
@@ -2849,7 +2850,7 @@ mod tests {
         let pt = |p: (f64, f64)| Point2::new(p.0, p.1);
         let boxp: Vec<Point2> = corners.iter().map(|&p| pt(p)).collect();
         let below = |top: f64| cut(&boxp, &|p: Point2| top - mu((p.x, p.y)));
-        let (gen, v, region): (Vec<(f64, f64)>, (f64, f64), Vec<Point2>) = match kind {
+        let (gen, v, region): Probe = match kind {
             0 => {
                 let a = inner(f.0, f.1);
                 (vec![c, a], (-30.0 * s, 30.0 * s), below(mu(a)))
