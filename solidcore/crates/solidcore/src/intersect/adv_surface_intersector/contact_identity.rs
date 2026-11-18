@@ -6,12 +6,11 @@
 //! methods, 2010, section 13). A root enclosure and its larger uniqueness domain are
 //! distinct objects; overlap alone never establishes identity.
 //!
-//! Deviations: eight inflation steps and eight refinements, with cancellation. Unresolved
-//! identity is refused. Charts without a continuous first derivative or an exact
-//! enclosure keep the existing boundary and singular-contact search.
+//! Deviations: eight inflation steps and eight refinements, with cancellation.
+//! If a comparison cannot be certified, the search uses its distance comparison.
 
 use super::{stationary_system, tp_evaluate, TpEval};
-use crate::blend::fillet_section::certificate::{knot_cuts, nurbs_partials_over_box};
+use crate::blend::fillet_section::certificate::nurbs_partials_over_box;
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::series::{v_add, v_scale, V3};
 use crate::blend::fillet_section::station::Nurbs;
@@ -35,6 +34,19 @@ fn unproved() -> SolidError {
     }
 }
 
+fn optional_proof<T>(proof: Result<T>) -> Result<Option<T>> {
+    match proof {
+        Ok(value) => Ok(Some(value)),
+        Err(e)
+            if std::iter::successors(Some(&e), |e| e.cause())
+                .any(SolidError::is_unported_or_cancelled) =>
+        {
+            Err(e)
+        }
+        Err(_) => Ok(None),
+    }
+}
+
 /// An accepted candidate with its original parameter representative.
 pub(super) struct Contact {
     pub(super) uv: [Point2; 2],
@@ -53,59 +65,27 @@ pub(super) struct Comparator(Option<Pair>);
 
 impl Comparator {
     pub(super) fn new(k: &Kernel, surfaces: [&Surface; 2], domains: [Extent2d; 2]) -> Result<Self> {
-        Ok(Self(Pair::new(k, surfaces, domains)?))
-    }
-
-    pub(super) fn supports(&self, uv: [Point2; 2]) -> bool {
-        self.0.as_ref().is_some_and(|pair| {
-            uv.into_iter().zip(pair.domains).all(|(p, d)| {
-                p.x > d.min().x && p.x < d.max().x && p.y > d.min().y && p.y < d.max().y
-            })
-        })
+        k.check_cancelled(OP)?;
+        Ok(Self(
+            optional_proof(Pair::new(k, surfaces, domains))?.flatten(),
+        ))
     }
 
     pub(super) fn same(
-        &mut self,
+        &self,
         k: &Kernel,
         surfaces: [&Surface; 2],
         old: &mut Contact,
         new: &mut Contact,
-    ) -> Result<bool> {
+    ) -> Result<Option<bool>> {
+        k.check_cancelled(OP)?;
         if old.uv == new.uv {
-            return Ok(true);
+            return Ok(Some(true));
         }
-        let pair = self.0.as_ref().ok_or_else(unproved)?;
-        if old.root.is_none() {
-            old.root = Some(pair.certify(k, surfaces, old.uv)?.ok_or_else(unproved)?);
-        }
-        if new.root.is_none() {
-            new.root = Some(pair.certify(k, surfaces, new.uv)?.ok_or_else(unproved)?);
-        }
-        let a = old.root.as_mut().ok_or_else(unproved)?;
-        let b = new.root.as_mut().ok_or_else(unproved)?;
-        for step in 0..=REFINEMENTS {
-            k.check_cancelled(OP)?;
-            if contains(a.unique, b.enclosure) || contains(b.unique, a.enclosure) {
-                return Ok(true);
-            }
-            if separated(pair.position(a.enclosure)?, pair.position(b.enclosure)?) {
-                return Ok(false);
-            }
-            let hull = core::array::from_fn(|i| {
-                let x = a.enclosure.get(i).copied().unwrap_or(Ivl::whole());
-                let y = b.enclosure.get(i).copied().unwrap_or(Ivl::whole());
-                Ivl::new(x.lo.min(y.lo), x.hi.max(y.hi))
-            });
-            let (_, j) = pair.system(hull)?;
-            if contraction(&a.inverse, &j).1 < 1.0 {
-                return Ok(true);
-            }
-            if step < REFINEMENTS {
-                a.refine(pair)?;
-                b.refine(pair)?;
-            }
-        }
-        Err(unproved())
+        let Some(pair) = &self.0 else {
+            return Ok(None);
+        };
+        optional_proof(pair.compare(k, surfaces, old, new))
     }
 }
 
@@ -122,13 +102,55 @@ fn separated(a: V3<Ivl>, b: V3<Ivl>) -> bool {
         .any(|(x, y)| x.hi < y.lo || y.hi < x.lo)
 }
 
+impl Pair {
+    fn compare(
+        &self,
+        k: &Kernel,
+        surfaces: [&Surface; 2],
+        old: &mut Contact,
+        new: &mut Contact,
+    ) -> Result<bool> {
+        if old.root.is_none() {
+            old.root = Some(self.certify(k, surfaces, old.uv)?.ok_or_else(unproved)?);
+        }
+        if new.root.is_none() {
+            new.root = Some(self.certify(k, surfaces, new.uv)?.ok_or_else(unproved)?);
+        }
+        let a = old.root.as_mut().ok_or_else(unproved)?;
+        let b = new.root.as_mut().ok_or_else(unproved)?;
+        for step in 0..=REFINEMENTS {
+            k.check_cancelled(OP)?;
+            if contains(a.unique, b.enclosure) || contains(b.unique, a.enclosure) {
+                return Ok(true);
+            }
+            if separated(self.position(a.enclosure)?, self.position(b.enclosure)?) {
+                return Ok(false);
+            }
+            let hull = core::array::from_fn(|i| {
+                let x = a.enclosure.get(i).copied().unwrap_or(Ivl::whole());
+                let y = b.enclosure.get(i).copied().unwrap_or(Ivl::whole());
+                Ivl::new(x.lo.min(y.lo), x.hi.max(y.hi))
+            });
+            let (_, j) = self.system(hull)?;
+            if self.contracts(&contraction(&a.inverse, &j).0) {
+                return Ok(true);
+            }
+            if step < REFINEMENTS {
+                a.refine(self)?;
+                b.refine(self)?;
+            }
+        }
+        Err(unproved())
+    }
+}
+
 enum Bounds {
     Plane(Plane),
     Net(Nurbs),
 }
 
 impl Bounds {
-    fn of(k: &Kernel, mut surface: &Surface, domain: Extent2d) -> Result<Option<Self>> {
+    fn of(k: &Kernel, mut surface: &Surface) -> Result<Option<Self>> {
         for _ in 0..32 {
             match surface.kind() {
                 SurfaceKind::CurveBounded(b) => surface = b.basis(),
@@ -137,15 +159,7 @@ impl Bounds {
                     let Some(s) = exact_nurbs_surface(k, surface)? else {
                         return Ok(None);
                     };
-                    let Ok(n) = Nurbs::of(&s) else {
-                        return Ok(None);
-                    };
-                    if knot_cuts(&n.u, n.p, n.nu, domain.min().x, domain.max().x, 1).is_ok()
-                        && knot_cuts(&n.v, n.q, n.nv, domain.min().y, domain.max().y, 1).is_ok()
-                    {
-                        return Ok(Some(Self::Net(n)));
-                    }
-                    return Ok(None);
+                    return Ok(optional_proof(Nurbs::of(&s))?.map(Self::Net));
                 }
             }
         }
@@ -196,58 +210,63 @@ impl Bounds {
 
 struct Pair {
     surfaces: [Bounds; 2],
-    offset: [f64; 4],
     scale: [f64; 4],
-    domains: [Extent2d; 2],
+    trim: Box4,
 }
 
 impl Pair {
     fn new(k: &Kernel, surfaces: [&Surface; 2], domains: [Extent2d; 2]) -> Result<Option<Self>> {
-        let [a, b] = domains;
         let [sa, sb] = surfaces;
+        let (Some(sa), Some(sb)) = (Bounds::of(k, sa)?, Bounds::of(k, sb)?) else {
+            return Ok(None);
+        };
+        let mut domains = domains;
+        for (surface, domain) in [&sa, &sb].into_iter().zip(&mut domains) {
+            match surface {
+                Bounds::Plane(p) if !p.is_out_of_bounds_enabled() => {
+                    *domain = domain.intersect(&p.step_uv_domain())?;
+                }
+                _ => {}
+            }
+        }
+        let [a, b] = domains;
         let scale = [a.size().x, a.size().y, b.size().x, b.size().y];
         if !scale.iter().all(|x| x.is_finite() && *x > 0.0) {
             return Ok(None);
         }
-        let (Some(sa), Some(sb)) = (Bounds::of(k, sa, a)?, Bounds::of(k, sb, b)?) else {
-            return Ok(None);
-        };
         Ok(Some(Self {
             surfaces: [sa, sb],
-            offset: [a.min().x, a.min().y, b.min().x, b.min().y],
             scale,
-            domains,
+            trim: [
+                Ivl::new(a.min().x, a.max().x),
+                Ivl::new(a.min().y, a.max().y),
+                Ivl::new(b.min().x, b.max().x),
+                Ivl::new(b.min().y, b.max().y),
+            ],
         }))
     }
 
-    fn parameters(&self, x: Box4) -> Box4 {
-        core::array::from_fn(
-            |i| match (self.offset.get(i), self.scale.get(i), x.get(i)) {
-                (Some(&o), Some(&s), Some(&v)) => Ivl::from(o) + Ivl::from(s) * v,
-                _ => Ivl::whole(),
-            },
-        )
+    // The box stays in native UV so clipping is exact. Scale the contraction norm
+    // by the chart widths to retain conditioning across different UV units.
+    fn contracts(&self, c: &[[Ivl; 4]; 4]) -> bool {
+        c.iter().zip(self.scale).all(|(row, si)| {
+            row.iter().zip(self.scale).fold(0.0, |sum, (&v, sj)| {
+                round_up(sum + (v * Ivl::from(sj) / Ivl::from(si)).mag())
+            }) < 1.0
+        })
     }
 
     fn jets(&self, x: Box4) -> Result<[TpEval<Ivl>; 2]> {
-        let [u1, v1, u2, v2] = self.parameters(x);
-        for ([u, v], d) in [[u1, v1], [u2, v2]].into_iter().zip(self.domains) {
-            if !(u.lo >= d.min().x && u.hi <= d.max().x && v.lo >= d.min().y && v.hi <= d.max().y) {
-                return Err(unproved());
-            }
+        if !contains(self.trim, x) {
+            return Err(unproved());
         }
+        let [u1, v1, u2, v2] = x;
         Ok([self.surfaces[0].at(u1, v1)?, self.surfaces[1].at(u2, v2)?])
     }
 
     fn system(&self, x: Box4) -> Result<([Ivl; 4], [[Ivl; 4]; 4])> {
         let [a, b] = self.jets(x)?;
-        let (f, mut j) = stationary_system(a, b);
-        for row in &mut j {
-            for (v, &s) in row.iter_mut().zip(&self.scale) {
-                *v = *v * Ivl::from(s);
-            }
-        }
-        Ok((f, j))
+        Ok(stationary_system(a, b))
     }
 
     fn position(&self, x: Box4) -> Result<V3<Ivl>> {
@@ -266,14 +285,14 @@ impl Pair {
         surfaces: [&Surface; 2],
         uv: [Point2; 2],
     ) -> Result<Option<Root>> {
-        let raw = [uv[0].x, uv[0].y, uv[1].x, uv[1].y];
-        let mid: [f64; 4] =
-            core::array::from_fn(
-                |i| match (raw.get(i), self.offset.get(i), self.scale.get(i)) {
-                    (Some(&v), Some(&o), Some(&s)) => (v - o) / s,
-                    _ => f64::NAN,
-                },
-            );
+        let mid = [uv[0].x, uv[0].y, uv[1].x, uv[1].y];
+        if !mid
+            .iter()
+            .zip(self.trim)
+            .all(|(&m, d)| m > d.lo && m < d.hi)
+        {
+            return Ok(None);
+        }
         let (_, j) = stationary_system(
             tp_evaluate(k, surfaces[0], uv[0])?,
             tp_evaluate(k, surfaces[1], uv[1])?,
@@ -287,9 +306,14 @@ impl Pair {
                     * self.scale.get(c).copied().unwrap_or(f64::NAN)
             })
         });
-        let Some(inverse) = inverse_of_columns4(&columns) else {
+        let Some(mut inverse) = inverse_of_columns4(&columns) else {
             return Ok(None);
         };
+        for (row, s) in inverse.iter_mut().zip(self.scale) {
+            for v in row {
+                *v *= s;
+            }
+        }
         let (f, _) = self.system(mid.map(Ivl::from))?;
         let mut radii = inverse.map(|row| {
             row.iter()
@@ -297,22 +321,23 @@ impl Pair {
                 .fold(Ivl::from(0.0), |v, (&c, f)| v + Ivl::from(c) * f)
                 .mag()
         });
-        for (r, m) in radii.iter_mut().zip(mid) {
-            *r = round_up(2.0 * *r + 32.0 * f64::EPSILON * (1.0 + m.abs()));
+        for ((r, m), s) in radii.iter_mut().zip(mid).zip(self.scale) {
+            *r = round_up(2.0 * *r + 32.0 * f64::EPSILON * s.max(m.abs()));
         }
         for _ in 0..KRAWCZYK_STEPS {
             k.check_cancelled(OP)?;
-            let x = core::array::from_fn(|i| match (mid.get(i), radii.get(i)) {
-                (Some(&m), Some(&r)) => Ivl::new(
-                    (Ivl::from(m) - Ivl::from(r)).lo,
-                    (Ivl::from(m) + Ivl::from(r)).hi,
-                ),
-                _ => Ivl::whole(),
-            });
+            let mut x = self.trim;
+            for ((d, m), r) in x
+                .iter_mut()
+                .zip(mid.map(Ivl::from))
+                .zip(radii.map(Ivl::from))
+            {
+                *d = Ivl::new(d.lo.max((m - r).lo), d.hi.min((m + r).hi));
+            }
             let (_, j) = self.system(x)?;
-            let (c, q) = contraction(&inverse, &j);
+            let (c, _) = contraction(&inverse, &j);
             let image = k_operator(&mid, &inverse, &f, &c, &x);
-            if q < 1.0
+            if self.contracts(&c)
                 && image
                     .iter()
                     .zip(x)
@@ -341,17 +366,23 @@ struct Root {
 impl Root {
     fn refine(&mut self, pair: &Pair) -> Result<()> {
         let mid = self.enclosure.map(Ivl::mid);
-        let (_, j) = pair.system(self.enclosure)?;
+        let center = mid.map(Ivl::from);
         // Recentring keeps the residual's point inside the box used for the Jacobian.
-        let (f, _) = pair.system(mid.map(Ivl::from))?;
+        if !contains(self.enclosure, center) {
+            return Err(unproved());
+        }
+        let (_, j) = pair.system(self.enclosure)?;
+        let (f, _) = pair.system(center)?;
         let (c, _) = contraction(&self.inverse, &j);
         let image = k_operator(&mid, &self.inverse, &f, &c, &self.enclosure);
-        for (x, y) in self.enclosure.iter_mut().zip(image) {
+        let mut enclosure = self.enclosure;
+        for (x, y) in enclosure.iter_mut().zip(image) {
             *x = Ivl::new(x.lo.max(y.lo), x.hi.min(y.hi));
-            if !(x.is_finite() && x.lo <= x.hi) {
+            if !x.is_finite() {
                 return Err(unproved());
             }
         }
+        self.enclosure = enclosure;
         Ok(())
     }
 }

@@ -41,7 +41,6 @@ use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
-use crate::geom::global_solver::SolverOperation;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Point3;
 use crate::intersect::surface_intersector::p1::{
@@ -436,24 +435,7 @@ impl Search<'_, '_> {
         {
             return Ok(());
         }
-        // Preserve membership of curves produced before this discrete root search.
         let reach = 100.0 * self.si.this_approx_tol_3d;
-        for (index, curve) in existing.iter().enumerate() {
-            let drop = curve.drop_point_in(
-                k,
-                &curve.natural_interval(),
-                pnt,
-                None,
-                reach,
-                None,
-                SolverOperation::Intersect,
-                caches,
-                index,
-            )?;
-            if drop.success && drop.distance < reach {
-                return Ok(());
-            }
-        }
 
         let mut contact = identity::Contact::new([uv1, uv2]);
         if !self.contacts.is_empty() && self.identities.is_none() {
@@ -464,17 +446,11 @@ impl Search<'_, '_> {
             )?);
         }
         for (old, point) in &mut self.contacts {
-            let same = match &mut self.identities {
-                Some(comparator)
-                    if comparator.supports(old.uv) && comparator.supports(contact.uv) =>
-                {
-                    comparator.same(k, [srf1, srf2], old, &mut contact)?
-                }
-                // A boundary or non-C1 chart does not admit the regular stationary
-                // system's proof. It retains the existing contact comparison.
-                _ => point.distance(pnt) < reach,
+            let identity = match &self.identities {
+                Some(comparator) => comparator.same(k, [srf1, srf2], old, &mut contact)?,
+                None => None,
             };
-            if same {
+            if identity.unwrap_or_else(|| point.distance(pnt) < reach) {
                 return Ok(());
             }
         }
@@ -602,6 +578,42 @@ pub(super) fn find_tangent_contact_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Vec2;
+    use crate::surface::plane::Plane;
+
+    #[test]
+    fn an_inconclusive_contact_comparison_uses_the_distance_check() {
+        let k = Kernel::default();
+        let domain = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let surface = Surface::from(Plane::new(
+            Point3::ZERO,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &domain,
+        ));
+        let mut si =
+            SurfaceIntersector::new(&k, &surface, &domain, &surface, &domain, false).unwrap();
+        si.this_approx_tol_3d = 1e-6;
+        let mut search = Search {
+            si: &si,
+            contacts: Vec::new(),
+            identities: None,
+            num_curves_in: 0,
+            gap_tol: 0.0,
+        };
+        let mut out = InteriorCurves::default();
+        let mut caches = DropPointCaches::default();
+        // Coplanar samples give a singular stationary Jacobian. The distance
+        // check merges the first two and keeps the far one.
+        for x in [0.0, 5e-5, 0.1] {
+            let uv = Point2::new(x, 0.0);
+            search
+                .accept(&k, uv, uv, 0.0, &mut out, &mut caches)
+                .unwrap();
+        }
+        assert_eq!(out.curve_types, [TsectCurveType::Touching; 2]);
+    }
 
     #[test]
     fn solve4_solves_and_rejects_singular() {
