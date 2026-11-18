@@ -95,7 +95,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.fillet_knife_edge_rounds = true;
-    f.fillet_on_edge_continues_line = true;
     f.fillet_plane_curve_ends_past_face = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
