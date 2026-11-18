@@ -930,6 +930,8 @@ circular compass and native widget-owned tooltip content, does not acquire an in
 }
 ```
 
+`solidcraft-theme/1` optionally accepts `glass`: `blur` (0-64 points), `refraction` (0-16 points), `see_through` and `reach` (0-1). The host then draws the window's panels, dialogs and bars as glass over a backdrop (the view's picture, else the theme's own gradient) with `egui_glass`; Appearance has sliders that scale these. A theme without `glass` draws flat fills as before, and a value out of range or an unknown key refuses the file.
+
 Those are Blueprint's settings: a single primary outline and dotted secondary rules. Secondary roles optionally accept `pattern`: `solid` (default) or `dotted`; this pattern follows horizontal/vertical section rules. Container outlines remain solid, as do the other roles. Themes without border settings retain their previous appearance.
 SolidCraft 95 uses silver surfaces and directional two-band bevels: light top/left
 edges and dark bottom/right edges for raised panels and buttons, reversed for

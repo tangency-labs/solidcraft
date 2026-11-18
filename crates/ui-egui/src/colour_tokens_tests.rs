@@ -146,6 +146,7 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
+    ("glass.rs", 1, "the grey a glass panel shows, from the theme's glass style and the luma under it"),
     ("navigation.rs", 1, "the navigator's face shading, made from a token"),
     ("drawing_sheet_page.rs", 2, "the drawing sheet moves toward white, else black, to stand off the backdrop"),
     ("canvas.rs", 3, "white rings around manipulator handles"),

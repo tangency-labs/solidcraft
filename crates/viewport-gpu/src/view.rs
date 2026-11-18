@@ -3024,8 +3024,8 @@ struct Supersampled {
 
 /// A frame filtered down to the viewport's own pixels, for a still view to blit as it is.
 struct CachedPicture {
-    /// Kept for the bind group, which samples it.
-    _view: wgpu::TextureView,
+    /// Kept for the bind group, which samples it ([`Renderer::picture`] too).
+    view: wgpu::TextureView,
     bind: wgpu::BindGroup,
 }
 
@@ -4504,6 +4504,21 @@ impl Renderer {
         self.target.samples != self.window.samples || self.target.depth != self.window.depth || self.target.format != self.window.format
     }
 
+    /// The picture the last frame drew offscreen (one sample, in [`Self::target`]'s format) and
+    /// whether that format is sRGB, for a host that shows it elsewhere too (the app's glass panels
+    /// refract it). `None` when the frame was drawn straight into the window's pass.
+    pub fn picture(&self) -> Option<(wgpu::TextureView, bool)> {
+        if !self.ss_ready {
+            return None;
+        }
+        let view = match (&self.cached, &self.ss) {
+            (Some(cached), _) => &cached.view,
+            (None, Some(ss)) => ss.resolve.as_ref().unwrap_or(&ss.color),
+            (None, None) => return None,
+        };
+        Some((view.clone(), self.target.format.is_srgb()))
+    }
+
     /// Why the last [`Renderer::prepare`] left a scene out (the device refused a buffer for it),
     /// taken: the picture it prepared shows the previous scene.
     pub(crate) fn take_refused_upload(&mut self) -> Option<String> {
@@ -5300,7 +5315,7 @@ impl Renderer {
             pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
             pass.draw(0..3, 0..1);
         }
-        self.cached = Some(CachedPicture { _view: view, bind });
+        self.cached = Some(CachedPicture { view, bind });
     }
 
     /// Draw the frame supersampled (`cb.ssaa` times the viewport's pixels each way, within the

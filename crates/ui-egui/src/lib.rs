@@ -86,6 +86,7 @@ pub mod fonts;
 pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
+mod glass;
 pub mod gpu;
 pub mod help;
 pub use solidcraft_ui_kit::history_bar;
@@ -628,6 +629,8 @@ pub struct WgpuBuilt {
     blur: bool,
     /// The anti-aliasing check failed at the asked samples and passed at 1x.
     msaa_fallback: bool,
+    /// The window's pass has no depth buffer and one sample: a glass theme's glass can share it.
+    glass: bool,
 }
 
 pub struct SolveApp {
@@ -860,6 +863,8 @@ pub struct SolveApp {
     pub msaa_supported: Vec<u32>,
     /// The startup check selected 1x; Graphics explains the workaround.
     pub msaa_compatibility: bool,
+    /// Glass for a glass theme, once the window draws on the GPU.
+    glass: Option<glass::GlassState>,
     /// Startup fallback diagnostic, also shown in Graphics preferences.
     pub graphics_fallback: Option<String>,
     /// Settings put back at start because they kept SolidCraft from starting, one line each,
@@ -1145,6 +1150,7 @@ impl SolveApp {
             stand_up_later: None,
             msaa_supported: Vec::new(),
             msaa_compatibility: false,
+            glass: None,
             graphics_fallback: None,
             settings_reset: Vec::new(),
             big_operation: false,
@@ -1285,7 +1291,8 @@ impl SolveApp {
                 Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
             }
         }
-        WgpuBuilt { built, blur: scene.depth.is_some() && window.depth.is_none() && window.samples == 1, msaa_fallback }
+        let glass = window.depth.is_none() && window.samples == 1;
+        WgpuBuilt { built, blur: scene.depth.is_some() && window.depth.is_none() && window.samples == 1, msaa_fallback, glass }
     }
 
     /// The view's pipelines could not be built (the thread compiling them failed, #1210): the view
@@ -1302,6 +1309,9 @@ impl SolveApp {
         // Safe graphics mode draws no blur behind panels: it never gets a device.
         if safe_graphics::blur(self) {
             self.blur.install(rs, built.blur);
+            if built.glass {
+                self.glass = Some(glass::GlassState::install(rs));
+            }
         }
         if built.msaa_fallback {
             self.msaa_compatibility = true;
@@ -4186,6 +4196,8 @@ impl SolveApp {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
         control::publish_design(self, &control::DOCUMENT_WATCH);
+        // Last, over everything drawn: a glass theme's panels become glass.
+        glass::frame(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());

@@ -97,6 +97,10 @@ pub struct ThemeFile {
     /// Levels newer than [`REQUIREMENTS_LEVEL`] disable options and overlays.
     #[serde(default = "default_requirements_level", skip_serializing_if = "is_default_requirements_level")]
     pub requires: u64,
+    /// Optional glass: `blur` and `refraction` in points, `see_through` and `reach` 0–1. Absent:
+    /// flat fills.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub glass: BTreeMap<String, Value>,
 }
 
 /// Theme option/overlay format level understood by this app.
@@ -127,6 +131,7 @@ impl Default for ThemeFile {
             options: Vec::new(),
             overlays: Vec::new(),
             requires: default_requirements_level(),
+            glass: BTreeMap::new(),
         }
     }
 }
@@ -415,6 +420,28 @@ pub fn parse_icon_palette(values: &BTreeMap<String, Value>) -> Result<Option<Pal
     Ok(Some(palette))
 }
 
+/// A theme file's glass, each value in its range; no entries: no glass.
+pub fn parse_glass(values: &BTreeMap<String, Value>) -> Result<Option<solidcraft_theme::Glass>, String> {
+    if values.is_empty() {
+        return Ok(None);
+    }
+    let mut glass = solidcraft_theme::Glass { blur: 36.0, refraction: 4.0, see_through: 0.5, reach: 1.0 };
+    for (key, value) in values {
+        let (slot, max) = match key.as_str() {
+            "blur" => (&mut glass.blur, 64.0),
+            "refraction" => (&mut glass.refraction, 16.0),
+            "see_through" => (&mut glass.see_through, 1.0),
+            "reach" => (&mut glass.reach, 1.0),
+            _ => return Err(format!("`glass.{key}` is not a glass setting (blur, refraction, see_through, reach)")),
+        };
+        match value.as_f64().map(|v| v as f32).filter(|v| (0.0..=max).contains(v)) {
+            Some(v) => *slot = v,
+            None => return Err(format!("`glass.{key}` must be a number from 0 to {max}")),
+        }
+    }
+    Ok(Some(glass))
+}
+
 pub fn export_icon_palette(palette: Option<Palette>) -> BTreeMap<String, Value> {
     let mut out = BTreeMap::new();
     let Some(palette) = palette else { return out };
@@ -472,7 +499,7 @@ macro_rules! theme_keys {
             // Not colours: the hover lift is a grey step, the analysis colours belong to shaders.
             let Tokens {
                 $($one: _,)* $($many: _,)*
-                hover_face_lift: _, analysis: _, icons: _, borders: _,
+                hover_face_lift: _, analysis: _, icons: _, borders: _, glass: _,
                 file_action_height: _, file_back_height: _, file_recovery_icon: _, file_grid_gap: _,
                 file_nav_width: _, file_nav_height: _, file_tile_height: _, file_tile_icon: _, file_recent_height: _,
                 file_sample_image_height: _, file_content_inset_x: _, file_content_inset_y: _, file_section_gap: _, font_start_title: _,
@@ -609,6 +636,12 @@ fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
         None => default_requirements_level(),
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
+    let glass = match v.get("glass") {
+        None => BTreeMap::new(),
+        Some(Value::Object(values)) => values.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        Some(_) => return Err("`glass` must be an object of blur, refraction, see_through and reach".into()),
+    };
+    parse_glass(&glass)?;
     let layer = parse_layer(v)?;
     let tabs = parse_tabs(v.get("tabs"), unknown)?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
@@ -628,6 +661,7 @@ fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
         options,
         overlays,
         requires,
+        glass,
     })
 }
 
@@ -1222,6 +1256,7 @@ pub fn resolve_base(theme: &ThemeFile) -> Tokens {
     }
     // Malformed hand-edited saved settings cannot introduce non-finite drawing geometry.
     t.borders = parse_borders(&theme.borders).unwrap_or_default();
+    t.glass = parse_glass(&theme.glass).unwrap_or_default();
     // Conflicting sketch geometry is drawn in the theme's own error colour unless it sets one of
     // its own (#7244).
     if !theme.colors.contains_key("sketch_conflict") {
@@ -1342,7 +1377,12 @@ pub fn export(name: &str, base: Base, t: &Tokens, icons: Option<Palette>) -> Val
         );
     }
     let icon_palette = export_icon_palette(icons);
-    json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})
+    let mut file =
+        json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette});
+    if let Some(g) = t.glass {
+        file["glass"] = json!({"blur": g.blur, "refraction": g.refraction, "see_through": g.see_through, "reach": g.reach});
+    }
+    file
 }
 
 /// Export a theme definition, preserving its options and overlays rather than flattening them
@@ -1370,6 +1410,9 @@ pub fn export_file(theme: &ThemeFile) -> Value {
         }
         if !is_default_requirements_level(&theme.requires) {
             obj.insert("requires".into(), json!(theme.requires));
+        }
+        if !theme.glass.is_empty() {
+            obj.insert("glass".into(), json!(theme.glass));
         }
     }
     value

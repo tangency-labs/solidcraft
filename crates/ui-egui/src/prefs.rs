@@ -1747,6 +1747,17 @@ preference_settings! {
     home_fit_size: f32 = 1.0, PAGE_NAVIGATION, accept(0.1..=1.0);
     /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.
     color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
+    /// A glass theme's blur, as a share of the theme's own: 0 (clear) to 2.
+    glass_blur: f32 = 1.0, PAGE_APPEARANCE, accept(0.0..=2.0);
+    /// A glass theme's see-through, as a share of the theme's own: 0 (the panels' colour) to 2.
+    glass_see_through: f32 = 1.0, PAGE_APPEARANCE, accept(0.0..=2.0);
+    /// A glass theme's rim bend (refraction), as a share of the theme's own: 0 (flat) to 2.
+    glass_refraction: f32 = 1.0, PAGE_APPEARANCE, accept(0.0..=2.0);
+    /// A glass theme's rim reach, as a share of the theme's own: 0 (the rim only magnifies what
+    /// is under the glass) to 1 (the theme's: the backdrop up to the bend past the edge).
+    glass_reach: f32 = 1.0, PAGE_APPEARANCE, accept(0.0..=1.0);
+    /// A glass theme's glass tinted with the accent; off: clear glass.
+    glass_tint_accent: bool = false, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
@@ -4826,6 +4837,9 @@ fn prepare_preferences(
     }
     if !accepted::perspective_fov(&new) {
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
+    }
+    if !accepted::glass_blur(&new) || !accepted::glass_see_through(&new) || !accepted::glass_refraction(&new) || !accepted::glass_reach(&new) {
+        return Err("`glass_blur`, `glass_see_through`, `glass_refraction` and `glass_reach` must be 0…2 (`glass_reach` 0…1)".into());
     }
     if crate::drawing_sheet_page::SheetBackdrop::parse(&new.drawing_sheet_backdrop).is_none() {
         return Err("`drawing_sheet_backdrop` must be datum_cloud, grid or none".into());
