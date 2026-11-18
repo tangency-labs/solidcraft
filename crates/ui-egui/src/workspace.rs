@@ -10,9 +10,6 @@ pub const RENDER_TABS: &[&str] = &["RENDER"];
 pub fn render_tab(tab: &str) -> bool {
     RENDER_TABS.contains(&tab)
 }
-pub fn tab_label(tab: &str) -> &str {
-    tab.strip_prefix("RENDER ").unwrap_or(tab)
-}
 
 /// A tab's registry name in normal word casing: "SHEET METAL" → "Sheet Metal".
 pub fn word_cased(name: &str) -> String {
@@ -34,6 +31,41 @@ pub fn tab_name(tab: &str) -> String {
 }
 
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
+
+pub const DRAWING_TABS: &[&str] = &["DRAWING LAYOUT", "DRAWING ANNOTATE", "DRAWING PARTS", "DRAWING REVIEW"];
+
+pub fn drawing_tab(tab: &str) -> bool {
+    DRAWING_TABS.contains(&tab)
+}
+
+/// Unique saved tab keys keep Drawing customisations separate from Design.
+pub fn tab_label(tab: &str) -> &str {
+    match tab {
+        "DRAWING LAYOUT" => "Layout",
+        "DRAWING ANNOTATE" => "Annotate",
+        "DRAWING PARTS" => "Parts & Tables",
+        "DRAWING REVIEW" => "Review",
+        _ => tab.strip_prefix("RENDER ").unwrap_or(tab),
+    }
+}
+
+/// Workspace switching has one lifecycle for menus and automation.
+pub fn enter(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
+    match workspace {
+        "drawing" => {
+            if crate::render_workspace::active(app) {
+                crate::render_workspace::enter(app, false)?;
+            }
+            crate::drawing_workspace::enter(app, true)
+        }
+        "design" if crate::drawing_workspace::active(app) => crate::drawing_workspace::enter(app, false),
+        "design" | "render" => {
+            crate::drawing_workspace::enter(app, false)?;
+            crate::render_workspace::enter(app, workspace == "render")
+        }
+        _ => Err("workspace must be design, render or drawing".into()),
+    }
+}
 
 /// Every tab's exact registry name with its accent: the contextual and specialty tabs, and the
 /// legacy Render sub-tabs that still share the Render accent. Theme files key their per-tab
@@ -244,6 +276,73 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d"];
 
 pub const SECTIONS: &[Section] = &[
+    Section {
+        tab: "DRAWING LAYOUT",
+        panel: "VIEWS",
+        promoted: 4,
+        ids: &[
+            "drawing.view.base.planned",
+            "drawing.view.section.planned",
+            "drawing.view.detail",
+            "drawing.view.break",
+            "drawing.view.auxiliary.planned",
+            "drawing.view.pictorial",
+            "drawing.view.draft",
+            "drawing.view.flat_pattern",
+        ],
+    },
+    Section {
+        tab: "DRAWING LAYOUT",
+        panel: "ARRANGE",
+        promoted: 1,
+        ids: &["drawing.views.align", "drawing.view.move_to_sheet.planned", "drawing.view.copy_to_sheet.planned"],
+    },
+    Section { tab: "DRAWING LAYOUT", panel: "INSERT", promoted: 3, ids: &["drawing.image", "drawing.sheet_sketch", "drawing.hatch"] },
+    Section {
+        tab: "DRAWING ANNOTATE",
+        panel: "MEASURE",
+        promoted: 3,
+        ids: &[
+            "drawing.dimension",
+            "drawing.dimension.from_model.planned",
+            "drawing.hole_callout",
+            "drawing.dimension.chain",
+            "drawing.dimension.suggest",
+        ],
+    },
+    Section { tab: "DRAWING ANNOTATE", panel: "NOTES", promoted: 2, ids: &["drawing.note", "drawing.leader", "drawing.note.chamfer"] },
+    Section {
+        tab: "DRAWING ANNOTATE",
+        panel: "SYMBOLS",
+        promoted: 4,
+        ids: &["drawing.centre_mark", "drawing.gdt", "drawing.surface_texture", "drawing.weld"],
+    },
+    Section {
+        tab: "DRAWING ANNOTATE",
+        panel: "ARRANGE",
+        promoted: 3,
+        ids: &["drawing.dimension.tidy", "drawing.annotations.align", "drawing.annotations.space"],
+    },
+    Section {
+        tab: "DRAWING PARTS",
+        panel: "ASSEMBLY",
+        promoted: 3,
+        ids: &["drawing.parts_list", "drawing.balloon", "drawing.balloon.auto", "assembly.bom", "drawing.parts_list.renumber"],
+    },
+    Section { tab: "DRAWING PARTS", panel: "TABLES", promoted: 2, ids: &["drawing.revision_table", "drawing.table.edit.planned"] },
+    Section {
+        tab: "DRAWING REVIEW",
+        panel: "CHANGES",
+        promoted: 3,
+        ids: &["drawing.update.planned", "drawing.check.planned", "drawing.replace_model"],
+    },
+    Section {
+        tab: "DRAWING REVIEW",
+        panel: "REVISION",
+        promoted: 3,
+        ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
+    },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -562,6 +661,26 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("contact.check", "Contact"),
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
+    ("drawing.annotations.align", "Align"),
+    ("drawing.annotations.space", "Space"),
+    ("drawing.check.planned", "Check Drawing"),
+    ("drawing.dimension", "Dimension"),
+    ("drawing.dimension.from_model.planned", "Model Dims."),
+    ("drawing.export.planned", "Export"),
+    ("drawing.hole_callout", "Hole Callout"),
+    ("drawing.image", "Image"),
+    ("drawing.leader", "Leader Note"),
+    ("drawing.note", "Note"),
+    ("drawing.replace_model", "Replace"),
+    ("drawing.print", "Print"),
+    ("drawing.revise.planned", "Issue Rev."),
+    ("drawing.revision", "Add Revision"),
+    ("drawing.revision_table", "Revision Tbl."),
+    ("drawing.surface_texture", "Surface Text."),
+    ("drawing.table.edit.planned", "Edit Table"),
+    ("drawing.update.planned", "Update"),
+    ("drawing.view.flat_pattern", "Flat Pattern"),
+    ("drawing.view.section.planned", "Section View"),
     ("document.units", "Units"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
@@ -664,6 +783,8 @@ pub fn destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
 pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
     // A few shared commands have a canonical home that differs from their first occurrence.
     let primary = match c.id {
+        "assembly.bom" => Some(("INSPECT", "CHECK")),
+        "sheet.flat_pattern" => Some(("SHEET METAL", "FLAT")),
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
         "sheet.convert" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
@@ -813,6 +934,9 @@ pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
 
 /// Every design tab stays hidden until the person chooses to show it again.
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
+    if crate::drawing_workspace::active(app) {
+        return DRAWING_TABS.to_vec();
+    }
     if crate::render_workspace::active(app) {
         return Vec::new();
     }
@@ -850,7 +974,7 @@ pub fn starts_a_sketch(app: &crate::SolveApp, id: &str) -> bool {
 /// other tabs to remain usable for the rest of that context. Sketch takes precedence over sheet
 /// metal, and sheet metal over weldments.
 pub fn sync_context(app: &mut crate::SolveApp) {
-    if crate::render_workspace::active(app) {
+    if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
         return;
     }
     let context = app
@@ -1033,6 +1157,111 @@ mod tests {
                 assert_eq!(TAB_ACCENTS.icon_accent(unknown), None);
             }
         }
+    }
+
+    fn drawing_inspector_visible(h: &crate::scenario::Harness) -> bool {
+        h.app.universal_panel_frame().is_some_and(|frame| frame.layout.sections.iter().any(|section| section.instance.0 == "drawing-inspector"))
+    }
+
+    #[test]
+    fn drawing_uses_the_ribbon_without_changing_the_source_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.ui.tab = "SURFACE".into();
+        let before = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        h.app.preferences.drawings_preview = true;
+        h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.frames(4);
+        assert_eq!(visible_tabs(&h.app), DRAWING_TABS);
+        for tab in DRAWING_TABS {
+            assert!(crate::scenario::handle_at(&format!("tab:{tab}")).is_some(), "{tab}");
+        }
+        h.step(&json!({"click":{"handle":"button:drawing.view.base.planned"}})).unwrap();
+        h.frames(3);
+        assert!(drawing_inspector_visible(&h), "known options open from the shared ribbon");
+        assert!(h.widget("Finish").is_some());
+        assert!(h.app.run("drawing.view.base.planned", json!({})).is_err(), "the preview never enables engine execution");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"click":{"handle":"tab:DRAWING PARTS"}})).unwrap();
+        assert!(crate::scenario::handle_at("button:assembly.bom").is_none(), "BOM stays in the Assembly list");
+        assert!(
+            layout("DRAWING PARTS", "ASSEMBLY", &solidcraft_engine::command_specs())
+                .is_some_and(|(commands, _)| commands.iter().any(|command| command.id == "assembly.bom"))
+        );
+        assert_eq!(h.app.ui.tab, "DRAWING PARTS");
+        assert_eq!(h.app.session.doc, before);
+        assert_eq!(h.app.session.revision, revision);
+        h.call("ui.workspace", json!({"workspace":"design"}));
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "SURFACE", "return restores the source workspace context");
+    }
+
+    #[test]
+    fn drawing_ribbon_has_the_designed_views_and_planned_commands_do_not_run() {
+        let mut h = crate::scenario::Harness::new();
+        let specs = solidcraft_engine::command_specs();
+        let (views, count) = layout("DRAWING LAYOUT", "VIEWS", &specs).unwrap();
+        let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
+        assert_eq!(
+            buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.break"]
+        );
+        assert!(views.iter().any(|command| command.id == "drawing.view.flat_pattern"));
+        assert!(!views.iter().any(|command| command.id == "drawing.view.projected.planned"));
+        assert_eq!(panels("DRAWING LAYOUT"), ["VIEWS", "ARRANGE", "INSERT"]);
+        assert_eq!(panels("DRAWING ANNOTATE"), ["MEASURE", "NOTES", "SYMBOLS", "ARRANGE"]);
+        assert_eq!(panels("DRAWING PARTS"), ["ASSEMBLY", "TABLES"]);
+        assert_eq!(panels("DRAWING REVIEW"), ["CHANGES", "REVISION", "OUTPUT"]);
+        let (tables, _) = layout("DRAWING PARTS", "TABLES", &specs).unwrap();
+        assert_eq!(tables.iter().map(|command| command.id).collect::<Vec<_>>(), ["drawing.revision_table", "drawing.table.edit.planned"]);
+        assert!(tables.iter().all(|command| command.planned.is_some() && !command.info(&h.app.session).enabled));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"name":"Sheet", "body_name":"Sheet"})).unwrap();
+        let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
+        assert_eq!(
+            buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.flat_pattern"]
+        );
+    }
+
+    #[test]
+    fn drawing_search_and_panels_work_from_the_keyboard() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.drawings_preview = true;
+        h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();
+        h.frames(3);
+        let before = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        for query in ["Base View", "Projected View"] {
+            h.step(&json!({"key":"S"})).unwrap();
+            assert!(h.app.ui.palette_open, "S opens the shared Drawing command search");
+            h.step(&json!({"text":query})).unwrap();
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.ui.palette_open);
+            assert!(drawing_inspector_visible(&h), "search opens known options for {query}");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!drawing_inspector_visible(&h), "Escape closes options for {query}");
+        }
+        // The Sheets panel has no settings button since it moved into the shared panels (#18238):
+        // Sheet Settings opens from the same search.
+        h.step(&json!({"key":"S"})).unwrap();
+        h.step(&json!({"text":"Sheet Settings"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(drawing_inspector_visible(&h));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!drawing_inspector_visible(&h), "Escape closes Sheet Settings");
+        assert_eq!(h.app.session.doc, before);
+        assert_eq!(h.app.session.revision, revision);
     }
 
     #[test]

@@ -15,8 +15,6 @@
 //! A tool is a [`crate::ssi::Surface`]; solidcore's own surface is made from its description
 //! ([`Spec`]), as `smlib_ssi.cpp` makes SMLib's, over the surface's natural UV domain.
 
-use std::sync::PoisonError;
-
 use solidcore::EntityRef;
 use solidcore::Result as SolidResult;
 use solidcore::boolean::api_brep::boolean_with_options;
@@ -316,12 +314,12 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
     if faces.is_empty() || faces.len() > MAX_FACES || tools.is_empty() || tools.len() > MAX_TOOLS {
         return Err(Error::Argument);
     }
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_split_faces: the body was left unfinished by an earlier panic".to_owned()));
     }
     let r = super::run_on("smlib_split_faces", &[("brep", body)], |k| {
         let mut a = {
-            let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let g = body.kernel();
             let count = brep_p1::faces(&g, None)?.len();
             let mut seen = std::collections::HashSet::new();
             if faces.iter().any(|&f| f >= count || !seen.insert(f)) {
@@ -383,14 +381,14 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
             Ok(_) => Ok(Some((a, made))),
         })
     })??;
-    Ok(r.map(|(b, made)| (Body::new(b), made)))
+    Ok(r.map(|(b, made)| (Body::from_kernel(b), made)))
 }
 
 /// `slice`: a copy of `body` sliced by `sheet` (SMLib's slice reads the side from the surfaces, not
 /// the faces' uses). `None` when nothing is left.
 fn slice(k: &mut Kernel, body: &Body, sheet: Brep) -> SolidResult<Out<Option<Brep>>> {
     let a = {
-        let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let g = body.kernel();
         brep_copy(k, &g)?
     };
     let options = MergeOptions::new(false, false, false, false, false);
@@ -413,7 +411,7 @@ fn both_sides(
     mut side: impl FnMut(&mut Kernel, bool) -> SolidResult<Out<Brep>>,
 ) -> SolidResult<Out<Option<(Brep, Brep)>>> {
     let solid = {
-        let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let g = body.kernel();
         is_manifold_solid(&g)?
     };
     if !solid {
@@ -439,7 +437,7 @@ fn both_sides(
 
 /// One side of `smlib_split_body`: a one-face sheet on the tool's surface, turned over with `flip`.
 fn side(k: &mut Kernel, body: &Body, spec: &Spec, flip: bool) -> SolidResult<Out<Brep>> {
-    let tolerance = body.0.lock().unwrap_or_else(PoisonError::into_inner).tolerance();
+    let tolerance = body.kernel().tolerance();
     let t = match tool(k, spec)? {
         Ok(t) => t,
         Err(e) => return Ok(Err(e)),
@@ -460,9 +458,11 @@ fn side(k: &mut Kernel, body: &Body, spec: &Spec, flip: bool) -> SolidResult<Out
 
 /// `smlib_split_body`: the manifold solid `body` cut in two by the tool: the part behind the
 /// surface (its normal points away) and the part in front. A side left empty is `None`
-/// (`SMLIB_ERR_NO_CUT`); a body that is no manifold solid is [`Error::NotSolid`].
+/// (`SMLIB_ERR_NO_CUT`), and so is a tool that ends inside the body: it only nicks it, and a
+/// part that is no manifold solid is no cut ([`both_sides`] with `whole`); a body that is no
+/// manifold solid is [`Error::NotSolid`].
 pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)>> {
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_split_body: the body was left unfinished by an earlier panic".to_owned()));
     }
     let r = super::run_on("smlib_split_body", &[("brep", body)], |k| {
@@ -471,9 +471,9 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
             Ok(None) => {}
             Err(e) => return Ok(Err(e)),
         }
-        both_sides(k, body, false, |k, flip| side(k, body, spec, flip))
+        both_sides(k, body, true, |k, flip| side(k, body, spec, flip))
     })??;
-    Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
+    Ok(r.map(|(b, f)| (Body::from_kernel(b), Body::from_kernel(f))))
 }
 
 /// `smlib_split_body` by a tool whose surface closes on itself both ways (a sphere, a whole
@@ -484,7 +484,7 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
 /// empty is `Some(None)`; a body that is no manifold solid is [`Error::NotSolid`].
 fn by_closed_tool(k: &mut Kernel, body: &Body, spec: &Spec) -> SolidResult<Out<Option<Option<(Brep, Brep)>>>> {
     let solid = {
-        let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let g = body.kernel();
         is_manifold_solid(&g)?
     };
     if !solid {
@@ -500,7 +500,7 @@ fn by_closed_tool(k: &mut Kernel, body: &Body, spec: &Spec) -> SolidResult<Out<O
     let mut parts = [None, None];
     for (part, op) in parts.iter_mut().zip([BooleanOperation::Intersection, BooleanOperation::Difference]) {
         let a = {
-            let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let g = body.kernel();
             brep_copy(k, &g)?
         };
         let tool = brep_copy(k, &sheet)?;
@@ -524,19 +524,19 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
     if std::ptr::eq(body, sheet) {
         return Err(Error::Argument);
     }
-    if body.0.is_poisoned() || sheet.0.is_poisoned() {
+    if body.kernel_left_unfinished() || sheet.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_split_body_by_sheet: a body was left unfinished by an earlier panic".to_owned()));
     }
     let r = super::run_on("smlib_split_body_by_sheet", &[("brep", body), ("sheet", sheet)], |k| {
         {
-            let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
+            let g = sheet.kernel();
             if !is_sheet(k, &g)? || face >= g.face_list().len() {
                 return Ok(Err(Error::Argument));
             }
         }
         both_sides(k, body, true, |k, flip| {
             let mut copy = {
-                let g = sheet.0.lock().unwrap_or_else(PoisonError::into_inner);
+                let g = sheet.kernel();
                 brep_copy(k, &g)?
             };
             let Some(&f) = brep_p1::faces(&copy, None)?.get(face) else { return Ok(Err(Error::Argument)) };
@@ -551,5 +551,5 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
             })
         })
     })??;
-    Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
+    Ok(r.map(|(b, f)| (Body::from_kernel(b), Body::from_kernel(f))))
 }

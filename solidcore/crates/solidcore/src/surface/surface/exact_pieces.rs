@@ -2702,8 +2702,7 @@ mod tests {
         use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
 
-        let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
+        let k = Kernel::default();
 
         let (l, r) = (10.0, 2.0);
         let o = Point3::new(0.0, 0.0, 0.0);

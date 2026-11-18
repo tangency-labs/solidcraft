@@ -69,13 +69,15 @@ fn default_lists_every_field_off_in_declaration_order() {
 #[test]
 fn one_flag_on_is_exactly_that_entry() {
     let mut newest = UpstreamFixes::default();
-    newest.surface_parallel_to_vector_checks = true;
-    assert_eq!(turned_on(&newest), ["surface_parallel_to_vector_checks"]);
+    newest.brep_ray_classifies_current_trims = true;
+    assert_eq!(turned_on(&newest), ["brep_ray_classifies_current_trims"]);
     assert_eq!(listed(&newest), debug_fields(&newest));
 
+    // the first field by name, so retiring whichever flag is first needs no edit here
     let mut first = UpstreamFixes::default();
-    first.fillet_trim_status = true;
-    assert_eq!(turned_on(&first), ["fillet_trim_status"]);
+    let name = UpstreamFixes::NAMES[0];
+    *first.flag_mut(name).expect("a field name") = true;
+    assert_eq!(turned_on(&first), [name]);
     assert_eq!(listed(&first), debug_fields(&first));
 }
 

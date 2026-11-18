@@ -6,7 +6,6 @@ const HANDLES: Handles<'static> = Handles {
     home_rect: &["t:home"],
     file: &["t:file"],
     file_rect: &["t:file"],
-    plugins: "t:plugins",
     button: &["t:"],
     separator: "t:separator:",
     search: "t:search",
@@ -25,8 +24,6 @@ struct BarRig {
     ctx: egui::Context,
     width: f32,
     name: &'static str,
-    /// The bar has a Plugins menu.
-    plugins: bool,
     time: std::cell::Cell<f64>,
     out: std::cell::RefCell<Option<BarOut>>,
 }
@@ -38,8 +35,7 @@ impl BarRig {
 
     /// The bar with the app's name `name`.
     fn named(width: f32, name: &'static str) -> BarRig {
-        let rig =
-            BarRig { ctx: crate::test_support::context(), width, name, plugins: false, time: std::cell::Cell::new(0.0), out: Default::default() };
+        let rig = BarRig { ctx: crate::test_support::context(), width, name, time: std::cell::Cell::new(0.0), out: Default::default() };
         rig.frame(Vec::new());
         rig
     }
@@ -62,10 +58,10 @@ impl BarRig {
         let bar = AppBar {
             mark: &|_, _| {},
             name: self.name,
+            leading: None,
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
-            plugins: self.plugins.then_some(("Plugins", false, "Plugins menu")),
             actions: vec![button("save", true, false), button("undo", false, true)],
             quick: 2,
             help: BarButton { id: "help", icon: "help", tip: "Help", enabled: true, narrow: false, wide_only: false },
@@ -120,52 +116,6 @@ fn the_bar_returns_what_was_clicked() {
     assert!(first > file.right() && step > 0.0);
     assert!(out.tabs_start > first + step, "the tabs follow the quick-access buttons");
     assert!(out.assistant.is_some_and(|a| a.left() > out.controls_left), "the assistant is in the right cluster");
-}
-
-/// The Plugins menu's button follows File without overlapping it or Save, and returns its own
-/// action; without one the bar is as before.
-#[test]
-fn the_plugins_button_sits_between_file_and_the_file_actions() {
-    for width in [1200.0, 600.0] {
-        let rig = BarRig::new(width);
-        let save_without = solidcraft_ui_registry::rect_of("t:save").expect("Save is drawn");
-        assert!(solidcraft_ui_registry::rect_of("t:plugins").is_none());
-        let rig = BarRig { plugins: true, ..rig };
-        rig.frame(Vec::new());
-        let file = solidcraft_ui_registry::rect_of("t:file").expect("File is drawn");
-        let plugins = solidcraft_ui_registry::rect_of("t:plugins").expect("Plugins is drawn");
-        let save = solidcraft_ui_registry::rect_of("t:save").expect("Save is drawn");
-        assert!(plugins.left() > file.right() && plugins.right() < save.left(), "{file:?} {plugins:?} {save:?}");
-        assert!(save.left() > save_without.left(), "the file actions move right by its width");
-        assert_eq!(rig.click("t:plugins"), vec![BarAction::Plugins { rect: plugins }]);
-    }
-}
-
-/// Between the compact width and the room the Plugins label needs, the bar leaves Plugins out (the
-/// app lists it in the File menu) and keeps exactly what it showed before there was a Plugins menu.
-#[test]
-fn between_compact_and_the_labels_room_plugins_moves_to_the_file_menu() {
-    for width in [645.0, 660.0] {
-        let rig = BarRig::new(width);
-        let before = rig.out.borrow().as_ref().map(|out| (out.quick, out.tabs_start)).unwrap();
-        let save = solidcraft_ui_registry::rect_of("t:save");
-        let rig = BarRig { plugins: true, ..rig };
-        rig.frame(Vec::new());
-        assert!(solidcraft_ui_registry::rect_of("t:plugins").is_none(), "{width}: no Plugins button");
-        assert!(solidcraft_ui_registry::rect_of("t:undo").is_some(), "{width}: Undo stays");
-        assert_eq!(solidcraft_ui_registry::rect_of("t:save"), save, "{width}: Save stays put");
-        let out = rig.out.borrow();
-        let out = out.as_ref().unwrap();
-        assert!(out.plugins_in_file, "{width}: the app is told to list Plugins in File");
-        assert_eq!((out.quick, out.tabs_start), before, "{width}: the quick-access room and tabs stay put");
-    }
-    for (width, label) in [(1200.0, true), (600.0, false)] {
-        let rig = BarRig { plugins: true, ..BarRig::new(width) };
-        rig.frame(Vec::new());
-        let plugins = solidcraft_ui_registry::rect_of("t:plugins").expect("Plugins is drawn");
-        assert_eq!(plugins.width() > 40.0, label, "{width}: label when wide, icon when compact");
-        assert!(!rig.out.borrow().as_ref().unwrap().plugins_in_file);
-    }
 }
 
 /// A compact bar leaves out the wide-only buttons and the quick-access room.
@@ -321,6 +271,7 @@ impl TabsRig {
             id: egui::Id::unique("test_tabs"),
             handles: TAB_HANDLES,
             views_as_tabs: self.views == Some(true),
+            switcher_always: false,
             view_text: ViewText {
                 close_view: "Close view",
                 close_design: "Close design",
@@ -503,14 +454,20 @@ fn press(pos: Pos2, pressed: bool) -> egui::Event {
 }
 
 /// A design with several views is a pill where the app asks for sub-tabs and the bar has room for
-/// the active view and the "N more" button; otherwise a switcher. One view or none is a plain tab.
+/// the active view and the "N more" button; otherwise a switcher. One view or none is a plain tab,
+/// unless the app asks for the switcher always: then one view has it too, but never with sub-tabs.
 #[test]
 fn the_selected_tab_falls_back_to_a_switcher_where_the_pill_has_no_room() {
-    assert_eq!(selected_layout(0, true, 300.0, 900.0), SelectedLayout::Plain);
-    assert_eq!(selected_layout(1, true, 300.0, 900.0), SelectedLayout::Plain);
-    assert_eq!(selected_layout(3, true, 300.0, 300.0), SelectedLayout::Pill);
-    assert_eq!(selected_layout(3, true, 300.0, 299.0), SelectedLayout::Switcher);
-    assert_eq!(selected_layout(3, false, 300.0, 900.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(0, true, false, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(1, true, false, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(1, false, false, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(3, true, false, 300.0, 300.0), SelectedLayout::Pill);
+    assert_eq!(selected_layout(3, true, false, 300.0, 299.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(3, false, false, 300.0, 900.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(1, false, true, 300.0, 900.0), SelectedLayout::Switcher);
+    assert_eq!(selected_layout(1, true, true, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(0, false, true, 300.0, 900.0), SelectedLayout::Plain);
+    assert_eq!(selected_layout(3, true, true, 300.0, 300.0), SelectedLayout::Pill);
 }
 
 /// The sub-tabs all show when they fit; otherwise a run of neighbours that holds the shown view

@@ -6,7 +6,10 @@
 use std::fmt::Write as _;
 
 use super::*;
+use crate::assembly::{OPEN_DOMAIN_SPAN, face_domain, onto_form, onto_knots, seams};
 use crate::p21;
+use solidcore_ops::pcurve::TrimFace;
+use solidcore_record::brep::{Curve2, EdgeUseRef, Face, Loop, Region, Shell};
 
 type V = [f64; 3];
 
@@ -383,7 +386,7 @@ fn the_two_ends_of_an_edge_read_later_are_never_joined() {
         let err = b.bound(bound, &mut edges).err().unwrap_or_default();
         assert!(err.contains("is not connected"), "{err}");
         let (e, _) = b.edge(short).unwrap();
-        let [s, t] = b.edges[e as usize].vertices;
+        let [s, t] = b.asm.edges[e as usize].vertices;
         assert_ne!(s, t);
     });
 }
@@ -405,19 +408,19 @@ fn a_loop_through_three_vertices_at_one_point_joins_all_three() {
     let ex = w.file(&[bound]);
     with_builder(&ex, |b| {
         let mut edges = 0;
-        let (LoopB::Edges(uses), _) = b.bound(bound, &mut edges).unwrap() else { panic!("an edge loop") };
+        let (Bound::Edges(uses), _) = b.bound(bound, &mut edges).unwrap() else { panic!("an edge loop") };
         b.join_vertices().unwrap();
         let ends: Vec<[u32; 2]> = uses
             .iter()
             .map(|&(e, fwd)| {
-                let [s, t] = b.edges[e as usize].vertices;
+                let [s, t] = b.asm.edges[e as usize].vertices;
                 if fwd { [s, t] } else { [t, s] }
             })
             .collect();
         for (k, e) in ends.iter().enumerate() {
             assert_eq!(e[1], ends[(k + 1) % ends.len()][0], "{ends:?}");
         }
-        assert_eq!(b.edges.iter().flat_map(|e| e.vertices).collect::<HashSet<_>>().len(), 2);
+        assert_eq!(b.asm.edges.iter().flat_map(|e| e.vertices).collect::<HashSet<_>>().len(), 2);
     });
 }
 
@@ -717,6 +720,55 @@ fn bands_and_caps_without_seams_get_one() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
 }
 
+/// A cylinder (r 5, h 10) with a hemispherical dome on top (#17151), its sphere's axis along -y
+/// or along +z. Along -y the dome's rim, the top circle, is a meridian of the sphere through both
+/// its poles: one edge passing through both, split at each so that the loop runs along each pole
+/// at a vertex. Split at the first pole alone, the rest of the rim crossed the second inside an
+/// edge, and the dome came in turned over, the solid closed with the wrong volume.
+#[test]
+fn a_dome_whose_rim_runs_through_both_poles_of_its_sphere() {
+    let (r, h) = (5.0, 10.0);
+    // pi r^2 h for the cylinder, 2/3 pi r^3 for the dome; its area 2 pi r h + pi r^2 + 2 pi r^2.
+    let volume = PI * r * r * h + 2.0 / 3.0 * PI * r * r * r;
+    let area = 2.0 * PI * r * h + 3.0 * PI * r * r;
+    for axis in [[0.0, -1.0, 0.0], [0.0, 0.0, 1.0]] {
+        let mut w = W::default();
+        let (vb, vt) = (w.vertex([r, 0.0, 0.0]), w.vertex([r, 0.0, h]));
+        let kb = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let kt = w.circle([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        let bottom = w.add(format!("EDGE_CURVE('',#{vb},#{vb},#{kb},.T.)"));
+        let top = w.add(format!("EDGE_CURVE('',#{vt},#{vt},#{kt},.T.)"));
+        let side = w.line_edge((vb, [r, 0.0, 0.0]), (vt, [r, 0.0, h]), true, 1.0);
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+        let uses = [w.oe(bottom, true), w.oe(side, true), w.oe(top, false), w.oe(side, false)];
+        let bx = w.bound(&uses, true, true);
+        let wall = w.face(&[bx], cyl, true);
+        let plane = w.plane([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        let x = w.oe(bottom, false);
+        let bx = w.bound(&[x], true, true);
+        let base = w.face(&[bx], plane, true);
+        let a = w.axis([0.0, 0.0, h], axis, [1.0, 0.0, 0.0]);
+        let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},{})", real(r)));
+        let x = w.oe(top, true);
+        let bx = w.bound(&[x], true, true);
+        let dome = w.face(&[bx], sphere, true);
+        let shell = closed_shell(&mut w, &[wall, base, dome]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('cylinder',#{shell})"));
+        let s = one_solid(&w.file(&[solid]));
+        assert!(!s.notes.iter().any(|n| n.contains("turned over")), "axis {axis:?}: {:?}", s.notes);
+        if axis[2] == 0.0 {
+            assert!(s.notes.iter().any(|n| n.contains("2 edges split where they pass through a face's pole")), "{:?}", s.notes);
+        }
+        faces_away(&s.brep, 0, |_| [0.0, 0.0, 0.75 * h]);
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        assert!(body.is_manifold_solid().unwrap());
+        let mass = body.mass_properties(1e-6).unwrap();
+        assert!((mass.volume - volume).abs() < 1e-3, "axis {axis:?}: {mass:?}, {volume} expected");
+        assert!((mass.area - area).abs() < 1e-3, "axis {axis:?}: {mass:?}, {area} expected");
+    }
+}
+
 /// An edge from vertex `va` counterclockwise about +z to vertex `vb` on the circle of radius `r`
 /// round the z axis at height `z`.
 fn arc_about_z(w: &mut W, (va, vb): (u64, u64), r: f64, z: f64) -> u64 {
@@ -953,6 +1005,90 @@ fn a_near_miss_piece_blocks_a_seam_over_its_whole_height_range() {
     // From a vertex at height 7: up, the hull is behind it; down, its lowest point is 1 mm along.
     assert_eq!(reach(&|h| h - 7.0), None);
     assert_eq!(reach(&|h| 7.0 - h), Some(1.0));
+}
+
+/// A rational quadratic spline on the cylinder of radius `r` about the z axis, from angle `from`
+/// at height `z` round the axis counterclockwise, a quarter turn and `rise` up for each of its
+/// `pieces`: seen along the axis each piece is an exact quarter circle (weights 1, cos 45°, 1),
+/// and its control points' heights are evenly spaced, so the piece is symmetric about its
+/// middle and the area under it is that under a straight helix. The curve, and its two ends.
+fn rising_quarters(w: &mut W, r: f64, from: f64, z: f64, rise: f64, pieces: usize) -> (u64, [V; 2]) {
+    use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_4, SQRT_2};
+    let at = |i: usize| {
+        let (angle, radius) = (from + i as f64 * FRAC_PI_4, if i.is_multiple_of(2) { r } else { r * SQRT_2 });
+        [radius * angle.cos(), radius * angle.sin(), z + 0.5 * rise * i as f64]
+    };
+    let points: Vec<u64> = (0..=2 * pieces).map(|i| w.pt(at(i))).collect();
+    let weights: Vec<String> = (0..points.len()).map(|i| real(if i.is_multiple_of(2) { 1.0 } else { FRAC_1_SQRT_2 })).collect();
+    let multiplicities: Vec<&str> = (0..=pieces).map(|i| if i == 0 || i == pieces { "3" } else { "2" }).collect();
+    let knots: Vec<String> = (0..=pieces).map(|i| real(i as f64)).collect();
+    let curve = w.add(format!(
+        "(BOUNDED_CURVE()B_SPLINE_CURVE(2,({}),.UNSPECIFIED.,.F.,.F.)B_SPLINE_CURVE_WITH_KNOTS(({}),({}),.UNSPECIFIED.)CURVE()GEOMETRIC_REPRESENTATION_ITEM()RATIONAL_B_SPLINE_CURVE(({}))REPRESENTATION_ITEM(''))",
+        list(&points),
+        multiplicities.join(","),
+        knots.join(","),
+        weights.join(",")
+    ));
+    (curve, [at(0), at(2 * pieces)])
+}
+
+/// A thread's crest in a bore: one cylinder face (radius 5) from a circle at z = 0 up to a rim at
+/// z = 8, less the thread's groove, 1 high, which starts at a wall along the axis from z = 2 to 3
+/// and winds a turn and a half up (4 a turn) to run out through the rim. The face's second loop
+/// goes along the rim, down the groove's lower helix, up the wall and up its upper helix. A seam
+/// can start from the circle's vertex alone, at 0° (the ruling from the rim's runs into the
+/// groove), and its ruling meets the lower helix half a turn up it, near z = 4, where two of the
+/// helix's pieces join. With that joint 0.001 rad to either side of 0° (0.005 mm, in a file of
+/// 0.01 mm uncertainty) the helix crosses the ruling on one piece, and the piece across the joint
+/// comes within the tolerance of the ruling without crossing it. That piece was taken for a
+/// second meeting, anywhere over its heights, and the face was left out ("a band winding round
+/// its axis whose rulings from its vertices meet another loop first"). It is the helix going on
+/// from the seam's end. The groove is 1 high over the upper helix's turn and a quarter, and half
+/// that on average over the last quarter turn under the rim, so the face's area is
+/// 5 (2π · 8 − 5π/2 − π/4) = 66.25π.
+#[test]
+fn a_seam_that_ends_beside_a_joint_of_a_helixs_pieces_is_not_taken_to_meet_the_next_piece() {
+    let (r, top, uncertainty) = (5.0, 8.0, 0.01);
+    for off in [-1e-3, 1e-3] {
+        let mut w = W::default();
+        let start = [r, 0.0, 0.0];
+        let v = w.vertex(start);
+        let circle = arc_about_z(&mut w, (v, v), r, 0.0);
+        // The helices from the wall at 180° + off: the lower one from z = 2 a turn and a half up
+        // to the rim, the upper one from z = 3 a turn and a quarter.
+        let (low_curve, [low_foot, low_top]) = rising_quarters(&mut w, r, PI + off, 2.0, 1.0, 6);
+        let (high_curve, [high_foot, high_top]) = rising_quarters(&mut w, r, PI + off, 3.0, 1.0, 5);
+        let (lf, hf, lt, ht) = (w.vertex(low_foot), w.vertex(high_foot), w.vertex(low_top), w.vertex(high_top));
+        let low = w.add(format!("EDGE_CURVE('',#{lf},#{lt},#{low_curve},.T.)"));
+        let high = w.add(format!("EDGE_CURVE('',#{hf},#{ht},#{high_curve},.T.)"));
+        let wall = w.line_edge((lf, low_foot), (hf, high_foot), true, 1.0);
+        // The rim over the crest: the three quarters of a turn from the lower helix's end on.
+        let rim = arc_about_z(&mut w, (lt, ht), r, top);
+        let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+        let below = w.oe(circle, true);
+        let above = [(rim, false), (low, false), (wall, true), (high, true)].map(|(e, o)| w.oe(e, o));
+        let bounds = [w.bound(&[below], true, true), w.bound(&above, false, true)];
+        let face = w.face(&bounds, cylinder, true);
+        let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+        let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('crest',(#{open}))"));
+        let s = one_solid(&w.file_with_uncertainty(&[model], uncertainty));
+        assert!(s.sheet);
+        assert_eq!(s.brep.faces.len(), 1, "off {off}: {:?}", s.notes);
+        assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "off {off}: {:?}", s.notes);
+        // The seam: up the ruling from the circle's vertex to the lower helix, which is at
+        // 4 - off / 2 there (it climbs half a unit a radian where its pieces join).
+        let seam = s.brep.edges.iter().find_map(|e| {
+            let [p, q] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            (len3(sub3(p, start)) < 1e-9 && q[2] > 1.0).then_some(q).or_else(|| (len3(sub3(q, start)) < 1e-9 && p[2] > 1.0).then_some(p))
+        });
+        let end = seam.unwrap_or_else(|| panic!("off {off}: no seam from the circle's vertex: {:?}", s.brep.vertices));
+        assert!(len3(sub3(end, [r, 0.0, 4.0 - 0.5 * off])) < 1e-5, "off {off}: the seam ends at {end:?}");
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        let mass = body.mass_properties(1e-6).unwrap();
+        let area = 66.25 * PI;
+        assert!((mass.area - area).abs() < 1e-3 * area, "off {off}: area {} for {area}", mass.area);
+    }
 }
 
 /// A seam's angle test (`seams::angular_sign`): a ruling's angular speed is 0, and rounding
@@ -1603,6 +1739,48 @@ fn vertex_parameters_on_lines_conics_and_splines() {
         ref_direction: [0.0, 0.0, 1.0],
     };
     assert!(map_edge(&offset, s, e, true, false, false, tol).unwrap_err().contains("not supported yet: OFFSET_CURVE_3D"));
+}
+
+/// A rational quadratic circle of radius 2 in quarters, from (2, 0), running on for `quarters`
+/// quarter turns (more than four: a full turn and then some, as a record keeps a turn unrolled).
+fn quarter_circle_spline(quarters: usize) -> Curve {
+    let corners = [[2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [-2.0, 2.0], [-2.0, 0.0], [-2.0, -2.0], [0.0, -2.0], [2.0, -2.0]];
+    let points: Vec<P3> = (0..=2 * quarters).map(|i| corners[i % 8]).map(|[x, y]| [x, y, 0.0]).collect();
+    let weights: Vec<f64> = (0..points.len()).map(|i| if i % 2 == 0 { 1.0 } else { std::f64::consts::FRAC_1_SQRT_2 }).collect();
+    let mut multiplicities = vec![3];
+    multiplicities.extend(std::iter::repeat_n(2, quarters - 1));
+    multiplicities.push(3);
+    Curve::BSpline(Box::new(crate::geom::BSplineCurve {
+        degree: 2,
+        points,
+        weights: Some(weights),
+        knots: (0..=quarters).map(|k| k as f64).collect(),
+        multiplicities,
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    }))
+}
+
+#[test]
+fn a_closed_edge_on_a_spline_that_runs_on_past_a_full_turn_is_the_turn_between_its_passes() {
+    // Five quarters from (2, 0): the curve passes (0, 2) at 1 and again at 5, its end. A
+    // record's turn whose seam moved is written so, and read back the edge is that turn.
+    let tol = 1e-7;
+    let five = quarter_circle_spline(5);
+    let m = map_edge(&five, [0.0, 2.0, 0.0], [0.0, 2.0, 0.0], true, true, true, tol).unwrap();
+    assert!((m.interval[0] - 1.0).abs() < 1e-9 && (m.interval[1] - 5.0).abs() < 1e-9, "{:?}", m.interval);
+    assert!(m.with_step && !m.sense_mismatch);
+    // Passing (2, 0) at 0 and 4: the same, the first pass at the curve's start.
+    let m = map_edge(&five, [2.0, 0.0, 0.0], [2.0, 0.0, 0.0], true, true, true, tol).unwrap();
+    assert!(m.interval[0].abs() < 1e-9 && (m.interval[1] - 4.0).abs() < 1e-9, "{:?}", m.interval);
+    // Three quarters pass each point once: no loop there to be the edge.
+    let three = quarter_circle_spline(3);
+    assert!(map_edge(&three, [0.0, 2.0, 0.0], [0.0, 2.0, 0.0], true, true, true, tol).unwrap_err().contains("closed edge on an open curve"));
+    // Nine quarters pass (0, 2) three times: which turn is the edge is not known.
+    let nine = quarter_circle_spline(9);
+    assert!(map_edge(&nine, [0.0, 2.0, 0.0], [0.0, 2.0, 0.0], true, true, true, tol).unwrap_err().contains("closed edge on an open curve"));
 }
 
 use std::f64::consts::{FRAC_PI_2, PI};
@@ -2514,6 +2692,72 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     }
     solidcore_ops::record_check::validate(b).unwrap();
     solidcore_ops::record_check::agreement(b).unwrap();
+}
+
+/// A disc (radius 30 mm, 18 mm high) with a flat cut off its side, its cylinder face going 330
+/// degrees about +z from 30.02 degrees to 360.02, in a file of uncertainty 0.02 mm (as Onshape
+/// writes): the face ends 0.0105 mm past its frame's x axis, within the uncertainty, so its form
+/// ends on that quarter line and its frame is not turned. Its two rim arcs, labelled on that
+/// frame, run those 0.02 degrees into a fifth quarter of the grid. Each has a form that is its
+/// arc (cut to it), not five whole quarters, a quarter past one turn, which the kernel refused
+/// ("a conic's NURBS form does not run anticlockwise round it at most once"): the record goes
+/// into the kernel, and the body has the disc's volume less the segment's.
+#[test]
+fn a_rim_arc_that_ends_within_the_tolerance_past_a_quarter_line_has_a_form_of_one_turn() {
+    let (r, h): (f64, f64) = (30.0, 18.0);
+    let (from, to) = (30.02_f64.to_radians(), 360.02_f64.to_radians());
+    let on_rim = |a: f64, z: f64| [r * a.cos(), r * a.sin(), z];
+    let mut w = W::default();
+    let v = |w: &mut W, p: V| (w.vertex(p), p);
+    let (a0, a1, b0, b1) = (v(&mut w, on_rim(from, 0.0)), v(&mut w, on_rim(from, h)), v(&mut w, on_rim(to, 0.0)), v(&mut w, on_rim(to, h)));
+    let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
+    let (up_a, up_b, chord_b, chord_t) = (edge(&mut w, a0, a1), edge(&mut w, b0, b1), edge(&mut w, b0, a0), edge(&mut w, a1, b1));
+    let arc = |w: &mut W, a: (u64, V), b: (u64, V), z: f64| {
+        let c = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{},#{},#{c},.T.)", a.0, b.0))
+    };
+    let (arc_b, arc_t) = (arc(&mut w, a0, b0, 0.0), arc(&mut w, a1, b1, h));
+    let ax = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cyl = w.add(format!("CYLINDRICAL_SURFACE('',#{ax},{})", real(r)));
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64, same_sense: bool| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, f)| w.oe(e, f)).collect();
+        let b = w.bound(&oes, true, true);
+        w.face(&[b], surface, same_sense)
+    };
+    let (bottom, top) = (w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), w.plane([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
+    // The flat: through the two rulings, its normal out along the middle of the cut.
+    let middle = 0.5 * (from + to - TAU);
+    let flat = w.plane(b0.1, [middle.cos(), middle.sin(), 0.0], [-middle.sin(), middle.cos(), 0.0]);
+    let faces = [
+        face(&mut w, &[(arc_b, true), (up_b, true), (arc_t, false), (up_a, false)], cyl, true),
+        face(&mut w, &[(chord_b, true), (up_a, true), (chord_t, true), (up_b, false)], flat, true),
+        face(&mut w, &[(arc_b, false), (chord_b, false)], bottom, false),
+        face(&mut w, &[(arc_t, true), (chord_t, false)], top, true),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('disc',#{shell})"));
+    // The rulings at the face's end lie past its form's range: their pcurves are the kernel's.
+    let kernel = Projected(std::sync::atomic::AtomicUsize::new(0));
+    let read = read_solids_with(&w.file_with_uncertainty(&[solid], 2e-2), &kernel);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    let b = &read.solids[0].brep;
+    assert_eq!(counts(b), [2, 1, 4, 6, 4]);
+    let mut arcs = 0;
+    for e in &b.edges {
+        let (BCurve::Circle { .. }, Some(BCurve::RationalSpline { knots, .. })) = (&e.curve, &e.nurbs) else { continue };
+        arcs += 1;
+        let (first, last) = (knots[0], knots[knots.len() - 1]);
+        assert_eq!([first, last], e.interval, "the form is the arc");
+        let sweep = solidcore::eval::form::angle(last) - solidcore::eval::form::angle(first);
+        assert!((sweep - (to - from)).abs() < 1e-12, "{sweep}");
+    }
+    assert_eq!(arcs, 2);
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let cut = TAU - (to - from);
+    let volume = h * r * r * (PI - 0.5 * (cut - cut.sin()));
+    let mass = body.mass_properties(1e-6).unwrap();
+    assert!((mass.volume - volume).abs() < 1e-5 * volume, "{} vs {volume}", mass.volume);
 }
 
 /// A spline face's pcurve a little past its patch's knot range is put on the range when that

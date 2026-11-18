@@ -1,4 +1,4 @@
-use crate::{Document, ModelBody, ModelState};
+use crate::{Document, ModelBody, ModelState, PlaneRef};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
@@ -152,6 +152,25 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     assert_eq!(sketch.points, saved.points);
     assert_eq!(sketch.links[0].id, link);
     assert!(matches!(&sketch.links[0].source,LinkSource::Face{body,..} if body=="Source"));
+}
+
+/// A view edge belongs to a drawing view's sketch. A model sketch holding one (a hand-edited
+/// design) loses that link with the reason and keeps its last geometry.
+#[test]
+fn a_model_sketch_loses_a_view_edge_link_and_keeps_its_line() {
+    let doc = Document::default();
+    let mut state = ModelState::default();
+    state.bodies.push(named_box("Body1", 20., 10.));
+    let source = LinkSource::ViewEdge { body: "Body1".into(), origin_feature: 1, name: "F1:e#1".into(), path: Vec::new() };
+    let refused = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &source).unwrap_err();
+    assert!(matches!(&refused, crate::DocError::Invalid(why) if why == "a view edge is projected only in its drawing view's sketch"), "{refused}");
+    let mut sketch = Sketch::default();
+    sketch.add_link(LinkKind::Project, source, &[LinkGeom::Line(Vec2::new(0., 0.), Vec2::new(20., 0.))]).unwrap();
+    let saved = sketch.clone();
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut sketch).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("a view edge is projected only in its drawing view's sketch")), "{warnings:?}");
+    assert!(sketch.links[0].lost);
+    assert_eq!((&sketch.points, &sketch.curves), (&saved.points, &saved.curves));
 }
 
 #[test]
@@ -454,6 +473,84 @@ fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
     assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
 }
 
+/// #18459: an edge picked on the start cap of a one-sided extrude is still found once an edit
+/// makes the extrude symmetric, on the cap at the end where the start cap lay, facing the same
+/// way: the low cap of an extrude that went along the sketch normal, the high cap of one that went
+/// against it. A symmetric extrude that does not know the way it went finds no `start` edge.
+#[test]
+fn an_edge_on_the_start_cap_is_found_when_the_extrude_becomes_symmetric() {
+    let evaluate = |doc: &Document| {
+        let mut model = crate::Model::new();
+        model.evaluate(doc);
+        model
+    };
+    let one_sided = |direction: &str| {
+        let doc = Document {
+            features: serde_json::from_value(serde_json::json!([
+                {
+                    "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                    "sketch": {
+                        "points": [
+                            {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                            {"fixed": false, "id": "p1", "pos": [0., 0.]},
+                            {"fixed": false, "id": "p2", "pos": [10., 0.]},
+                            {"fixed": false, "id": "p3", "pos": [10., 16.1]},
+                            {"fixed": false, "id": "p4", "pos": [0., 16.1]}
+                        ],
+                        "curves": [
+                            {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                            {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                            {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                            {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                        ],
+                        "constraints": [],
+                        "counters": {"k": 0, "l": 4, "p": 4}
+                    }
+                },
+                {
+                    "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                    "extent": {"convention": "total_distance", "direction": direction, "distance": "6"},
+                    "operation": "new_body", "profiles": {"loops": [["l1", "l2", "l3", "l4"]], "type": "curves"}, "sketch": 1
+                }
+            ]))
+            .unwrap(),
+            ..Document::default()
+        };
+        crate::format::read(&doc.to_json()).unwrap()
+    };
+    // The start cap lies on the sketch plane, where the edge was picked.
+    let near = Vec3::new(0., 8.05, 0.);
+    for (direction, way, high) in [("positive", crate::Direction::Positive, false), ("negative", crate::Direction::Negative, true)] {
+        let doc = one_sided(direction);
+        let model = evaluate(&doc);
+        let state = model.state();
+        let names = crate::naming::edge_names(state.body("Body1").unwrap());
+        let picked = names.iter().find(|n| n.contains("F2:start") && n.contains("F2:side:l4")).expect("the side's edge on the start cap").clone();
+        // The edit makes it symmetric and records the way it went.
+        let old = doc.feature(2).unwrap().clone();
+        let mut new = old.clone();
+        if let crate::FeatureKind::Extrude { extent, .. } = &mut new.kind {
+            extent.direction = crate::Direction::Symmetric;
+        }
+        crate::keep_one_sided_direction(&model, &old, &mut new);
+        let crate::FeatureKind::Extrude { extent, .. } = &new.kind else { panic!("an extrude") };
+        assert_eq!(extent.one_sided_direction, Some(way), "{direction}");
+        let mut symmetric = doc.clone();
+        *symmetric.feature_mut(2).unwrap() = new.clone();
+        let model = evaluate(&symmetric);
+        let state = model.state();
+        let hit = crate::name_lookup::locate_edge(state.body("Body1").unwrap(), &picked, near).unwrap_or_else(|e| panic!("{picked}: {e}"));
+        assert_eq!(hit.point.z > 0.0, high, "{direction}: the edge on the cap facing the way the start cap did: {:?}", hit.point);
+        // Without the record no cap answers to `start`.
+        if let crate::FeatureKind::Extrude { extent, .. } = &mut symmetric.feature_mut(2).unwrap().kind {
+            extent.one_sided_direction = None;
+        }
+        let model = evaluate(&symmetric);
+        let state = model.state();
+        assert!(crate::name_lookup::locate_edge(state.body("Body1").unwrap(), &picked, near).is_err(), "{direction}: {picked}");
+    }
+}
+
 /// #13464: a mesh's flat patch outline drops a corner part way along a side, even when single
 /// precision has moved it off the line (as an STL's corners are), and when the loop starts there.
 #[test]
@@ -740,3 +837,79 @@ fn mesh_body_has_no_vertex_names() {
     );
     assert!(crate::naming::vertex_names(&mb).is_empty());
 }
+
+/// #17534: a construction plane of another component, projected onto a sketch, is brought
+/// into the sketch's frame: the projected line is the intersection of the two planes, and
+/// not a line parallel to it, in the plane's own frame.
+#[test]
+fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
+    // A body with two parallel faces: the midplane between them is the XZ plane at y = 10.
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(20., 20., 20.)).unwrap();
+    let mut st = ModelState::default();
+    st.bodies.push(ModelBody::new("Case".into(), body, 1));
+    let faces = st.bodies[0].body.faces(0.01).unwrap();
+    let face_at = |y: f64| {
+        faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::Y).abs() > 0.99) && (f.centroid.y - y).abs() < 1e-6)
+            .map(|f| f.centroid)
+            .unwrap()
+    };
+    // The design: a part placed in the world, turned half about X and lifted 100 mm, and a
+    // construction plane in the root component, halfway between the body's two XZ faces.
+    let mut doc = Document::new("midplane");
+    doc.components.push(crate::Component { id: 7, name: "Part".into(), ..Default::default() });
+    doc.occurrences.push(crate::Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Part".into(),
+        transform: PART_FRAME,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    });
+    let mid = doc
+        .add_feature(
+            crate::FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Midplane {
+                    a: Box::new(crate::construct::GeoRef::Face { at: face_at(0.), name: None }),
+                    b: Box::new(crate::construct::GeoRef::Face { at: face_at(20.), name: None }),
+                },
+            },
+            Some("Mid"),
+        )
+        .unwrap();
+    let vals = doc.param_values().0;
+    // The plane as it was built, in the root component's frame.
+    let built = doc.resolve_plane_in(&vals, &PlaneRef::Construction { feature: crate::FeatureId(mid), placement: None }, 0, 0, Some(&st)).unwrap();
+    assert!((built.origin.y - 10.).abs() < 1e-9, "the midplane is halfway between the two faces: {built:?}");
+    st.construct.push(crate::construct::Construct {
+        feature: mid,
+        name: "Mid".into(),
+        geom: crate::construct::ConstructGeom::Plane(built),
+        bodies: Vec::new(),
+    });
+    // The sketch stands in the part's frame: its own XY plane.
+    let resolved = crate::project::resolve_at(
+        &doc,
+        &vals,
+        &st,
+        &Plane::XY,
+        LinkKind::Project,
+        &LinkSource::Plane { name: "Mid".into() },
+        Some(&(7, PART_FRAME)),
+    )
+    .unwrap();
+    let LinkGeom::Line(a, b) = &resolved.geom[0] else { panic!("the plane projects to a line: {:?}", resolved.geom) };
+    // The part is turned half about X and lifted 100 mm, so the root's midplane at y = 10
+    // lies at y = 90 in the part's frame: the trace of the two planes is there.
+    assert!(
+        (a.y - 90.).abs() < 1e-9 && (b.y - 90.).abs() < 1e-9,
+        "the projected line is the intersection of the midplane and the sketch plane: {a:?} {b:?}"
+    );
+    assert!((a.x - b.x).abs() > 1e-9, "the projected line runs along the sketch plane: {a:?} {b:?}");
+}
+
+/// Where the part of the test above stands: turned half about X and lifted 100 mm.
+const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];

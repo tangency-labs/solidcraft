@@ -276,7 +276,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Commands that start with a step of their own: Canvas and Decal ask for the image first,
 /// Edit Canvas opens the canvas panel. False when the command should not go on.
 pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
-    if id == "inspect.section" && app.preferences.viewport_section_status && app.session.section.is_some() {
+    if id == "inspect.section" && app.preferences.viewport_section_status && !app.session.section.is_empty() {
         let _ = app.run(id, json!({"clear":true}));
         return false;
     }
@@ -951,6 +951,11 @@ fn mode(id: &str) -> Option<Mode> {
     })
 }
 
+/// Whether an extra sketch tool draws new geometry from clicks rather than picking existing entities.
+pub fn is_drawing_tool(id: &str) -> bool {
+    matches!(mode(id), Some(Mode::Points(_) | Mode::Construction))
+}
+
 /// A tool for one of the extra sketch commands.
 pub fn tool_for(id: &str) -> Option<Tool> {
     mode(id)?;
@@ -969,7 +974,8 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         arc_turn: 0.0,
         lined: Vec::new(),
         chain: Default::default(),
-        normal: false,
+        line_type: crate::sketch_construction::last_line_type(),
+        classic: false,
     })
 }
 
