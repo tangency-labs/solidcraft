@@ -115,6 +115,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 to_body_apart: _,
                 from_level: _,
                 picked_placements: _,
+                one_sided_direction: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
         }
@@ -141,6 +142,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         components,
         occurrences: _,
         assembly: _,
+        // Drawings draw the model; they feed none of it.
+        drawings: _,
         sheet,
         plastic,
         parts,

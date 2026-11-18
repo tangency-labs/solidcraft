@@ -76,6 +76,7 @@ fn plate_doc() -> (Document, u64) {
                 to_body_apart: false,
                 from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -184,6 +185,7 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_body_apart: false,
                 from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -942,6 +944,7 @@ fn box_fillet_cut_timeline() {
                 to_body_apart: false,
                 from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -1677,6 +1680,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_body_apart: false,
                 from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -1877,6 +1881,7 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
         transform: IDENTITY,
         grounded: false,
         expressed_moves: Vec::new(),
+        bom_type: None,
     });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
@@ -1950,6 +1955,7 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
             name: format!("P{id}"),
             transform: IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         });
     }
@@ -2023,6 +2029,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_body_apart: false,
             from_level: false,
             picked_placements: Vec::new(),
+            one_sided_direction: None,
         },
         operation: Operation::NewBody,
         targets: vec![],

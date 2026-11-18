@@ -108,6 +108,8 @@ pub struct ReportState {
     /// The report's field that had focus when a capture hid it.
     refocus: Option<egui::Id>,
     cad_focus: Option<egui::Id>,
+    /// The commands run this session, for a report's recent steps (`ticket::record_step`).
+    pub(crate) steps: std::collections::VecDeque<serde_json::Value>,
 }
 
 /// How long a screenshot waits for a preview being computed before it shows it unfinished.
@@ -609,8 +611,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
         truncate(&mut body, MAX_BODY - 32);
         body.push_str("\n[report context truncated]\n");
     }
-    let mut title = format!("Crash: {}", s("message").lines().next().unwrap_or_default());
-    truncate(&mut title, 160);
+    let title = ticket::readable(&format!("Crash: {}", s("message").lines().next().unwrap_or_default()), 160);
     let mut draft = Draft::new(title, body, 0);
     draft.origin = Origin::Crash;
     draft.description =
@@ -2312,7 +2313,7 @@ mod tests {
         let mut app = app();
         let ctx = crate::fonts::test_context();
         begin(&mut app, &ctx, None, None);
-        // As the app's window device has it (vendor/egui-wgpu asks for at least 8192).
+        // As the app's window device has it (the vendored egui-wgpu asks for at least 8192).
         app.issue_report.pending.as_mut().unwrap().max_side = 8192;
         let token = app.issue_report.pending.as_ref().unwrap().token;
         let [w, h] = [6016, 3384];
@@ -2504,6 +2505,7 @@ mod tests {
             screenshot: Some(vec![1, 2, 3]),
             design: Some(("SecretBracket.sc".into(), b"SECRET-DESIGN-BYTES".to_vec())),
             crash: None,
+            ..Default::default()
         }
     }
 
@@ -2642,7 +2644,7 @@ mod tests {
         frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
         // The step that went unanswered is named (#17932), after one more try.
         assert!(
-            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at POST /api/drafts")),
+            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at create report draft (POST /api/drafts)")),
             "{:?}",
             app.tickets.outcome
         );
@@ -2692,7 +2694,7 @@ mod tests {
         assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened(draft_page())));
         assert!(tickets::queue::list(&dir).is_empty(), "nothing kept");
         assert!(
-            app.session.log.iter().any(|l| l.contains("no answer to PUT /api/uploads/") && l.contains("timeout: global")),
+            app.session.log.iter().any(|l| l.contains("no answer to upload part 1 of log.txt (PUT /api/uploads/") && l.contains("timeout: global")),
             "{:?}",
             app.session.log
         );
@@ -2938,5 +2940,222 @@ mod tests {
         assert!(matches!(app.tickets.outcome, Some(tickets::Outcome::Failed(_))));
         assert!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) == 0, "no report or file left behind");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #17911: a report made from a crash report attaches the crashed session's design (the
+    /// crash report's copy), not the empty design open now; with no copy, none, and it says so.
+    #[test]
+    fn ticket_report_from_a_crash_attaches_the_crashed_sessions_design_or_says_there_is_none() {
+        let ctx = crate::fonts::test_context();
+        let (mut app, _, _, _) = ticket_app(true, None);
+        let dir = temp_dir("crash-design");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut crashed = Session::default();
+        crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let bytes = solidcraft_engine::io::write_design(&crashed.doc);
+        let design = dir.join("design.sc");
+        std::fs::write(&design, &bytes).unwrap();
+        let report = json!({
+            "id": "c1", "kind": "unclean_exit", "message": "ended without a clean exit",
+            "command": {"command": "solid.pattern.rectangular", "params": {"count1": 5}},
+            "base": {"file": "/somewhere/Vent Panel.sc"},
+            "design_path": design.to_string_lossy(),
+            "recent_commands": [
+                {"command": "doc.open", "params": {"path": "/somewhere/Vent Panel.sc"}, "ok": true},
+                {"command": "select.set", "params": {"items": [{"type": "body", "name": "Body1"}]}, "ok": true},
+                {"command": "solid.fillet", "params": {"radius": 9}, "ok": false, "error": "radius too large"},
+            ],
+        });
+        begin_crash(&mut app, &ctx, &report);
+        let draft = app.issue_report.draft.take().unwrap();
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        let ev = &t.evidence;
+        assert_eq!(ev.design.as_ref().map(|(n, b)| (n.as_str(), b.as_slice())), Some(("Vent Panel.sc", bytes.as_slice())));
+        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc), "not the design open now");
+        assert_eq!(ev.design_from, Some("report.design_from_crash"));
+        assert_eq!(ev.session["session_start"], "crashed");
+        assert_eq!(ev.session["design_sha256"], json!(tickets::api::sha256_hex(&bytes)));
+        // The crashed session's steps, opens included; a file's path is reduced to its name.
+        let steps: Vec<&str> = ev.steps.iter().filter_map(|s| s["command"].as_str()).collect();
+        assert_eq!(steps, ["doc.open", "select.set", "solid.fillet"]);
+        assert_eq!((ev.steps[0]["file"].as_str(), ev.steps[0].get("params")), (Some("Vent Panel.sc"), None));
+        assert_eq!(ev.steps[2]["error"], "radius too large");
+        let sent = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, ev, "t");
+        assert_eq!(sent.ticket["repro"]["steps"].as_array().map(Vec::len), Some(3));
+        assert!(sent.files.iter().any(|f| f.kind == "design" && f.name == "Vent Panel.sc" && f.bytes == bytes));
+
+        // No copy of the design: nothing attached, and the report and the dialog say why.
+        let mut report = report;
+        report.as_object_mut().unwrap().remove("design_path");
+        begin_crash(&mut app, &ctx, &report);
+        let draft = app.issue_report.draft.take().unwrap();
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        assert!(t.evidence.design.is_none(), "never the empty design open now");
+        assert_eq!(t.evidence.design_from, Some("report.design_none_crash"));
+        assert!(t.evidence.session["design"].as_str().is_some_and(|d| d.starts_with("none")));
+        assert!(t.evidence.session.get("design_sha256").is_none());
+        let sent = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &t.evidence, "t");
+        assert!(!sent.files.iter().any(|f| f.kind == "design"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A report made in a new, empty design while a design from a run that ended (a lost
+    /// graphics device) waits for recovery attaches that design (#17911).
+    #[test]
+    fn ticket_report_in_an_empty_design_attaches_the_design_left_for_recovery() {
+        let (mut app, _, _, _) = ticket_app(true, None);
+        let dir = temp_dir("recovery");
+        let mut left = Session::default();
+        left.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        std::sync::Arc::make_mut(&mut left.doc).name = "Light Switch".into();
+        let mut saver = solidcraft_engine::recovery::Autosaver::new(&dir, std::time::Duration::from_secs(1)).unwrap();
+        assert!(saver.save(&left).unwrap());
+        drop(saver);
+        crate::recovery_ui::start(&mut app, &dir, std::time::Duration::from_secs(600));
+        assert_eq!(app.recoverable.len(), 1);
+        let draft = draft_for(&app, None, None);
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        let (name, bytes) = t.evidence.design.clone().unwrap();
+        assert_eq!(name, "Light Switch.sc");
+        assert_eq!(solidcraft_engine::io::read_design(&bytes).unwrap().features.len(), left.doc.features.len());
+        assert_eq!((t.evidence.design_from, &t.evidence.session["session_start"]), (Some("report.design_from_recovery"), &json!("recovered")));
+
+        // A design with something in it is the one the report is about.
+        app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let draft = draft_for(&app, None, None);
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        assert_eq!(t.evidence.design_from, None);
+        assert_eq!(t.evidence.design.unwrap().1, solidcraft_engine::io::write_design(&app.session.doc));
+        if let Some(a) = app.autosave.take() {
+            drop(a);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// "Recent steps" were empty: the report sent no steps at all. Every command the session
+    /// ran goes, with its parameters, opens and selections included; a gesture's frames do not.
+    #[test]
+    fn ticket_report_recent_steps_are_the_commands_the_session_ran() {
+        let (mut app, _, _, _) = ticket_app(true, None);
+        app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        assert!(app.run("solid.fillet", json!({"edges": [], "radius": -1})).is_err());
+        // An open finishes on a worker: it is recorded without its folders.
+        app.finish_command("doc.open", &Ok(json!({"path": "/home/someone/clients/Bracket.sc"})));
+        ticket::step_params(&mut app, "doc.open", &json!({"path": "/home/someone/clients/Bracket.sc"}));
+        app.finish_command("view.navigate", &Ok(json!({"continuous": true})));
+        let draft = draft_for(&app, None, None);
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        let steps = &t.evidence.steps;
+        let ids: Vec<&str> = steps.iter().filter_map(|s| s["command"].as_str()).collect();
+        assert_eq!(ids, ["solid.box", "select.set", "solid.fillet", "doc.open"]);
+        assert_eq!(steps[0]["params"]["length"], 10);
+        assert_eq!(steps[1]["params"]["items"][0]["name"], "Body1");
+        assert!(steps[2]["ok"] == false && steps[2]["error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert!(steps[3].get("params").is_none() && steps[3]["file"] == "Bracket.sc");
+        // The parameters (names in the design) go only with the design, which holds them anyway.
+        let with_design = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &t.evidence, "t");
+        assert_eq!(with_design.ticket["repro"]["steps"], json!(steps));
+        let without = payload::build(&form(), payload::Ticks::default(), &t.evidence, "t");
+        let bare: Vec<serde_json::Value> = steps
+            .iter()
+            .map(|s| {
+                let mut s = s.clone();
+                let o = s.as_object_mut().unwrap();
+                o.remove("params");
+                o.remove("file");
+                s
+            })
+            .collect();
+        assert_eq!(without.ticket["repro"]["steps"], json!(bare));
+        assert!(!without.ticket.to_string().contains("Body1") && !without.ticket.to_string().contains("Bracket"));
+        assert!(payload::repro_text(&t.evidence, false).contains("\"steps\""), "the dialog shows what goes");
+        assert!(!payload::repro_text(&t.evidence, false).contains("Body1") && payload::repro_text(&t.evidence, true).contains("Body1"));
+        // Bounded: the last MAX_STEPS.
+        for _ in 0..ticket::MAX_STEPS + 5 {
+            let _ = app.run("select.clear", json!({}));
+        }
+        assert_eq!(app.issue_report.steps.len(), ticket::MAX_STEPS);
+    }
+
+    /// The log a report attaches is the end of the log file on disk, the run before's end first
+    /// when this run has little, bounded in lines and bytes; not two lines of UI notices.
+    #[test]
+    fn ticket_report_log_is_the_end_of_the_log_file() {
+        let dir = temp_dir("log");
+        std::fs::create_dir_all(&dir).unwrap();
+        let previous: String = (0..1000).map(|i| format!("before {i}\n")).collect();
+        std::fs::write(dir.join(crate::log_file::PREVIOUS), previous).unwrap();
+        std::fs::write(dir.join(crate::log_file::FILE), "now 1\nnow 2\n").unwrap();
+        let lines = crate::log_file::tail_in(&dir, ticket::LOG_LINES, ticket::LOG_BYTES);
+        assert_eq!(lines.len(), ticket::LOG_LINES);
+        assert_eq!(lines[lines.len() - 3..], ["--- the run before ---", "now 1", "now 2"]);
+        assert_eq!(lines[lines.len() - 4], "before 999");
+        // Bytes bound it too, and a line cut by the bound is left out whole.
+        let long: String = (0..400).map(|i| format!("{i:04} {}\n", "x".repeat(1000))).collect();
+        std::fs::write(dir.join(crate::log_file::FILE), long).unwrap();
+        let lines = crate::log_file::tail_in(&dir, ticket::LOG_LINES, ticket::LOG_BYTES);
+        let bytes: usize = lines.iter().map(|l| l.len() + 1).sum();
+        assert!(bytes as u64 <= ticket::LOG_BYTES && lines.len() > 100, "{} lines, {bytes} bytes", lines.len());
+        let now = lines.iter().position(|l| l == crate::log_file::RUN_MARK).map_or(0, |i| i + 1);
+        assert!(lines[now..].iter().all(|l| l.len() == 1005) && lines.last().unwrap().starts_with("0399"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The error in a report's title and description is cut at a word, with "…", never mid-word
+    /// ("…Surface Natur"); the whole error stays in the failed operation's details.
+    #[test]
+    fn ticket_report_error_is_cut_at_a_word_and_kept_whole_in_the_details() {
+        let error = format!("SMLib boolean: SMLib's check refuses the result: {}Surface Natural Boundary", "Face has Coincident Edges; ".repeat(60));
+        let failing = payload::Failing { command: Some("solid.extrude".into()), error: error.clone(), ..Default::default() };
+        let mut app = failing_sample();
+        let mut draft = draft_for(&app, None, Some(&error));
+        draft.title_prefix = "EXTRUDE: ".into();
+        let t = ticket::new_ticket(&mut app, &draft, None);
+        for text in [t.form.title.as_str(), t.form.description.lines().find(|l| l.starts_with("**Error:**")).unwrap()] {
+            assert!(text.ends_with('…'), "{text}");
+            let kept = text.trim_end_matches('…').trim_start_matches("**Error:** ");
+            assert!(error.starts_with(kept.trim_start_matches("EXTRUDE: ")) || t.form.title == text, "{text}");
+            let next = error.get(kept.trim_start_matches("EXTRUDE: ").len()..).unwrap_or_default();
+            assert!(next.is_empty() || next.starts_with(char::is_whitespace) || next.starts_with(';'), "cut mid-word: {text}");
+        }
+        assert!(t.form.title.chars().count() <= payload::MAX_TITLE);
+        assert_eq!(t.evidence.failing.as_ref().map(|f| f.error.as_str()), Some(error.as_str()));
+        assert_eq!(payload::failing_json(&failing)["error"], json!(error));
+        assert_eq!(ticket::readable("short", 10), "short");
+        assert_eq!(ticket::readable("one two three four", 12), "one two…");
+        assert_eq!(ticket::readable("first line\nsecond line goes on", 20), "first line…");
+        assert_eq!(ticket::readable("Überlänge", 5), "Über…", "one long word is cut at a character");
+    }
+
+    /// A description left as the template, with "What were you trying to do?" unanswered, goes
+    /// without the bare question; an answer keeps it.
+    #[test]
+    fn ticket_report_drops_the_unanswered_question() {
+        crate::i18n::install();
+        let q = solidcraft_ui_text::tr("report.trying_to_do");
+        let template = format!("**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n\n{q}\n");
+        assert_eq!(ticket::without_unanswered(&template), "**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n");
+        assert_eq!(ticket::without_unanswered(&format!("{template}  \n\n")), "**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n");
+        let answered = format!("{template}Rounding the top edge\n");
+        assert_eq!(ticket::without_unanswered(&answered), answered);
+        let same_line = template.replace(q, &format!("{q} Rounding the top edge"));
+        assert_eq!(ticket::without_unanswered(&same_line), same_line);
+        assert_eq!(ticket::without_unanswered(q), "");
+
+        // Sent: the ticket's body has no bare question, and the title is not made from it.
+        let (mut app, _, _, _) = ticket_app(true, None);
+        // Read again: making the app loads the message catalogs, which a test run alone in its
+        // own process has not loaded before.
+        let q = solidcraft_ui_text::tr("report.trying_to_do");
+        let mut draft = draft_for(&app, None, Some("radius too large"));
+        draft.title_prefix = "Fillet: ".into();
+        let mut t = ticket::new_ticket(&mut app, &draft, None);
+        assert!(t.form.description.contains(q), "{}", t.form.description);
+        t.form.title.clear();
+        ticket::ready_to_send(&mut t.form);
+        let report = ticket::outgoing(&draft, &t);
+        assert!(!report.ticket["body"].as_str().unwrap().contains(q), "{}", report.ticket["body"]);
+        assert_ne!(report.ticket["title"].as_str(), Some(q));
     }
 }

@@ -76,10 +76,11 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
     let original = solidcraft_io::vfs::read(path, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(e.to_string()))?;
     // Validate before a filesystem mutation, and keep external component links pointing
     // to the same originals when moving a saved assembly to another folder.
-    let mut doc = solidcraft_io::read_design(&original)?;
-    let links = super::design_link::rebased(&doc, Some(path), destination);
-    let contents = if links != doc.links {
-        doc.links = links;
+    // Its drawings' sources follow the same rule as its component links.
+    let doc = solidcraft_io::read_design(&original)?;
+    let mut moved = std::borrow::Cow::Borrowed(&doc);
+    super::design_link::filed(&mut moved, Some(path), destination);
+    let contents = if let std::borrow::Cow::Owned(doc) = moved {
         if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc) } else { solidcraft_io::write_design_container(&doc)? }
     } else {
         original.clone()

@@ -871,6 +871,216 @@ fn a_micro_edge_on_a_bezier_with_a_tiny_knot_span_keeps_the_block() {
     assert!(e.contains("knot resolution is 1e-12"), "{e}");
 }
 
+/// [`bezier_block`] (split at 1 µm) with its first edge's curve, which the micro edge and the
+/// rest of that edge share, lifted `lift` mm off the bottom face's plane: the reader gives both
+/// edges the gap as their tolerance, which SMLib takes as a part, but its check refuses those
+/// tolerances against the body's.
+pub(super) fn lifted_bezier_block(lift: f64) -> String {
+    bezier_block("20.", 1e-3)
+        .lines()
+        .map(|l| match l.rsplit_once(',') {
+            Some((head, _)) if ["#1000=", "#1001=", "#1002=", "#1003="].iter().any(|p| l.starts_with(p)) => format!("{head},{lift:.17E}));\n"),
+            _ => format!("{l}\n"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
+    // #17689: a part SMLib takes but its check fails came in silently, and every boolean on it
+    // was refused later. The import now runs the check and says so, naming the part.
+    let text = lifted_bezier_block(2e-3);
+    // The engine's tests read the same block from the regression file.
+    assert_eq!(text, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step"));
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(body.smlib_refusal().is_none(), "SMLib takes the part");
+    assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), (6, 13, 9), "the block's topology as the file writes it");
+    let check = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(!check.is_valid(), "the check fails it");
+    let summary = crate::validation::CheckFailure::of(&check).unwrap().to_string();
+    let issue = imp.report.issues.iter().find(|i| i.kind == IssueKind::NeedsRepair).unwrap_or_else(|| panic!("{:?}", imp.warnings));
+    assert_eq!(issue.detail, format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {summary}"));
+    assert!(imp.warnings.contains(&issue.detail), "{:?}", imp.warnings);
+    assert!(summary.starts_with(&format!("{} failed test", check.failures)), "{summary}");
+    // Each test the check failed is named once, with how many times it failed.
+    for line in check.text.lines().filter(|l| l.contains("Test #")) {
+        let name = &line[..line.find(" (").unwrap()];
+        assert_eq!(summary.matches(name).count(), 1, "{name} in {summary}");
+    }
+    // The block as written (its edge on the plane) passes the check, and no warning says otherwise.
+    let clean = step_import(&lifted_bezier_block(0.0)).unwrap();
+    assert_eq!(clean.bodies.len(), 1, "{:?}", clean.warnings);
+    let b = &clean.bodies[0].body;
+    assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 13, 9), "the same topology with the edge on its face");
+    assert!(clean.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap().is_valid());
+    assert!(clean.report.issues.iter().all(|i| i.kind != IssueKind::NeedsRepair), "{:?}", clean.warnings);
+}
+
+/// `block` (one solid `#101` in representation `#60`, as [`bezier_block`] writes it) as a part
+/// placed twice in an assembly: once where the file defines it, and once 100 mm along x by a
+/// CARTESIAN_TRANSFORMATION_OPERATOR_3D that scales it by `(sx, sy, sz)` (non-uniform when they
+/// differ).
+fn with_scaled_instance(block: &str, (sx, sy, sz): (f64, f64, f64)) -> String {
+    let rep = "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+    assert!(block.contains(rep));
+    let mut t = block.replace(rep, "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101,#65),#20);\n").replace(TAIL, "");
+    t += "#8=PRODUCT_DEFINITION_CONTEXT('part definition',#9,'design');\n#9=APPLICATION_CONTEXT('');\n";
+    t += &product(50, "Block");
+    t += &product(70, "Assembly");
+    t += "#61=SHAPE_DEFINITION_REPRESENTATION(#54,#60);\n#65=AXIS2_PLACEMENT_3D('',#66,$,$);\n#66=CARTESIAN_POINT('',(0.,0.,0.));\n";
+    t += "#80=SHAPE_REPRESENTATION('',(#81),#20);\n#81=AXIS2_PLACEMENT_3D('',#82,$,$);\n#82=CARTESIAN_POINT('',(0.,0.,0.));\n";
+    t += "#88=SHAPE_DEFINITION_REPRESENTATION(#74,#80);\n#67=CARTESIAN_POINT('',(100.,0.,0.));\n";
+    let scaled = if sx == sy && sy == sz {
+        format!("CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#67,{sx:.17E},$)")
+    } else {
+        format!("CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM('','',$,$,#67,{sx:.17E},$,{sy:.17E},{sz:.17E})")
+    };
+    for (k, placement) in [(0u64, "ITEM_DEFINED_TRANSFORMATION('','',#65,#81)".to_string()), (1, scaled)] {
+        let n = 600 + k * 10;
+        t += &format!("#{n}=NEXT_ASSEMBLY_USAGE_OCCURRENCE('{k}','Block:{k}','',#70,#50,$);\n");
+        t += &format!("#{}=PRODUCT_DEFINITION_SHAPE('','',#{n});\n#{}={placement};\n", n + 1, n + 2);
+        t += &format!(
+            "#{}=(REPRESENTATION_RELATIONSHIP('','',#60,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#{})SHAPE_REPRESENTATION_RELATIONSHIP());\n",
+            n + 3,
+            n + 2
+        );
+        t += &format!("#{}=CONTEXT_DEPENDENT_SHAPE_REPRESENTATION(#{},#{});\n", n + 4, n + 3, n + 1);
+    }
+    t += TAIL;
+    t
+}
+
+/// #17689 review: the check at import is of each part as placed, as operations take it. A
+/// placement that scales the part maps its geometry without its tolerances, so the part's own
+/// check does not speak for it: the block with its edge lifted 0.2 µm passes SMLib's check as
+/// the file defines it, and fails it stretched 100 times along z. The import says so for the
+/// stretched instance. A rigid placement is one class with the part (checked once); a uniform
+/// scale is a class of its own.
+#[test]
+fn a_placement_that_scales_a_part_is_checked_as_placed() {
+    let z_extent = |b: &Body| {
+        let m = measure(b).unwrap();
+        m.bbox.max.z - m.bbox.min.z
+    };
+    let label = "solid 'Bloco' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: ";
+    let imp = step_import(&with_scaled_instance(&lifted_bezier_block(2e-4), (1.0, 1.0, 100.0))).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let (part, stretched) = (&imp.bodies[0].body, &imp.bodies[1].body);
+    for b in [part, stretched] {
+        assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 13, 9), "the block's topology");
+    }
+    assert!((z_extent(part) - 10.0).abs() < 1e-9 && (z_extent(stretched) - 1000.0).abs() < 1e-6, "the second instance is the stretched one");
+    assert_eq!(crate::validation::failing_check(part).unwrap(), None, "the part as the file defines it passes the check");
+    let failure = crate::validation::failing_check(stretched).unwrap().expect("stretched, it fails the check");
+    let checked = |w: &[String]| -> Vec<String> {
+        let mut c: Vec<String> = w.iter().filter(|w| w.contains("SMLib's check")).cloned().collect();
+        c.sort();
+        c
+    };
+    // (The import's other notes, such as the gaps the stretched edges have, are not the check's.)
+    assert_eq!(checked(&imp.warnings), [format!("{label}{failure}")]);
+    // The block lifted 2 µm fails as the file defines it: placed again rigidly (a translation),
+    // the same check speaks for that instance, once; placed again scaled 10 times, that instance
+    // is checked too, and says so.
+    let fails = lifted_bezier_block(2e-3);
+    let rigid = step_import(&with_scaled_instance(&fails, (1.0, 1.0, 1.0))).unwrap();
+    assert_eq!(rigid.bodies.len(), 2, "{:?}", rigid.warnings);
+    let own = crate::validation::failing_check(&rigid.bodies[0].body).unwrap().expect("the lifted block fails the check");
+    assert_eq!(crate::validation::failing_check(&rigid.bodies[1].body).unwrap().as_ref(), Some(&own), "moved, it fails the same tests");
+    assert_eq!(checked(&rigid.warnings), [format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own} (×2)")]);
+    let scaled = step_import(&with_scaled_instance(&fails, (10.0, 10.0, 10.0))).unwrap();
+    assert_eq!(scaled.bodies.len(), 2, "{:?}", scaled.warnings);
+    assert!((z_extent(&scaled.bodies[1].body) - 100.0).abs() < 1e-9);
+    let large = crate::validation::failing_check(&scaled.bodies[1].body).unwrap().expect("scaled, it still fails");
+    let mut want = vec![format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own}"), format!("{label}{large}")];
+    want.sort();
+    assert_eq!(checked(&scaled.warnings), want);
+}
+
+/// A check job for `body`, as the reader makes one (part `name`, `times` instances).
+fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
+    checks::Job { item: 101, part: name.into(), what: format!("solid '{name}'"), body: body.clone(), times }
+}
+
+/// The one body of the lifted block (failing SMLib's check when `fails`) and of the block as
+/// written (passing it).
+fn checked_blocks() -> (Body, Body) {
+    let fails = step_import(&lifted_bezier_block(2e-3)).unwrap().bodies.remove(0).body;
+    let passes = step_import(&lifted_bezier_block(0.0)).unwrap().bodies.remove(0).body;
+    (fails, passes)
+}
+
+/// #17689 review: the check at import runs on a copy it owns, so the token over the import's
+/// work stops it, and the import says it was stopped (the import then fails as cancelled).
+#[test]
+fn a_stopped_import_stops_in_the_check() {
+    let (fails, _) = checked_blocks();
+    let jobs = || vec![check_job(&fails, "Bloco", 1), check_job(&fails, "Bloco", 1)];
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    assert!(stop.within(|| jobs().iter().all(|j| matches!(checks::check(j), checks::Outcome::Stopped))), "the check stops with the work");
+    assert_eq!(ImportChecks::start(jobs(), 2, Some(stop)).wait(), None, "checks stopped by the caller's token say so");
+    assert!(jobs().iter().all(|j| matches!(checks::check(j), checks::Outcome::NeedsRepair(_))), "unstopped, the lifted block fails the check");
+    let found = ImportChecks::start(jobs(), 2, None).wait().expect("unstopped, they end");
+    assert_eq!(found.len(), 2);
+}
+
+/// #17697 review: a part is checked once however often it is placed rigidly, and the warning
+/// counts every placement of it.
+#[test]
+fn a_part_placed_twice_rigidly_is_checked_once_and_counted_twice() {
+    let text = with_scaled_instance(&lifted_bezier_block(2e-3), (1.0, 1.0, 1.0));
+    for workers in [1, 4] {
+        let mut reading = StepReading::with_workers(&text, workers).unwrap();
+        while reading.rd.convert_next(reading.single) {}
+        assert_eq!(reading.rd.check_jobs.len(), 1, "one check for the part's two rigid placements");
+        assert_eq!(reading.rd.check_jobs[0].times, 2);
+        let imp = reading.finish().unwrap();
+        assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+        let repair: Vec<_> = imp.report.issues.iter().filter(|i| i.kind == IssueKind::NeedsRepair).collect();
+        assert_eq!(repair.len(), 1, "{:?}", imp.warnings);
+        assert_eq!(repair[0].times, 2, "both placements are flagged");
+        assert!(repair[0].detail.ends_with(" (×2)"), "{}", repair[0].detail);
+        assert!(imp.warnings.contains(&repair[0].detail));
+    }
+}
+
+/// #17697 review: the import returns before SMLib's check of its parts ends; what the check
+/// finds is in the report once every check has ended, the same as a waiting import says.
+#[test]
+fn the_check_runs_after_a_shared_import_returns_and_reports_when_done() {
+    let text = lifted_bezier_block(2.2e-3);
+    let imp = step_import_shared(&text).unwrap();
+    assert!(!imp.report.checks.is_empty(), "the part is still to check");
+    assert!(imp.warnings.iter().all(|w| !w.contains("SMLib's check")), "the import's own warnings come first, alone");
+    let settled = imp.report.settled().expect("the checks end");
+    let waited = step_import(&text).unwrap();
+    assert_eq!(settled.issues, waited.report.issues, "the same issues as an import that waits");
+    assert!(!imp.report.checking());
+    assert_eq!(imp.report.current().issues, settled.issues, "settled, the report shows what the checks found");
+    assert_eq!(imp.report.checks.issues().map(|i| i.len()), Some(1));
+    assert!(!imp.report.checks.stopped());
+}
+
+/// #17697 review: what the checks find is in the order the parts were read, however the threads
+/// finish.
+#[test]
+fn the_checks_report_in_read_order_whatever_the_threads() {
+    let (fails, passes) = checked_blocks();
+    let jobs = || -> Vec<checks::Job> {
+        (0..12).map(|k| if k % 3 == 1 { check_job(&passes, &format!("p{k}"), 1) } else { check_job(&fails, &format!("p{k}"), 1 + k % 2) }).collect()
+    };
+    let want: Vec<String> = (0..12).filter(|k| k % 3 != 1).map(|k| format!("p{k}")).collect();
+    for workers in [1, 2, 4, 8] {
+        for _ in 0..3 {
+            let found = ImportChecks::start(jobs(), workers, None).wait().unwrap();
+            assert_eq!(found.iter().map(|i| i.part.clone()).collect::<Vec<_>>(), want, "{workers} workers");
+        }
+    }
+}
+
 fn context(id: u64, unit: &str) -> String {
     format!(
         "#{id}=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{},#{}))REPRESENTATION_CONTEXT('',''));\n#{}=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-6),#{},'','');\n#{}={unit};\n#{}=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n",
@@ -1654,10 +1864,18 @@ fn torus_capped_cylinder(torus: &str, major: f64, minor: f64, tip: Tip) -> Strin
 }
 
 /// The one closed body of `text`, its volume and area against the closed forms; `warnings`
-/// the import's warnings.
-fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str]) {
+/// the import's warnings. `fails_check`: SMLib's full check fails the body, and the import's
+/// last warning is the one that says so, built from that check; otherwise the check passes.
+fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str], fails_check: bool) {
     let imp = step_import(text).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let check = crate::validation::failing_check(&imp.bodies[0].body).unwrap();
+    assert_eq!(check.is_some(), fails_check, "{check:?}");
+    let mut warnings: Vec<String> = warnings.iter().map(|w| (*w).to_string()).collect();
+    if let Some(check) = check {
+        let name = &imp.bodies[0].name;
+        warnings.push(format!("solid '{name}': needs repair before it can be modelled: SMLib's check fails it: {check}"));
+    }
     assert_eq!(imp.warnings, warnings, "{:?}", imp.warnings);
     assert!(imp.bodies[0].closed);
     let m = measure(&imp.bodies[0].body).unwrap();
@@ -1674,7 +1892,7 @@ fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str])
 fn horn_torus_round_on_a_pin_imports_whole() {
     use std::f64::consts::PI;
     let t = torus_capped_cylinder("#5=TOROIDAL_SURFACE('',#4,1.,1.);", 1.0, 1.0, Tip::Disc { z: 1.0, r: 1.0 });
-    assert_closed_measures(&t, 8.0 * PI + PI * (5.0 / 3.0 + PI / 2.0), 15.0 * PI + PI * PI, &[]);
+    assert_closed_measures(&t, 8.0 * PI + PI * (5.0 / 3.0 + PI / 2.0), 15.0 * PI + PI * PI, &[], false);
 }
 
 /// The volume and area of a spindle torus's pin end ([`Tip::Pole`]): in the meridian plane the
@@ -1706,7 +1924,7 @@ fn spindle_torus_pin_tip_imports_whole() {
     for torus in ["#5=TOROIDAL_SURFACE('',#4,1.,2.);", "#5=DEGENERATE_TOROIDAL_SURFACE('',#4,1.,2.,.T.);"] {
         for (seam, warnings) in [(true, &[][..]), (false, &["solid 'Pin': 1 seam edges added to faces that wind around their surface"][..])] {
             let t = torus_capped_cylinder(torus, 1.0, 2.0, Tip::Pole { apex: s3, seam });
-            assert_closed_measures(&t, volume, area, warnings);
+            assert_closed_measures(&t, volume, area, warnings, false);
         }
     }
 }
@@ -1765,7 +1983,8 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
     t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
     t += TAIL;
     let (volume, area) = pin_with_cylinder(major, minor);
-    assert_closed_measures(&t, volume, area, &[]);
+    // SMLib's check fails the part as the reader makes it (#17706): the import says so.
+    assert_closed_measures(&t, volume, area, &[], true);
 }
 
 /// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole
@@ -1796,7 +2015,7 @@ fn spindle_torus_lemon_with_a_negative_major_radius_imports_whole() {
         t += "#20=CLOSED_SHELL('',(#19));\n#21=MANIFOLD_SOLID_BREP('Lemon',#20);\n#22=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#21),#70);\n";
         t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
         t += TAIL;
-        assert_closed_measures(&t, PI * (6.0 * s3 - 8.0 * PI / 3.0), 4.0 * PI * (2.0 * s3 - 2.0 * PI / 3.0), &[]);
+        assert_closed_measures(&t, PI * (6.0 * s3 - 8.0 * PI / 3.0), 4.0 * PI * (2.0 * s3 - 2.0 * PI / 3.0), &[], false);
     }
 }
 
@@ -1841,7 +2060,7 @@ fn torus_written_as_a_revolution_of_a_spline_circle_imports_whole() {
     let ring = PI * 3.0;
     let wall = 2.0 * PI * 2.0;
     let tube = 2.0 * PI * (PI - 1.0);
-    assert_closed_measures(&t, volume, ring + wall + tube, &[]);
+    assert_closed_measures(&t, volume, ring + wall + tube, &[], false);
 }
 
 /// A wire of rectangular section (radius 2 to 3, 0.5 high) wound two turns round the Z axis, rising
@@ -1989,7 +2208,8 @@ fn a_face_winding_two_turns_round_its_cylinder_imports_whole() {
     let ruled_area = |r: f64| 0.5 * (r * (r * r + c * c).sqrt() + c * c * (r + (r * r + c * c).sqrt()).ln());
     let volume = height * (outer * outer - inner * inner) / 2.0 * angle;
     let area = (outer + inner) * height * angle + 2.0 * (outer - inner) * height + 2.0 * angle * (ruled_area(outer) - ruled_area(inner));
-    assert_closed_measures(&t, volume, area, &[]);
+    // SMLib's check fails the part as the reader makes it (#17706): the import says so.
+    assert_closed_measures(&t, volume, area, &[], true);
 }
 
 /// No warning that a face was left out or that the solid came in as surfaces.
@@ -4016,6 +4236,77 @@ fn a_ball_end_split_through_its_pole_imports_closed() {
     // The cap below z = h: π H² (3R − H) / 3 with H = R + h.
     let cap = r + h;
     assert_closed_solid(&w.solid(&[north, south, disk]), 3, std::f64::consts::PI * cap * cap * (3.0 * r - cap) / 3.0);
+}
+
+/// A lens-like solid: a dome turned about the x axis from a quadratic B-spline profile that
+/// starts on the axis, a cylindrical band and a flat back, each split into halves along the
+/// plane z = 0, with no pcurves in the file (as a 2016 lens export has it). Each dome half is a
+/// SURFACE_OF_REVOLUTION face bounded by its two meridians (B-spline edges meeting at the pole)
+/// and half the rim circle, and its loop starts on a meridian, runs into the pole and comes back
+/// out on the other one. The band's frame is turned 45° about the axis, so the rim is labelled
+/// on it and has no closed-form pcurve on the dome. The meridian out of the pole and the rim's
+/// first point were projected from the last point before the pole, across the axis, and
+/// settled on the pole: each half's box stopped a sample short of its meridian, the rim's pcurve
+/// was cut back to that box, and both dome halves were left out. They read whole and the solid
+/// is closed, its volume the dome's π ∫ y² dx and the band's π r² l.
+#[test]
+fn a_dome_of_revolution_split_through_its_pole_keeps_both_halves() {
+    // Profile (0, 0), (0, 2), (1.5, 3): x = 1.5 t², y = 4t − t², so π ∫ y² x' dt = 7.7 π.
+    let (h, r, back) = (1.5_f64, 3.0_f64, 2.5_f64);
+    let k = std::f64::consts::FRAC_1_SQRT_2;
+    let mut w = Entities::default();
+    let point = |w: &mut Entities, p: [f64; 3]| w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2]));
+    let quadratic = |w: &mut Entities, side: f64| {
+        let ps: Vec<String> = [[0.0, 0.0, 0.0], [0.0, 2.0 * side, 0.0], [h, r * side, 0.0]].iter().map(|p| format!("#{}", point(w, *p))).collect();
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',2,({}),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.)", ps.join(",")))
+    };
+    let pole = w.vertex([0.0, 0.0, 0.0]);
+    let (east, west) = (w.vertex([h, r, 0.0]), w.vertex([h, -r, 0.0]));
+    let (east2, west2) = (w.vertex([back, r, 0.0]), w.vertex([back, -r, 0.0]));
+    let (east_c, west_c) = (quadratic(&mut w, 1.0), quadratic(&mut w, -1.0));
+    let mer_east = w.add(format!("EDGE_CURVE('',#{pole},#{east},#{east_c},.T.)"));
+    let mer_west = w.add(format!("EDGE_CURVE('',#{pole},#{west},#{west_c},.T.)"));
+    // Circles about the axis from +y, turning towards +z: halves from +y to −y and back.
+    let circle = |w: &mut Entities, x: f64| {
+        let a = w.axis([x, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        w.add(format!("CIRCLE('',#{a},{r:?})"))
+    };
+    let (rim_c, back_c) = (circle(&mut w, h), circle(&mut w, back));
+    let rim_up = w.add(format!("EDGE_CURVE('',#{east},#{west},#{rim_c},.T.)"));
+    let rim_down = w.add(format!("EDGE_CURVE('',#{west},#{east},#{rim_c},.T.)"));
+    let back_up = w.add(format!("EDGE_CURVE('',#{east2},#{west2},#{back_c},.T.)"));
+    let back_down = w.add(format!("EDGE_CURVE('',#{west2},#{east2},#{back_c},.T.)"));
+    let line = |w: &mut Entities, y: f64| {
+        let o = point(w, [h, y, 0.0]);
+        let d = w.add("DIRECTION('',(1.,0.,0.))");
+        let v = w.add(format!("VECTOR('',#{d},{:?})", back - h));
+        w.add(format!("LINE('',#{o},#{v})"))
+    };
+    let (line_e_c, line_w_c) = (line(&mut w, r), line(&mut w, -r));
+    let line_e = w.add(format!("EDGE_CURVE('',#{east},#{east2},#{line_e_c},.T.)"));
+    let line_w = w.add(format!("EDGE_CURVE('',#{west},#{west2},#{line_w_c},.T.)"));
+    let band = |w: &mut Entities| {
+        let a = w.axis([h, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, k, k]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{r:?})"))
+    };
+    let dome = |w: &mut Entities| {
+        let o = point(w, [0.0; 3]);
+        let d = w.add("DIRECTION('',(1.,0.,0.))");
+        let axis = w.add(format!("AXIS1_PLACEMENT('',#{o},#{d})"));
+        w.add(format!("SURFACE_OF_REVOLUTION('',#{east_c},#{axis})"))
+    };
+    let (b_up, b_down, s_up, s_down) = (band(&mut w), band(&mut w), dome(&mut w), dome(&mut w));
+    let band_up = w.face(&[(rim_up, true), (line_w, true), (back_up, false), (line_e, false)], b_up);
+    let band_down = w.face(&[(rim_down, true), (line_e, true), (back_down, false), (line_w, false)], b_down);
+    let up = w.face(&[(mer_east, false), (mer_west, true), (rim_up, false)], s_up);
+    let down = w.face(&[(mer_west, false), (mer_east, true), (rim_down, false)], s_down);
+    let base = w.axis([back, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let plane = w.add(format!("PLANE('',#{base})"));
+    let disc = w.face(&[(back_up, true), (back_down, true)], plane);
+    // The band first, as the lens export lists its faces: the rim takes the band's frame.
+    let text = w.solid(&[band_up, band_down, up, down, disc]);
+    let pi = std::f64::consts::PI;
+    assert_closed_solid(&text, 5, 7.7 * pi + pi * r * r * (back - h));
 }
 
 /// An elliptic cylinder written as a SURFACE_OF_LINEAR_EXTRUSION of an ellipse, its side a band

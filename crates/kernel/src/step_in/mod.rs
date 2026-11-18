@@ -7,6 +7,7 @@
 //! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
 //! warning rather than a failure wherever the rest of the file is still usable.
 
+mod checks;
 pub mod p21;
 mod parallel;
 mod tessellated;
@@ -19,6 +20,7 @@ use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
+pub use checks::ImportChecks;
 use p21::{Entity, Exchange, Param};
 
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for
@@ -124,6 +126,18 @@ pub struct StepImport {
     pub description: String,
 }
 
+impl StepImport {
+    /// The import once SMLib's check of its parts has ended (waiting for it): what it found is in
+    /// `warnings` and `report.issues`, after the read's own, and no check is left running. A
+    /// token that stopped a check stops the import ("STEP import cancelled").
+    fn settled(mut self) -> Result<StepImport> {
+        let report = self.report.settled().ok_or_else(|| crate::watch::cancelled_error("STEP import"))?;
+        self.warnings.extend(report.issues.iter().skip(self.report.issues.len()).map(|i| i.detail.clone()));
+        self.report = report;
+        Ok(self)
+    }
+}
+
 /// What an import warning is about, so a window can word a summary of them (the warning's
 /// text is the detail).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -142,7 +156,8 @@ pub enum IssueKind {
     OpenBody,
     /// Faces of the part could not be meshed and are not shown.
     FacesNotShown,
-    /// SMLib refuses the part: modelling operations on it fail until it is repaired.
+    /// SMLib refuses the part, or takes it but its check fails it: modelling operations on it
+    /// fail until it is repaired.
     NeedsRepair,
     /// Something was repaired on the way (edges split at a pole, faces turned, gaps covered).
     Repaired,
@@ -178,6 +193,40 @@ pub struct ImportReport {
     pub solids: usize,
     /// In the order of [`StepImport::warnings`].
     pub issues: Vec<ImportIssue>,
+    /// SMLib's check of the parts, which may still be running after the import
+    /// ([`step_import_shared`]): what it finds follows `issues` ([`Self::current`]). Not saved:
+    /// a saved report holds what the checks found in `issues` ([`Self::settled`]).
+    #[serde(skip)]
+    pub checks: ImportChecks,
+}
+
+impl ImportReport {
+    /// The report with what the checks have found so far: all of it once they have ended, none
+    /// of it while they run (so it never shows a part list that depends on which thread was
+    /// first).
+    pub fn current(&self) -> std::borrow::Cow<'_, ImportReport> {
+        match self.checks.issues() {
+            Some(found) if !found.is_empty() => std::borrow::Cow::Owned(self.with_checks(&found)),
+            _ => std::borrow::Cow::Borrowed(self),
+        }
+    }
+
+    /// The report once the checks have ended (waiting for them), their issues after the import's
+    /// own, with no checks left to run. `None` when a token stopped a check.
+    pub fn settled(&self) -> Option<ImportReport> {
+        self.checks.wait().map(|found| self.with_checks(&found))
+    }
+
+    /// The checks are still running.
+    pub fn checking(&self) -> bool {
+        self.checks.is_running()
+    }
+
+    fn with_checks(&self, found: &[ImportIssue]) -> ImportReport {
+        let mut issues = self.issues.clone();
+        issues.extend(found.iter().cloned());
+        ImportReport { parts: self.parts, solids: self.solids, issues, checks: ImportChecks::default() }
+    }
 }
 
 /// A warning kept by [`Reader::note`]: what it is about and how often it came.
@@ -281,6 +330,27 @@ fn translation(t: [f64; 3]) -> M4 {
 }
 
 /// The matrix of an AXIS2_PLACEMENT: its frame's axes and origin.
+/// The class of placements under which a part is sent into SMLib, and checked there, once
+/// (`Reader::modelling_checked`): every rigid motion is one class (`None`), any other placement
+/// (a transformation operator's scale, shear or mirror) its own, by the matrix's exact bits.
+///
+/// A rigid placement is applied by [`solidcraft_geom::brep::placement::moved`], which moves
+/// every point and direction of the part by the same rotation and translation and keeps every
+/// tolerance; SMLib's check compares distances, lengths and orientations with those tolerances,
+/// which the motion keeps but for the rounding of the coordinates it moves. Any other placement
+/// is mapped without its tolerances, so the check can differ: such a placement is checked as it
+/// is.
+fn check_class(m: &M4) -> Option<[u64; 16]> {
+    if solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some() {
+        return None;
+    }
+    let mut bits = [0u64; 16];
+    for (b, x) in bits.iter_mut().zip(m.iter().flatten()) {
+        *b = x.to_bits();
+    }
+    Some(bits)
+}
+
 fn frame_matrix(p: &solidcore_step::geom::Placement) -> M4 {
     let (x, y, z, o) = (p.ref_direction, p.y(), p.axis, p.origin);
     [[x[0], x[1], x[2], 0.0], [y[0], y[1], y[2], 0.0], [z[0], z[1], z[2], 0.0], [o[0], o[1], o[2], 1.0]]
@@ -334,8 +404,16 @@ struct Reader {
     visits: usize,
     /// Items whose meshing was checked.
     unmeshed_checked: HashSet<u64>,
-    /// Items sent into SMLib as an operation would send them, to say which need repair.
-    modelling_checked: HashSet<u64>,
+    /// Items sent into SMLib as an operation would send them, to say which need repair: each
+    /// once per class of the placements of its instances ([`check_class`]).
+    modelling_checked: HashSet<(u64, Option<[u64; 16]>)>,
+    /// The bodies SMLib's check is to run on ([`checks`]), one per part and class of its
+    /// placements, in read order, and which of them each such pair is.
+    check_jobs: Vec<checks::Job>,
+    check_of: HashMap<(u64, Option<[u64; 16]>), usize>,
+    /// What the checks of `check_jobs` found so far, when the read runs them itself in its
+    /// steps (no worker threads: [`StepReading::step`]).
+    check_outcomes: Vec<checks::Outcome>,
     bodies: Vec<ImportedBody>,
     /// Solids the walk found, in file order, to be converted into bodies afterwards (so the
     /// conversion, the long part, can be done a piece at a time: [`StepReading`]).
@@ -382,6 +460,9 @@ impl Reader {
             visits: 0,
             unmeshed_checked: HashSet::new(),
             modelling_checked: HashSet::new(),
+            check_jobs: Vec::new(),
+            check_of: HashMap::new(),
+            check_outcomes: Vec::new(),
             bodies: Vec::new(),
             plan: Vec::new(),
             batches: Vec::new(),
@@ -1032,14 +1113,32 @@ impl Reader {
                         }
                         None => body,
                     };
-                    // A part SMLib refuses cannot be modelled on: found now (its first instance,
-                    // sent as an operation would send it), not at the first operation.
-                    if self.modelling_checked.insert(item)
-                        && let Some(refused) = body.smlib_refusal()
-                    {
-                        let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
-                        let msg = format!("solid '{name}': needs repair before it can be modelled: {}{at}", refused.why);
-                        self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
+                    // A part SMLib refuses cannot be modelled on: found now, not at the first
+                    // operation. So is a part SMLib takes but whose check fails (or cannot run):
+                    // every operation that checks its result (booleans, sweeps, blends) refuses it
+                    // until then. Both are of the body placed, as an operation sends it, at the
+                    // first instance of each class of its placements ([`check_class`]: one for
+                    // every rigid motion, one for each other placement, whose mapping can change
+                    // the check's verdict). The refusal is said now; the check, the long part,
+                    // runs once the parts are read ([`checks`]), and its warning counts every
+                    // instance of the class.
+                    let class = (item, check_class(&m));
+                    if let Some(job) = self.check_of.get(&class).and_then(|j| self.check_jobs.get_mut(*j)) {
+                        job.times += 1;
+                    } else if self.modelling_checked.insert(class) {
+                        let what = if class.1.is_some() {
+                            format!("solid '{name}' as its placement scales, shears or mirrors it")
+                        } else {
+                            format!("solid '{name}'")
+                        };
+                        if let Some(refused) = body.smlib_refusal() {
+                            let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
+                            let msg = format!("{what}: needs repair before it can be modelled: {}{at}", refused.why);
+                            self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
+                        } else if part.refused.is_none() && !body.is_mesh() {
+                            self.check_of.insert(class, self.check_jobs.len());
+                            self.check_jobs.push(checks::Job { item, part: self.part_name(item), what, body: body.clone(), times: 1 });
+                        }
                     }
                     self.bodies.push(ImportedBody {
                         name,
@@ -1087,7 +1186,7 @@ impl Reader {
                 detail: detail.clone(),
             })
             .collect();
-        ImportReport { parts, solids, issues }
+        ImportReport { parts, solids, issues, checks: ImportChecks::default() }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices and the STEP
@@ -1316,6 +1415,10 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 
 /// [`step_import`] through a small cache of recent results (keyed by the text). Keep the result
 /// while the same text is still to be read elsewhere (in the timeline): that read reuses it.
+///
+/// It returns once the parts are read: SMLib's check of them runs on after it, on worker
+/// threads, and what it finds is in [`ImportReport::current`] once every check has ended
+/// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
     let key = text_key(text);
     if let Ok(cache) = RECENT.lock()
@@ -1323,9 +1426,8 @@ pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
     {
         return Ok(imp);
     }
-    let imp = std::sync::Arc::new(step_import(text)?);
-    remember(key, &imp, text.len() <= KEEP_SMALL_BYTES);
-    Ok(imp)
+    let _span = solidcraft_profile::span("import", "step.import");
+    StepReading::new(text)?.finish_shared()
 }
 
 /// The cache key of a STEP text: its hash and length.
@@ -1353,7 +1455,9 @@ pub fn step_cache_alive() -> (usize, usize) {
     RECENT.lock().map(|c| c.iter().filter(|r| r.import.strong_count() > 0).fold((0, 0), |(n, b), r| (n + 1, b + r.key.1))).unwrap_or((0, 0))
 }
 
-/// Read a STEP file: its solids (as bodies, placed by the assembly structure) and the tree.
+/// Read a STEP file: its solids (as bodies, placed by the assembly structure) and the tree, with
+/// SMLib's check of its parts done (a part the check fails is a `NeedsRepair` warning, after the
+/// read's own warnings).
 pub fn step_import(text: &str) -> Result<StepImport> {
     step_import_with_workers(text, parallel::workers())
 }
@@ -1463,9 +1567,21 @@ impl StepReading {
 
     /// Convert the next solid (or batch of solids); false once all are converted (or the
     /// watch cancelled the import).
+    ///
+    /// With no worker threads, the steps after the last conversion check the parts in SMLib, one
+    /// part a step ([`checks`]); with them, [`Self::finish_shared`] leaves the checks running.
     pub fn step(&mut self) -> bool {
         let _span = solidcraft_profile::span("import", "step.convert_batch");
-        self.rd.convert_next(self.single)
+        if self.rd.convert_next(self.single) {
+            return true;
+        }
+        if !self.single || self.rd.cancelled || self.rd.watch.as_ref().is_some_and(|w| w.cancelled()) {
+            return false;
+        }
+        let Some(job) = self.rd.check_jobs.get(self.rd.check_outcomes.len()) else { return false };
+        let outcome = checks::check(job);
+        self.rd.check_outcomes.push(outcome);
+        true
     }
 
     /// Solids converted, of the solids to convert.
@@ -1473,8 +1589,16 @@ impl StepReading {
         (self.rd.converted, self.rd.plan.len())
     }
 
-    /// The import, once [`Self::step`] has converted every solid.
-    pub fn finish(mut self) -> Result<StepImport> {
+    /// The import, once [`Self::step`] has converted every solid, with SMLib's check of its parts
+    /// done: what the check found is in its warnings, after the read's own.
+    pub fn finish(self) -> Result<StepImport> {
+        let over = solidcraft_smlib::stop::current();
+        self.finish_checking(over)?.settled()
+    }
+
+    /// The import, once [`Self::step`] has converted every solid, with SMLib's check of its parts
+    /// started (under `over` too, when given): [`ImportReport::checks`].
+    fn finish_checking(mut self, over: Option<solidcraft_smlib::stop::Stop>) -> Result<StepImport> {
         while self.step() {}
         let _span = solidcraft_profile::span("import", "step.finish");
         let rd = &mut self.rd;
@@ -1496,7 +1620,14 @@ impl StepReading {
             rd.warn(warning);
         }
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
-        let report = rd.report(&warnings);
+        let mut report = rd.report(&warnings);
+        let jobs = std::mem::take(&mut rd.check_jobs);
+        // A check the caller's token stopped stops the import, as a stopped read does.
+        if self.single && rd.check_outcomes.iter().any(|o| matches!(o, checks::Outcome::Stopped)) {
+            return Err(crate::watch::cancelled_error("STEP import"));
+        }
+        report.checks =
+            if self.single { checks::ImportChecks::ran(&jobs, &rd.check_outcomes) } else { checks::ImportChecks::start(jobs, rd.workers, over) };
         if rd.bodies.is_empty() {
             let why = warnings.first().cloned().unwrap_or_else(|| "the file has no solids".into());
             return Err(KernelError::Failed(format!("STEP import: no bodies ({why})")));
@@ -1514,10 +1645,11 @@ impl StepReading {
         })
     }
 
-    /// [`Self::finish`], and the import is cached for the next read of the same text.
+    /// The import, cached for the next read of the same text, with SMLib's check of its parts
+    /// still running ([`ImportReport::checks`]; in the steps before, with no worker threads).
     pub fn finish_shared(self) -> Result<Arc<StepImport>> {
         let (key, small) = (self.key, self.small);
-        let imp = Arc::new(self.finish()?);
+        let imp = Arc::new(self.finish_checking(None)?);
         remember(key, &imp, small);
         Ok(imp)
     }

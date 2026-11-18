@@ -369,7 +369,7 @@ mod imp {
             }
         }
         let body = crate::native::body_from_smlib(&brep)?;
-        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep) } else { body })
+        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep, &[]) } else { body })
     }
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a

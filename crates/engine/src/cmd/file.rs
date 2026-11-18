@@ -44,13 +44,14 @@ const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.new", "New Design", crate::checked!("file.new", new_doc))
+        .any_part()
         .icon("new")
         .key("Ctrl+N")
         .noundo()
         .contract(&NEW_DESIGN_CONTRACT)
         .output(output_schema_for::<NewDesignResult>)
         .params("name?"),
-    CommandSpec::new("doc.open", "Open", crate::checked!("doc.open", open))
+    CommandSpec::new("doc.open", "Open", crate::checked!("doc.open", open)).any_part()
         .icon("open")
         .key("Ctrl+O")
         .noundo()
@@ -69,49 +70,51 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_MESH_CONTRACT)
         .output(output_schema_for::<MeshInserted>)
         .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made); crease_angle_degrees?: 0..180 (0 clears imported shading normals for the previous flat-shading behavior; positive angles regenerate angle-weighted normals across manifold edges below this crease angle; omitted keeps authored OBJ normals/smoothing groups, or flat shading when absent; geometry stays unchanged)"),
-    CommandSpec::new("file.save", "Save", crate::checked!("file.save", save))
+    CommandSpec::new("file.save", "Save", crate::checked!("file.save", save)).any_part()
         .icon("save")
         .key("Ctrl+S")
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
         .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
-    CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
+    CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as)).any_part()
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
         .contract(&SAVE_AS_CONTRACT)
         .output(output_schema_for::<SaveResult>)
         .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
-    CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify))
+    CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify)).any_part()
         .icon("shield")
         .noundo()
         .contract(&VERIFY_CONTRACT)
         .output(output_schema_for::<VerifyResult>)
         .params("path? (default: the design's current file) → {path, status, reason?, truncated, records: [{method, key_id, user_id?, author?, created?, format, covered}]}: status is unsigned, valid, not_covered (signed earlier, saved since without a key), invalid or unsupported"),
-    CommandSpec::new("file.gpg_keys", "Signing Keys", crate::checked!("file.gpg_keys", gpg_keys))
+    CommandSpec::new("file.gpg_keys", "Signing Keys", crate::checked!("file.gpg_keys", gpg_keys)).any_part()
         .icon("shield")
         .noundo()
         .contract(&GPG_KEYS_CONTRACT)
         .output(output_schema_for::<GpgKeysResult>)
         .params("→ {available, keys: [{fingerprint, key_id, user_id, on_card}]}: the GnuPG secret keys a save can sign with (desktop only)"),
     CommandSpec::new("file.save_for_sharing", "Save Design to Share (.zip)", crate::checked!("file.save_for_sharing", save_for_sharing))
+        .any_part()
         .icon("save")
         .noundo()
         .contract(&SAVE_FOR_SHARING_CONTRACT)
         .output(output_schema_for::<SaveForSharingResult>)
         .params("path: the .zip to write (e.g. bracket.sc.zip): the design container, which is a ZIP, under a name issue trackers such as GitHub accept (they take no .sc); doc.open opens it; source?: a design file to save instead of the open design (a crash report's design.sc; a JSON design becomes a container) → path, bytes. A copy: the open design keeps its file and saved state"),
-    CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).icon("restore")
+    CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).any_part().icon("restore")
         .noundo()
         .contract(&RECOVERY_LIST_CONTRACT)
         .output(output_schema_for::<RecoveryListResult>)
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
-    CommandSpec::new("doc.recover", "Recover Design", crate::checked!("doc.recover", recover)).icon("restore")
+    CommandSpec::new("doc.recover", "Recover Design", crate::checked!("doc.recover", recover)).any_part().icon("restore")
         .noundo()
         .contract(&RECOVER_CONTRACT)
         .output(output_schema_for::<RecoverResult>)
         .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
     CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", crate::checked!("doc.recovery_discard", recovery_discard))
+        .any_part()
         .icon("delete")
         .noundo()
         .contract(&RECOVERY_DISCARD_CONTRACT)
@@ -557,12 +560,31 @@ fn open_step(
     let mut reply = add_step_bytes(&mut fresh, path, None, &options, &bytes, profiled)?;
     reply["import_reused"] = json!(false);
     if let Some(cache) = cache
-        && let Some(saved) = saved_geometry(&fresh, &fresh.doc)
-        && let Err(e) = cache.write(&key, &fresh.doc, &saved, &reply)
+        && let Some((saved, pending)) = saved_geometry_now(&fresh, &fresh.doc)
     {
-        log::info!("import was not cached: {e}");
+        write_import_cache(cache, key, &fresh.doc, saved, pending, &reply);
     }
     Ok((fresh, reply))
+}
+
+/// Cache an opened import. While SMLib's check of its parts runs on (after the design shows),
+/// the write waits for it on a thread of its own, so the cached import says what the check found
+/// ([`solidcraft_io::ImportCache::write_after`]).
+fn write_import_cache(
+    cache: &solidcraft_io::ImportCache,
+    key: String,
+    doc: &Document,
+    saved: solidcraft_doc::SavedModel,
+    pending: solidcraft_doc::PendingChecks,
+    reply: &Value,
+) {
+    if pending.is_empty() {
+        if let Err(e) = cache.write(&key, doc, &saved, reply) {
+            log::info!("import was not cached: {e}");
+        }
+        return;
+    }
+    cache.write_after(key, doc.clone(), saved, reply.clone(), move |saved| pending.settle(saved));
 }
 
 /// Add a FreeCAD file's rebuilt history (`design`) in a new component named after the file.
@@ -1989,15 +2011,9 @@ impl Session {
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.
     pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
-        let mut design = std::borrow::Cow::Borrowed(&*self.doc);
+        let mut design = crate::as_saved(&self.doc, &self.visibility, &self.dimension_values);
         if let Some(path) = path {
-            let links = super::design_link::rebased(&self.doc, self.path.as_deref(), path);
-            if links != self.doc.links {
-                design.to_mut().links = links;
-            }
-        }
-        if !self.visibility.is_empty() {
-            design.to_mut().visibility = self.visibility.clone();
+            super::design_link::filed(&mut design, self.path.as_deref(), path);
         }
         // Print faces not kept stay with this session: the file is saved without them (#11512).
         if !self.keep_print_faces && !design.print_faces.is_empty() {
@@ -2121,6 +2137,14 @@ fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::Save
         return None;
     }
     s.model.saved(design)
+}
+
+/// [`saved_geometry`] without waiting for the imports' checks ([`solidcraft_doc::Model::saved_now`]).
+fn saved_geometry_now(s: &Session, design: &Document) -> Option<(solidcraft_doc::SavedModel, solidcraft_doc::PendingChecks)> {
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.state().bodies.is_empty() {
+        return None;
+    }
+    s.model.saved_now(design)
 }
 
 /// Cache only warm display geometry. A save never waits for an unevaluated mesh.

@@ -510,13 +510,7 @@ mod imp {
             if step == crate::validation::Step::Check {
                 let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
                 if !check.is_valid() {
-                    let input_fails = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-                    let step = if input_fails {
-                        "SMLib's check refuses the result (the input already fails it)"
-                    } else {
-                        "SMLib's check refuses the result"
-                    };
-                    return Err(failed(what, step, check));
+                    return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), check));
                 }
             }
             let (out, result_order) = body_from_smlib_ordered(&r)?;
@@ -537,7 +531,7 @@ mod imp {
             };
             let out = out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body);
             let out = if step == crate::validation::Step::Defer {
-                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r)
+                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r, &[body])
             } else {
                 out
             };
