@@ -327,6 +327,9 @@ struct SessionObjects<'target> {
     /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
     /// kept by the clean-up.
     cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
+    /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
+    /// open result must keep to be kept ([`finish::OpenInput`]).
+    open_input: finish::OpenInput,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -1548,6 +1551,7 @@ impl<'target> FilletSession<'target> {
                 attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
+                open_input: finish::OpenInput::default(),
                 extended_surfaces: BTreeMap::new(),
                 edge_caches: BTreeMap::new(),
                 target_serial,
@@ -5504,13 +5508,12 @@ impl RailTrimAccess<FilletObject> for SessionObjects<'_> {
         &mut self,
         k: &mut Kernel,
         solver: FilletObject,
-        executive: &mut FilletExecutive<FilletObject>,
+        _executive: &mut FilletExecutive<FilletObject>,
     ) -> Result<bool> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        let lone = executive.solvers.len() == 1;
-        self.rolled_rails_on_their_faces(k, id, lone)
+        self.rolled_rails_on_their_faces(k, id)
     }
 }
 
@@ -6678,10 +6681,7 @@ impl SessionObjects<'_> {
         // without having the filletSurface - do so
 
         // set filletVertex->Positions (fork 66b02de passes this on: SER)
-        crate::error::ignore_status(crate::error::passed_on(
-            self.calc_nx1_corner_vert_geom(k, id),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        self.calc_nx1_corner_vert_geom(k, id)?;
 
         // set FilletSideEdge->Curves
         for edge in [gaps.edge1, gaps.edge2] {
@@ -6716,10 +6716,7 @@ impl SessionObjects<'_> {
             );
             replay_corner_error(&mut executive.error, &note);
             // fork 66b02de passes this on (SER)
-            crate::error::ignore_status(crate::error::passed_on(
-                result,
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            result?;
         }
 
         // When proposing an extended surface
@@ -6774,8 +6771,8 @@ impl SessionObjects<'_> {
             .ok_or_else(|| invalid("corner is not live"))?;
         // get extendedSurface/OtherSideEdge coincidence to within tolerance (fork
         // 66b02de passes this on: SER)
-        let found = crate::error::ignored(crate::error::passed_on(
-            surface.simple_coincidence_checker::<crate::topology::ObjectHandle>(
+        let found = surface
+            .simple_coincidence_checker::<crate::topology::ObjectHandle>(
                 k,
                 &surface.natural_uv_domain_with_nurb(k)?,
                 curve,
@@ -6783,11 +6780,8 @@ impl SessionObjects<'_> {
                 corner.approx_tol_3d,
                 false,
                 [None, None],
-            ),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?
-        .flatten()
-        .is_some();
+            )?
+            .is_some();
         // when extendedSurface/OtherSideEdge are not coincident
         if !found {
             // can't define endFace->Surface as a sideFace->ExtendedSurface
