@@ -188,15 +188,23 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
 }
 
 /// `nodes` with each body index `k` the made body `kept[k]` is, with that body's file item, and
-/// the bodies left out at their place among the node's bodies, as a STEP import's tree keeps a
-/// solid it could not read: a stored body name stays with its body. An index past the records
-/// names no body and is dropped.
+/// the bodies left out at their place among the node's solids, as a STEP import's tree keeps a
+/// solid it could not read: a stored body name stays with its body. A node's stored left-out
+/// solids (`left_out`, each at its place among the node's solids in file order) are kept where
+/// they are, and the bodies take the places between them, so a body left out now is at the place
+/// it had. An index past the records names no body and is dropped.
 fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody]) -> Vec<StepNode> {
     nodes
         .iter()
         .map(|n| {
-            let (mut bodies, mut items, mut left_out) = (Vec::new(), Vec::new(), Vec::new());
-            for (at, k) in n.bodies.iter().enumerate() {
+            let (mut bodies, mut items) = (Vec::new(), Vec::new());
+            let mut left_out = n.left_out.clone();
+            let taken: std::collections::HashSet<usize> = n.left_out.iter().map(|l| l.at).collect();
+            let mut at = 0usize;
+            for k in &n.bodies {
+                while taken.contains(&at) {
+                    at = at.saturating_add(1);
+                }
                 match kept.get(*k) {
                     Some(Some(b)) => {
                         bodies.push(*b);
@@ -205,7 +213,9 @@ fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody])
                     Some(None) => left_out.push(LeftOut { at, item: *k as u64 }),
                     None => {}
                 }
+                at = at.saturating_add(1);
             }
+            left_out.sort_by_key(|l| l.at);
             StepNode { name: n.name.clone(), transform: n.transform, bodies, items, left_out, children: renumbered(&n.children, kept, made) }
         })
         .collect()

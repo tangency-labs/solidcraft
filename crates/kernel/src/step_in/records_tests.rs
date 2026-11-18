@@ -72,6 +72,25 @@ fn a_record_placed_moves_its_body() {
     assert!((b.centroid.x - a.centroid.x - 5.0).abs() < 1e-9 && (b.volume - a.volume).abs() < 1e-9, "{a:?} {b:?}");
 }
 
+/// A stored tree's left-out solids are kept at their places among the node's solids, and a body
+/// left out now takes the place it had between them: with a solid left out first (item 42), the
+/// broken record after it is at place 1 and the good one, at place 2, comes in.
+#[test]
+fn a_stored_trees_left_out_solids_are_kept_where_they_are() {
+    use super::super::LeftOut;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut r = kept(&std::fs::read_to_string(dir.join("cone_point.step")).unwrap());
+    let mut broken = r.bodies[0].clone();
+    broken.face_origin.pop();
+    r.bodies.insert(0, broken);
+    r.tree[0].bodies = vec![0, 1];
+    r.tree[0].left_out = vec![LeftOut { at: 0, item: 42 }];
+    let imp = records_import(&r).unwrap();
+    assert_eq!(imp.bodies.len(), 1);
+    assert_eq!(imp.tree[0].bodies, vec![0]);
+    assert_eq!(imp.tree[0].left_out, vec![LeftOut { at: 0, item: 42 }, LeftOut { at: 1, item: 0 }]);
+}
+
 #[test]
 fn a_broken_record_is_left_out_with_the_reason_and_the_others_still_come_in() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
