@@ -192,6 +192,18 @@ pub struct TabViewIdParams {
     pub id: Option<u64>,
 }
 
+/// `tab.view.close_others` or `tab.view.close_right`: close views in one window's strip.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabViewCloseGroupParams {
+    /// The view to leave open. Defaults to the active view in the chosen window.
+    #[serde(default)]
+    pub id: Option<u64>,
+    /// The target window. Defaults to the named view's window or the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
+}
+
 /// `tab.view.activate`: show one view, by id or by place.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
