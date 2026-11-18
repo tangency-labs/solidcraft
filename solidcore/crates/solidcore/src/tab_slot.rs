@@ -18,6 +18,7 @@
 //! | [`TabSkip`], [`tab_outline`] | none     |
 //! | [`slot_outline`], [`slot_outline_along`] | none |
 //! | [`apart`]                    | none     |
+//! | [`vary`], [`stretch_seed`]    | none     |
 
 use crate::error::{Result, SolidError};
 use crate::math::Point2;
@@ -212,6 +213,83 @@ fn starts(
         return Err(invalid("more tabs on one stretch than MAX_TABS"));
     }
     Ok(Ok((0..n).map(at).collect()))
+}
+
+/// The seed of stretch `index` of a joint seeded `seed` (a splitmix64 step of both), so that each
+/// stretch draws its own run of widths and one stretch's tab count does not shift another's.
+#[must_use]
+pub fn stretch_seed(seed: u64, index: usize) -> u64 {
+    splitmix(seed ^ splitmix(index as u64 ^ 0xA5A5_5A5A_1234_5678))
+}
+
+/// One step of splitmix64: the next state and its output. Own small generator, so the widths of a
+/// seed are the same on every platform and build.
+fn splitmix(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// The tabs of [`place`] (`starts`, each `width` wide) with their widths varied (request 3):
+/// tab `k` gets `width + u · jitter`, `u ∈ [−1, 1]` drawn from a splitmix64 chain started at
+/// `seed` and run along the stretch in order (so the same seed gives the same widths, and a tab
+/// does not depend on those after it), but never under a tenth of `width`. A tab keeps its
+/// centre where the room allows. Each tab's room is the usable length `[a + e, b − e]` at the
+/// ends and, between two tabs, half of the space beyond `g_min` on each side, so the varied
+/// layout never leaves the usable length and keeps `g_min` between neighbours, whatever the
+/// draws. Returns `(start, width)` per tab. A `jitter` of 0 returns the tabs as placed. The slot
+/// and the tab are cut from the same pair, so both plates see the same layout.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `jitter` that is not finite and non-negative, a `seed`
+/// aside (any is fine), or a stretch, width, end distance or `g_min` as [`place`] refuses.
+pub fn vary(
+    stretch: (f64, f64),
+    starts: &[f64],
+    width: f64,
+    end_distance: f64,
+    g_min: f64,
+    seed: u64,
+    jitter: f64,
+) -> Result<Vec<(f64, f64)>> {
+    if !non_negative(jitter) {
+        return Err(invalid("the width jitter must be finite and non-negative"));
+    }
+    let (a, b) = stretch;
+    if !(a.is_finite() && b.is_finite() && a <= b && width.is_finite() && width > 0.0) {
+        return Err(invalid("a stretch and the tab width must be finite, ordered and positive"));
+    }
+    if !(non_negative(end_distance) && non_negative(g_min)) {
+        return Err(invalid("the end distance and least space must be finite and non-negative"));
+    }
+    if jitter == 0.0 {
+        return Ok(starts.iter().map(|&u| (u, width)).collect());
+    }
+    let mut state = seed;
+    let mut out = Vec::with_capacity(starts.len());
+    for (k, &start) in starts.iter().enumerate() {
+        state = splitmix(state);
+        // The top 53 bits as a fraction of [0, 1), then [-1, 1).
+        let u = (state >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
+        let wanted = (width + u * jitter).max(0.1 * width);
+        let lo = match k.checked_sub(1) {
+            None => a + end_distance,
+            Some(p) => start - ((start - (starts[p] + width)) - g_min).max(0.0) / 2.0,
+        };
+        let hi = match starts.get(k + 1) {
+            None => b - end_distance,
+            Some(&n) => start + width + ((n - (start + width)) - g_min).max(0.0) / 2.0,
+        };
+        // A tab laid out by place() sits inside its room; keep it so even past rounding.
+        let (lo, hi) = (lo.min(start), hi.max(start + width));
+        let w = wanted.min(hi - lo);
+        let centre = start + width / 2.0;
+        let s = (centre - w / 2.0).clamp(lo, hi - w);
+        out.push((s, w));
+    }
+    Ok(out)
 }
 
 /// Why one tab is not made.

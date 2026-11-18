@@ -359,3 +359,69 @@ fn skips_name_their_reason_ids() {
     assert_eq!(SlotSkip::AtEdge.reason_id(), "at_edge");
     assert_eq!(SlotSkip::OverHole { web: 0.0 }.reason_id(), "over_hole");
 }
+
+// Seeded width variation (h0witzer's request 3).
+
+fn varied(stretch: (f64, f64), layout: Layout, w: f64, e: f64, seed: u64, j: f64) -> Vec<(f64, f64)> {
+    let starts = tabs(stretch, layout, w, e);
+    vary(stretch, &starts, w, e, LASER, seed, j).unwrap()
+}
+
+#[test]
+fn zero_jitter_keeps_every_tab_as_placed() {
+    let v = varied((0.0, 100.0), Layout::Count(3), 6.0, 5.0, 7, 0.0);
+    let s = tabs((0.0, 100.0), Layout::Count(3), 6.0, 5.0);
+    assert_eq!(v, s.iter().map(|&u| (u, 6.0)).collect::<Vec<_>>());
+}
+
+#[test]
+fn the_same_seed_gives_the_same_widths_and_another_seed_others() {
+    let a = varied((0.0, 100.0), Layout::Count(4), 6.0, 5.0, 11, 2.0);
+    assert_eq!(a, varied((0.0, 100.0), Layout::Count(4), 6.0, 5.0, 11, 2.0));
+    assert_ne!(a, varied((0.0, 100.0), Layout::Count(4), 6.0, 5.0, 12, 2.0));
+    assert!(a.iter().any(|&(_, w)| (w - 6.0).abs() > 1e-9));
+}
+
+#[test]
+fn widths_stay_within_the_jitter_and_the_floor() {
+    for seed in 0..200 {
+        for &(_, w) in &varied((0.0, 100.0), Layout::Count(4), 6.0, 5.0, seed, 2.0) {
+            assert!((4.0 - 1e-9..=8.0 + 1e-9).contains(&w), "{w}");
+        }
+        // A jitter past the width cannot take a tab under a tenth of it.
+        for &(_, w) in &varied((0.0, 100.0), Layout::Count(4), 6.0, 5.0, seed, 50.0) {
+            assert!(w >= 0.6 - 1e-9, "{w}");
+        }
+    }
+}
+
+#[test]
+fn varied_tabs_stay_in_the_usable_length_and_keep_the_least_space() {
+    for layout in [Layout::Count(1), Layout::Count(5), Layout::Auto, Layout::Spacing(12.0)] {
+        for seed in 0..200 {
+            let v = varied((10.0, 110.0), layout, 6.0, 5.0, seed, 4.0);
+            let mut prev_end = 15.0;
+            for &(u, w) in &v {
+                assert!(u >= prev_end - 1e-9 && (prev_end == 15.0 || u - prev_end >= LASER - 1e-9), "{v:?}");
+                prev_end = u + w;
+            }
+            assert!(prev_end <= 105.0 + 1e-9, "{v:?}");
+        }
+    }
+}
+
+#[test]
+fn one_seed_chains_along_the_stretch_and_a_stretch_index_changes_it() {
+    let a = varied((0.0, 100.0), Layout::Count(3), 6.0, 5.0, 5, 2.0);
+    // The first tab does not depend on how many follow it.
+    let b = varied((0.0, 100.0), Layout::Count(3), 6.0, 5.0, 5, 2.0);
+    assert_eq!(a[0], b[0]);
+    assert_ne!(stretch_seed(5, 0), stretch_seed(5, 1));
+}
+
+#[test]
+fn a_bad_jitter_is_refused() {
+    for j in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(vary((0.0, 100.0), &[47.0], 6.0, 5.0, LASER, 1, j).is_err());
+    }
+}
