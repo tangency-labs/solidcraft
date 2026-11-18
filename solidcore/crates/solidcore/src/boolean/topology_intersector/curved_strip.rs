@@ -33,9 +33,11 @@
 //! parameters is the strip's side). E needs no such tie and has none: its trim is checked
 //! only at its ends against E's vertices (MEASURED on the #18166 join: E's trim lies a
 //! certified 3.77e-5 from E's curve, over E's 1e-5 tolerance, a defect of that B-rep the
-//! certificate does not rest on). Each piece is cut into equal parameter pieces, and
-//! each of those lies in the box of its certified
-//! hull points (`Curve::piece_hull_points`, their coordinates' errors added); where two
+//! certificate does not rest on). E's trim is assumed to share E's parameter interval:
+//! it is cut over that interval, and its two ends are the ones checked against E's
+//! vertices, so a trim parametrised otherwise is refused in practice by those checks (the
+//! same assumption as for N's trim over N's piece). Each piece is cut into equal
+//! parameter pieces, and each of those lies in the box of its certified hull points (`Curve::piece_hull_points`, their coordinates' errors added); where two
 //! pieces meet, the segment closing the gap between their ends lies in the box of their
 //! end boxes. So the closed boundary lies in the union of those boxes. The span of the
 //! boxes in u is cut into equal slabs: a vertical line through the strip meets it between
@@ -115,6 +117,8 @@ const OP: &str = "boolean::topology_intersector::curved_strip::drop_strip_crossi
 /// face that the coincident pair of its neighbour and the other face imprints (module
 /// docs). The interval is removed from both faces' classifications.
 ///
+/// Returns the number of intervals dropped.
+///
 /// # Errors
 ///
 /// Those of the curve and surface evaluations, the topology walks and the enclosure;
@@ -124,14 +128,14 @@ pub(super) fn drop_strip_crossings<O: ClassObject + SolutionObject + Ord>(
     brep: &impl IntersectorBrepP2<O>,
     intersections: &mut [FacePairIntersection<O>],
     tol: f64,
-) -> Result<()> {
+) -> Result<usize> {
     let coincident: Vec<(O, O)> = intersections
         .iter()
         .filter(|x| x.2)
         .map(|x| (x.0, x.1))
         .collect();
     if coincident.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     // (decided over the intersection as it stands, then removed: the event check reads
     // every pair)
@@ -194,7 +198,59 @@ pub(super) fn drop_strip_crossings<O: ClassObject + SolutionObject + Ord>(
             c.remove_at(ll)?;
         }
     }
+    Ok(dropped.len())
+}
+
+/// Test-only seam ([`crate::kernel::StripProbe`]): makes each run the kernel's probe asks
+/// for on a copy of the operation's real intersection list `intersections` at the drop's
+/// call, and records the number of intervals each drops.
+///
+/// # Errors
+///
+/// Those of [`drop_strip_crossings`].
+#[cfg(test)]
+pub(super) fn probe<O: ClassObject + SolutionObject + Ord>(
+    k: &Kernel,
+    brep: &impl IntersectorBrepP2<O>,
+    intersections: &[FacePairIntersection<O>],
+) -> Result<()> {
+    let runs = match k.strip_probe.lock() {
+        Ok(mut p) => core::mem::take(&mut p.runs),
+        Err(_) => return Ok(()),
+    };
+    for run in runs {
+        if let Ok(mut p) = k.strip_probe.lock() {
+            p.active = Some(run);
+        }
+        let mut copy = intersections.to_vec();
+        let got = drop_strip_crossings(k, brep, &mut copy, run.tol);
+        if let Ok(mut p) = k.strip_probe.lock() {
+            p.active = None;
+            if let Ok(n) = got {
+                p.dropped.push(n);
+            }
+        }
+        got?;
+    }
     Ok(())
+}
+
+/// The active probe run's perturbations ([`crate::kernel::StripProbeRun`]): what is added
+/// to the strip's bound, the curve's gap and N's piece's gap, and whether a synthetic
+/// event lies on N's piece. None outside the crate's unit tests.
+#[cfg(test)]
+fn perturbed(k: &Kernel) -> ([f64; 3], bool) {
+    k.strip_probe
+        .lock()
+        .ok()
+        .and_then(|p| p.active)
+        .map_or(([0.0; 3], false), |r| (r.extra, r.event_on_n))
+}
+
+/// See the test build's version: no perturbation.
+#[cfg(not(test))]
+fn perturbed(_k: &Kernel) -> ([f64; 3], bool) {
+    ([0.0; 3], false)
 }
 
 /// One candidate: the curve interval `interval` of `curve` as face `fa`'s classification
@@ -488,7 +544,7 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
                 } else {
                     edge::start_vertex(b, n)?
                 };
-                if self.other_event_on(brep, b, n, v, w, tw, piece)? {
+                if self.other_event_on(k, brep, b, n, v, w, tw, piece)? {
                     return Ok(false);
                 }
                 let Some(n_boxes) = piece_boxes(n_trim, piece) else {
@@ -514,7 +570,9 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
         boxes.extend(e_boxes);
 
         // the strip over each slab of the boxes' span in u, enclosed
-        if !strip_within(&a.net, a.net_bound, &boxes, implicit, self.tol)? {
+        // (`extra` is the test seam's perturbation, 0 outside the unit tests)
+        let (extra, _) = perturbed(k);
+        if !strip_within(&a.net, a.net_bound + extra[0], &boxes, implicit, self.tol)? {
             return Ok(false);
         }
 
@@ -522,11 +580,27 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
         // parameters (module docs): the curve within the tolerance, N's piece within it
         // plus N's tolerance
         let floor = 0.01 * self.tol;
-        if !gap_within(k, a, self.curve, self.uv, c_range, self.tol, floor)? {
+        if !gap_within(
+            k,
+            a,
+            self.curve,
+            self.uv,
+            c_range,
+            self.tol - extra[1],
+            floor,
+        )? {
             return Ok(false);
         }
         if let Some((n_curve, n_trim, range, n_tol)) = n_piece {
-            if !gap_within(k, a, n_curve, n_trim, range, self.tol + n_tol, floor)? {
+            if !gap_within(
+                k,
+                a,
+                n_curve,
+                n_trim,
+                range,
+                self.tol + n_tol - extra[2],
+                floor,
+            )? {
                 return Ok(false);
             }
         }
@@ -539,6 +613,7 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
     #[allow(clippy::too_many_arguments)]
     fn other_event_on(
         &self,
+        k: &Kernel,
         brep: &impl IntersectorBrepP2<O>,
         b: &Brep,
         n: EdgeId,
@@ -565,7 +640,9 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
                 }
             }
         }
-        Ok(false)
+        // (the test seam's synthetic end on N, at its piece's middle: none otherwise)
+        let synthetic = EndOn::Edge(n, 0.5 * (piece.min() + piece.max()));
+        Ok(perturbed(k).1 && event_in_piece(synthetic, n, v, w, tw, piece))
     }
 }
 
@@ -883,7 +960,7 @@ fn net_bound_over(
     if !(g_lo.x <= lo.x && g_lo.y <= lo.y && hi.x <= g_hi.x && hi.y <= g_hi.y) {
         return Ok(None);
     }
-    off_surface_bound(&sub, implicit)
+    off_surface_bound(&sub, implicit, net)
 }
 
 /// Whether edge `e`'s UV trim `trim` on `surface` meets the edge at parameter `t`: at an
@@ -1222,5 +1299,132 @@ mod tests {
         assert!((0.0..=1e-13).contains(&on), "{on:e}");
         let past = Extent2d::from_bounds(0.25, 0.25, 1.01, 0.75);
         assert_eq!(net_bound_over(&net, &past, &plane).unwrap(), None);
+    }
+
+    /// The fixture of `tests/wr_614_coincident_strip_crossing.rs`
+    /// (`curved_strip_join_union_is_one_valid_solid`): the body and the kept part, read
+    /// with every fix on.
+    fn curved_strip_join(k: &mut Kernel) -> (Brep, Brep) {
+        use crate::geom::attribute::AttributeStore;
+        use crate::topology::api_files::read_brep_from_file;
+        use crate::topology::brep::p10::TopologyEnv;
+        use crate::topology::topology::NotifyRecords;
+        let mut load = |bytes: &[u8]| {
+            let fresh = Brep::new();
+            let mut store = AttributeStore::new();
+            let mut records = NotifyRecords::new();
+            let key_of = |e| fresh.owner_identity(e);
+            let mut env = TopologyEnv {
+                all_attributes: &[],
+                attributes: &mut store,
+                key_of: &key_of,
+                records: &mut records,
+                next_key: 1 << 50,
+            };
+            let mut b =
+                read_brep_from_file(k, Some(bytes.to_vec()), false, false, &mut env).unwrap();
+            b.refresh_cached_topology();
+            b
+        };
+        let body = load(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/curved_strip_join_body.smb"
+        )));
+        let kept = load(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/curved_strip_join_kept.smb"
+        )));
+        (body, kept)
+    }
+
+    /// The drop decided on the fixture's real intersection list (the kernel's test seam
+    /// runs [`drop_strip_crossings`] on a copy of it where the union's topology intersector
+    /// calls it): the dropped curve C goes at the intersector's tolerance 5e-6 (one
+    /// interval), and stays (none) when any one check refuses:
+    /// - at 1e-7, below C's certified gap (MEASURED 4.22e-7);
+    /// - at 1e-8, below the net's bound `ε` (MEASURED 1.21e-8);
+    /// - at 5e-6 with 1 added to the strip's enclosure ([`strip_within`]), to C's gap or
+    ///   to N's piece's gap ([`gap_within`]), or with a synthetic interval end on N at the
+    ///   middle of its piece ([`Strip::other_event_on`]).
+    ///
+    /// The union itself goes on with the real drop at the real tolerance.
+    #[test]
+    fn the_strip_drop_keeps_the_curve_when_a_check_refuses() {
+        use crate::boolean::api_brep::boolean_union;
+        use crate::kernel::{StripProbeRun, UpstreamFixes};
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let (body, kept) = curved_strip_join(&mut k);
+        let run = |tol: f64, extra: [f64; 3], event_on_n: bool| StripProbeRun {
+            tol,
+            extra,
+            event_on_n,
+        };
+        let runs = vec![
+            run(5e-6, [0.0; 3], false),
+            run(1e-7, [0.0; 3], false),
+            run(1e-8, [0.0; 3], false),
+            run(5e-6, [1.0, 0.0, 0.0], false),
+            run(5e-6, [0.0, 1.0, 0.0], false),
+            run(5e-6, [0.0, 0.0, 1.0], false),
+            run(5e-6, [0.0; 3], true),
+        ];
+        k.strip_probe.lock().unwrap().runs = runs;
+        boolean_union(&mut k, body, kept).unwrap();
+        let dropped = core::mem::take(&mut k.strip_probe.lock().unwrap().dropped);
+        assert_eq!(dropped, [1, 0, 0, 0, 0, 0, 0]);
+    }
+
+    /// [`net_of`]'s bound is the bound of the definition a B-spline surface keeps (the
+    /// fixture's curved faces, the nets of rounds: MEASURED 1.21e-8 for A), and 0 for a
+    /// plain B-spline surface.
+    #[test]
+    fn a_kept_definition_gives_the_net_its_bound() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+        use crate::topology::brep::p1::faces;
+        let mut k = Kernel::default();
+        let (body, kept) = curved_strip_join(&mut k);
+        let mut kept_bounds = 0;
+        for b in [&body, &kept] {
+            for f in faces(b, None).unwrap() {
+                let Some(surface) = b.face(f).unwrap().surface.as_ref() else {
+                    continue;
+                };
+                let (SurfaceKind::BSpline(_), Some(definition)) =
+                    (surface.kind(), surface.procedural_definition())
+                else {
+                    continue;
+                };
+                let (_, bound) = net_of(surface).unwrap();
+                assert!(bound > 0.0, "{bound:e}");
+                assert_eq!(bound.to_bits(), definition.bound().to_bits());
+                kept_bounds += 1;
+            }
+        }
+        assert!(kept_bounds > 0, "no B-spline face keeps a definition");
+        let plain = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let (_, bound) = net_of(&Surface::from(plain)).unwrap();
+        assert_eq!(bound, 0.0);
     }
 }

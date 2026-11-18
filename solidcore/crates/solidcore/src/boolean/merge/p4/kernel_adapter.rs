@@ -92,6 +92,9 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         // (the caller's profiler: the copy's scopes record into its tree)
         #[cfg(feature = "profile")]
         profiler: k.profiler.clone(),
+        // (the test seam is shared: the copy's drops are the operation's)
+        #[cfg(test)]
+        strip_probe: k.strip_probe.clone(),
     }
 }
 

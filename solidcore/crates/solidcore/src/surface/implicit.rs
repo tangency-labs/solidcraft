@@ -16,7 +16,7 @@ use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::math::{gamma, NOW};
+use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
 use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
@@ -499,24 +499,54 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
 /// `F = ρ² − ρ_P²` with `ρ_P = √(R² + δ s²)` the surface's radius at that height, and the
 /// point of the surface at the same height and angle lies `|ρ − ρ_P| = |F| / (ρ + ρ_P) ≤
 /// |F| / ρ_P` away. `ρ_P` is bounded below over the patch's heights by [`radius_floor`]
-/// (`None` near the apex, where it is not). The rounding of the Bézier decomposition and of
-/// the extraction of a sub-patch before it is the slack of [`distance_bound`] with
-/// `γ_{24(p+q)+8}` (ARGUED, a count of the knot insertions, not checked): each is a level
-/// of convex combinations of homogeneous points, a point's chain running through at most
-/// `p` insertions at each end of the extraction in u and `2 (p − 1)` of the
-/// decomposition's at its span's two knots (and the same in v with `q`), at most
-/// `4 (p + q)` levels in all, each at most six roundings (the ratio, its complement, two
-/// products, a sum, and the ratio's own error carried through); `8` more cover the
-/// coefficients' scale. The margin against the uses is wide: the slack is a relative
-/// `γ_{152} ≈ 3.4e-14` for a bicubic patch, against bounds compared with tolerances of
-/// `1e-6` and more. A patch whose rounding `τ` is below `MIN_POSITIVE / ε` (where the
-/// coefficients' underflow is not inside the `γ` model, as [`distance_bound`]) has no
-/// bound. The whole is the largest over the patches, grown by a few roundings.
+/// (`None` near the apex, where it is not).
+///
+/// PROVEN, the rounding of the extraction and decomposition (`γ_n = n u / (1 − n u)`,
+/// `u = ε / 2` the unit roundoff, [`gamma`]): the patches are made from the net of
+/// `source` (the surface `form` was cut from, or `form` itself) by knot insertions, each a
+/// level of
+/// [`CPoint::combine2`](crate::nurbs::math::CPoint::combine2) `α a + (1 − α) b` per
+/// homogeneous coordinate, `0 ≤ α ≤ 1`:
+/// - the ratio `α` takes 3 roundings, two subtractions and a division, so
+///   `α̂ = α (1 + θ₃)`: `alf = (ul − left) / (knot − left)` in
+///   [`extract_patch`](crate::nurbs::srf_tool::p1::extract_patch), and
+///   `x = num / (u[isu + i] − u[isu])` with `num = u[ieu] − u[isu]` in
+///   [`decompose_to_bez`];
+/// - its complement `1 − α̂` takes 1 (`oma = 1.0 − alf`, `1.0 − x`);
+/// - `combine2` takes 3, two products and a sum;
+/// - so the `α` term carries `γ₅` (ratio, product, sum) and the `1 − α` term `γ₃`
+///   (complement, product, sum) on `(1 − α) |b|`, plus the ratio's `γ₃` on `α |b|`
+///   through the complement; with `|a|, |b| ≤ M`, the level's new error is at most
+///   `(5 α + 3 (1 − α) + 3 α) u M ≤ 8 u M` to first order, and the earlier errors pass
+///   through with the factor `α̂ + (1 − α̂) = 1` up to a rounding.
+///
+/// `M` is the size of the original net: every intermediate point is a convex combination
+/// of its control points, so each homogeneous coordinate is within `max |H|∞` and each
+/// weight within `W_max` (both up to the roundings themselves). A point's chain runs
+/// through at most `p` insertions at each end of the extraction in u (`p − mul` and
+/// `p − mur`) and `p − 1` at each of its span's two knots in the decomposition, `4p − 2`
+/// in u and `4q − 2` in v, so `L ≤ 4 (p + q) − 4` levels: the error is at most
+/// `γ_{8L} M`, and `γ_{32(p+q)+8}` covers that, the second-order terms and `8` more
+/// roundings for the coefficients' scale. In the coordinates moved to the equation's origin
+/// `O` the error is at most `γ A` with `A = max |H|∞ + |O|∞ W_max`, and in the weight at
+/// most `γ W_max`, so at a point with weight `W ≥ W₀`, `X − O = (H − O W) / W` moves by at
+/// most `γ A / W₀ + A (1 + γ) γ W_max / (W₀ (W₀ − γ W_max))`, twice that as a Euclidean
+/// length (`√3 < 2`); `None` where `W₀ ≤ γ W_max`. The net's size is the larger of
+/// `source`'s and `form`'s and the patch's own (so `form` alone, as `source`, is sound when
+/// it was not cut from another net). The margin against the uses is wide: the slack is a
+/// relative `2 γ_{200} ≈ 4.4e-14` for a bicubic patch, against bounds compared with
+/// tolerances of `1e-6` and more. A patch whose rounding `τ` is below `MIN_POSITIVE / ε`
+/// (where the coefficients' underflow is not inside the `γ` model, as [`distance_bound`])
+/// has no bound. The whole is the largest over the patches, grown by a few roundings.
 ///
 /// # Errors
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
-pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<Option<f64>> {
+pub(crate) fn off_surface_bound(
+    form: &BSplineSurface,
+    a: &Implicit,
+    source: &BSplineSurface,
+) -> Result<Option<f64>> {
     let below = match *a {
         Implicit::Plane { .. } => 0.0,
         Implicit::Cone { axis, .. } => {
@@ -532,6 +562,17 @@ pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<O
     let nurb = form
         .gw_nurb()
         .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let origin = match *a {
+        Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
+        Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
+    };
+    let Some(net) = source.gw_nurb() else {
+        return Ok(None);
+    };
+    let (Some(from), Some(own)) = (net_size(net, origin), net_size(nurb, origin)) else {
+        return Ok(None);
+    };
+    let (net_absolute, net_wmax) = (from.0.max(own.0), from.1.max(own.1));
     let mut bound = 0.0_f64;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
@@ -585,9 +626,16 @@ pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<O
                 }
                 Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
             };
-            let g = gamma(24 * (p + q) + 8);
+            let g = gamma(32 * (p + q) + 8);
+            let absolute = net_absolute.max(r.absolute);
+            let wmax = net_wmax.max(r.wmax);
+            // (the true weight is at least `W₀ − γ W_max`)
+            let low = w0 - g * wmax;
+            if !(low > 0.0) {
+                return Ok(None);
+            }
             // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
-            let slack = 2.0 * g * r.absolute * (1.0 + r.wmax / w0) / w0;
+            let slack = 2.0 * g * absolute * (1.0 / w0 + (1.0 + g) * wmax / (w0 * low));
             let patch_bound = off + slack;
             if !patch_bound.is_finite() {
                 return Ok(None);
@@ -597,6 +645,29 @@ pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<O
     }
     let bound = bound * (1.0 + 8.0 * f64::EPSILON);
     Ok(bound.is_finite().then_some(bound))
+}
+
+/// The size of the control net `net` for [`off_surface_bound`]'s rounding, moved to the
+/// origin `origin`: `(max |H|∞ + |O|∞ W_max, W_max)` over its homogeneous points `H`
+/// (stored weighted when rational) and weights `W` (1 when not rational); `None` when a
+/// value is not finite.
+fn net_size(net: &crate::nurbs::srf_basic::Surface, origin: Vec3) -> Option<(f64, f64)> {
+    let mut hmax = 0.0_f64;
+    let mut wmax = 0.0_f64;
+    for c in net.rows().flatten() {
+        let wi = if c.w == NOW { 1.0 } else { c.w };
+        let z = if c.z == NOZ { 0.0 } else { c.z };
+        let hm = c.x.abs().max(c.y.abs()).max(z.abs());
+        // (`max` would drop a value that is not a number)
+        if !(hm.is_finite() && wi.is_finite()) {
+            return None;
+        }
+        hmax = hmax.max(hm);
+        wmax = wmax.max(wi.abs());
+    }
+    let om = origin.x.abs().max(origin.y.abs()).max(origin.z.abs());
+    let absolute = (hmax + om * wmax) * (1.0 + 2.0 * f64::EPSILON);
+    absolute.is_finite().then_some((absolute, wmax))
 }
 
 /// A lower bound of the cone's radius `ρ_P = √(R² + δ s²)` over the heights `s` of the
@@ -2760,8 +2831,10 @@ mod tests {
     /// patch at x = 2 (y, z from 0 to 1) lies 0.5 from the plane x = 1.5, and its equation
     /// is linear in the homogeneous coordinates (weights 1), so the bound is 0.5 within a
     /// few roundings (PROVEN: never below the true distance), and on the plane x = 2 only
-    /// the counted rounding (the slack `2 γ₅₆ · 2 · 2 ≈ 9.9e-14` plus the coefficients'
-    /// `τ`, under 2e-13). Not a number in a control point or in the equation has no bound.
+    /// the counted rounding (the slack `2 γ₇₂ · 4 · 2 ≈ 1.3e-13`, `4 = |H|∞ + |O|∞ W`, plus
+    /// the coefficients' `τ = γ₃₂ · 4 ≈ 1.4e-14`, under 2e-13). Not a number in a control
+    /// point or in the equation has no bound. Cut from a net a million times larger, the
+    /// same patch carries that net's rounding: at least `2 γ₇₂ · 2e6 · 2 ≈ 6.4e-8`.
     #[test]
     fn a_plane_patch_off_a_plane_is_bounded_by_its_distance() {
         let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
@@ -2787,18 +2860,45 @@ mod tests {
             origin: Vec3::new(x, 0.0, 0.0),
             normal: Vec3::X,
         };
-        let off = off_surface_bound(&patch, &plane(1.5)).unwrap().unwrap();
+        let off = off_surface_bound(&patch, &plane(1.5), &patch)
+            .unwrap()
+            .unwrap();
         assert!((0.5..=0.5 * (1.0 + 1e-12)).contains(&off), "{off:e}");
-        let on = off_surface_bound(&patch, &plane(2.0)).unwrap().unwrap();
+        let on = off_surface_bound(&patch, &plane(2.0), &patch)
+            .unwrap()
+            .unwrap();
         assert!((0.0..=2e-13).contains(&on), "{on:e}");
+        let large = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2e6, 0.0, 0.0),
+                Point3::new(2e6, 1.0, 0.0),
+                Point3::new(2e6, 0.0, 1.0),
+                Point3::new(2e6, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let from_large = off_surface_bound(&patch, &plane(2.0), &large)
+            .unwrap()
+            .unwrap();
+        assert!(from_large >= 2.0 * gamma(72) * 2e6 * 2.0, "{from_large:e}");
         // (not a number in the equation, or in a control point)
         let nan_plane = Implicit::Plane {
             origin: Vec3::new(f64::NAN, 0.0, 0.0),
             normal: Vec3::X,
         };
-        assert_eq!(off_surface_bound(&patch, &nan_plane).unwrap(), None);
+        assert_eq!(off_surface_bound(&patch, &nan_plane, &patch).unwrap(), None);
         assert_eq!(
-            off_surface_bound(&patch, &cone(1.0, f64::NAN)).unwrap(),
+            off_surface_bound(&patch, &cone(1.0, f64::NAN), &patch).unwrap(),
             None
         );
         let nan_patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
@@ -2844,11 +2944,11 @@ mod tests {
             origin: Vec3::new(1.5e-300, 0.0, 0.0),
             normal: Vec3::X,
         };
-        assert_eq!(off_surface_bound(&tiny, &tiny_plane).unwrap(), None);
+        assert_eq!(off_surface_bound(&tiny, &tiny_plane, &tiny).unwrap(), None);
         // (a surface that cannot be made from it is refused earlier, as well)
         if let Ok(nan_patch) = nan_patch {
             assert_eq!(
-                off_surface_bound(&nan_patch, &plane(2.0)).unwrap_or(None),
+                off_surface_bound(&nan_patch, &plane(2.0), &nan_patch).unwrap_or(None),
                 None
             );
         }
@@ -2866,10 +2966,12 @@ mod tests {
         let k = Kernel::default();
         let s = Surface::from(ap::create_cylinder_surface(&k, Point3::ZERO, 50.0, 100.0).unwrap());
         let (form, own) = form_and_equation(&k, &s);
-        let on = off_surface_bound(&form, &own).unwrap().unwrap();
+        let on = off_surface_bound(&form, &own, &form).unwrap().unwrap();
         assert!((0.0..=1e-9).contains(&on), "{on:e}");
         for r in [50.0 - 1e-3, 50.0 + 1e-3] {
-            let off = off_surface_bound(&form, &cone(r, 0.0)).unwrap().unwrap();
+            let off = off_surface_bound(&form, &cone(r, 0.0), &form)
+                .unwrap()
+                .unwrap();
             assert!((1e-3..=5e-3).contains(&off), "{r} {off:e}");
         }
     }
@@ -2888,7 +2990,7 @@ mod tests {
         let s =
             Surface::from(ap::create_cone_surface(&k, Point3::ZERO, 50.0, 30.0, 100.0).unwrap());
         let (form, own) = form_and_equation(&k, &s);
-        let on = off_surface_bound(&form, &own).unwrap().unwrap();
+        let on = off_surface_bound(&form, &own, &form).unwrap().unwrap();
         assert!((0.0..=1e-9).contains(&on), "{on:e}");
         let Implicit::Cone {
             origin,
@@ -2906,12 +3008,12 @@ mod tests {
             tan_angle,
         };
         let d = 1e-3 / (1.0 + tan_angle * tan_angle).sqrt();
-        let off = off_surface_bound(&form, &shifted).unwrap().unwrap();
+        let off = off_surface_bound(&form, &shifted, &form).unwrap().unwrap();
         assert!(d <= off && off <= 8.0 * d, "{d:e} {off:e}");
         let sphere = Implicit::Sphere {
             centre: Vec3::ZERO,
             radius: 50.0,
         };
-        assert_eq!(off_surface_bound(&form, &sphere).unwrap(), None);
+        assert_eq!(off_surface_bound(&form, &sphere, &form).unwrap(), None);
     }
 }

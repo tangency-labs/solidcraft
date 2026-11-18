@@ -280,6 +280,7 @@ written as the operations it counts:
 | `surface::extend::analytic` (private `certify_iso`) | γ_(12L+6) A_j, plus the plane's own (a parallel's height γ_(12L+7), a meridian's normal γ_(12L+8) + γ_12), × (1 + γ_16) | an extended analytic's iso control point off its plane; L de Boor levels, A_j its stencil's size (#15039) |
 | `surface::sphere::meridian_rounding` | S · 1.75 (γ_K + γ_33) \|P\| + 3.5 γ_4 \|P\| + γ_31 π r, K = 16(p + q + 2) | a half meridian's end angle as `IsArc` fits it; S its first-order conditioning, read off the fit (`end_angle_conditioning`) (#15039) |
 | `primitive::primitive_creation::p2::taper_walls` (`touch_bound`, `circles_may_meet`) | γ_16 (\|w\| + \|q\| + r); γ_12 (D² + (r_a ∓ r_b)²) | a draft's line's foot q off its circle (\|q\| − r) and circle/circle reach at a section crossing; within it, taken as touching |
+| `surface::implicit::off_surface_bound` | γ_(32(p+q)+8) A, A = max \|H\|∞ + \|O\|∞ W_max of the source net (the net the patch was cut from), slack 2γA (1/W₀ + (1 + γ) W_max / (W₀ (W₀ − γ W_max))) | a Bézier patch's points after extraction and decomposition: L ≤ 4(p + q) − 4 knot-insertion levels, eight roundings each (the ratio's two subtractions and division, its complement, `CPoint::combine2`'s two products and sum), 8 more for the coefficients' scale (#18166) |
 
 In `precision_floor`, D is the stations' term (a foot within L_u η_u + L_v η_v of its root,
 η = `STATION_STEP` (1 + max |knot|), L the support's derivative bounds), M the net's size about the
