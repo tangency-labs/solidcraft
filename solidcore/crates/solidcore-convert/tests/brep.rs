@@ -618,7 +618,8 @@ fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]], tol: f64, body_tol: f64
 /// whose top steps up 3e-4 along y = 5, every edge and vertex at 1e-3 and the body at 1e-5, with
 /// the corner (10, 0, 0) moved 2e-4 up off its three edges and the bottom. The healer resets the
 /// tolerances from the model size and the gaps; it shrank the corner's under twice its gap, and
-/// the check (a vertex's gaps within half its tolerance) then failed the gap it had covered.
+/// the check (a vertex's gaps within half its tolerance) then failed the gap it had covered. With
+/// the corner stated at 3e-4, under what its gap needs, the healer raises it to that need.
 #[test]
 fn the_healer_keeps_a_vertex_tolerance_that_covers_its_gaps() {
     let (gap, h) = (2e-4, 10.0 + 3e-4);
@@ -646,36 +647,39 @@ fn the_healer_keeps_a_vertex_tolerance_that_covers_its_gaps() {
         &[1, 2, 10, 9, 6, 5], // right
         &[0, 4, 7, 8, 11, 3], // left
     ];
-    let mut r = polyhedron(&corners, &cycles, 1e-3, 1e-5);
-    let corner = r
-        .vertices
-        .iter()
-        .position(|v| v.point == [10.0, 0.0, 0.0])
-        .unwrap();
-    r.vertices[corner].point = [10.0, 0.0, gap];
-    let mut k = kernel();
-    let (b, order) = to_kernel(&mut k, &r, true).unwrap();
-    let stated = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
-    assert!(stated >= 2.0 * gap, "{stated}");
-    let (mut b, order) = to_kernel(&mut k, &r, false).unwrap();
-    order_is_total(&order, &r, &b);
-    assert_eq!(
-        [
-            b.face_list().len(),
-            b.edge_list().len(),
-            b.vertex_list().len()
-        ],
-        [8, 18, 12]
-    );
-    // the floor, the gap gain times twice the gap, under the stated tolerance
-    let healed = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
-    let floor = 2.0 * solidcore::geom::tol::gap_gain(&k) * gap;
-    assert!(floor < stated);
-    assert!(
-        (healed - floor).abs() <= 4.0 * f64::EPSILON * floor,
-        "{healed} against {floor}"
-    );
-    valid(&mut k, &mut b);
+    // the corner's stated tolerance, and whether it covers its gap before the heal
+    for (corner_tol, covered) in [(1e-3, true), (3e-4, false)] {
+        let mut r = polyhedron(&corners, &cycles, 1e-3, 1e-5);
+        let corner = r
+            .vertices
+            .iter()
+            .position(|v| v.point == [10.0, 0.0, 0.0])
+            .unwrap();
+        r.vertices[corner].point = [10.0, 0.0, gap];
+        r.vertices[corner].tolerance = corner_tol;
+        let mut k = kernel();
+        let (b, order) = to_kernel(&mut k, &r, true).unwrap();
+        let stated = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
+        assert_eq!(stated >= 2.0 * gap, covered, "{stated}");
+        let (mut b, order) = to_kernel(&mut k, &r, false).unwrap();
+        order_is_total(&order, &r, &b);
+        assert_eq!(
+            [
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ],
+            [8, 18, 12]
+        );
+        // the floor, the gap gain times twice the gap, whatever the stated tolerance
+        let healed = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
+        let floor = 2.0 * solidcore::geom::tol::gap_gain(&k) * gap;
+        assert!(
+            (healed - floor).abs() <= 4.0 * f64::EPSILON * floor,
+            "stated {stated}: {healed} against {floor}"
+        );
+        valid(&mut k, &mut b);
+    }
 }
 
 /// A body goes to the record, validates, comes back to the kernel as the same body (counts,
