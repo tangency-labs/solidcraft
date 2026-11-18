@@ -2320,10 +2320,13 @@ fn coons_side<'a>(
 /// encloses nothing).
 type StationAngle = Option<(f64, f64)>;
 
+/// An interval `[lo, hi]` known to hold an exact angle.
+type Enclosure = (f64, f64);
+
 /// An enclosure `[lo, hi]` of a station's exact angle: its computed angle less and plus
 /// its bound, each rounded outwards by a step (a correctly rounded sum is within half a
 /// step of the exact one).
-fn station_enclosure((angle, err): (f64, f64)) -> (f64, f64) {
+fn station_enclosure((angle, err): (f64, f64)) -> Enclosure {
     (next_down(angle - err), next_up(angle + err))
 }
 
@@ -2332,11 +2335,16 @@ fn station_enclosure((angle, err): (f64, f64)) -> (f64, f64) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SideVerdict {
     /// Shown no worse: the candidate's largest angle is at most the copy's plus the
-    /// resolution, by the enclosures.
+    /// resolution, by the enclosures, and not certainly above the copy's.
     NoWorse,
+    /// Certainly above the copy's largest angle, but by at most the resolution: a veto
+    /// unless the candidate's largest angle over the whole patch is certainly lower by
+    /// more than the resolution ([`SideAngle::no_worse_than`]).
+    Rises,
     /// The candidate leaves out a station the copy certifies: no worse is not shown there.
     Uncertified,
-    /// The candidate's largest angle is certainly larger than the copy's.
+    /// The candidate's largest angle is certainly larger than the copy's, and not shown
+    /// within the resolution of it.
     Worse,
     /// Neither: the enclosures are too wide to show the candidate no worse.
     Undecided,
@@ -2345,14 +2353,45 @@ enum SideVerdict {
 /// Compares one side of a candidate `cand` with the same side of a copy `held`, both
 /// measured at the same stations, over the stations `held` certifies: the largest angle
 /// of each over them lies in `[max lo, max hi]` of its enclosures
-/// ([`station_enclosure`]). The candidate is [`SideVerdict::Worse`] where its lower end
-/// is above the copy's upper end, and shown no worse where its upper end is at most the
-/// copy's lower end plus `resolution`; an undecided comparison does not count as no
-/// worse. A side `held` certifies nowhere constrains nothing. Comparisons are written so
-/// that a NaN decides against the candidate.
+/// ([`station_enclosure`]). Where the candidate's lower end is above the copy's upper end
+/// it is certainly worse: [`SideVerdict::Rises`] if its upper end is still at most the
+/// copy's lower end plus `resolution`, else [`SideVerdict::Worse`]. Otherwise it is shown
+/// no worse where its upper end is at most the copy's lower end plus `resolution`; an
+/// undecided comparison does not count as no worse. A side `held` certifies nowhere
+/// constrains nothing. Comparisons are written so that a NaN decides against the
+/// candidate.
 fn compare_side(cand: &[StationAngle], held: &[StationAngle], resolution: f64) -> SideVerdict {
+    let (c, h) = match side_maxima(cand, held) {
+        Err(v) => return v,
+        Ok(None) => return SideVerdict::NoWorse,
+        Ok(Some(m)) => m,
+    };
+    let within = c.1 <= next_down(h.0 + resolution);
+    if c.0.is_nan() || h.1.is_nan() {
+        SideVerdict::Worse
+    } else if c.0 > h.1 {
+        if within {
+            SideVerdict::Rises
+        } else {
+            SideVerdict::Worse
+        }
+    } else if within {
+        SideVerdict::NoWorse
+    } else {
+        SideVerdict::Undecided
+    }
+}
+
+/// The largest angle of one side of `cand` and of `held` over the stations `held`
+/// certifies, each as `[max lo, max hi]` of the stations' enclosures
+/// ([`station_enclosure`]): `Ok(None)` where `held` certifies none, and
+/// [`SideVerdict::Uncertified`] where `cand` lacks one of them.
+fn side_maxima(
+    cand: &[StationAngle],
+    held: &[StationAngle],
+) -> Result<Option<(Enclosure, Enclosure)>, SideVerdict> {
     if cand.len() != held.len() {
-        return SideVerdict::Uncertified;
+        return Err(SideVerdict::Uncertified);
     }
     let mut c = (f64::NEG_INFINITY, f64::NEG_INFINITY);
     let mut h = (f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -2360,7 +2399,7 @@ fn compare_side(cand: &[StationAngle], held: &[StationAngle], resolution: f64) -
     for (sc, sh) in cand.iter().zip(held) {
         let Some(sh) = *sh else { continue };
         let Some(sc) = *sc else {
-            return SideVerdict::Uncertified;
+            return Err(SideVerdict::Uncertified);
         };
         let (cl, ch) = station_enclosure(sc);
         let (hl, hh) = station_enclosure(sh);
@@ -2368,17 +2407,7 @@ fn compare_side(cand: &[StationAngle], held: &[StationAngle], resolution: f64) -
         h = (h.0.max(hl), h.1.max(hh));
         any = true;
     }
-    if !any {
-        return SideVerdict::NoWorse;
-    }
-    if c.0 > h.1 || c.0.is_nan() || h.1.is_nan() {
-        return SideVerdict::Worse;
-    }
-    if c.1 <= next_down(h.0 + resolution) {
-        SideVerdict::NoWorse
-    } else {
-        SideVerdict::Undecided
-    }
+    Ok(any.then_some((c, h)))
 }
 
 /// What [`coons_side_angle`] measured, per side (left, bottom, right, top): `None` for a
@@ -2419,11 +2448,45 @@ impl SideAngle {
         out
     }
 
-    /// Whether `self` is shown no worse than `held` on every side.
+    /// Whether `self` is shown no worse than `held`: every side is
+    /// [`SideVerdict::NoWorse`] or [`SideVerdict::Rises`] (certainly above, but within the
+    /// resolution), and where any rises, the largest angle over all sides is certainly
+    /// lower than `held`'s by more than the resolution ([`Self::lowers_sup`]). A side may
+    /// give up at most the resolution only in exchange for a certainly smaller seam:
+    /// `blend_crossing`'s crease corner (bare patch 12 and 29 degrees off along two sides,
+    /// 0 along the third; its refined copies 0.3 degrees along the two and 0.4 along the
+    /// third). Without that exchange a certain rise vetoes, however small: analytic064's
+    /// refined copies rise by 6e-5 radians on two sides and lower nothing.
     fn no_worse_than(&self, held: &SideAngle, resolution: f64) -> bool {
-        self.verdicts(held, resolution)
+        let verdicts = self.verdicts(held, resolution);
+        if verdicts
             .iter()
-            .all(|v| *v == SideVerdict::NoWorse)
+            .any(|v| !matches!(v, SideVerdict::NoWorse | SideVerdict::Rises))
+        {
+            return false;
+        }
+        !verdicts.contains(&SideVerdict::Rises) || self.lowers_sup(held, resolution)
+    }
+
+    /// Whether the largest angle of `self` over the stations `held` certifies, on every
+    /// side both measure, is certainly below `held`'s there by more than `resolution`:
+    /// the largest upper end of `self` at most the largest lower end of `held` less
+    /// `resolution`, by the enclosures ([`side_maxima`]).
+    fn lowers_sup(&self, held: &SideAngle, resolution: f64) -> bool {
+        let mut c_hi = f64::NEG_INFINITY;
+        let mut h_lo = f64::NEG_INFINITY;
+        for (c, h) in self.sides.iter().zip(&held.sides) {
+            let (Some(c), Some(h)) = (c, h) else { continue };
+            match side_maxima(c, h) {
+                Ok(Some((c, h))) => {
+                    c_hi = c_hi.max(c.1);
+                    h_lo = h_lo.max(h.0);
+                }
+                Ok(None) => {}
+                Err(_) => return false,
+            }
+        }
+        h_lo.is_finite() && c_hi <= next_down(h_lo - resolution)
     }
 }
 
@@ -2624,25 +2687,52 @@ fn coons_station_error(
 /// the patch inside them read as tangent as the bare patch (WR-713: analytic034's sides
 /// leave the cylinder by 26 degrees inside the last span, against 20 at the corner).
 ///
-/// Nor does the fork add [`coons_corner_stations`] in the first and last gaps.
-fn coons_stations(knots: Option<&[f64]>, fallback_spans: usize, along: &Extent1d) -> Vec<f64> {
+/// Nor does the fork add [`coons_corner_stations`] in the first and last gaps, here at
+/// each end whose corner `corners` (start, end) marks as one the loop curves fix.
+fn coons_stations(
+    knots: Option<&[f64]>,
+    fallback_spans: usize,
+    along: &Extent1d,
+    corners: [bool; 2],
+) -> Vec<f64> {
     let mut stations = coons_span_stations(knots, fallback_spans, along);
-    let corners = coons_corner_stations(&stations);
-    stations.extend(corners);
+    let near_corners = coons_corner_stations(&stations, corners);
+    stations.extend(near_corners);
     stations
+}
+
+/// Whether each end (start, end) of side `ii` is a corner whose normal the loop curves
+/// fix, for [`coons_corner_stations`]: not where the side it meets there has no surface.
+/// `create_corner_blend` refuses a side without a surface unless its curve is degenerate,
+/// so such a side is a single point and both its ends are a collapsed corner (the apex of
+/// a three-sided corner), where the patch normal has no value to approach.
+fn coons_fixed_corners(surfaces: &[Option<&SmSurface>], ii: usize) -> [bool; 2] {
+    let has = |side: usize| surfaces.get(side).copied().flatten().is_some();
+    let (start, end) = if ii == BOT || ii == TOP {
+        (LEFT, RIGHT)
+    } else {
+        (BOT, TOP)
+    };
+    [has(start), has(end)]
 }
 
 /// The stations every candidate of [`make_coons_patch_tangent_to_sides`] is measured at
 /// along a side of `patch` in direction `dir`: the union, ascending and without repeats,
 /// of the [`coons_stations`] of the patch's knot vector and of each refinement's
-/// ([`refinement_knots`], 8, 16, 32 and 64 spans).
+/// ([`refinement_knots`], 8, 16, 32 and 64 spans), with corner stations at the ends
+/// `corners` (start, end) marks ([`coons_fixed_corners`]).
 ///
 /// Not the fork, which measures each copy at its own stations. Copies compared at
 /// different stations compare different maxima: a coarse copy's peak between its
 /// stations is unseen where a finer copy's is seen, and the coarse copy reads better
 /// for being looked at less (review of WR-713). At common stations a candidate's
 /// largest angle and a held copy's are maxima over the same points of the side.
-fn coons_common_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) -> Vec<f64> {
+fn coons_common_stations(
+    patch: &BSplineSurface,
+    dir: SurfParamType,
+    along: &Extent1d,
+    corners: [bool; 2],
+) -> Vec<f64> {
     let fallback = patch
         .number_control_points(dir)
         .saturating_sub(patch.degree(dir));
@@ -2653,11 +2743,11 @@ fn coons_common_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Ext
             nurb.v_knots().to_vec()
         }
     });
-    let mut all = coons_stations(knots.as_deref(), fallback, along);
+    let mut all = coons_stations(knots.as_deref(), fallback, along, corners);
     if let Some(knots) = &knots {
         for spans in COONS_REFINEMENTS {
             let refined = refinement_knots(knots, spans);
-            all.extend(coons_stations(Some(&refined), fallback, along));
+            all.extend(coons_stations(Some(&refined), fallback, along, corners));
         }
     }
     all.retain(|s| s.is_finite());
@@ -2697,7 +2787,16 @@ const QUARTER_OCTAVES: [f64; 4] = [
 /// (WR-713: analytic064's refined copies leave the torus by 0.51721 radians `4.2e-6`
 /// along a side whose first span is `4.9e-4` long, above the corner's 0.51715), and that
 /// rise decides between candidates whose maxima are otherwise the corner's.
-fn coons_corner_stations(stations: &[f64]) -> Vec<f64> {
+///
+/// Only at the ends `fixed` (start, end) marks ([`coons_fixed_corners`]). At a collapsed
+/// corner the premise fails: the loop fixes no normal there (the patch's own is
+/// undefined at the apex), and next to it the patch normal is the cross product of a
+/// derivative shrinking to zero, so the stations there read rounding, not tangency. In
+/// the L-shaped box's three-sided corner (`fork_cae8618_l_box_corner_patch`) they lie
+/// within `1e-5` of the apex with bounds of `0.2` to `1.5` radians on every candidate,
+/// and with them no refined copy could be shown no worse than the bare patch, which
+/// leaves its neighbours by 38.5 degrees where the 64-span copy is within 0.4.
+fn coons_corner_stations(stations: &[f64], fixed: [bool; 2]) -> Vec<f64> {
     let mut corners = Vec::new();
     let (Some(&s0), Some(&s1)) = (stations.first(), stations.get(1)) else {
         return corners;
@@ -2706,14 +2805,19 @@ fn coons_corner_stations(stations: &[f64]) -> Vec<f64> {
     let (Some(&t0), Some(&t1)) = (stations.get(n - 1), stations.get(n.wrapping_sub(2))) else {
         return corners;
     };
+    let [at_start, at_end] = fixed;
     for e in 9..=64_usize {
         let Some(&q) = QUARTER_OCTAVES.get(e % 4) else {
             continue;
         };
         // 2^-(e / 4) is exact, and so the product's only rounding is the one of `q`
         let f = q * 0.5_f64.powi(i32::try_from(e / 4).unwrap_or(0));
-        corners.push(s0 + (s1 - s0) * f);
-        corners.push(t0 - (t0 - t1) * f);
+        if at_start {
+            corners.push(s0 + (s1 - s0) * f);
+        }
+        if at_end {
+            corners.push(t0 - (t0 - t1) * f);
+        }
     }
     corners
 }
@@ -2796,11 +2900,26 @@ fn coons_station_flags(uv: Point2, su: &Extent1d, sv: &Extent1d) -> EvaluateFlag
 /// side point and the neighbour's normal nearest it ([`coons_side_normal_nearest`], not
 /// the fork's normal at the UV curve's point). A station where the neighbour has no
 /// nearest point, or its normal fails to evaluate, has no frame and certifies nothing.
+/// Corner stations go at the corners the loop fixes ([`coons_fixed_corners`]).
 fn coons_side_frames(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
     uv_curves: &[Option<BSplineCurve>],
     surfaces: &[Option<&SmSurface>],
+) -> Result<CoonsSideFrames> {
+    coons_side_frames_at(k, patch, uv_curves, surfaces, |ii| {
+        coons_fixed_corners(surfaces, ii)
+    })
+}
+
+/// [`coons_side_frames`] with corner stations at the ends `corners(side)` (start, end)
+/// marks.
+fn coons_side_frames_at(
+    k: &crate::kernel::Kernel,
+    patch: &BSplineSurface,
+    uv_curves: &[Option<BSplineCurve>],
+    surfaces: &[Option<&SmSurface>],
+    corners: impl Fn(usize) -> [bool; 2],
 ) -> Result<CoonsSideFrames> {
     let mut sides: [Option<Vec<CoonsSideFrame>>; 4] = [None, None, None, None];
     let domain = patch.natural_uv_domain();
@@ -2818,7 +2937,7 @@ fn coons_side_frames(
             SurfParamType::V
         };
         let mut frames = Vec::new();
-        for s in coons_common_stations(patch, dir, along) {
+        for s in coons_common_stations(patch, dir, along, corners(ii)) {
             let uv = coons_station_uv(ii, s, &su, &sv);
             // only the point is used: no tangent repair, which can fail where a
             // derivative of the patch vanishes though the station is valid
@@ -3148,7 +3267,11 @@ fn project_coons_side_rows(
 /// - a tie within the resolution goes to the finer copy, the refinement's intent;
 /// - a side certainly worse vetoes the copy even where the largest angle over all sides
 ///   improves (WR-713: `vase_rev_corner_blend_3`'s bottom side, 1.3896 radians on the
-///   bare patch against 1.5708 on every refined copy);
+///   bare patch against 1.5708 on every refined copy), save one exchange: a side
+///   certainly worse by at most the resolution does not veto a copy whose largest angle
+///   over all sides is certainly lower by more than the resolution (`blend_crossing`'s
+///   crease corner: 29 degrees off on the bare patch, 0.4 on its refined copies, which
+///   give up 0.4 degrees along a side the bare patch fits exactly);
 /// - a comparison the bounds leave undecided, or a station the held copy certifies and
 ///   the candidate does not, does not take the copy (WR-713: `Endcap_corner_blend_3`,
 ///   whose sides read to a radian next to its collapsed corners);
@@ -3156,7 +3279,8 @@ fn project_coons_side_rows(
 ///   drifting: the copy returned is within the resolution of the bare patch on every
 ///   side.
 ///
-/// G1 is undefined where the normal is, so only certified stations count. The choice
+/// G1 is undefined where the normal is, so only certified stations count, and no corner
+/// stations are placed next to a collapsed corner ([`coons_corner_stations`]). The choice
 /// depends only on the computed values, so it is deterministic.
 fn make_coons_patch_tangent_to_sides(
     k: &crate::kernel::Kernel,
@@ -3687,13 +3811,15 @@ mod tests {
     /// Near a collapsed corner far from the origin the patch normal is lost in rounding:
     /// the stations whose cross product is within its rounding bound of zero are left out
     /// (bound `PI`), so they neither decide nor tie; every other station is kept with its
-    /// angle and bound.
+    /// angle and bound. Measured with corner stations at both ends of every side, so that
+    /// stations next to the apex are measured (the kernel places none there,
+    /// [`coons_corner_stations`]).
     #[test]
     fn coons_side_angle_leaves_out_a_collapsed_corner() {
         let k = &crate::Kernel::default();
         let (patch, plane, uvs) = far_triangle(Vec3::new(1e8, 1e8, 1e8));
         let surfaces = [Some(&plane), Some(&plane), Some(&plane), None];
-        let frames = coons_side_frames(k, &patch, &uvs, &surfaces).unwrap();
+        let frames = coons_side_frames_at(k, &patch, &uvs, &surfaces, |_| [true, true]).unwrap();
         let mut log = Vec::new();
         let angle = coons_side_angle(&patch, &frames, Some(&mut log)).unwrap();
         assert!(
@@ -3724,6 +3850,45 @@ mod tests {
                 side.iter().flatten().count() > 20,
                 "side {ii}: few certified stations"
             );
+        }
+    }
+
+    /// Corner stations go only at a corner the loop fixes: the triangle's top side has no
+    /// surface (a collapsed side), so its left and right sides get corner stations at
+    /// their bottom ends and none towards the apex, where only the span stations remain;
+    /// its bottom side, between two fixed corners, gets them at both ends.
+    #[test]
+    fn no_corner_stations_at_a_collapsed_corner() {
+        let k = &crate::Kernel::default();
+        let (patch, plane, uvs) = far_triangle(Vec3::new(0.0, 0.0, 0.0));
+        let surfaces = [Some(&plane), Some(&plane), Some(&plane), None];
+        for ii in [LEFT, RIGHT] {
+            assert_eq!(coons_fixed_corners(&surfaces, ii), [true, false]);
+        }
+        assert_eq!(coons_fixed_corners(&surfaces, BOT), [true, true]);
+        let along = Extent1d::from_min_max(0.0, 1.0);
+        let spans: Vec<f64> = (0..=1024).map(|i| f64::from(i) / 1024.0).collect();
+        let on_span = |s: f64| spans.contains(&s);
+        let frames = coons_side_frames(k, &patch, &uvs, &surfaces).unwrap();
+        for ii in [LEFT, RIGHT, BOT] {
+            let stations: Vec<f64> = frames.sides[ii]
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|f| f.0)
+                .collect();
+            let all = coons_common_stations(&patch, SurfParamType::V, &along, [true, true]);
+            // near the start the corner stations are there on every side
+            assert!(stations.iter().any(|&s| s > 0.0 && s < 1e-5), "side {ii}");
+            let near_end = stations.iter().filter(|&&s| s > 1.0 - 1.0 / 1024.0);
+            if ii == BOT {
+                assert_eq!(stations, all, "side {ii}");
+            } else {
+                // towards the apex only the span stations: the end itself
+                assert!(near_end.copied().all(on_span), "side {ii}");
+                assert!(stations.iter().all(|s| all.contains(s)), "side {ii}");
+                assert!(stations.len() < all.len(), "side {ii}");
+            }
         }
     }
 
@@ -3775,13 +3940,13 @@ mod tests {
     fn candidates_are_measured_at_common_stations() {
         let (patch, _, _) = far_triangle(Vec3::new(0.0, 0.0, 0.0));
         let along = Extent1d::from_min_max(0.0, 1.0);
-        let common = coons_common_stations(&patch, SurfParamType::U, &along);
+        let common = coons_common_stations(&patch, SurfParamType::U, &along, [true, true]);
         assert!(common.windows(2).all(|w| w[0] < w[1]), "not ascending");
         let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
         let mut levels = vec![knots.to_vec()];
         levels.extend(COONS_REFINEMENTS.map(|spans| refinement_knots(&knots, spans)));
         for level in &levels {
-            for s in coons_stations(Some(level), 1, &along) {
+            for s in coons_stations(Some(level), 1, &along, [true, true]) {
                 assert!(common.contains(&s), "station {s} missing");
             }
         }
@@ -3874,6 +4039,91 @@ mod tests {
         let tie = one_station([None, Some((1.0752 + 1e-3, 0.0034)), None, None]);
         let bare_bot = one_station([None, Some((1.0752, 0.0034)), None, None]);
         assert!(coons_takes(&[bare_bot], &tie));
+    }
+
+    /// A rise certainly above the held copy but within the resolution does not veto a
+    /// copy whose largest angle is certainly lower by more than the resolution:
+    /// `blend_crossing`'s crease corner (the solidcore-ops test
+    /// `a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches`), whose
+    /// bare patch reads 0 along its right side and 12 and 29 degrees along the others,
+    /// against 0.40, 0.32 and 0.31 degrees on the 64-span copy. A rise past the
+    /// resolution still vetoes, and so does a rise within it that lowers no seam
+    /// (analytic064's torus corner: every refined copy 6e-5 radians above the bare patch
+    /// on two sides, equal on the others).
+    #[test]
+    fn a_certain_rise_within_the_resolution_trades_only_for_a_lower_seam() {
+        let bare = one_station([
+            Some((0.215_204, 5.01e-7)),
+            Some((0.499_652, 1.19e-7)),
+            Some((0.0, 1.20e-6)),
+            None,
+        ]);
+        let finer = one_station([
+            Some((0.005_665, 2.51e-6)),
+            Some((0.005_362, 1.20e-7)),
+            Some((0.006_924, 5.53e-6)),
+            None,
+        ]);
+        let (_, finer_hi) = station_enclosure((0.006_924, 5.53e-6));
+        let (_, bare_hi) = station_enclosure((0.0, 1.20e-6));
+        assert!(
+            finer_hi - 2.0 * 5.53e-6 > bare_hi,
+            "the rise is not certain"
+        );
+        assert_eq!(
+            finer.verdicts(&bare, COONS_RESOLUTION),
+            [
+                SideVerdict::NoWorse,
+                SideVerdict::NoWorse,
+                SideVerdict::Rises,
+                SideVerdict::NoWorse
+            ]
+        );
+        assert!(finer.lowers_sup(&bare, COONS_RESOLUTION));
+        assert!(coons_takes(std::slice::from_ref(&bare), &finer));
+        // the same rise without the lower seam: the bare patch's other sides as low
+        let flat = one_station([
+            Some((0.005_665, 2.51e-6)),
+            Some((0.005_362, 1.20e-7)),
+            Some((0.0, 1.20e-6)),
+            None,
+        ]);
+        assert!(!finer.lowers_sup(&flat, COONS_RESOLUTION));
+        assert!(!coons_takes(std::slice::from_ref(&flat), &finer));
+        // analytic064: two sides certainly 6e-5 above, the others equal, no lower seam
+        let torus = one_station([
+            Some((0.517_153_939_750_907, 6.3e-10)),
+            Some((0.517_153_939_750_907, 6.3e-10)),
+            Some((0.517_153_939_749_756, 5.0e-10)),
+            Some((0.517_153_939_749_756, 5.0e-10)),
+        ]);
+        let refined = one_station([
+            Some((0.517_214_025_819_062, 6.3e-10)),
+            Some((0.517_153_939_750_907, 6.3e-10)),
+            Some((0.517_214_025_817_678, 5.0e-10)),
+            Some((0.517_153_939_749_756, 5.0e-10)),
+        ]);
+        assert_eq!(
+            refined.verdicts(&torus, COONS_RESOLUTION),
+            [
+                SideVerdict::Rises,
+                SideVerdict::NoWorse,
+                SideVerdict::Rises,
+                SideVerdict::NoWorse
+            ]
+        );
+        assert!(!coons_takes(&[torus], &refined));
+        let past = one_station([
+            Some((0.005_665, 2.51e-6)),
+            Some((0.005_362, 1.20e-7)),
+            Some((COONS_RESOLUTION + 1e-4, 5.53e-6)),
+            None,
+        ]);
+        assert_eq!(
+            past.verdicts(&bare, COONS_RESOLUTION)[RIGHT],
+            SideVerdict::Worse
+        );
+        assert!(!coons_takes(&[bare], &past));
     }
 
     /// A tie of the largest angles hides a side read precisely: `vase_rev_corner_blend_3`'s

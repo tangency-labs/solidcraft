@@ -106,7 +106,10 @@
 //!   only where its angle bound is certified (error below a right angle). A copy is taken
 //!   only when, against every copy held so far, no side is worse, undecided or uncertified
 //!   where the held copy certifies: "no worse" means its upper bound is at most the held
-//!   lower bound plus the resolution `0.5` degrees. Those rows, by label "(tie rule)", are
+//!   lower bound plus the resolution `0.5` degrees and its lower bound not above the held
+//!   upper bound. A side certainly above but within the resolution vetoes too, unless the
+//!   copy's largest angle over all sides is certainly lower than the held copy's by more
+//!   than the resolution. Those rows, by label "(tie rule)", are
 //!   checked twice before G1 decides the class. First the refinement replays
 //!   ([`replay_coons`]): every station's derivative and angle bounds enclose the exact
 //!   values (enclosed here from the candidate's net and knots), every candidate is measured
@@ -4341,14 +4344,16 @@ fn sides_sup(s: &Sides) -> Option<f64> {
         })
 }
 
-/// One side of a candidate `c` against a held copy `h`, at the same stations, over those
-/// `h` certifies: `"worse"` where the candidate's largest lower end is above the copy's
-/// largest upper end, `"no worse"` where its largest upper end is at most the copy's
-/// largest lower end plus `res` (one step down), `"uncertified"` where it lacks a station,
-/// else `"undecided"`. Each enclosure is `[angle - err, angle + err]` rounded outwards.
-fn side_verdict(c: &[Option<(f64, f64)>], h: &[Option<(f64, f64)>], res: f64) -> &'static str {
+/// The largest angle of one side of candidate `c` and of held copy `h`, at the same
+/// stations, over those `h` certifies, each as `(max lo, max hi)` of the enclosures
+/// `[angle - err, angle + err]` rounded outwards: `Ok(None)` where `h` certifies none,
+/// `Err(())` where `c` lacks a station `h` certifies.
+fn side_max(
+    c: &[Option<(f64, f64)>],
+    h: &[Option<(f64, f64)>],
+) -> Result<Option<((f64, f64), (f64, f64))>, ()> {
     if c.len() != h.len() {
-        return "uncertified";
+        return Err(());
     }
     let (mut cl, mut ch, mut hl, mut hh) = (
         f64::NEG_INFINITY,
@@ -4360,7 +4365,7 @@ fn side_verdict(c: &[Option<(f64, f64)>], h: &[Option<(f64, f64)>], res: f64) ->
     for (sc, sh) in c.iter().zip(h) {
         let Some((ha, he)) = *sh else { continue };
         let Some((ca, ce)) = *sc else {
-            return "uncertified";
+            return Err(());
         };
         cl = cl.max(down(ca - ce));
         ch = ch.max(up(ca + ce));
@@ -4368,33 +4373,68 @@ fn side_verdict(c: &[Option<(f64, f64)>], h: &[Option<(f64, f64)>], res: f64) ->
         hh = hh.max(up(ha + he));
         any = true;
     }
-    if !any {
-        "no worse"
-    } else if cl > hh || cl.is_nan() || hh.is_nan() {
+    Ok(any.then_some(((cl, ch), (hl, hh))))
+}
+
+/// One side of a candidate `c` against a held copy `h` ([`side_max`]): where the
+/// candidate's largest lower end is above the copy's largest upper end it is certainly
+/// worse, `"rises"` if its largest upper end is still at most the copy's largest lower
+/// end plus `res` (one step down), else `"worse"`; otherwise `"no worse"` where that
+/// holds, `"uncertified"` where it lacks a station, else `"undecided"`.
+fn side_verdict(c: &[Option<(f64, f64)>], h: &[Option<(f64, f64)>], res: f64) -> &'static str {
+    let ((cl, ch), (hl, hh)) = match side_max(c, h) {
+        Err(()) => return "uncertified",
+        Ok(None) => return "no worse",
+        Ok(Some(m)) => m,
+    };
+    let within = ch <= down(hl + res);
+    if cl.is_nan() || hh.is_nan() {
         "worse"
-    } else if ch <= down(hl + res) {
+    } else if cl > hh {
+        if within {
+            "rises"
+        } else {
+            "worse"
+        }
+    } else if within {
         "no worse"
     } else {
         "undecided"
     }
 }
 
-/// The verdict of candidate `c` against held copy `h`: `"no worse"` when every side is;
-/// else the first of `"worse"`, `"uncertified"`, `"undecided"` some side has.
+/// The verdict of candidate `c` against held copy `h`: the first of `"worse"`,
+/// `"uncertified"`, `"undecided"` some side has; else, where a side `"rises"`, `"no
+/// worse"` only if the candidate's largest upper end over every side both measure is at
+/// most the copy's largest lower end less `res` (one step down), `"worse"` otherwise; else
+/// `"no worse"`.
 fn candidate_verdict(c: &Sides, h: &Sides, res: f64) -> &'static str {
     let mut found = Vec::new();
+    let (mut c_hi, mut h_lo) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
     for (cs, hs) in c.iter().zip(h) {
         found.push(match (cs, hs) {
             (_, None) => "no worse",
             (None, Some(hs)) if hs.iter().all(Option::is_none) => "no worse",
             (None, Some(_)) => "uncertified",
-            (Some(cs), Some(hs)) => side_verdict(cs, hs, res),
+            (Some(cs), Some(hs)) => {
+                if let Ok(Some(((_, ch), (hl, _)))) = side_max(cs, hs) {
+                    c_hi = c_hi.max(ch);
+                    h_lo = h_lo.max(hl);
+                }
+                side_verdict(cs, hs, res)
+            }
         });
     }
-    ["worse", "uncertified", "undecided"]
+    if let Some(v) = ["worse", "uncertified", "undecided"]
         .into_iter()
         .find(|v| found.contains(v))
-        .unwrap_or("no worse")
+    {
+        return v;
+    }
+    if found.contains(&"rises") && !(h_lo.is_finite() && c_hi <= down(h_lo - res)) {
+        return "worse";
+    }
+    "no worse"
 }
 
 /// Replays one `make_coons_patch_tangent_to_sides` run from its log and checks it.
