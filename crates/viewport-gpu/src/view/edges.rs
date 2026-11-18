@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{EDGE_PX, EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally, placement_scale};
+use super::{EDGE_PX, EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally, placement_stretch};
 
 /// The instanced edge vertex shaders, appended to the viewport's (they draw with its
 /// `line_vertex` and `fs_line`).
@@ -180,6 +180,9 @@ impl Arena {
             return None;
         }
         let room = (need + need / 2).min(limit).next_multiple_of(EDGE_SEG_SIZE as u64).min(limit);
+        // A buffer or bind group the device refuses fails the scene's upload, which keeps the
+        // previous picture and tries the scene again ([`super::refused`]).
+        let scopes = crate::error_scopes(device);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sc_edge_segments"),
             size: room,
@@ -191,6 +194,10 @@ impl Arena {
             layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
         });
+        if let Some(reason) = crate::caught(scopes) {
+            super::refused(reason);
+            return None;
+        }
         let empty = Arena { buffer, bind, room, taken: Arc::new(Mutex::new(0)), spans: HashMap::new() };
         empty.with(queue, wanted, wanted, need)
     }
@@ -407,12 +414,12 @@ pub(super) struct Pipelines {
 
 /// The edge level each placement in view is drawn from: the coarsest whose deviation stays under
 /// [`EDGE_PX`] where the placement is drawn (`rows`, its box `bounds`, the view `vp` of `size`
-/// pixels).
+/// pixels), in whichever direction the edges stray ([`placement_stretch`]).
 pub(super) fn level_for(e: &SharedEdges, rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> u8 {
     if e.levels.len() < 2 {
         return 0;
     }
-    let scale = placement_scale(rows, bounds, vp, size);
+    let scale = placement_stretch(rows, bounds, vp, size);
     let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= EDGE_PX).unwrap_or(0);
     u8::try_from(level).unwrap_or(0)
 }

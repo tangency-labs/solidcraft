@@ -1619,9 +1619,35 @@ pub const LOD_PX: f32 = 0.75;
 /// `size` pixels. Infinite when a corner of it is at or behind the eye, or for a box that is not
 /// finite: such a placement is drawn in full.
 pub fn placement_scale(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> f32 {
+    let Some(axes) = placement_axes(rows, bounds, vp, size) else { return f32::INFINITY };
+    let scale = axes.iter().map(|[x, y]| (x * x + y * y).sqrt()).fold(0.0f32, f32::max);
+    if scale.is_finite() { scale } else { f32::INFINITY }
+}
+
+/// [`placement_scale`] along whichever direction shows largest, not only the box's axes: the
+/// most pixels a millimetre of the part covers there (a step across the axes, seen from along
+/// a diagonal, shows larger than any one axis). Infinite where [`placement_scale`] is.
+pub fn placement_stretch(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> f32 {
+    let Some(axes) = placement_axes(rows, bounds, vp, size) else { return f32::INFINITY };
+    // The largest singular value of the map from the part's millimetres to pixels: the square
+    // root of the larger eigenvalue of its 2 × 2 Gram matrix.
+    let (mut a, mut b, mut c) = (0.0f32, 0.0f32, 0.0f32);
+    for [x, y] in axes {
+        a += x * x;
+        b += x * y;
+        c += y * y;
+    }
+    let half = (a - c) * 0.5;
+    let stretch = ((a + c) * 0.5 + (half * half + b * b).sqrt()).sqrt();
+    if stretch.is_finite() { stretch } else { f32::INFINITY }
+}
+
+/// Pixels a millimetre along each axis of a placement's box covers where it is nearest the eye
+/// (see [`placement_scale`]); `None` when it is drawn in full.
+fn placement_axes(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> Option<[[f32; 2]; 3]> {
     let [lo, hi] = bounds;
     if !lo.iter().chain(hi).all(|x| x.is_finite()) {
-        return f32::INFINITY;
+        return None;
     }
     let clip = |p: [f32; 3]| -> [f32; 4] {
         let w = rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
@@ -1634,7 +1660,7 @@ pub fn placement_scale(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32;
     for c in corners {
         let w = clip(c)[3];
         if !(w > 1e-6) {
-            return f32::INFINITY;
+            return None;
         }
         if w < nearest.0 {
             nearest = (w, c);
@@ -1643,20 +1669,20 @@ pub fn placement_scale(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32;
     let screen = |c: [f32; 4]| [c[0] / c[3] * size[0] * 0.5, c[1] / c[3] * size[1] * 0.5];
     let (_, c) = nearest;
     let at = screen(clip(c));
-    let mut scale = 0.0f32;
-    for k in 0..3 {
+    let mut axes = [[0.0f32; 2]; 3];
+    for (k, axis) in axes.iter_mut().enumerate() {
         // A step of a hundredth of the box (at least a micrometre) along each axis.
         let step = ((hi[k] - lo[k]) * 0.01).max(1e-3);
         let mut q = c;
         q[k] += step;
         let qc = clip(q);
         if !(qc[3] > 1e-6) {
-            return f32::INFINITY;
+            return None;
         }
         let s = screen(qc);
-        scale = scale.max(((s[0] - at[0]).powi(2) + (s[1] - at[1]).powi(2)).sqrt() / step);
+        *axis = [(s[0] - at[0]) / step, (s[1] - at[1]) / step];
     }
-    if scale.is_finite() { scale } else { f32::INFINITY }
+    Some(axes)
 }
 
 /// The coarsest level whose error (mm; level 0, the full triangles, has none) stays under
@@ -2267,14 +2293,15 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
     ) -> Result<(), String> {
-        self.take_sharing(device, queue, uniform, bgl, key, slot, tess, oit_available, None)
+        self.take_sharing(device, queue, uniform, bgl, key, slot, tess, oit_available, None, None)
     }
 
     /// [`Batches::take`], taking over the blocks, evaluated chunks and instanced triangles the
     /// scene shares with `donor` (another scene drawn in the same frame) instead of uploading and
     /// evaluating them again: a dragged component's bodies move between the model scene and the
     /// moving layer. `uniform` is the one the scene's palette is bound with (the layer has its
-    /// own). The donor gives them up only when the upload succeeded.
+    /// own). The donor gives them up only when the upload succeeded. The scene's lit instanced
+    /// edges are drawn from `edges_from`'s segment buffer (the model's) where it holds them.
     fn take_sharing(
         &mut self,
         device: &wgpu::Device,
@@ -2286,6 +2313,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         donor: Option<&mut Batches>,
+        edges_from: Option<&edges::Edges>,
     ) -> Result<(), String> {
         if self.key == Some(key) {
             return Ok(());
@@ -2294,7 +2322,7 @@ impl Batches {
         let _ = take_upload_failure();
         let mut next = self.clone();
         let mut taken = donor.as_deref().cloned();
-        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut());
+        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut(), edges_from);
         match take_upload_failure() {
             None => {
                 next.upload_failed = false;
@@ -2330,6 +2358,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         mut donor: Option<&mut Batches>,
+        edges_from: Option<&edges::Edges>,
     ) {
         {
             self.uploads = UploadStats::default();
@@ -2358,16 +2387,28 @@ impl Batches {
             self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
             self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
             // The instanced edges, and the lit ones drawn again over them, from one segment
-            // buffer: a lit part's edges are the model's, uploaded once.
+            // buffer: a lit part's edges are the model's (this scene's, or the model scene's for
+            // the highlight), uploaded once.
             let mut uploaded = 0;
             let mut shared_edges = |parts: &[edges::Part<'_>], before: Option<&edges::Edges>| {
                 let (e, up) = edges::Edges::new(device, queue, bgl.edges.as_ref()?, parts, before)?;
                 uploaded += up;
                 Some(e)
             };
-            self.edges = shared_edges(&edges::Part::of_draws(&self.instanced), self.edges.as_ref());
-            self.lit_shared_edges = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_edges), self.edges.as_ref());
-            self.lit_shared_hidden = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_hidden), self.edges.as_ref());
+            let parts = edges::Part::of_draws(&self.instanced);
+            self.edges = shared_edges(&parts, self.edges.as_ref());
+            // Edges the segment buffer cannot hold (more than the device binds at once) are drawn
+            // as the scene's own lines, every placement's, as before there was one.
+            let spilled = (self.edges.is_none() && !parts.is_empty()).then(|| {
+                let (mut lines, mut hidden) = (sc.lines.clone(), sc.hidden.clone());
+                for m in sc.instanced.iter().filter(|m| m.edges.is_some()) {
+                    m.expand_edges_into(&mut lines, sc.instanced_hidden_edges.then_some(&mut hidden));
+                }
+                (lines, hidden)
+            });
+            let lit_from = self.edges.as_ref().or(edges_from);
+            self.lit_shared_edges = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_edges), lit_from);
+            self.lit_shared_hidden = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_hidden), lit_from);
             self.uploads.geometry += uploaded;
             self.hidden_edges = sc.instanced_hidden_edges;
             self.hover_planned = sc.hover_planned.clone();
@@ -2412,8 +2453,8 @@ impl Batches {
             self.pbr = own("sc_pbr", &sc.pbr, PBR_SIZE);
             self.trans = own("sc_trans", &sc.trans, TRI_SIZE);
             self.shadow = own("sc_shadow", &sc.shadow, TRI_SIZE);
-            let own_lines = own("sc_lines", &sc.lines, LINE_SIZE);
-            let own_hidden = own("sc_hidden", &sc.hidden, LINE_SIZE);
+            let own_lines = own("sc_lines", spilled.as_ref().map_or(&sc.lines, |(l, _)| l), LINE_SIZE);
+            let own_hidden = own("sc_hidden", spilled.as_ref().map_or(&sc.hidden, |(_, h)| h), LINE_SIZE);
             self.overlays = own("sc_overlay", &sc.overlay, LINE_SIZE);
             self.ghost = own("sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = own("sc_xray", &sc.xray, TRI_SIZE);
@@ -4215,13 +4256,18 @@ fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
     match crate::buffer_init(device, label, contents, usage) {
         Ok(buffer) => Some(buffer),
         Err(error) => {
-            let reason = error.to_string();
-            UPLOAD_FAILURE.with(|f| {
-                f.borrow_mut().get_or_insert(reason);
-            });
+            refused(error.to_string());
             None
         }
     }
+}
+
+/// Note that the device refused a buffer (or a bind group) of the scene upload under way, for
+/// [`take_upload_failure`]: the first reason is kept.
+fn refused(reason: String) {
+    UPLOAD_FAILURE.with(|f| {
+        f.borrow_mut().get_or_insert(reason);
+    });
 }
 
 /// Bytes per GPU buffer for vertices of `stride` bytes: within the device's limit and a
@@ -4520,11 +4566,12 @@ impl Renderer {
                 tess,
                 oit,
                 Some(&mut res.model),
+                None,
             ));
         }
         res.uniform_bgl.environment.upload(queue);
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        uploads.push(res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving)));
+        uploads.push(res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving), None));
         match &cb.moving {
             Some(mv) => {
                 res.moving.sort_glass(queue, local_direction(&mv.transform, cb.back));
@@ -4542,7 +4589,19 @@ impl Renderer {
         // The highlight evaluates plans of its own where the model has none to draw again (in
         // Wireframe, a whole lit body's faces).
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        uploads.push(res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, tess, oit));
+        // Its lit instanced edges are drawn from the model's segment buffer, not uploaded again.
+        uploads.push(res.highlight.take_sharing(
+            device,
+            queue,
+            &res.uniform,
+            &res.uniform_bgl,
+            cb.hl_key,
+            &cb.hl_slot,
+            tess,
+            oit,
+            None,
+            res.model.edges.as_ref(),
+        ));
         uploads.push(res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit));
         // A refused scene leaves the previous picture; a capture must not pass it off as the new one.
         res.refused_upload = uploads.into_iter().find_map(Result::err);
@@ -4682,6 +4741,11 @@ impl Renderer {
     /// What the model scene's last change uploaded ([`UploadStats`]).
     pub fn uploads(&self) -> UploadStats {
         self.model.uploads
+    }
+
+    /// What the highlight scene's last change uploaded.
+    pub fn highlight_uploads(&self) -> UploadStats {
+        self.highlight.uploads
     }
 
     fn publish(&self, drawn: DrawStats) {
@@ -5699,6 +5763,19 @@ mod tests {
         assert!(far < near / 9.0 && far > 0.0, "{far} vs {near}");
         assert!(placement_scale(&at(0.0, 0.0, 0.5), &unit, &persp, size).is_infinite(), "a corner behind the eye");
         assert!(placement_scale(&at(0.0, 0.0, -10.0), &[[f32::NAN; 3], [1.0; 3]], &persp, size).is_infinite());
+        // Seen along the part's (1, 1, 1): each axis shows at 0.816 of the view's 10 px/mm, a step
+        // across them, in the picture's plane, at the whole 10.
+        let diagonal = [
+            [std::f32::consts::FRAC_1_SQRT_2, -std::f32::consts::FRAC_1_SQRT_2, 0.0, 0.0],
+            [1.0 / 6f32.sqrt(), 1.0 / 6f32.sqrt(), -2.0 / 6f32.sqrt(), 0.0],
+            [1.0 / 3f32.sqrt(), 1.0 / 3f32.sqrt(), 1.0 / 3f32.sqrt(), 0.0],
+        ];
+        let axis = placement_scale(&diagonal, &unit, &ortho, size);
+        assert!((axis - 10.0 * (2.0f32 / 3.0).sqrt()).abs() < 1e-2, "{axis}");
+        let stretch = super::placement_stretch(&diagonal, &unit, &ortho, size);
+        assert!((stretch - 10.0).abs() < 1e-2, "{stretch}");
+        assert!((super::placement_stretch(&at(5.0, -3.0, 0.0), &unit, &ortho, size) - 10.0).abs() < 1e-3, "an axis in the picture");
+        assert!(super::placement_stretch(&at(0.0, 0.0, 0.5), &unit, &persp, size).is_infinite(), "a corner behind the eye");
         // The coarsest level within LOD_PX: errors 0 (full), 0.05, 0.2, 1.0 mm.
         let errors = [0.0, 0.05, 0.2, 1.0];
         assert_eq!(level_for(&errors, f32::INFINITY), 0);

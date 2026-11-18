@@ -51,13 +51,33 @@ pub(crate) struct Meshing {
     first_shown: bool,
     /// The parts placed more than once, made ahead for the scenes that draw them as instances.
     parts: crate::viewport::WarmedParts,
+    /// What the viewport drew with when it started ([`Caps`]): a viewport that changes (its GPU
+    /// pipelines ready after the design opened) meshes again for the new one.
+    caps: Caps,
+}
+
+/// What a viewport draws bodies from, which the meshing makes ahead: display plans (`plans`),
+/// shared vertices (`shared`, a GPU viewport) and instances' shared edges (`edges`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Caps {
+    plans: bool,
+    shared: bool,
+    edges: bool,
+}
+
+impl Caps {
+    fn of(app: &SolveApp) -> Caps {
+        let gpu = app.viewport.gpu;
+        Caps { plans: gpu.is_some_and(|g| g.tess), shared: gpu.is_some(), edges: gpu.is_some_and(|g| g.edges) }
+    }
 }
 
 impl Meshing {
     /// `plans`: the bodies are drawn from their display plans; `shared`: large meshes and parts
     /// placed more than once are drawn from shared vertices (a GPU viewport), made here too, with
     /// the parts' shared edges when the renderer draws instances' edges (`edges`).
-    fn start(world: Arc<ModelState>, plans: bool, shared: bool, edges: bool) -> Meshing {
+    fn start(world: Arc<ModelState>, caps: Caps) -> Meshing {
+        let Caps { plans, shared, edges } = caps;
         let n = world.bodies.len();
         let ready = Arc::new(Mutex::new(Vec::with_capacity(n)));
         let (done, stop) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
@@ -115,6 +135,7 @@ impl Meshing {
             began: None,
             first_shown: false,
             parts,
+            caps,
         }
     }
 
@@ -133,9 +154,7 @@ impl Drop for Meshing {
 /// the bodies' outlines; `remember`: then draw the Home picture of that file.
 pub(crate) fn start(app: &mut SolveApp, remember: Option<String>) {
     app.open_meshing_next = false;
-    let plans = app.viewport.gpu.is_some_and(|g| g.tess);
-    let edges = app.viewport.gpu.is_some_and(|g| g.edges);
-    let mut meshing = Meshing::start(crate::open_meshing::session_world(&app.session), plans, app.viewport.gpu.is_some(), edges);
+    let mut meshing = Meshing::start(crate::open_meshing::session_world(&app.session), Caps::of(app));
     meshing.remember = remember;
     app.open_meshing = Some(meshing);
     app.fit_view();
@@ -201,16 +220,18 @@ pub(crate) fn framing(app: &SolveApp) -> bool {
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(m) = app.open_meshing.as_ref() else { return };
     let world = crate::open_meshing::session_world(&app.session);
-    if !Arc::ptr_eq(&world, &m.world) {
-        if m.complete {
-            // The design changed after its open: the viewport draws it as ever.
-            app.open_meshing = None;
-            return;
-        }
-        // The design changed (an edit, an undo): mesh the new world; what is made is kept.
+    let caps = Caps::of(app);
+    let changed = !Arc::ptr_eq(&world, &m.world);
+    if changed && m.complete {
+        // The design changed after its open: the viewport draws it as ever.
+        app.open_meshing = None;
+        return;
+    }
+    if changed || (m.caps != caps && !m.complete) {
+        // The design changed (an edit, an undo), or the viewport did (its GPU pipelines ready
+        // after the open started): mesh the new world for it; what is made is kept.
         let (framed, remember) = (m.framed, m.remember.clone());
-        let plans = app.viewport.gpu.is_some_and(|g| g.tess);
-        let mut next = Meshing::start(world.clone(), plans, app.viewport.gpu.is_some(), app.viewport.gpu.is_some_and(|g| g.edges));
+        let mut next = Meshing::start(world.clone(), caps);
         (next.framed, next.remember) = (framed, remember);
         app.open_meshing = Some(next);
     }
@@ -318,7 +339,8 @@ pub(crate) fn warm(
 ) {
     use solidcraft_engine::doc::display_quality::DisplayQuality;
     let (mesh, _) = b.mesh_in_place();
-    if shared {
+    // A part placed more than once has its shared vertices made with its part ([`warm_part`]).
+    if shared && b.placed_definition().is_none_or(|id| !repeated.contains(&id)) {
         crate::viewport::warm_shared_tris(&mesh);
     }
     // Its box, which framing the view reads for every body once they are all shown: worked out
