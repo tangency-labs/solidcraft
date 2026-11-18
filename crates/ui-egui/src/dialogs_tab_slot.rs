@@ -5,7 +5,7 @@ use crate::{
     SolveApp,
     dialogs::Kind,
     selection::{BODIES, SelInput, SelectionExt as _},
-    ui_kit::{BackingTooltipExt as _, choice_row, expr_row},
+    ui_kit::{BackingTooltipExt as _, action_row, choice_row, expr_row},
 };
 use serde_json::{Map, Value, json};
 use solidcraft_engine::{Sel, doc::FeatureKind};
@@ -22,6 +22,10 @@ pub struct TabSlot {
     pub end_distance: String,
     pub clearance: String,
     pub protrusion: String,
+    /// Width Jitter: tabs vary by up to this much either way; empty is off.
+    pub width_jitter: String,
+    /// Seed of the width variation; empty is the default (1000).
+    pub seed: String,
 }
 
 /// A new dialog's values: every field auto but the clearance, 0.1 mm in the design's unit.
@@ -53,6 +57,11 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [S
     enter |= tipped(ui, "ui.tab_slot.end_distance_tip", |ui| expr_row(ui, "ui.tab_slot.end_distance", &mut t.end_distance));
     enter |= tipped(ui, "ui.tab_slot.clearance_tip", |ui| expr_row(ui, "ui.tab_slot.clearance", &mut t.clearance));
     enter |= tipped(ui, "ui.tab_slot.protrusion_tip", |ui| expr_row(ui, "ui.tab_slot.protrusion", &mut t.protrusion));
+    enter |= tipped(ui, "ui.tab_slot.width_jitter_tip", |ui| expr_row(ui, "ui.tab_slot.width_jitter", &mut t.width_jitter));
+    enter |= tipped(ui, "ui.tab_slot.seed_tip", |ui| expr_row(ui, "ui.tab_slot.seed", &mut t.seed));
+    if tipped(ui, "ui.tab_slot.new_seed_tip", |ui| action_row(ui, "tab_slot_new_seed", "ui.tab_slot.new_seed")) {
+        t.seed = fresh_seed(&t.seed).to_string();
+    }
     if let Some(reply) = &app.preview.report {
         let l = solidcraft_ui_text::locale();
         for (id, args) in summary_args(reply) {
@@ -62,6 +71,17 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [S
         }
     }
     enter
+}
+
+/// A new seed for the width variation: a whole number from the clock, mixed with the old one so
+/// two clicks in one tick still differ, and never the old value.
+fn fresh_seed(old: &str) -> u64 {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let mut x = nanos ^ old.trim().bytes().fold(0x9E37_79B9_7F4A_7C15u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    let n = (x ^ (x >> 31)) % 1_000_000;
+    if n.to_string() == old.trim() { (n + 1) % 1_000_000 } else { n }
 }
 
 /// The summary under the fields (design v2 12.4), from a preview's reply, as (message id,
@@ -121,6 +141,8 @@ pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<St
         ("end_distance", t.end_distance.as_str()),
         ("clearance", t.clearance.as_str()),
         ("protrusion", t.protrusion.as_str()),
+        ("width_jitter", t.width_jitter.as_str()),
+        ("seed", t.seed.as_str()),
     ] {
         if !v.trim().is_empty() {
             args.insert(k.into(), json!(v.trim()));
@@ -135,7 +157,20 @@ pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<St
 /// Edit Feature: the dialog of a stored Tab and Slot, its plates picked and its rows as typed.
 /// The stored picks and `next_plate_key` ride in `extra`, so OK sends the keys back.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
-    let FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, count, spacing, tab_width, end_distance, clearance, protrusion, .. } = kind
+    let FeatureKind::TabSlot {
+        tab_plates,
+        slot_plates,
+        next_plate_key,
+        count,
+        spacing,
+        tab_width,
+        end_distance,
+        clearance,
+        protrusion,
+        seed,
+        width_jitter,
+        ..
+    } = kind
     else {
         return None;
     };
@@ -149,6 +184,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         end_distance: text(end_distance),
         clearance: clearance.as_str().to_string(),
         protrusion: text(protrusion),
+        width_jitter: text(width_jitter),
+        seed: text(seed),
     };
     let mut extra = Map::new();
     for (i, (list, picks)) in [("tab_plates", tab_plates), ("slot_plates", slot_plates)].into_iter().enumerate() {
@@ -184,9 +221,28 @@ mod tests {
             cmds[0].1,
             json!({"tab_plates": ["Back"], "slot_plates": ["Bottom", "Side"], "count": "2", "tab_width": "12 mm", "clearance": "0.1 mm"})
         );
+        (t.width_jitter, t.seed) = ("1.5 mm".into(), "42".into());
+        let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
+        assert_eq!((args["width_jitter"].as_str(), args["seed"].as_str()), (Some("1.5 mm"), Some("42")), "{args}");
         t.layout = 1;
         let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
         assert_eq!((args.get("count"), args["spacing"].as_str()), (None, Some("30 mm")), "{args}");
+    }
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use super::fresh_seed;
+
+    /// A new seed is a whole number in range and never the one it replaces.
+    #[test]
+    fn a_new_seed_differs_from_the_old_one() {
+        let mut seed = String::new();
+        for _ in 0..200 {
+            let next = fresh_seed(&seed);
+            assert!(next < 1_000_000 && next.to_string() != seed, "{seed} -> {next}");
+            seed = next.to_string();
+        }
     }
 }
 
@@ -205,12 +261,14 @@ mod edit_tests {
             let p = json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": name, "operation": "new"});
             s.execute("solid.box", &p).unwrap();
         }
-        let p = json!({"tab_plates": [{"body": "Wall", "near": [80, 33, 6]}], "slot_plates": ["Bottom"], "spacing": "40 mm", "tab_width": "12 mm"});
+        let p = json!({"tab_plates": [{"body": "Wall", "near": [80, 33, 6]}], "slot_plates": ["Bottom"], "spacing": "40 mm", "tab_width": "12 mm",
+            "width_jitter": "2 mm", "seed": "7"});
         s.execute("solid.tab_slot", &p).unwrap();
         let app = SolveApp::new(s, Services::default());
         let kind = app.session.doc.features.last().unwrap().kind.clone();
         let (Kind::TabSlot(t), mut inputs, extra) = for_feature(&app, &kind).unwrap() else { panic!("not a tab and slot") };
         assert_eq!((t.layout, t.spacing.as_str(), t.tab_width.as_str(), t.count.as_str()), (1, "40 mm", "12 mm", ""));
+        assert_eq!((t.width_jitter.as_str(), t.seed.as_str()), ("2 mm", "7"));
         assert_eq!(inputs[0].items, vec![Sel::Body { name: "Wall".into() }]);
         let args = &commands(&app, &t, &inputs, &extra).unwrap()[0].1;
         assert_eq!(args["tab_plates"], json!([{"key": 1, "body": "Wall", "near": [80.0, 33.0, 6.0]}]), "{args}");
