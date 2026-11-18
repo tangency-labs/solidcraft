@@ -83,6 +83,20 @@ pub(crate) fn reveal_shared_panel(app: &mut SolveApp, name: &str) {
     }
 }
 
+/// Close a production panel in the layout, so the panel state follows the window's flag (#16058).
+/// A layout without that panel keeps the flag alone.
+pub(crate) fn close_shared_panel(app: &mut SolveApp, name: &str) {
+    use solidcraft_engine::panels::{LayoutAction, Mutation};
+
+    let Some(layout) = app.panel_runtime().map(|runtime| runtime.layout().layout()) else { return };
+    let Some(panel) = layout.instances.iter().find(|panel| panel.id.0 == name) else { return };
+    if !panel.requested_open {
+        return;
+    }
+    let mutation = Mutation::Close { instance: panel.id.clone() };
+    let _ = app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] });
+}
+
 /// Find in Browser for a body: show the Browser and find the body there ([`find_in_tree`]). It
 /// shows the whole tree, so it ends a search; a pick in the view keeps one ([`reveal_pick`], #1413).
 pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
