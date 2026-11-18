@@ -8988,9 +8988,11 @@ fn occurrences_from(doc: &Document, from: u64, ids: &[u64]) -> Option<Mat> {
     Some(m)
 }
 
-/// The placements (column-major matrices) of a pattern's copies, the original excluded.
+/// The placements (column-major matrices) of a pattern's copies, the original excluded, read
+/// with the values the features are built with, so a bare number in an expression is in the
+/// design's unit (#8523).
 pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind) -> Result<Vec<[[f64; 4]; 4]>> {
-    let (vals, _) = doc.param_values();
+    let vals = doc.evaluation_values();
     pattern_transforms(doc, &vals, st, 0, p)
 }
 
