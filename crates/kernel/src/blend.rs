@@ -1228,6 +1228,31 @@ pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     picked_chain(body, picks).map(|(_, chain, _)| chain)
 }
 
+/// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
+/// themselves ([`tangent_chain`]): one list per such edge, in chain order, of `per_edge` points
+/// (1 to 64) spread evenly inside the edge's parameter interval, never at its ends. For a caller
+/// that checks which of those edges a blend left as they were: a blend may take part of an edge
+/// it runs past the end of, so its middle alone does not tell. Picks that find no edge are
+/// refused.
+pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize) -> Result<Vec<Vec<Vec3>>> {
+    let (rec, chain, picked) = picked_chain(body, picks)?;
+    let n = per_edge.max(1).min(64);
+    chain
+        .into_iter()
+        .skip(picked)
+        .map(|e| edge_inner_points(&rec, e, n).ok_or_else(|| KernelError::Failed("points along a chain edge".into())))
+        .collect()
+}
+
+/// `n` points spread evenly inside edge `e`'s parameter interval, never at its ends.
+fn edge_inner_points(rec: &Faces, e: usize, n: usize) -> Option<Vec<Vec3>> {
+    let edge = rec.rec.edges.get(e)?;
+    let curve = CurveEval::new(edge.parameters()).ok()?;
+    let [a, b] = edge.interval;
+    let steps = (n + 1) as f64;
+    (1..=n).map(|k| curve.point(a + (b - a) * (k as f64 / steps))).collect()
+}
+
 /// The body's record, the picked edges' tangent chain as its edge indices (the picked edges
 /// first, each once), and how many of those the picks took.
 fn picked_chain(body: &Body, picks: &[Vec3]) -> Result<(Faces, Vec<usize>, usize)> {
