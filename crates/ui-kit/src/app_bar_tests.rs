@@ -742,13 +742,21 @@ fn a_view_drop_slot_shifts_only_neighbours_at_or_after_the_local_index() {
     let strip = egui::Id::unique("test_tabs");
     let first = rig.at("t:view:0");
     let second = rig.at("t:view:1");
+    let second_rect = solidcraft_ui_registry::rect_of("t:view:1").unwrap();
+    let plus = rig.at("t:vnew");
     set_view_drag_slot(&rig.ctx, strip, Some(1), 38.0);
     rig.frame(Vec::new());
     assert_eq!(rig.at("t:view:0"), first);
     assert_eq!(rig.at("t:view:1"), second + vec2(38.0 + VIEW_GAP, 0.0));
+    let gap = view_drag_gap(&rig.ctx, strip, 1).unwrap();
+    assert_eq!(gap.left_top(), second_rect.left_top());
+    assert_eq!(gap.size(), vec2(38.0, VIEW_HEIGHT));
+    assert_eq!(rig.at("t:vnew"), plus + vec2(38.0 + VIEW_GAP, 0.0));
     set_view_drag_slot(&rig.ctx, strip, None, 0.0);
     rig.frame(Vec::new());
     assert_eq!(rig.at("t:view:1"), second);
+    assert_eq!(rig.at("t:vnew"), plus);
+    assert!(view_drag_gap(&rig.ctx, strip, 1).is_none());
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.
