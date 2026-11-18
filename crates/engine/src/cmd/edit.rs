@@ -9,7 +9,6 @@ use solidcore_record::brep::{Loop, OrientedEdge};
 use solidcraft_doc::drawing::{self, Drawing};
 use solidcraft_doc::{Document, Feature, FeatureKind};
 
-
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
 use crate::schema::edit::{
