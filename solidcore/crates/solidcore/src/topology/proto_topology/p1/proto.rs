@@ -376,27 +376,30 @@ pub struct PositionFromPcs {
     pub deviation: f64,
 }
 
-/// Not upstream: the curve of the seam edge that the vertex `pc` classifies onto ends
-/// ([`vertex::seam_edge`]); `None` when `pc` is not on a vertex, that vertex ends no seam
-/// edge, or the adapter cannot resolve its handle.
+/// Not upstream: the curve of the seam `pc` classifies onto: the seam edge its vertex ends
+/// ([`vertex::seam_edge`]), or the seam edge itself when `pc` lies on one
+/// ([`vertex::is_seam_edge`]), where the definition's vertex will split it and end both
+/// pieces. `None` when `pc` is on neither, or the adapter cannot resolve its handle.
 ///
 /// # Errors
 ///
-/// Those of [`vertex::seam_edge`] and [`edge::curve`].
+/// Those of [`vertex::seam_edge`], [`vertex::is_seam_edge`] and [`edge::curve`].
 fn seam_curve<'g, O: ClassObject>(
     geometry: &'g impl ClassGeometry<O>,
     pc: &PointClassification<O>,
 ) -> Result<Option<&'g Curve>> {
-    if pc.point_class() != PointClassType::Vertex {
-        return Ok(None);
-    }
-    let Some((b, EntityRef::Vertex(v))) = pc.object().and_then(|o| geometry.topology_entity(o))
-    else {
+    let Some((b, entity)) = pc.object().and_then(|o| geometry.topology_entity(o)) else {
         return Ok(None);
     };
-    match vertex::seam_edge(b, v)? {
-        Some(e) => edge::curve(b, e),
-        None => Ok(None),
+    match (pc.point_class(), entity) {
+        (PointClassType::Vertex, EntityRef::Vertex(v)) => match vertex::seam_edge(b, v)? {
+            Some(e) => edge::curve(b, e),
+            None => Ok(None),
+        },
+        (PointClassType::Edge, EntityRef::Edge(e)) if vertex::is_seam_edge(b, e)? => {
+            edge::curve(b, e)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -3195,13 +3198,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// hull point covered.
     ///
     /// With `seam_vertex_stays_on_seam` (not upstream): a definition on a vertex that ends
-    /// a seam edge ([`vertex::seam_edge`]) is put onto that seam, at the seam's point under
-    /// the position worked out as upstream ([`onto_seam`]). The seam edge's curve is the
-    /// seam, an iso line of its face's surface, and its vertex ends that line; a vertex
-    /// moved off it leaves the seam edge's trims off the seam, which the face's seam test
-    /// refuses (test 36, a suspicious edge near the seam) when another edge runs beside the
-    /// seam there. Along the seam the definition still moves as upstream's, sharing the gap
-    /// with the other object. With both sides on seam vertices the first's seam holds it.
+    /// a seam edge ([`vertex::seam_edge`]), or on a seam edge itself, is put onto that seam,
+    /// at the seam's point under the position worked out as upstream ([`onto_seam`]). The
+    /// seam edge's curve is the seam, an iso line of its face's surface, and its vertex ends
+    /// that line; a definition on the seam edge makes a vertex that splits it and ends both
+    /// pieces. A vertex off the seam leaves the seam edge's trims off the seam, which the
+    /// face's seam test refuses (test 36, a suspicious edge near the seam) when another edge
+    /// runs beside the seam there: two edges crossing within tolerance, one of them a seam,
+    /// are blended halfway (`find_position_from_pcs`), which puts the crossing off the seam
+    /// by half the other edge's offset across it (#18689). Along the seam the definition
+    /// still moves as upstream's, sharing the gap with the other object. With both sides on
+    /// seams the first's seam holds it.
     ///
     /// # Errors
     ///
@@ -3242,7 +3249,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
-        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex keeps to
+        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex or edge keeps to
         let seam = if k.fixes.seam_vertex_stays_on_seam {
             match seam_curve(geometry, &v.pc1)? {
                 Some(c) => Some(c),

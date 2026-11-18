@@ -161,6 +161,18 @@ pub fn step(id: &str, params: Option<&Value>, error: Option<&str>, home: Option<
             let name = path.rsplit(['/', '\\']).next().unwrap_or_default();
             s["file"] = json!(super::limited(name, 200));
         }
+        if id == "file.import" {
+            // Preserve the importer slot and option names without leaking option values.
+            // Plugin options can contain local paths or private configuration (#18760).
+            if let Some(importer) = p.get("format").and_then(Value::as_str) {
+                s["importer"] = json!(importer.chars().filter(|c| !c.is_control()).take(120).collect::<String>());
+            }
+            if let Some(options) = p.get("options").and_then(Value::as_object) {
+                s["option_keys"] = json!(
+                    options.keys().take(32).map(|key| key.chars().filter(|c| !c.is_control()).take(100).collect::<String>()).collect::<Vec<_>>()
+                );
+            }
+        }
         return s;
     }
     if serde_json::to_string(p).map_or(usize::MAX, |t| t.len()) > MAX_STEP_PARAMS {
@@ -272,6 +284,16 @@ fn design_for(app: &SolveApp, crash: Option<&Value>) -> DesignChoice {
     (Some((design_name(app), solidcraft_engine::io::write_design(&app.session.doc))), None, None)
 }
 
+/// A failed importer reads a separate file; its error does not require the open design.
+fn failed_plugin_import(app: &SolveApp, failing: Option<&payload::Failing>) -> bool {
+    match failing {
+        Some(f) if f.command.is_some() => f.command.as_deref() == Some("file.import"),
+        _ => app.issue_report.steps.back().is_some_and(|step| {
+            step.get("command").and_then(Value::as_str) == Some("file.import") && step.get("ok").and_then(Value::as_bool) == Some(false)
+        }),
+    }
+}
+
 /// Everything the boxes can attach, collected when the report opens. `failing`: the operation
 /// the report is about, if any.
 pub fn evidence(
@@ -282,12 +304,21 @@ pub fn evidence(
 ) -> payload::Evidence {
     // A crash report that does not read is still about the crash: it then has no design to give.
     let report: Option<Value> = crash.as_ref().map(|(_, json)| serde_json::from_str(json).unwrap_or(Value::Null));
-    let (design, design_from, design_said) = design_for(app, report.as_ref());
+    let import_failed = report.is_none() && failed_plugin_import(app, failing.as_ref());
+    let (design, design_from, design_said) = if import_failed {
+        // The failed plugin read a different input file. Offering the open design risks sharing
+        // unrelated private work and cannot reproduce the failure (#18760).
+        (None, Some("report.design_unrelated_import"), Some("none: the failed plugin import read a separate input file"))
+    } else {
+        design_for(app, report.as_ref())
+    };
     // How to get back to where the failure happened: the design (its history is in the file)
     // plus the one failed operation, on this exact build.
     let mut session = serde_json::Map::new();
     let start = match (&report, design_from) {
         (Some(_), _) => "crashed",
+        (None, Some("report.design_unrelated_import")) if app.session.path.is_some() => "opened",
+        (None, Some("report.design_unrelated_import")) => "new",
         (None, Some(_)) => "recovered",
         (None, None) if app.session.path.is_some() => "opened",
         (None, None) => "new",

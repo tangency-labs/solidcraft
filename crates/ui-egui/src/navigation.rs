@@ -259,6 +259,16 @@ pub(crate) fn immediate_wheel(
                 *bracketed = false;
                 continue;
             }
+            egui::TouchPhase::Move if !point => {
+                // Lines or pages come from a wheel, which never sends an End: a finger's
+                // gesture is over, and a bracket a wheel's pixel scroll opened is closed with
+                // it, so the view stops counting as moving and clicks pick again (#17871).
+                if *gesture {
+                    coast.end(input.time);
+                }
+                *gesture = false;
+                *bracketed = false;
+            }
             egui::TouchPhase::Move => {
                 if point && matches!(source, egui::MouseWheelSource::Trackpad) {
                     // A finger keeps its bracket open between the moves: the fingers rest
@@ -2013,6 +2023,33 @@ mod tests {
             ),
             events,
         )
+    }
+
+    /// #17871: on Wayland a hi-res wheel's scroll between two notches arrives as points with a
+    /// `Start` and never an `End`; the wheel's next whole notch (lines) closes that bracket.
+    #[test]
+    fn a_wheel_notch_closes_a_bracket_its_pixel_scroll_opened() {
+        let options = egui::InputOptions::default();
+        let event = |phase, unit| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit,
+            delta: egui::vec2(0.0, 1.0),
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        let mut gesture = false;
+        let mut bracketed = false;
+        let mut coast = super::TrackpadCoast::default();
+        let mut input = egui::InputState::default();
+        input.events = vec![event(egui::TouchPhase::Start, egui::MouseWheelUnit::Point), event(egui::TouchPhase::Move, egui::MouseWheelUnit::Point)];
+        super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
+        assert!(gesture && bracketed, "the pixel scroll opened a bracket");
+        let mut input = egui::InputState::default();
+        input.events = vec![event(egui::TouchPhase::Move, egui::MouseWheelUnit::Line)];
+        let raw =
+            super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
+        assert!(!gesture && !bracketed, "the wheel's notch closes it");
+        assert_ne!(raw.zoom, 0.0, "and still zooms");
     }
 
     /// #2130: the platform's bracket around a trackpad gesture stays open from its

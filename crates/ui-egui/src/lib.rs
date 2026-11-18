@@ -19,6 +19,9 @@ pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
+pub mod browser_search;
+#[cfg(test)]
+mod browser_search_tests;
 pub mod canvas;
 pub mod cli_link;
 #[cfg(test)]
@@ -1535,6 +1538,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
+        // The rules below name registered ids; a command spelled in another case is the same
+        // command (the engine runs it), so it meets the same rules.
+        let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(self.tr("prefs.plugin_busy").into());
@@ -2805,6 +2811,20 @@ impl SolveApp {
             let _ = self.run_heavy(id, json!({}));
             return;
         }
+        // Move Features to Component takes the features selected in the Browser or the History,
+        // into the active component; started with none, it says so instead of the command's
+        // "`features` must list 1...1000 features" (#18702).
+        if id == "component.move_features" {
+            let features = timeline::selected_feature_ids(self);
+            if features.is_empty() {
+                let hint = self.tr("ui.move_features_needs_features").to_owned();
+                self.set_status(hint, true);
+                self.restore_command_tab();
+            } else if self.run(id, json!({ "features": features })).is_err() {
+                self.restore_command_tab();
+            }
+            return;
+        }
         // Change Part Size with no standard part selected (its dialog had nothing to open on).
         if id == "parts.resize" {
             dialogs_part_size::needs_a_part(self);
@@ -3259,6 +3279,29 @@ impl SolveApp {
         self.set_status(text, false);
     }
 
+    /// Tell the user when the open design keeps data of a plugin that can't change it here: one
+    /// that isn't installed, is turned off, or is older than the data. The data is kept and saved
+    /// back unchanged either way; nothing is installed or run.
+    pub(crate) fn say_plugin_data(&mut self) {
+        if self.session.doc.plugin_data.is_empty() {
+            return;
+        }
+        let Ok(listed) = self.session.execute("storage.list", &serde_json::json!({})) else { return };
+        for plugin in listed.get("plugins").and_then(serde_json::Value::as_array).into_iter().flatten() {
+            let text = |key: &str| plugin.get(key).and_then(serde_json::Value::as_str).unwrap_or_default();
+            let key = match (text("status"), text("plugin_version").is_empty()) {
+                ("missing", false) => "plugin_data.missing",
+                ("missing", true) => "plugin_data.missing_unversioned",
+                ("disabled", _) => "plugin_data.disabled",
+                ("older", _) => "plugin_data.older",
+                _ => continue,
+            };
+            let message = solidcraft_ui_text::format(key, &[("name", text("name")), ("version", text("plugin_version"))]);
+            self.messages.push(&message, false, now_ms());
+            self.set_status(message, false);
+        }
+    }
+
     /// Say what a design's signature check found (a `doc.open {verify: true}` or `file.verify`).
     pub(crate) fn say_signature(&mut self, result: &serde_json::Value) {
         let Some(signature) = result.get("signature") else { return };
@@ -3339,6 +3382,7 @@ impl SolveApp {
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
             self.say_newer_file();
+            self.say_plugin_data();
             self.say_signature(&r);
         }
     }
@@ -3972,6 +4016,11 @@ impl SolveApp {
         finite_input(raw);
         self.hold_click_after_typing(raw);
         issue_report::hold_input(self, raw);
+        // Over a quiet view, pointer motion asks egui for no frame after this one: the window
+        // asked for this one only if the motion lit up something new
+        // (`viewport::follow_pointer_without_frame`). Queued control-channel input keeps the frames
+        // coming as before, one pointer event a frame.
+        raw.repaint_on_pointer_move = self.viewport.quiet_motion.is_none() || !self.synthetic.is_empty() || !self.held_click.is_empty();
     }
 
     /// A pointer button after typing in the same frame (a slow frame) waits for the next frame,
@@ -4246,7 +4295,6 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        drawing_workspace::reconcile(self);
         if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 // This is the existing source manufacturing inspector, not a drawing scene.

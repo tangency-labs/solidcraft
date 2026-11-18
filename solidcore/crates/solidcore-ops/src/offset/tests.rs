@@ -359,6 +359,52 @@ fn a_spheres_cap_moves_out_over_a_step() {
     moved_to(&b, &[[0.0, 0.0, 50.0]], 4.0, v, [4, 8, 6]);
 }
 
+/// A sphere r 50 with its top cut off at z = 30: the flat cap, a disc of r 40, meets the
+/// sphere at an angle along its rim, and the sphere's top is 20 above it.
+fn cut_ball() -> Body {
+    let ball = make_sphere([0.0; 3], 50.0).unwrap();
+    let above = make_box([-60.0, -60.0, 30.0], [120.0, 120.0, 40.0]).unwrap();
+    crate::boolean::boolean(ball, above, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The cut ball's cap moved out 10, to z = 40, still meets the sphere: the ball below
+/// z = 40, V = pi (R + h)² (2R - h) / 3 = pi 90² 60 / 3.
+#[test]
+fn a_cut_balls_cap_moves_out_within_the_sphere() {
+    all_fixes();
+    let b = cut_ball();
+    let o = order(&b);
+    offset_faces(&b, &o, &[through(&b, &o, [0.0, 0.0, 30.0])], 10.0).unwrap();
+    let expected = PI * 8100.0 * 60.0 / 3.0;
+    assert!(rel(volume(&b), expected) < 1e-9, "{}", volume(&b));
+}
+
+/// The cut ball's cap moved out 25, to z = 55, past the sphere's top at z = 50: the sphere
+/// beside it can't be extended to meet it, so the move is refused before anything changes,
+/// naming the cap and how far it could move, 20 (#18564). It was refused late, as a body
+/// that is not a manifold solid (or, hollowed, as a move that moved no face).
+#[test]
+fn a_cut_balls_cap_moved_past_the_sphere_is_refused_with_the_room() {
+    all_fixes();
+    let b = cut_ball();
+    let o = order(&b);
+    let cap = through(&b, &o, [0.0, 0.0, 30.0]);
+    let before = volume(&b);
+    match offset_faces(&b, &o, &[cap], 25.0) {
+        Err(Error::OffsetRefused {
+            face,
+            why: crate::OffsetRefusal::PastSide { largest },
+        }) => {
+            assert_eq!(face, Some(cap));
+            assert!((largest - 20.0).abs() < 1e-9, "{largest}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
+}
+
 /// The upper half of a frustum's side (r 50 at z = 0 to r 30 at z = 100, split at z = 50)
 /// moved out 4: the cone 4 out beside the cone it came from never meets it, and the cone of
 /// normals through the split circle closes the step. In a half-plane through the axis the

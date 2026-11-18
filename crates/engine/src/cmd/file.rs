@@ -57,13 +57,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a FreeCAD or Rhino file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences or joints: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences or joints: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); reader?: solidcraft|cadmpeg for a FreeCAD or Rhino file's solids (default solidcraft: cadmpeg's STEP writer restates them as STEP, which SolidCraft's own STEP reader reads and the Import feature keeps; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -271,6 +271,10 @@ pub(crate) fn names_form(v: &Value) -> Option<solidcraft_io::StepNames> {
     v.as_str().and_then(solidcraft_io::StepNames::parse)
 }
 
+/// What `reader` says when it is neither reader, as `step_options` and the command schemas have it.
+pub(crate) const READER_MESSAGE: &str =
+    "`reader` must be \"solidcraft\" (SolidCraft's own STEP reader) or \"cadmpeg\" (cadmpeg's model read into records)";
+
 /// How a STEP or IGES file comes in beyond its path: which way is up in the file, and what its
 /// bodies are named after.
 struct StepOptions {
@@ -288,6 +292,9 @@ struct StepOptions {
     /// after their part where the file gives them a placeholder. `false` (the default) keeps the
     /// file's assembly structure.
     flatten: bool,
+    /// `reader: "cadmpeg"`: a FreeCAD or Rhino file's solids are read from cadmpeg's model straight
+    /// into records; `solidcraft` (the default) restates them as STEP for SolidCraft's own reader.
+    reader: solidcraft_io::StepReader,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -323,7 +330,11 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             }
         },
     };
-    Ok(StepOptions { y_up, names, folder, history, flatten: false })
+    let reader = match p.get("reader") {
+        None | Some(Value::Null) => solidcraft_io::StepReader::default(),
+        Some(v) => v.as_str().and_then(solidcraft_io::StepReader::parse).ok_or_else(|| bad(cmd, READER_MESSAGE))?,
+    };
+    Ok(StepOptions { y_up, names, folder, history, flatten: false, reader })
 }
 
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
@@ -411,7 +422,8 @@ fn add_step_bytes(
             Err(why) => not_rebuilt = Some(format!("the feature history was not rebuilt, so the file's solids were imported instead: {why}")),
         }
     }
-    let mut sf = solidcraft_io::step_import_feature_named(bytes, path, options.names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let mut sf = solidcraft_io::step_import_feature_read(bytes, path, options.names, options.reader)
+        .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     sf.warnings.splice(0..0, not_rebuilt);
     add_read_step(s, path, name, options, sf, bytes, profiled)
 }
@@ -1363,6 +1375,23 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     opened_design(s, opened, path, read_only, disk, verify, None)
 }
 
+/// Whether running `command` with `params` runs an installed importer plugin's code:
+/// `file.import` always does; `doc.open` does for a file an installed, enabled importer opens
+/// (one SolidCraft doesn't read itself, or any file with `format`). Reads manifests only.
+pub fn runs_plugin_importer(s: &Session, command: &str, params: &Value) -> bool {
+    if command.eq_ignore_ascii_case("file.import") {
+        return true;
+    }
+    if !command.eq_ignore_ascii_case("doc.open") {
+        return false;
+    }
+    let Some(path) = params.get("path").and_then(Value::as_str) else { return false };
+    let format = params.get("format").and_then(Value::as_str);
+    // An ambiguous claim is refused before any plugin runs; anything else that names an
+    // importer would run it.
+    (format.is_some() || !reads_natively(path)) && !matches!(crate::plugin::importer_for(s, path, format), Ok(None))
+}
+
 /// SolidCraft opens this file with its own readers (a design, drawing, CAD, mesh or point cloud file).
 fn reads_natively(path: &str) -> bool {
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
@@ -1686,6 +1715,31 @@ fn write_file(
     write_bytes(s, path, format, compression, preview, cache, sign, signing_key)
 }
 
+/// Report a requested model cache missing from the file just written. Inspecting the
+/// container directory avoids decoding the large model a second time (#18815).
+fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> Option<String> {
+    if !cache || format != "container" || s.doc.features.is_empty() {
+        return None;
+    }
+    let present = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).ok()?.has_model_cache();
+    if present {
+        return None;
+    }
+    let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
+        let feature = s.doc.feature(result.id).map_or("a timeline feature", |f| f.name.as_str());
+        format!("feature {feature} has an error")
+    } else if s.active_sketch.is_some() {
+        "a sketch is being edited".into()
+    } else if !s.pending_moves.is_empty() {
+        "temporary component placements are active (for example an exploded view)".into()
+    } else if s.model.state().bodies.is_empty() {
+        "there are no evaluated bodies to cache".into()
+    } else {
+        "the cache could not fit or be encoded within the design file budget".into()
+    };
+    Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+}
+
 fn write_bytes(
     s: &mut Session,
     path: &str,
@@ -1731,6 +1785,7 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
+    let cache_not_saved = missing_save_cache(s, format, cache, &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -1749,7 +1804,8 @@ fn write_bytes(
         bytes: bytes.len(),
         name: s.doc.name.clone(),
         kept_format: None,
-        warnings: None,
+        warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
+        cache_not_saved,
         not_kept: None,
         param_warnings: Vec::new(),
         signature,
@@ -1763,7 +1819,7 @@ fn write_bytes(
         }
         out.kept_format = Some(s.doc.format.clone());
         if !lost.is_empty() {
-            out.warnings = Some(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect());
+            out.warnings.get_or_insert_with(Vec::new).extend(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")));
             out.not_kept = Some(lost);
         }
     }
@@ -2290,8 +2346,14 @@ fn export_to(
         bytes
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
+    let skipped = skipped_from_warnings(&warnings);
+    let reply =
+        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), skipped, warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn skipped_from_warnings(warnings: &[String]) -> Vec<String> {
+    warnings.iter().filter_map(|w| w.split_once(": skipped: meshing failed").map(|(b, _)| b.to_string())).collect()
 }
 
 /// A picture of the part, drawn only for a format that has a place for it.
@@ -2344,11 +2406,13 @@ fn export_laid(
     quality: solidcraft_io::MeshQuality,
 ) -> Result<Value> {
     let (bytes, laid) = write_laid(s, path, format, bodies, parts, quality)?;
+    let skipped = skipped_from_warnings(&laid.warnings);
     let reply = ExportResult {
         path: path.to_string(),
         bytes,
         format: format!("{format:?}"),
         print_faces: laid.bodies,
+        skipped,
         warnings: laid.warnings,
         ..ExportResult::default()
     };
@@ -3529,7 +3593,11 @@ mod tests {
         s.execute("file.save", &json!({})).unwrap();
         s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
         assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
-        s.execute("file.save", &json!({})).unwrap();
+        let saved = s.execute("file.save", &json!({})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("temporary placements omit the model cache");
+        assert!(notice.contains("temporary component placements"), "{notice}");
+        assert!(!notice.contains("design file budget"), "do not misdiagnose an eligible-model encoding failure: {notice}");
+        assert_eq!(saved["warnings"][0], notice);
         s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
         assert!(s.is_dirty());
         assert!(s.execute("file.save", &json!({})).is_err());
@@ -3661,6 +3729,53 @@ mod tests {
         assert!(editing.active_sketch.is_some());
         assert!(saved_preview(&editing).is_none());
         assert!(saved_geometry(&editing, &editing.doc).is_none());
+    }
+
+    /// A save with a failing feature succeeds but explains that its missing model cache will
+    /// make the next open rebuild the timeline. Plain JSON and explicit cache:false are
+    /// unchanged; an ordinary cache is still silent (#18815).
+    #[test]
+    fn saving_a_failed_feature_reports_missing_cache_without_losing_the_design() {
+        let path = std::env::temp_dir().join(format!("solidcraft-cache-error-{}.sc", std::process::id()));
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"name":"Block"})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,15],"operation":"cut","name":"Pocket"})).unwrap();
+        s.execute("solid.fillet", &json!({"edges":[[2.5,5,15]],"radius":1,"name":"Round"})).unwrap();
+        s.execute("timeline.suppress", &json!({"feature":"Pocket","suppressed":true})).unwrap();
+        assert!(s.model.results.iter().any(|r| r.error.is_some()), "the suppressed Pocket leaves Round invalid");
+        let saved = s.execute("file.save", &json!({"path":path})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("a failing feature must be reported");
+        assert!(notice.contains("Round") && notice.contains("error"), "{notice}");
+        assert_eq!(saved["warnings"][0], notice);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
+        assert_eq!(solidcraft_io::read_design(&bytes).unwrap().to_json(), s.doc.to_json(), "the authoritative design is saved");
+
+        let disabled = s.execute("file.save", &json!({"cache":false})).unwrap();
+        assert!(disabled.get("cache_not_saved").is_none());
+        assert!(disabled.get("warnings").is_none(), "deliberately omitting the cache is not a warning");
+        let json_path = path.with_extension("json");
+        let plain = s.execute("file.save_as", &json!({"path":json_path})).unwrap();
+        assert!(plain.get("cache_not_saved").is_none(), "JSON cannot contain a native model cache");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&json_path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+    }
+
+    /// A valid model with no cache in a container gets the budget/encoding warning; a real
+    /// cached container does not. No model decode is needed for this diagnosis.
+    #[test]
+    fn saved_model_cache_presence_is_detected_without_recomputing_bodies() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+        let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
+        let notice = missing_save_cache(&s, "container", true, &omitted).unwrap();
+        assert!(notice.contains("design file budget"), "{notice}");
+        assert!(missing_save_cache(&s, "container", false, &omitted).is_none());
+        assert!(missing_save_cache(&s, "json", true, &omitted).is_none());
+        let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        assert!(missing_save_cache(&s, "container", true, &included).is_none());
     }
 
     #[test]

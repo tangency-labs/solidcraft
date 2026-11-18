@@ -1855,7 +1855,7 @@ pub(super) mod round_definition_proof {
     use solidcore::kernel::Kernel;
     use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume};
     use solidcore::mass::integrator::properties::{
-        brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
+        brep_mass_properties, MassProperties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
     use solidcore::math::Vec3;
     use solidcore::surface::surface::Surface;
@@ -1864,6 +1864,16 @@ pub(super) mod round_definition_proof {
 
     /// The golden's requested relative accuracy of the mass properties.
     pub(in super::super) const MASS_ACCURACY: f64 = 1e-4;
+
+    /// The integrator's estimates of a closed body's mass values (density 1, about the
+    /// origin), taken once by [`volume_band`] and read again by [`mass_bands`]: at the
+    /// golden's accuracy and at the integrator's finest, where it converges.
+    pub(in super::super) struct Estimates {
+        /// At [`MASS_ACCURACY`], as the golden measures.
+        golden: MassProperties,
+        /// At [`ESTIMATE_ACCURACY_FINEST`].
+        converged: MassProperties,
+    }
 
     /// The faces of `b` whose surface is a blend by its definition, each with the proved
     /// distance `d_f` between its net and its definition (`recertify`, at most its bound);
@@ -1913,28 +1923,30 @@ pub(super) mod round_definition_proof {
     /// [`certified_blends`]). Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
     /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
-    /// printed beside the band for the record only: an estimate is not a bound.
+    /// printed beside the band for the record only: an estimate is not a bound. Returns
+    /// both estimates, for [`mass_bands`].
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
         blends: &[(FaceId, f64)],
         old: f64,
         name: &str,
-    ) {
+    ) -> Estimates {
         let spread = spread(k, b, blends);
         let store = solidcore::geom::attribute::AttributeStore::default();
         let attributes = PropertyAttributes {
             store: &store,
             key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
         };
-        let mut volume = |accuracy: f64| {
-            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes)
-                .unwrap()
-                .properties
-                .volume
+        let mut at = |accuracy: f64| {
+            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap()
         };
-        let new = volume(MASS_ACCURACY);
-        let converged = volume(ESTIMATE_ACCURACY_FINEST);
+        let estimates = Estimates {
+            golden: at(MASS_ACCURACY),
+            converged: at(ESTIMATE_ACCURACY_FINEST),
+        };
+        let new = estimates.golden.properties.volume;
+        let converged = estimates.converged.properties.volume;
         let enclosure = enclose_volume(k, b, 1e-6 * new.abs()).unwrap();
         let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
         assert!(
@@ -1946,6 +1958,7 @@ pub(super) mod round_definition_proof {
              certified [{lo}, {hi}], band width {:e}",
             hi - lo
         );
+        estimates
     }
 
     /// The certified bands of the closed body `b`'s other mass values, as the golden
@@ -1960,21 +1973,15 @@ pub(super) mod round_definition_proof {
     /// within that accuracy of it; prints `PROVEN` where the band is at most that accuracy
     /// wide (the golden's value is then within twice its accuracy of the true one) and
     /// `WIDE` where it is not. The bands are of the body as stored (its nets), which is the
-    /// body the golden measures.
-    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, name: &str) {
+    /// body the golden measures. The estimates are [`volume_band`]'s, of the same body.
+    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, estimates: &Estimates, name: &str) {
         use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
-        let store = solidcore::geom::attribute::AttributeStore::default();
-        let attributes = PropertyAttributes {
-            store: &store,
-            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
-        };
-        let mut at = |accuracy: f64| {
-            let m = brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap();
+        let at = |m: &MassProperties| {
             let v = |p: Vec3| [p.x, p.y, p.z];
             (m.properties.area, v(m.centroid), v(m.inertia), v(m.products))
         };
-        let golden = at(MASS_ACCURACY);
-        let converged = at(ESTIMATE_ACCURACY_FINEST);
+        let golden = at(&estimates.golden);
+        let converged = at(&estimates.converged);
         let e = enclose_mass_properties(k, b, 1e-5).unwrap();
         if let Some((q, stop)) = e.short {
             eprintln!("{name}: the {q:?} enclosure stopped at {stop:?}, its band wider");
@@ -2206,8 +2213,8 @@ pub(super) mod round_definition_rows {
             }
             let blends = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
-                volume_band(&k, &mut body, &blends, old, name);
-                mass_bands(&k, &mut body, name);
+                let estimates = volume_band(&k, &mut body, &blends, old, name);
+                mass_bands(&k, &mut body, &estimates, name);
             }
         }
     }
