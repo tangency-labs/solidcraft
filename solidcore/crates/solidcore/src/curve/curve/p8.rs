@@ -2769,11 +2769,14 @@ impl Curve {
                 // the touch is the only place in the stretch where the curves meet,
                 // certified over the whole stretch ([`touch_is_alone`]: a straight curve
                 // against one whose second derivative across it keeps one sign over the
-                // stretch; or [`curves_meet_at_most_once`], for curves that pass through
+                // stretch; [`curves_meet_at_most_once`], for curves that pass through
                 // each other in space with both ends of the stretch on one side, as a
-                // line through a space curve); else the stretch may hold more than that
-                // one contact (an exact overlap, a fitted copy touching its edge where the
-                // fit is exact, two touches) and keeps its ranges
+                // line through a space curve; or [`meetings_lie_in_one_interval`], for a
+                // curve leaving a planar curve's plane on either side of the touch, as a
+                // section of a surface tangent to that plane along the planar curve);
+                // else the stretch may hold more than that one contact (an exact
+                // overlap, a fitted copy touching its edge where the fit is exact, two
+                // touches) and keeps its ranges
                 if !(touch_is_alone(
                     k,
                     self,
@@ -2781,7 +2784,8 @@ impl Curve {
                     other,
                     stretches.1,
                     [touch[0], touch[1]],
-                )? || curves_meet_at_most_once(k, self, stretches.0, other, stretches.1))
+                )? || curves_meet_at_most_once(k, self, stretches.0, other, stretches.1)
+                    || meetings_lie_in_one_interval(self, stretches.0, other, stretches.1))
                 {
                     continue;
                 }
@@ -2985,14 +2989,20 @@ impl StretchSpline {
     /// [`MAX_STRETCH_POINTS`] points, a 2D curve, or anything not finite or a weight not
     /// positive.
     fn of(curve: &Curve, lo: f64, hi: f64, projected: bool) -> Option<Self> {
+        Self::of_up_to(curve, lo, hi, projected, MAX_STRETCH_POINTS)
+    }
+
+    /// [`StretchSpline::of`] with at most `most` control points in place of
+    /// [`MAX_STRETCH_POINTS`] (for a certificate whose work grows only with their count).
+    fn of_up_to(curve: &Curve, lo: f64, hi: f64, projected: bool, most: usize) -> Option<Self> {
         if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
             return None;
         }
         let spline = match curve.kind() {
-            CurveKind::BSpline(c) => Self::of_nurb(c.nurb_ref().ok()?, lo, hi)?,
-            CurveKind::Ellipse(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi)?,
-            CurveKind::Parabola(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi)?,
-            CurveKind::Hyperbola(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi)?,
+            CurveKind::BSpline(c) => Self::of_nurb(c.nurb_ref().ok()?, lo, hi, most)?,
+            CurveKind::Ellipse(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi, most)?,
+            CurveKind::Parabola(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi, most)?,
+            CurveKind::Hyperbola(c) => Self::of_nurb(c.base().nurb_ref().ok()?, lo, hi, most)?,
             CurveKind::Line(l) => {
                 // affine in the parameter: the segment between its points at the ends of
                 // the stretch, each computed from `point + s vector scale` (a few
@@ -3038,7 +3048,7 @@ impl StretchSpline {
             {
                 // `x - n ((x - o) . n)` is affine: the control points map by it (in
                 // homogeneous form, `x w - n ((x w - o w) . n)`)
-                let base = Self::of(pc.curve(), lo, hi, true)?;
+                let base = Self::of_up_to(pc.curve(), lo, hi, true, most)?;
                 let (n, o) = (pc.proj_vec(), pc.proj_point());
                 let stretch = 1.0 + n.dot(n);
                 let points = base
@@ -3066,7 +3076,7 @@ impl StretchSpline {
     }
 
     /// The spans of a NURB meeting `[lo, hi]`, with the control points and knots they use.
-    fn of_nurb(nurb: &NurbCurve, lo: f64, hi: f64) -> Option<Self> {
+    fn of_nurb(nurb: &NurbCurve, lo: f64, hi: f64, most: usize) -> Option<Self> {
         let p = nurb.degree();
         let (cpts, knots) = (nurb.cpts(), nurb.knots());
         let n = cpts.len().checked_sub(1)?;
@@ -3090,7 +3100,7 @@ impl StretchSpline {
         };
         let first = (p..=n).find(|&j| meets(j))?;
         let last = (p..=n).rev().find(|&j| meets(j))?;
-        if last + 1 - first + p > MAX_STRETCH_POINTS {
+        if last + 1 - first + p > most {
             return None;
         }
         let rational = nurb.is_rational();
@@ -3983,6 +3993,260 @@ fn touch_is_alone_against(
     Ok(one_contact(2.0 * (2.0 * (eps - least) / kappa).sqrt()))
 }
 
+/// The most pieces [`meetings_lie_in_one_interval`] cuts a stretch into (bounded work).
+const MAX_BAND_PIECES: usize = 4096;
+
+/// What [`meetings_lie_in_one_interval`] certified over one piece of the stretch.
+#[derive(Clone, Copy)]
+struct BandPiece {
+    /// The offset is within the band over the whole piece.
+    inside: bool,
+    /// The offset is past the band (on one side) over the whole piece.
+    outside: bool,
+    /// The offset's derivative has this sign over the whole piece (0: not certified).
+    slope: i8,
+}
+
+/// Not upstream (WR-647): a certificate that the meetings of a curve with a planar curve
+/// (a conic, or a planar spline) over the stretches `[a.0, a.1]` and `[b.0, b.1]` all lie
+/// in one interval of the other curve's parameter, over which that curve stays within the
+/// scaled zero of the planar curve's plane, tried both ways round. It is what certifies a
+/// touch where the curves separate across that plane: a section of a surface tangent to
+/// the planar curve's plane, along the curve (a fourth order touch, whose curves stay
+/// within a tolerance of each other far from it).
+///
+/// The plane: `p0`, the planar curve's first control point, and `n`, a normal from its
+/// control points; `eps_b` bounds `|n . (y - p0)|` over them, so over the planar curve's
+/// stretch (inside their hull, its weights positive), and is at most the scaled zero
+/// below (a curve only near a plane is not taken as planar). A meeting is a point of the other
+/// curve within the scaled zero `z = EFF_ZERO (1 + size)` of the planar curve (the touch's
+/// own test, `size` bounding both curves' coordinates), where `f = n . (c(u) - p0)` is
+/// within `|n| z + eps_b`, so `g = w f = n . (x w - w p0)` (a scalar spline with the
+/// homogeneous control points' offsets as coefficients) within the band
+/// `(|n| z + eps_b) w_max`. The stretch is cut at its knots and the pieces are halved
+/// until each is certified, from its Bernstein coefficients (each from the blossom, every
+/// rounding counted): inside the band, past it, or with `g` monotone (the coefficient
+/// differences of one sign). Then the set where `g` is within the band is one interval
+/// when, after the pieces past it at either end, the pieces inside it are one run, the
+/// pieces before it all monotone the same way and those after it too (a monotone `g` meets
+/// the band in an interval holding the run's end, and with no run inside it a single
+/// monotone run meets it in an interval). The other curve wholly within the band (all
+/// pieces inside: the curves in one plane, where the plane does not separate them) gets no
+/// certificate.
+///
+/// `false` (no certificate) for a curve kind [`StretchSpline::of`] does not take (a stretch
+/// over more than [`MAX_BAND_PIECES`] control points, not [`MAX_STRETCH_POINTS`]: the
+/// work here grows only with their count), a planar curve whose control points span no
+/// plane, more than [`MAX_BAND_PIECES`] pieces or
+/// [`MAX_SUBDIVISION_LEVELS`] halvings, or a NaN.
+pub fn meetings_lie_in_one_interval(
+    a: &Curve,
+    a_stretch: (f64, f64),
+    b: &Curve,
+    b_stretch: (f64, f64),
+) -> bool {
+    [(a, a_stretch, b, b_stretch), (b, b_stretch, a, a_stretch)]
+        .into_iter()
+        .any(|(planar, p_stretch, other, o_stretch)| {
+            meetings_in_one_interval_against(planar, p_stretch, other, o_stretch).is_some()
+        })
+}
+
+/// [`meetings_lie_in_one_interval`] with `planar` the planar curve: `Some(())` when
+/// certified.
+fn meetings_in_one_interval_against(
+    planar: &Curve,
+    p_stretch: (f64, f64),
+    other: &Curve,
+    o_stretch: (f64, f64),
+) -> Option<()> {
+    let flat = StretchSpline::of_up_to(planar, p_stretch.0, p_stretch.1, false, MAX_BAND_PIECES)?;
+    let spline = StretchSpline::of_up_to(other, o_stretch.0, o_stretch.1, false, MAX_BAND_PIECES)?;
+    // the plane: p0, and n from the farthest control point and the one farthest across
+    let points: Vec<(Vec3, f64)> = (0..flat.points.len())
+        .map(|i| flat.point(i))
+        .collect::<Option<_>>()?;
+    let &(p0, _) = points.first()?;
+    let far = points
+        .iter()
+        .map(|&(y, _)| y - p0)
+        .fold(
+            Vec3::ZERO,
+            |m, d| if d.length() > m.length() { d } else { m },
+        );
+    let normal = points
+        .iter()
+        .map(|&(y, _)| far.cross(y - p0))
+        .fold(
+            Vec3::ZERO,
+            |m, d| if d.length() > m.length() { d } else { m },
+        );
+    let normal_length = normal.length();
+    if !above(normal_length, 0.0) {
+        return None;
+    }
+    let n = normal * (1.0 / normal_length);
+    let n_length = n.length() * (1.0 + gamma(4));
+    // eps_b: |n . (y - p0)| over the control points, each rounding counted
+    let offset_rounding = |d: Vec3, y: Vec3, scale: f64| {
+        let comp = |nc: f64, yc: f64, pc: f64, dc: f64| {
+            nc.abs() * (gamma(2) * (yc.abs() + pc.abs() * scale) + gamma(3) * dc.abs())
+        };
+        comp(n.x, y.x, p0.x, d.x) + comp(n.y, y.y, p0.y, d.y) + comp(n.z, y.z, p0.z, d.z)
+    };
+    let mut eps_b: f64 = 0.0;
+    for &(y, err) in &points {
+        let d = y - p0;
+        let bound =
+            (n.dot(d).abs() + offset_rounding(d, y, 1.0) + n_length * err) * (1.0 + gamma(8));
+        eps_b = max2(eps_b, bound);
+    }
+    // the scaled zero of the meeting test over both curves, and the band of g
+    let mut size: f64 = 0.0;
+    for &(y, err) in &points {
+        size = max2(size, y.max_dimension() + err);
+    }
+    let mut w_max: f64 = 0.0;
+    for i in 0..spline.points.len() {
+        let (x, err) = spline.point(i)?;
+        size = max2(size, x.max_dimension() + err);
+        w_max = max2(w_max, spline.points.get(i)?.1);
+    }
+    let zero = EFF_ZERO * (1.0 + size);
+    // planar: within the scaled zero of its plane (a curve only near a plane is not
+    // separated from the other by it)
+    if eps_b.is_nan() || above(eps_b, n_length * zero) {
+        return None;
+    }
+    let band = (n_length * zero + eps_b) * w_max * (1.0 + gamma(8));
+    if !band.is_finite() {
+        return None;
+    }
+    // the Bernstein coefficients of g over a piece, each (value, error)
+    let classify = |&(span, t0, t1): &PieceSpan| -> Option<BandPiece> {
+        let mut coef: Coefficients = Vec::new();
+        for (x, w, ex, ew) in spline.homogeneous_piece(span, t0, t1)? {
+            let d = x - p0 * w;
+            let e =
+                (n_length * (ex + p0.length() * ew) + offset_rounding(d, x, w)) * (1.0 + gamma(8));
+            coef.push((n.dot(d), e));
+        }
+        let inside = coef.iter().all(|&(c, e)| c.abs() + e <= band);
+        let outside =
+            coef.iter().all(|&(c, e)| c - e > band) || coef.iter().all(|&(c, e)| c + e < -band);
+        let mut slope: i8 = 0;
+        for pair in coef.windows(2) {
+            let [(c0, e0), (c1, e1)] = pair else {
+                return None;
+            };
+            let diff = c1 - c0;
+            let e = (e0 + e1 + gamma(1) * (c0.abs() + c1.abs())) * (1.0 + gamma(2));
+            let sign = if diff > e {
+                1
+            } else if diff < -e {
+                -1
+            } else {
+                0
+            };
+            if sign == 0 || (slope != 0 && sign != slope) {
+                slope = 0;
+                break;
+            }
+            slope = sign;
+        }
+        Some(BandPiece {
+            inside,
+            outside,
+            slope,
+        })
+    };
+    // the pieces in parameter order, each certified (`Ok`) or to be halved (`Err`)
+    let label = |piece: PieceSpan| -> Option<core::result::Result<BandPiece, PieceSpan>> {
+        let found = classify(&piece)?;
+        Some(if found.inside || found.outside || found.slope != 0 {
+            Ok(found)
+        } else {
+            Err(piece)
+        })
+    };
+    let mut pieces = spline
+        .cut(o_stretch.0, o_stretch.1, 1, |_, j, t0, t1| {
+            Some((j, t0, t1))
+        })?
+        .into_iter()
+        .map(label)
+        .collect::<Option<Vec<_>>>()?;
+    let mut levels = 0;
+    while pieces.iter().any(core::result::Result::is_err) {
+        levels += 1;
+        if levels > MAX_SUBDIVISION_LEVELS {
+            return None;
+        }
+        let mut next = Vec::new();
+        for piece in pieces {
+            match piece {
+                Ok(found) => next.push(Ok(found)),
+                Err((span, t0, t1)) => {
+                    let mid = 0.5 * (t0 + t1);
+                    if !(t0 < mid && mid < t1) {
+                        return None;
+                    }
+                    next.push(label((span, t0, mid))?);
+                    next.push(label((span, mid, t1))?);
+                }
+            }
+            if next.len() > MAX_BAND_PIECES {
+                return None;
+            }
+        }
+        pieces = next;
+    }
+    let labels: Vec<BandPiece> = pieces
+        .into_iter()
+        .filter_map(core::result::Result::ok)
+        .collect();
+    band_is_one_interval(&labels).then_some(())
+}
+
+/// For [`meetings_lie_in_one_interval`]: whether the pieces' labels (in parameter order)
+/// make the set where the offset is within the band one interval: past the band at either
+/// end, then the pieces inside it one run with the pieces before it monotone one way and
+/// those after it monotone one way, or with no piece inside it all monotone one way; and
+/// not every piece inside it.
+fn band_is_one_interval(labels: &[BandPiece]) -> bool {
+    if labels.iter().all(|l| l.inside) {
+        return false;
+    }
+    let first = labels.iter().position(|l| !l.outside);
+    let last = labels.iter().rposition(|l| !l.outside);
+    let (Some(first), Some(last)) = (first, last) else {
+        // past the band everywhere: no meeting at all
+        return true;
+    };
+    let Some(core) = labels.get(first..=last) else {
+        return false;
+    };
+    let one_way = |run: &[BandPiece]| {
+        run.first()
+            .is_none_or(|l0| l0.slope != 0 && run.iter().all(|l| l.slope == l0.slope))
+    };
+    let inner = core.iter().position(|l| l.inside);
+    let Some(inner) = inner else {
+        return one_way(core);
+    };
+    let Some(inner_end) = core.iter().rposition(|l| l.inside) else {
+        return false;
+    };
+    let (Some(before), Some(run), Some(after)) = (
+        core.get(..inner),
+        core.get(inner..=inner_end),
+        core.get(inner_end + 1..),
+    ) else {
+        return false;
+    };
+    run.iter().all(|l| l.inside) && one_way(before) && one_way(after)
+}
+
 /// Scalar B-spline or Bezier coefficients, each `(value, error)`.
 type Coefficients = Vec<(f64, f64)>;
 
@@ -4408,5 +4672,116 @@ mod tests {
         if fresh.is_ok() {
             assert!(slot_a.is_some() && slot_b.is_some());
         }
+    }
+
+    /// A Bezier curve over `[0, 1]`, without weights, from the power-basis coefficients
+    /// of each coordinate (`power[j]` multiplies `s^j`): its Bernstein points are
+    /// `b_i = sum_{j <= i} C(i, j) / C(n, j) a_j`.
+    fn power_bezier(power: &[[f64; 3]]) -> Curve {
+        let p = power.len() - 1;
+        let choose = |n: usize, k: usize| -> f64 {
+            (0..k).fold(1.0, |c, i| c * (n - i) as f64 / (i + 1) as f64)
+        };
+        let mut cur = allocate_nurb_curve(p, p, 2 * p + 1).unwrap();
+        for (i, d) in cur.cpts_mut().iter_mut().enumerate() {
+            let mut b = [0.0; 3];
+            for (j, a) in power.iter().enumerate().take(i + 1) {
+                for c in 0..3 {
+                    b[c] += choose(i, j) / choose(p, j) * a[c];
+                }
+            }
+            d.x = b[0];
+            d.y = b[1];
+            d.z = b[2];
+            d.w = -f64::MAX;
+        }
+        let mut u = vec![0.0; p + 1];
+        u.extend(vec![1.0; p + 1]);
+        cur.knots_mut().copy_from_slice(&u);
+        Curve::from(BSplineCurve::from_nurb(cur, 3, false))
+    }
+
+    /// The planar parabola `(s, s², 0)` over `[0, 1]`.
+    fn floor_parabola() -> Curve {
+        power_bezier(&[[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    }
+
+    /// A curve over the floor parabola rising off its plane as the fourth power, the two
+    /// within 1e-10 of each other over a tenth of the stretch, meets it in one interval:
+    /// the band certificate takes it, either way round, though the curves are not
+    /// straight and do not pass through each other.
+    #[test]
+    fn a_curve_leaving_a_planar_curves_plane_meets_it_in_one_interval() {
+        let c = 1e-6;
+        let rising = power_bezier(&[
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0; 3],
+            [0.0, 0.0, c],
+        ]);
+        let floor = floor_parabola();
+        let k = Kernel::default();
+        let (p, q) = (
+            rising.evaluate_point(&k, 0.09).unwrap(),
+            floor.evaluate_point(&k, 0.09).unwrap(),
+        );
+        assert!(p.distance(q) <= 1e-10, "{p:?} {q:?}");
+        let whole = (0.0, 1.0);
+        assert!(meetings_lie_in_one_interval(&rising, whole, &floor, whole));
+        assert!(meetings_lie_in_one_interval(&floor, whole, &rising, whole));
+        assert!(!curves_meet_at_most_once(&k, &rising, whole, &floor, whole));
+        // the touch at an end of a part of the stretch, as where a section ends
+        assert!(meetings_lie_in_one_interval(
+            &rising,
+            (0.0, 0.43),
+            &floor,
+            whole
+        ));
+    }
+
+    /// A curve touching the floor parabola's plane at two places, leaving it between
+    /// them, gets no certificate: the band is met in two intervals.
+    #[test]
+    fn two_touches_across_a_plane_are_not_one_interval() {
+        // 16 c (s - 1/4)² (s - 3/4)² = 16 c (s⁴ - 2 s³ + 1.375 s² - 0.375 s + 0.03515625)
+        let c = 1e-3;
+        let twice = power_bezier(&[
+            [0.0, 0.0, 16.0 * c * 0.035_156_25],
+            [1.0, 0.0, -16.0 * c * 0.375],
+            [0.0, 1.0, 16.0 * c * 1.375],
+            [0.0, 0.0, -16.0 * c * 2.0],
+            [0.0, 0.0, 16.0 * c],
+        ]);
+        let floor = floor_parabola();
+        let k = Kernel::default();
+        for s in [0.25, 0.75] {
+            let p = twice.evaluate_point(&k, s).unwrap();
+            assert!(p.z.abs() <= 1e-15, "{p:?}");
+        }
+        let whole = (0.0, 1.0);
+        assert!(!meetings_lie_in_one_interval(&twice, whole, &floor, whole));
+        assert!(!meetings_lie_in_one_interval(&floor, whole, &twice, whole));
+        // either touch on its own is certified
+        assert!(meetings_lie_in_one_interval(
+            &twice,
+            (0.0, 0.5),
+            &floor,
+            whole
+        ));
+    }
+
+    /// Curves in one plane are not separated by it: every piece is within the band and
+    /// no certificate is given, however they meet.
+    #[test]
+    fn curves_in_one_plane_get_no_band_certificate() {
+        let steeper = power_bezier(&[[0.0; 3], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0]]);
+        let whole = (0.0, 1.0);
+        assert!(!meetings_lie_in_one_interval(
+            &steeper,
+            whole,
+            &floor_parabola(),
+            whole
+        ));
     }
 }
