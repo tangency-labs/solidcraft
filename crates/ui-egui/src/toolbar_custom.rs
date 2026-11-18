@@ -6,8 +6,10 @@
 //! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
 //! or right-click its empty space or a tab) shows or hides each tab, and has Customize Toolbar…
 //! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
-//! restores the tab. The buttons are kept with the preferences and exported or imported with the
-//! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
+//! restores the tab. A button is large (icon and label) or a small icon cell of its panel's
+//! gallery; the command's menu and Customize Toolbar switch it. The buttons are kept with the
+//! preferences and exported or imported with the keyboard shortcuts; hidden tabs are kept in the
+//! `hidden_toolbar_tabs` preference.
 //!
 //! The quick-access bar (#10223) is kept here too: the commands a command's menu added to the
 //! application bar, after Save, Undo and Redo, in the order the user dragged them into. It is
@@ -29,8 +31,9 @@ pub struct ToolbarCustom {
     /// `"<workspace>/<tab>/<panel>"` → the panel's buttons, in order (only panels the user
     /// changed).
     pub panels: BTreeMap<String, Vec<String>>,
-    /// `"<workspace>/<tab>"` → gallery commands moved to full-size buttons.
-    pub gallery_buttons: BTreeMap<String, Vec<String>>,
+    /// `"<workspace>/<tab>/<command>"` → shown as a small gallery cell (true) or a large button
+    /// (false), only where the user changed the default.
+    pub small: BTreeMap<String, bool>,
     /// The quick-access bar's commands, in order (#10223). Empty by default: no bar.
     pub quick_access: Vec<String>,
     /// The Customize Toolbar window is open (not kept).
@@ -41,17 +44,14 @@ pub struct ToolbarCustom {
 pub const MAX_QUICK_ACCESS: usize = 24;
 
 impl ToolbarCustom {
-    /// Whether a command still uses a compact gallery cell in this panel. `pinned`: constraints
-    /// the user pinned join the default six (the `pinned_constraints_in_grid` preference).
-    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str, pinned: bool) -> bool {
-        tab == "SKETCH"
-            && panel == "CONSTRAIN"
-            && (crate::workspace::CONSTRAINT_GALLERY.contains(&id) || (pinned && crate::workspace::constraint_cell(id)))
-            && !self.gallery_buttons.get(&format!("{WORKSPACE}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
+    /// Whether a command's button on a panel is a small gallery cell: the user's choice, or the
+    /// default ([`small_by_default`]).
+    pub fn is_small(&self, tab: &str, panel: &str, id: &str, small_icons: bool, pinned: bool) -> bool {
+        self.small.get(&format!("{WORKSPACE}/{tab}/{id}")).copied().unwrap_or_else(|| small_by_default(tab, panel, id, small_icons, pinned))
     }
 
     pub fn prefs(&self) -> Value {
-        json!({"version": 3, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "quick_access": self.quick_access})
+        json!({"version": 3, "panels": self.panels, "small": self.small, "quick_access": self.quick_access})
     }
     pub fn load(&mut self, v: &Value) {
         let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
@@ -69,19 +69,20 @@ impl ToolbarCustom {
                     .collect()
             })
             .unwrap_or_default();
-        self.gallery_buttons = v
-            .get("gallery_buttons")
+        self.small = v
+            .get("small")
             .and_then(Value::as_object)
-            .map(|o| {
-                o.iter()
-                    .take(500)
-                    .filter_map(|(k, v)| {
-                        let ids = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
-                        Some((k.clone(), ids))
-                    })
-                    .collect()
-            })
+            .map(|o| o.iter().take(1000).filter_map(|(k, v)| Some((k.clone(), v.as_bool()?))).collect())
             .unwrap_or_default();
+        // Settings saved before any button could be made small kept the commands dragged out of
+        // the constraint gallery (`"<workspace>/<tab>"` → ids): those are large.
+        if let Some(o) = v.get("gallery_buttons").and_then(Value::as_object) {
+            for (k, ids) in o.iter().take(500) {
+                for id in ids.as_array().into_iter().flatten().take(100).filter_map(Value::as_str) {
+                    self.small.entry(format!("{k}/{id}")).or_insert(false);
+                }
+            }
+        }
         // Saved ids are kept as they are, each once; one this version lacks is not drawn.
         self.quick_access.clear();
         for id in v.get("quick_access").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).take(100) {
@@ -203,7 +204,16 @@ fn key(tab: &str, panel: &str) -> String {
     format!("{WORKSPACE}/{tab}/{panel}")
 }
 
-/// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel.
+/// A command is a small gallery cell by default: in the panel's default gallery (the small-icon
+/// ribbon's, or the constraint gallery), or a constraint the user pinned to Constrain
+/// (`pinned`: the `pinned_constraints_in_grid` preference).
+pub fn small_by_default(tab: &str, panel: &str, id: &str, small_icons: bool, pinned: bool) -> bool {
+    crate::workspace::grid_index(tab, panel, id, small_icons).is_some()
+        || ((tab, panel) == ("SKETCH", "CONSTRAIN") && pinned && crate::workspace::constraint_cell(id))
+}
+
+/// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel
+/// (and, in the small-icon ribbon, its gallery).
 pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandSpec], promoted: usize) -> Vec<&'static CommandSpec> {
     if tab == "DRAWING LAYOUT" && panel == "VIEWS" {
         let flat_pattern = "drawing.view.flat_pattern";
@@ -226,7 +236,39 @@ pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandS
     }
     match app.toolbar_custom.panels.get(&key(tab, panel)) {
         Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect(),
-        None => cmds.iter().take(promoted).copied().collect(),
+        None => {
+            let mut out: Vec<_> = cmds.iter().take(promoted).copied().collect();
+            if app.preferences.ribbon_small_icons {
+                for c in crate::workspace::grid(tab, panel, true).iter().filter_map(|id| solidcraft_engine::find_command(id)) {
+                    if !out.iter().any(|o| o.id == c.id) {
+                        out.push(c);
+                    }
+                }
+            }
+            out
+        }
+    }
+}
+
+/// A panel's small gallery cells, in order: the default gallery's commands in their fixed places,
+/// then the ones the user made small, in button order.
+pub fn gallery_cells(app: &SolveApp, tab: &str, panel: &str, shown: &[&'static CommandSpec]) -> Vec<&'static CommandSpec> {
+    let small_icons = app.preferences.ribbon_small_icons;
+    let mut cells: Vec<_> = shown.iter().copied().filter(|c| in_gallery(app, tab, panel, c.id)).collect();
+    let fixed = crate::workspace::grid(tab, panel, small_icons).len();
+    cells.sort_by_key(|c| crate::workspace::grid_index(tab, panel, c.id, small_icons).unwrap_or(fixed));
+    cells
+}
+
+/// Show a command's button small (a gallery cell) or large on a tab.
+pub fn set_small(app: &mut SolveApp, tab: &str, id: &str, small: bool) {
+    let k = format!("{WORKSPACE}/{tab}/{id}");
+    let (small_icons, pinned) = (app.preferences.ribbon_small_icons, app.preferences.pinned_constraints_in_grid);
+    let default = home_panel(tab, id).is_some_and(|panel| small_by_default(tab, panel, id, small_icons, pinned));
+    if small == default {
+        app.toolbar_custom.small.remove(&k);
+    } else {
+        app.toolbar_custom.small.insert(k, small);
     }
 }
 
@@ -261,10 +303,11 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
     if let Some(v) = app.toolbar_custom.panels.get(&k) {
         return v.clone();
     }
-    let lists = panel_lists(tab);
-    let ids: Vec<String> =
-        lists.iter().find(|(p, ..)| *p == panel).map(|(_, cmds, n)| cmds.iter().take(*n).map(|c| c.id.to_string()).collect()).unwrap_or_default();
-    ids
+    panel_lists(tab)
+        .iter()
+        .find(|(p, ..)| *p == panel)
+        .map(|(p, cmds, n)| buttons(app, tab, p, cmds, *n).iter().map(|c| c.id.to_string()).collect())
+        .unwrap_or_default()
 }
 
 /// Where a command is a button on a tab now: its panel.
@@ -307,9 +350,9 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
 }
 
-/// [`ToolbarCustom::in_gallery`] with the user's preference.
+/// [`ToolbarCustom::is_small`] with the user's preferences.
 pub fn in_gallery(app: &SolveApp, tab: &str, panel: &str, id: &str) -> bool {
-    app.toolbar_custom.in_gallery(tab, panel, id, app.preferences.pinned_constraints_in_grid)
+    app.toolbar_custom.is_small(tab, panel, id, app.preferences.ribbon_small_icons, app.preferences.pinned_constraints_in_grid)
 }
 
 /// Move a button before another one (`before`: None puts it at the end of `panel`).
@@ -317,18 +360,12 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     if fixed(tab, panel, id) {
         return;
     }
-    // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
-    // else it becomes a full-size button.
-    if tab == "SKETCH"
-        && (crate::workspace::CONSTRAINT_GALLERY.contains(&id)
-            || (app.preferences.pinned_constraints_in_grid && crate::workspace::constraint_cell(id)))
-    {
-        let into_gallery = before.is_some_and(|b| in_gallery(app, tab, panel, b));
-        let ids = app.toolbar_custom.gallery_buttons.entry(format!("{WORKSPACE}/{tab}")).or_default();
-        ids.retain(|c| c != id);
-        if !into_gallery {
-            ids.push(id.to_string());
-        }
+    // A button dropped on a gallery cell becomes a small cell; a small cell dropped anywhere else
+    // becomes a full-size button.
+    let into_gallery = before.is_some_and(|b| in_gallery(app, tab, panel, b));
+    let from_gallery = pinned_on(app, tab, id).is_some_and(|from| in_gallery(app, tab, from, id));
+    if into_gallery || from_gallery {
+        set_small(app, tab, id, into_gallery);
     }
     if let Some(from) = pinned_on(app, tab, id) {
         let mut ids = own(app, tab, from);
@@ -385,7 +422,7 @@ pub fn quick_move(app: &mut SolveApp, id: &str, before: Option<&str>) {
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
-    app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
+    app.toolbar_custom.small.retain(|k, _| !k.starts_with(&prefix));
 }
 
 /// The menu of a command (toolbar button, drop-down row, S box row).
@@ -399,6 +436,11 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     } else {
         Item::action("ui.toolbarPin", "Pin to Toolbar", "plus").with(json!({ "command": id }))
     });
+    if let Some(panel) = pinned_on(app, &tab, id) {
+        let small = in_gallery(app, &tab, panel, id);
+        let label = if small { "Show Large" } else { "Show Small" };
+        v.push(Item::action("ui.toolbarSize", label, "settings").with(json!({ "command": id, "small": !small })));
+    }
     v.push(Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "star").with(json!({ "command": id })));
     // The application bar's quick-access buttons (#10223).
     v.push(if app.toolbar_custom.quick_access.iter().any(|q| q == id) {
@@ -452,6 +494,7 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
             }
         }
         "ui.toolbarRemove" => remove(app, &tab, id),
+        "ui.toolbarSize" => set_small(app, &tab, id, p.get("small").and_then(Value::as_bool).unwrap_or(false)),
         "ui.toolbarReset" => reset(app, &tab),
         "ui.toolbarCustomize" => app.toolbar_custom.customizing = true,
         "ui.toolbarTab" => crate::workspace::set_tab_shown(app, &tab, p.get("shown").and_then(Value::as_bool).unwrap_or(true)),
@@ -513,6 +556,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let tab = app.ui.tab.clone();
     let mut changes: Vec<(&'static str, bool)> = Vec::new();
+    let mut sizes: Vec<(&'static str, bool)> = Vec::new();
     let mut reset_tab = false;
     let t = solidcraft_theme::Tokens::get();
     // This long card grows as sections open. A top-left pivot keeps its controls at their
@@ -544,11 +588,24 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 let shown = buttons(app, &tab, panel, &cmds, n);
                                 for c in &cmds {
                                     let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
-                                    crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
-                                    if r.changed() {
-                                        changes.push((c.id, on));
-                                    }
+                                    ui.horizontal(|ui| {
+                                        let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
+                                        crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
+                                        if r.changed() {
+                                            changes.push((c.id, on));
+                                        }
+                                        // Small: an icon cell of the panel's gallery instead of a large button.
+                                        if on {
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                let mut small = in_gallery(app, &tab, panel, c.id);
+                                                let r = ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Small"), &mut small);
+                                                crate::scenario::publish_handle(&format!("customize:small:{}", c.id), r.rect.center());
+                                                if r.changed() {
+                                                    sizes.push((c.id, small));
+                                                }
+                                            });
+                                        }
+                                    });
                                 }
                             });
                         }
@@ -565,6 +622,9 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         } else {
             remove(app, &tab, id);
         }
+    }
+    for (id, small) in sizes {
+        set_small(app, &tab, id, small);
     }
     if reset_tab {
         reset(app, &tab);

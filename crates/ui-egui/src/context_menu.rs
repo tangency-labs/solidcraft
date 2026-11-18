@@ -1950,6 +1950,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.canvasVisible" | "ui.canvasLocked" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin"
         | "ui.toolbarRemove"
+        | "ui.toolbarSize"
         | "ui.toolbarReset"
         | "ui.toolbarCustomize"
         | "ui.toolbarTab"

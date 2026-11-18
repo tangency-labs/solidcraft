@@ -3,7 +3,10 @@
 use super::*;
 
 fn sizes(buttons: &[usize]) -> Vec<PanelSize> {
-    buttons.iter().map(|&b| PanelSize { buttons: vec![ButtonSize { width: BUTTON_MIN_WIDTH, min_width: BUTTON_MIN_WIDTH }; b] }).collect()
+    buttons
+        .iter()
+        .map(|&b| PanelSize { buttons: vec![ButtonSize { width: BUTTON_MIN_WIDTH, min_width: BUTTON_MIN_WIDTH }; b], gallery: false })
+        .collect()
 }
 
 fn used_with_more(plans: &[Plan]) -> f32 {
@@ -59,6 +62,7 @@ fn panels_fill_the_room_they_have_at_every_width() {
                         min_width: BUTTON_MIN_WIDTH,
                     })
                     .collect(),
+                gallery: false,
             })
             .collect();
         let mut last: Option<(f32, usize)> = None;
@@ -101,6 +105,7 @@ fn variable_width_buttons_narrow_before_rightmost_equal_panels_lose_buttons() {
             ButtonSize { width: 63.0, min_width: BUTTON_MIN_WIDTH },
             ButtonSize { width: 54.0, min_width: BUTTON_MIN_WIDTH },
         ],
+        gallery: false,
     }];
     let full = used(&panels.iter().map(Plan::full).collect::<Vec<_>>());
     let narrow = fit(&panels, full - 1.0);
@@ -124,6 +129,7 @@ fn constraint_gallery_stays_fixed_and_hands_all_cells_to_the_menu_together() {
             ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
             ButtonSize { width: GALLERY_WIDTH, min_width: GALLERY_WIDTH },
         ],
+        gallery: true,
     }];
     let minimum = panel_width(&[BUTTON_MIN_WIDTH, GALLERY_WIDTH]) + PANEL_GAP;
     let narrow = fit(&panels, minimum);
@@ -131,6 +137,42 @@ fn constraint_gallery_stays_fixed_and_hands_all_cells_to_the_menu_together() {
     assert_eq!(narrow[0].widths, [BUTTON_MIN_WIDTH, GALLERY_WIDTH]);
     let collapsed = fit(&panels, minimum - 1.0);
     assert_eq!((collapsed[0].fit, collapsed[0].shown), (Fit::Collapsed, 1));
+}
+
+/// #6165: a panel keeps its gallery and one large button while its other large buttons go to
+/// the drop-down, and every large button that can go goes before any gallery does.
+#[test]
+fn galleries_stay_while_large_buttons_go_to_the_drop_down() {
+    let large = ButtonSize { width: BUTTON_MIN_WIDTH, min_width: BUTTON_MIN_WIDTH };
+    let width = gallery_width(12, true, true);
+    assert_eq!(width, 102.0);
+    assert_eq!(gallery_width(6, true, false), GALLERY_WIDTH);
+    let gallery = ButtonSize { width, min_width: width };
+    let panels =
+        vec![PanelSize { buttons: vec![large, large, large, gallery], gallery: true }, PanelSize { buttons: vec![large, large], gallery: false }];
+    let full = used(&panels.iter().map(Plan::full).collect::<Vec<_>>());
+    // A little short: the gallery panel's last large button goes, its gallery stays.
+    let short = fit(&panels, full - 1.0);
+    assert_eq!((short[0].shown, short[0].gallery_shown()), (3, true));
+    assert_eq!(short[0].visible(), [BUTTON_MIN_WIDTH, BUTTON_MIN_WIDTH, width]);
+    // Shorter: every large button that can go goes before any gallery does.
+    let room = panel_width(&[BUTTON_MIN_WIDTH, width]) + COLLAPSED_WIDTH + 2.0 * PANEL_GAP;
+    let tight = fit(&panels, room);
+    assert_eq!((tight[0].shown, tight[0].gallery_shown()), (2, true));
+    assert_eq!(tight[1].fit, Fit::Collapsed);
+    // Shorter still: the gallery goes, and the panel collapses.
+    assert_eq!(fit(&panels, room - 1.0)[0].fit, Fit::Collapsed);
+}
+
+/// The small-icon ribbon fills its galleries column by column, three rows under labels.
+#[test]
+fn small_icon_galleries_fill_column_by_column() {
+    let at = pos2(0.0, 0.0);
+    let cell = |i| gallery_cell(at, i, true, true).min;
+    assert_eq!([cell(0), cell(1), cell(2), cell(3)], [pos2(0.0, 3.0), pos2(0.0, 24.0), pos2(0.0, 45.0), pos2(26.0, 3.0)]);
+    // The standard gallery keeps its rows: the default six 3 x 2, read row by row.
+    assert_eq!(gallery_cell(at, 3, true, false).min, pos2(0.0, 29.0));
+    assert!(section_height(true) < section_height(false));
 }
 
 const HANDLES: Handles<'static> = Handles {
@@ -234,6 +276,7 @@ impl RowRig {
                 group("B", vec![button("b.on", true), button("b.off", false)]),
             ],
             labels: true,
+            small_icons: false,
             accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
             exit: false,
             reveal: None,
@@ -640,6 +683,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     let row = Row {
         groups: vec![group("A", vec![on, button("a.off", true)])],
         labels: true,
+        small_icons: false,
         accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
         exit: false,
         reveal: None,

@@ -173,6 +173,104 @@ pub fn constraint_cell(id: &str) -> bool {
         || (id.starts_with("sketch.constraint.") && solidcraft_engine::find_command(id).is_some_and(|c| c.icon.starts_with("c_")))
 }
 
+/// The small-icon ribbon (a Layout preference): panels add these commands as small icon cells
+/// after their large buttons, three rows high and up to [`GRID_COLUMNS`] wide, filled column by
+/// column so every command keeps its place. Icons come from each spec; the full names are in the
+/// tooltips.
+pub struct Grid {
+    pub tab: &'static str,
+    pub panel: &'static str,
+    pub ids: &'static [&'static str],
+}
+
+pub const GRID_COLUMNS: usize = 4;
+
+pub const GRIDS: &[Grid] = &[
+    Grid {
+        tab: "SKETCH",
+        panel: "CREATE",
+        ids: &[
+            "sketch.slot.center_to_center",
+            "sketch.polygon.inscribed",
+            "sketch.spline.fit_point",
+            "sketch.ellipse",
+            "sketch.conic",
+            "sketch.point",
+            "sketch.centerline",
+            "sketch.infinite",
+            "sketch.text",
+            "sketch.rectangle.center",
+            "sketch.circle.three_point",
+            "sketch.arc.tangent",
+        ],
+    },
+    Grid {
+        tab: "SKETCH",
+        panel: "MODIFY",
+        ids: &[
+            "sketch.extend",
+            "sketch.break",
+            "sketch.blend_curve",
+            "sketch.chamfer.equal_distance",
+            "sketch.chamfer.two_distance",
+            "sketch.chamfer.distance_angle",
+            "sketch.move",
+            "sketch.scale",
+            "sketch.copy",
+            "sketch.cut",
+            "sketch.paste",
+        ],
+    },
+    Grid {
+        tab: "SKETCH",
+        panel: "CONSTRAIN",
+        ids: &[
+            "sketch.constraint.horizontal_vertical",
+            "sketch.constraint.coincident",
+            "sketch.constraint.tangent",
+            "sketch.constraint.equal",
+            "sketch.constraint.parallel",
+            "sketch.constraint.perpendicular",
+            "sketch.constraint.concentric",
+            "sketch.constraint.collinear",
+            "sketch.constraint.midpoint",
+            "sketch.constraint.symmetry",
+            "sketch.constraint.fix",
+            "sketch.constraint.curvature",
+        ],
+    },
+    Grid {
+        tab: "SKETCH",
+        panel: "REFERENCE",
+        ids: &[
+            "sketch.intersect",
+            "sketch.include_3d",
+            "sketch.project_to_surface",
+            "sketch.intersection_curve",
+            "sketch.spun_profile",
+            "sketch.isoparametric_curve",
+            "sketch.fit_curves_to_section",
+            "sketch.insert_dxf",
+            "sketch.insert_svg",
+            "canvas.insert",
+        ],
+    },
+];
+
+/// A panel's small icon cells by default, in their fixed order (empty for panels without a
+/// grid): the small-icon ribbon's, or the constraint gallery.
+pub fn grid(tab: &str, panel: &str, small_icons: bool) -> &'static [&'static str] {
+    if small_icons {
+        return GRIDS.iter().find(|g| g.tab == tab && g.panel == panel).map_or(&[], |g| g.ids);
+    }
+    if (tab, panel) == ("SKETCH", "CONSTRAIN") { CONSTRAINT_GALLERY } else { &[] }
+}
+
+/// Where a command sits in its panel's default grid.
+pub fn grid_index(tab: &str, panel: &str, id: &str, small_icons: bool) -> Option<usize> {
+    grid(tab, panel, small_icons).iter().position(|g| *g == id)
+}
+
 pub struct CommandGroup {
     pub label: &'static str,
     pub ids: &'static [&'static str],

@@ -261,6 +261,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.ribbon_icon_grid = selected == 1;
                             }
                         });
+                        // Galleries of small icons beside the panels' large buttons (#6165).
+                        ui_kit::row(ui, app.tr("prefs.ribbon"), |ui| {
+                            let mut selected = usize::from(app.preferences.ribbon_small_icons);
+                            if ui_kit::segmented(
+                                ui,
+                                &mut selected,
+                                &[app.tr("prefs.ribbon_standard"), app.tr("prefs.ribbon_small_icons")],
+                                ui_kit::Segments { intrinsic: true, ..Default::default() },
+                            ) {
+                                app.preferences.ribbon_small_icons = selected == 1;
+                            }
+                        });
+                        ui_kit::row(ui, app.tr("prefs.tooltips"), |ui| {
+                            let response = ui_kit::checkbox(ui, app.tr("prefs.tooltip_descriptions"), &mut app.preferences.ribbon_help);
+                            crate::scenario::publish_target("prefs:ribbon_help", response.rect);
+                        });
                         let response = setting::construct_menu_groups(app, ui);
                         crate::scenario::publish_target("prefs:construct_menu_groups", response.rect);
                         ui_kit::row(ui, app.tr("prefs.toast_place"), |ui| {

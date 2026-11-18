@@ -1198,6 +1198,8 @@ struct RibbonPanels {
     /// The last panel leaves the sketch or the edit.
     exit: bool,
     running: Option<String>,
+    /// Galleries of small icons (the `ribbon_small_icons` preference).
+    small_icons: bool,
 }
 
 impl RibbonPanels {
@@ -1325,7 +1327,13 @@ impl RibbonPanels {
                 .collect(),
             buttons,
         });
-        RibbonPanels { panels, plugins, exit, running: if app.preferences.ribbon_reveal { running } else { None } }
+        RibbonPanels {
+            panels,
+            plugins,
+            exit,
+            running: if app.preferences.ribbon_reveal { running } else { None },
+            small_icons: app.preferences.ribbon_small_icons,
+        }
     }
 
     fn row<'a>(
@@ -1412,6 +1420,7 @@ impl RibbonPanels {
                 }))
                 .collect(),
             labels,
+            small_icons: self.small_icons,
             accent,
             exit: self.exit,
             reveal,
@@ -1583,19 +1592,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     cmds.retain(|c| solidcraft_engine::cmd::construction_line_mode(c.id).is_none());
                 }
                 let mut shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
-                // Gallery cells are painted together after the large buttons, in reading order.
-                if tab == "SKETCH" && panel == "CONSTRAIN" {
-                    shown.sort_by_key(|c| {
-                        if crate::toolbar_custom::in_gallery(app, &tab, panel, c.id) {
-                            crate::workspace::CONSTRAINT_GALLERY
-                                .iter()
-                                .position(|id| *id == c.id)
-                                .map_or(crate::workspace::CONSTRAINT_GALLERY.len() + 1, |i| i + 1)
-                        } else {
-                            0
-                        }
-                    });
-                }
+                // Gallery cells are painted together after the large buttons, in their order.
+                let cells = crate::toolbar_custom::gallery_cells(app, &tab, panel, &shown);
+                shown.sort_by_key(|c| cells.iter().position(|g| g.id == c.id).map_or(0, |i| i + 1));
                 (panel, cmds, shown)
             })
             .collect();
@@ -2236,6 +2235,9 @@ use ribbon::ROW_H;
 
 /// Registry parameter syntax is not a user-facing description. Reuse existing catalog prose
 /// where present; other commands intentionally show only their name and registered shortcut.
+/// The command's icon in a ribbon tooltip.
+const TOOLTIP_ICON: f32 = 32.0;
+
 fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft_engine::CommandSpec, disabled: Option<&str>) -> egui::Response {
     if let Some(hint) = persistent_hint(app, command, disabled.is_none() && response.enabled() && command.info(&app.session).enabled) {
         return response.backing_on_hover_text(hint);
@@ -2253,8 +2255,12 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
                 ui.painter().layout_no_wrap(key.to_string(), FontId::monospace(solidcraft_theme::Tokens::get().font_body), t.text_dim).size().x + 24.0
             })
             .unwrap_or(0.0);
-        ui.set_width(280.0_f32.max(name_width + key_width + 12.0));
+        ui.set_width(280.0_f32.max(TOOLTIP_ICON + 8.0 + name_width + key_width + 12.0));
         ui.horizontal(|ui| {
+            // The command's icon at full size, also for the small gallery cells.
+            let (icon, _) = ui.allocate_exact_size(vec2(TOOLTIP_ICON, TOOLTIP_ICON), Sense::hover());
+            icons::paint_icon(ui.painter(), icon, command.icon, 1.0);
+            ui.add_space(4.0);
             let (rect, _) = ui.allocate_exact_size(vec2(name_width, 20.0), Sense::hover());
             ribbon::text(ui, rect.center(), name, t.font_heading, t.text, true);
             if let Some(key) = crate::keymap::display_for(app, command.id) {
@@ -2286,11 +2292,13 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             "render.export" => Some(app.tr("render.output_format_status")),
             _ => None,
         };
-        if let Some(description) = description {
+        // The tool descriptions can be left out (Preferences › Layout › Tooltips).
+        let help = app.preferences.ribbon_help;
+        if let Some(description) = description.filter(|_| help) {
             ui.add(egui::Label::new(description).wrap());
         }
         // The tool's own help, when it has one (#2758).
-        if let Some(help) = crate::command_help::help(command.id) {
+        if let Some(help) = crate::command_help::help(command.id).filter(|_| help) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
         let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
@@ -5258,11 +5266,16 @@ mod ribbon_gallery_tests {
         assert_eq!(rect_of(&button).unwrap().height(), full.height());
         // Settings saved before the gallery could change load with the default gallery.
         let mut older = h.app.toolbar_custom.prefs();
-        older.as_object_mut().unwrap().remove("gallery_buttons");
+        older.as_object_mut().unwrap().remove("small");
         let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
         loaded.load(&older);
         assert_eq!(loaded.panels, h.app.toolbar_custom.panels);
-        assert!(loaded.in_gallery("SKETCH", "CONSTRAIN", id, true));
+        assert!(loaded.is_small("SKETCH", "CONSTRAIN", id, false, true));
+        // Settings saved when only the constraint gallery could change keep its large buttons.
+        older["gallery_buttons"] = json!({"DESIGN/SKETCH": [id]});
+        loaded.load(&older);
+        assert!(!loaded.is_small("SKETCH", "CONSTRAIN", id, false, true));
+        assert_eq!(loaded.small, h.app.toolbar_custom.small);
         crate::toolbar_custom::reset(&mut h.app, "MODEL");
         h.frames(2);
         assert!(rect_of(&cell_handle).is_none());
@@ -5270,6 +5283,64 @@ mod ribbon_gallery_tests {
         h.frames(3);
         assert_eq!(rect_of(&cell_handle), Some(cell));
         assert_eq!(count(), original_count);
+    }
+
+    /// #6165: the small-icon ribbon adds galleries of small icons to the sketch panels; the
+    /// standard ribbon stays as it was.
+    #[test]
+    fn the_small_icon_ribbon_adds_galleries_and_the_standard_one_stays_as_it_was() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let cell = vec2(24.0, 20.0);
+        // Standard: the large buttons and the constraint gallery people know, nothing else.
+        assert!(rect_of("button:sketch.ellipse").is_none());
+        assert!(rect_of("button:sketch.constraint.concentric").is_none());
+        let trim = rect_of("button:sketch.trim").map(|r| r.height());
+        assert!(trim.is_some_and(|h| h > cell.y));
+        h.app.preferences.ribbon_small_icons = true;
+        h.frames(3);
+        for id in ["sketch.ellipse", "sketch.extend", "sketch.constraint.concentric", "sketch.intersect"] {
+            assert_eq!(rect_of(&format!("button:{id}")).map(|r| r.size()), Some(cell), "{id}");
+        }
+        assert_eq!(rect_of("button:sketch.trim").map(|r| r.height()), trim);
+        // Filled column by column: the second cell is under the first.
+        let [a, b] = ["sketch.constraint.horizontal_vertical", "sketch.constraint.coincident"].map(|id| rect_of(&format!("button:{id}")).unwrap());
+        assert!((a.left() - b.left()).abs() < 0.5 && b.top() > a.bottom());
+        // Every command of a gallery is pinned, so its menu offers Show Large.
+        assert!(crate::toolbar_custom::pinned_on(&h.app, "SKETCH", "sketch.ellipse").is_some());
+    }
+
+    /// #6165: any button switches between large and small from its menu; the choice is kept with
+    /// the preferences, and Reset Toolbar restores the default sizes.
+    #[test]
+    fn a_button_switches_between_large_and_small_and_reset_restores_it() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let cell = vec2(24.0, 20.0);
+        assert_eq!(rect_of("button:sketch.constraint.equal").map(|r| r.size()), Some(cell));
+        let items = crate::toolbar_custom::command_items(&h.app, "sketch.constraint.equal");
+        let size = items.iter().find(|i| i.id == "ui.toolbarSize").and_then(|i| i.params.clone());
+        assert_eq!(size, Some(json!({"command": "sketch.constraint.equal", "small": false})));
+        crate::toolbar_custom::run(&mut h.app, "ui.toolbarSize", &json!({"command": "sketch.constraint.equal", "small": false}));
+        h.frames(2);
+        assert!(rect_of("ribbon:constraint:sketch.constraint.equal").is_none());
+        assert!(rect_of("button:sketch.constraint.equal").is_some_and(|r| r.height() > cell.y));
+        // A large button made small joins the gallery after its fixed cells.
+        crate::toolbar_custom::set_small(&mut h.app, "SKETCH", "sketch.dimension", true);
+        h.frames(2);
+        assert_eq!(rect_of("button:sketch.dimension").map(|r| r.size()), Some(cell));
+        // Kept with the preferences.
+        let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
+        loaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(loaded, h.app.toolbar_custom);
+        crate::toolbar_custom::reset(&mut h.app, "SKETCH");
+        h.frames(2);
+        assert_eq!(rect_of("button:sketch.constraint.equal").map(|r| r.size()), Some(cell));
+        assert!(h.app.toolbar_custom.small.is_empty());
     }
 
     #[test]

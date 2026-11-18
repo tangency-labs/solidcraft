@@ -1,0 +1,72 @@
+{
+  "en": {
+    "Show Large": "Show Large",
+    "Show Small": "Show Small",
+    "Small": "Small",
+    "prefs.ribbon": "Ribbon",
+    "prefs.ribbon_small_icons": "Small icons",
+    "prefs.ribbon_standard": "Standard",
+    "prefs.tooltip_descriptions": "Show tool descriptions",
+    "prefs.tooltips": "Tooltips"
+  },
+  "de": {
+    "Show Large": "Groß anzeigen",
+    "Show Small": "Klein anzeigen",
+    "Small": "Klein",
+    "prefs.ribbon": "Ribbon",
+    "prefs.ribbon_small_icons": "Kleine Symbole",
+    "prefs.ribbon_standard": "Standard",
+    "prefs.tooltip_descriptions": "Werkzeugbeschreibungen anzeigen",
+    "prefs.tooltips": "Tooltips"
+  },
+  "ja": {
+    "Show Large": "大きく表示",
+    "Show Small": "小さく表示",
+    "Small": "小",
+    "prefs.ribbon": "リボン",
+    "prefs.ribbon_small_icons": "小さいアイコン",
+    "prefs.ribbon_standard": "標準",
+    "prefs.tooltip_descriptions": "ツールの説明を表示",
+    "prefs.tooltips": "ツールチップ"
+  },
+  "zh": {
+    "Show Large": "显示大图标",
+    "Show Small": "显示小图标",
+    "Small": "小",
+    "prefs.ribbon": "功能区",
+    "prefs.ribbon_small_icons": "小图标",
+    "prefs.ribbon_standard": "标准",
+    "prefs.tooltip_descriptions": "显示工具说明",
+    "prefs.tooltips": "工具提示"
+  },
+  "ar": {
+    "Show Large": "إظهار كبير",
+    "Show Small": "إظهار صغير",
+    "Small": "صغير",
+    "prefs.ribbon": "الشريط",
+    "prefs.ribbon_small_icons": "أيقونات صغيرة",
+    "prefs.ribbon_standard": "قياسي",
+    "prefs.tooltip_descriptions": "إظهار أوصاف الأدوات",
+    "prefs.tooltips": "تلميحات الأدوات"
+  },
+  "he": {
+    "Show Large": "הצגה גדולה",
+    "Show Small": "הצגה קטנה",
+    "Small": "קטן",
+    "prefs.ribbon": "רצועת הכלים",
+    "prefs.ribbon_small_icons": "סמלים קטנים",
+    "prefs.ribbon_standard": "רגיל",
+    "prefs.tooltip_descriptions": "הצגת תיאורי הכלים",
+    "prefs.tooltips": "תיאורי כלים"
+  },
+  "vi": {
+    "Show Large": "Hiển thị lớn",
+    "Show Small": "Hiển thị nhỏ",
+    "Small": "Nhỏ",
+    "prefs.ribbon": "Dải băng",
+    "prefs.ribbon_small_icons": "Biểu tượng nhỏ",
+    "prefs.ribbon_standard": "Tiêu chuẩn",
+    "prefs.tooltip_descriptions": "Hiển thị mô tả công cụ",
+    "prefs.tooltips": "Chú giải công cụ"
+  }
+}
