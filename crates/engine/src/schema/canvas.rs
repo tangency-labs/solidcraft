@@ -72,10 +72,28 @@ pub struct CanvasInsertParams {
     pub resolution: Option<f64>,
     /// Tie the image to a construction rectangle drawn exactly around it, as `canvas.frame_sketch`
     /// does: in the sketch being edited (the image must lie on its plane), else in a new sketch.
-    /// Dimensions and constraints on that rectangle then place, turn and size the image. Default:
-    /// false.
+    /// Dimensions and constraints on that rectangle then place, turn and size the image.
+    /// `"auto"`: framed in the sketch being edited only when the image lies on its plane, else a
+    /// free image (as the image tools place it). Default: false.
     #[serde(default)]
-    pub frame: Option<bool>,
+    pub frame: Option<FrameParam>,
+}
+
+/// `frame`: true or false, or `"auto"`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FrameParam {
+    /// Frame the image (true) or not (false).
+    Always(bool),
+    /// Frame it in the sketch being edited when it lies on that sketch's plane.
+    Auto(FrameAuto),
+}
+
+/// The one word `frame` takes besides true and false.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FrameAuto {
+    Auto,
 }
 
 /// Put an image on a planar face of the model, like a sticker, kept in the design. Give the image
@@ -132,9 +150,10 @@ pub struct CanvasDecalParams {
     pub resolution: Option<f64>,
     /// Tie the image to a construction rectangle drawn exactly around it, as `canvas.frame_sketch`
     /// does: in the sketch being edited (the face must be on its plane), else in a new sketch.
-    /// Default: false.
+    /// `"auto"`: framed in the sketch being edited only when the face is on its plane, else a free
+    /// image. Default: false.
     #[serde(default)]
-    pub frame: Option<bool>,
+    pub frame: Option<FrameParam>,
 }
 
 /// Change a canvas or decal: its place, size, angle, opacity, mirroring, visibility or name. Keys

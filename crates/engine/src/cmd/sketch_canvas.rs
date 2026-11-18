@@ -1,7 +1,7 @@
 //! Canvases (reference images on planes) and decals (images on planar faces).
 
 use serde_json::{Value, json};
-use solidcore_record::Vec2;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::canvas::{Canvas, CanvasAnchor, MAX_CANVAS_BYTES, base64_decode, base64_encode, image_info};
 use solidcraft_geom::prelude::*;
 
@@ -33,13 +33,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (base64 PNG, JPEG or SVG; an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?; frame?: true ties the image to a construction rectangle around it (in the sketch being edited, which it must lie on, else in a new sketch), as canvas.frame_sketch does"),
+        .params("path | data (base64 PNG, JPEG or SVG; an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?; frame?: true ties the image to a construction rectangle around it (in the sketch being edited, which it must lie on, else in a new sketch), as canvas.frame_sketch does; \"auto\" frames it in the sketch being edited only when it lies on its plane"),
     CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
         .at("SKETCH", "INSERT")
         .icon("decal")
         .contract(&DECAL_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1); frame?: true ties the image to a construction rectangle around it, as canvas.frame_sketch does"),
+        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1); frame?: true ties the image to a construction rectangle around it, as canvas.frame_sketch does; \"auto\" only in the sketch being edited, when the face is on its plane"),
     CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
@@ -108,9 +108,12 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         return Err(bad(cmd, "`width` must be positive"));
     }
     let opacity = num(p, "opacity").unwrap_or(if decal { 1.0 } else { 0.5 }).clamp(0.0, 1.0);
-    let framed = match p.get("frame") {
-        None | Some(Value::Null) => false,
-        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`frame` must be true or false"))?,
+    // `"auto"`: framed in the sketch being edited only when the image lies on its plane, as the
+    // image tools place it; otherwise a free image.
+    let (framed, auto) = match p.get("frame") {
+        None | Some(Value::Null) => (false, false),
+        Some(Value::String(v)) if v == "auto" => (true, true),
+        Some(v) => (v.as_bool().ok_or_else(|| bad(cmd, "`frame` must be true, false or \"auto\""))?, false),
     };
     // It belongs to the active component (its plane is in that frame) and moves with it.
     let component = s.active_component;
@@ -143,7 +146,14 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
     // was: no image is left behind unframed.
     let frame = if framed {
         let i = s.doc.canvases.iter().position(|c| c.id == id).ok_or_else(|| bad(cmd, "canvas"))?;
-        Some(frame_canvas(s, i, None, cmd)?)
+        let on_open = || -> Result<bool> {
+            let c = s.doc.canvases.get(i).ok_or_else(|| bad(cmd, "canvas"))?;
+            Ok(match super::sketch_store::active(s) {
+                Some(open) => corners_in_sketch(s, c, open, cmd)?.is_some(),
+                None => false,
+            })
+        };
+        if !auto || on_open()? { Some(frame_canvas(s, i, None, cmd)?) } else { None }
     } else {
         None
     };
@@ -432,6 +442,18 @@ fn frame_canvas(s: &mut Session, i: usize, name: Option<&str>, cmd: &str) -> Res
 /// The bottom-left, bottom-right and top-left corners of canvas `c`'s frame (unmirrored) in the
 /// coordinates of sketch `sketch`, or why the image does not lie on that sketch's plane.
 fn frame_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<[Vec2; 3]> {
+    corners_in_sketch(s, c, sketch, cmd)?.ok_or_else(|| {
+        let name = s.doc.feature(sketch).map(|f| f.name.clone()).unwrap_or_default();
+        bad(
+            cmd,
+            format!("{} does not lie on the plane of sketch `{name}`: put it on that plane, or finish the sketch to frame it in a new one", c.name),
+        )
+    })
+}
+
+/// [`frame_in_sketch`]'s corners, or `None` when the image does not lie on the sketch's plane.
+fn corners_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<Option<[Vec2; 3]>> {
+    use solidcore_ops::affine;
     let (vals, _) = s.doc.param_values();
     let state = s.model.state();
     let ss = state.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch being edited has not been solved; finish or repair it first"))?;
@@ -442,26 +464,21 @@ fn frame_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<[V
     let back = if solidcraft_doc::is_identity(&m) {
         None
     } else {
-        Some(solidcraft_doc::mat_inverse(&m).ok_or_else(|| bad(cmd, "the sketch's component has no inverse placement"))?)
+        Some(affine::inverse(&m).map_err(|_| bad(cmd, "the sketch's component has no inverse placement"))?)
     };
-    let (n, o) = (ss.plane.normal(), ss.plane.origin);
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let (n, o) = (arr(ss.plane.normal()), arr(ss.plane.origin));
     let tolerance = 1e-6 * (1.0 + c.width.max(c.height()));
     let mut k = [Vec2::ZERO; 4];
     for (slot, w) in k.iter_mut().zip(world) {
-        let q = back.as_ref().map_or(w, |b| solidcraft_doc::apply_point(b, w));
-        if !((q - o).dot(n).abs() <= tolerance) {
-            return Err(bad(
-                cmd,
-                format!(
-                    "{} does not lie on the plane of sketch `{}`: put it on that plane, or finish the sketch to frame it in a new one",
-                    c.name, ss.name
-                ),
-            ));
+        let [x, y, z] = back.as_ref().map_or(arr(w), |b| affine::apply_point(b, arr(w)));
+        if !(affine::distance_along(o, n, [x, y, z]).abs() <= tolerance) {
+            return Ok(None);
         }
-        *slot = ss.plane.to_local(q);
+        *slot = ss.plane.to_local(Vec3::new(x, y, z));
     }
     // A mirrored image's bottom-left corner is the frame's bottom-right.
-    Ok(if c.flip { [k[1], k[0], k[2]] } else { [k[0], k[1], k[3]] })
+    Ok(Some(if c.flip { [k[1], k[0], k[2]] } else { [k[0], k[1], k[3]] }))
 }
 
 #[cfg(test)]
@@ -952,6 +969,13 @@ mod tests {
         assert!(e.contains("does not lie on the plane"), "{e}");
         assert_eq!(size(&s), before);
         assert!(s.execute("canvas.insert", &json!({"data": png(40, 20), "frame": "yes"})).is_err());
+        // "auto", as the image tools send it: off the open sketch's plane the image is placed free,
+        // on it the image is framed there.
+        let free = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XZ", "width": 20, "frame": "auto"})).unwrap();
+        assert!(free.get("frame").is_none(), "{free}");
+        let framed =
+            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "center": [80, 20], "width": 20, "frame": "auto"})).unwrap();
+        assert_eq!(framed["frame"]["sketch"].as_u64(), Some(sketch), "{framed}");
     }
 
     /// An SVG decal is kept as the PNG it draws, at the resolution asked for.

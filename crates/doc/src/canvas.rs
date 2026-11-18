@@ -100,20 +100,11 @@ impl Canvas {
     /// image's shape makes it, its top to the left of the bottom edge's direction. Mirrored left
     /// to right like the canvas. `None` for a frame with no area.
     pub fn frame_corners(&self, bl: Vec2, br: Vec2, tl: Option<Vec2>) -> Option<[Vec2; 4]> {
-        let along = br - bl;
-        let width = along.len();
         let [pw, ph] = self.pixels;
         let aspect = if pw == 0 { 1.0 } else { f64::from(ph) / f64::from(pw) };
-        let up = match tl {
-            Some(tl) => tl - bl,
-            None => along.perp() * aspect,
-        };
-        let height = up.len();
-        // Both edges long enough and not along one line (more than a microradian apart).
-        if !(width > 1e-9 && height > 1e-9 && width.is_finite() && height.is_finite()) || !(along.cross(up).abs() > 1e-6 * width * height) {
-            return None;
-        }
-        let (tr, tl) = (br + up, bl + up);
+        // The kernel's frame: both edges long enough and not along one line.
+        let xy = |p: Vec2| [p.x, p.y];
+        let [bl, br, tr, tl] = solidcore_ops::affine::picture_frame(xy(bl), xy(br), tl.map(xy), aspect)?.map(|[x, y]| Vec2::new(x, y));
         Some(if self.flip { [br, bl, tl, tr] } else { [bl, br, tr, tl] })
     }
     pub fn bytes(&self) -> Option<Vec<u8>> {
@@ -178,19 +169,8 @@ impl crate::Document {
     /// The world corners `anchor` gives `c` (as [`Document::canvas_corners`] orders them), or why
     /// it gives none.
     pub fn canvas_anchor_corners(&self, c: &Canvas, anchor: &CanvasAnchor, state: &crate::ModelState) -> crate::Result<[Vec3; 4]> {
-        let invalid = |m: String| crate::DocError::Invalid(m);
-        let ss = state.sketch(anchor.sketch).ok_or_else(|| invalid(format!("{} follows sketch {}, which is not there", c.name, anchor.sketch)))?;
-        let point = |id: &str| {
-            ss.sketch.points.iter().find(|p| p.id == id).map(|p| p.pos).ok_or_else(|| invalid(format!("sketch `{}` has no point `{id}`", ss.name)))
-        };
-        let (bl, br) = (point(&anchor.bottom_left)?, point(&anchor.bottom_right)?);
-        let tl = anchor.top_left.as_deref().map(point).transpose()?;
-        let corners = c.frame_corners(bl, br, tl).ok_or_else(|| {
-            invalid(format!(
-                "the corners {} follows in sketch `{}` make a frame with no area: its points coincide or lie on one line",
-                c.name, ss.name
-            ))
-        })?;
+        let corners = self.canvas_anchor_frame(c, anchor, state)?;
+        let ss = state.sketch(anchor.sketch).ok_or_else(|| crate::DocError::Invalid(format!("sketch {} is not there", anchor.sketch)))?;
         // The sketch's points are in its component's frame; the world is where that component's
         // occurrence puts it, as for the canvas's own plane.
         let m = self.component_transform(self.feature(anchor.sketch).map_or(c.component, |f| f.component));
@@ -199,6 +179,24 @@ impl crate::Document {
             if crate::is_identity(&m) { w } else { crate::apply_point(&m, w) }
         };
         Ok(corners.map(placed))
+    }
+
+    /// The corners `anchor` gives `c` (as [`Document::canvas_corners`] orders them) in the
+    /// coordinates of the anchor's sketch, or why it gives none.
+    pub fn canvas_anchor_frame(&self, c: &Canvas, anchor: &CanvasAnchor, state: &crate::ModelState) -> crate::Result<[Vec2; 4]> {
+        let invalid = |m: String| crate::DocError::Invalid(m);
+        let ss = state.sketch(anchor.sketch).ok_or_else(|| invalid(format!("{} follows sketch {}, which is not there", c.name, anchor.sketch)))?;
+        let point = |id: &str| {
+            ss.sketch.points.iter().find(|p| p.id == id).map(|p| p.pos).ok_or_else(|| invalid(format!("sketch `{}` has no point `{id}`", ss.name)))
+        };
+        let (bl, br) = (point(&anchor.bottom_left)?, point(&anchor.bottom_right)?);
+        let tl = anchor.top_left.as_deref().map(point).transpose()?;
+        c.frame_corners(bl, br, tl).ok_or_else(|| {
+            invalid(format!(
+                "the corners {} follows in sketch `{}` make a frame with no area: its points coincide or lie on one line",
+                c.name, ss.name
+            ))
+        })
     }
 }
 
