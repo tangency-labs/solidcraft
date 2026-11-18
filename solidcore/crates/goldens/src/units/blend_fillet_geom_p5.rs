@@ -1194,8 +1194,8 @@ mod tests {
     use super::*;
 
     /// The rail trims whose golden moved from a success to a refusal when
-    /// `fillet_statuses_pass_on` was removed (WR-661; the same 13 rows also move with
-    /// `fillet_rail_trim_at_near_knot`, WR-664). Each end point of the rail drops back
+    /// `fillet_statuses_pass_on` was removed (WR-661; the near-knot snap of WR-664 leaves
+    /// them refused by the same `set_min_max`). Each end point of the rail drops back
     /// onto the rail before its start point, so the trim interval `[param1, param2]` has
     /// `param1 > param2` and is not an interval. `Extent1d::set_min_max` refuses it.
     /// Upstream ignored that status and trimmed the rail to its previous interval, but set
@@ -1333,8 +1333,7 @@ mod tests {
                 None,
                 "{name}: the solver has an edge use"
             );
-            let mut k = Kernel::default();
-            k.fixes.fillet_rail_trim_at_near_knot = true;
+            let k = Kernel::default();
             let target = rm.target.clone_standing_for_self().expect("target");
             let gid = rm.geom(*g).expect("geometry");
             rm.fb

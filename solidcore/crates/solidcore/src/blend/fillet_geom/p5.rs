@@ -43,10 +43,10 @@
 //!   vertex, against N's own tangent there, with `SrfSrfOptions::closed_by_start_direction`
 //!   (`turned_back_arc`): a closed foot curve is taken the way round that continues N, of
 //!   any length and also across the face's seam.
-//! - **Near-knot rail trims (opt-in, not upstream).** With
-//!   `fixes.fillet_rail_trim_at_near_knot` (WR-664, the fork's tangency-labs/smlib@7d79866),
-//!   `TrimRailCurves` trims a rail at its knot next to a vertex's drop when the rail between
-//!   the two is no longer than the zone tolerance (`snap_rail_end_to_knot`).
+//! - **Near-knot rail trims (not upstream).** As the fork does (WR-664,
+//!   tangency-labs/smlib@7d79866), `TrimRailCurves` trims a rail at its knot next to a
+//!   vertex's drop when the rail between the two is no longer than the target B-rep's zone
+//!   tolerance (`snap_rail_end_to_knot`).
 //! - **Object model.** As in `blend.fillet_geom_p1` / `_p4`, a fillet vertex, edge or
 //!   geometry is an id of the [`FilletBrep`] (`self`, upstream's pseudo B-rep
 //!   `pPseudoBrep`). `GetFilletSolver()` is an opaque [`FilletSolverId`] resolved in
@@ -2730,21 +2730,15 @@ impl FilletBrep {
             .fillet_solver()
             .ok_or_else(|| missing(OP_TRIM))?;
         let app_tol = resolve(sid, OP_TRIM)?.approx_tol_3d;
-        // Opt-in (`fixes.fillet_rail_trim_at_near_knot`, WR-664; the fork's
-        // tangency-labs/smlib@7d79866): the target B-rep's zone tolerance
-        // (`SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`).
-        let zone_tol = if k.fixes.fillet_rail_trim_at_near_knot {
-            resolve(sid, OP_TRIM)?
-                .edgeuse(0)?
-                .ok_or_else(|| missing(OP_TRIM))?;
-            Some(crate::geom::tol::brep_zone_tol_3d(
-                k,
-                target,
-                crate::geom::tol::SmallTopoType::NormalSize,
-            ))
-        } else {
-            None
-        };
+        // WR-664 (the fork's tangency-labs/smlib@7d79866): the target B-rep's zone
+        // tolerance. The fork reads it as `SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`;
+        // the solver's edge uses live in `target`, so it is read from `target` directly
+        // and a solver without edge uses trims as one with them.
+        let zone_tol = crate::geom::tol::brep_zone_tol_3d(
+            k,
+            target,
+            crate::geom::tol::SmallTopoType::NormalSize,
+        );
 
         // for both rail curves
         for ii in 0..2 {
@@ -2860,18 +2854,16 @@ impl FilletBrep {
                     t = clean_up_noise(t);
 
                     // fork 7d79866: no end span shorter than the zone tolerance
-                    if let Some(zone_tol) = zone_tol {
-                        let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
-                        t = snap_rail_end_to_knot(
-                            k,
-                            &rail_curve,
-                            rail_tol,
-                            &trim_ivl,
-                            zone_tol,
-                            true,
-                            t,
-                        )?;
-                    }
+                    let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                    t = snap_rail_end_to_knot(
+                        k,
+                        &rail_curve,
+                        rail_tol,
+                        &trim_ivl,
+                        zone_tol,
+                        true,
+                        t,
+                    )?;
 
                     // set Vertexuse0->UVPoint on filletSurface
                     self.fillet_vertexuse_mut(vu0)?
@@ -2913,20 +2905,18 @@ impl FilletBrep {
                     }
 
                     // fork 7d79866: no end span shorter than the zone tolerance
-                    if let Some(zone_tol) = zone_tol {
-                        let mut from_start = Extent1d::default();
-                        from_start.set_min_max(param1, trim_ivl.max())?;
-                        let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
-                        param2 = snap_rail_end_to_knot(
-                            k,
-                            &rail_curve,
-                            rail_tol,
-                            &from_start,
-                            zone_tol,
-                            false,
-                            param2,
-                        )?;
-                    }
+                    let mut from_start = Extent1d::default();
+                    from_start.set_min_max(param1, trim_ivl.max())?;
+                    let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                    param2 = snap_rail_end_to_knot(
+                        k,
+                        &rail_curve,
+                        rail_tol,
+                        &from_start,
+                        zone_tol,
+                        false,
+                        param2,
+                    )?;
 
                     // set Vertexuse1->UVPoint on filletSurface
                     self.fillet_vertexuse_mut(vu1)?
@@ -3386,8 +3376,8 @@ fn user_surface(
 /// tolerance (`SmEdge::GetTolerance`, zero on a fillet B-rep's rails); the system zone
 /// tolerance when there is no edge. `SmBSplineCurve::Trim` maps it to parameter space
 /// to find degenerate end spans to remove.
-/// The fork's `sm_SnapRailEndToKnot` (tangency-labs/smlib@7d79866, opt-in
-/// `fixes.fillet_rail_trim_at_near_knot`, WR-664), not upstream: where a rail is trimmed
+/// The fork's `sm_SnapRailEndToKnot` (tangency-labs/smlib@7d79866, WR-664), not
+/// upstream: where a rail is trimmed
 /// at an end vertex, the parameter `param` found for the vertex, or the rail's knot next
 /// to it inside `trim_ivl` (above it for the trim's start, below it for its end) when the
 /// rail between the two is no longer than `zone_tol`. A trim there would leave an end span
