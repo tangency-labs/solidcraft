@@ -18,6 +18,8 @@ struct SetupWindow {
     views: usize,
     level: SetupLevel,
     options: WindowOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    panel_layout: Option<Value>,
     placement: Option<Placement>,
     tiles: Option<Value>,
 }
@@ -99,6 +101,7 @@ impl Setup {
                     views: views.len(),
                     level: view_windows::setup_level(app, id),
                     options: app.docs.views.window(id).map_or_else(WindowOptions::default, |window| window.options),
+                    panel_layout: app.docs.views.window(id).and_then(|window| window.panel_layout.clone()),
                     placement: view_windows::setup_placement(app, id).map(|placement| Placement::capture(app, placement)),
                     tiles,
                 })
@@ -156,7 +159,8 @@ impl Setup {
                 }
             };
             let options = window.get("options").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
-            windows.push(SetupWindow { views, level, options, placement, tiles });
+            let panel_layout = window.get("panel_layout").and_then(solidcraft_views::ViewSet::read_panel_layout);
+            windows.push(SetupWindow { views, level, options, panel_layout, placement, tiles });
         }
         (total <= MAX_VIEWS).then_some(Self { windows })
     }
@@ -167,6 +171,7 @@ impl Setup {
                 saved.views == actual.views
                     && saved.level == actual.level
                     && saved.options == actual.options
+                    && saved.panel_layout == actual.panel_layout
                     && saved.tiles == actual.tiles
                     && saved.placement.as_ref().is_none_or(|placement| actual.placement.as_ref().is_none_or(|actual| placement.same_position(actual)))
             })
@@ -250,6 +255,7 @@ fn apply(app: &mut SolveApp, name: &str) -> Result<(), String> {
                 tiles,
                 level: template.level.into(),
                 options: template.options,
+                panel_layout: template.panel_layout,
                 placement: template.placement.map(|placement| view_windows::resolve_setup_placement(app, placement)),
             })
         })

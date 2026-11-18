@@ -41,6 +41,7 @@ pub struct WindowMenu<'a> {
     pub displays: &'a [DisplayChoice<'a>],
     pub card_headers: CardHeaders,
     pub keep_on_top: bool,
+    pub panels: bool,
     pub ribbon: bool,
     pub ribbon_auto_hide: bool,
 }
@@ -49,6 +50,7 @@ pub struct WindowMenu<'a> {
 pub enum Action {
     CardHeaders(CardHeaders),
     KeepOnTop(bool),
+    Panels(bool),
     Ribbon(bool),
     RibbonAutoHide(bool),
     MoveToDisplay(usize),
@@ -227,6 +229,7 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut
 fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
     Menu::heading(ui, tr("window_menu.show_here"));
     let mut action = ribbon_options(ui, menu, focus);
+    action = panel_options(ui, menu.panels, focus).or(action);
     action = card_headers(ui, menu.card_headers, focus).or(action);
     Menu::separator(ui);
     Menu::heading(ui, tr("window_menu.window"));
@@ -299,6 +302,25 @@ fn ribbon_options(ui: &mut Ui, menu: &WindowMenu<'_>, focus: &mut FocusRows) -> 
     } else {
         None
     }
+}
+
+fn panel_options(ui: &mut Ui, current: bool, focus: &mut FocusRows) -> Option<Action> {
+    use crate::BackingTooltipExt as _;
+    let t = Tokens::get();
+    let label = tr("window_panels.other_panels");
+    let description = tr("window_panels.workspace_panels");
+    let mut panels = current;
+    ui.horizontal(|ui| {
+        ui.add_space(t.space_8);
+        ui.label(label).backing_on_hover_text(description);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(t.space_8);
+            let response = crate::preferences::theme_option_switch(ui, label, &mut panels).backing_on_hover_text(description);
+            solidcraft_ui_registry::publish_target("window_options:other_panels", response.rect);
+            focus.row(&response);
+        });
+    });
+    (panels != current).then_some(Action::Panels(panels))
 }
 
 fn card_headers(ui: &mut Ui, headers: CardHeaders, focus: &mut FocusRows) -> Option<Action> {

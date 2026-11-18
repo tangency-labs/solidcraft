@@ -172,8 +172,8 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
         ("tab.window.options", Value::Null, json!({}), output_schema_for::<TabWindowOptionsReply>()),
         (
             "tab.window.set_options",
-            json!({"window": 1, "card_headers":"hover", "keep_on_top": true}),
-            json!({"window": 1, "card_headers":"hover", "keep_on_top": true}),
+            json!({"window": 1, "card_headers":"hover", "keep_on_top": true, "panels":true}),
+            json!({"window": 1, "card_headers":"hover", "keep_on_top": true, "panels":true}),
             output_schema_for::<TabWindowOptionsReply>(),
         ),
         ("window.options.use_as_default", json!({"window": 1}), json!({"window": 1}), output_schema_for::<TabWindowOptionsReply>()),
@@ -243,6 +243,7 @@ fn window_commands_refuse_malformed_requests() {
         ("tab.window.options", json!({"window": -1})),
         ("tab.window.set_options", json!({"card_headers":"sometimes"})),
         ("tab.window.set_options", json!({"keep_on_top":"yes"})),
+        ("tab.window.set_options", json!({"panels": [true]})),
         ("window.options.use_as_default", json!({"keep_on_top":true})),
         ("tab.window.focus", json!({})),
         ("tab.window.focus", json!({"window": 4_294_967_296_u64})),
