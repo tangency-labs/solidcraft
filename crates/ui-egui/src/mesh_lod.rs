@@ -45,21 +45,7 @@ impl MeshLods {
         if let Some((_, levels)) = state.by_mesh.get(&key).filter(|(held, _)| Arc::ptr_eq(held, mesh)) {
             return levels.clone();
         }
-        state.by_mesh.insert(key, (mesh.clone(), None));
-        state.queue.push_back((key, mesh.clone()));
-        if state.making < MAX_JOBS {
-            state.making += 1;
-            let shared = self.0.clone();
-            if std::thread::Builder::new().name("mesh-lod".into()).spawn(move || work(&shared)).is_err() {
-                // No threads (the browser): drawn in full.
-                state.making = state.making.saturating_sub(1);
-                for (key, _) in std::mem::take(&mut state.queue) {
-                    if let Some(slot) = state.by_mesh.get_mut(&key) {
-                        slot.1 = Some(Arc::new(Vec::new()));
-                    }
-                }
-            }
-        }
+        queue(&mut state, &self.0, key, mesh);
         None
     }
 
@@ -81,22 +67,45 @@ impl MeshLods {
     }
 }
 
+/// Queues `mesh` (at `key`) for a worker, starting one when fewer than [`MAX_JOBS`] run. Called
+/// with the state locked, so a worker retiring ([`work`]) either takes this request or has already
+/// let go of its place, which this one then starts again.
+fn queue(state: &mut State, shared: &Arc<Mutex<State>>, key: usize, mesh: &Arc<Mesh>) {
+    state.by_mesh.insert(key, (mesh.clone(), None));
+    state.queue.push_back((key, mesh.clone()));
+    if state.making < MAX_JOBS {
+        state.making += 1;
+        let shared = shared.clone();
+        if std::thread::Builder::new().name("mesh-lod".into()).spawn(move || work(&shared)).is_err() {
+            // No threads (the browser): drawn in full.
+            state.making = state.making.saturating_sub(1);
+            for (key, _) in std::mem::take(&mut state.queue) {
+                if let Some(slot) = state.by_mesh.get_mut(&key) {
+                    slot.1 = Some(Arc::new(Vec::new()));
+                }
+            }
+        }
+    }
+}
+
 /// A worker: makes the queued meshes' levels until none is left, then tells the viewport (once for
-/// all it made), which fills them into its scene.
+/// all it made), which fills them into its scene. It finds the queue empty and retires under one
+/// lock, so a mesh queued meanwhile is never left without a worker.
 fn work(shared: &Arc<Mutex<State>>) {
     loop {
-        let next = shared.lock().ok().and_then(|mut s| s.queue.pop_front());
-        let Some((key, source)) = next else { break };
+        let Ok(mut state) = shared.lock() else { return };
+        let Some((key, source)) = state.queue.pop_front() else {
+            state.making = state.making.saturating_sub(1);
+            state.generation = state.generation.wrapping_add(1);
+            return;
+        };
+        drop(state);
         let levels = Arc::new(make(&source));
         if let Ok(mut state) = shared.lock()
             && let Some(slot) = state.by_mesh.get_mut(&key).filter(|(held, _)| Arc::ptr_eq(held, &source))
         {
             slot.1 = Some(levels);
         }
-    }
-    if let Ok(mut state) = shared.lock() {
-        state.making = state.making.saturating_sub(1);
-        state.generation = state.generation.wrapping_add(1);
     }
 }
 

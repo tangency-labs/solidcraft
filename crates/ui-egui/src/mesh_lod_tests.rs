@@ -43,8 +43,12 @@ fn a_meshs_levels_are_made_once_on_a_worker() {
         assert!(began.elapsed() < std::time::Duration::from_secs(60), "made on a worker");
         std::thread::sleep(std::time::Duration::from_millis(5));
     };
+    // The worker stores the levels before it retires: wait for that too.
+    while lods.busy() {
+        assert!(began.elapsed() < std::time::Duration::from_secs(60), "the worker retires");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     assert_ne!(lods.generation(), before);
-    assert!(!lods.busy());
     // A quarter, a sixteenth and a sixty-fourth.
     assert_eq!(levels.len(), 3, "{} triangles", mesh.triangles.len());
     let mut last = (mesh.triangles.len(), 0.0f32);
@@ -76,10 +80,15 @@ fn every_mesh_gets_levels_whatever_its_size() {
         triangles: vec![[0, 1, 2]],
         ..Default::default()
     });
-    for m in small.iter().chain([&single]) {
-        assert!(lods.levels(m).is_none(), "queued, not made in the asking frame");
-    }
     let before = lods.generation();
+    // Queued under one lock, so no worker starts on the queue before it is full and none retires
+    // early: each worker retires once, when the queue is empty.
+    {
+        let mut state = lods.0.lock().unwrap();
+        for m in small.iter().chain([&single]) {
+            queue(&mut state, &lods.0, Arc::as_ptr(m) as usize, m);
+        }
+    }
     let began = std::time::Instant::now();
     while lods.busy() {
         assert!(began.elapsed() < std::time::Duration::from_secs(60), "made on the workers");
