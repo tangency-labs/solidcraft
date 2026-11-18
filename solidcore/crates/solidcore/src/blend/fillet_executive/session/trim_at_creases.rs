@@ -110,24 +110,6 @@ fn smos_min(a: f64, b: f64) -> f64 {
     }
 }
 
-/// #18646: whether face `g` of `b` lies on the surface of face `f` within `tol`: each edge of
-/// `g` does ([`edge_on_surface`]), as two faces of one plane do.
-///
-/// # Errors
-/// Those of the topology queries and of [`edge_on_surface`].
-fn face_on_surface(k: &Kernel, b: &Brep, g: FaceId, f: FaceId, tol: f64) -> Result<bool> {
-    let edges = face::p4::edges(b, g, None, false, None)?;
-    if edges.is_empty() {
-        return Ok(false);
-    }
-    for e in edges {
-        if !edge_on_surface(k, b, e, b, f, tol)? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 /// `SmFilletSolver::IsTangentEdge` (the fork's bacd0bb): whether the two faces at the
 /// manifold edge `e` meet tangentially there (`sm_TestManifoldTangentRollover`).
 fn is_tangent_edge(k: &Kernel, b: &mut Brep, e: EdgeId, tangency_tol_rad: f64) -> Result<bool> {
@@ -2147,13 +2129,10 @@ impl FilletSession<'_> {
             }
             lamina_edges = kept_lamina;
         }
-        // #18646: the faces each rail lies on, less those on the surface of a face of its
-        // round's own edge that the rail lies on, other than that face. A rail lies on the
-        // surface of every face of the plane its round rolls on: two rounds on two faces of
-        // one plane, apart, each have a rail on both. The other face of the plane is not the
-        // one it rolls on, and its extension would not close on that face. (A face of
-        // another surface the rail lies on, as a crease along an edge lies on both its
-        // faces, keeps it.)
+        // #18646: a rail on a face of its own blended edge extends only that edge's faces.
+        // Matching another face's surface does not make that face a support of this round,
+        // whether the faces share a surface or merely meet along the rail. Creases and
+        // section ends with no own-face match keep all the faces they lie on.
         let mut on_faces: Vec<Vec<FaceId>> = Vec::new();
         for &e in &lamina_edges {
             let mut on = Vec::new();
@@ -2166,29 +2145,13 @@ impl FilletSession<'_> {
             for s in edge::faces(&sheet, e, None)? {
                 let round = piece_round.get(&s).or_else(|| round_of.get(&s));
                 if let Some(&be) = round.and_then(|&i| blended_edges.get(i)) {
-                    for g in edge::faces(self.objects.target, be, None)? {
-                        if on.contains(&g) && !own.contains(&g) {
-                            own.push(g);
-                        }
-                    }
+                    own.extend(edge::faces(self.objects.target, be, None)?);
                 }
             }
-            let mut kept = Vec::new();
-            for &f in &on {
-                let mut beside = false;
-                if !own.contains(&f) {
-                    for &g in &own {
-                        if face_on_surface(k, self.objects.target, g, f, on_tol)? {
-                            beside = true;
-                            break;
-                        }
-                    }
-                }
-                if !beside {
-                    kept.push(f);
-                }
+            if on.iter().any(|f| own.contains(f)) {
+                on.retain(|f| own.contains(f));
             }
-            on_faces.push(kept);
+            on_faces.push(on);
         }
         let mut extensions: Vec<Extension> = Vec::new();
         let mut along: Vec<Curve> = Vec::new();

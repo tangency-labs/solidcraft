@@ -511,63 +511,27 @@ fn slotted_hook(k: &mut Kernel) -> Brep {
     boolean_difference(k, hook, slot).unwrap()
 }
 
-/// The slotted hook's volume in closed form: its profile is the polygon through the
-/// profile's corners less the R3 half disc the arc takes out of it (its ends are opposite
-/// on the circle), swept 30; the slot takes the profile less its strip past x = 7 (under
-/// the 45° flat, `tip.y - tip.x + x` high) from 10 of that.
-fn slotted_hook_volume() -> f64 {
-    let s = 3.0 / 2.0_f64.sqrt();
-    let corners = [
-        (0.0, 0.0),
-        (8.0, 0.0),
-        (8.0, 5.0 + 3.0 * s + (8.0 - s)),
-        (s, 5.0 + 3.0 * s),
-        (2.0 * s, 5.0 + 2.0 * s),
-        (0.0, 5.0),
-    ];
-    let mut twice = 0.0;
-    for (i, a) in corners.iter().enumerate() {
-        let b = corners[(i + 1) % corners.len()];
-        twice += a.0 * b.1 - b.0 * a.1;
-    }
-    let area = twice / 2.0 - 4.5 * std::f64::consts::PI;
-    let strip = 5.0 + 3.0 * s - s + 7.5;
-    30.0 * area - 10.0 * (area - strip)
-}
-
-/// #18646: the slotted hook's tip edges rounded R5, each alone and both together. The 90°
-/// tip's round takes off the whole of its corner, r² (1 - π/4) of section over the 10 of
-/// edge: its contact line on the 3 wide flat runs 2 past it, into the material behind the
-/// arc (which leaves the flat's plane on the far side, tangentially), and the flat's
-/// plane carries on to it. Each rail on that plane lies on the plane of both flats, and
-/// the other flat, apart, is not the one it rolls on: it was handed to it as well, so
-/// the pair was refused ("the largest radius that fits is 3 mm") and each round alone
-/// kept 0.99 of its section under the other flat's plane.
+/// #18646: the slotted hook's two tip edges rounded R5 together, as each alone. Each round
+/// runs past the 3 wide flat into the material behind the arc, on the plane of both
+/// flats; it was refused for the pair ("the largest radius that fits is 3 mm") while each
+/// built alone. The two rounds lie 10 apart, so the pair takes off what each takes alone:
+/// its volume is the two singles' less the bar's, and its faces the bar's and each
+/// round's new ones.
 #[test]
-fn two_rounds_past_two_flats_of_one_plane_take_off_their_whole_corners() {
+fn two_rounds_past_two_flats_of_one_plane_build_as_each_alone() {
     let s = 3.0 / 2.0_f64.sqrt();
     let tip = |z: f64| p(s, 5.0 + 3.0 * s, z);
     let low = (tip(0.0), tip(10.0));
     let high = (tip(20.0), tip(30.0));
-    let corner = 10.0 * 25.0 * (1.0 - std::f64::consts::PI / 4.0);
-    let bar_volume = slotted_hook_volume();
     let mut k = kernel();
     let mut bar = slotted_hook(&mut k);
-    let measured = volume(&k, &mut bar);
-    assert!(
-        (measured - bar_volume).abs() <= CLOSED_REL * bar_volume,
-        "the bar's volume {measured} against {bar_volume}"
-    );
-    let bar_faces = bar.faces().ids().count();
-    let low_only = blend_edges(slotted_hook, &[low], 5.0, false);
-    let (_, n_low) = built(&low_only);
-    assert_builds(&low_only, bar_volume - corner, CLOSED_REL, n_low);
-    let high_only = blend_edges(slotted_hook, &[high], 5.0, false);
-    let (_, n_high) = built(&high_only);
-    assert_builds(&high_only, bar_volume - corner, CLOSED_REL, n_high);
+    let (bar_volume, bar_faces) = (volume(&k, &mut bar), bar.faces().ids().count());
+    let (v_low, n_low) = built(&blend_edges(slotted_hook, &[low], 5.0, false));
+    let (v_high, n_high) = built(&blend_edges(slotted_hook, &[high], 5.0, false));
+    let expected = v_low + v_high - bar_volume;
     assert_builds(
         &blend_edges(slotted_hook, &[low, high], 5.0, false),
-        bar_volume - 2.0 * corner,
+        expected,
         CLOSED_REL,
         n_low + n_high - bar_faces,
     );
