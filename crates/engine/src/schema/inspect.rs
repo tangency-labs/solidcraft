@@ -196,10 +196,9 @@ pub struct ModelFace {
     /// For a cylindrical face: its axis and radius.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cylinder: Option<FaceCylinder>,
-    /// For a folded sheet's face: `sheet:<body>:<panel>:<side>`, where the panel is `base` or a
-    /// flange's tag `F<feature>.<k>` and the side is `top`, `bottom`, `rim.<edge>`, `bend.inner`
-    /// or `bend.outer`. It is taken wherever a face name is, and holds while sizes change and
-    /// flanges come and go.
+    /// For a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, the side `top`, `bottom`,
+    /// `rim.<edge>`, `bend.inner` or `bend.outer`. It is taken wherever a face name is. A sheet
+    /// made from surfaces has none: its faces' names are the model's, after what made each.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet_face: Option<String>,
 }
@@ -659,7 +658,9 @@ pub struct BodyFigures {
     /// Its centre of mass at uniform density; `null` unless it is closed.
     pub center_of_mass: Option<[f64; 3]>,
     pub bbox: BoundingBox,
-    /// Faces, with split pieces of one analytic surface counted once.
+    /// Faces, with split pieces of one analytic surface counted once. These, the edges and the
+    /// vertices count the body's stored B-rep: a sheet metal body's perforation holes, which its
+    /// volume, area and centre of mass leave out, are not in it and are not counted.
     pub faces: i64,
     pub edges: i64,
     pub vertices: i64,
@@ -678,7 +679,8 @@ pub struct BodyFigures {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BodyFailure {
     pub error: String,
-    /// Topology counts, when available.
+    /// The counts known of a body that could not be measured, where a reply has them
+    /// (`inspect.measure` has none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub faces: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]

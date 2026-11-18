@@ -22,16 +22,16 @@ use super::types::{LengthExpr, Point2, Point3};
 use crate::params;
 
 /// Place an image on a plane as a reference to trace, kept in the design. Give the image as
-/// `path` or as base64 `data`; only PNG and JPEG are taken, up to 16 MiB. The image goes into the
-/// active component. One undo step.
+/// `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
+/// PNG. The image goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = image_required)]
 pub struct CanvasInsertParams {
-    /// A PNG or JPEG file to read (not blank, under 4096 characters). Used when `data` is not
-    /// given.
+    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
+    /// not given.
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG or JPEG, as base64. Wins over `path`.
+    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
     #[serde(default)]
     pub data: Option<String>,
     /// The plane the image lies on. Default: XY. A picked face is read as `sketch.create` reads
@@ -66,19 +66,23 @@ pub struct CanvasInsertParams {
     /// Its opacity, 0 (clear) to 1 (opaque); a value outside is clamped (a number of 1e9 or more is ignored, as if left out). Default: 0.5.
     #[serde(default)]
     pub opacity: Option<f64>,
+    /// For an SVG image: the longest side of the PNG it is drawn into, in pixels, 1 to 4096.
+    /// Default: 1024. A PNG or JPEG is kept as it is.
+    #[serde(default)]
+    pub resolution: Option<f64>,
 }
 
 /// Put an image on a planar face of the model, like a sticker, kept in the design. Give the image
-/// as `path` or as base64 `data`; only PNG and JPEG are taken, up to 16 MiB. The image goes into
-/// the active component. One undo step.
+/// as `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
+/// PNG. The image goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = decal_required)]
 pub struct CanvasDecalParams {
-    /// A PNG or JPEG file to read (not blank, under 4096 characters). Used when `data` is not
-    /// given.
+    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
+    /// not given.
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG or JPEG, as base64. Wins over `path`.
+    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
     #[serde(default)]
     pub data: Option<String>,
     // Optional in the type and required in the schema (`decal_required`): left out, the handler
@@ -116,6 +120,10 @@ pub struct CanvasDecalParams {
     /// Its opacity, 0 (clear) to 1 (opaque); a value outside is clamped (a number of 1e9 or more is ignored, as if left out). Default: 1.
     #[serde(default)]
     pub opacity: Option<f64>,
+    /// For an SVG image: the longest side of the PNG it is drawn into, in pixels, 1 to 4096.
+    /// Default: 1024. A PNG or JPEG is kept as it is.
+    #[serde(default)]
+    pub resolution: Option<f64>,
 }
 
 /// Change a canvas or decal: its place, size, angle, opacity, mirroring, visibility or name. Keys

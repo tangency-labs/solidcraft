@@ -95,7 +95,7 @@ pub use sketch_construction::{
 };
 pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
 pub use sketch_import::drawing_import_command;
-pub use sketch_modify::{TrimHover, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
+pub use sketch_modify::{TrimHover, break_shared_end, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
@@ -158,7 +158,8 @@ mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
     DxfCurves, DxfText, FlangeType, ThenStep, bend_table_format, dxf_curves, dxf_layers, dxf_note_height, dxf_text, flange_edge, flange_edge_list,
-    flange_position, flange_type, flat_reply, fold_points, fold_position, perforation_pattern, sheet_points, sheet_rule_name, then_list,
+    flange_position, flange_type, flat_reply, fold_points, fold_position, fold_stays, material_side, perforation_pattern, sheet_points,
+    sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;
@@ -167,6 +168,7 @@ pub(crate) use sketch::collapse_reason;
 pub(crate) use sketch::created as sketch_created;
 pub(crate) use sketch::{PLANE_REF_FORMS, custom_plane_form, point_arg_form};
 mod canvas_sketch;
+mod canvas_svg;
 mod sketch_3d;
 mod sketch_canvas;
 pub mod sketch_clipboard;
@@ -183,6 +185,7 @@ mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::{MAX_PROJECTED_ENTITIES, RefForm, model_ref, ref_form};
+mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
 mod surface;

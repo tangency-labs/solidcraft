@@ -554,7 +554,25 @@ its new curves have ends (the poles of an offset's splines), `created.points` be
 `created.point_count`: refer to those curves by their ids. A `sketch.move_points` reply gives
 `moved_count` and `reached` (true when every point reached its target) instead of the `moved`
 list, and lists only the moves that missed under `not_reached` (`point`, `to`, `at`).
-Other fields and errors are unchanged;
+An export's mesh warnings (STL, OBJ and 3MF: faces left short of the smallest angle asked or
+off the surface, edges off the curve) are counted. Two or more lines of one kind become one line
+that gives how many there were, the bounds or reasons that stopped the mesh, the worst of them and
+the bodies they are on, for example
+`3 faces short of the 25° asked (stopped by: Corner, Points); the sharpest: smallest angle 3.00°
+(Base: face 9); bodies: "Lid" (1), "Base" (2)`. A face past its chord tolerance is never counted with
+one within it, and a surface or curve summary gives the chord tolerance of the face or edge it
+names. Body names are quoted, and faces that no bound stopped are counted as "nothing stopped
+N faces". `warning_count` gives the number of lines that `verbose: true` lists. A line in a wording
+the compact reply doesn't know stays as it is.
+
+A `warning` that is null is left out. A null `error` stays, so a client that reads `error` still
+finds it. A `display_value` the same as `value` (a new parameter in its own unit) is left out.
+
+`timeline.export_script` with a `path` writes the script and replies with `path` (the file
+written, as an absolute path), `bytes` (its size) and `steps`. The compact reply leaves the script
+itself out, as it is in the file. An older app that gives no `bytes` keeps the script in the reply.
+
+All other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
 
