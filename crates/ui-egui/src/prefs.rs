@@ -1096,10 +1096,6 @@ preference_settings! {
     library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
-    /// Drawings (preview): the Drawing workspace and its settings. Off by default, so the app shows
-    /// no Drawing workspace until it is turned on; a design's drawings are kept as they are either
-    /// way.
-    drawings_preview: bool = false, PAGE_DESIGN => check_id_help("prefs.drawings_preview", "prefs.drawings_preview_help");
     /// First or third angle for new drawings (third when not set, or set to one this version
     /// doesn't know).
     default_projection: Projection = Projection::Third, PAGE_DESIGN;
@@ -1403,6 +1399,10 @@ preference_settings! {
     /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
     /// its solids as one Import feature, as before.
     freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
+    /// Import with cadmpeg: a FreeCAD or Rhino file's solids are read from cadmpeg's model straight
+    /// into B-rep records, instead of restated as STEP by cadmpeg's STEP writer and read by
+    /// SolidCraft's own STEP reader. Off (the default) keeps that STEP route, as before.
+    cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.

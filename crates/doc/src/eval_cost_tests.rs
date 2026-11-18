@@ -21,9 +21,9 @@ use crate::*;
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go), face surfaces classified for a hole's direction, joins made of bodies that are all apart
-/// without running the kernel's union, and the holes whose tools were built (not moved from
-/// another copy's).
+/// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
+/// direction, joins made of bodies that are all apart without running the kernel's union, and the
+/// holes whose tools were built (not moved from another copy's).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -39,6 +39,7 @@ pub(super) struct Counts {
     pub tapped_wall: usize,
     pub miss_intersects: usize,
     pub cut_tools: usize,
+    pub apart_unions: usize,
     pub surfaces: usize,
     pub joined_apart: usize,
     pub kept_checks: usize,
@@ -65,6 +66,7 @@ thread_local! {
             tapped_wall: 0,
             miss_intersects: 0,
             cut_tools: 0,
+            apart_unions: 0,
             surfaces: 0,
             joined_apart: 0,
             kept_checks: 0,
@@ -318,7 +320,7 @@ fn placed_imports(parts: usize) -> Document {
         let comp = doc.add_component(Some(&format!("Part {i}")), 0).unwrap();
         let o = doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap();
         o.transform = rigid(Vec3::new(0.0, 0.0, 5.0 * i as f64), Vec3::ZERO, Vec3::Z, 0.05 * i as f64);
-        let kind = FeatureKind::Import { file: format!("part{i}.step"), step, components: Vec::new(), skip: Vec::new() };
+        let kind = FeatureKind::Import { file: format!("part{i}.step"), step, components: Vec::new(), skip: Vec::new(), records: None };
         let id = doc.add_feature(kind, Some(&format!("Part {i}"))).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
@@ -2576,6 +2578,62 @@ fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_o
     });
     assert_eq!(patterned, kernel::measure(&one_by_one).unwrap().merged.faces);
     assert_eq!(work.cut_tools, 1, "{work:?}");
+}
+
+/// A shaft (10 mm radius, 40 mm high) with a helical groove cut into its wall, and the groove
+/// in a circular pattern of `count` about Z: the shaft's volume and the work the pattern cost.
+fn shaft_with_coil_pattern(doc: &mut Document, count: Option<usize>) -> (f64, Counts) {
+    let shaft = FeatureKind::Cylinder {
+        base: point_expr(Vec3::ZERO),
+        axis: Dir(Vec3::Z),
+        radius: "10".into(),
+        height: "40".into(),
+        operation: Operation::NewBody,
+        references: Vec::new(),
+    };
+    doc.add_feature(shaft, Some("Shaft")).unwrap();
+    // A groove that climbs 120 mm a turn around the shaft's wall: over the shaft's height it
+    // runs a third of a turn, and the copies of it round the shaft are a twelfth of a turn
+    // apart.
+    let groove: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "coil", "base": [0, 0, 0], "axis": [0, 0, 1], "diameter": "20", "pitch": "120",
+        "turns": "1", "section_size": "0.5", "section": "circular", "operation": "cut",
+    }))
+    .unwrap();
+    let groove = doc.add_feature(groove, Some("Groove")).unwrap();
+    if let Some(count) = count {
+        let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "pattern", "features": [groove],
+            "pattern": {"type": "circular", "origin": [0, 0, 0], "axis": [0, 0, 1], "count": count.to_string(), "angle": "360 deg"},
+        }))
+        .unwrap();
+        doc.add_feature(pattern, Some("Grooves")).unwrap();
+    }
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    (disc_volume(&model), work)
+}
+
+/// A circular pattern of a coil cut (#17632): the copies of a helical groove are told apart
+/// with one union of all of them, not with a union for every pair of them, and they are cut in
+/// one go.
+#[test]
+fn a_circular_pattern_of_a_coil_cut_cuts_its_copies_at_once() {
+    // The groove wraps round the shaft, so every copy's box is the whole cylinder and the
+    // copies' boxes meet: their exact shapes decide whether they are apart. Telling the
+    // forty-nine copies of a pattern of fifty apart took a union for each of their 1176 pairs,
+    // and minutes on the design of #17632. The copies are cut in two groups, and each group is
+    // told apart with one union.
+    let mut doc = Document::new("grooved shaft");
+    let (volume, work) = shaft_with_coil_pattern(&mut doc, Some(50));
+    assert_eq!((work.cut_tools, work.apart_unions), (2, 2), "{work:?}");
+    // The shaft less fifty grooves: fifty times what one groove takes away.
+    let mut doc = Document::new("one groove");
+    let (one, _) = shaft_with_coil_pattern(&mut doc, None);
+    let shaft = std::f64::consts::PI * 100.0 * 40.0;
+    let taken = shaft - volume;
+    assert!((taken - 50.0 * (shaft - one)).abs() < 0.02 * taken, "{taken} against {}", 50.0 * (shaft - one));
 }
 
 /// A 100 x 100 x 2 plate with a 3 mm hole at (5, 5) drilled from its top, in a 10 x 9 grid on a

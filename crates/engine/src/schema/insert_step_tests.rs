@@ -11,7 +11,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertStepParams>(), &["flatten", "folder", "history", "matrix", "name", "names", "path", "tolerance", "up"]);
+    assert_keys(
+        input_schema_for::<InsertStepParams>(),
+        &["flatten", "folder", "history", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
+    );
 }
 
 #[test]
