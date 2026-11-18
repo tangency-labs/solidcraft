@@ -220,7 +220,7 @@ fn a_token_fired_before_the_call_cancels_offset_shell_and_sweep() {
 /// Every opt-in fix (as `fork_ea59e9c_section_orders`'s
 /// SolidCraft kernel): with them the shell takes #1476's slow path (two 38 000-sample
 /// curve offsets, over 4 min in a debug build).
-fn every_fix() -> solidcore::kernel::UpstreamFixes {
+fn all_fixes() -> solidcore::kernel::UpstreamFixes {
     solidcore::kernel::UpstreamFixes::all()
 }
 
@@ -255,7 +255,7 @@ fn cancel_shell_after(
     });
     let mut k = Kernel::default();
     if every_fix {
-        k.fixes = every_fix();
+        k.fixes = all_fixes();
     }
     let mut part = swept_bar(&mut k);
     let start = planar_faces_at(&k, &part, 2, 0.0);
