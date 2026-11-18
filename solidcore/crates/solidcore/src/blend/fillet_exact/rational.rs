@@ -39,6 +39,15 @@
 //!   [`MAX_SPINE_SEGMENTS`] segments, is `SM_ERR` (the fork's `ULONG` conversion of a
 //!   non-finite count is undefined and a huge one exhausts memory); geometry never gets
 //!   near it (a hyperbola's parameter is an `asinh`).
+//! - **Where the edge's middle lies on an ellipse (not the fork's, #18824).** The spine
+//!   runs from the trace's first centre to its last the way round an ellipse that passes the
+//!   edge's middle. The fork read the middle off the ellipse by its angle about the
+//!   ellipse's centre, in the ellipse's plane; here it is read by its angle round the
+//!   cylinder's or cone's axis (`ellipse_param_about_axis`), which the edge and the spine
+//!   share. A chamfer whose ball nearly fills a 1 mm round has a spine ellipse 0.07 mm
+//!   across, its plane 0.97 mm off the edge along a tilted axis: the fork's reading put the
+//!   middle outside the short arc, and the round ran the long way round, its rails off
+//!   their faces.
 //! - No recursion: the weight-positivity halving is the fork's work list (left half
 //!   first), at most 6 levels deep, as the fork bounds it.
 //! - **Nodal arithmetic.** The nodal quartic is constructed directly in Bernstein form
@@ -570,6 +579,46 @@ fn conic_param(k: &Conic, x: Point3) -> f64 {
     }
 }
 
+/// The parameter of an ellipse `k` on the plane through `at` with unit normal `normal`, a
+/// section of `q`, that `x` stands at round `q`'s axis: `x` moved along a cylinder's or
+/// cone's axis onto the plane, and the conic's point on the half-line to it from where the
+/// axis crosses the plane (both keep the angle about the axis, which the conic's points,
+/// the faces' and their edges' share). Not the fork's, which read `x` off the conic about
+/// its centre: a point of the edge, far from a small conic against its size, reads there at
+/// an angle that has nothing to do with where it lies round the axis. Of another quadric,
+/// and of an axis along the plane, `x` is read about the conic's centre
+/// ([`conic_param`]).
+fn ellipse_param_about_axis(
+    k: &Conic,
+    at: Point3,
+    normal: Vec3,
+    q: &BlendQuadric,
+    x: Point3,
+) -> f64 {
+    let along = q.dir.dot(normal);
+    if !matches!(q.kind, QuadricKind::Cylinder | QuadricKind::Cone) || along.abs() <= EFF_ZERO {
+        return conic_param(k, x);
+    }
+    let axis_at = q.point + q.dir * ((at - q.point).dot(normal) / along);
+    let moved = x - q.dir * ((x - at).dot(normal) / along);
+    // in the ellipse's own coordinates, where it is the unit circle
+    let coords = |p: Point3| {
+        let d = p - k.c;
+        (d.dot(k.a1) / k.a1.dot(k.a1), d.dot(k.a2) / k.a2.dot(k.a2))
+    };
+    let (a0, a1) = coords(axis_at);
+    let (m0, m1) = coords(moved);
+    let (w0, w1) = (m0 - a0, m1 - a1);
+    let ww = w0 * w0 + w1 * w1;
+    let aw = a0 * w0 + a1 * w1;
+    let disc = aw * aw - ww * (a0 * a0 + a1 * a1 - 1.0);
+    if !positive(ww) || disc < 0.0 {
+        return conic_param(k, x);
+    }
+    let mu = (disc.sqrt() - aw) / ww;
+    (a1 + mu * w1).atan2(a0 + mu * w0)
+}
+
 /// `sm_ConicSegment`: one rational quadratic segment of the conic from `t0` to `t1`.
 fn conic_segment(k: &Conic, t0: f64, t1: f64) -> Segment {
     let p0 = conic_point(k, t0);
@@ -893,7 +942,7 @@ pub fn calc_rational_spine_fillet_geom(
         let t1 = conic_param(&kc, end);
         // from the first point to the last: round the loop the way the edge runs on a
         // closed edge, else the way along an ellipse that passes the edge's middle
-        // (tangency-labs/smlib@dda3b5d)
+        // (tangency-labs/smlib@dda3b5d), read round the quadric's axis (not the fork's)
         let mut span = t1 - t0;
         let mut dir = if span >= 0.0 { 1.0 } else { -1.0 };
         if kc.kind == ConicKind::Ellipse {
@@ -904,7 +953,8 @@ pub fn calc_rational_spine_fillet_geom(
                 span = dir * 2.0 * PI;
             } else {
                 // the arc t0 -> t1 one way or the other, by where the edge's middle lies
-                let mid = conic_param(&kc, edge_mid);
+                // round the quadric's axis
+                let mid = ellipse_param_about_axis(&kc, blend.point, blend.dir, &q, edge_mid);
                 let within = |a: f64, span: f64, t: f64| {
                     let mut d = (t - a) * if span >= 0.0 { 1.0 } else { -1.0 };
                     d -= 2.0 * PI * (d / (2.0 * PI)).floor();
