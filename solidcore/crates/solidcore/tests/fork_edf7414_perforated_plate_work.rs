@@ -575,15 +575,26 @@ fn stacked_plate_seam_tests(n: u32) -> u64 {
     let holes = n * n;
     let volume = brep_volume_default(&k, &mut joined, 1e-9).unwrap();
     let exact = 24.0 * (w * w - f64::from(holes) * PI * RADIUS * RADIUS);
+    let counts = (
+        joined.face_list().len(),
+        joined.edge_list().len(),
+        joined.vertex_list().len(),
+    );
     println!(
         "plate with {holes} holes joined onto its top: {seconds:.3} s, {pairs} face pairs, \
-         {tests} seam and pole tests, faces {}, edges {}",
-        joined.face_list().len(),
-        joined.edge_list().len()
+         {tests} seam and pole tests, faces, edges and vertices {counts:?}"
     );
     assert!(
         (volume - exact).abs() <= 1e-7 * exact,
         "volume {volume}, exact {exact}"
+    );
+    // one block 24 tall with the holes through it: top, bottom, four sides and a side per
+    // hole; each hole has a circle at each end and a seam with a vertex at each end
+    let h = holes as usize;
+    assert_eq!(
+        counts,
+        (6 + h, 12 + 3 * h, 8 + 2 * h),
+        "faces, edges, vertices"
     );
     tests
 }
