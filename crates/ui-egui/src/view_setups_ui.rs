@@ -34,7 +34,8 @@ pub(crate) fn handle(app: &mut SolveApp, ctx: &egui::Context, row: &str) -> bool
             return true;
         }
     };
-    ctx.data_mut(|data| data.insert_temp(id(ctx), Dialog { editor, text: String::new(), first: true, error: None }));
+    let id = id(ctx);
+    ctx.data_mut(|data| data.insert_temp(id, Dialog { editor, text: String::new(), first: true, error: None }));
     true
 }
 
@@ -92,7 +93,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         .char_limit(64)
                         .desired_width(ui.available_width()),
                 );
-                field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextEdit, true, app.tr("view_layout.name")));
+                field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, app.tr("view_layout.name")));
                 if state.first {
                     field.request_focus();
                     state.first = false;

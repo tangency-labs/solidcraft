@@ -3367,7 +3367,8 @@ mod tests {
         assert!(view_rename(&mut app, third, "Original angle"));
         app.run("tab.view.move_to_window", json!({"view":third})).unwrap();
         app.run("tab.view.layout", json!({"window":0,"layout":"side_by_side"})).unwrap();
-        assert_eq!(app.run("tab.layout.save", json!({"name":"Side monitors"})).unwrap()["layouts"], json!(["Side monitors"]));
+        assert_eq!(app.run("tab.layout.save", json!({"name":"Side monitors"})).unwrap()["name"], "Side monitors");
+        assert_eq!(app.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Side monitors"]));
         assert_eq!(crate::view_setups::matching_name(&app).as_deref(), Some("Side monitors"));
         let stored = serde_json::to_value(&app.preferences).unwrap();
         assert!(!stored["view_window_setups"].to_string().contains("Original angle"));
@@ -3391,8 +3392,10 @@ mod tests {
         target.run("tab.layout.apply", json!({"name":"Side monitors"})).unwrap();
         assert_eq!(target.docs.views.windows().first().unwrap().id, id);
         assert!(target.docs.views.check());
-        assert_eq!(target.run("tab.layout.rename", json!({"name":"Side monitors","new_name":"Review"})).unwrap()["layouts"], json!(["Review"]));
-        assert_eq!(target.run("tab.layout.remove", json!({"name":"Review"})).unwrap()["layouts"], json!([]));
+        assert_eq!(target.run("tab.layout.rename", json!({"name":"Side monitors","new_name":"Review"})).unwrap()["new_name"], "Review");
+        assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Review"]));
+        assert_eq!(target.run("tab.layout.remove", json!({"name":"Review"})).unwrap()["name"], "Review");
+        assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!([]));
     }
 
     #[test]
