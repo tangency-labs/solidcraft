@@ -128,6 +128,62 @@ pub fn section_frames(body: &Body, edges: &[Vec3], leave: Vec3, stations: usize)
     crate::bridge::frames(body, face, &chain, leave, stations)
 }
 
+/// One edge of a face's rim: points on its exact curve in the order the face's loop runs it, and
+/// the point halfway along (to pick the edge again).
+pub type RimPiece = (Vec<Vec3>, Vec3);
+
+/// The edges bounding `body`'s face `face`, read on their exact curves at `samples` points each
+/// (ends on the edge's vertices). A seam edge, which the face uses twice, is left out.
+pub fn face_rim_pieces(body: &Body, face: usize, samples: usize) -> Result<Vec<RimPiece>> {
+    use solidcore_record::brep::Loop;
+    use solidcraft_geom::brep::eval::CurveEval;
+    let faces = crate::blend::Faces::of(body)?;
+    let rec = &faces.rec;
+    let f = rec.faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
+    let uses: Vec<_> = f
+        .loops
+        .iter()
+        .flat_map(|l| match l {
+            Loop::Edges { edges } => edges.as_slice(),
+            Loop::Vertex { .. } => &[],
+        })
+        .collect();
+    let n = samples.clamp(2, 1024);
+    let mut out = Vec::new();
+    for u in &uses {
+        if uses.iter().filter(|x| x.edge == u.edge).count() > 1 {
+            continue;
+        }
+        let Some(e) = rec.edges.get(u.edge as usize) else { continue };
+        let Ok(c) = CurveEval::new(e.parameters()) else { continue };
+        let [t0, t1] = e.interval;
+        let mut pts: Vec<Vec3> = (0..n).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / (n - 1) as f64)).collect();
+        if pts.len() < 2 {
+            continue;
+        }
+        if let Some((a, b)) = faces.ends(u.edge as usize) {
+            if let Some(p) = pts.first_mut() {
+                *p = a;
+            }
+            if let Some(p) = pts.last_mut() {
+                *p = b;
+            }
+        }
+        if !u.forward {
+            pts.reverse();
+        }
+        let mid = pts.get(pts.len() / 2).copied().unwrap_or(Vec3::ZERO);
+        out.push((pts, mid));
+    }
+    Ok(out)
+}
+
+/// The outward unit normal of `body`'s face `face` at `p` (a point on or near the face), read on
+/// its exact surface.
+pub fn face_normal_at(body: &Body, face: usize, p: Vec3) -> Option<Vec3> {
+    crate::blend::Faces::of(body).ok()?.normal_at(face, p, f64::INFINITY)
+}
+
 /// What the face has to do at one section: where it is, and the run direction's first, second and
 /// third derivatives at each of the section's stations. The third is carried only when the
 /// section holds a change-of-curvature condition.

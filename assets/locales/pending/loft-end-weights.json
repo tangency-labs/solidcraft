@@ -1,0 +1,218 @@
+{
+  "en": {
+    "ui.end_weight": "End Weight",
+    "ui.flip_end": "Flip End",
+    "ui.flip_start": "Flip Start",
+    "ui.start_weight": "Start Weight"
+  },
+  "en-GB": {
+    "ui.end_weight": "End Weight",
+    "ui.flip_end": "Flip End",
+    "ui.flip_start": "Flip Start",
+    "ui.start_weight": "Start Weight"
+  },
+  "ar": {
+    "ui.end_weight": "وزن النهاية",
+    "ui.flip_end": "قلب النهاية",
+    "ui.flip_start": "قلب البداية",
+    "ui.start_weight": "وزن البداية"
+  },
+  "bg": {
+    "ui.end_weight": "Тегло в края",
+    "ui.flip_end": "Обръщане в края",
+    "ui.flip_start": "Обръщане в началото",
+    "ui.start_weight": "Тегло в началото"
+  },
+  "bs": {
+    "ui.end_weight": "Krajnja težina",
+    "ui.flip_end": "Obrni kraj",
+    "ui.flip_start": "Obrni početak",
+    "ui.start_weight": "Početna težina"
+  },
+  "ca": {
+    "ui.end_weight": "Pes final",
+    "ui.flip_end": "Invertir el final",
+    "ui.flip_start": "Invertir l'inici",
+    "ui.start_weight": "Pes inicial"
+  },
+  "cs": {
+    "ui.end_weight": "Koncová váha",
+    "ui.flip_end": "Převrátit konec",
+    "ui.flip_start": "Převrátit začátek",
+    "ui.start_weight": "Počáteční váha"
+  },
+  "da": {
+    "ui.end_weight": "Vægt ved slut",
+    "ui.flip_end": "Vend slut",
+    "ui.flip_start": "Vend start",
+    "ui.start_weight": "Vægt ved start"
+  },
+  "de": {
+    "ui.end_weight": "Endgewichtung",
+    "ui.flip_end": "Ende umkehren",
+    "ui.flip_start": "Start umkehren",
+    "ui.start_weight": "Startgewichtung"
+  },
+  "es": {
+    "ui.end_weight": "Peso final",
+    "ui.flip_end": "Invertir final",
+    "ui.flip_start": "Invertir inicio",
+    "ui.start_weight": "Peso inicial"
+  },
+  "fi": {
+    "ui.end_weight": "Loppupaino",
+    "ui.flip_end": "Käännä loppu",
+    "ui.flip_start": "Käännä alku",
+    "ui.start_weight": "Alkupaino"
+  },
+  "fr": {
+    "ui.end_weight": "Poids de fin",
+    "ui.flip_end": "Inverser la fin",
+    "ui.flip_start": "Inverser le départ",
+    "ui.start_weight": "Poids de départ"
+  },
+  "gl": {
+    "ui.end_weight": "Peso final",
+    "ui.flip_end": "Inverter final",
+    "ui.flip_start": "Inverter inicio",
+    "ui.start_weight": "Peso inicial"
+  },
+  "he": {
+    "ui.end_weight": "משקל בסיום",
+    "ui.flip_end": "היפוך סיום",
+    "ui.flip_start": "היפוך התחלה",
+    "ui.start_weight": "משקל בהתחלה"
+  },
+  "hr": {
+    "ui.end_weight": "Krajnja težina",
+    "ui.flip_end": "Obrni kraj",
+    "ui.flip_start": "Obrni početak",
+    "ui.start_weight": "Početna težina"
+  },
+  "hu": {
+    "ui.end_weight": "Végső súly",
+    "ui.flip_end": "Vég megfordítása",
+    "ui.flip_start": "Kezdet megfordítása",
+    "ui.start_weight": "Kezdő súly"
+  },
+  "id": {
+    "ui.end_weight": "Bobot Akhir",
+    "ui.flip_end": "Balik Akhir",
+    "ui.flip_start": "Balik Awal",
+    "ui.start_weight": "Bobot Awal"
+  },
+  "it": {
+    "ui.end_weight": "Peso finale",
+    "ui.flip_end": "Inverti fine",
+    "ui.flip_start": "Inverti inizio",
+    "ui.start_weight": "Peso iniziale"
+  },
+  "ja": {
+    "ui.end_weight": "終端の重み",
+    "ui.flip_end": "終端を反転",
+    "ui.flip_start": "始端を反転",
+    "ui.start_weight": "始端の重み"
+  },
+  "ka": {
+    "ui.end_weight": "ბოლო წონა",
+    "ui.flip_end": "ბოლოს შებრუნება",
+    "ui.flip_start": "დასაწყისის შებრუნება",
+    "ui.start_weight": "საწყისი წონა"
+  },
+  "ko": {
+    "ui.end_weight": "끝 가중치",
+    "ui.flip_end": "끝 뒤집기",
+    "ui.flip_start": "시작 뒤집기",
+    "ui.start_weight": "시작 가중치"
+  },
+  "lv": {
+    "ui.end_weight": "Beigu svars",
+    "ui.flip_end": "Apvērst beigas",
+    "ui.flip_start": "Apvērst sākumu",
+    "ui.start_weight": "Sākuma svars"
+  },
+  "ms": {
+    "ui.end_weight": "Pemberat Akhir",
+    "ui.flip_end": "Balik Akhir",
+    "ui.flip_start": "Balik Mula",
+    "ui.start_weight": "Pemberat Mula"
+  },
+  "nb": {
+    "ui.end_weight": "Sluttvekt",
+    "ui.flip_end": "Snu slutt",
+    "ui.flip_start": "Snu start",
+    "ui.start_weight": "Startvekt"
+  },
+  "nl": {
+    "ui.end_weight": "Eindweging",
+    "ui.flip_end": "Einde omdraaien",
+    "ui.flip_start": "Begin omdraaien",
+    "ui.start_weight": "Beginweging"
+  },
+  "pl": {
+    "ui.end_weight": "Waga końcowa",
+    "ui.flip_end": "Odwróć koniec",
+    "ui.flip_start": "Odwróć początek",
+    "ui.start_weight": "Waga początkowa"
+  },
+  "pt-BR": {
+    "ui.end_weight": "Peso final",
+    "ui.flip_end": "Inverter fim",
+    "ui.flip_start": "Inverter início",
+    "ui.start_weight": "Peso inicial"
+  },
+  "ro": {
+    "ui.end_weight": "Pondere la sfârșit",
+    "ui.flip_end": "Răstoarnă sfârșitul",
+    "ui.flip_start": "Răstoarnă începutul",
+    "ui.start_weight": "Pondere la început"
+  },
+  "ru": {
+    "ui.end_weight": "Вес в конце",
+    "ui.flip_end": "Перевернуть конец",
+    "ui.flip_start": "Перевернуть начало",
+    "ui.start_weight": "Вес в начале"
+  },
+  "sr": {
+    "ui.end_weight": "Крајња тежина",
+    "ui.flip_end": "Обрни крај",
+    "ui.flip_start": "Обрни почетак",
+    "ui.start_weight": "Почетна тежина"
+  },
+  "sv": {
+    "ui.end_weight": "Slutvikt",
+    "ui.flip_end": "Vänd slut",
+    "ui.flip_start": "Vänd start",
+    "ui.start_weight": "Startvikt"
+  },
+  "tr": {
+    "ui.end_weight": "Bitiş ağırlığı",
+    "ui.flip_end": "Bitişi ters çevir",
+    "ui.flip_start": "Başlangıcı ters çevir",
+    "ui.start_weight": "Başlangıç ağırlığı"
+  },
+  "uk": {
+    "ui.end_weight": "Вага в кінці",
+    "ui.flip_end": "Перевернути кінець",
+    "ui.flip_start": "Перевернути початок",
+    "ui.start_weight": "Вага на початку"
+  },
+  "vi": {
+    "ui.end_weight": "Trọng số cuối",
+    "ui.flip_end": "Lật cuối",
+    "ui.flip_start": "Lật đầu",
+    "ui.start_weight": "Trọng số đầu"
+  },
+  "zh": {
+    "ui.end_weight": "末端权重",
+    "ui.flip_end": "翻转末端",
+    "ui.flip_start": "翻转起始",
+    "ui.start_weight": "起始权重"
+  },
+  "zh-TW": {
+    "ui.end_weight": "末端權重",
+    "ui.flip_end": "翻轉末端",
+    "ui.flip_start": "翻轉起始",
+    "ui.start_weight": "起始權重"
+  }
+}

@@ -64,6 +64,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
+        // A loft section given as a body face: the face point, in the frame of the body under it.
+        "solid.loft" => &[("sections", Picks), ("targets", Body), ("participants", Body)],
         // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
         // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
         // picked edge and face axes too.
