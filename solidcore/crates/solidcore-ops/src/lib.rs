@@ -11,6 +11,8 @@
 //! - [`session`]: the one process kernel, the fixes the application names, the panic guard, the
 //!   call running now and the failure callback;
 //! - [`cancel`]: stopping the calls of work nobody waits for any more ([`Error::Cancelled`]);
+//! - [`rigor`]: how hard a call works: certification, accuracy, effort and a time budget
+//!   ([`Error::OutOfTime`]), from one dial;
 //! - [`Error`]: why an operation failed, as data (the application words it);
 //! - [`Body`]: a kernel body, with primitives, copy and transform, counts and volume, `.smb`
 //!   bytes ([`file`]) and the validity check ([`check`]), and the record both ways
@@ -71,6 +73,7 @@ pub mod pick;
 pub mod prism;
 pub mod provenance;
 pub mod record_check;
+pub mod rigor;
 pub mod session;
 pub mod split;
 pub mod step_assembly;
@@ -109,6 +112,7 @@ pub use measure::{
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
+pub use rigor::{Certify, Rigor};
 pub use step_assembly::{placed_bodies, PlacedBody};
 
 #[cfg(test)]

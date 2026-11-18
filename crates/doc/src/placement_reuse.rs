@@ -166,6 +166,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         point_clouds,
+        // How hard each operation works: it decides what the features build.
+        rigor,
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,
@@ -205,6 +207,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *named_views == b.named_views
         && *visibility == b.visibility
         && *point_clouds == b.point_clouds
+        && *rigor == b.rigor
 }
 
 /// Compare feature definitions without traversing immutable imported payloads. A replacement
