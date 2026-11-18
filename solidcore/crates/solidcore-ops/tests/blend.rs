@@ -4877,16 +4877,17 @@ const HEX_RC: f64 = 6.845_299_461_620_161;
 /// #17594: the slab's top rim (six straight edges and the six corner rounds' arcs, one
 /// tangent chain) rounded at the corners' own radius, r 1. Along each arc the ball touches the
 /// corner's cylinder all round its equator, so its centre stays on the corner's axis: the
-/// piece is the ball's triangle, a sphere of radius 1 about the axis 1 below the top. Each
+/// piece is a sphere of radius 1 about the axis 1 below the top (the round's arc turned about
+/// the axis, a torus with no hole). Each
 /// straight round removes `(1 - pi/4) HEX_RC` (its section over the side between the axes),
 /// each corner `pi/6 - pi/9 = pi/18` (the 60 degree sector of the unit cylinder 1 high less
-/// that of the upper half ball). On main the arcs were classified as tori of major radius 0
-/// (a circle about the axis through the centres, of radius 0): at one corner the section to
-/// the next straight round came out a traced curve up to 0.61 off its meridian and 0.21 off
-/// the round's cylinder: the check finds that gap, and the volume is off where the faces
-/// miss each other (the slab lost 9.674 for 9.861; the whole part gained 5.85).
+/// that of the upper half ball). On main, at the one corner whose round has the top as its
+/// first face, the turn was taken from the top's rail point, the ball's pole on the axis, and
+/// the section to the next straight round came out a curve up to 0.61 off its meridian and
+/// 0.21 off that round's cylinder: the check finds that gap, and the volume is off where the
+/// faces miss each other (the slab lost 9.674 for 9.861; the whole part gained 5.85).
 #[test]
-fn a_hex_rim_rounded_at_its_corner_rounds_radius_is_six_ball_triangles() {
+fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
     rig_fixes();
     let b = hex_slab();
     let before = b.volume(1e-11).unwrap();
@@ -4939,9 +4940,14 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_is_six_ball_triangles() {
     // bottom's 12 vertices, the contacts' 12 ends and the six poles on the top
     assert_eq!(b.counts().unwrap(), [26, 54, 30]);
     // the top, the bottom and the six sides; the six corner walls and the six straight
-    // rounds, cylinders; the six corner pieces, each the ball's triangle on its sphere
+    // rounds, cylinders; the six corner pieces, each the arc turned about its corner's axis
     // (26 in all: no face of another kind)
     let (_, brep) = kernel_copy(&b);
+    for &f in brep.face_list() {
+        if let SurfaceKind::Cone(c) = brep.face(f).unwrap().surface.as_ref().unwrap().kind() {
+            assert!(c.is_cylinder(), "face {f:?} on a cone");
+        }
+    }
     let count = |name: &str| {
         brep.face_list()
             .iter()
@@ -4951,7 +4957,11 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_is_six_ball_triangles() {
             .count()
     };
     assert_eq!(
-        [count("plane"), count("cone"), count("ball-patch")],
+        [
+            count("plane"),
+            count("cone"),
+            count("surface-of-revolution")
+        ],
         [8, 12, 6]
     );
     let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
