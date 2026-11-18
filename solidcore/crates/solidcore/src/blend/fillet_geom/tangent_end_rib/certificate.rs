@@ -605,12 +605,16 @@ impl Rib<'_> {
             .map(|near| worst.max(near)))
     }
 
-    /// The tangent end's frame: the fillet surface's point `S(sigma0, alpha0)` and its unit
-    /// normal there, or `None`.
-    fn frame(&self, alpha0: f64) -> Option<Frame> {
-        let s = self.fillet_over(Ivl::from(self.sigma0), Ivl::from(alpha0), 1)?;
+    /// The tangent end's frame: the fillet surface's point `S(sigma0, alpha0)` and the end
+    /// surface's unit normal at `(u0, v0)` (the fillet surface's too, at a tangent end; the
+    /// end surface's keeps the separation's system regular wherever its own partials are),
+    /// or `None`.
+    fn frame(&self, [a0, u0, v0]: [f64; 3]) -> Option<Frame> {
+        let at = Ivl::from;
+        let s = self.fillet_over(at(self.sigma0), at(a0), 0)?;
+        let e = partials_over(self.end, at(u0), at(v0), 1)?;
         let m = |a: V3<Ivl>| [a.x.mid(), a.y.mid(), a.z.mid()];
-        let (p, [ax, ay, az], [bx, by, bz]) = (m(s(0, 0)), m(s(1, 0)), m(s(0, 1)));
+        let (p, [ax, ay, az], [bx, by, bz]) = (m(s(0, 0)), m(e.at(1, 0)), m(e.at(0, 1)));
         let n = [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
         let len = n.iter().map(|x| x * x).sum::<f64>().sqrt();
         let n = n.map(|x| x / len);
@@ -758,7 +762,7 @@ impl Rib<'_> {
     fn near_bound(&self, p: [f64; 3], (ts, ys): (f64, [f64; 3]), tol: f64) -> Result<Option<f64>> {
         let [a0, u0, v0] = p;
         let start = [0.0, u0, v0];
-        let Some(f) = self.frame(a0) else {
+        let Some(f) = self.frame(p) else {
             return Ok(None);
         };
         let Some(b) = self.root_at(ts, ys)? else {
@@ -847,7 +851,7 @@ impl Rib<'_> {
     }
 }
 
-/// The tangent end's point and unit normal (on the fillet surface), as numbers.
+/// The tangent end's point and unit normal, as numbers ([`Rib::frame`]).
 struct Frame {
     p: [f64; 3],
     n: [f64; 3],

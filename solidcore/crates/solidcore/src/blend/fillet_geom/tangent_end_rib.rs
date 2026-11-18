@@ -802,25 +802,58 @@ mod tests {
             }
             Ok(rib) => rib,
         };
+        let worst = farthest_off(&k, &rib, &fillet, &end);
+        assert!(
+            worst <= tol,
+            "the rib is {worst:e} off a surface (tolerance {tol:e})"
+        );
+        assert!(rib.bound <= tol, "{}", rib.bound);
+    }
+
+    /// The farthest the rib's 3D curve is from either surface, at 1001 parameters.
+    fn farthest_off(k: &Kernel, rib: &TangentEndRib, fillet: &Surface, end: &Surface) -> f64 {
         let opts = DropPointOptions::default();
-        let fil_dom = fillet.natural_uv_domain_with_nurb(&k).unwrap();
-        let end_dom = end.natural_uv_domain_with_nurb(&k).unwrap();
         let ivl = rib.curve_3d.natural_interval();
         let mut worst: f64 = 0.0;
-        for i in 0..=1000 {
-            let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 1000.0;
-            let x = rib.curve_3d.evaluate_point(t).unwrap();
-            for (s, dom) in [(&fillet, &fil_dom), (&end, &end_dom)] {
+        for s in [fillet, end] {
+            let dom = s.natural_uv_domain_with_nurb(k).unwrap();
+            for i in 0..=1000 {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 1000.0;
+                let x = rib.curve_3d.evaluate_point(t).unwrap();
                 let d = s
-                    .drop_point::<crate::surface::surface::p4::NoObject>(&k, x, dom, &opts)
+                    .drop_point::<crate::surface::surface::p4::NoObject>(k, x, &dom, &opts)
                     .unwrap();
                 assert!(d.success);
                 worst = worst.max(d.gap);
             }
         }
-        assert!(
-            worst <= tol,
-            "the rib is {worst:e} off a surface (tolerance {tol:e})"
-        );
+        worst
+    }
+
+    /// The same surfaces without the bump: the rib is the line `x = y − 1/2` on `z = 0`. It
+    /// is certified, the tangent end's span included ([`certificate`]'s graded pieces and
+    /// its bound near the end), with a stored bound within the tolerance that holds the
+    /// sampled distances (the rib lies on both surfaces, so a curve point's distance from
+    /// one is at most its distance from the rib point; 1e-12 for the projection's rounding).
+    #[test]
+    fn a_rib_on_its_surfaces_is_certified_within_the_tolerance() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let (fillet, end) = bumped_rib_surfaces(0.0);
+        let rib = tangent_end_rib(
+            &k,
+            &fillet,
+            &end,
+            2,
+            Point3::new(-0.5, 0.0, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+            None,
+            false,
+            tol,
+        )
+        .unwrap();
+        assert!(rib.bound <= tol, "{}", rib.bound);
+        let worst = farthest_off(&k, &rib, &fillet, &end);
+        assert!(worst <= rib.bound + 1e-12, "{worst:e} > {:e}", rib.bound);
     }
 }
