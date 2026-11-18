@@ -1470,12 +1470,56 @@ fn text_key(text: &str) -> (u64, usize) {
 /// Keep `imp`, read healing its parts or not (`heal`), in the recent imports (strongly only when
 /// `small`).
 fn remember(key: (u64, usize), heal: bool, imp: &Arc<StepImport>, small: bool) {
+    #[cfg(test)]
+    let _others = recent_for_tests::wait();
     if let Ok(mut cache) = RECENT.lock() {
         cache.retain(|r| (r.key, r.heal) != (key, heal) && r.import.strong_count() > 0);
         cache.push(Recent { key, heal, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
         while cache.len() > 4 {
             cache.remove(0);
         }
+    }
+}
+
+/// Tests that assert what the cache of recent reads holds: under `cargo test` the tests of
+/// this crate run as threads of one process and share [`RECENT`], whose oldest entry goes when
+/// a fifth comes. While a test holds [`recent_for_tests::hold`], reads on other threads wait to
+/// be remembered, so nothing the test remembered is pushed out; its own reads (remembered on its
+/// own thread) go on. Under nextest each test is its own process.
+#[cfg(test)]
+pub(crate) mod recent_for_tests {
+    use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+    static GATE: RwLock<()> = RwLock::new(());
+
+    std::thread_local! {
+        static HOLDER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Held by a test: reads on other threads are remembered once it is dropped.
+    pub(crate) struct Held {
+        _gate: RwLockWriteGuard<'static, ()>,
+    }
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            HOLDER.with(|h| h.set(false));
+        }
+    }
+
+    /// Hold the cache for this thread's reads alone.
+    pub(crate) fn hold() -> Held {
+        let gate = GATE.write().unwrap_or_else(PoisonError::into_inner);
+        HOLDER.with(|h| h.set(true));
+        Held { _gate: gate }
+    }
+
+    /// For [`super::remember`]: waits while another thread holds the cache.
+    pub(super) fn wait() -> Option<RwLockReadGuard<'static, ()>> {
+        if HOLDER.with(|h| h.get()) {
+            return None;
+        }
+        Some(GATE.read().unwrap_or_else(PoisonError::into_inner))
     }
 }
 

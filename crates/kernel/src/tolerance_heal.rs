@@ -161,7 +161,8 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         log::debug!(target: "repair", "tolerance heal not kept: {:?}", report.why_not);
         return Ok(None);
     };
-    let out = Body::from_record(healed.record)?.with_color(body.color());
+    // the healed part keeps the part's sticky veto on regularizing its faces
+    let out = Body::from_record(healed.record)?.with_color(body.color()).inherit_regularization_protection(body);
     // The body kept is SMLib's of the healed record, not the body solidcore-ops checked: it
     // stands only on its own check.
     if let Some(refused) = out.smlib_refusal() {

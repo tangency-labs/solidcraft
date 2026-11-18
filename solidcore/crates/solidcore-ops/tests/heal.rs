@@ -818,7 +818,7 @@ fn squeezed_riser(
     let (mut b, _) =
         solidcore_convert::brep::to_kernel(k, &hair_step_box(3e-4, TOLS), true).unwrap();
     edit_brep(k, &mut b, |k, b, scope| {
-        let targets = squeeze_targets(b)?;
+        let targets = squeeze_targets(k, b)?;
         collapse_short_edges(k, b, scope.env, &targets, &mut Healed::default())
     })
     .unwrap();
@@ -925,6 +925,22 @@ fn a_sliver_wider_than_its_tolerance_or_losing_the_larger_tolerance_is_not_colla
     }
     outcomes.sort_unstable();
     assert_eq!(outcomes, ["collapsed", "would grow"]);
+}
+
+/// The squeeze's clusters are found under the kernel's token: a cancelled heal stops there too,
+/// before the squeeze's own edge limit is checked; not cancelled, the hair step's riser ends
+/// squeeze to their targets.
+#[test]
+fn squeeze_targets_stop_when_cancelled() {
+    use solidcore::heal::tolerance_defects::squeeze_targets;
+    let mut k = solidcore::Kernel::default();
+    let (b, _) =
+        solidcore_convert::brep::to_kernel(&mut k, &hair_step_box(3e-4, TOLS), true).unwrap();
+    assert!(!squeeze_targets(&k, &b).unwrap().is_empty());
+    let token = solidcore::kernel::CancelToken::new();
+    token.cancel();
+    k.set_cancel_token(token);
+    assert!(squeeze_targets(&k, &b).unwrap_err().is_cancelled());
 }
 
 /// #17708 review: a NaN tolerance on either side of a sliver refuses its collapse, and no NaN

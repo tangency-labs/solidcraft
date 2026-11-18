@@ -3981,7 +3981,7 @@ impl Model {
                         let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) = kernel::validating(validation, || {
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
-                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair);
+                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal);
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
                         });
@@ -10899,6 +10899,7 @@ fn chamfer_with(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -10907,16 +10908,20 @@ fn eval_feature(
     warning: &mut Option<String>,
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
+    heal: bool,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
     r
 }
 
-/// [`eval_feature`] for one kind of feature.
+/// [`eval_feature`] for one kind of feature. `heal` is the tolerance heal preference the
+/// evaluation read once ([`Model::heals`]): Repair heals first as it says, whatever the
+/// preference became since.
+#[allow(clippy::too_many_arguments)]
 fn eval_feature_kind(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -10925,6 +10930,7 @@ fn eval_feature_kind(
     warning: &mut Option<String>,
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
+    heal: bool,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -11924,10 +11930,7 @@ fn eval_feature_kind(
             let gap = val(vals, gap, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let source = st.bodies.get(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
-            let (repaired, report) = kernel::repair(
-                &source.body,
-                &kernel::RepairOptions { gap, patch_holes: *patch_holes, heal_first: kernel::heals_tolerance_defects() },
-            )?;
+            let (repaired, report) = kernel::repair(&source.body, &kernel::RepairOptions { gap, patch_holes: *patch_holes, heal_first: heal })?;
             let repaired = repaired.with_color(source.body.color());
             let result = ModelBody::new(source.name.clone(), repaired, source.feature);
             let mut left: Vec<String> =

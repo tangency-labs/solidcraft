@@ -4805,6 +4805,22 @@ fn a_stopped_heal_changes_nothing() {
     assert_eq!(healed.body.face_count(), 7);
 }
 
+/// #17708 review: the healed part keeps the part's regularization protection (the sticky veto
+/// that keeps authored face boundaries), in the heal and in Repair healing first; a part with
+/// none gets none.
+#[test]
+fn a_healed_part_keeps_its_regularization_protection() {
+    for protected in [false, true] {
+        let mut hair = hair_step_body(3e-4, 1e-3);
+        hair.regularization_protected = protected;
+        let (healed, _) = crate::heal_tolerance_defects(&hair).unwrap().expect("healed");
+        assert_eq!(healed.regularization_protected, protected);
+        let (repaired, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
+        assert!(report.healed.is_some(), "Repair healed first");
+        assert_eq!(repaired.regularization_protected, protected);
+    }
+}
+
 /// #17689: a part whose only instance is at a rigid placement away from the identity is decided
 /// by its own check and healed like any other; the instance is the healed part placed, checked
 /// again, and that check passes. At the identity the heal's own check of the body it kept is the
@@ -5007,6 +5023,8 @@ fn a_token_stopped_after_the_heals_stops_the_run() {
 /// the same text; the same read unstopped is cached.
 #[test]
 fn a_heal_stopped_with_one_worker_fails_the_import_uncached() {
+    // what the cache holds is asserted below: no other test's read pushes ours out meanwhile
+    let _cache = super::recent_for_tests::hold();
     let hair = hair_step_body(3e-4, 1e-3);
     let reading = |name: &str| {
         let text = boxes_step(1, name);
@@ -5041,6 +5059,8 @@ fn a_heal_stopped_with_one_worker_fails_the_import_uncached() {
 /// preference on, which heals the part.
 #[test]
 fn with_the_heal_preference_off_a_failing_part_stays_as_read() {
+    // what the cache holds is asserted below: no other test's read pushes ours out meanwhile
+    let _cache = super::recent_for_tests::hold();
     let hair = hair_step_body(3e-4, 1e-3);
     for workers in [1, 2] {
         let name = format!("heal preference, {workers} workers");

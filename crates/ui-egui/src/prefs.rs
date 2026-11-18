@@ -2239,6 +2239,7 @@ impl Snapshot {
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
+        apply_tolerance_heal(&app.preferences);
         app.preferences.stand_up_answers = stand_up_answers;
         app.preferences.update = update;
         if units_changed {
@@ -2539,6 +2540,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     crate::plugins::sync_policy(app);
     sync_surface_analysis(app);
     crate::render_workspace::apply_memory_policy(app);
+    apply_tolerance_heal(&app.preferences);
     if app.preferences.default_units != units {
         default_units_changed(app);
     }
@@ -9747,6 +9749,16 @@ mod tests {
         let out = super::set(&mut app, &json!({"heal_tolerance_defects": true})).unwrap();
         assert_eq!(out["heal_tolerance_defects"], true);
         assert!(kernel::heals_tolerance_defects(), "on: the kernel heals again");
+        // Cancel and Restore Defaults reach the kernel at once too, not at the next frame.
+        let snapshot = super::Snapshot::take(&app);
+        super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        snapshot.restore_other_preferences(&mut app).unwrap();
+        assert!(app.preferences.heal_tolerance_defects);
+        assert!(kernel::heals_tolerance_defects(), "cancelled: the kernel heals as before");
+        super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        super::defaults(&mut app, super::PAGE_DESIGN);
+        assert!(app.preferences.heal_tolerance_defects);
+        assert!(kernel::heals_tolerance_defects(), "defaults: the kernel heals again");
     }
 
     /// The validation mode is once per feature by default; set by name or by the command, the

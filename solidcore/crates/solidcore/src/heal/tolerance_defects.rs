@@ -53,7 +53,8 @@
 //! ([`Refusal`]).
 //!
 //! Deviations: no recursion. One squeeze removes an edge, so the passes are bounded by the
-//! edge count, each at most [`MAX_EDGES`] edges; cancellation is polled per edge.
+//! edge count, each at most [`MAX_EDGES`] edges; cancellation is polled per edge (in the
+//! squeeze's clusters too) and per cut.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -259,6 +260,30 @@ pub fn short_edge_bound(
     })
 }
 
+/// The root of `i`'s cluster in the disjoint-set forest `parent` ([`squeeze_targets`]): its
+/// smallest vertex index, as a parent is always a smaller index (so the walk ends). Every
+/// vertex on the walk is pointed at the root afterwards (path compression), so a cluster
+/// joined as a chain is walked in full once, not once per vertex; the roots stay the same.
+fn root(parent: &mut [usize], i: usize) -> usize {
+    let mut r = i;
+    while let Some(&q) = parent.get(r) {
+        if q == r {
+            break;
+        }
+        r = q;
+    }
+    let mut x = i;
+    while x != r {
+        let Some(slot) = parent.get_mut(x) else {
+            break;
+        };
+        let next = *slot;
+        *slot = r;
+        x = next;
+    }
+    r
+}
+
 /// The point each vertex goes to when the short edges around it are squeezed: vertices joined
 /// by edges whose ends lie within the edge's tolerance of each other (the candidates) form
 /// clusters, and a cluster goes to the centre of the box of its points, which no point of it is
@@ -266,27 +291,20 @@ pub fn short_edge_bound(
 /// so a cluster of several short edges (a sliver triangle) ends at one place however its
 /// squeezes are ordered; vertices of no cluster are not listed.
 ///
+/// Cancellation is polled per edge.
+///
 /// # Errors
 ///
-/// Those of the topology reads.
-pub fn squeeze_targets(b: &Brep) -> Result<Vec<(VertexId, Point3)>> {
+/// Those of the topology reads; `Cancelled` when `k`'s token is.
+pub fn squeeze_targets(k: &Kernel, b: &Brep) -> Result<Vec<(VertexId, Point3)>> {
     let vertices = p1::vertices(b, None)?;
     let positions: BTreeMap<VertexId, usize> =
         vertices.iter().enumerate().map(|(i, &v)| (v, i)).collect();
     let index = |v: VertexId| positions.get(&v).copied();
     let mut parent: Vec<usize> = (0..vertices.len()).collect();
-    let root = |parent: &[usize], mut i: usize| {
-        // a parent is always a smaller index, so the walk ends
-        while let Some(&q) = parent.get(i) {
-            if q == i {
-                break;
-            }
-            i = q;
-        }
-        i
-    };
     let mut joined = vec![false; vertices.len()];
     for e in p1::edges(b, None)? {
+        k.check_cancelled(OP)?;
         let Some((v, w)) = ends(b, e)? else {
             continue;
         };
@@ -297,7 +315,7 @@ pub fn squeeze_targets(b: &Brep) -> Result<Vec<(VertexId, Point3)>> {
         let (Some(i), Some(j)) = (index(v), index(w)) else {
             continue;
         };
-        let (ri, rj) = (root(&parent, i), root(&parent, j));
+        let (ri, rj) = (root(&mut parent, i), root(&mut parent, j));
         let (lo, hi) = (ri.min(rj), ri.max(rj));
         if let Some(slot) = parent.get_mut(hi) {
             *slot = lo;
@@ -313,7 +331,7 @@ pub fn squeeze_targets(b: &Brep) -> Result<Vec<(VertexId, Point3)>> {
         if !joined.get(i).copied().unwrap_or(false) {
             continue;
         }
-        let r = root(&parent, i);
+        let r = root(&mut parent, i);
         let p = vertex::point(b, v)?;
         boxes
             .entry(r)
@@ -328,7 +346,7 @@ pub fn squeeze_targets(b: &Brep) -> Result<Vec<(VertexId, Point3)>> {
         if !joined.get(i).copied().unwrap_or(false) {
             continue;
         }
-        let r = root(&parent, i);
+        let r = root(&mut parent, i);
         if let Some((lo, hi)) = boxes.get(&r) {
             out.push((v, midpoint(*lo, *hi)));
         }
@@ -974,7 +992,9 @@ pub fn collapse_coincident_two_edge_faces(
 /// (`SmBSplineCurve` test 15's pole tolerance).
 const PIECE_POLE_TOL: f64 = ZONE_TOL_3D / 10.0;
 
-/// The multiplicity of the knot at `index` in `u`, and the index of its last copy.
+/// The multiplicity of the knot at `index` in `u`, and the index of its last copy: the
+/// number of knots equal to it, and the index of the first of them plus that number less one.
+#[cfg(test)]
 fn multiplicity(u: &[f64], index: usize) -> (usize, usize) {
     let Some(&v) = u.get(index) else {
         return (0, index);
@@ -982,6 +1002,37 @@ fn multiplicity(u: &[f64], index: usize) -> (usize, usize) {
     let first = u.iter().position(|&x| x == v).unwrap_or(index);
     let count = u.iter().filter(|&&x| x == v).count();
     (count, first + count.saturating_sub(1))
+}
+
+/// [`multiplicity`] of every knot of `u`, in one sort rather than a scan of `u` per knot: the
+/// knots grouped by value (`==`: `-0.0` and `0.0` one value, a NaN equal to none, so its count
+/// is 0 and its last copy its own index), each one's count and the first index of its group
+/// plus that count less one. Read with [`multiplicity_in`].
+fn multiplicities(u: &[f64]) -> Vec<(usize, usize)> {
+    let mut sorted: Vec<(f64, usize)> = u.iter().copied().zip(0..).collect();
+    // `total_cmp` puts the values `==` takes as one next to each other (-0.0 just before 0.0)
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let mut out: Vec<(usize, usize)> = (0..u.len()).map(|i| (0, i)).collect();
+    let mut start = 0;
+    while let Some(&(v, _)) = sorted.get(start) {
+        let len = sorted
+            .get(start..)
+            .map_or(0, |rest| rest.iter().take_while(|(x, _)| *x == v).count());
+        let group = sorted.get(start..start + len).unwrap_or(&[]);
+        let first = group.iter().map(|&(_, i)| i).min().unwrap_or(0);
+        for &(_, i) in group {
+            if let Some(slot) = out.get_mut(i) {
+                *slot = (len, first + len.saturating_sub(1));
+            }
+        }
+        start += len.max(1);
+    }
+    out
+}
+
+/// [`multiplicity`] of the knot at `index`, read from `table` ([`multiplicities`]).
+fn multiplicity_in(table: &[(usize, usize)], index: usize) -> (usize, usize) {
+    table.get(index).copied().unwrap_or((0, index))
 }
 
 /// The curve `nurb` (a clamped B-spline of degree `p`, one positive weight for every control
@@ -1010,18 +1061,19 @@ fn cut_one_piece(nurb: &Nurbs, rational: bool) -> Result<Option<(Curve, f64)>> {
         }
     };
     let end = u.len().saturating_sub(p + 1);
+    let table = multiplicities(u);
     // knot runs: a piece runs from the last copy of one knot value to the next value
     let mut i = p;
     while i < end {
-        let (_, last_a) = multiplicity(u, i);
+        let (_, last_a) = multiplicity_in(&table, i);
         let Some(next) = last_a.checked_add(1) else {
             break;
         };
         if next > end {
             break;
         }
-        let (mult_b, last_b) = multiplicity(u, next);
-        let (mult_a, _) = multiplicity(u, i);
+        let (mult_b, last_b) = multiplicity_in(&table, next);
+        let (mult_a, _) = multiplicity_in(&table, i);
         let interior = i > p && last_b < end;
         // a Bézier piece between two C0 joints: CPs last_a - p ..= last_a
         if interior && mult_a == p && mult_b == p {
@@ -1107,6 +1159,7 @@ pub fn cut_degenerate_pieces(
         let mut cut_any = false;
         let mut gaps = Vec::new();
         for _ in 0..knots {
+            k.check_cancelled(OP)?;
             let Some(t) = edge::create_trimmed_nurbs_curve(k, b, e)? else {
                 break;
             };
@@ -1172,7 +1225,7 @@ pub fn heal_short_edges_and_slivers(
 ) -> Result<Healed> {
     let mut healed = Healed::default();
     cut_degenerate_pieces(k, b, env, &mut healed)?;
-    let targets = squeeze_targets(b)?;
+    let targets = squeeze_targets(k, b)?;
     let rounds = p1::faces(b, None)?.len().saturating_add(1);
     for _ in 0..rounds {
         let squeezed = collapse_short_edges(k, b, env, &targets, &mut healed)?;
@@ -1183,4 +1236,51 @@ pub fn heal_short_edges_and_slivers(
         }
     }
     Ok(healed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{multiplicities, multiplicity, multiplicity_in, root};
+
+    /// The table gives every knot's multiplicity and last copy as the scan of the whole vector
+    /// does: clamped and repeated knots, signed zeros, a NaN, and an unsorted vector.
+    #[test]
+    fn the_multiplicity_table_reads_as_the_scan() {
+        let vectors: [&[f64]; 6] = [
+            &[],
+            &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0],
+            &[-0.0, 0.0, 0.0, 0.5, 1.0, 1.0, -0.0],
+            &[0.0, f64::NAN, 1.0, f64::NAN, 1.0],
+            &[2.0, 1.0, 2.0, 0.0, 1.0, 2.0],
+            &[5.0],
+        ];
+        for u in vectors {
+            let table = multiplicities(u);
+            for i in 0..u.len() + 2 {
+                assert_eq!(
+                    multiplicity_in(&table, i),
+                    multiplicity(u, i),
+                    "{u:?} at {i}"
+                );
+            }
+        }
+    }
+
+    /// A cluster joined as a chain (each vertex's parent the one before) is walked once: after
+    /// one root lookup every vertex on the walk points at the root, which is unchanged.
+    #[test]
+    fn a_root_lookup_compresses_the_chain_it_walks() {
+        let n = 1000;
+        let mut parent: Vec<usize> = (0..n).map(|i| i.saturating_sub(1)).collect();
+        assert_eq!(root(&mut parent, n - 1), 0);
+        assert!(
+            parent.iter().all(|&q| q == 0),
+            "every vertex walked points at the root"
+        );
+        // a lookup off the forest is its own root, and changes nothing
+        assert_eq!(root(&mut parent, n + 5), n + 5);
+        let mut forest = vec![0, 0, 2, 2, 3];
+        assert_eq!(root(&mut forest, 4), 2);
+        assert_eq!(forest, vec![0, 0, 2, 2, 2]);
+    }
 }

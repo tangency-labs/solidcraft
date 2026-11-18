@@ -235,6 +235,10 @@ fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals:
     // A part placed more than once shows its first instance's mesh, placed.
     let mut shown: Option<(Arc<crate::body::SharedDisplay>, M4)> = None;
     for (index, (_, m)) in heals.instances.iter().enumerate().filter(|(_, (i, _))| *i == item) {
+        // each placement runs unstoppable: a stop met between them ends the item, nothing kept
+        if solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped()) {
+            return ItemHeal { stopped: true, ..ItemHeal::default() };
+        }
         let Ok(body) = place(m) else {
             log::debug!(target: "step", "the healed part of item #{item} could not be placed");
             return ItemHeal::default();
