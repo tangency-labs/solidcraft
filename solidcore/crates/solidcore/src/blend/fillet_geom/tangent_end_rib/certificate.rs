@@ -28,7 +28,8 @@
 //! face is evaluated there ([`crate::blend::fillet_section::station::Nurbs`]).
 
 use crate::blend::fillet_section::certificate::{
-    curve_derivs_over, knot_cuts, nurbs_partials_over_piece, partials_hull, NurbsCurve,
+    curve_derivs_over, knot_cuts, nurbs_partials_over_piece, nurbs_partials_over_piece_about,
+    partials_hull, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::{cmax, Ivl};
 use crate::blend::fillet_section::series::{v_add, v_scale, v_sub, V3};
@@ -80,22 +81,37 @@ fn cuts(
 }
 
 /// A face's partials `P[a][b]`, `a + b <= lk`, over `u x v`, enclosed: the hull over the
-/// pieces the box covers. `None` where a part is not enclosed.
+/// pieces the box covers, each of `S − o` with `o` the face's point at the box's middle
+/// ([`nurbs_partials_over_piece_about`]: a rational face's quotient then scales with the
+/// box's size, not with its distance from the origin), `o` added back to `P[0][0]`. `None`
+/// where a part is not enclosed.
 fn partials_over(n: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> {
     let continuity = if lk >= 2 { CONTINUITY } else { 0 };
     let us = cuts(&n.u, n.p, n.nu, u.lo, u.hi, continuity)?;
     let vs = cuts(&n.v, n.q, n.nv, v.lo, v.hi, continuity)?;
+    let (um, vm) = (u.mid(), v.mid());
+    let (&(_, _, ku), &(_, _, kv)) = (
+        us.iter().find(|c| c.0 <= um && um <= c.1)?,
+        vs.iter().find(|c| c.0 <= vm && vm <= c.1)?,
+    );
+    let o = nurbs_partials_over_piece(n, ku, kv, um, um, vm, vm, 0)
+        .ok()?
+        .at(0, 0);
+    let o = [o.x.mid(), o.y.mid(), o.z.mid()];
     let mut out: Option<Partials<Ivl>> = None;
     for &(a0, a1, ku) in &us {
         for &(b0, b1, kv) in &vs {
-            let p = nurbs_partials_over_piece(n, ku, kv, a0, a1, b0, b1, lk).ok()?;
+            let p = nurbs_partials_over_piece_about(n, ku, kv, a0, a1, b0, b1, lk, o).ok()?;
             out = Some(match out {
                 None => p,
                 Some(h) => partials_hull(h, &p, lk),
             });
         }
     }
-    out
+    let mut out = out?;
+    let [x, y, z] = o.map(Ivl::from);
+    out.set(0, 0, v_add(out.at(0, 0), V3 { x, y, z }));
+    Some(out)
 }
 
 fn neg(a: V3<Ivl>) -> V3<Ivl> {
