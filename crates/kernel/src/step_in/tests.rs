@@ -5551,7 +5551,7 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     let v = e.vertex([6.12323e-15, 100.0, 0.0]);
     let edge = e.add(format!("EDGE_CURVE('',#{v},#{v},#{rim},.T.)"));
     let cap = e.face(&[(edge, true)], sphere);
-    let bottom_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
     let bottom = e.add(format!("PLANE('',#{bottom_axis})"));
     let base = e.face(&[(edge, false)], bottom);
     let text = e.solid(&[cap, base]);

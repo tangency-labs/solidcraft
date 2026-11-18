@@ -97,16 +97,10 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/block_edge_off_its_face.step", "8e25cc9a701de87d"),
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "ed34ee7908eddf1d"),
-<<<<<<< HEAD
-    ("tests/step-regressions/hole_round_revolved.step", "260e07ac4dec005d"),
-    ("tests/step-regressions/net_steps_back_within_tolerance.step", "687c36e89ffe679a"),
-    ("tests/step-regressions/rod_doubled_edge.step", "7e5ec3041433853c"),
-    ("tests/step-regressions/thread_crest_band.step", "30923bc03bcfd757"),
-=======
     ("tests/step-regressions/hole_round_revolved.step", "1749e03c3c2f194a"),
+    ("tests/step-regressions/net_steps_back_within_tolerance.step", "687c36e89ffe679a"),
     ("tests/step-regressions/rod_doubled_edge.step", "ef5f1b70be16e528"),
     ("tests/step-regressions/thread_crest_band.step", "2053d57556b7dafa"),
->>>>>>> e79b88000 (STEP import: a seam split the solver leaves a rounding off the curve's own knot lands on it)
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
     ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),
     ("tests/step-regressions/torus_patch_and_rest_revolved.step", "6b2f15c1dc602029"),
