@@ -688,3 +688,68 @@ fn wr_647_two_touches_in_one_stretch_keep_their_range() {
         "{all:?}"
     );
 }
+
+/// Review r3 (B1): two meetings of a planar curve and a curve leaving its plane only at
+/// the fourth order. A is the parabola y = x²/2 in z = 0 (the quadratic Bezier (-1, 1/2),
+/// (0, -1/2), (1, 1/2), x = 2t - 1). B is the quartic Bezier `(X, X²/2 + (X² - δ²)/16,
+/// 2⁻²⁰ (X² - δ²)²)`, X = 2t - 1, δ = 1/32 (its control points below are those
+/// polynomials' Bernstein coefficients). In the plane B crosses A at X = ±δ and is 6.1e-5
+/// from it at X = 0; across the plane it is at most 2⁻²⁰ δ⁴ = 8.9e-16 off it between the
+/// meetings. So it meets A exactly twice, at t = (1 ± δ)/2 on both, and every answer must
+/// hold both meetings (a point within 1e-5 of each, or a range over it). The head before
+/// this test took the stretch for one touch (the band of A's plane alone put both in one
+/// interval) and lost one meeting at tolerances 1e-3, 3e-3 and 1e-2; A, a planar spline,
+/// now gives no band certificate, and the stretch keeps main's range.
+#[test]
+fn wr_647_two_meetings_within_a_planar_curves_band_are_both_kept() {
+    let k = Kernel::default();
+    let a = bezier(&[
+        Point3::new(-1.0, 0.5, 0.0),
+        Point3::new(0.0, -0.5, 0.0),
+        Point3::new(1.0, 0.5, 0.0),
+    ]);
+    let b = bezier(&[
+        Point3::new(-1.0, 0.56243896484375, 9.518125807517208e-07),
+        Point3::new(-0.5, -6.103515625e-05, -9.536734069115482e-07),
+        Point3::new(0.0, -0.18756103515625, 9.542961076173622e-07),
+        Point3::new(0.5, -6.103515625e-05, -9.536734069115482e-07),
+        Point3::new(1.0, 0.56243896484375, 9.518125807517208e-07),
+    ]);
+    let d = 1.0 / 32.0;
+    for x in [-d, d] {
+        let t = 0.5 * (x + 1.0);
+        let gap = b
+            .evaluate_point(&k, t)
+            .unwrap()
+            .distance(a.evaluate_point(&k, t).unwrap());
+        assert!(gap <= 1e-15, "X {x}: {gap:e}");
+    }
+    let middle = b
+        .evaluate_point(&k, 0.5)
+        .unwrap()
+        .distance(a.evaluate_point(&k, 0.5).unwrap());
+    assert!(middle > 6e-5, "{middle:e}");
+    for tol in [3e-4, 1e-3, 3e-3, 1e-2] {
+        let all = intersect_at(&a, &b, tol);
+        for x in [-d, d] {
+            let u = 0.5 * (x + 1.0);
+            let at = b.evaluate_point(&k, u).unwrap();
+            let held = all.iter().any(|s| match s.solution_type {
+                SolutionType::RangeOfValues => {
+                    let (lo, hi) = (
+                        s.start.parameters[1].min(s.end.parameters[1]),
+                        s.start.parameters[1].max(s.end.parameters[1]),
+                    );
+                    lo <= u && u <= hi
+                }
+                _ => {
+                    b.evaluate_point(&k, s.start.parameters[1])
+                        .unwrap()
+                        .distance(at)
+                        <= 1e-5
+                }
+            });
+            assert!(held, "tol {tol}: the meeting at X = {x} is lost: {all:?}");
+        }
+    }
+}

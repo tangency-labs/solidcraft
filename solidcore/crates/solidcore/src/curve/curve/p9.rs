@@ -109,7 +109,9 @@
 //!   projections only: a perspective or rotation projection's derivatives are upstream's
 //!   secant approximations, on which the local solvers stop short of the contact (a
 //!   perspective crossing 7.9e-9 apart found at 8.6e-5), so those keep their ranges. A
-//!   projection without its vectors is `InvalidInput` there.
+//!   projection without its vectors is `InvalidInput` there, which cannot be reached: the
+//!   solve before it already fails in its box test without the vector
+//!   (`GlobalSolver::opt_vector`), as before WR-647.
 
 use crate::curve::curve::p2::{
     proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind, CurvePropertyType,
@@ -2952,5 +2954,63 @@ mod tests {
         assert!(a.is_on_positive_side_of_planes(&k, &below, &up).unwrap());
         let down = [Vec3::new(0.0, 0.0, -1.0)];
         assert!(!a.is_on_positive_side_of_planes(&k, &below, &down).unwrap());
+    }
+
+    /// WR-647 (review r3, M2): a parallel projected solve of two curves that are not a
+    /// line pair, given no projection vector, fails in the solver's own box test
+    /// (`GlobalSolver::opt_vector`, reached by the root branch's box test before any leaf
+    /// solve) and returns no solutions, as upstream's port did before WR-647. So the
+    /// projected crossings step, which runs only on the solutions of a solve that
+    /// returned, always has its projection vector, and its own refusal of a missing one
+    /// cannot be reached. With the vector, the same solve returns the overlap of the
+    /// curves seen along z.
+    #[test]
+    fn a_parallel_projected_solve_without_its_vector_fails_in_the_solver() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let arch = |z: f64| {
+            let pw = [(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)]
+                .iter()
+                .map(|&(x, y)| CPoint::new(x, y, z, NOW))
+                .collect();
+            let nl = NlCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+        };
+        let (a, b) = (arch(0.0), arch(5.0));
+        let k = Kernel::default();
+        let (ia, ib) = (a.natural_interval(), b.natural_interval());
+        let solve = |vectors: Option<&[Vec3]>| {
+            let opts = CurveSolveOptions {
+                handles: handles(&a, &b),
+                opt_vectors: vectors,
+                ..CurveSolveOptions::default()
+            };
+            a.global_curve_solve(
+                &k,
+                &ia,
+                &b,
+                &ib,
+                SolverOperation::ProjectedIntersect,
+                1e-6,
+                &opts,
+                SolutionRequested::All,
+            )
+        };
+        for vectors in [None, Some(&[][..])] {
+            match solve(vectors) {
+                Err(SolidError::InvalidInput { operation, .. }) => {
+                    assert_eq!(operation, "geom::global_solver::GlobalSolver::opt_vector");
+                }
+                other => panic!("{vectors:?}: {other:?}"),
+            }
+        }
+        let along = [Vec3::new(0.0, 0.0, 1.0)];
+        let sols = solve(Some(&along)).unwrap();
+        assert!(
+            sols.as_slice()
+                .iter()
+                .any(|s| s.solution_type == SolutionType::RangeOfValues),
+            "{sols:?}"
+        );
     }
 }

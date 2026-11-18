@@ -1105,6 +1105,52 @@ mod tests {
         assert!(meet <= 1e-14, "{meet:e}");
         // the base stretch lies in the polynomial span [a, 1]
         assert!(knot < lo && hi < 1.0);
+
+        // base's range ends are subdivision cuts, not where the curves part to the
+        // tolerance: the band where c2 is within `tol` of the line is u in [0.2244, 0.5359]
+        // and holds both ends strictly inside. Over each of 128 pieces of [0.2245, 0.5358],
+        // the separation across the line is the quadratic Bezier `S0, S1, S2` (the blossom
+        // of `c2` at the piece's ends, mapped by the linear `across`), so its square length
+        // is the quartic with Bernstein coefficients `S0.S0, S0.S1, (S0.S2 + 2 S1.S1) / 3,
+        // S1.S2, S2.S2`, at most their greatest: all below `(tol |v|²)²` with a relative
+        // margin of 1e-6 (roundings near 1e-15 of quantities of order 10). Just outside
+        // the band, at 0.2243 and 0.5360, the curves are farther than `tol` apart.
+        let blossom = |x: f64, y: f64| {
+            let (s, r) = ((x - knot) / d, (y - knot) / d);
+            [0, 1, 2].map(|i| {
+                (1.0 - s) * (1.0 - r) * b0[i]
+                    + ((1.0 - s) * r + s * (1.0 - r)) * ctrl[2][i]
+                    + s * r * ctrl[3][i]
+            })
+        };
+        let rel = |q: [f64; 3]| across([0, 1, 2].map(|i| q[i] - p[i]));
+        let limit = (*tol * vv) * (*tol * vv);
+        let (band_lo, band_hi) = (0.2245, 0.5358);
+        let pieces = 128;
+        for j in 0..pieces {
+            let x = band_lo + (band_hi - band_lo) * f64::from(j) / f64::from(pieces);
+            let y = band_lo + (band_hi - band_lo) * f64::from(j + 1) / f64::from(pieces);
+            let (s0, s1, s2) = (rel(blossom(x, x)), rel(blossom(x, y)), rel(blossom(y, y)));
+            let coef = [
+                dot(s0, s0),
+                dot(s0, s1),
+                (dot(s0, s2) + 2.0 * dot(s1, s1)) / 3.0,
+                dot(s1, s2),
+                dot(s2, s2),
+            ];
+            let most = coef.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            assert!(most <= limit * (1.0 - 1e-6), "piece [{x}, {y}]: {most} against {limit}");
+        }
+        let line_gap = |u: f64| {
+            let q = rel(mid(u));
+            dot(q, q).sqrt() / vv
+        };
+        for u in [0.2243, 0.5360] {
+            assert!(line_gap(u) > *tol, "{u}: {}", line_gap(u));
+        }
+        assert!(band_lo < lo && hi < band_hi);
+        // and the ends themselves are well inside the tolerance (0.408 and 0.332)
+        assert!((line_gap(lo) - 0.408).abs() < 1e-3 && (line_gap(hi) - 0.332).abs() < 1e-3);
     }
 
     /// The first point of `range_end_preserves_noncollapsed_tail`: main's `rust()` output
