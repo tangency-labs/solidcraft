@@ -741,7 +741,13 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("id", "must match its lowercase package folder"));
     }
     if manifest.id != folder {
-        return Err(invalid("id", format!("package id `{}` does not match the folder `{folder}`", manifest.id)));
+        return Err(invalid(
+            "id",
+            format!(
+                "package id `{}` does not match the folder `{folder}`: a package folder is named after its plugin's id, so rename the folder to `{}`",
+                manifest.id, manifest.id
+            ),
+        ));
     }
     if !plain(&manifest.name, 80) {
         return Err(invalid("name", "requires 1..80 printable characters"));
