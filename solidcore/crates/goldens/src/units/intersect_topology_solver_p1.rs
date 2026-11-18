@@ -1483,12 +1483,15 @@ pub(super) fn p2_tree_generate(rng: &mut Rng) -> Option<Value> { serde_json::to_
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::curve::curve::p8::curves_meet_at_most_once;
 
     /// WR-647 (#18392): gen2408 moved from a range to one point. Base answered a range
     /// from `(901.4153, 0.74788)` (the line, then the Hermite curve) to `(1165.5436,
     /// 0.99919)` at tolerance 100, its ends 45.2 and 42.2 apart. The curves meet inside
     /// it: the point lies inside the base range, the curves evaluated there are less
-    /// than `1e-12` apart (5.3e-13), and no stencil neighbour is nearer.
+    /// than `1e-12` apart (5.3e-13), no stencil neighbour is nearer, and the library's
+    /// certificate (`curves_meet_at_most_once`) holds that they meet at most once over
+    /// the range. Base's ends are main's `rust()` output at bf685d1b3.
     #[test]
     fn wr_647_gen2408_meets_inside_its_base_range() {
         let ctx = CaseContext {
@@ -1538,6 +1541,17 @@ mod tests {
         let g = gap(point);
         assert!(g < 1e-12, "{g:e}");
         assert!(gap(base[0]) > 45.0 && gap(base[1]) > 42.0);
+        // the certificate that this is the curves' only contact over the base range: the
+        // Hermite cubic passes through the line (at about 21 degrees, in space; its
+        // separations at base's ends point to one side), and the cones of their tangents
+        // part (over the range, or over the pieces left near the meeting)
+        assert!(curves_meet_at_most_once(
+            &k,
+            a,
+            (base[0][0], base[1][0]),
+            b,
+            (base[0][1], base[1][1]),
+        ));
         // a local least distance: no stencil neighbour is nearer
         for (dt, du) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
             let q = [point[0] + dt * 1e-5, point[1] + du * 1e-8];
@@ -1545,4 +1559,3 @@ mod tests {
         }
     }
 }
-
