@@ -1274,10 +1274,10 @@ const RATIONAL_BOUND_LEVELS: u32 = 6;
 /// holds; the least found is returned.
 ///
 /// Refused where a weight of a piece is not certified positive (past the range a continued
-/// weight can reach zero), where the weights' products leave the normal range (underflow) or
-/// a distance between the `R` is not finite (overflow), where `across` is off its knot range
-/// or `along` is empty, and for knots with an empty span where one is needed or, along `d`, a
-/// multiplicity above the degree.
+/// weight can reach zero), where the weights' products, the weights' part of a distance between
+/// the `R` or the bound leave the normal range (underflow) or are not finite (overflow), where
+/// `across` is off its knot range or `along` is empty, and for knots with an empty span where
+/// one is needed or, along `d`, a multiplicity above the degree.
 fn rational_partial_bound(
     s: &EvalSurface,
     d: usize,
@@ -1467,7 +1467,16 @@ fn rational_partial_bound(
                         cross = cross.max(finite(e)?);
                     }
                 }
-                finite(near + cross * radius / (low * low))
+                // The weights' part, divided first so it does not scale with the weights. Below
+                // the normal range its rounding is not the relative one `gamma` counts, and at
+                // zero it would leave the weights' move out, so it is refused there.
+                let part = finite(cross / (low * low))? * radius;
+                if !(part >= f64::MIN_POSITIVE || radius == 0.0) {
+                    return Err(refused(
+                        "a distance on a rational net whose weights' part underflows",
+                    ));
+                }
+                finite(near + part)
             };
             let mut top = 0.0f64;
             for kk in 0..p {
@@ -1485,11 +1494,12 @@ fn rational_partial_bound(
                 top = top.max(high * step + turn * far);
             }
             // The quotient by the piece's length and the least weight, then the bound's sums
-            // and products, rounded up.
+            // and products, rounded up. A positive `top` whose bound is zero or below the normal
+            // range (the piece's length times the least weight overflowed) is refused with it.
             let b = p as f64 * top / (length * (1.0 - gamma(1)) * low) * (1.0 + gamma(32));
-            if !b.is_finite() {
+            if !(b.is_finite() && (b >= f64::MIN_POSITIVE || top == 0.0)) {
                 return Err(refused(
-                    "a partial bound of a rational net that is not finite",
+                    "a partial bound of a rational net that is not finite or not normal",
                 ));
             }
             bound = bound.max(b);
