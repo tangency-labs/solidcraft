@@ -487,6 +487,29 @@ fn a_hole_in_a_moved_body_follows_the_move() {
 }
 
 #[test]
+fn a_hole_turned_about_a_picked_edge_follows_the_edge_where_it_is_now() {
+    // The plate is turned over about its bottom front edge (picked at y = 0, z = 0), then lifted
+    // 50 mm. Dragging the lift before the turn moves the edge to z = 50, and the turn follows it
+    // there (#17974), so the plate ends at z 42..50 and y -30..0.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [45, 15, 8], "diameter": 5, "depth": 4, "name": "Blind"}));
+    let about = json!({"edge": [30, 0, 0], "body": "Plate"});
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "origin": [0, 0, 0], "axis": [1, 0, 0], "angle": "180 deg", "about": about}));
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "translate": [0, 0, 50]}));
+    run(&mut s, "timeline.reorder", json!({"feature": "Move2", "position": 2}));
+    // The model: the hole opens at z = 42 and goes 4 mm up into the plate.
+    assert!(!solid_at(&s, 45.0, -15.0, 44.0) && solid_at(&s, 45.0, -15.0, 48.0) && solid_at(&s, 45.0, -5.0, 44.0));
+    // The callout puts it there too, not where a turn about the saved line (z = 0) would.
+    let b = callout(&mut s, "Blind");
+    assert_eq!(b["status"], "resolved", "{b}");
+    assert_eq!(lines(&b), ["Ø5.00 ↧ 4.00"], "{b}");
+    let at = |k: usize| b["callout"]["start"][k].as_f64().unwrap_or(f64::NAN);
+    assert!((at(0) - 45.0).abs() < 1e-6 && (at(1) + 15.0).abs() < 1e-6 && (at(2) - 42.0).abs() < 1e-6, "{b}");
+    assert!((b["callout"]["direction"][2].as_f64().unwrap_or(f64::NAN) - 1.0).abs() < 1e-6, "{b}");
+}
+
+#[test]
 fn one_feature_can_drill_through_on_one_hole_and_blind_on_another() {
     let mut s = Session::default();
     bearing_block(&mut s);

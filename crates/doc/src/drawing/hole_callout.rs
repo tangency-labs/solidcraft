@@ -255,15 +255,14 @@ fn later_motion(doc: &Document, model: &Model, vals: &BTreeMap<String, Value>, i
     let mut m = crate::IDENTITY;
     let Some(i) = model.results.iter().position(|r| r.id == id) else { return Ok(m) };
     for r in model.results.iter().skip(i + 1).filter(|r| !r.skipped && r.error.is_none()) {
-        let Some(FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, .. }) =
-            doc.feature(r.id).filter(|f| !f.suppressed).map(|f| &f.kind)
-        else {
-            continue;
-        };
+        let Some(f) = doc.feature(r.id).filter(|f| !f.suppressed) else { continue };
+        let FeatureKind::Move { bodies, copy, .. } = &f.kind else { continue };
         if *copy || !bodies.iter().any(|b| *b == body) {
             continue;
         }
-        let (t, origin, axis, angle) = crate::eval::move_motion(vals, translate, *rotate_axis, origin.as_ref(), angle.as_ref())?;
+        // Read against the model the Move was evaluated on, so a turn about a picked edge turns
+        // where eval turned it. A lost edge was already reported on the Move itself.
+        let (t, origin, axis, angle) = crate::eval::move_motion(doc, vals, &model.state_before(r.id), f, &mut None)?;
         m = crate::mat_mul(&crate::rigid(t, origin, axis, angle), &m);
     }
     Ok(m)
