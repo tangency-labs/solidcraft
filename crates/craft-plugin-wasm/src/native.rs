@@ -104,6 +104,11 @@ struct ImportState {
     read_bytes: u64,
     files: BTreeSet<PathBuf>,
     design: Vec<u8>,
+    /// The manifest asks for `evaluate@0.1`.
+    evaluate: bool,
+    /// The design staged for `evaluate`, and whether the host has it open.
+    scratch: Vec<u8>,
+    evaluating: bool,
 }
 impl<H: PluginHost> State<H> {
     fn fail(&mut self, error: HostError) -> PluginError {
@@ -429,6 +434,71 @@ impl<H: PluginHost> design::Host for State<H> {
     }
 }
 
+impl<H: PluginHost> State<H> {
+    /// The import, when its manifest asks for `evaluate`.
+    fn evaluation(&mut self) -> std::result::Result<&mut ImportState, PluginError> {
+        self.check()?;
+        match self.import.as_mut() {
+            Some(import) if import.evaluate => Ok(import),
+            _ => Err(wit_error(HostError::PermissionDenied { permission: "evaluate: the manifest does not ask for evaluate@0.1".into() })),
+        }
+    }
+    fn close_evaluation(&mut self) {
+        if let Some(import) = self.import.as_mut()
+            && std::mem::take(&mut import.evaluating)
+        {
+            self.host.evaluate_close();
+        }
+    }
+}
+impl<H: PluginHost> evaluate::Host for State<H> {
+    fn stage(&mut self, bytes: Vec<u8>) -> std::result::Result<(), PluginError> {
+        if bytes.len() > MAX_IMPORT_CHUNK_BYTES {
+            self.check()?;
+            return Err(self.fail(limit("evaluate.stage chunk (at most 1 MiB)")));
+        }
+        if self.evaluation()?.evaluating {
+            self.close_evaluation();
+            if let Some(import) = self.import.as_mut() {
+                import.scratch.clear();
+            }
+        }
+        let import = self.evaluation()?;
+        if import.scratch.len().saturating_add(bytes.len()) > MAX_IMPORT_DESIGN_BYTES {
+            return Err(self.fail(limit("evaluate: a staged design of more than 256 MiB")));
+        }
+        import.scratch.extend_from_slice(&bytes);
+        Ok(())
+    }
+    fn run(&mut self, command: String, args: String) -> std::result::Result<String, PluginError> {
+        if args.len() > MAX_JSON_BYTES || command.len() > 128 {
+            self.check()?;
+            return Err(self.fail(limit("evaluate.run arguments exceed 1 MiB")));
+        }
+        let args: Value =
+            serde_json::from_str(&args).map_err(|e| wit_error(HostError::InvalidInput { field: "args".into(), reason: e.to_string() }))?;
+        if !self.evaluation()?.evaluating {
+            let design = std::mem::take(&mut self.evaluation()?.scratch);
+            // The plugin's own design not opening is an answer about it, not a failed import.
+            self.host.evaluate_open(&design).map_err(wit_error)?;
+            self.evaluation()?.evaluating = true;
+        }
+        let result = self.host.evaluate_run(&command, &args).map_err(wit_error)?;
+        let text = serde_json::to_string(&result).map_err(|e| wit_error(trap(e.to_string())))?;
+        if text.len() > MAX_JSON_BYTES {
+            // Too large to check this way: an answer, not a failed import.
+            return Err(wit_error(limit("evaluate.run result exceeds 1 MiB")));
+        }
+        Ok(text)
+    }
+    fn reset(&mut self) {
+        self.close_evaluation();
+        if let Some(import) = self.import.as_mut() {
+            import.scratch = Vec::new();
+        }
+    }
+}
+
 /// Refuses `path` inside a granted folder when any part of it is a symbolic link (or, on Windows,
 /// a junction). Authorization looks at the path as spelled, so a link would let a visible name
 /// reach what the spelling hides: `public -> .hidden` made `public/secret.txt` readable and
@@ -711,6 +781,63 @@ fn stack_bytes(limits: &Limits, options: RuntimeOptions, importer: bool) -> Resu
     Ok(bytes)
 }
 
+/// The first eight bytes of a core WebAssembly module; a component's header names layer 1 instead.
+const CORE_MODULE_HEADER: [u8; 8] = *b"\0asm\x01\0\0\0";
+
+/// A host that answers nothing: [`check_component`] links against it and never instantiates.
+struct Inert;
+impl PluginHost for Inert {
+    fn command_catalog(&self) -> Vec<CommandSchema> {
+        Vec::new()
+    }
+    fn run_command(&mut self, name: &str, _args: &Value) -> Result<Value> {
+        Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") })
+    }
+    fn begin_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn commit_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn rollback_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn granted_folders(&self) -> Vec<craft_plugin::FileGrant> {
+        Vec::new()
+    }
+    fn log(&mut self, _message: &str) {}
+    fn progress(&mut self, _fraction: f32, _message: &str) {}
+}
+
+fn component_error(reason: impl Into<String>) -> HostError {
+    HostError::InvalidInput { field: "component".into(), reason: reason.into() }
+}
+
+pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: RuntimeOptions) -> Result<()> {
+    let runtime =
+        manifest.runtime.as_ref().ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
+    runtime.validate()?;
+    if bytes.len() > runtime.max_component_bytes() {
+        return Err(limit(&format!("component size: {} bytes is over {} MiB", bytes.len(), runtime.max_component_bytes() >> 20)));
+    }
+    if bytes.starts_with(&CORE_MODULE_HEADER) {
+        return Err(component_error("this is a core WebAssembly module, not a component"));
+    }
+    let importer = runtime.is_importer();
+    let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer)?)?;
+    reject_network_imports(&engine, &component)?;
+    let mut linker = Linker::<State<Inert>>::new(&engine);
+    let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
+    if importer {
+        importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else {
+        bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    }
+    Ok(())
+}
+
 type Compiled = (Arc<[u8]>, usize, Engine, Component);
 /// The most recently compiled component. Compiling a large importer takes tens of seconds; keeping
 /// the compiled code in memory (never on disk, which would need unsafe deserialization) lets the
@@ -725,15 +852,21 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((engine.clone(), component.clone()));
     }
+    let (engine, component) = compile_with(bytes, stack_bytes)?;
+    if let Ok(mut cache) = COMPILED.lock() {
+        *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
+    }
+    Ok((engine, component))
+}
+
+/// Compiles `bytes` under the host's configuration, without the cache.
+fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     let mut config = Config::new();
     config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
     // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
     config.async_stack_size(stack_bytes.saturating_add(1 << 20));
     let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
     let component = Component::from_binary(&engine, bytes).map_err(|e| trap(format!("component compilation failed: {e:#}")))?;
-    if let Ok(mut cache) = COMPILED.lock() {
-        *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
-    }
     Ok((engine, component))
 }
 
@@ -790,6 +923,9 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             read_bytes: 0,
             files: BTreeSet::new(),
             design: Vec::new(),
+            evaluate: manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")),
+            scratch: Vec::new(),
+            evaluating: false,
         };
         Ok((runtime, entry, options, engine, component, import, source::FileInfo { name, size }))
     })();
@@ -805,7 +941,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
-        effect: Effect::Edit,
+        effect: Effect::Open,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
@@ -853,7 +989,9 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         }
         Ok(Imported { design, report })
     })();
-    (store.into_data().host, outcome)
+    let mut state = store.into_data();
+    state.close_evaluation();
+    (state.host, outcome)
 }
 
 #[cfg(test)]

@@ -94,6 +94,26 @@ fn hostile_manifest_fields_return_errors() {
 }
 
 #[test]
+fn larger_manifests_fit_without_removing_input_descriptions() {
+    let serialized = serde_json::to_vec(&manifest()).unwrap();
+    assert!(serialized.len() < 16 * 1024);
+    assert_eq!(MAX_MANIFEST_BYTES, 64 * 1024);
+
+    // Whitespace pads a real manifest to exact byte boundaries without changing its
+    // meaning. The old 16 KiB cap no longer rejects a valid manifest.
+    for len in [16 * 1024 + 1, 64 * 1024] {
+        let mut bytes = serialized.clone();
+        bytes.resize(len, b' ');
+        let parsed = parse_manifest(&bytes, "sample").unwrap();
+        assert_eq!(parsed.id, "sample");
+    }
+
+    let mut too_large = serialized;
+    too_large.resize(MAX_MANIFEST_BYTES + 1, b' ');
+    assert!(matches!(parse_manifest(&too_large, "sample"), Err(HostError::LimitExceeded { limit }) if limit.contains("64 KiB")));
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());
@@ -223,9 +243,22 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([".f3d"]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["f3d", "f3d"]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["effect"] = json!("read"), "effect");
+    // An importer opens a file as a new design: that is its effect, whether it says so, says
+    // nothing, or says `edit` as manifests written before `open` did; a command never opens.
+    assert_eq!(runtime.entries[0].effect, Effect::Open);
+    assert_eq!(serde_json::to_value(&runtime.entries[0]).unwrap()["effect"], "open");
+    for declared in ["open", "edit"] {
+        let mut value = importer();
+        value["runtime"]["entries"][0]["effect"] = json!(declared);
+        assert_eq!(parse(&value).unwrap().runtime.unwrap().entries[0].effect, Effect::Open, "{declared}");
+    }
     refused(&|v| v["runtime"]["entries"].as_array_mut().unwrap().push(json!({"name":"make"})), "runtime.entries");
     refused(&|v| v["runtime"]["commands"] = json!(["app.make"]), "runtime.commands");
     refused(&|v| v["runtime"]["limits"]["stack_kib"] = json!(1 << 20), "stack_kib");
+    // An importer may also check its result; a command may not ask to.
+    let mut evaluating = importer();
+    evaluating["capabilities"] = json!(["evaluate@0.1", "formats@0.1"]);
+    assert!(parse(&evaluating).is_ok());
     // A command claims no extension, reads no input folder and still finishes within 30 s.
     let command = |change: &dyn Fn(&mut Value), field: &str| {
         let mut value = manifest();
@@ -233,7 +266,9 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
         assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field: f, .. }) if f.contains(field)), "{field}");
     };
     command(&|v| v["runtime"]["entries"] = json!([{"name":"make","extensions":["f3d"]}]), "extensions");
+    command(&|v| v["runtime"]["entries"] = json!([{"name":"make","effect":"open"}]), "effect");
     command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
+    command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
     command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 

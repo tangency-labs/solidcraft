@@ -12,7 +12,7 @@ use serde_json::Value;
 // The WIT package declaration is the sole source of the API identifier.
 include!(concat!(env!("OUT_DIR"), "/api.rs"));
 pub const WIT: &str = include_str!("../wit/plugin.wit");
-pub const MAX_MANIFEST_BYTES: usize = 16 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 pub const MAX_COMPONENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_JSON_BYTES: usize = 1024 * 1024;
 /// An importer's component may be larger: a real converter measured 28 to 42 MB (RFC 0002).
@@ -59,7 +59,7 @@ pub enum HostError {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("formats", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
 
 fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
@@ -111,9 +111,13 @@ fn invalid(field: impl Into<String>, reason: impl Into<String>) -> HostError {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effect {
+    /// Reads the open design and changes nothing.
     Read,
+    /// Changes the open design.
     #[default]
     Edit,
+    /// Opens a file as a new design and leaves the open one as it is: every importer's effect.
+    Open,
 }
 
 /// The app supplies the same contracts it exposes to its other programmatic clients.
@@ -179,6 +183,19 @@ pub trait PluginHost {
     fn is_cancelled(&self) -> bool {
         false
     }
+    /// Opens `design`, a design file an importer made, in a private session apart from every open
+    /// design and every file, for [`PluginHost::evaluate_run`] (capability `evaluate@0.1`). An app
+    /// that doesn't check designs refuses, as here.
+    fn evaluate_open(&mut self, _design: &[u8]) -> Result<()> {
+        Err(HostError::PermissionDenied { permission: "evaluate: this app does not check imported designs".into() })
+    }
+    /// Runs one of the app's read-only commands on the design [`PluginHost::evaluate_open`] opened.
+    /// A command that fails is an answer (`{"error": ...}`), not an error.
+    fn evaluate_run(&mut self, command: &str, _args: &Value) -> Result<Value> {
+        Err(HostError::PermissionDenied { permission: format!("evaluate: {command} is not available") })
+    }
+    /// Discards the session [`PluginHost::evaluate_open`] opened.
+    fn evaluate_close(&mut self) {}
 }
 
 /// User-owned ceilings, separate from the package's exact content-approved request.
@@ -347,8 +364,10 @@ struct DeclaredEntry {
     kind: EntryKind,
     #[serde(default)]
     extensions: Vec<String>,
+    /// A command's effect is `edit` unless it says `read`; an importer's is `open`. An importer that
+    /// says `edit` (the only effect it could state before `open` existed) still opens a new design.
     #[serde(default)]
-    effect: Effect,
+    effect: Option<Effect>,
     #[serde(default = "empty_input_schema")]
     input_schema: Value,
     #[serde(default)]
@@ -369,7 +388,11 @@ impl From<EntryDeclaration> for Entry {
                 name: value.name,
                 kind: value.kind,
                 extensions: value.extensions,
-                effect: value.effect,
+                effect: match (value.kind, value.effect) {
+                    (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
+                    (_, Some(effect)) => effect,
+                    (EntryKind::Command, None) => Effect::Edit,
+                },
                 input_schema: value.input_schema,
                 slots: value.slots,
             },
@@ -480,6 +503,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
+        EntryKind::Command if entry.effect == Effect::Open => {
+            Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
         EntryKind::Command => Ok(()),
         EntryKind::Importer => {
             let mut seen = BTreeSet::new();
@@ -491,8 +517,8 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
                     "an importer claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
                 ));
             }
-            if entry.effect != Effect::Edit {
-                return Err(invalid(format!("{field}.effect"), "an importer makes a design: its effect is edit"));
+            if entry.effect != Effect::Open {
+                return Err(invalid(format!("{field}.effect"), "an importer opens a file as a new design: its effect is open"));
             }
             Ok(())
         }
@@ -595,7 +621,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// [`parse_manifest`], naming the host `app` in a capability refusal.
 pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
-        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 16 KiB".into() });
+        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
     if let Ok(value) = serde_json::from_slice::<Value>(text)
@@ -632,6 +658,8 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
             if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
                 return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
             }
+        } else if manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
+            return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer (formats) asks for it"));
         } else if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
         }

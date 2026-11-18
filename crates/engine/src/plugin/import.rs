@@ -113,6 +113,7 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 /// Run `importer` on `path` and make its design this session's, as a new design that is not saved
 /// anywhere yet. Nothing changes unless the whole import succeeds; a trap names the plugin and file.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    session.plugin_state.refresh_stored();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
     let package = read_package(&importer.folder)?;
     if package.manifest.id != importer.plugin_id || session.disabled_plugins.contains(&importer.plugin_id) {
@@ -146,8 +147,10 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
             session: Session::default(),
             transaction: None,
             sketch_exits: Vec::new(),
+            view: None,
             groups: BTreeSet::new(),
             file_folders: Vec::new(),
+            evaluation: None,
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
         // importer asks for (a real decoder needs about 16 MiB) and the host's own calls.

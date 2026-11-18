@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.drawing_offscreen.recenter": "Centre sheet"
+  },
+  "de": {
+    "ui.drawing_offscreen.recenter": "Blatt zentrieren"
+  },
+  "ja": {
+    "ui.drawing_offscreen.recenter": "シートを中央に表示"
+  },
+  "ko": {
+    "ui.drawing_offscreen.recenter": "시트 가운데 맞춤"
+  },
+  "zh": {
+    "ui.drawing_offscreen.recenter": "将图纸居中"
+  },
+  "ar": {
+    "ui.drawing_offscreen.recenter": "توسيط اللوحة"
+  },
+  "he": {
+    "ui.drawing_offscreen.recenter": "מרכוז הגיליון"
+  },
+  "vi": {
+    "ui.drawing_offscreen.recenter": "Căn giữa tờ"
+  }
+}

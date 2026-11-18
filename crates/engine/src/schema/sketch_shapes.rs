@@ -962,7 +962,10 @@ pub struct RoundedRectResult {
     /// The corner arcs: bottom-left, bottom-right, top-right, top-left.
     pub arcs: Vec<String>,
     /// The parameter that holds the corner radius.
-    pub param: String,
+    pub param: Option<String>,
+    /// A sheet sketch keeps its radius expression without making a model parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,

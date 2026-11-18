@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_view_auxiliary": "Auxiliary View"
+  },
+  "ar": {
+    "cmd.drawing_view_auxiliary": "العرض المساعد"
+  },
+  "de": {
+    "cmd.drawing_view_auxiliary": "Hilfsansicht"
+  },
+  "he": {
+    "cmd.drawing_view_auxiliary": "תצוגת עזר"
+  },
+  "ja": {
+    "cmd.drawing_view_auxiliary": "補助ビュー"
+  },
+  "ko": {
+    "cmd.drawing_view_auxiliary": "보조 뷰"
+  },
+  "vi": {
+    "cmd.drawing_view_auxiliary": "Chế độ xem phụ"
+  },
+  "zh": {
+    "cmd.drawing_view_auxiliary": "辅助视图"
+  }
+}

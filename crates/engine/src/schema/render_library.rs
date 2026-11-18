@@ -134,8 +134,8 @@ fn kind_schema(_: &mut SchemaGenerator) -> Schema {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct LibraryTargetsParams {
-    /// Text to look for in a body's name, ignoring case: at most 256 bytes, without control
-    /// characters. Default: every body.
+    /// Text to look for in a body's name, ignoring case: at most 512 bytes (`MAX_BODY_NAME_BYTES`,
+    /// so a whole body name fits), without control characters. Default: every body.
     pub query: String,
     /// How many matching bodies to skip: at most 262 144. Default: 0.
     #[schemars(range(max = 262_144))]

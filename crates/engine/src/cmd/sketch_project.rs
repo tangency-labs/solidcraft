@@ -623,10 +623,16 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// `{vertex: [x,y,z], body?}` under one of `keys` is projected into the sketch first, as
 /// Project does, and stands for the projected curve (or point) in the parameters returned.
 /// Any body's edges work, a mirrored or patterned copy's too; the link keeps the edge's
-/// persistent name, so the constraint follows the edge through rebuilds.
+/// persistent name, so the constraint follows the edge through rebuilds. An edge's middle,
+/// `{midpoint: {edge: [x,y,z], body?}}`, projects the edge and becomes `{midpoint: <its curve>}`,
+/// the middle of the projected line (#17920).
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
-    if !keys.iter().any(|k| p.get(*k).is_some_and(model_ref)) {
+    let middle_of = |v: &Value| v.get("midpoint").filter(|m| m.get("edge").is_some() && model_ref(m)).cloned();
+    if !keys.iter().any(|k| p.get(*k).is_some_and(|v| model_ref(v) || middle_of(v).is_some())) {
         return Ok(p.clone());
+    }
+    if s.open_drawing.is_some() {
+        return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
@@ -634,8 +640,12 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     refresh(s, &doc, id, &mut sk);
     let mut out = p.clone();
     for key in keys {
-        let Some(v) = p.get(*key).filter(|v| model_ref(v)) else { continue };
-        out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        let Some(v) = p.get(*key) else { continue };
+        if let Some(m) = middle_of(v) {
+            out[*key] = json!({"midpoint": project_ref(s, &doc, id, &mut sk, &m, cmd)?});
+        } else if model_ref(v) {
+            out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        }
     }
     sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
@@ -681,6 +691,9 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
     }
     if !entities.iter().any(model_ref) {
         return Ok(p.clone());
+    }
+    if s.open_drawing.is_some() {
+        return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
@@ -873,10 +886,25 @@ fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String
 /// two lines, circles or arcs (and `"vertex:x,y,z"` is the vertex form). Everything else is left
 /// as it is. The links are added to the active sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
-    let Some(id) = sketch_store::active(s) else { return Ok(p.clone()) };
+    // A sheet may be open while the model retains its own active sketch. Never
+    // project into that model or reinterpret its new local ids as sheet points.
+    let sheet = s.open_drawing.is_some();
+    let target = if sheet { None } else { sketch_store::active(s) };
+    if !sheet && target.is_none() {
+        return Ok(p.clone());
+    }
     let mut out = p.clone();
     let mut doc: Option<(Document, Sketch)> = None;
     let fix = |v: &mut Value, s: &Session, doc: &mut Option<(Document, Sketch)>| -> Result<()> {
+        // These spellings denote automatic projection/snap operations, not an
+        // authored 2D point. Reject even malformed values with an `at` fallback.
+        if sheet
+            && (v.get("vertex").is_some()
+                || v.get("on_edge").is_some()
+                || v.as_str().is_some_and(|text| ["vertex:", "mid:", "on:", "x:"].iter().any(|prefix| text.starts_with(prefix))))
+        {
+            return Err(bad(cmd, "not supported yet: automatic snap or projection in a sheet sketch; use a 2D point or exact local point id"));
+        }
         let (vertex, edge) = (v.get("vertex").and_then(vec3), v.get("on_edge").and_then(vec3));
         // String forms from interactive snapping: "vertex:x,y,z" and "mid:<line>".
         let vertex = vertex.or_else(|| {
@@ -901,6 +929,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         if vertex.is_none() && edge.is_none() && mid.is_none() && on.is_none() && crossing.is_none() {
             return Ok(());
         }
+        let id = target.ok_or_else(|| bad(cmd, "no model sketch is being edited"))?;
         if doc.is_none() {
             let d = (*s.doc).clone();
             let mut sk = sketch_store::read(&d, id)?.clone();
@@ -971,6 +1000,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
     }
     if let Some((mut d, sk)) = doc {
+        let id = target.ok_or_else(|| bad(cmd, "no model sketch is being edited"))?;
         sketch_store::write(&mut d, id, sk)?;
         *s.doc_mut() = d;
     }
