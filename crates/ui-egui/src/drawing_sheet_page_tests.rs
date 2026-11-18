@@ -902,6 +902,157 @@ fn no_drawing_open_shows_the_note() {
     assert_eq!(page(&mut h), Value::Null);
 }
 
+/// A plate and a bolt as components, the bolt placed twice, on a drawing in the Drawing workspace,
+/// drawn.
+fn assembly_sheet() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    for (name, part) in [("Plate", "P-100"), ("Bolt", "B-200")] {
+        h.app.run("component.create", json!({"name": name})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": name})).unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.metadata.set", json!({"component": name, "part_number": part})).unwrap();
+    }
+    h.app.run("occurrence.copy", json!({"component": "Bolt", "translate": [0, 50, 0]})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    h
+}
+
+/// Where the open sheet's paper point `mm` is on screen, and one screen point in millimetres.
+fn paper_point(h: &mut Harness, mm: Vec2) -> ([f32; 2], f64) {
+    let shown = page(h);
+    let size = Vec2::new(number(&shown["size_mm"][0]), number(&shown["size_mm"][1]));
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    let x = paper.left() + paper.width() * (mm.x / size.x) as f32;
+    let y = paper.bottom() - paper.height() * (mm.y / size.y) as f32;
+    ([x, y], size.x / f64::from(paper.width()))
+}
+
+/// The open drawing's table `id`.
+fn table_of(h: &Harness, id: u64) -> solidcraft_engine::doc::drawing::table::SheetTable {
+    h.app.session.drawing("drawing.inspect").unwrap().tables.by_id(id).unwrap().clone()
+}
+
+/// A parts list added by command on the active sheet, its panel open: its id.
+fn list_with_panel(h: &mut Harness) -> u64 {
+    let sheet = solidcraft_engine::doc::ids::encode(active_sheet(&h.app).unwrap());
+    let added = h.app.run("drawing.table.add", json!({"sheet": sheet, "kind": "parts_list"})).unwrap();
+    let id = solidcraft_engine::doc::ids::decode(added["table"].as_str().unwrap()).unwrap();
+    settle(h);
+    crate::drawing_workspace::edit_object(&mut h.app, "parts_list", id);
+    h.frames(4);
+    id
+}
+
+/// Replaces the text of the panel field published as `handle` with `text`.
+fn retype(h: &mut Harness, handle: &str, text: &str) {
+    h.step(&json!({"click": {"handle": handle}})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": text})).unwrap();
+    h.frames(2);
+}
+
+/// The panel's heading, row height, shown columns and widths go in with one Apply, as one undo step;
+/// the column only its editor reads stays. OK with nothing changed and Cancel add no step. An undo
+/// while the panel is open is what the panel then shows.
+#[test]
+fn parts_list_panel_applies_its_fields_in_one_step() {
+    use solidcraft_engine::geom::table::{BALLOONED, Heading};
+
+    let mut h = assembly_sheet();
+    let id = list_with_panel(&mut h);
+    let before = table_of(&h, id);
+    h.step(&json!({"click": {"handle": "drawing:parts_list:heading:bottom"}})).unwrap();
+    retype(&mut h, "drawing:parts_list:row_height", "9");
+    h.step(&json!({"click": {"handle": "drawing:parts_list:column:mass:shown"}})).unwrap();
+    retype(&mut h, "drawing:parts_list:column:name:width", "40");
+    let steps = h.app.session.undo.len();
+    h.step(&json!({"widget": "Apply"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.session.undo.len(), steps + 1, "one step");
+    let after = table_of(&h, id);
+    assert_eq!((after.table.heading, after.table.row_height_mm), (Heading::Bottom, 9.0));
+    let column = |name: &str| after.table.columns.iter().find(|c| c.name == name).unwrap().clone();
+    assert!(!column("mass").printed && column("name").width_mm == Some(40.0));
+    assert_eq!(after.table.columns.len(), before.table.columns.len());
+    assert!(!column(BALLOONED).printed, "the editor's column stays, unprinted");
+    assert_eq!((&after.place, &after.kind), (&before.place, &before.kind), "the rest stays");
+
+    h.step(&json!({"widget": "OK"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.session.undo.len(), steps + 1, "nothing new, no step");
+    assert!(crate::scenario::handle_at("drawing:parts_list:row_height").is_none(), "OK closes the panel");
+
+    crate::drawing_workspace::edit_object(&mut h.app, "parts_list", id);
+    h.frames(4);
+    retype(&mut h, "drawing:parts_list:row_height", "12");
+    h.step(&json!({"widget": "Cancel"})).unwrap();
+    h.frames(3);
+    assert_eq!(table_of(&h, id).table.row_height_mm, 9.0, "Cancel keeps the list as it was");
+
+    crate::drawing_workspace::edit_object(&mut h.app, "parts_list", id);
+    h.frames(4);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(3);
+    assert_eq!(table_of(&h, id), before, "the undo puts the list back");
+    h.step(&json!({"widget": "Apply"})).unwrap();
+    h.frames(3);
+    assert_eq!(table_of(&h, id), before, "the panel shows the list as the undo left it");
+}
+
+/// A row height or width that isn't a size the list can have, or no column shown, is refused
+/// before anything is sent: the list and the undo steps stay as they were.
+#[test]
+fn parts_list_panel_refuses_hostile_values_without_a_step() {
+    let mut h = assembly_sheet();
+    let id = list_with_panel(&mut h);
+    let before = table_of(&h, id);
+    let steps = h.app.session.undo.len();
+    let unchanged = |h: &mut Harness, what: &str| {
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        h.frames(2);
+        assert_eq!((table_of(h, id), h.app.session.undo.len()), (before.clone(), steps), "{what}");
+    };
+    for bad in ["0", "-7", "NaN", "inf", "1e400", "abc", "1001", "9".repeat(400).as_str()] {
+        retype(&mut h, "drawing:parts_list:row_height", bad);
+        unchanged(&mut h, bad);
+    }
+    retype(&mut h, "drawing:parts_list:row_height", "7");
+    for bad in ["1", "-40", "NaN", "6000"] {
+        retype(&mut h, "drawing:parts_list:column:name:width", bad);
+        unchanged(&mut h, bad);
+    }
+    retype(&mut h, "drawing:parts_list:column:name:width", "");
+    for column in before.table.columns.iter().filter(|c| c.printed) {
+        h.step(&json!({"click": {"handle": format!("drawing:parts_list:column:{}:shown", column.name)}})).unwrap();
+    }
+    h.frames(2);
+    unchanged(&mut h, "no column shown");
+}
+
+/// A double-click on a placed list opens its panel with live fields.
+#[test]
+fn a_double_click_opens_the_parts_list_panel() {
+    let mut h = assembly_sheet();
+    let sheet = solidcraft_engine::doc::ids::encode(active_sheet(&h.app).unwrap());
+    // In the middle of the sheet, where no panel or card can cover it.
+    let size = Vec2::new(number(&page(&mut h)["size_mm"][0]), number(&page(&mut h)["size_mm"][1]));
+    let set = json!({"place": {"at": [size.x / 2.0, size.y / 2.0]}});
+    let added = h.app.run("drawing.table.add", json!({"sheet": sheet, "kind": "parts_list", "set": set})).unwrap();
+    settle(&mut h);
+    let inspected = h.app.run("drawing.table.inspect", json!({"table": added["table"]})).unwrap();
+    let outline: Vec<f64> = inspected["outline_mm"].as_array().unwrap().iter().map(number).collect();
+    let (point, _) = paper_point(&mut h, Vec2::new((outline[0] + outline[2]) / 2.0, (outline[1] + outline[3]) / 2.0));
+    assert!(!crate::shell::covered(&h.app, pos2(point[0], point[1])), "the list is on the free sheet: {outline:?}");
+    h.step(&json!({"move": point})).unwrap();
+    h.step(&json!({"click": point, "double": true})).unwrap();
+    h.frames(4);
+    assert!(crate::scenario::handle_at("drawing:parts_list:row_height").is_some(), "the panel's fields are live");
+}
+
 #[test]
 fn offscreen_arrow_tracks_the_edge_and_hides_when_paper_is_visible() {
     let area = Rect::from_min_max(pos2(50.0, 20.0), pos2(250.0, 220.0));
