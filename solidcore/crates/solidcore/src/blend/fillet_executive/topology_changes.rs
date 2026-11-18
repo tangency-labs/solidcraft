@@ -33,13 +33,6 @@ pub trait TopologyChangesAccess<O> {
     fn change_corner(&mut self, k: &Kernel, corner: O, old: O, new: O) -> Result<()>;
 }
 
-fn ignored(status: Result<()>) -> Result<()> {
-    match status {
-        Err(error) if error.is_unported_or_cancelled() => Err(error),
-        _ => Ok(()),
-    }
-}
-
 /// The shared native loop, using the actual executive's retained lists.
 /// Per-object statuses are ignored upstream; genuine missing capabilities propagate.
 /// # Errors
@@ -71,20 +64,14 @@ pub fn update_topology_changes<O: Copy + PartialEq>(
         for geometry in access.change_geometries(solver)? {
             for &face in &faces {
                 // fork 873c7c9 passes this on (SER)
-                ignored(crate::error::passed_on(
-                    access.change_geometry(k, geometry, original, face),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                access.change_geometry(k, geometry, original, face)?;
             }
         }
     }
     for &corner in corners {
         for &face in &faces {
             // fork 873c7c9 passes this on (SER)
-            ignored(crate::error::passed_on(
-                access.change_corner(k, corner, original, face),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            access.change_corner(k, corner, original, face)?;
         }
     }
     Ok(())
@@ -115,6 +102,8 @@ mod tests {
         users: Vec<Option<usize>>,
         events: Vec<(bool, usize, usize)>,
         stop: Option<usize>,
+        /// every update fails with an ordinary status
+        failing: bool,
     }
     impl TopologyChangesAccess<usize> for Changes {
         type User = Option<usize>;
@@ -135,7 +124,10 @@ mod tests {
                     "blend.fillet_geom_p5",
                 ));
             }
-            Err(SolidError::sm_err("ordinary ignored update"))
+            if self.failing {
+                return Err(SolidError::sm_err("ordinary failed update"));
+            }
+            Ok(())
         }
         fn change_corner(&mut self, _: &Kernel, c: usize, _: usize, face: usize) -> Result<()> {
             self.events.push((true, c, face));
@@ -143,7 +135,7 @@ mod tests {
         }
     }
     #[test]
-    fn ordered_updates_ignore_ordinary_errors_then_visit_corners() {
+    fn ordered_updates_visit_every_geometry_then_the_corners() {
         let mut changes = Changes {
             users: vec![Some(8), None, Some(3), Some(9)],
             ..Changes::default()
@@ -168,26 +160,19 @@ mod tests {
         );
     }
     /// Fork 873c7c9 (`UpdateTopologyChanges`: `SER( pFilGeom->UpdateSplitFace(..) )`):
-    /// with `fillet_statuses_pass_on` the first failed geometry update is returned,
-    /// before the other geometries and the corners; without it every update runs.
+    /// the first failed geometry update is returned, before the other geometries and
+    /// the corners (WR-661; upstream runs every update).
     #[test]
-    fn fillet_statuses_pass_on_returns_the_first_failed_split_face_update() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_statuses_pass_on = true;
+    fn returns_the_first_failed_split_face_update() {
+        let k = Kernel::default();
         let mut changes = Changes {
             users: vec![Some(3), Some(8)],
+            failing: true,
             ..Changes::default()
         };
         let e = update_topology_changes(&k, &[2, 1], &[7], &mut changes, 0, 3).unwrap_err();
-        assert_eq!(e, SolidError::sm_err("ordinary ignored update"));
+        assert_eq!(e, SolidError::sm_err("ordinary failed update"));
         assert_eq!(changes.events, vec![(false, 20, 8)]);
-        k.fixes.fillet_statuses_pass_on = false;
-        let mut changes = Changes {
-            users: vec![Some(3), Some(8)],
-            ..Changes::default()
-        };
-        update_topology_changes(&k, &[2, 1], &[7], &mut changes, 0, 3).unwrap();
-        assert_eq!(changes.events.len(), 5);
     }
     #[test]
     fn genuine_missing_update_retains_prefix_and_stops_before_corners() {

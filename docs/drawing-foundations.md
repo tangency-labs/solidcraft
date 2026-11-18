@@ -1,5 +1,12 @@
 # Drawing foundations: first geometry slice
 
+For live progress, use the checklist in the body of [RFC #860][rfc]; the
+[final W00–W47 plan][plan] remains the delivery plan.
+For the dated package map, claims, integrated children and later
+decisions, see [Drawing delivery and handoffs](drawing-delivery.md). The ledger
+below preserves the original W01a scope and its historical coordination snapshot;
+its open storage and ownership questions are not the current delivery status.
+
 This is the W00 bootstrap ledger for the [published Drawing plan][plan] in
 [#860][rfc]. The first implementation is W01a, [#2053][w01-issue] /
 [PR #2085][w01-pr], owned by `0xlillith`: neutral section-geometry records,
@@ -27,6 +34,12 @@ retains the detailed requirements, alternatives and sources. Product research is
 requirements evidence; its descriptions and proposed standards rules are not
 implementation code, independently verified conformance or permission to copy
 protected content.
+
+Later source note (2026-10-25): the [updated study, attachment 33742361][study-current],
+especially §18.10, adds BOM and explicit sheet-source decisions. The
+[delivery map](drawing-delivery.md#decisions-that-supersede-the-original-plan)
+records those decisions and the later owner agreements that take precedence.
+The original attachment and historical W01a snapshot below are retained.
 
 Here, **W01a** means code in this slice; **future** means a requirement still to
 implement or decide. A merged representation or validator does not establish a
@@ -130,6 +143,7 @@ instructions govern any later change to those areas.
 [fabrication]: https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6231770565
 [study-comment]: https://github.com/tangency-labs/solidcraft/issues/860#issuecomment-6216908058
 [study]: https://github.com/user-attachments/files/33548772/inventor-drawings-research.md
+[study-current]: https://github.com/user-attachments/files/33742361/inventor-drawings-research.md
 [w01-issue]: https://github.com/tangency-labs/solidcraft/issues/2053
 [w01-pr]: https://github.com/tangency-labs/solidcraft/pull/2085
 [w09-issue]: https://github.com/tangency-labs/solidcraft/issues/2054

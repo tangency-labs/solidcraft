@@ -44,13 +44,14 @@ const INSERT_STEP_CONTRACT: TypedContract<InsertStepParams> = TypedContract::new
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.new", "New Design", crate::checked!("file.new", new_doc))
+        .any_part()
         .icon("new")
         .key("Ctrl+N")
         .noundo()
         .contract(&NEW_DESIGN_CONTRACT)
         .output(output_schema_for::<NewDesignResult>)
         .params("name?"),
-    CommandSpec::new("doc.open", "Open", crate::checked!("doc.open", open))
+    CommandSpec::new("doc.open", "Open", crate::checked!("doc.open", open)).any_part()
         .icon("open")
         .key("Ctrl+O")
         .noundo()
@@ -69,43 +70,44 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_MESH_CONTRACT)
         .output(output_schema_for::<MeshInserted>)
         .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made); crease_angle_degrees?: 0..180 (0 clears imported shading normals for the previous flat-shading behavior; positive angles regenerate angle-weighted normals across manifold edges below this crease angle; omitted keeps authored OBJ normals/smoothing groups, or flat shading when absent; geometry stays unchanged)"),
-    CommandSpec::new("file.save", "Save", crate::checked!("file.save", save))
+    CommandSpec::new("file.save", "Save", crate::checked!("file.save", save)).any_part()
         .icon("save")
         .key("Ctrl+S")
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
         .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
-    CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
+    CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as)).any_part()
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
         .contract(&SAVE_AS_CONTRACT)
         .output(output_schema_for::<SaveResult>)
         .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
-    CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify))
+    CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify)).any_part()
         .icon("shield")
         .noundo()
         .contract(&VERIFY_CONTRACT)
         .output(output_schema_for::<VerifyResult>)
         .params("path? (default: the design's current file) → {path, status, reason?, truncated, records: [{method, key_id, user_id?, author?, created?, format, covered}]}: status is unsigned, valid, not_covered (signed earlier, saved since without a key), invalid or unsupported"),
-    CommandSpec::new("file.gpg_keys", "Signing Keys", crate::checked!("file.gpg_keys", gpg_keys))
+    CommandSpec::new("file.gpg_keys", "Signing Keys", crate::checked!("file.gpg_keys", gpg_keys)).any_part()
         .icon("shield")
         .noundo()
         .contract(&GPG_KEYS_CONTRACT)
         .output(output_schema_for::<GpgKeysResult>)
         .params("→ {available, keys: [{fingerprint, key_id, user_id, on_card}]}: the GnuPG secret keys a save can sign with (desktop only)"),
-    CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).icon("restore")
+    CommandSpec::new("doc.recovery_list", "Recoverable Designs", crate::checked!("doc.recovery_list", recovery_list)).any_part().icon("restore")
         .noundo()
         .contract(&RECOVERY_LIST_CONTRACT)
         .output(output_schema_for::<RecoveryListResult>)
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
-    CommandSpec::new("doc.recover", "Recover Design", crate::checked!("doc.recover", recover)).icon("restore")
+    CommandSpec::new("doc.recover", "Recover Design", crate::checked!("doc.recover", recover)).any_part().icon("restore")
         .noundo()
         .contract(&RECOVER_CONTRACT)
         .output(output_schema_for::<RecoverResult>)
         .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
     CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", crate::checked!("doc.recovery_discard", recovery_discard))
+        .any_part()
         .icon("delete")
         .noundo()
         .contract(&RECOVERY_DISCARD_CONTRACT)
@@ -1361,6 +1363,23 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     opened_design(s, opened, path, read_only, disk, verify, None)
 }
 
+/// Whether running `command` with `params` runs an installed importer plugin's code:
+/// `file.import` always does; `doc.open` does for a file an installed, enabled importer opens
+/// (one SolidCraft doesn't read itself, or any file with `format`). Reads manifests only.
+pub fn runs_plugin_importer(s: &Session, command: &str, params: &Value) -> bool {
+    if command.eq_ignore_ascii_case("file.import") {
+        return true;
+    }
+    if !command.eq_ignore_ascii_case("doc.open") {
+        return false;
+    }
+    let Some(path) = params.get("path").and_then(Value::as_str) else { return false };
+    let format = params.get("format").and_then(Value::as_str);
+    // An ambiguous claim is refused before any plugin runs; anything else that names an
+    // importer would run it.
+    (format.is_some() || !reads_natively(path)) && !matches!(crate::plugin::importer_for(s, path, format), Ok(None))
+}
+
 /// SolidCraft opens this file with its own readers (a design, drawing, CAD, mesh or point cloud file).
 fn reads_natively(path: &str) -> bool {
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
@@ -1684,6 +1703,31 @@ fn write_file(
     write_bytes(s, path, format, compression, preview, cache, sign, signing_key)
 }
 
+/// Report a requested model cache missing from the file just written. Inspecting the
+/// container directory avoids decoding the large model a second time (#18815).
+fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> Option<String> {
+    if !cache || format != "container" || s.doc.features.is_empty() {
+        return None;
+    }
+    let present = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).ok()?.has_model_cache();
+    if present {
+        return None;
+    }
+    let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
+        let feature = s.doc.feature(result.id).map_or("a timeline feature", |f| f.name.as_str());
+        format!("feature {feature} has an error")
+    } else if s.active_sketch.is_some() {
+        "a sketch is being edited".into()
+    } else if !s.pending_moves.is_empty() {
+        "temporary component placements are active (for example an exploded view)".into()
+    } else if s.model.state().bodies.is_empty() {
+        "there are no evaluated bodies to cache".into()
+    } else {
+        "the cache could not fit or be encoded within the design file budget".into()
+    };
+    Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+}
+
 fn write_bytes(
     s: &mut Session,
     path: &str,
@@ -1729,6 +1773,7 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
+    let cache_not_saved = missing_save_cache(s, format, cache, &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -1747,7 +1792,8 @@ fn write_bytes(
         bytes: bytes.len(),
         name: s.doc.name.clone(),
         kept_format: None,
-        warnings: None,
+        warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
+        cache_not_saved,
         not_kept: None,
         param_warnings: Vec::new(),
         signature,
@@ -1761,7 +1807,7 @@ fn write_bytes(
         }
         out.kept_format = Some(s.doc.format.clone());
         if !lost.is_empty() {
-            out.warnings = Some(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect());
+            out.warnings.get_or_insert_with(Vec::new).extend(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")));
             out.not_kept = Some(lost);
         }
     }
@@ -1988,15 +2034,9 @@ impl Session {
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.
     pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
-        let mut design = std::borrow::Cow::Borrowed(&*self.doc);
+        let mut design = crate::as_saved(&self.doc, &self.visibility, &self.dimension_values);
         if let Some(path) = path {
-            let links = super::design_link::rebased(&self.doc, self.path.as_deref(), path);
-            if links != self.doc.links {
-                design.to_mut().links = links;
-            }
-        }
-        if !self.visibility.is_empty() {
-            design.to_mut().visibility = self.visibility.clone();
+            super::design_link::filed(&mut design, self.path.as_deref(), path);
         }
         // Print faces not kept stay with this session: the file is saved without them (#11512).
         if !self.keep_print_faces && !design.print_faces.is_empty() {
@@ -3533,7 +3573,11 @@ mod tests {
         s.execute("file.save", &json!({})).unwrap();
         s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
         assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
-        s.execute("file.save", &json!({})).unwrap();
+        let saved = s.execute("file.save", &json!({})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("temporary placements omit the model cache");
+        assert!(notice.contains("temporary component placements"), "{notice}");
+        assert!(!notice.contains("design file budget"), "do not misdiagnose an eligible-model encoding failure: {notice}");
+        assert_eq!(saved["warnings"][0], notice);
         s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
         assert!(s.is_dirty());
         assert!(s.execute("file.save", &json!({})).is_err());
@@ -3665,6 +3709,53 @@ mod tests {
         assert!(editing.active_sketch.is_some());
         assert!(saved_preview(&editing).is_none());
         assert!(saved_geometry(&editing, &editing.doc).is_none());
+    }
+
+    /// A save with a failing feature succeeds but explains that its missing model cache will
+    /// make the next open rebuild the timeline. Plain JSON and explicit cache:false are
+    /// unchanged; an ordinary cache is still silent (#18815).
+    #[test]
+    fn saving_a_failed_feature_reports_missing_cache_without_losing_the_design() {
+        let path = std::env::temp_dir().join(format!("solidcraft-cache-error-{}.sc", std::process::id()));
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"name":"Block"})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,15],"operation":"cut","name":"Pocket"})).unwrap();
+        s.execute("solid.fillet", &json!({"edges":[[2.5,5,15]],"radius":1,"name":"Round"})).unwrap();
+        s.execute("timeline.suppress", &json!({"feature":"Pocket","suppressed":true})).unwrap();
+        assert!(s.model.results.iter().any(|r| r.error.is_some()), "the suppressed Pocket leaves Round invalid");
+        let saved = s.execute("file.save", &json!({"path":path})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("a failing feature must be reported");
+        assert!(notice.contains("Round") && notice.contains("error"), "{notice}");
+        assert_eq!(saved["warnings"][0], notice);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
+        assert_eq!(solidcraft_io::read_design(&bytes).unwrap().to_json(), s.doc.to_json(), "the authoritative design is saved");
+
+        let disabled = s.execute("file.save", &json!({"cache":false})).unwrap();
+        assert!(disabled.get("cache_not_saved").is_none());
+        assert!(disabled.get("warnings").is_none(), "deliberately omitting the cache is not a warning");
+        let json_path = path.with_extension("json");
+        let plain = s.execute("file.save_as", &json!({"path":json_path})).unwrap();
+        assert!(plain.get("cache_not_saved").is_none(), "JSON cannot contain a native model cache");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&json_path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+    }
+
+    /// A valid model with no cache in a container gets the budget/encoding warning; a real
+    /// cached container does not. No model decode is needed for this diagnosis.
+    #[test]
+    fn saved_model_cache_presence_is_detected_without_recomputing_bodies() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+        let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
+        let notice = missing_save_cache(&s, "container", true, &omitted).unwrap();
+        assert!(notice.contains("design file budget"), "{notice}");
+        assert!(missing_save_cache(&s, "container", false, &omitted).is_none());
+        assert!(missing_save_cache(&s, "json", true, &omitted).is_none());
+        let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        assert!(missing_save_cache(&s, "container", true, &included).is_none());
     }
 
     #[test]

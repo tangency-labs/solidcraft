@@ -673,10 +673,7 @@ fn fillet_edge_update_split_face(
     corners: &[FilletCorner],
 ) -> Result<()> {
     // fork 9b7cd48 passes this on (SER)
-    ignore_non_unported(crate::error::passed_on(
-        fb.update_edge_split_face(k, e, orig_face, new_face, target, corners),
-        k.fixes.fillet_statuses_pass_on,
-    )?)
+    fb.update_edge_split_face(k, e, orig_face, new_face, target, corners)
 }
 
 /// Actual solver records and extended surfaces used by a corner edge calculation.
@@ -1193,21 +1190,18 @@ impl FilletBrep {
                         };
                         let solvers = [solver_of(g1)?, solver_of(g2)?];
                         // fork 9b7cd48 passes this on (SER)
-                        ignore_non_unported(crate::error::passed_on(
-                            super::p1::examine_n_fix_fillet_geoms_with_solvers(
-                                k,
-                                self,
-                                g1,
-                                at_start_of_geom1,
-                                g2,
-                                at_start_of_geom2,
-                                start_fv,
-                                end_fv,
-                                tol,
-                                solvers,
-                            ),
-                            k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        super::p1::examine_n_fix_fillet_geoms_with_solvers(
+                            k,
+                            self,
+                            g1,
+                            at_start_of_geom1,
+                            g2,
+                            at_start_of_geom2,
+                            start_fv,
+                            end_fv,
+                            tol,
+                            solvers,
+                        )?;
 
                         // Upstream's `pSurface1` / `pSurface2` point at the fillet
                         // geometries' own surfaces, which the fix edits in place (a
@@ -1533,10 +1527,7 @@ impl FilletBrep {
                     let uv_domain = Extent2d::from_bounds(-x_len, -y_len, 2.0 * x_len, 2.0 * y_len);
                     let mut plane = Plane::new(origin, x_vector, y_vector, uv_scale, &uv_domain);
                     // fork 9b7cd48 passes this on (SER)
-                    ignore_non_unported(crate::error::passed_on(
-                        plane.make_nurb(),
-                        k.fixes.fillet_statuses_pass_on,
-                    )?)?;
+                    plane.make_nurb()?;
                     (
                         Some(Surface::from(plane)),
                         Some(ExecutiveErrorObject::TempEndPlane(e)),
@@ -2566,10 +2557,7 @@ impl FilletBrep {
                 )?;
                 let mut c = approx.curve;
                 // fork 9b7cd48 passes this on (SER)
-                ignore_non_unported(crate::error::passed_on(
-                    c.convert_to_2d(k),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                c.convert_to_2d(k)?;
                 c
             }
         } else {
@@ -2911,10 +2899,7 @@ impl FilletBrep {
                 }
 
                 // clip the interval to drop points; fork 9b7cd48 passes this on (SER)
-                ignore_non_unported(crate::error::passed_on(
-                    trim_ivl.set_min_max(param1, param2),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                trim_ivl.set_min_max(param1, param2)?;
 
                 // Trim 3D curve and both UVTrimCurves (each may snap sIvl by tol to
                 // existing knots)
@@ -3251,10 +3236,7 @@ impl FilletBrep {
                         ));
                     }
                     // fork 9b7cd48 passes this on (SER)
-                    ignore_non_unported(crate::error::passed_on(
-                        trim_ivl.set_min_max(param1, param2),
-                        k.fixes.fillet_statuses_pass_on,
-                    )?)?;
+                    trim_ivl.set_min_max(param1, param2)?;
                     let mut copy_curve = orig_rail_curve.copy(k)?;
                     copy_curve.trim(k, &mut trim_ivl, TrimMode::Notify)?;
                     set_edge_curve(self.brep_mut(), rail, Some(copy_curve))?;
