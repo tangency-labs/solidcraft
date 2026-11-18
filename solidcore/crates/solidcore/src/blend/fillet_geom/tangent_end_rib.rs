@@ -923,4 +923,84 @@ mod tests {
         let worst = farthest_off(&k, &rib, &fillet, &end);
         assert!(worst <= bound + 1e-12, "{worst:e} > {bound:e}");
     }
+
+    /// A quarter cylinder of radius `r` round the y axis lifted by `r`, its section along u
+    /// (the rail u = 0 the line `x = z = 0`, u = 1 the line `x = z = r`), and an end surface
+    /// `z = (x² / 2 + 2 y²) / (2 r)`, biquadratic, that touches it at the origin with a
+    /// curvature across the section half the cylinder's: a true tangent end of contact
+    /// order 2, the rib `y ≈ x / 2` from it. Returned with the rib's other end.
+    fn tangent_end_surfaces(r: f64) -> (Surface, Surface, Point3) {
+        let p = Point3::new;
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let (y0, y1) = (-r, r);
+        let mut pts = Vec::new();
+        for q in [p(0.0, 0.0, 0.0), p(r, 0.0, 0.0), p(r, 0.0, r)] {
+            pts.push(p(q.x, y0, q.z));
+            pts.push(p(q.x, y1, q.z));
+        }
+        let fillet = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, 1.0, w, w, 1.0, 1.0]),
+            uv_domain: None,
+        })
+        .unwrap();
+        // z = c x² + b y² over x in [−r/4, 5r/4], y in [−r, r]: a quadratic's Bernstein
+        // coefficients on [x0, x0 + h] are c x0², c x0 (x0 + h), c (x0 + h)²
+        let (c, b) = (1.0 / (4.0 * r), 1.0 / r);
+        let bern =
+            |k: f64, x0: f64, h: f64| [k * x0 * x0, k * x0 * (x0 + h), k * (x0 + h) * (x0 + h)];
+        let (x0, hx, hy) = (-0.25 * r, 1.5 * r, 2.0 * r);
+        let (zx, zy) = (bern(c, x0, hx), bern(b, y0, hy));
+        let mut pts = Vec::new();
+        let halves = [0.0, 0.5, 1.0];
+        for (fx, zi) in halves.iter().zip(zx) {
+            for (fy, zj) in halves.iter().zip(zy) {
+                pts.push(p(x0 + hx * fx, y0 + hy * fy, zi + zj));
+            }
+        }
+        let end = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 2,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[3, 3],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        // the other rail: x = z = r, on the end surface where b y² = r − c r²
+        let other = p(r, ((r - c * r * r) / b).sqrt(), r);
+        (Surface::from(fillet), Surface::from(end), other)
+    }
+
+    /// The third outcome of the tangent end's span (#17744, the maintainer's answer on
+    /// #18674): on a true tangent end of a large round (radius 40), both faces enclosed
+    /// (NURBS), the certificate's graded pieces stop at `t*` near the tangent end, where the
+    /// bound over `[0, t*]` is not within the tolerance. The span is accepted on `main`'s
+    /// midpoint check, every other span certified, and the rib makes no claim.
+    #[test]
+    fn a_rib_whose_tangent_end_is_not_bounded_is_built_without_a_bound() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let (fillet, end, other) = tangent_end_surfaces(40.0);
+        assert!(certificate::Face::of(&k, &fillet).unwrap().is_some());
+        assert!(certificate::Face::of(&k, &end).unwrap().is_some());
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol).unwrap();
+        assert_eq!(rib.bound, None);
+        let worst = farthest_off(&k, &rib, &fillet, &end);
+        assert!(worst <= tol, "{worst:e}");
+    }
 }
