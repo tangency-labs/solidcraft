@@ -1757,18 +1757,32 @@ fn write_bytes(
 ) -> Result<Value> {
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
-    let bytes = if sign {
-        if !s.signing_allowed {
-            return Err(bad(
-                "file.save",
-                "signing is only available from the app's Save, with the key chosen in Preferences; a script or agent cannot sign",
-            ));
+    let mut notes: Vec<String> = Vec::new();
+    // Signing never refuses a save: whatever stops it (no GnuPG, no key, a wrong passphrase, a
+    // cancelled prompt, a script that may not sign), the design is saved unsigned and the save
+    // says why. Only a failure of the save itself stops it.
+    let mut signed_bytes = None;
+    if sign {
+        let why = if !s.signing_allowed {
+            Some("signing is only available from the app's Save, with the key chosen in Preferences; a script or agent cannot sign".to_owned())
+        } else if format != "container" {
+            Some("only a container can carry a signature: save as .sc (format container), not json".to_owned())
+        } else {
+            match write_signed_container(s, &chain, path, compression, preview, cache, signing_key) {
+                Ok(Ok((bytes, signed))) => {
+                    signature = signed;
+                    signed_bytes = Some(bytes);
+                    None
+                }
+                Ok(Err(why)) => Some(why),
+                Err(e) => Some(e.to_string()),
+            }
+        };
+        if let Some(why) = why {
+            notes.push(format!("Saved without a signature, because it could not be signed: {why}"));
         }
-        if format != "container" {
-            return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
-        }
-        let (bytes, signed) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
-        signature = signed;
+    }
+    let bytes = if let Some(bytes) = signed_bytes {
         bytes
     } else if !chain.records.is_empty() {
         // A save without a key keeps the history it opened with, so the newest record is reported
@@ -1804,9 +1818,10 @@ fn write_bytes(
     s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
     s.provenance = None;
     s.mark_saved();
+    let bytes_len = bytes.len();
     let mut out = SaveResult {
         path: path.to_string(),
-        bytes: bytes.len(),
+        bytes: bytes_len,
         name: s.doc.name.clone(),
         kept_format: None,
         warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
@@ -1815,6 +1830,14 @@ fn write_bytes(
         param_warnings: Vec::new(),
         signature,
     };
+    if bytes_len > solidcraft_io::limits::max_design_bytes() {
+        notes.push(format!(
+            "Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit: {}",
+            bytes_len >> 20,
+            solidcraft_io::limits::max_design_bytes() >> 20,
+            solidcraft_io::limits::how_to_raise()
+        ));
+    }
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
     if s.doc.newer_file.is_some() {
@@ -1827,6 +1850,9 @@ fn write_bytes(
             out.warnings.get_or_insert_with(Vec::new).extend(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")));
             out.not_kept = Some(lost);
         }
+    }
+    if !notes.is_empty() {
+        out.warnings.get_or_insert_with(Vec::new).extend(notes);
     }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
@@ -1841,8 +1867,8 @@ fn write_signed_container(
     preview: bool,
     cache: bool,
     signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
-    let gpg = crate::gpg::Gpg::find().ok_or_else(|| bad("file.save", "signing needs GnuPG, which was not found on this computer"))?;
+) -> Result<std::result::Result<(Vec<u8>, Option<SignedSave>), String>> {
+    let Some(gpg) = crate::gpg::Gpg::find() else { return Ok(Err("GnuPG was not found on this computer".to_owned())) };
     let signer = crate::gpg::Signer::new(&gpg, signing_key.map(str::trim).filter(|key| !key.is_empty()));
     let save = solidcraft_io::ProvenanceSave {
         source: Some(solidcraft_io::SignatureSource::OpenPgp(&signer)),
@@ -1854,7 +1880,7 @@ fn write_signed_container(
     };
     let bytes = s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let info = signer.signing_info().ok_or_else(|| EngineError::Other(format!("{path}: GnuPG signed the design but named no key")))?;
-    Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id })))
+    Ok(Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id }))))
 }
 
 /// The browser cannot run GnuPG.
@@ -1867,8 +1893,8 @@ fn write_signed_container(
     _preview: bool,
     _cache: bool,
     _signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
-    Err(bad("file.save", "signing needs the desktop app and GnuPG; the browser cannot sign"))
+) -> Result<std::result::Result<(Vec<u8>, Option<SignedSave>), String>> {
+    Ok(Err("the browser cannot sign; signing needs the desktop app and GnuPG".to_owned()))
 }
 
 /// `file.verify`: check a saved design's signature.
@@ -3374,6 +3400,32 @@ mod tests {
             assert_eq!(s.doc, before, "a failed open preserves the current design");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #18686: Save As with signing on, on a computer without GnuPG, writes the design unsigned and
+    /// says why, instead of refusing to save.
+    #[test]
+    fn signing_failures_save_unsigned_with_a_warning() {
+        struct Present;
+        impl Drop for Present {
+            fn drop(&mut self) {
+                crate::gpg::tests_without_gpg::set(false);
+            }
+        }
+        crate::gpg::tests_without_gpg::set(true);
+        let _present = Present;
+        let dir = std::env::temp_dir().join(format!("solidcraft-18686-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Unsigned.sc");
+        let mut s = Session { signing_allowed: true, ..Session::default() };
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let out = s.execute("file.save_as", &json!({"path": path.to_string_lossy(), "sign": true})).unwrap();
+        assert!(path.exists(), "the design was written");
+        assert!(out["signature"].is_null(), "{out}");
+        let warning = out["warnings"][0].as_str().unwrap_or_default();
+        assert!(warning.contains("without a signature") && warning.contains("GnuPG was not found"), "{out}");
+        assert!(solidcraft_io::read_design_provenance_chain(&std::fs::read(&path).unwrap()).is_none_or(|chain| chain.records.is_empty()));
+        let _ = std::fs::remove_file(&path);
     }
 
     /// #3044: a save run on a scratch copy of the session (on a worker, so the window keeps

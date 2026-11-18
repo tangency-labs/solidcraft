@@ -60,6 +60,98 @@ fn dimension_tool_places_a_view_edge_length() {
     assert!((placed.offset_mm.abs() - 12.0).abs() < 0.75, "offset was {} mm", placed.offset_mm);
 }
 
+/// The plate's sheet with a hole 12 across through the plate's middle, seen face on in the front
+/// view: on paper (1:2, centred at 140, 180) the plate's bottom edge is y = 175, its top y = 185, its
+/// left side x = 115 and the hole a circle of radius 3 about (140, 180). The Dimension tool is on.
+fn holed_plate_dimensioning() -> (Harness, String) {
+    let (mut h, front) = plate_sheet();
+    crate::drawing_workspace::enter(&mut h.app, false).unwrap();
+    let cut = json!({"radius": 6, "height": 100, "base": [50, -10, 10], "axis": "Y", "operation": "cut", "targets": ["Plate"], "name": "Hole"});
+    h.app.run("solid.cylinder", cut).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    (h, front)
+}
+
+/// A click at paper millimetres (`x`, `y`) of the A3 sheet, a frame drawn after it.
+fn click_paper(h: &mut Harness, x: f32, y: f32) {
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    let at = [paper.left() + paper.width() * x / 420.0, paper.bottom() - paper.height() * y / 297.0];
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+}
+
+/// The dimension the tool added last, as inspect reads it.
+fn added_dimension(h: &mut Harness, before: &[u64]) -> Value {
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    assert_eq!(drawing.dimensions.len(), before.len() + 1, "one dimension was added");
+    let id = drawing.dimensions.iter().map(|d| d.id).find(|id| !before.contains(id)).unwrap();
+    h.app.run("drawing.dimension.inspect", json!({"dimension": solidcraft_engine::doc::ids::encode(id)})).unwrap()
+}
+
+/// Two edges picked one after the other dimension the distance between them, as in a sketch: the
+/// plate's bottom and top edges, parallel, read its 20 mm height, measured square to them
+/// (vertical), with the line through the third click.
+#[test]
+fn dimension_tool_dimensions_between_two_parallel_edges() {
+    let (mut h, _) = holed_plate_dimensioning();
+    let before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 125.0, 175.0);
+    click_paper(&mut h, 125.0, 185.0);
+    use crate::drawing_workspace::dimension::{Shape, picked_shapes};
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_), Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before.len(), "two picks place nothing yet");
+    click_paper(&mut h, 100.0, 180.0);
+    let read = added_dimension(&mut h, &before);
+    assert!((number(&read["value"]) - 20.0).abs() < 1e-6, "{read}");
+    assert_eq!(read["record"]["kind"]["linear"]["direction"], "vertical", "{read}");
+    assert!(picked_shapes(&h.app).is_empty(), "the tool starts again, as the sketch's does");
+}
+
+/// Two edges that aren't parallel dimension the angle between them: the plate's bottom edge and its
+/// left side, 90°.
+#[test]
+fn dimension_tool_dimensions_the_angle_between_two_edges() {
+    let (mut h, _) = holed_plate_dimensioning();
+    let before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 125.0, 175.0);
+    click_paper(&mut h, 115.0, 179.0);
+    click_paper(&mut h, 122.0, 181.0);
+    let read = added_dimension(&mut h, &before);
+    assert!(read["record"]["kind"]["angle"].is_object(), "{read}");
+    assert!((number(&read["value"]) - 90.0).abs() < 1e-6, "{read}");
+}
+
+/// One round edge dimensions its size: the hole's rim, a whole circle, reads Ø12, its text where
+/// the click placed it.
+#[test]
+fn dimension_tool_dimensions_a_holes_diameter() {
+    let (mut h, _) = holed_plate_dimensioning();
+    let before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 143.0, 180.0);
+    use crate::drawing_workspace::dimension::{Shape, picked_shapes};
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Round(_)]), "{:?}", picked_shapes(&h.app));
+    click_paper(&mut h, 150.0, 192.0);
+    let read = added_dimension(&mut h, &before);
+    assert!(read["record"]["kind"]["radial"].is_object(), "{read}");
+    assert_eq!(read["text"], "Ø12.00", "{read}");
+}
+
+/// Esc drops the tool's picks first and keeps the tool, as in a sketch; the next Esc leaves it.
+#[test]
+fn dimension_tool_escape_drops_picks_then_the_tool() {
+    let (mut h, _) = holed_plate_dimensioning();
+    click_paper(&mut h, 125.0, 175.0);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(crate::drawing_workspace::dimension::picked_shapes(&h.app).is_empty());
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool stays on");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(!crate::drawing_workspace::placing_dimension(&h.app));
+}
+
 /// Frames until no view or dimension is waiting to be drawn.
 fn settle(h: &mut Harness) {
     for _ in 0..5_000 {
@@ -121,6 +213,26 @@ fn true_size_is_one_millimetre_at_any_ui_scale() {
     h.frames(2);
     let p = page(&mut h);
     assert!((number(&p["points_per_mm"]) - 1.25 * 96.0 / 25.4).abs() < 1e-9 && (number(&p["zoom"]) - 1.0).abs() < 1e-9, "{p}");
+}
+
+/// #19070: Fit Sheet frames the sheet in the part of the window the ribbon, the Browser and the
+/// History leave free, so no edge of the paper is under them, in a small window too.
+#[test]
+fn fit_sheet_keeps_the_paper_clear_of_the_ribbon_browser_and_history() {
+    let (mut h, _) = plate_sheet();
+    h.call("ui.resize", json!({"width": 1280, "height": 720}));
+    h.frames(6);
+    h.app.run("view.home", json!({})).unwrap();
+    h.frames(4);
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    let canvas = h.app.viewport.rect.unwrap();
+    let mut covers: Vec<(&str, Rect)> = h.app.shell.cards.iter().map(|r| ("a ribbon card", *r)).collect();
+    covers.extend(h.app.shell.browser.map(|r| ("the Browser", r)));
+    covers.extend(h.app.shell.history.map(|r| ("the History bar", r)));
+    assert!(!covers.is_empty(), "the shell reports what covers the canvas");
+    for (what, rect) in covers.into_iter().filter(|(_, r)| r.intersects(canvas)) {
+        assert!(!paper.intersects(rect), "the paper {paper:?} is under {what} {rect:?}");
+    }
 }
 
 /// Fit Sheet shows the whole sheet, and comes back after any zoom; typed and wheeled zooms stay
@@ -216,7 +328,9 @@ fn pan_moves_the_sheet_and_leaves_the_design_camera() {
     let (cam, doc, undo) = (h.app.cam, h.app.session.doc.to_json(), h.app.session.undo.len());
     h.app.run("view.tool", json!({"tool": "pan"})).unwrap();
     let before = crate::scenario::rect_of("sheet:paper").unwrap();
-    let from = h.app.viewport.rect.unwrap().center();
+    // From an empty corner of the paper, not the canvas's middle: where the fitted sheet puts its
+    // views depends on the free area around it.
+    let from = before.min + vec2(15.0, 15.0);
     h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + 120.0, "y1": from.y + 40.0, "steps": 8}));
     h.frames(2);
     let after = crate::scenario::rect_of("sheet:paper").unwrap();

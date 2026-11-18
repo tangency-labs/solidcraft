@@ -697,10 +697,24 @@ fn fillet_fitted(
     fit: crate::FilletFit,
     turn: kernel::FilletTurn,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
+        // A refusal the kernel could not size names no radius to try, and the search for the
+        // largest radius that fits cannot be guided by it: it then halves the radius from the
+        // middle down and blends every edge again for each of the sizes it tries. On the design
+        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
+        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
+        // found nothing: the round fails at any radius there. The refusal is reported as the
+        // kernel stated it.
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
+            Err(kernel::KernelError::TooLarge(why))
+        }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
             let hint = kernel::named_fit(&why);
+            #[cfg(test)]
+            cost_tests::count(|c| c.fit_searches += 1);
             with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
         }),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
@@ -7672,6 +7686,54 @@ fn bridge_tools(plane: &Plane, r: f64, rc: f64, dc: f64, bottom: f64, layer: f64
     Ok(tools)
 }
 
+/// The turn a whole turn's tool is turned by about the revolve axis, so that its seam is not in
+/// the profile plane: a body revolved in that plane has its own seam there, and SMLib's boolean
+/// leaves an edge near the seam when it splits the two (#18039). The solid is the same (a whole
+/// turn is the same whatever angle it starts at).
+const SEAM_TURN: f64 = 0.5;
+
+/// Whether `body` holds a seam in the plane `plane`: an edge of its B-rep that is a seam of a
+/// curved surface and lies in the plane. Two solids of revolution about the same axis, revolved
+/// in the same plane, hold their seams in that plane, and SMLib's boolean splits both where the
+/// cut crosses them and leaves an edge near the seam, which its check refuses (#18039).
+///
+/// The seam is read from the exact record, never from a tessellation: the kernel's own seam
+/// flags (which the record's faces and edges decide) and the record's own vertices. The seam of
+/// a surface of revolution is the profile curve in the revolve's plane, so its ends in the plane
+/// mean the seam lies in it.
+fn has_seam_in_plane(body: &Body, plane: &Plane) -> bool {
+    // The kernel's seam flags are read from the record; the mesh it takes with them is unused.
+    let seams = kernel::seam_flags(body, &Mesh::default());
+    let record = body.record();
+    let tolerance = body.size().max(1e-9) * 1e-6;
+    seams.iter().enumerate().any(|(index, seam)| {
+        *seam
+            && record.edges.get(index).is_some_and(|edge| {
+                edge.vertices
+                    .iter()
+                    .all(|vertex| record.vertices.get(*vertex as usize).is_some_and(|v| plane.height(Vec3::from(v.point)).abs() <= tolerance))
+            })
+    })
+}
+
+/// The tool of a whole turn, with the seam of its surface of revolution turned away from the
+/// profile plane: the same solid, with the seam somewhere else, so the two seams are not in one
+/// plane (#18039).
+fn turned_seam(axis: Vec3, origin: Vec3, body: &Body) -> Result<Body> {
+    let m = crate::rigid(Vec3::ZERO, origin, axis, SEAM_TURN);
+    kernel::transform_matrix(body, m).map_err(DocError::Kernel)
+}
+
+/// Whether any of the bodies the feature cuts holds a seam in the plane `plane`.
+fn bodies_hold_a_seam_in_plane(st: &ModelState, f: &Feature, plane: &Plane) -> bool {
+    let FeatureKind::Revolve { targets, .. } = &f.kind else { return false };
+    st.bodies
+        .iter()
+        .filter(|b| b.component == f.component)
+        .filter(|b| targets.is_empty() || targets.iter().any(|t| t == &b.name))
+        .any(|b| has_seam_in_plane(&b.body, plane))
+}
+
 /// The angular interval used by both the solid and its interactive extent handles.
 #[derive(Clone, Copy, Debug)]
 pub struct RevolveExtent {
@@ -8393,24 +8455,51 @@ fn feature_tools_with_constructor(
                         continue;
                     }
                     let bodies = revolve(&ss.plane, std::slice::from_ref(region), o, d, region_extent.sweep)?;
-                    let m = crate::rigid(Vec3::ZERO, origin_w, rotation_axis, region_extent.start);
+                    let turn = region_extent.start;
+                    let m = crate::rigid(Vec3::ZERO, origin_w, rotation_axis, turn);
+                    // A whole turn's tool has the seam of its surface of revolution in the profile
+                    // plane. A body that holds a seam in that plane (a body revolved in it) makes
+                    // SMLib's boolean split both and leave an edge near the seam, which its check
+                    // refuses (#18039): the tool's seam is turned away from the plane then, the
+                    // solid being the same.
+                    let turn_it = operation != Operation::NewBody
+                        && (region_extent.sweep.abs() - std::f64::consts::TAU).abs() <= 1e-9
+                        && bodies_hold_a_seam_in_plane(st, f, &ss.plane);
                     for body in bodies {
-                        out.push(if region_extent.start.abs() < 1e-12 {
-                            tool(region, body, None)
+                        let (body, built) = if turn.abs() < 1e-12 {
+                            (body, None)
                         } else {
-                            tool(region, kernel::transform_matrix(&body, m)?, Some(&body))
-                        });
+                            let moved = kernel::transform_matrix(&body, m)?;
+                            (moved, Some(&body))
+                        };
+                        let body = if turn_it { turned_seam(rotation_axis, origin_w, &body)? } else { body };
+                        out.push(tool(region, body, built));
                     }
                 }
                 return Ok(out);
             }
             let bodies = revolve(&ss.plane, &regions, o, d, ang)?;
-            if start.abs() < 1e-12 {
-                return Ok(regions.iter().zip(bodies).map(|(r, body)| tool(r, body, None)).collect());
-            }
-            // Turned back to start before the profile.
-            let m = crate::rigid(Vec3::ZERO, origin_w, axis_w, -start);
-            regions.iter().zip(bodies).map(|(r, body)| Ok(tool(r, kernel::transform_matrix(&body, m)?, Some(&body)))).collect()
+            let turn = -start;
+            let turn_it =
+                operation != Operation::NewBody && (ang.abs() - std::f64::consts::TAU).abs() <= 1e-9 && bodies_hold_a_seam_in_plane(st, f, &ss.plane);
+            let tools: Vec<Traced> = if turn.abs() < 1e-12 {
+                regions.iter().zip(bodies).map(|(r, body)| tool(r, body, None)).collect()
+            } else {
+                // Turned back to start before the profile.
+                let m = crate::rigid(Vec3::ZERO, origin_w, axis_w, turn);
+                regions
+                    .iter()
+                    .zip(bodies)
+                    .map(|(r, body)| Ok(tool(r, kernel::transform_matrix(&body, m)?, Some(&body))))
+                    .collect::<Result<Vec<_>>>()?
+            };
+            tools
+                .into_iter()
+                .map(|t| {
+                    let body = if turn_it { turned_seam(axis_w, origin_w, &t.body)? } else { t.body.clone() };
+                    Ok(Traced { body, lineage: t.lineage, recipe: t.recipe })
+                })
+                .collect()
         }
         FeatureKind::Loft { sections, rails, .. } if sections.iter().any(|s| s.point.is_some()) => {
             // A profile lofted to a sketch point (an apex).
@@ -9889,6 +9978,21 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                     },
                     _ => *p = hit.pick_point(input, *p),
                 }
+            }
+            // A deleted face is picked by its point as well: when its name is gone (a design saved by
+            // an older version names merged faces differently), the face is the one face of the same
+            // body that holds the point. With none, or with several (the point on an edge they share),
+            // nothing is deleted: the feature asks for the face to be picked again (#14206).
+            None if matches!(f.kind, FeatureKind::DeleteFace { .. }) => {
+                let mut holders = state
+                    .bodies
+                    .iter()
+                    .filter(|b| !b.body.is_mesh() && f.kind.face_body().is_none_or(|name| b.name == name))
+                    .flat_map(|b| crate::appearance::faces_within(b, *p, b.body.size() * 1e-3 + 1e-6));
+                if holders.next().is_none() || holders.next().is_some() {
+                    return Err(DocError::reselect(n.as_str()));
+                }
+                notes.push(format!("face `{n}` is no longer named so: the one face at [{}, {}, {}] is used", p.x, p.y, p.z));
             }
             None => return Err(DocError::reselect(n.as_str())),
         }

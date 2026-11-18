@@ -67,6 +67,27 @@ impl Nurbs {
         Ok(())
     }
 
+    /// A weighted spline with no exact `Seg2` form, as a rational curve over [0, 1].
+    /// A common weight scale preserves the shape and keeps the homogeneous coordinates finite.
+    pub fn rational_record(&self, points: &[Vec2], degree: u8) -> Option<solidcore_record::brep::Curve> {
+        if degree == 2 || !self.weights.windows(2).any(|pair| pair[0] != pair[1]) {
+            return None;
+        }
+        self.check(points.len(), degree).ok()?;
+        let (lo, hi) = self.domain(points.len(), usize::from(degree))?;
+        let knots = self.knots.iter().map(|t| (t - lo) / (hi - lo)).collect();
+        let scale = self.weights.iter().copied().fold(0.0, f64::max);
+        let homogeneous = points
+            .iter()
+            .zip(&self.weights)
+            .map(|(p, w)| {
+                let w = w / scale;
+                [p.x * w, p.y * w, 0.0, w]
+            })
+            .collect();
+        Some(solidcore_record::brep::Curve::RationalSpline { knots, homogeneous })
+    }
+
     fn weight(&self, i: usize) -> f64 {
         self.weights.get(i).copied().unwrap_or(1.0)
     }

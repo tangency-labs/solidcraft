@@ -512,7 +512,20 @@ pub fn ends_on_both(
             }
             let on = surface.evaluate_point(k, d.result_uv)?;
             *normal = surface.evaluate_normal(k, d.result_uv, Side::Left, Side::Left)?;
-            if on.distance(p) > tol {
+            // Not the fork's: a plane goes on as
+            // itself past the face it was made for, so a point is on it by its distance to the
+            // plane, not to the plane's domain, which ends at the face's edge (an end past a
+            // shallow concave crease lies on the side face's plane continued)
+            let off = if matches!(
+                surface.kind(),
+                crate::surface::surface::p2::SurfaceKind::Plane(_)
+            ) && normal.length() > crate::math::EFF_ZERO
+            {
+                ((p - on).dot(*normal) / normal.length()).abs()
+            } else {
+                on.distance(p)
+            };
+            if off > tol {
                 return Ok(false);
             }
         }
@@ -566,6 +579,38 @@ mod tests {
         assert!(first.z.abs() <= 1.0e-11, "{first:?}");
         assert!((first.y + 0.01 * first.x).abs() <= 1.0e-11, "{first:?}");
         assert!(first.distance(start) <= 3.0e-6, "{}", first.distance(start));
+    }
+
+    /// A plane goes on past the face it was made for: an end on the plane `z = 0` but past its
+    /// domain (made for a face 2 wide) is on it, by its distance to the plane. Upstream
+    /// dropped the end onto the domain, whose edge
+    /// lies 2 from it, and answered `false`, so `sm_SurfacePlaneCurve` was never made for a
+    /// corner's side curve running past its side face's edge.
+    #[test]
+    fn an_end_past_a_planes_domain_is_on_the_plane() {
+        let k = Kernel::new(&KernelOptions::default());
+        let small = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let large = Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0);
+        let floor = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &small,
+        ));
+        // the wall: x = 0
+        let wall = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            &large,
+        ));
+        let ends = [Point3::new(0.0, 0.5, 0.0), Point3::new(0.0, 3.0, 0.0)];
+        assert!(ends_on_both(&k, [&floor, &wall], ends, 4.0e-5).unwrap());
+        // an end off the plane is still off it
+        let off = [ends[0], Point3::new(0.0, 3.0, 1.0e-3)];
+        assert!(!ends_on_both(&k, [&floor, &wall], off, 4.0e-5).unwrap());
     }
 
     /// An end off the plane: a typed blend failure that keeps the bare `Upstream`'s status
