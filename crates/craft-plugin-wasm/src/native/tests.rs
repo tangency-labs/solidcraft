@@ -189,7 +189,8 @@ fn a_component_for_another_api_version_is_refused_in_plain_words() {
         matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0")) && reason.contains("update")),
         "{failure}"
     );
-    assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+    // Refused while the component is checked, before any transaction starts: nothing to roll back.
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 0, 0, 0));
     // A component naming two versions the host runs is refused too: it was built against neither.
     let source = format!("{prefix}\n(import \"{package}/storage@0.1.0\" (instance))\n)");
     let failure = run(&mut App::default(), &manifest(), &wat::parse_str(source).unwrap(), "make", &json!({})).unwrap_err();
