@@ -4853,3 +4853,81 @@ fn a_round_on_a_sphere_s_rim_turned_about_the_face_normal_builds() {
         }
     }
 }
+
+/// #17594's slab: the top 1.206 of a hexagonal boss whose six upright corners are rounds of
+/// radius 1 (axes on the circle of radius `HEX_RC` about (0, -69.5), top z = 30.706, bottom
+/// z = 29.5), cut from the imported part as SolidCraft traced it (`b1`).
+fn hex_slab() -> Body {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/issue_17594_hex_slab.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// The radius of the circle the slab's corner axes stand on: 2 x 5.928203230275 / sqrt(3).
+const HEX_RC: f64 = 6.845_299_461_620_161;
+
+/// #17594: the slab's top rim (six straight edges and the six corner rounds' arcs, one
+/// tangent chain) rounded at the corners' own radius, r 1. Along each arc the ball touches the
+/// corner's cylinder all round its equator, so its centre stays on the corner's axis: the
+/// piece is the ball's triangle, a sphere of radius 1 about the axis 1 below the top. Each
+/// straight round removes `(1 - pi/4) HEX_RC` (its section over the side between the axes),
+/// each corner `pi/6 - pi/9 = pi/18` (the 60 degree sector of the unit cylinder 1 high less
+/// that of the upper half ball). On main the arcs were classified as tori of major radius 0
+/// (a circle about the axis through the centres, of radius 0): at one corner the section to
+/// the next straight round came out a traced curve up to 0.61 off its meridian and 0.21 off
+/// the round's cylinder, and the round gained volume where the faces missed each other.
+#[test]
+fn a_hex_rim_rounded_at_its_corner_rounds_radius_is_six_ball_triangles() {
+    rig_fixes();
+    let b = hex_slab();
+    let before = b.volume(1e-11).unwrap();
+    let top = 30.706;
+    let corners: Vec<[f64; 2]> = (0..6)
+        .map(|i| {
+            let a = (90.0 - 60.0 * f64::from(i)).to_radians();
+            [HEX_RC * a.cos(), -69.5 + HEX_RC * a.sin()]
+        })
+        .collect();
+    let mut rim = Vec::new();
+    for i in 0..6 {
+        let c = corners[i];
+        let n = corners[(i + 1) % 6];
+        // the arc's middle: one out from the axis, away from the centre
+        let (dx, dy) = (c[0], c[1] + 69.5);
+        rim.push(nearest_edge(
+            &b,
+            [c[0] + dx / HEX_RC, c[1] + dy / HEX_RC, top],
+        ));
+        // the side's middle: one out from the midpoint of the axes
+        let m = [0.5 * (c[0] + n[0]), 0.5 * (c[1] + n[1])];
+        let (mx, my) = (m[0], m[1] + 69.5);
+        let len = mx.hypot(my);
+        rim.push(nearest_edge(&b, [m[0] + mx / len, m[1] + my / len, top]));
+    }
+    let mut distinct = rim.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), 12, "the rim's twelve edges");
+    blend(&b, Blend::Round, &rim, &[1.0], &[], Corners::Filled).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // the slab's 14 faces and the twelve rounds; the sides' 12 upright edges, the bottom's
+    // 12, the rounds' 12 contacts with the walls, 6 on the top and their 12 sections; the
+    // bottom's 12 vertices, the contacts' 12 ends and the six poles on the top
+    assert_eq!(b.counts().unwrap(), [26, 54, 30]);
+    let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
+    let after = b.volume(1e-11).unwrap();
+    assert!(
+        (before - after - removed).abs() <= 1e-9 * before,
+        "removed {}, the closed form {removed}",
+        before - after
+    );
+}
