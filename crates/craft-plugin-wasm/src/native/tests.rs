@@ -810,7 +810,8 @@ fn host_calls(engine: Engine, loaded: Component) -> usize {
     let mut app = App::default();
     let commands = app.command_catalog().into_iter().map(|s| (s.name.clone(), s)).collect();
     app.begin_transaction().unwrap();
-    let (state, outcome) = execute(app, runtime, &runtime.entries[0], "{}".into(), engine, loaded, (commands, BTreeSet::new()), BTreeMap::new());
+    let (state, outcome) =
+        execute(app, runtime, &runtime.entries[0], "{}".into(), (engine, loaded, STACK), (commands, BTreeSet::new()), BTreeMap::new());
     outcome.unwrap();
     state.host.value
 }
