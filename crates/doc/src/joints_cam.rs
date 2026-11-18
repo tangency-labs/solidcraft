@@ -412,7 +412,13 @@ fn profile_not_on_cam_error(doc: &Document, cam: &super::Joint, profile_occ: Opt
 /// The profile's points in its component's coordinates, the occurrence placing them, and the
 /// profile's size. `fa`, `fb`: the cam joint's frames (picked edges continue along the edges in
 /// the plane square to the cam's axis).
-pub(crate) fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::Joint, (fa, fb): (&Mat, &Mat)) -> Result<(Vec<Vec3>, u64, f64)> {
+pub(crate) fn profile_points(
+    doc: &Document,
+    st: &ModelState,
+    p: &CamProfile,
+    cam: &super::Joint,
+    (fa, fb): (&Mat, &Mat),
+) -> Result<(Vec<Vec3>, u64, f64)> {
     let bad = |m: &str| DocError::Invalid(format!("cam: {m}"));
     match p {
         CamProfile::Sketch { sketch, curves } => {
@@ -450,8 +456,7 @@ pub(crate) fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, ca
             }
             // Each body sampled to its own size (a large part beside the cam leaves the cam fine).
             // Each body's edges with the faces beside them.
-            let meshes: Vec<std::sync::Arc<solidcraft_geom::Mesh>> =
-                bodies.iter().map(|b| b.cam_mesh()).collect::<crate::Result<_>>()?;
+            let meshes: Vec<std::sync::Arc<solidcraft_geom::Mesh>> = bodies.iter().map(|b| b.cam_mesh()).collect::<crate::Result<_>>()?;
             let edges: Vec<(usize, &Vec<Vec3>, &[u32])> = meshes
                 .iter()
                 .enumerate()

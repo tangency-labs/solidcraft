@@ -64,6 +64,10 @@ pub struct ModelBody {
     faces: Arc<std::sync::Mutex<MeasuredFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
+    /// The mesh a cam's profile is read from: the body's edges at the cam's own tolerance. Made
+    /// once and kept, so a solve that works the cam's table out again does not mesh the body
+    /// again (#3389).
+    cam_mesh: Arc<OnceLock<Arc<Mesh>>>,
     /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
     /// [`placed_mesh::OppositeHand`]. Display only: the model reads the copy's own triangles.
     mirrored_mesh: Option<Arc<placed_mesh::PlacedMesh>>,
@@ -221,6 +225,7 @@ impl ModelBody {
             joint_faces: Arc::new(OnceLock::new()),
             faces: Default::default(),
             mesh_placement: None,
+            cam_mesh: Arc::new(OnceLock::new()),
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
@@ -658,9 +663,14 @@ impl ModelBody {
     /// and kept, so a solve that works the cam's table out again does not mesh the body again
     /// (#3389).
     pub(crate) fn cam_mesh(&self) -> Result<Arc<Mesh>> {
+        if let Some(mesh) = self.cam_mesh.get() {
+            return Ok(mesh.clone());
+        }
         #[cfg(test)]
         cost_tests::count(|c| c.cam_meshes += 1);
-        Ok(Arc::new(self.body.mesh(&solidcraft_kernel::MeshTolerance::chord(crate::joints::cam::profile_tolerance(self.body.size())))?))
+        let mesh = Arc::new(self.body.mesh(&solidcraft_kernel::MeshTolerance::chord(crate::joints::cam::profile_tolerance(self.body.size())))?);
+        // Another thread may have made it first: the mesh is the same either way.
+        Ok(self.cam_mesh.get_or_init(|| mesh).clone())
     }
 
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
