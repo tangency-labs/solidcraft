@@ -292,8 +292,8 @@ struct Builder<'m, 'a, 't> {
 }
 
 impl<'a> Builder<'_, 'a, '_> {
-    /// Vertices a curve-less edge of the region's loops joins at one point (within the
-    /// tolerance) are one vertex: the edge collapses to it, and the loop runs on from it, as it
+    /// Vertices a curve-less edge of the region's loops (one with no curve, or on a degenerate
+    /// one) joins at one point (within the tolerance) are one vertex: the edge collapses to it, and the loop runs on from it, as it
     /// does when the edge's two ends are one vertex already. Vertices apart stay apart, and such
     /// an edge between them is refused when it is read.
     fn join_collapsed(&mut self, shells: &[cadmpeg_ir::ids::ShellId]) {
@@ -317,7 +317,15 @@ impl<'a> Builder<'_, 'a, '_> {
             else {
                 continue;
             };
-            if edge.carrier.curve().is_some() {
+            // An edge collapses with no curve, or on a degenerate one ([`Builder::edge`]).
+            let collapses = match edge.carrier.curve() {
+                None => true,
+                Some(c) => model
+                    .curves
+                    .get(c.as_str())
+                    .is_some_and(|c| geometry::degenerate(&c.geometry)),
+            };
+            if !collapses {
                 continue;
             }
             let (a, b) = (

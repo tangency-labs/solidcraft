@@ -438,6 +438,20 @@ pub(crate) fn curve(g: &CurveGeometry, fit: Fit) -> R<Option<Carrier>> {
     Ok(solved_curve(solved, 0, fit)?.map(|(carrier, _)| carrier))
 }
 
+/// Whether [`curve`] reads `g` as degenerate (`None`): its solved form is a point, placed or not.
+/// Such an edge collapses to its vertex as one with no curve does.
+pub(crate) fn degenerate(g: &CurveGeometry) -> bool {
+    let mut g = g.solved();
+    for _ in 0..=MAX_PLACEMENTS {
+        match g {
+            Some(SolvedCurveGeometry::Degenerate(_)) => return true,
+            Some(SolvedCurveGeometry::Transformed(placed)) => g = Some(placed.basis()),
+            _ => return false,
+        }
+    }
+    false
+}
+
 /// An edge's carrier as the record takes it.
 #[derive(Clone, Debug)]
 pub(crate) enum Carrier {

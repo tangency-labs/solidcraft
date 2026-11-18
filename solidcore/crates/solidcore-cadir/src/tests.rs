@@ -718,14 +718,23 @@ fn an_edge_across_a_periodic_splines_seam_is_read_with_its_points() {
     assert!((area - 100.0).abs() < 1e-6, "{area}");
 }
 
-/// A curve-less edge between two vertices at one point collapses, and the loops through it run on
-/// from the one vertex the two are: the cube with one corner split into two vertices at its
-/// point, joined by such an edge in both loops that pass there, is still the cube.
-#[test]
-fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() {
+/// The cube with one corner split into two vertices at its point, joined by an edge on `curve`
+/// (none, or one the model holds) in both loops that pass there.
+fn cube_with_a_corner_split(curve: Option<cadmpeg_ir::geometry::SolvedCurveGeometry>) -> CadIr {
+    use cadmpeg_ir::geometry::{Curve, CurveGeometry};
     use cadmpeg_ir::ids::{CoedgeId, EdgeId, VertexId};
     use cadmpeg_ir::topology::{EdgeCarrier, LoopRing, Vertex};
     let mut ir = cube();
+    let curve = curve.map(|g| {
+        let id: cadmpeg_ir::ids::CurveId = tid("curve", 0);
+        ir.model.curves.push(Curve {
+            id: id.clone(),
+            geometry: CurveGeometry::Solved(g),
+            parameter_range: None,
+            source_object: None,
+        });
+        id
+    });
     let first = ir.model.edges.first().unwrap().clone();
     let a = first.start.clone();
     let point = ir
@@ -746,7 +755,7 @@ fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() 
     let collapsed: EdgeId = tid("edge", 0);
     ir.model.edges.push(cadmpeg_ir::topology::Edge {
         id: collapsed.clone(),
-        carrier: EdgeCarrier::new(None, None).unwrap(),
+        carrier: EdgeCarrier::new(curve, None).unwrap(),
         start: a,
         end: split,
         tolerance: None,
@@ -791,16 +800,42 @@ fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() 
         ring.insert(at, ids[k].clone());
         lp.boundary = LoopBoundary::Ring(LoopRing::new(ring, Vec::new()).unwrap());
     }
-    let s = one(&ir);
-    assert_eq!(
-        (
-            s.brep.faces.len(),
-            s.brep.edges.len(),
-            s.brep.vertices.len()
-        ),
-        (6, 12, 8)
+    ir
+}
+
+/// A curve-less edge between two vertices at one point collapses, and the loops through it run on
+/// from the one vertex the two are: the cube with one corner split into two vertices at its
+/// point, joined by such an edge in both loops that pass there, is still the cube. So it is when
+/// the edge is on a degenerate curve (a point), placed or not, as a seam or pole collapses one.
+#[test]
+fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() {
+    use cadmpeg_ir::geometry::analytic::DegenerateCurve;
+    use cadmpeg_ir::geometry::{PlacedCurve, SolvedCurveGeometry};
+    let point = SolvedCurveGeometry::Degenerate(
+        DegenerateCurve::try_new(Point3::new(0.0, 0.0, 0.0)).unwrap(),
     );
-    assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+    let moved = cadmpeg_ir::transform::Transform::affine([
+        [1.0, 0.0, 0.0, 3.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ])
+    .unwrap();
+    let placed = SolvedCurveGeometry::Transformed(
+        PlacedCurve::try_new(Box::new(point.clone()), moved).unwrap(),
+    );
+    for curve in [None, Some(point), Some(placed)] {
+        let s = one(&cube_with_a_corner_split(curve.clone()));
+        assert_eq!(
+            (
+                s.brep.faces.len(),
+                s.brep.edges.len(),
+                s.brep.vertices.len()
+            ),
+            (6, 12, 8),
+            "{curve:?}"
+        );
+        assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+    }
 }
 
 /// A coedge with a 3D curve of its own in place of its edge's refuses its region with the reason,
