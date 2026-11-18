@@ -1404,15 +1404,15 @@ fn main() -> eframe::Result {
     // The crash guard (#18683): an API whose driver crashed the process while the last launch
     // started it is skipped from now on (until the next version), and each API this launch
     // probes or starts is named on disk first.
-    let (backend_guard, crashed) = match (&settings, &backend_path) {
+    let (backend_guard, skipped) = match (&settings, &backend_path) {
         (Some(dir), Some(path)) => {
-            let (guard, crashed) = startup::BackendGuard::begin(dir, path, solidcraft_ui_egui::help::VERSION);
-            (Some(guard), crashed)
+            let (guard, skipped) = startup::BackendGuard::begin(dir, path, solidcraft_ui_egui::help::VERSION);
+            (Some(guard), skipped)
         }
-        _ => (None, eframe::wgpu::Backends::empty()),
+        _ => (None, startup::SkippedBackends::default()),
     };
-    if !crashed.is_empty() {
-        solidcraft_engine::note!("SolidCraft graphics: skipping {crashed:?}, which crashed while starting");
+    if !skipped.crashed.is_empty() || !skipped.failed.is_empty() {
+        solidcraft_engine::note!("SolidCraft graphics: skipping {:?} (crashed) and {:?} (no hardware adapter)", skipped.crashed, skipped.failed);
     }
     let backend_attempt = backend_path.zip(backend_launch.attempt);
     let backend_note = backend_launch.note;
@@ -1463,9 +1463,9 @@ fn main() -> eframe::Result {
     }
     let saved_samples = if safe_mode { None } else { msaa() };
     let wgpu_options = if safe {
-        safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), crashed)
+        safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), skipped.crashed)
     } else {
-        wgpu_options(cpu_renderer, backend_launch.backend.as_deref(), crashed)
+        wgpu_options(cpu_renderer, backend_launch.backend.as_deref(), skipped)
     };
     // Named on disk before the window loads the drivers; cleared once the
     // first frame is presented (`App::backend_guard`) or startup returns.
@@ -1839,7 +1839,7 @@ fn main() -> eframe::Result {
     }
     match result {
         Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => {
-            no_window(e, cpu_renderer, safe, started, crashed, settings.as_deref(), backend_attempt.as_ref())
+            no_window(e, cpu_renderer, safe, started, skipped.crashed | skipped.failed, settings.as_deref(), backend_attempt.as_ref())
         }
         r => r,
     }
@@ -1933,9 +1933,10 @@ fn startup_step(step: &'static str, detail: &str) {
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
 /// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
-/// in use is started); `preference` is `graphics.json`'s `backend`. `crashed`: the APIs that
-/// crashed while starting, skipped.
-fn wgpu_options(cpu: bool, preference: Option<&str>, crashed: eframe::wgpu::Backends) -> eframe::egui_wgpu::WgpuConfiguration {
+/// in use is started); `preference` is `graphics.json`'s `backend`. `skipped`: the APIs that
+/// crashed while starting or had no hardware adapter. In the automatic Windows order an API
+/// starts only on a hardware adapter (`startup::require_hardware`).
+fn wgpu_options(cpu: bool, preference: Option<&str>, skipped: startup::SkippedBackends) -> eframe::egui_wgpu::WgpuConfiguration {
     // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
     // `WgpuConfiguration::default()` is HIGH_THROUGHPUT (two frames queued), which added a frame
     // of input-to-display latency to every pan, orbit and drag.
@@ -1944,8 +1945,9 @@ fn wgpu_options(cpu: bool, preference: Option<&str>, crashed: eframe::wgpu::Back
         let env_set = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
         let retry = std::env::var(startup::RETRY_BACKEND_ENV).ok();
+        let hardware_only = startup::hardware_only(cfg!(target_os = "windows"), env_set, cpu, preference, retry.is_some());
         let preference = if cpu { preference } else { retry.as_deref().or(preference) };
-        if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, crashed) {
+        if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed, skipped.failed) {
             solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
             setup.instance_descriptor.backends = backends;
         }
@@ -1957,6 +1959,9 @@ fn wgpu_options(cpu: bool, preference: Option<&str>, crashed: eframe::wgpu::Back
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);
+        if hardware_only {
+            startup::require_hardware(setup);
+        }
         // A float depth buffer with a stencil (see `FLOAT_DEPTH_BITS`), indirect draws that start
         // at an instance (instanced meshes drawn a call per pipeline), and timestamp queries for
         // the GPU time the frame-rate readout shows, wherever the adapter has them.
@@ -2006,7 +2011,7 @@ fn no_window(
     tried_cpu: bool,
     safe_graphics: bool,
     failed: eframe::wgpu::Backends,
-    crashed: eframe::wgpu::Backends,
+    skipped: eframe::wgpu::Backends,
     settings: Option<&std::path::Path>,
     backend_attempt: Option<&(std::path::PathBuf, startup::BackendAttempt)>,
 ) -> eframe::Result {
@@ -2037,9 +2042,9 @@ fn no_window(
         }
     }
     let explicit = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
-    // An API that could not open the window (no card for it, a device that would not start) is
-    // skipped like a crashed one from now on, so the next launch starts on the API that works
-    // without trying this one first (nothing is probed before the window starts).
+    // An API that could not open the window (no hardware adapter for it, a device that would not
+    // start) is skipped by the automatic order from now on, so the next launch starts on the API
+    // that works without trying this one first (nothing is probed before the window starts).
     if !explicit
         && !tried_cpu
         && !safe_graphics
@@ -2052,7 +2057,7 @@ fn no_window(
     let next = if safe_graphics && !explicit && !tried_cpu {
         Some("cpu")
     } else {
-        startup::fallback_backend(cfg!(target_os = "windows"), explicit, tried_cpu, failed, crashed)
+        startup::fallback_backend(cfg!(target_os = "windows"), explicit, tried_cpu, failed, skipped)
     };
     if let Some(next) = next
         && let Ok(exe) = std::env::current_exe()

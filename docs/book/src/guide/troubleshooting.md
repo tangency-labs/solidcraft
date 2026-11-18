@@ -153,8 +153,9 @@ old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the dri
 
 SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan opens the
 window. Where Vulkan has no graphics card or its device fails to start (older Intel graphics,
-virtual machines, Remote Desktop), SolidCraft starts again on Direct3D 12, then OpenGL, then
-software rendering, and later launches of that version go straight to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
+virtual machines, Remote Desktop), SolidCraft starts again on Direct3D 12, then OpenGL, each only
+on a graphics card, and only then software rendering. Later launches of that version go straight
+to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
 before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together.
 
 If a graphics driver crashes the app while it starts a graphics API, the next launch knows

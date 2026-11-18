@@ -432,6 +432,8 @@ pub const GRAPHICS_ATTEMPT: &str = "graphics-attempt.json";
 /// app version it crashed on. Only the current version's entries count: a new version (which may
 /// come with a new driver) tries each API once more.
 pub const CRASHED_BACKENDS: &str = "crashed_backends";
+/// `graphics.json`'s record of the APIs that could not open the window ([`failed_backends`]).
+pub const FAILED_BACKENDS: &str = "failed_backends";
 /// The order wgpu brings its backends up in; with several APIs in one attempt, the first one is
 /// blamed, so repeated crashes take one API away per launch.
 const GUARD_ORDER: [(eframe::wgpu::Backends, &str); 4] = [
@@ -460,34 +462,62 @@ pub fn blamed_backend(leftover: &str, version: &str) -> Option<&'static str> {
 
 /// The APIs that crashed this version of the app (`graphics.json`'s `crashed_backends`).
 pub fn crashed_backends(graphics: &GraphicsSettings, version: &str) -> eframe::wgpu::Backends {
-    let Some(record) = graphics.get(CRASHED_BACKENDS).and_then(serde_json::Value::as_object) else { return eframe::wgpu::Backends::empty() };
+    recorded_backends(graphics, CRASHED_BACKENDS, version)
+}
+
+/// The APIs that could not open the window on this version without crashing: no hardware adapter
+/// for them, or a device that would not start (`graphics.json`'s `failed_backends`). The automatic
+/// order skips them; unlike crashed ones, the software renderer may still use them (WARP is D3D12).
+pub fn failed_backends(graphics: &GraphicsSettings, version: &str) -> eframe::wgpu::Backends {
+    recorded_backends(graphics, FAILED_BACKENDS, version)
+}
+
+fn recorded_backends(graphics: &GraphicsSettings, key: &str, version: &str) -> eframe::wgpu::Backends {
+    let Some(record) = graphics.get(key).and_then(serde_json::Value::as_object) else { return eframe::wgpu::Backends::empty() };
     GUARD_ORDER
         .iter()
         .filter(|(_, n)| record.get(*n).and_then(serde_json::Value::as_str) == Some(version))
         .fold(eframe::wgpu::Backends::empty(), |all, (b, _)| all | *b)
 }
 
-/// A launch begins with what the last one left (`leftover`, the attempt file's text): a crash
-/// during an attempt adds the blamed API to `graphics`' record, and entries from other versions
-/// go. Returns the APIs to avoid on this launch and whether `graphics` changed.
-pub fn note_crashed_attempt(graphics: &mut GraphicsSettings, leftover: Option<&str>, version: &str) -> (eframe::wgpu::Backends, bool) {
-    let blamed = leftover.and_then(|text| blamed_backend(text, version));
-    let before = graphics.get(CRASHED_BACKENDS).cloned();
+/// Add `name` to `graphics`' record `key` for `version`, dropping other versions' entries.
+/// Returns whether `graphics` changed.
+fn note_backend(graphics: &mut GraphicsSettings, key: &str, name: Option<&str>, version: &str) -> bool {
+    let before = graphics.get(key).cloned();
     let mut record: serde_json::Map<String, serde_json::Value> = before
         .as_ref()
         .and_then(serde_json::Value::as_object)
         .map(|r| r.iter().filter(|(_, v)| v.as_str() == Some(version)).map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
-    if let Some(name) = blamed {
+    if let Some(name) = name {
         record.insert(name.into(), serde_json::Value::String(version.into()));
     }
     let after = (!record.is_empty()).then(|| serde_json::Value::Object(record));
     let changed = after != before;
     match after {
-        Some(record) => graphics.insert(CRASHED_BACKENDS.into(), record),
-        None => graphics.remove(CRASHED_BACKENDS),
+        Some(record) => graphics.insert(key.into(), record),
+        None => graphics.remove(key),
     };
-    (crashed_backends(graphics, version), changed)
+    changed
+}
+
+/// The APIs a launch skips ([`BackendGuard::begin`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SkippedBackends {
+    /// Crashed the process while starting: never loaded, safe mode and software rendering included.
+    pub crashed: eframe::wgpu::Backends,
+    /// Could not open the window (no hardware adapter): skipped by the automatic order only.
+    pub failed: eframe::wgpu::Backends,
+}
+
+/// A launch begins with what the last one left (`leftover`, the attempt file's text): a crash
+/// during an attempt adds the blamed API to `graphics`' record, and entries from other versions
+/// go. Returns the APIs that crashed this version and whether `graphics` changed.
+pub fn note_crashed_attempt(graphics: &mut GraphicsSettings, leftover: Option<&str>, version: &str) -> (eframe::wgpu::Backends, bool) {
+    let blamed = leftover.and_then(|text| blamed_backend(text, version));
+    let crashed = note_backend(graphics, CRASHED_BACKENDS, blamed, version);
+    let failed = note_backend(graphics, FAILED_BACKENDS, None, version);
+    (crashed_backends(graphics, version), crashed || failed)
 }
 
 /// The backends left once `crashed` are taken out of `backends`; never none at all (with every
@@ -497,12 +527,13 @@ pub fn without_crashed(backends: eframe::wgpu::Backends, crashed: eframe::wgpu::
     if rest.is_empty() { backends } else { rest }
 }
 
-/// The window could not start on `failed` (one API) without crashing: record it as
-/// [`CRASHED_BACKENDS`] does a crash, so later launches of this version go straight to the next
-/// API instead of failing on this one first.
+/// The window could not start on `failed` (one API) without crashing: record it
+/// ([`failed_backends`]), so later launches of this version go straight to the next API in the
+/// order instead of failing on this one first.
 pub fn record_failed_backend(graphics_path: &Path, failed: eframe::wgpu::Backends, version: &str) {
+    let name = GUARD_ORDER.iter().find(|(b, _)| failed.contains(*b)).map(|(_, n)| *n);
     let result = read_backend_settings(graphics_path).and_then(|mut graphics| {
-        let (_, changed) = note_crashed_attempt(&mut graphics, Some(&attempt_text(failed, version)), version);
+        let changed = note_backend(&mut graphics, FAILED_BACKENDS, name, version);
         if changed { write_backend_settings(graphics_path, &graphics) } else { Ok(()) }
     });
     if let Err(reason) = result {
@@ -519,29 +550,29 @@ pub struct BackendGuard {
 
 impl BackendGuard {
     /// Read what the last launch left in `dir` and record a crash in `graphics_path`
-    /// ([`note_crashed_attempt`]). Returns the guard and the APIs this launch avoids. Unreadable
-    /// graphics settings are left alone (nothing is avoided then).
-    pub fn begin(dir: &Path, graphics_path: &Path, version: &str) -> (Self, eframe::wgpu::Backends) {
+    /// ([`note_crashed_attempt`]). Returns the guard and the APIs this launch skips. Unreadable
+    /// graphics settings are left alone (nothing is skipped then).
+    pub fn begin(dir: &Path, graphics_path: &Path, version: &str) -> (Self, SkippedBackends) {
         let guard = Self { marker: dir.join(GRAPHICS_ATTEMPT), version: version.into() };
         let leftover = std::fs::read_to_string(&guard.marker).ok();
-        let crashed = match read_backend_settings(graphics_path) {
+        let skipped = match read_backend_settings(graphics_path) {
             Ok(mut graphics) => {
                 let (crashed, changed) = note_crashed_attempt(&mut graphics, leftover.as_deref(), version);
                 if changed && let Err(reason) = write_backend_settings(graphics_path, &graphics) {
                     log::warn!("graphics: crashed API not saved: {reason}");
                 }
-                crashed
+                SkippedBackends { crashed, failed: failed_backends(&graphics, version) }
             }
             Err(reason) => {
                 log::warn!("graphics: {reason}");
-                eframe::wgpu::Backends::empty()
+                SkippedBackends::default()
             }
         };
         if let Some(name) = leftover.as_deref().and_then(|t| blamed_backend(t, version)) {
             log::warn!("graphics: the last launch crashed while starting {name}; it is skipped on this computer until the next version");
         }
         guard.clear();
-        (guard, crashed)
+        (guard, skipped)
     }
 
     /// `backends` are about to be started: say so on disk first, flushed.
@@ -590,6 +621,58 @@ pub fn pick_cpu_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&efr
 pub struct AdapterChoice {
     pub name: String,
     pub compatible: bool,
+    /// A software adapter (WARP, lavapipe, llvmpipe).
+    pub cpu: bool,
+}
+
+impl AdapterChoice {
+    fn of(adapter: &eframe::wgpu::Adapter, surface: Option<&eframe::wgpu::Surface<'_>>) -> Self {
+        let info = adapter.get_info();
+        Self {
+            name: info.name,
+            compatible: surface.is_none_or(|s| adapter.is_surface_supported(s)),
+            cpu: info.device_type == eframe::wgpu::DeviceType::Cpu,
+        }
+    }
+}
+
+/// Whether an API in the automatic Windows order may start here: it needs a hardware adapter
+/// that can draw the window. Without one the window fails cleanly, and the next API is tried
+/// (Vulkan, D3D12, OpenGL), so a machine with OpenGL hardware never lands on WARP; software
+/// rendering comes only after all three.
+pub fn has_hardware(adapters: &[AdapterChoice]) -> bool {
+    adapters.iter().any(|a| a.compatible && !a.cpu)
+}
+
+/// Whether this launch's API must find a hardware adapter ([`has_hardware`]): the automatic
+/// Windows order and its retries, not an API the user chose, `WGPU_BACKEND` or the software renderer.
+pub fn hardware_only(windows: bool, env_set: bool, cpu: bool, preference: Option<&str>, retry: bool) -> bool {
+    let chosen = preference
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && !p.eq_ignore_ascii_case("auto"))
+        .is_some_and(|p| !eframe::wgpu::Backends::from_comma_list(p).is_empty());
+    windows && !env_set && !cpu && (retry || !chosen)
+}
+
+/// Make the window's adapter request fail when there is no hardware adapter ([`has_hardware`]),
+/// after any adapter selector already set (a named card still wins). With one, wgpu's own
+/// request picks the adapter as before.
+pub fn require_hardware(setup: &mut eframe::egui_wgpu::WgpuSetupCreateNew) {
+    let named = setup.native_adapter_selector.take();
+    setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
+        if let Some(select) = &named
+            && let Some(adapter) = select(adapters, surface)?
+        {
+            return Ok(Some(adapter));
+        }
+        let choices: Vec<_> = adapters.iter().map(|a| AdapterChoice::of(a, surface)).collect();
+        if has_hardware(&choices) {
+            Ok(None)
+        } else {
+            let names: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
+            Err(format!("no hardware graphics adapter for this API (found: {})", if names.is_empty() { "none".into() } else { names.join(", ") }))
+        }
+    }));
 }
 
 /// Choose an adapter by name. The environment override follows wgpu's case-insensitive
@@ -623,10 +706,7 @@ pub fn configure_adapter(setup: &mut eframe::egui_wgpu::WgpuSetupCreateNew, cpu:
         setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| pick_cpu_adapter(adapters, surface).map(Some)));
     } else if environment.as_deref().is_some_and(|s| !s.is_empty()) || preference.as_deref().is_some_and(|s| !s.is_empty()) {
         setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
-            let choices: Vec<_> = adapters
-                .iter()
-                .map(|a| AdapterChoice { name: a.get_info().name, compatible: surface.is_none_or(|s| a.is_surface_supported(s)) })
-                .collect();
+            let choices: Vec<_> = adapters.iter().map(|a| AdapterChoice::of(a, surface)).collect();
             Ok(choose_adapter(&choices, environment.as_deref(), preference.as_deref()).and_then(|i| adapters.get(i)).cloned())
         }));
     }
@@ -645,7 +725,8 @@ pub const WGPU_BACKEND_ENV: &str = "WGPU_BACKEND";
 /// first: the window starts on the API and asks for the one adapter it draws with, and where that
 /// API has no card or its device fails to start (older Intel graphics, virtual machines, Remote
 /// Desktop) the next one is tried ([`fallback_backend`]). An API that crashed the process while
-/// starting (`crashed`, [`BackendGuard`]) is skipped everywhere but in an explicit choice.
+/// starting (`crashed`, [`BackendGuard`]) is skipped everywhere but in an explicit choice; one that
+/// could not open the window (`failed`, no hardware adapter) is skipped by the automatic order.
 ///
 /// - `WGPU_BACKEND` set (`env_set`): `None`, whatever it says wins.
 /// - The software renderer (`cpu`, safe mode): D3D12 alone on Windows (WARP); `None` elsewhere.
@@ -658,12 +739,14 @@ pub fn choose_backends(
     cpu: bool,
     preference: Option<&str>,
     crashed: eframe::wgpu::Backends,
+    failed: eframe::wgpu::Backends,
 ) -> Option<eframe::wgpu::Backends> {
     use eframe::wgpu::Backends;
     if env_set {
         return None;
     }
-    let others = || (!crashed.is_empty()).then(|| without_crashed(Backends::all(), crashed));
+    let platform = if windows { Backends::VULKAN | Backends::DX12 | Backends::GL } else { Backends::VULKAN | Backends::GL | Backends::METAL };
+    let others = || (!crashed.is_empty()).then(|| without_crashed(platform, crashed));
     if cpu {
         return if windows && !crashed.contains(Backends::DX12) { Some(Backends::DX12) } else { others() };
     }
@@ -677,7 +760,10 @@ pub fn choose_backends(
     if !windows {
         return others();
     }
-    Some(WINDOWS_ORDER.into_iter().find(|b| !crashed.contains(*b)).unwrap_or(Backends::VULKAN))
+    let skip = crashed | failed;
+    // With every API skipped: the first one not crashed (a failed one may work now), else Vulkan.
+    let first = WINDOWS_ORDER.into_iter().find(|b| !skip.contains(*b)).or_else(|| WINDOWS_ORDER.into_iter().find(|b| !crashed.contains(*b)));
+    Some(first.unwrap_or(Backends::VULKAN))
 }
 
 /// Internal, process-local retry choice; never written to the graphics preference.
@@ -852,7 +938,10 @@ mod tests {
     use super::*;
 
     fn cards() -> Vec<AdapterChoice> {
-        ["Integrated", "Discrete small", "Discrete large"].into_iter().map(|name| AdapterChoice { name: name.into(), compatible: true }).collect()
+        ["Integrated", "Discrete small", "Discrete large"]
+            .into_iter()
+            .map(|name| AdapterChoice { name: name.into(), compatible: true, cpu: false })
+            .collect()
     }
 
     #[test]
@@ -1051,11 +1140,23 @@ mod tests {
         let leftover = attempt_text(Backends::VULKAN, v);
         assert_eq!(note_crashed_attempt(&mut graphics, Some(&leftover), v), (Backends::VULKAN, true));
         assert_eq!(graphics["msaa"], 8, "other settings stay");
-        assert_eq!(choose_backends(true, false, false, None, Backends::VULKAN), Some(Backends::DX12), "Vulkan is never loaded");
-        assert_eq!(choose_backends(true, false, false, Some("auto"), Backends::VULKAN | Backends::DX12), Some(Backends::GL), "then OpenGL");
-        assert_eq!(choose_backends(true, false, false, None, Backends::DX12), Some(Backends::VULKAN), "a crashed D3D12 alone: Vulkan as ever");
         assert_eq!(
-            choose_backends(true, false, false, None, Backends::VULKAN | Backends::DX12 | Backends::GL),
+            choose_backends(true, false, false, None, Backends::VULKAN, eframe::wgpu::Backends::empty()),
+            Some(Backends::DX12),
+            "Vulkan is never loaded"
+        );
+        assert_eq!(
+            choose_backends(true, false, false, Some("auto"), Backends::VULKAN | Backends::DX12, eframe::wgpu::Backends::empty()),
+            Some(Backends::GL),
+            "then OpenGL"
+        );
+        assert_eq!(
+            choose_backends(true, false, false, None, Backends::DX12, eframe::wgpu::Backends::empty()),
+            Some(Backends::VULKAN),
+            "a crashed D3D12 alone: Vulkan as ever"
+        );
+        assert_eq!(
+            choose_backends(true, false, false, None, Backends::VULKAN | Backends::DX12 | Backends::GL, eframe::wgpu::Backends::empty()),
             Some(Backends::VULKAN),
             "all crashed: tried again"
         );
@@ -1072,9 +1173,9 @@ mod tests {
         );
         assert_eq!(blamed_backend("not json", v), None);
         // The same on every system: elsewhere wgpu's own choice, less the crashed API.
-        let linux = choose_backends(false, false, false, None, Backends::VULKAN).unwrap();
+        let linux = choose_backends(false, false, false, None, Backends::VULKAN, eframe::wgpu::Backends::empty()).unwrap();
         assert!(!linux.contains(Backends::VULKAN) && linux.contains(Backends::GL));
-        assert_eq!(choose_backends(false, false, false, None, Backends::empty()), None);
+        assert_eq!(choose_backends(false, false, false, None, Backends::empty(), eframe::wgpu::Backends::empty()), None);
     }
 
     /// The attempt file is written before the driver loads and gone once the start went well: a start
@@ -1085,27 +1186,27 @@ mod tests {
         let dir = scratch("backend-guard");
         let path = dir.join("graphics.json");
         std::fs::write(&path, r#"{"msaa":4}"#).unwrap();
-        let (guard, crashed) = BackendGuard::begin(&dir, &path, "0.44.2");
-        assert!(crashed.is_empty());
+        let (guard, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
+        assert_eq!(skipped, SkippedBackends::default());
         guard.attempt(Backends::VULKAN);
         assert!(dir.join(GRAPHICS_ATTEMPT).is_file(), "on disk before the driver loads");
         guard.clear();
-        let (guard, crashed) = BackendGuard::begin(&dir, &path, "0.44.2");
-        assert!(crashed.is_empty(), "a start that presented a frame blames nothing");
+        let (guard, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
+        assert_eq!(skipped, SkippedBackends::default(), "a start that presented a frame blames nothing");
         assert_eq!(backend_settings(&path), serde_json::json!({"msaa": 4}), "graphics.json untouched");
         // The process dies inside the Vulkan driver: nothing clears the file.
         guard.attempt(Backends::VULKAN);
-        let (_, crashed) = BackendGuard::begin(&dir, &path, "0.44.2");
-        assert_eq!(crashed, Backends::VULKAN);
+        let (_, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
+        assert_eq!(skipped.crashed, Backends::VULKAN);
         assert!(!dir.join(GRAPHICS_ATTEMPT).exists(), "the leftover is read once");
         assert_eq!(backend_settings(&path), serde_json::json!({"msaa": 4, "crashed_backends": {"vulkan": "0.44.2"}}));
-        let (_, crashed) = BackendGuard::begin(&dir, &path, "0.44.2");
-        assert_eq!(crashed, Backends::VULKAN, "skipped from then on");
+        let (_, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
+        assert_eq!(skipped.crashed, Backends::VULKAN, "skipped from then on");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Without a probe, a Vulkan start with no card for it fails and the app starts again on
-    /// D3D12; that failure is kept too, so the next launch goes straight to D3D12.
+    /// Without a probe, a Vulkan start with no hardware adapter fails cleanly and the app starts
+    /// again on the next API; that failure is kept, so the next launch goes straight there.
     #[test]
     fn a_backend_that_could_not_open_the_window_is_skipped_next_time() {
         use eframe::wgpu::Backends;
@@ -1114,11 +1215,60 @@ mod tests {
         std::fs::write(&path, r#"{"backend":"auto"}"#).unwrap();
         record_failed_backend(&path, Backends::VULKAN, "0.44.2");
         let (_, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
-        assert_eq!(skipped, Backends::VULKAN);
-        assert_eq!(choose_backends(true, false, false, Some("auto"), skipped), Some(Backends::DX12));
+        assert_eq!(skipped, SkippedBackends { crashed: Backends::empty(), failed: Backends::VULKAN });
+        assert_eq!(choose_backends(true, false, false, Some("auto"), skipped.crashed, skipped.failed), Some(Backends::DX12));
+        // Not crashed: the software renderer still uses D3D12 (WARP).
+        assert_eq!(choose_backends(true, false, true, None, skipped.crashed, skipped.failed), Some(Backends::DX12));
         assert_eq!(backend_settings(&path)["backend"], "auto", "the preference stays");
         let (_, skipped) = BackendGuard::begin(&dir, &path, "0.45.0");
-        assert!(skipped.is_empty(), "the next version tries Vulkan again");
+        assert_eq!(skipped, SkippedBackends::default(), "the next version tries Vulkan again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Windows machine whose only hardware API is OpenGL: Vulkan has no adapter, D3D12 only WARP.
+    /// The automatic order takes only a hardware adapter, so it goes Vulkan, D3D12, then OpenGL
+    /// hardware, never WARP; software rendering comes only after all three.
+    #[test]
+    fn a_machine_with_only_opengl_hardware_lands_on_opengl_not_warp() {
+        use eframe::wgpu::Backends;
+        let warp = AdapterChoice { name: "Microsoft Basic Render Driver".into(), compatible: true, cpu: true };
+        let gl_card = AdapterChoice { name: "Old GPU".into(), compatible: true, cpu: false };
+        let adapters = |b: Backends| {
+            if b == Backends::DX12 {
+                vec![warp.clone()]
+            } else if b == Backends::GL {
+                vec![gl_card.clone()]
+            } else {
+                vec![]
+            }
+        };
+        let dir = scratch("backend-gl-only");
+        let path = dir.join("graphics.json");
+        let none = Backends::empty();
+        // First launch: each API whose window fails is recorded and the next one is tried.
+        let mut api = choose_backends(true, false, false, None, none, none).unwrap();
+        let mut tried = vec![];
+        while !has_hardware(&adapters(api)) {
+            tried.push(api);
+            record_failed_backend(&path, api, "0.44.2");
+            let Some(next) = fallback_backend(true, false, false, api, none) else { panic!("no next API after {api:?}") };
+            api = Backends::from_comma_list(next);
+        }
+        assert_eq!((tried, api), (vec![Backends::VULKAN, Backends::DX12], Backends::GL), "OpenGL hardware, not WARP");
+        // Later launches start on OpenGL at once.
+        let (_, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
+        assert_eq!(choose_backends(true, false, false, None, skipped.crashed, skipped.failed), Some(Backends::GL));
+        // Software rendering only after all three: with no hardware anywhere, WARP.
+        assert!(!has_hardware(&[warp.clone()]) && !has_hardware(&[]));
+        assert_eq!(fallback_backend(true, false, false, Backends::GL, none), Some("cpu"));
+        assert!(!has_hardware(&[AdapterChoice { compatible: false, ..gl_card.clone() }]), "it must draw the window");
+        // Only the automatic order (and its retries) needs hardware; a chosen API, WGPU_BACKEND
+        // and the software renderer take what there is; elsewhere than Windows, wgpu's choice.
+        assert!(hardware_only(true, false, false, None, false) && hardware_only(true, false, false, Some("auto"), false));
+        assert!(hardware_only(true, false, false, Some("dx12"), true), "a fallback retry");
+        assert!(!hardware_only(true, false, false, Some("dx12"), false));
+        assert!(!hardware_only(true, true, false, None, false) && !hardware_only(true, false, true, None, false));
+        assert!(!hardware_only(false, false, false, None, false));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1139,10 +1289,10 @@ mod tests {
     #[test]
     fn an_explicit_choice_wins_over_a_crashed_backend() {
         use eframe::wgpu::Backends;
-        assert_eq!(choose_backends(true, false, false, Some("vulkan"), Backends::VULKAN), Some(Backends::VULKAN));
-        assert_eq!(choose_backends(false, false, false, Some("vulkan"), Backends::VULKAN), Some(Backends::VULKAN));
-        assert_eq!(choose_backends(true, true, false, None, Backends::VULKAN), None, "WGPU_BACKEND: wgpu reads it");
-        assert_eq!(choose_backends(true, true, true, None, Backends::DX12), None);
+        assert_eq!(choose_backends(true, false, false, Some("vulkan"), Backends::VULKAN, eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
+        assert_eq!(choose_backends(false, false, false, Some("vulkan"), Backends::VULKAN, eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
+        assert_eq!(choose_backends(true, true, false, None, Backends::VULKAN, eframe::wgpu::Backends::empty()), None, "WGPU_BACKEND: wgpu reads it");
+        assert_eq!(choose_backends(true, true, true, None, Backends::DX12, eframe::wgpu::Backends::empty()), None);
         assert_eq!(fallback_backend(true, true, false, Backends::VULKAN, Backends::DX12), None);
     }
 
@@ -1158,12 +1308,12 @@ mod tests {
         assert_eq!(safe_backends(Backends::VULKAN | Backends::GL, Some("gl"), Backends::VULKAN), Backends::GL, "never empty");
         assert_eq!(safe_backends(Backends::VULKAN, None, Backends::VULKAN), Backends::VULKAN, "all there is");
         // The software renderer: WARP alone on Windows; without D3D12 (crashed), everything else.
-        assert_eq!(choose_backends(true, false, true, None, Backends::VULKAN), Some(Backends::DX12));
-        let cpu = choose_backends(true, false, true, None, Backends::DX12).unwrap();
+        assert_eq!(choose_backends(true, false, true, None, Backends::VULKAN, eframe::wgpu::Backends::empty()), Some(Backends::DX12));
+        let cpu = choose_backends(true, false, true, None, Backends::DX12, eframe::wgpu::Backends::empty()).unwrap();
         assert!(!cpu.contains(Backends::DX12) && cpu.contains(Backends::VULKAN));
-        let cpu = choose_backends(false, false, true, None, Backends::VULKAN).unwrap();
+        let cpu = choose_backends(false, false, true, None, Backends::VULKAN, eframe::wgpu::Backends::empty()).unwrap();
         assert!(!cpu.contains(Backends::VULKAN) && cpu.contains(Backends::GL), "llvmpipe, not lavapipe");
-        assert_eq!(choose_backends(false, false, true, None, Backends::empty()), None);
+        assert_eq!(choose_backends(false, false, true, None, Backends::empty(), eframe::wgpu::Backends::empty()), None);
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -1568,14 +1718,14 @@ mod tests {
         let none = Backends::empty();
         // Vulkan alone: D3D12's and OpenGL's drivers are never loaded, and nothing is probed
         // before the window asks for its adapter.
-        assert_eq!(choose_backends(true, false, false, None, none), Some(Backends::VULKAN));
+        assert_eq!(choose_backends(true, false, false, None, none, eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
         // Where Vulkan has no card or fails, the handled failure moves on to D3D12, then OpenGL,
         // then software.
         assert_eq!(fallback_backend(true, false, false, Backends::VULKAN, none), Some("dx12"));
         // `auto` and blanks are the default order; a chosen API always wins.
-        assert_eq!(choose_backends(true, false, false, Some(" auto "), none), Some(Backends::VULKAN));
-        assert_eq!(choose_backends(true, false, false, Some(""), none), Some(Backends::VULKAN));
-        assert_eq!(choose_backends(true, false, false, Some("dx12"), none), Some(Backends::DX12));
+        assert_eq!(choose_backends(true, false, false, Some(" auto "), none, eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
+        assert_eq!(choose_backends(true, false, false, Some(""), none, eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
+        assert_eq!(choose_backends(true, false, false, Some("dx12"), none, eframe::wgpu::Backends::empty()), Some(Backends::DX12));
     }
 
     #[test]
@@ -1604,7 +1754,10 @@ mod tests {
             for cpu in [false, true] {
                 for backend in [B::DX12, B::VULKAN, B::GL, B::all()] {
                     assert_eq!(fallback_backend(windows, true, cpu, backend, eframe::wgpu::Backends::empty()), None);
-                    assert_eq!(choose_backends(windows, true, cpu, Some("vulkan"), eframe::wgpu::Backends::empty()), None);
+                    assert_eq!(
+                        choose_backends(windows, true, cpu, Some("vulkan"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()),
+                        None
+                    );
                 }
             }
         }
@@ -1626,24 +1779,39 @@ mod tests {
     fn wgpu_backend_the_preference_and_the_software_renderer_override_the_order() {
         use eframe::wgpu::Backends;
         // WGPU_BACKEND: wgpu reads it itself.
-        assert_eq!(choose_backends(true, true, false, Some("gl"), eframe::wgpu::Backends::empty()), None);
-        assert_eq!(choose_backends(true, true, true, None, eframe::wgpu::Backends::empty()), None);
+        assert_eq!(choose_backends(true, true, false, Some("gl"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()), None);
+        assert_eq!(choose_backends(true, true, true, None, eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()), None);
         // The software renderer (safe mode, the retry): WARP through D3D12 alone, never Vulkan.
-        assert_eq!(choose_backends(true, false, true, Some("vulkan"), eframe::wgpu::Backends::empty()), Some(Backends::DX12));
-        assert_eq!(choose_backends(false, false, true, None, eframe::wgpu::Backends::empty()), None);
-        // The preference, on any system.
-        assert_eq!(choose_backends(true, false, false, Some("vulkan"), eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
-        assert_eq!(choose_backends(true, false, false, Some("GL"), eframe::wgpu::Backends::empty()), Some(Backends::GL));
         assert_eq!(
-            choose_backends(true, false, false, Some("dx12,vulkan"), eframe::wgpu::Backends::empty()),
+            choose_backends(true, false, true, Some("vulkan"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()),
+            Some(Backends::DX12)
+        );
+        assert_eq!(choose_backends(false, false, true, None, eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()), None);
+        // The preference, on any system.
+        assert_eq!(
+            choose_backends(true, false, false, Some("vulkan"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()),
+            Some(Backends::VULKAN)
+        );
+        assert_eq!(
+            choose_backends(true, false, false, Some("GL"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()),
+            Some(Backends::GL)
+        );
+        assert_eq!(
+            choose_backends(true, false, false, Some("dx12,vulkan"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()),
             Some(Backends::DX12 | Backends::VULKAN)
         );
-        assert_eq!(choose_backends(false, false, false, Some("vulkan"), eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
+        assert_eq!(
+            choose_backends(false, false, false, Some("vulkan"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()),
+            Some(Backends::VULKAN)
+        );
         // An unknown preference is the default order.
-        assert_eq!(choose_backends(true, false, false, Some("glide"), eframe::wgpu::Backends::empty()), Some(Backends::VULKAN));
+        assert_eq!(
+            choose_backends(true, false, false, Some("glide"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()),
+            Some(Backends::VULKAN)
+        );
         // Elsewhere: wgpu's own choice.
-        assert_eq!(choose_backends(false, false, false, None, eframe::wgpu::Backends::empty()), None);
-        assert_eq!(choose_backends(false, false, false, Some("auto"), eframe::wgpu::Backends::empty()), None);
+        assert_eq!(choose_backends(false, false, false, None, eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()), None);
+        assert_eq!(choose_backends(false, false, false, Some("auto"), eframe::wgpu::Backends::empty(), eframe::wgpu::Backends::empty()), None);
     }
 
     #[test]
@@ -1657,7 +1825,7 @@ mod tests {
         assert!(pick_cpu_adapter(&[], None).unwrap_err().contains("none"));
         // The adapters the software renderer chooses among: it starts D3D12 alone on Windows
         // (WARP), not every backend, so the test doesn't load the OpenGL driver either (#1156).
-        let options = crate::wgpu_options(true, None, eframe::wgpu::Backends::empty());
+        let options = crate::wgpu_options(true, None, SkippedBackends::default());
         let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { panic!("the software renderer makes its own device") };
         let backends = setup.instance_descriptor.backends;
         if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
