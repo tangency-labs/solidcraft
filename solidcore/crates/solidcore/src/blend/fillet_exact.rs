@@ -40,9 +40,7 @@
 //!   ([`QuadricKind::Circle`]), as a cylinder so moved is its axis. An offset collapsed
 //!   onto such a curve that the other offset crosses is a point spine
 //!   ([`classify_ball_on_collapsed_offset`]): the round along an earlier round's end curve,
-//!   where that round has the ball's radius, is a piece of the ball. That holds where the
-//!   two are coaxial too (a cylinder of the ball's radius under a plane square to its axis,
-//!   #17594): [`classify_blend_spine`] gives no circle there, whose radius would be 0.
+//!   where that round has the ball's radius, is a piece of the ball.
 //! - **An offset collapsed by its geometry (solidcore #2652, not in the fork).** With
 //!   a constant ball, a round on a face of no natural quadric (a
 //!   B-spline, as a round of the ball's radius built by a trace) and a surface quadric is
@@ -1303,13 +1301,6 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
     if let Some((axis_point, axis_dir)) = coaxial(&a, &b, tol, reach) {
         // two coaxial cylinders meet nowhere or all along: no spine
         if matches!(a.kind, Q::Cylinder | Q::Line) && matches!(b.kind, Q::Cylinder | Q::Line) {
-            return;
-        }
-        // (#17594) an offset collapsed onto the axis (a round of the ball's radius) holds
-        // every centre on the axis: the circles about it have radius 0, so the spine is the
-        // one point where the other offset crosses the axis, the ball's triangle
-        // (`classify_ball_on_collapsed_offset`), never a torus with no hole
-        if a.kind == Q::Line || b.kind == Q::Line {
             return;
         }
         blend.spine = BlendSpine::Circle;
