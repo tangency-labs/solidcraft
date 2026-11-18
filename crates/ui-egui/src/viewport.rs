@@ -7514,6 +7514,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !corner_hovered
         && !manipulator_dragging;
     app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
+    // A part dragged in from the parts library: where it lands, and the insert on release.
+    crate::parts_library::view_drop(app, ui, rect, &proj);
     // The picture may run past the view's own rectangle (the focused view of a tiled window).
     let paint = app.viewport.bleed.take().unwrap_or(rect);
     let layer = ui.layer_id();

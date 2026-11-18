@@ -250,7 +250,7 @@ impl Capturer {
         // is built), so the previous picture's highlight would show in this one.
         frame.hl_key = state.key;
         frame.hl_slot = Arc::new(Mutex::new(Some(highlight.unwrap_or_default())));
-        let result = self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height]);
+        let result = self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), scene.transparent, [width, height]);
         // Each capture uploads its own scene. Release the picture's buffers after readback or
         // error so a long-lived capturer keeps its pipelines without holding the last mesh.
         if let Some(gpu) = &mut state.gpu {
@@ -259,9 +259,16 @@ impl Capturer {
         result
     }
 
-    /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
-    /// drew (read while the caller holds `state`).
-    fn picture(&self, state: &mut State, frame: &Frame, (top, bottom): (Rgb, Rgb), [width, height]: [u32; 2]) -> Result<(Vec<u8>, DrawStats)> {
+    /// `frame` drawn over the `background` gradient (none when `transparent`: the parts library's
+    /// cards), read back as straight RGBA, and what it drew (read while the caller holds `state`).
+    fn picture(
+        &self,
+        state: &mut State,
+        frame: &Frame,
+        (top, bottom): (Rgb, Rgb),
+        transparent: bool,
+        [width, height]: [u32; 2],
+    ) -> Result<(Vec<u8>, DrawStats)> {
         let Gpu { device, queue, renderer, background: background_pipeline } = state.gpu.as_mut().ok_or_else(closed)?;
         let (device, queue) = (&*device, &*queue);
         let scopes = error_scopes(device);
@@ -331,10 +338,13 @@ impl Capturer {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            // The background first, as the viewport paints it before the model.
-            pass.set_pipeline(background_pipeline);
-            pass.set_vertex_buffer(0, background.slice(..));
-            pass.draw(0..6, 0..1);
+            // The background first, as the viewport paints it before the model (none for a
+            // transparent picture: the pass cleared to transparent black).
+            if !transparent {
+                pass.set_pipeline(background_pipeline);
+                pass.set_vertex_buffer(0, background.slice(..));
+                pass.draw(0..6, 0..1);
+            }
             renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;
@@ -839,18 +849,18 @@ mod tests {
         let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
         // Drawn where it was moved to.
         let moved = frame(&at(shift), &cam, size, 1, None);
-        let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+        let expected = capturer.picture(&mut state, &moved, BACKGROUND, false, size).unwrap().0;
         assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the body shows");
         // Drawn where it was, moved by the layer; the model scene empty.
         let mut layered = frame(&Scene::default(), &cam, size, 2, None);
         let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift.x as f32, shift.y as f32, shift.z as f32, 1.0]];
         layered.moving = Some(crate::view::MovingLayer { key: 3, slot: slot(scene_geometry(&at(Vec3::ZERO))), transform });
-        let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+        let drawn = capturer.picture(&mut state, &layered, BACKGROUND, false, size).unwrap().0;
         let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
         assert!(differ <= 4, "{differ} pixels differ from the body drawn where it was moved to");
         // The drag over: the model scene draws it, and nothing is drawn twice or left behind.
         let after = frame(&at(shift), &cam, size, 4, None);
-        let back = capturer.picture(&mut state, &after, BACKGROUND, size).unwrap().0;
+        let back = capturer.picture(&mut state, &after, BACKGROUND, false, size).unwrap().0;
         assert_eq!(back, expected);
     }
 
@@ -874,7 +884,7 @@ mod tests {
         let mut picture = |model: u64, moving: Option<(u64, Option<GpuScene>)>| {
             let mut f = frame(&Scene::default(), &cam, size, model, None);
             f.moving = moving.map(|(key, scene)| crate::view::MovingLayer { key, slot: Arc::new(Mutex::new(scene)), transform });
-            let drawn = capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0;
+            let drawn = capturer.picture(&mut state, &f, BACKGROUND, false, size).unwrap().0;
             let red = drawn.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count();
             (drawn, red)
         };
@@ -925,13 +935,13 @@ mod tests {
             // The model scene with the placement where it was moved to.
             let mut moved = frame(&Scene::default(), &cam, size, key + 1, None);
             moved.slot = placed_at(shift);
-            let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+            let expected = capturer.picture(&mut state, &moved, BACKGROUND, false, size).unwrap().0;
             assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
             // Placed where it was, in the layer moved by the drag; the model scene empty.
             let mut layered = frame(&Scene::default(), &cam, size, key + 2, None);
             let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift[0], shift[1], shift[2], 1.0]];
             layered.moving = Some(crate::view::MovingLayer { key: key + 3, slot: placed_at([0.0; 3]), transform });
-            let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+            let drawn = capturer.picture(&mut state, &layered, BACKGROUND, false, size).unwrap().0;
             let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
             assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where it was moved to", k == 0);
         }

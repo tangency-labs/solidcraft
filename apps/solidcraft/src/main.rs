@@ -876,8 +876,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let future = dialog.pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
-        pick_folder: Some(Box::new(move || {
-            let future = browse_folder.start(folder_parent.clone()).set_title("Choose a folder").pick_folder();
+        pick_folder: Some(Box::new(move |title: &str| {
+            let future = browse_folder.start(folder_parent.clone()).set_title(title).pick_folder();
             let folder = browse_folder.clone();
             Box::pin(async move { folder.answer_folder(future.await) })
         })),
