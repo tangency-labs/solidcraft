@@ -224,6 +224,15 @@ pub trait IntersectorBrepP3<O>: IntersectorBrepP2<O> + MergeIntervalBrep<O> {
     /// Those of `upward_loopuses`; [`SolidError::InvalidInput`] for a handle that is
     /// not a face of a known B-rep.
     fn face_upward_loopuses(&self, face: O) -> Result<Vec<O>>;
+    /// Not upstream: whether the face has an edge with the face on both sides (a seam):
+    /// a face without one has no seam edge and no pole, so the seam and pole tests of
+    /// its edges and vertices can be skipped (docs/booleans.md, "Seams and poles").
+    ///
+    /// # Errors
+    ///
+    /// Those of the face's edge and face use queries; [`SolidError::InvalidInput`] for
+    /// a handle that is not a face of a known B-rep.
+    fn face_has_seam(&self, k: &Kernel, face: O) -> Result<bool>;
 }
 
 // ---- small helpers ----------------------------------------------------------------------------
@@ -398,6 +407,15 @@ pub struct CurveOnSurfaces<O> {
     /// Handles naming the two local curve classifications (`&sCrvClass2`,
     /// `&sCrvClass1` passed to `SetFilletData`); read only with `doing_fillets`.
     pub classifications: Option<(O, O)>,
+    /// Not upstream: whether the face of `surface` has an edge with the face on both
+    /// sides (a seam): a face without one has no seam edge and no pole, so the seam and
+    /// pole tests of its edges and vertices are skipped (docs/booleans.md, "Seams and
+    /// poles"). `None` when the caller does not know: the tests are then made as
+    /// upstream does.
+    pub face_has_seam: Option<bool>,
+    /// Not upstream: whether the face of `other_surface` has an edge with the face on
+    /// both sides (a seam); see [`CurveOnSurfaces::face_has_seam`].
+    pub other_face_has_seam: Option<bool>,
 }
 
 /// What [`TopologyIntersector::merge_curve_on_surfaces`] returns.
@@ -1376,6 +1394,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             input.uv_curve2,
             input.curve_tolerance,
         )?;
+        // (not upstream) the faces' answer (does either of them have a seam edge?): the
+        // classification of the curve on a face skips the seam and pole tests of that
+        // face's edges and vertices when the face has none.
+        crv_class1.set_face_has_seam(input.face_has_seam);
+        crv_class2.set_face_has_seam(input.other_face_has_seam);
 
         // when asked - set up fillet data
         if self.doing_fillets {
@@ -1715,6 +1738,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // get FaceBBox/FaceBBox intersection
         let intersection_box = this_face_box.intersect(&other_face_box)?;
 
+        // (not upstream) whether each of the two faces has an edge with the face on both
+        // sides (a seam): a face without one has no seam edge and no pole, so the seam
+        // and pole tests of its edges and vertices are made once for the face and not
+        // once for every curve. The merges below make edges of the faces, none of them a
+        // seam (a seam is an edge with the face on both sides), so the answer holds for
+        // every pass.
+        let face_seams = [
+            Some(brep.face_has_seam(k, b_face)?),
+            Some(brep.face_has_seam(k, o_face)?),
+        ];
+
         // loop: project the curves of one face onto the other, merge the projected
         // curves into the surface faces, repeat until merge no longer causes topology
         // changes
@@ -1741,6 +1775,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 &intersection_box,
                 ti,
                 &mut out.deleted_curves,
+                face_seams,
             )?;
 
             // when topology changed -- restart the outer loop
@@ -1759,6 +1794,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 &intersection_box,
                 ti,
                 &mut out.deleted_curves,
+                face_seams,
             )?;
         }
 
@@ -1865,6 +1901,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         intersection_box: &Extent3d,
         ti: Option<O>,
         deleted_curves: &mut Vec<O>,
+        face_seams: [Option<bool>; 2],
     ) -> Result<bool> {
         let mut topology_changed = false;
 
@@ -1963,6 +2000,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     other_edge,
                     ti,
                     classifications: None,
+                    face_has_seam: face_seams[0],
+                    other_face_has_seam: face_seams[1],
                 };
                 let m = self.merge_curve_on_surfaces(k, brep, &input)?;
                 deleted_curves.extend(m.deleted_curves);
@@ -2061,6 +2100,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         other_edge,
                         ti,
                         classifications: None,
+                        face_has_seam: face_seams[0],
+                        other_face_has_seam: face_seams[1],
                     };
                     let m = self.merge_curve_on_surfaces(k, brep, &input)?;
                     deleted_curves.extend(m.deleted_curves);

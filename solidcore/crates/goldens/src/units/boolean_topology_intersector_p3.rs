@@ -603,6 +603,8 @@ fn run_rust_merge(i: &Inputs, p: Prepared) -> Result<Vec<f64>, SolidError> {
                 other_edge: edge2,
                 ti: Some(TI_HANDLE),
                 classifications: None,
+                face_has_seam: None,
+                other_face_has_seam: None,
             };
             let r = ti.merge_curve_on_surfaces(&mut k, &mut two, &input);
             if let Some(m) = status(r, &mut o)? {
@@ -820,6 +822,13 @@ impl IntersectorBrepP3<H> for Two {
                 .map(|lu| hd(face.b, K_LOOPUSE, lu.index()))
                 .collect(),
         )
+    }
+
+    fn face_has_seam(&self, k: &Kernel, face: H) -> solidcore::Result<bool> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face"));
+        }
+        solidcore::query::face::p2::face_has_seam(k, self.brep_r(face)?, fid(face))
     }
 
     fn face_bounding_box(&self, k: &Kernel, face: H) -> solidcore::Result<Extent3d> {

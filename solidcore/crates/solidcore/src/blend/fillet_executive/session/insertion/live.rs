@@ -251,6 +251,8 @@ impl LiveGeometryInsertion<'_> {
                 other_edge: Some(FilletObject::IntermediateTopology(EntityRef::Edge(managed))),
                 ti: Some(FilletObject::Intersector),
                 classifications: None,
+                face_has_seam: None,
+                other_face_has_seam: None,
             };
             let attempt = ti.merge_curve_on_surfaces_linked_attempt(k, geometry, &input);
             // MergeCurveOnSurfaces deletes its temporary curves (`SmObjDelete

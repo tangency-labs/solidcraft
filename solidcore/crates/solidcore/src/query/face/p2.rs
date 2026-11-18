@@ -1677,13 +1677,16 @@ impl<G: ClassGeometryMut<O>, O: ClassObject> ClassGeometryMut<O> for WithVertexF
 }
 
 /// Resolve stored edge data and its optional gap on this face, on the face's B-rep
-/// (whose gap cache `GetMaxEdgeFaceGap` fills).
+/// (whose gap cache `GetMaxEdgeFaceGap` fills). `has_seam` is the face's answer (does it
+/// have an edge with the face on both sides?): a face without one has no seam edge, and
+/// the test of this edge is skipped.
 fn boundary_edge<O: ClassObject>(
     k: &Kernel,
     objects: &mut impl CurveOnClassifyBrep<O>,
     face: FaceId,
     edge: EdgeId,
     has_big_gaps: bool,
+    has_seam: bool,
 ) -> Result<BoundaryEdge<O>> {
     let face_gap = if has_big_gaps {
         match crate::topology::edge::edgeuse_of_face(objects.brep(), edge, Some(face))? {
@@ -1703,7 +1706,7 @@ fn boundary_edge<O: ClassObject>(
         interval: record.interval,
         zone_tol_3d: record.tolerance,
         face_gap,
-        seam: seam_ends(k, objects.brep(), edge, face)?,
+        seam: seam_ends(k, objects.brep(), edge, face, has_seam)?,
     })
 }
 
@@ -1711,7 +1714,19 @@ fn boundary_edge<O: ClassObject>(
 /// that bound material: a vertex that is no pole of the face
 /// ([`crate::topology::vertex::inside_face`]), with its point and tolerance
 /// (docs/booleans.md, "Seams and poles"). `None` for an edge that is no seam.
-fn seam_ends(k: &Kernel, b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
+/// `has_seam` is the face's answer (does it have an edge with the face on both sides?):
+/// a face without one has no seam edge, and the test is skipped.
+fn seam_ends(
+    k: &Kernel,
+    b: &Brep,
+    edge: EdgeId,
+    face: FaceId,
+    has_seam: bool,
+) -> Result<Option<SeamEnds>> {
+    if !has_seam {
+        // the face has no seam edge: this edge is none
+        return Ok(None);
+    }
     k.work_counters.add_seam_check();
     if !crate::topology::edge::face_on_both_sides(b, edge, face)? {
         return Ok(None);
@@ -2031,12 +2046,15 @@ fn restore_surface_owner(
 /// Build real ordered topology views; only handle identity is caller-specific.
 /// UV computation uses the existing vertexuse port on the face's B-rep; the UV trim
 /// curves it makes that `objects` cannot resolve are added to `made_trims`.
+/// `has_seam` is the face's answer (does it have an edge with the face on both sides?):
+/// a face without one has no seam edge, and the test of each of its edges is skipped.
 fn boundary_loops<O: ClassObject>(
     k: &Kernel,
     objects: &mut impl CurveOnClassifyBrep<O>,
     made_trims: &mut Vec<(O, Curve)>,
     face: FaceId,
     cached: bool,
+    has_seam: bool,
 ) -> Result<Vec<BoundaryLoop<O>>> {
     let fu = fp2::upward_faceuse(objects.brep(), face)?
         .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's upward face use"))?;
@@ -2096,7 +2114,7 @@ fn boundary_loops<O: ClassObject>(
             };
             edges.push(BoundaryEdgeuse {
                 edgeuse: objects.edgeuse(eu),
-                edge: boundary_edge(k, objects, face, edge, false)?,
+                edge: boundary_edge(k, objects, face, edge, false, has_seam)?,
                 trim_curve,
             });
         }
@@ -2365,6 +2383,32 @@ fn reset_classification<O: ClassObject>(k: &Kernel, cc: &mut CurveClassification
     cc.reset(k, &ResetOptions::default())
 }
 
+/// Whether the face the curve is classified on may have a seam edge (an edge with the
+/// face on both sides): the caller's answer, `Some(false)` when the face has none;
+/// `true` when the caller does not know, so the seam and pole tests are made as
+/// upstream does.
+fn may_have_seam<O: ClassObject>(cc: &CurveClassification<O>) -> bool {
+    cc.face_has_seam().unwrap_or(true)
+}
+
+/// Not upstream: whether `face` has an edge with the face on both sides (a seam,
+/// [`crate::topology::edge::face_on_both_sides`]). A face without one has no seam edge
+/// and no pole (a vertex all of whose edges are seams), so the seam and pole tests of
+/// its edges and vertices can be skipped (docs/booleans.md, "Seams and poles").
+///
+/// # Errors
+///
+/// Those of [`crate::topology::face::p4::edges`] and of the face use queries.
+pub fn face_has_seam(k: &Kernel, b: &Brep, face: FaceId) -> Result<bool> {
+    for e in crate::topology::face::p4::edges(b, face, None, false, None)? {
+        k.work_counters.add_seam_scan();
+        if crate::topology::edge::face_on_both_sides(b, e, face)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// `SmCurveClassification::IntersectTSBound(this, bDoCheck3d)`, on the face's B-rep
 /// (see [`WithMadeTrimCurves`]).
 fn intersect_ts_bound<O: ClassObject>(
@@ -2393,37 +2437,38 @@ fn intersect_ts_bound<O: ClassObject>(
     let cached = !base.face_was_modified
         && base.have_t_surface_cache
         && base.face_containment_done != FaceContainment::NotDone;
-    let result = boundary_loops(k, objects, made_trims, face, cached).and_then(|loops| {
-        let visits = {
-            let surface = objects
-                .classify_surface(face)?
-                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
-            let objects_r = &*objects;
-            let cache_handle = |h: EntityRef| match h {
-                EntityRef::Vertexuse(vu) => Some(objects_r.vertexuse(vu)),
-                EntityRef::Edgeuse(eu) => Some(objects_r.edgeuse(eu)),
-                _ => None,
+    let result =
+        boundary_loops(k, objects, made_trims, face, cached, may_have_seam(cc)).and_then(|loops| {
+            let visits = {
+                let surface = objects
+                    .classify_surface(face)?
+                    .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
+                let objects_r = &*objects;
+                let cache_handle = |h: EntityRef| match h {
+                    EntityRef::Vertexuse(vu) => Some(objects_r.vertexuse(vu)),
+                    EntityRef::Edgeuse(eu) => Some(objects_r.edgeuse(eu)),
+                    _ => None,
+                };
+                let boundary = BoundaryFace {
+                    surface,
+                    loops: &loops,
+                    cache: &lease.cache,
+                    cache_handle: &cache_handle,
+                };
+                let geometry = WithMadeTrimCurves {
+                    inner: objects_r,
+                    trims: made_trims.as_slice(),
+                };
+                match cc.ts_bound_cached_visits(k, &geometry, &boundary)? {
+                    // no up-to-date trimmed cache: every vertex use and edge use of the face
+                    None => return cc.intersect_ts_bound(k, &geometry, &boundary, do_check_3d),
+                    // no work - curve is outside of the domain of the surface
+                    Some(visits) if visits.no_nodes => return Ok(()),
+                    Some(visits) => visits,
+                }
             };
-            let boundary = BoundaryFace {
-                surface,
-                loops: &loops,
-                cache: &lease.cache,
-                cache_handle: &cache_handle,
-            };
-            let geometry = WithMadeTrimCurves {
-                inner: objects_r,
-                trims: made_trims.as_slice(),
-            };
-            match cc.ts_bound_cached_visits(k, &geometry, &boundary)? {
-                // no up-to-date trimmed cache: every vertex use and edge use of the face
-                None => return cc.intersect_ts_bound(k, &geometry, &boundary, do_check_3d),
-                // no work - curve is outside of the domain of the surface
-                Some(visits) if visits.no_nodes => return Ok(()),
-                Some(visits) => visits,
-            }
-        };
-        cached_ts_bound(k, objects, made_trims, cc, face, visits, do_check_3d)
-    });
+            cached_ts_bound(k, objects, made_trims, cc, face, visits, do_check_3d)
+        });
     lease.release();
     result
 }
@@ -2499,7 +2544,7 @@ fn cached_ts_bound<O: ClassObject>(
             }
         }
         // SmTol::GetZoneTol3d(pE) as it is now
-        edgeuse.edge = boundary_edge(k, objects, face, edge, false)?;
+        edgeuse.edge = boundary_edge(k, objects, face, edge, false, may_have_seam(cc))?;
         let surface = objects
             .classify_surface(face)?
             .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
@@ -2544,7 +2589,7 @@ fn intersect_edges<O: ClassObject>(
     let rescue = clear_surface_owner(objects.brep_mut(), face)?;
     let mut views = Ok(Vec::new());
     for &edge in edges {
-        match boundary_edge(k, objects, face, edge, has_big_gaps) {
+        match boundary_edge(k, objects, face, edge, has_big_gaps, may_have_seam(cc)) {
             Ok(view) => {
                 if let Ok(v) = views.as_mut() {
                     v.push(view);
@@ -3267,6 +3312,7 @@ pub(crate) mod tests {
             &mut Vec::new(),
             f,
             false,
+            true,
         )
         .unwrap();
         assert_eq!(loops.len(), 1);
@@ -3330,6 +3376,7 @@ pub(crate) mod tests {
             &mut SnapshotObjects::new(&objects, &b, &mut copy),
             &mut Vec::new(),
             f,
+            true,
             true,
         )
         .unwrap();

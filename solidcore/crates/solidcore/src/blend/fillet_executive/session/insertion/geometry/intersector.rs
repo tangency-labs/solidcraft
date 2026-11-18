@@ -771,4 +771,9 @@ impl IntersectorBrepP3<FilletObject> for InsertionGeometry<'_> {
             .map(|lu| Self::handle(r, EntityRef::Loopuse(lu)))
             .collect())
     }
+
+    fn face_has_seam(&self, k: &Kernel, object: FilletObject) -> Result<bool> {
+        let (r, f) = fid(object)?;
+        crate::query::face::p2::face_has_seam(k, self.body(r), f)
+    }
 }

@@ -2325,6 +2325,13 @@ impl IntersectorBrepP3<H> for ArenaPair<'_> {
                 .collect(),
         )
     }
+
+    fn face_has_seam(&self, k: &Kernel, face: H) -> crate::Result<bool> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        crate::query::face::p2::face_has_seam(k, self.brep_r(face)?, fid(face))
+    }
 }
 
 impl crate::topology::proto_topology::p3::BrepGlue<H> for ArenaPair<'_> {

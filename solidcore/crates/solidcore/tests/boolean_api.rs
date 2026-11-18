@@ -1941,13 +1941,15 @@ fn polygon_spline(n: usize) -> Curve {
         let a = 2.0 * PI * (i as f64) / (n as f64);
         control.push(Point3::new(10.0 * a.cos(), 10.0 * a.sin(), 0.0));
     }
-    control.push(control[0]);
+    if let Some(first) = control.first().copied() {
+        control.push(first);
+    }
     let knots: Vec<f64> = (0..=n).map(|i| i as f64).collect();
     // the expanded knot vector of a degree-1 curve with n + 1 control points holds
     // n + 3 knots: the first and the last twice, the rest once
-    let mut mults = vec![1usize; n + 1];
-    mults[0] = 2;
-    mults[n] = 2;
+    let mults: Vec<usize> = (0..=n)
+        .map(|i| if i == 0 || i == n { 2 } else { 1 })
+        .collect();
     Curve::from(
         BSplineCurve::create_canonical(&CanonicalData {
             dim: 3,
@@ -1968,14 +1970,19 @@ fn polygon_spline(n: usize) -> Curve {
 /// not), 2 mm tall.
 fn polygon_prism(k: &mut Kernel, n: usize, up: bool) -> Brep {
     let curve = polygon_spline(n);
-    let dir = if up { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(0.0, 0.0, -1.0) };
+    let dir = if up {
+        Vec3::new(0.0, 0.0, 1.0)
+    } else {
+        Vec3::new(0.0, 0.0, -1.0)
+    };
     create_linear_sweep(k, &[Some(&curve)], dir, 2.0, true).unwrap()
 }
 
 /// The seam and pole tests a union of two prisms that share an `n`-edged face makes
 /// ([`Kernel::work_counters`]): the face is tested for a seam once, not once for every
-/// curve classified on it.
-fn seam_checks_of_a_shared_face(n: usize) -> u64 {
+/// curve classified on it. The face's own scan (the answer the classification uses) is
+/// counted apart.
+fn seam_checks_of_a_shared_face(n: usize) -> (u64, u64) {
     let mut k = Kernel::default();
     let lower = polygon_prism(&mut k, n, false);
     let upper = polygon_prism(&mut k, n, true);
@@ -1989,7 +1996,7 @@ fn seam_checks_of_a_shared_face(n: usize) -> u64 {
         "volume {volume} vs {}",
         4.0 * area
     );
-    k.work_counters.seam_checks()
+    (k.work_counters.seam_checks(), k.work_counters.seam_scans())
 }
 /// A boolean of two solids that share a many-edged face tests that face for a seam once,
 /// not once for every curve classified on it: the work grows with the edges of the face,
@@ -1997,8 +2004,11 @@ fn seam_checks_of_a_shared_face(n: usize) -> u64 {
 /// the seam and pole tests of every curve rescanning the whole face).
 #[test]
 fn a_boolean_of_two_solids_sharing_a_many_edged_face_tests_its_seams_once() {
-    let (checks16, checks32) = (seam_checks_of_a_shared_face(16), seam_checks_of_a_shared_face(32));
-    println!("16 edges: {checks16} seam checks; 32 edges: {checks32} seam checks");
+    let ((checks16, scans16), (checks32, scans32)) = (
+        seam_checks_of_a_shared_face(16),
+        seam_checks_of_a_shared_face(32),
+    );
+    println!("16 edges: {checks16} seam checks, {scans16} edges scanned; 32 edges: {checks32} seam checks, {scans32} edges scanned");
     assert!(
         checks32 <= checks16,
         "the seam tests grew with the number of curves: {checks16} for 16 edges, {checks32} for 32"

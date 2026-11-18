@@ -503,13 +503,20 @@ fn vertex_big_gap_tolerance<O: Copy>(
 
 /// Not upstream: whether `vertex` is a pole of `face`, the face around it on every side
 /// ([`crate::topology::vertex::inside_face`]); `false` where the adapter resolves either
-/// to no topology or the two lie in different B-reps.
+/// to no topology or the two lie in different B-reps. `has_seam` is the face's answer
+/// (does it have an edge with the face on both sides?): a face without one has no pole
+/// either, and the test is skipped.
 fn pole_of_face<O: ClassObject>(
+    k: &Kernel,
     geometry: &impl ClassGeometry<O>,
     vertex: O,
     face: Option<O>,
-    k: &Kernel,
+    has_seam: Option<bool>,
 ) -> Result<bool> {
+    if has_seam == Some(false) {
+        // the face has no seam edge: no vertex of it is a pole
+        return Ok(false);
+    }
     let Some(face) = face else {
         return Ok(false);
     };
@@ -931,7 +938,8 @@ impl<O: ClassObject> CurveClassification<O> {
             // whether a contact is held to the curve's region: at a pole, for every curve
             // but the face's own seam curve (checked as upstream does)
             let mut regional = false;
-            let tolerance = if pole_of_face(geometry, vertex, self.face(), k)? {
+            let tolerance = if pole_of_face(k, geometry, vertex, self.face(), self.face_has_seam())?
+            {
                 let working = match &wrapped {
                     Some(lifted) => lifted,
                     None => self.curve_geometry(geometry)?,

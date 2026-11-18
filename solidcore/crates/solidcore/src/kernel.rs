@@ -172,6 +172,7 @@ pub struct WorkCounters {
     mass_iso_evaluations: Cell<u64>,
     coincident_curves_classified: Cell<u64>,
     seam_checks: Cell<u64>,
+    seam_scans: Cell<u64>,
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
     target_record_seedings: Cell<u64>,
@@ -292,6 +293,14 @@ impl WorkCounters {
         self.seam_checks.get()
     }
 
+    /// The edges of a face tested for being a seam of it, in the face's own scan for a
+    /// seam (the answer the curve classification uses for the whole face). Not upstream
+    /// (the fork's counters have none).
+    #[must_use]
+    pub fn seam_scans(&self) -> u64 {
+        self.seam_scans.get()
+    }
+
     /// Edge curves the loop containment test (`query::loop::contains_uv_point`) drops the
     /// test point onto: those whose box, grown by the edge's tolerance, reaches the point.
     /// Not upstream (upstream drops it onto every edge of the loop it walks).
@@ -374,6 +383,7 @@ impl WorkCounters {
         self.mass_iso_evaluations.set(0);
         self.coincident_curves_classified.set(0);
         self.seam_checks.set(0);
+        self.seam_scans.set(0);
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
         self.target_record_seedings.set(0);
@@ -458,7 +468,14 @@ impl WorkCounters {
     /// Counts one seam or pole test of a face's edges or vertices (an edge tested for
     /// being a seam of the face, a vertex tested for being a pole of it).
     pub(crate) fn add_seam_check(&self) {
-        self.seam_checks.set(self.seam_checks.get().saturating_add(1));
+        self.seam_checks
+            .set(self.seam_checks.get().saturating_add(1));
+    }
+
+    /// Counts one edge of a face tested for being a seam of it, in the face's own scan
+    /// for a seam (the answer the curve classification then uses for the whole face).
+    pub(crate) fn add_seam_scan(&self) {
+        self.seam_scans.set(self.seam_scans.get().saturating_add(1));
     }
 
     /// Counts one drop of a containment test's point onto an edge curve.

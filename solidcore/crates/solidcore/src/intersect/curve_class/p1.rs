@@ -594,6 +594,12 @@ pub struct CurveClassification<O> {
     /// where it meets a seam or a pole (docs/booleans.md, "Seams and poles"). `None` until
     /// it is set or first read ([`CurveClassification::source_reach_in`]).
     pub(super) source_reach: Option<SourceReach>,
+    /// Not upstream: whether the face the curve is classified on has an edge with the
+    /// face on both sides (a seam). A face without one has no seam edge and no pole (a
+    /// vertex all of whose edges are seams), so the seam and pole tests of its edges and
+    /// vertices are skipped (docs/booleans.md, "Seams and poles"). `None` when the
+    /// caller does not know: the tests are then made as upstream does.
+    pub(super) face_has_seam: Option<bool>,
 }
 
 /// Not upstream: how far across itself a classified curve is known (docs/booleans.md,
@@ -739,6 +745,7 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_fillets: false,
             ok_to_set_tolerance: true,
             source_reach: None,
+            face_has_seam: None,
             tgt_loops_only: false,
             tgt_loops: Vec::new(),
             other_classification: None,
@@ -804,6 +811,7 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_fillets: self.doing_fillets,
             ok_to_set_tolerance: self.ok_to_set_tolerance,
             source_reach: self.source_reach,
+            face_has_seam: self.face_has_seam,
             tgt_loops_only: self.tgt_loops_only,
             tgt_loops,
             other_classification: self.other_classification.map(&mut *f).transpose()?,
@@ -1060,6 +1068,23 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Not upstream: sets how far across itself the classified curve is known.
     pub fn set_source_reach(&mut self, source_reach: SourceReach) {
         self.source_reach = Some(source_reach);
+    }
+
+    /// Not upstream: whether the face the curve is classified on has an edge with the
+    /// face on both sides (a seam), once the caller has said (see the field). `None`
+    /// when the caller does not know: the seam and pole tests are then made as upstream
+    /// does.
+    #[must_use]
+    pub const fn face_has_seam(&self) -> Option<bool> {
+        self.face_has_seam
+    }
+
+    /// Not upstream: says whether the face the curve is classified on has an edge with
+    /// the face on both sides (a seam). The caller that knows the face's edges says so
+    /// once, and the seam and pole tests of the face's edges and vertices are then made
+    /// for the face instead of for every curve.
+    pub fn set_face_has_seam(&mut self, face_has_seam: Option<bool>) {
+        self.face_has_seam = face_has_seam;
     }
 
     /// Not upstream: how far across itself the classified curve `working` is known

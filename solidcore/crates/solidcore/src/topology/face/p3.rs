@@ -291,21 +291,19 @@ fn point_3d_classify(
 /// over the sine of the least angle between the surfaces along it, enclosed
 /// ([`intersection_reach`]), or unbounded where none is proved. Read only where it
 /// decides something, a face with a seam; a face without one meets the curve at its
-/// boundary edges, within both tolerances.
+/// boundary edges, within both tolerances. `has_seam` is the pair of faces' answer (does
+/// either of them have an edge with the face on both sides?), told by the caller once
+/// for the pair.
 fn intersection_curve_reach(
     k: &Kernel,
     faces: [(&Brep, FaceId); 2],
     curve: &Curve,
     interval: &Extent1d,
     tolerance: f64,
+    has_seam: bool,
 ) -> Result<SourceReach> {
-    let mut seam = false;
-    for (b, f) in faces {
-        for e in face_edges(b, f)? {
-            seam = seam || edge::face_on_both_sides(b, e, f)?;
-        }
-    }
-    if !seam {
+    if !has_seam {
+        // neither face has a seam edge: the curve meets no seam
         return Ok(SourceReach::Unbounded);
     }
     let [(b1, f1), (b2, f2)] = faces;
@@ -2797,6 +2795,15 @@ pub fn face_intersect_breps_cached(
             ii += 1;
         }
     }
+    // (not upstream) whether each of the two faces has an edge with the face on both
+    // sides (a seam): a face without one has no seam edge and no pole, so the seam and
+    // pole tests of its edges and vertices are made once for the face and not once for
+    // every curve. The loop below only makes queries on the faces (their UV trim
+    // curves, their gap caches and their tolerances), so the answer holds for it.
+    let face_seams = [
+        qf2::face_has_seam(k, &*this_brep, f)?,
+        qf2::face_has_seam(k, other_brep.as_deref().unwrap_or(&*this_brep), other)?,
+    ];
     for (ii, curve) in curves_3d.iter().enumerate() {
         let curve_type = curve_types
             .get(ii)
@@ -2835,6 +2842,8 @@ pub fn face_intersect_breps_cached(
         let ivl = curve.natural_interval();
         let mut cc1 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, zone_tol)?;
         let mut cc2 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, zone_tol)?;
+        cc1.set_face_has_seam(Some(face_seams[0]));
+        cc2.set_face_has_seam(Some(face_seams[1]));
         if !curves_are_edges {
             let reach = intersection_curve_reach(
                 k,
@@ -2845,6 +2854,7 @@ pub fn face_intersect_breps_cached(
                 curve,
                 &ivl,
                 xsect_tol3d(k, zone_tol),
+                face_seams[0] || face_seams[1],
             )?;
             cc1.set_source_reach(reach);
             cc2.set_source_reach(reach);
