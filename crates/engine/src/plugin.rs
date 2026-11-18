@@ -2,16 +2,32 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
+    API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
     MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
 };
-use craft_plugin::{CommandSchema, HostError, PluginHost};
+use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 static PROCESS_HOST_LIMITS: std::sync::OnceLock<HostLimits> = std::sync::OnceLock::new();
+/// The command line's and headless MCP's plugins: the plugins folder of every session of the process
+/// (`None`: the per-user one) and whether its grants are kept in that folder's grant store between
+/// runs. Unset: the per-user folder, with grants that last for the session.
+static PROCESS_PLUGINS: std::sync::OnceLock<(Option<PathBuf>, bool)> = std::sync::OnceLock::new();
+/// Make every session this process opens from now on use the plugins folder `plugins` (`None`: the
+/// per-user one) and, with `keep_grants`, keep approved grants in that folder's grant store and read
+/// them back there, as the desktop app does. Without it, approvals last for the session, as before
+/// there was a store. The command line and headless MCP call this once, before any session.
+pub fn configure_process_plugins(plugins: Option<PathBuf>, keep_grants: bool) -> Result<()> {
+    if let Some(dir) = &plugins
+        && !dir.is_absolute()
+    {
+        return Err(error("the plugins folder must be an absolute path"));
+    }
+    PROCESS_PLUGINS.set((plugins, keep_grants)).map_err(|_| error("the process plugins folder is already configured"))
+}
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     limits.validate()?;
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
@@ -56,6 +72,10 @@ pub struct AppState {
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
+    /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
+    /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
+    /// grants live only in this session, or the app keeps them itself (the desktop app).
+    pub stored: Option<grant_store::Synced>,
 }
 
 impl AppState {
@@ -65,6 +85,43 @@ impl AppState {
             return None;
         }
         self.plugins_dir.clone().or_else(|| crate::recovery::data_dir().map(|p| p.join("plugins")))
+    }
+
+    /// A new session's plugin state: the process's plugins folder ([`configure_process_plugins`]),
+    /// and when the process keeps grants between runs, one that reads and writes its grant store.
+    pub fn for_process() -> Self {
+        match PROCESS_PLUGINS.get() {
+            Some((plugins, keep)) => Self { plugins_dir: plugins.clone(), stored: keep.then(Default::default), ..Default::default() },
+            None => Self::default(),
+        }
+    }
+
+    /// Take in grants another program stored or revoked since this session last looked. Nothing
+    /// to do unless this session keeps its grants in the store.
+    pub fn refresh_stored(&mut self) {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return };
+        if let Some(synced) = self.stored.as_mut() {
+            synced.refresh(&dir, &mut self.grants);
+        }
+    }
+
+    /// Delete plugin `id`'s record from the store, when this session keeps its grants there, even
+    /// one this session never read: a removed or revoked plugin leaves no approval behind.
+    pub fn forget_stored(&mut self, id: &str) -> Result<()> {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return Ok(()) };
+        match self.stored.as_mut() {
+            Some(synced) => synced.forget(&dir, id).map_err(|e| error(format!("could not take back the approvals for later sessions: {e}"))),
+            None => Ok(()),
+        }
+    }
+
+    /// Write this session's changed grants to the store, when it keeps them there.
+    pub fn persist_stored(&mut self) -> Result<()> {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return Ok(()) };
+        match self.stored.as_mut() {
+            Some(synced) => synced.persist(&dir, &self.grants).map_err(|e| error(format!("could not save the approvals for later sessions: {e}"))),
+            None => Ok(()),
+        }
     }
 
     /// Discovery must not replace a package path explicitly selected by inspection.
@@ -185,6 +242,19 @@ pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimit
     limits
 }
 
+/// Take back what was approved for plugin `id`, keeping it installed: it then runs with nothing
+/// granted until it is installed again with approvals. Whether there was anything to take back.
+pub fn revoke(s: &mut Session, id: &str) -> Result<bool> {
+    if !valid_id(id) {
+        return Err(HostError::InvalidInput { field: "id".into(), reason: "invalid plugin id".into() }.into());
+    }
+    s.plugin_state.refresh_stored();
+    let revoked = s.plugin_state.grants.remove(id).is_some();
+    s.plugin_state.persist_stored()?;
+    s.plugin_state.forget_stored(id)?;
+    Ok(revoked)
+}
+
 /// The most files and folders one plugin folder holds; install and removal both stop there.
 pub(super) const MAX_FILES: usize = 1024;
 
@@ -197,7 +267,14 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// Runs `entry` of `package`. A failure starts with the plugin's name.
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+    let name = package.manifest.name.clone();
+    run_package(session, package, entry, params).map_err(messages::named(&name, None))
+}
+
+fn run_package(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+    session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
     }
@@ -222,8 +299,15 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
-        let host =
-            SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new(), evaluation: None };
+        let host = SolidCraftHost {
+            session: scratch,
+            transaction: None,
+            sketch_exits: Vec::new(),
+            view: None,
+            groups,
+            file_folders: Vec::new(),
+            evaluation: None,
+        };
         let file_folders = host
             .granted_folders()
             .into_iter()
@@ -242,7 +326,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
                 session.echo(message);
             }
         }
-        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, param_warnings: vec![] })
+        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, view: host.view, param_warnings: vec![] })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
@@ -251,14 +335,18 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+pub mod check;
+pub mod grant_store;
 mod import;
 pub mod install;
+pub mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
 pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
 
@@ -267,12 +355,32 @@ pub struct SolidCraftHost {
     pub session: Session,
     transaction: Option<Session>,
     sketch_exits: Vec<Option<u64>>,
+    /// The last view command in this run. Cleared on rollback, like `sketch_exits`.
+    /// `accept_computed` does not copy `session.camera`, so the window applies this beside that.
+    view: Option<crate::schema::plugin::PluginView>,
     /// Granted sensitive command groups, for this call's manifest.
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
     /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
     evaluation: Option<Box<Session>>,
+}
+
+impl SolidCraftHost {
+    /// Keep the last view command. `view.fit` and `view.home` frame in the window.
+    /// `view.navigate` does not store a camera; its reply is what the navigator applies.
+    /// Any other command that changes `session.camera` keeps that camera.
+    fn note_view(&mut self, name: &str, reply: &Value, before: Option<solidcraft_viewport::Camera>, after: Option<solidcraft_viewport::Camera>) {
+        if matches!(name, "view.fit" | "view.home") {
+            self.view = Some(if name == "view.home" { crate::schema::plugin::PluginView::Home } else { crate::schema::plugin::PluginView::Fit });
+        } else if name == "view.navigate" {
+            self.view = Some(crate::schema::plugin::PluginView::Navigate { reply: reply.clone() });
+        } else if after != before
+            && let Ok(camera) = serde_json::to_value(after)
+        {
+            self.view = Some(crate::schema::plugin::PluginView::Camera { camera });
+        }
+    }
 }
 
 /// The commands an importer may run on its own design to check it: they read the model, and
@@ -327,6 +435,7 @@ impl PluginHost for SolidCraftHost {
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
         // Even implicit font and linked-design reads have no authority from a command grant.
@@ -340,9 +449,11 @@ impl PluginHost for SolidCraftHost {
         {
             return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
         }
+        let camera_after = s.camera;
         if matches!(name, "sketch.finish" | "sketch.cancel") {
             self.sketch_exits.push(reply.get("sketch").and_then(Value::as_u64));
         }
+        self.note_view(name, &reply, camera_before, camera_after);
         Ok(reply)
     }
     fn begin_transaction(&mut self) -> craft_plugin::Result<()> {
@@ -373,6 +484,7 @@ impl PluginHost for SolidCraftHost {
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
         self.sketch_exits.clear();
+        self.view = None;
         Ok(())
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {

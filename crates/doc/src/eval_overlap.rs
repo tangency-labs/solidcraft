@@ -251,7 +251,7 @@ mod tests {
         assert_eq!(work.reused_checks, 1);
         assert_eq!(detached.len(), 1);
         assert_eq!(detached[0].0, "Other");
-        assert!(super::super::run_kept(detached).is_ok(), "the other result still runs its full check");
+        assert!(super::super::run_kept(detached, Vec::new()).is_ok(), "the other result still runs its full check");
     }
 
     /// Keeping a body's name cannot validate a later output that has another shape record.
@@ -268,7 +268,7 @@ mod tests {
         let work = cost_tests::counted(|| detached = checks().detach(&ModelState::default(), &after));
         assert_eq!(work.detached_checks, 1);
         assert_eq!(work.reused_checks, 0);
-        assert!(super::super::run_kept(detached.unwrap()).is_ok());
+        assert!(super::super::run_kept(detached.unwrap(), Vec::new()).is_ok());
     }
 
     /// A check that ends after the evaluation went on, with `r`.

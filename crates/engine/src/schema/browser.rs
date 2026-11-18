@@ -954,6 +954,11 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
+/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserToggleParams {}
+
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
 /// change; the camera is not. With `isolate`, everything else is hidden.
@@ -1275,7 +1280,9 @@ impl JsonSchema for ViewCamera {
                 "yaw": {"description": "Turn about the up axis; 0 looks along +Y, from the front.", "type": "number"},
                 "pitch": {"description": "Elevation of the eye above the ground plane.", "type": "number"},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
-                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0}
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "default": 0.0},
+                "roll": {"description": "Rotation about the view direction, in radians. Default: 0.", "type": "number", "default": 0.0},
+                "up": {"description": "The world axis pointing up. Default: z.", "type": "string", "enum": ["z", "y"], "default": "z"}
             },
             "required": ["target", "yaw", "pitch", "distance"]
         })
@@ -1289,8 +1296,8 @@ impl JsonSchema for ViewCamera {
 pub struct ViewSaveParams {
     // Optional in the type and required in the schema (`camera_required`): left out, the handler
     // refuses it with its own message.
-    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?}`, finite, with a
-    /// distance above 0.
+    /// The camera to keep: `{target: [x, y, z], yaw, pitch, distance, fov?, roll?, up?}`,
+    /// finite, with a distance above 0. Up is "z" or "y".
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ViewCamera")]
     pub camera: Option<ViewCamera>,
@@ -1379,6 +1386,11 @@ pub struct ViewEntry {
     pub distance: f64,
     /// Vertical field of view in radians; 0 is orthographic.
     pub fov: f64,
+    /// Rotation about the view direction in radians.
+    pub roll: f64,
+    /// World axis pointing up, serialized as "z" or "y".
+    #[schemars(with = "String")]
+    pub up: solidcraft_viewport::UpAxis,
 }
 
 /// What `view.list` returns.
@@ -1594,6 +1606,28 @@ pub struct RedefineSketchParams {
     /// component's own coordinates. Default: world. A named plane or a face takes none.
     #[serde(default)]
     pub frame: Option<PlaneFrame>,
+    /// Not on a face: `true`, `"x"` or `"y"` turns the new plane half way about that in-plane axis
+    /// (as `sketch.create`'s `flip`), `false` keeps the new plane's own side. Default: when the new
+    /// plane faces the other way, it is turned so the sketch keeps facing the way it did and stays
+    /// upright (the reply's `flip` says about which axis).
+    #[serde(default)]
+    pub flip: Option<SketchFlip>,
+}
+
+/// A sketch plane's half turn: `true` or either in-plane axis.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SketchFlip {
+    Flag(bool),
+    Axis(FlipAxis),
+}
+
+/// The in-plane axis a half turn is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlipAxis {
+    X,
+    Y,
 }
 
 /// How a redefined sketch is attached to its plane: `exact_face` (to a face of a body, which it
@@ -1614,6 +1648,9 @@ pub struct RedefineSketchResult {
     pub sketch: u64,
     /// How it is attached now.
     pub attachment: Option<RedefineAttachment>,
+    /// When the new plane was turned half way: the in-plane axis it was turned about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip: Option<FlipAxis>,
     /// For an explicit plane: the coordinates it was read in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<PlaneFrame>,

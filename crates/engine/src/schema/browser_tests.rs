@@ -351,7 +351,7 @@ fn view_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ViewDeleteParams>(), &["view"]);
     assert_keys(input_schema_for::<ViewListParams>(), &[]);
     assert_keys(input_schema_for::<ViewApplyParams>(), &["camera", "view"]);
-    assert_keys(input_schema_for::<RedefineSketchParams>(), &["author_path", "frame", "offset", "plane", "sketch"]);
+    assert_keys(input_schema_for::<RedefineSketchParams>(), &["author_path", "flip", "frame", "offset", "plane", "sketch"]);
 }
 
 /// Each call has one problem the handler already refuses: strict gives its message. The session
@@ -491,6 +491,8 @@ fn the_check_reads_each_key_as_the_handler_does() {
     assert_eq!(issues("view.apply", json!({})), none);
     // view.save.
     assert_eq!(issues("view.save", json!({"camera": CAMERA()})), none);
+    assert_eq!(issues("view.save", json!({"camera": cam(json!({"roll": 0.6, "up": "y"}))})), none);
+    assert_eq!(issues("view.save", json!({"camera": cam(json!({"up": "x"}))})).len(), 1);
     assert_eq!(issues("view.save", json!({"camera": CAMERA(), "name": "  "})), none);
     assert_eq!(issues("view.save", json!({"camera": CAMERA(), "name": null})), none);
     // Not text: the handler reads it as left out; the check reports it.

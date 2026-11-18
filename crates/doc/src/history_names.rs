@@ -103,15 +103,36 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
     let mut named: Vec<Option<Named>> = h.faces.iter().map(|f| from_origins(f, &operands, fid)).collect();
     if named.iter().any(Option::is_none) {
         let geometric = crate::naming::geometric_names(b, o, named.len());
-        for (slot, name) in named.iter_mut().zip(geometric) {
-            if slot.is_none() {
-                *slot = Some(Named { name: crate::naming::strip_piece(&name).to_string(), verified: false, ..Named::default() });
+        // A face only a tool without roles made (a thread's groove) is named from geometry, after
+        // the face of the body before it that it lies on or beside. Where exact history already
+        // gives that name to a face of this body, the guess would share it with the face that owns
+        // it and leave both without a name of their own (the untouched end face of a threaded
+        // part, #18460): the tool's face is named by its place instead, still unverified.
+        let exact: BTreeSet<String> = named.iter().flatten().map(|n| crate::naming::strip_piece(&n.name).to_string()).collect();
+        for (fi, (slot, name)) in named.iter_mut().zip(geometric).enumerate() {
+            if slot.is_some() {
+                continue;
             }
+            let name = crate::naming::strip_piece(&name);
+            let taken = exact.contains(name) && h.faces.get(fi).is_some_and(|face| built_by_unnamed_tool(face, &operands));
+            let name = if taken { format!("F{fid}:face:{fi}") } else { name.to_string() };
+            *slot = Some(Named { name, verified: false, ..Named::default() });
         }
     }
     let named: Vec<Named> = named.into_iter().collect::<Option<_>>()?;
     let centres = || crate::naming::face_centres(b);
     Some(qualify_at(named, &adjacency(h), by_place(&o.feature, &centres)))
+}
+
+/// Whether `face` came only from faces of tools the feature built whose roles are not known.
+fn built_by_unnamed_tool(face: &FaceProv, operands: &[OperandNames]) -> bool {
+    !face.origins.is_empty()
+        && face.origins.iter().all(|origin| match *origin {
+            FaceOrigin::Face { operand, face } => {
+                operands.get(operand).is_some_and(|op| matches!(op.operand, Operand::Made(roles) if roles.get(face).is_none_or(Vec::is_empty)))
+            }
+            _ => false,
+        })
 }
 
 /// Pairs of faces that share an edge, from a history.
@@ -360,16 +381,20 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
     };
     let n = named.len();
     let mut bounds: Vec<BTreeSet<String>> = vec![BTreeSet::new(); n];
+    // A face named only by its place in the kernel's order (`F7:face:12`, unverified) does not
+    // tell its neighbours apart: the next evaluation can give that number to another face, and
+    // a piece qualified by it would change its name, or take another's, while still exact.
+    let tells_apart = |x: &Named, stem: &str| x.verified || !named_by_index(stem);
     for &(a, b) in adjacent {
         let (Some(na), Some(nb)) = (named.get(a), named.get(b)) else { continue };
         let (sa, sb) = (crate::naming::strip_piece(&na.name), crate::naming::strip_piece(&nb.name));
         if a == b || sa == sb {
             continue;
         }
-        if let Some(set) = bounds.get_mut(a) {
+        if let Some(set) = bounds.get_mut(a).filter(|_| tells_apart(nb, sb)) {
             set.insert(sb.to_string());
         }
-        if let Some(set) = bounds.get_mut(b) {
+        if let Some(set) = bounds.get_mut(b).filter(|_| tells_apart(na, sa)) {
             set.insert(sa.to_string());
         }
     }
@@ -474,6 +499,11 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
         .map(|((x, bounds), verified)| FaceInfo { aliases: x.aliases, synonyms: x.synonyms, bounds, verified })
         .collect();
     Names { faces: Arc::new(names), info }
+}
+
+/// Whether `stem` names a face by its index alone (`F7:face:12`, `Body1:face:3`).
+fn named_by_index(stem: &str) -> bool {
+    stem.rsplit_once(":face:").is_some_and(|(_, index)| !index.is_empty() && index.bytes().all(|c| c.is_ascii_digit()))
 }
 
 /// The most bytes a face name may take: a command takes a face name of at most this many
