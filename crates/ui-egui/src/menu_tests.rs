@@ -2272,7 +2272,11 @@ fn export_from_a_selected_browser_body_includes_all_selected_bodies() {
         assert_eq!(export.id, "ui.export");
         assert_eq!(export.params.as_ref().unwrap()["bodies"], json!(expected), "clicked {clicked}, selected {selected:?}");
         let mesh = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Save As Mesh");
-        assert_eq!(export.params.as_ref().unwrap()["bodies"], mesh.params.as_ref().unwrap()["bodies"], "Export and Save As Mesh target the same bodies");
+        assert_eq!(
+            export.params.as_ref().unwrap()["bodies"],
+            mesh.params.as_ref().unwrap()["bodies"],
+            "Export and Save As Mesh target the same bodies"
+        );
     }
     let mut app = appearance_selection_app();
     app.run("select.set", json!({"items":[{"type":"body","name":"Two"},{"type":"body","name":"One"}]})).unwrap();
