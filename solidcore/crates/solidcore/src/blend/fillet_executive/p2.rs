@@ -1384,10 +1384,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if let Some(edge) = start_edge {
                 // fork 873c7c9 (SolidCraft change): GetFilletSolverOfEdge returns NULL
                 // when GetEdgeuses fails
-                let pass_on = k.fixes.fillet_statuses_pass_on;
                 fs = self
                     .fillet_solver_of_edge_with(edge, |e| match access.smooth_edge_edgeuses(e) {
-                        Err(err) if pass_on && !err.is_unported_or_cancelled() => Ok(Vec::new()),
+                        Err(err) if !err.is_unported_or_cancelled() => Ok(Vec::new()),
                         r => r,
                     })?
                     .ok_or_else(|| null!("the edge's solver"))?;
@@ -1694,27 +1693,6 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
-        Self::new_with_fixes(
-            access,
-            fs,
-            rail_index,
-            side_eu,
-            &crate::kernel::UpstreamFixes::default(),
-        )
-    }
-
-    /// Constructs a radius change with the caller's upstream fixes. A failed setup is
-    /// reported before the caller starts filleting (UB-252).
-    pub fn new_with_fixes<A>(
-        access: &mut A,
-        fs: O,
-        rail_index: usize,
-        side_eu: O,
-        fixes: &crate::kernel::UpstreamFixes,
-    ) -> Result<Self>
-    where
-        A: ExecutiveAccess<O> + ?Sized,
-    {
         let mut change = Self {
             saved_bsp: None,
             start_rad: 0.0,
@@ -1724,8 +1702,8 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
             rail_idx: rail_index,
         };
         // fork 873c7c9 SERs inside SetUp (its constructor still cannot report; here the
-        // status reaches the caller)
-        change.set_up_with(access, fixes.fillet_statuses_pass_on)?;
+        // status reaches the caller, WR-661)
+        change.set_up(access)?;
         Ok(change)
     }
 
@@ -1739,15 +1717,6 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
     /// `SM_ERR_NULL_POINTER` for a missing edge use or owning edge; those of the law
     /// evaluation (`SmFilletLaw::Evaluate`) and the constant law curve.
     pub fn set_up<A>(&mut self, access: &mut A) -> Result<()>
-    where
-        A: ExecutiveAccess<O> + ?Sized,
-    {
-        self.set_up_with(access, false)
-    }
-
-    /// [`Self::set_up`]; with `pass_on` the constant law curve's re-parameterization
-    /// status is returned (fork 873c7c9 `SER`) instead of ignored.
-    fn set_up_with<A>(&mut self, access: &mut A, pass_on: bool) -> Result<()>
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
@@ -1841,11 +1810,8 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
                 Point3::new(end_rad, 1.0, 0.0),
                 Point3::new(end_rad, 2.0, 0.0),
             )?;
-            // fork 873c7c9 passes this on (SER)
-            ignored(crate::error::passed_on(
-                const_bsp.edit_parameterization(&unit_ivl),
-                pass_on,
-            )?)?;
+            // (status ignored upstream; fork 873c7c9 passes it on, SER, as does this)
+            const_bsp.edit_parameterization(&unit_ivl)?;
 
             let vrfs = access
                 .variable_radius_solver_mut(self.fs)?
@@ -1942,32 +1908,7 @@ where
     O: ClassObject + SolutionObject + Ord,
     A: ExecutiveAccess<O> + ?Sized,
 {
-    with_temporary_radius_change_with_fixes(
-        access,
-        fs,
-        rail_index,
-        side_eu,
-        &crate::kernel::UpstreamFixes::default(),
-        body,
-    )
-}
-
-/// Runs a temporary radius scope using the caller's upstream fix policy.
-/// A setup failure returns before `body`.
-/// A completed setup is reverted even when `body` fails.
-pub fn with_temporary_radius_change_with_fixes<O, A, T>(
-    access: &mut A,
-    fs: O,
-    rail_index: usize,
-    side_eu: O,
-    fixes: &crate::kernel::UpstreamFixes,
-    body: impl FnOnce(&mut A) -> Result<T>,
-) -> Result<T>
-where
-    O: ClassObject + SolutionObject + Ord,
-    A: ExecutiveAccess<O> + ?Sized,
-{
-    let change = TemporaryRadiusChange::new_with_fixes(access, fs, rail_index, side_eu, fixes)?;
+    let change = TemporaryRadiusChange::new(access, fs, rail_index, side_eu)?;
     let result = body(access);
     let reverted = change.revert(access);
     match result {

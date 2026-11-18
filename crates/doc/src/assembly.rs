@@ -29,6 +29,18 @@ pub fn mat_mul(a: &Mat, b: &Mat) -> Mat {
     r
 }
 
+/// How much `m` scales a volume: the size of the determinant of its linear part (1 for a rigid
+/// placement).
+pub fn mat_volume_scale(m: &Mat) -> f64 {
+    let c = |i: usize| m.get(i).map_or(Vec3::ZERO, |col| Vec3::new(col[0], col[1], col[2]));
+    c(0).dot(c(1).cross(c(2))).abs()
+}
+
+/// Why an assembly too large to walk whole is refused.
+pub(crate) fn too_many_placements() -> crate::DocError {
+    crate::DocError::Invalid(format!("the assembly is deeper than {MAX_PLACEMENT_DEPTH} levels or has more than {MAX_PLACEMENTS} placements"))
+}
+
 pub fn apply_point(m: &Mat, p: Vec3) -> Vec3 {
     Vec3::new(
         m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + m[3][0],
@@ -43,6 +55,11 @@ pub fn apply_vector(m: &Mat, v: Vec3) -> Vec3 {
         m[0][1] * v.x + m[1][1] * v.y + m[2][1] * v.z,
         m[0][2] * v.x + m[1][2] * v.y + m[2][2] * v.z,
     )
+}
+
+/// `p` carried by `m`: `None` when `m` flattens it.
+pub fn map_plane(m: &Mat, p: &Plane) -> Option<Plane> {
+    Plane::new(apply_point(m, p.origin), apply_vector(m, p.x), apply_vector(m, p.y))
 }
 
 pub fn is_identity(m: &Mat) -> bool {
@@ -202,6 +219,10 @@ pub struct Occurrence {
     /// Grounded occurrences don't move.
     #[serde(default)]
     pub grounded: bool,
+    /// How this occurrence counts in the bill of materials, in place of its component's type
+    /// (`None`: as its component).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bom_type: Option<BomType>,
     /// Moves whose translation was typed as expressions over the design's parameters, which the
     /// occurrence follows when they change (oldest first; none in older designs).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -214,7 +235,8 @@ fn identity() -> Mat {
 
 /// How a component counts in the bill of materials of an assembly it is placed in. It is a part
 /// property (the `bom_type` key of the component's [`Metadata`](crate::Metadata)); a component
-/// without one is [`BomType::Normal`].
+/// without one is [`BomType::Normal`]. One occurrence can count as another type
+/// ([`Occurrence::bom_type`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BomType {
@@ -380,21 +402,16 @@ impl ExpressedMove {
 pub const MAX_PLACEMENT_DEPTH: usize = 64;
 pub const MAX_PLACEMENTS: usize = 100_000;
 
-fn map_plane(m: &Mat, p: &Plane) -> Plane {
-    let (o, x, y) = (apply_point(m, p.origin), apply_vector(m, p.x), apply_vector(m, p.y));
-    Plane::new(o, x, y).unwrap_or(*p)
-}
-
 fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
     match p {
-        PlaneRef::Custom { plane } => *plane = map_plane(m, plane),
+        PlaneRef::Custom { plane } => *plane = map_plane(m, plane).unwrap_or(*plane),
         PlaneRef::Placed { origin, x_dir, y_dir } => {
             map_point_expr(m, origin);
             *x_dir = apply_vector(m, *x_dir);
             *y_dir = apply_vector(m, *y_dir);
         }
         PlaneRef::Face { plane, at, .. } => {
-            *plane = map_plane(m, plane);
+            *plane = map_plane(m, plane).unwrap_or(*plane);
             *at = apply_point(m, *at);
         }
         PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => map_plane_ref(m, base),
@@ -519,6 +536,22 @@ impl Document {
         self.occurrences.iter().find(|o| o.component == component)
     }
 
+    /// The bill of materials type each occurrence counts as, in the order of `occurrences`: its
+    /// own ([`Occurrence::bom_type`]), else its component's. Components are looked up once.
+    pub fn occurrence_bom_types(&self) -> Vec<BomType> {
+        let types: std::collections::HashMap<u64, BomType> =
+            self.components.iter().map(|c| (c.id, c.metadata.bom_type())).filter(|(_, t)| *t != BomType::Normal).collect();
+        self.occurrences.iter().map(|o| o.bom_type.or_else(|| types.get(&o.component).copied()).unwrap_or_default()).collect()
+    }
+
+    /// The occurrences that count as reference ([`Document::occurrence_bom_types`]). A body placed
+    /// through any of them is a reference part: the bill of materials counts nothing inside a
+    /// reference, and a drawing draws all of it as reference.
+    pub fn reference_occurrences(&self) -> std::collections::HashSet<u64> {
+        let types = self.occurrences.iter().zip(self.occurrence_bom_types());
+        types.filter(|(_, bom_type)| *bom_type == BomType::Reference).map(|(o, _)| o.id).collect()
+    }
+
     /// World transform of a component's frame (through its first occurrence and its parents').
     pub fn component_transform(&self, component: u64) -> Mat {
         transform_through(component, |c| self.occurrence_of(c))
@@ -549,6 +582,45 @@ impl Document {
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
         crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
+    }
+
+    /// Whether [`Document::placements`] reaches every placement. Its walk stops at
+    /// [`MAX_PLACEMENTS`], and a branch past [`MAX_PLACEMENT_DEPTH`] levels, so a placement it
+    /// holds may have occurrences it never walked; the walk is whole when none does.
+    pub fn placements_complete(&self) -> bool {
+        let mut children = std::collections::HashMap::<u64, usize>::new();
+        for o in &self.occurrences {
+            *children.entry(o.parent).or_default() += 1;
+        }
+        let walk = self.placements();
+        let reached = walk.iter().fold(0usize, |n, (c, _, _)| n.saturating_add(children.get(c).copied().unwrap_or(0)));
+        walk.len() == reached.saturating_add(1)
+    }
+
+    /// The placement `path` of `component` at `world`, and every placement below it: (component,
+    /// occurrence path ids, world transform), the start first. Unlike [`Self::placements`], which
+    /// stops a branch where the display does, a larger assembly is refused, never walked in part:
+    /// for totals that must cover all of it (physical properties).
+    pub fn placements_below(&self, component: u64, path: &[u64], world: Mat) -> crate::Result<Vec<(u64, Vec<u64>, Mat)>> {
+        let mut children: std::collections::HashMap<u64, Vec<&Occurrence>> = std::collections::HashMap::new();
+        for o in &self.occurrences {
+            children.entry(o.parent).or_default().push(o);
+        }
+        let mut out = vec![(component, path.to_vec(), world)];
+        let mut stack = vec![(component, path.to_vec(), world)];
+        while let Some((parent, path, world)) = stack.pop() {
+            for o in children.get(&parent).into_iter().flatten() {
+                if path.len() >= MAX_PLACEMENT_DEPTH || out.len() > MAX_PLACEMENTS {
+                    return Err(too_many_placements());
+                }
+                let mut child = path.clone();
+                child.push(o.id);
+                let w = mat_mul(&world, &o.transform);
+                out.push((o.component, child.clone(), w));
+                stack.push((o.component, child, w));
+            }
+        }
+        Ok(out)
     }
 
     /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a
@@ -615,6 +687,21 @@ impl Document {
             }
         }
         false
+    }
+
+    /// The virtual components that hold something, by id: a feature (a sketch, a body's, a moved
+    /// body's) or a placed component. A virtual component holds nothing ([`crate::metadata::VIRTUAL`]):
+    /// the engine refuses any change that puts something in one.
+    pub fn virtual_holding(&self) -> Vec<u64> {
+        let virtuals: std::collections::HashSet<u64> = self.components.iter().filter(|c| c.metadata.is_virtual()).map(|c| c.id).collect();
+        if virtuals.is_empty() {
+            return Vec::new();
+        }
+        let mut held: Vec<u64> =
+            self.features.iter().map(|f| f.component).chain(self.occurrences.iter().map(|o| o.parent)).filter(|id| virtuals.contains(id)).collect();
+        held.sort_unstable();
+        held.dedup();
+        held
     }
 
     /// Is `c` (or one of its ancestors) marked out of the History bar (#10393)? The root (0)
@@ -742,6 +829,7 @@ impl Document {
             transform,
             grounded: false,
             expressed_moves: Vec::new(),
+            bom_type: None,
         });
         Ok(id)
     }

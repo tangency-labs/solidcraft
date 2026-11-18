@@ -1,0 +1,50 @@
+{
+  "de": {
+    "ui.drawing_backdrop.datum_cloud": "Punktfeld",
+    "ui.drawing_backdrop.grid": "Raster",
+    "ui.drawing_backdrop.label": "Hintergrundmuster",
+    "ui.drawing_backdrop.none": "Keins"
+  },
+  "en": {
+    "ui.drawing_backdrop.datum_cloud": "Datum cloud",
+    "ui.drawing_backdrop.grid": "Grid",
+    "ui.drawing_backdrop.label": "Backdrop pattern",
+    "ui.drawing_backdrop.none": "None"
+  },
+  "ja": {
+    "ui.drawing_backdrop.datum_cloud": "ドットパターン",
+    "ui.drawing_backdrop.grid": "グリッド",
+    "ui.drawing_backdrop.label": "背景パターン",
+    "ui.drawing_backdrop.none": "なし"
+  },
+  "ko": {
+    "ui.drawing_backdrop.datum_cloud": "점 패턴",
+    "ui.drawing_backdrop.grid": "격자",
+    "ui.drawing_backdrop.label": "배경 패턴",
+    "ui.drawing_backdrop.none": "없음"
+  },
+  "zh": {
+    "ui.drawing_backdrop.datum_cloud": "基准点阵",
+    "ui.drawing_backdrop.grid": "网格",
+    "ui.drawing_backdrop.label": "背景图案",
+    "ui.drawing_backdrop.none": "无"
+  },
+  "ar": {
+    "ui.drawing_backdrop.datum_cloud": "نقاط مرجعية",
+    "ui.drawing_backdrop.grid": "شبكة",
+    "ui.drawing_backdrop.none": "بلا نمط",
+    "ui.drawing_backdrop.label": "نمط الخلفية"
+  },
+  "he": {
+    "ui.drawing_backdrop.datum_cloud": "נקודות ייחוס",
+    "ui.drawing_backdrop.grid": "רשת",
+    "ui.drawing_backdrop.none": "ללא",
+    "ui.drawing_backdrop.label": "דוגמת רקע"
+  },
+  "vi": {
+    "ui.drawing_backdrop.datum_cloud": "Điểm chuẩn",
+    "ui.drawing_backdrop.grid": "Lưới",
+    "ui.drawing_backdrop.none": "Không có",
+    "ui.drawing_backdrop.label": "Họa tiết nền"
+  }
+}
