@@ -1,3 +1,0 @@
-| tests/step-regressions/hole_round_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (a 30 x 30 x 10 block, a 14 mm hole, a 1 mm round on its top edge), inserted and exported again; import regression fixture | MIT OR Apache-2.0 |
-| tests/step-regressions/torus_patch_and_rest.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (solid.torus R 12, r 2); import regression fixture | MIT OR Apache-2.0 |
-| tests/step-regressions/torus_patch_and_rest_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (torus_patch_and_rest.step inserted and exported again); import regression fixture | MIT OR Apache-2.0 |

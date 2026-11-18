@@ -18,6 +18,12 @@ fn can_start(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> bool {
         || (crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(command.id))
 }
 
+/// A planned Drawing tool with a working options panel is a working tool, drawn and described as
+/// one. Only a planned tool that opens nothing yet is faded and says it is coming soon.
+pub(crate) fn coming_soon(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> bool {
+    command.planned.is_some() && !(crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(command.id))
+}
+
 /// Accent for a tab or a panel with a more specific semantic role.
 fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     if panel == "CONSTRAIN" {
@@ -413,7 +419,7 @@ impl FileAction {
         // with unsaved changes under the report, and ask about it where it can't be answered.
         let behind_report = app.issue_report.draft.is_some();
         let available = match self {
-            Self::NewDrawing => crate::drawing_workspace::enabled(app) && app.session.doc.has_something_to_draw(),
+            Self::NewDrawing => app.session.doc.has_something_to_draw(),
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
@@ -517,11 +523,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
     let mut rows = vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)];
-    // Drawings are a preview (Preferences > Design > Drawings): off, the File menu has no New Drawing.
-    if crate::drawing_workspace::enabled(app) {
-        // The icon `drawing.create` itself uses.
-        rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
-    }
+    // The icon `drawing.create` itself uses.
+    rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
     rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
     let mut recent: Vec<FileRow> = app
         .home
@@ -1146,6 +1149,8 @@ struct PanelButton {
     exit: bool,
     persistent: bool,
     disabled: Option<String>,
+    /// Drawn faded: a planned tool that opens nothing yet.
+    coming_soon: bool,
     split_title: String,
     split_name: String,
 }
@@ -1159,7 +1164,7 @@ impl PanelButton {
             name: &self.name,
             icon: self.icon,
             size: self.size,
-            planned: self.selected.planned.is_some(),
+            planned: self.coming_soon,
             enabled: self.enabled,
             pressed: self.pressed,
             exit: self.exit,
@@ -1260,6 +1265,7 @@ impl RibbonPanels {
                             && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
                         persistent,
                         disabled: info.disabled_reason,
+                        coming_soon: coming_soon(app, selected),
                         split_title: family.map(|f| app.tr_label(crate::workspace::ribbon_family_label(f)).to_string()).unwrap_or_default(),
                         split_name: family.map(|f| app.tr_label(f.label).to_string()).unwrap_or_default(),
                     }
@@ -1280,6 +1286,7 @@ impl RibbonPanels {
                         exit: false,
                         persistent: false,
                         disabled: info.disabled_reason,
+                        coming_soon: coming_soon(app, c),
                         split_title: String::new(),
                         split_name: String::new(),
                     }
@@ -2105,7 +2112,7 @@ impl RowData {
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
         let reason = if crate::drawing_workspace::active(app) && c.planned.is_some() {
-            Some(app.tr("ui.drawing_ribbon.planned"))
+            coming_soon(app, c).then(|| app.tr("ui.drawing_ribbon.planned"))
         } else {
             info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason))
         };
@@ -2309,7 +2316,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
         let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
-            Some(app.tr("ui.drawing_ribbon.planned"))
+            coming_soon(app, command).then(|| app.tr("ui.drawing_ribbon.planned"))
         } else {
             disabled.map(|reason| app.tr_label(reason))
         };
@@ -2660,10 +2667,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     // Home hides the design: only New, Open and Preferences work there.
     // An empty Drawing workspace has no drawing history, selection or camera. Shortcuts
     // must not silently edit the source design behind it. Explicit source editors retain
-    // their existing shortcuts while open.
+    // their existing shortcuts while open. With a drawing open, undo and redo step through that
+    // drawing's own history only, so Ctrl+Z and Ctrl+Y pass.
     let drawing =
         crate::drawing_workspace::active(app) && app.bom.is_none() && app.design_properties.is_none() && !crate::dialogs_sheet::flat_active(app);
     let shown = design_shown(app) && !drawing;
+    let drawing_history = drawing && design_shown(app) && app.session.open_drawing.is_some();
     if shown {
         crate::edit_clipboard::handle(app, ctx);
     } else {
@@ -2712,7 +2721,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     });
                 }
-                _ if !shown => {}
+                _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {}
                 // Ctrl+W closes the view shown, and the design with it when that is its only view;
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
@@ -2798,6 +2807,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
+            }
+            // The quick menu at the cursor (#5501), unless the person bound the key to a command.
+            Key::S if mods.shift && !mods.alt && crate::keymap::commands_for(app, crate::quick_menu::KEY).is_empty() => {
+                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                crate::quick_menu::open(app, at);
             }
             Key::F2 => {
                 if !crate::context_menu::press_shortcut(app, "F2") {
@@ -2981,7 +2995,6 @@ mod header_report_tests {
     fn native_menu_actions_disable_save_on_home() {
         let mut h = crate::scenario::Harness::new();
         // New Drawing is there with drawings on (Preferences > Design > Drawings).
-        h.app.preferences.drawings_preview = true;
         h.app.home.open = true;
         assert!(!FileAction::Save.enabled(&h.app));
         assert!(!FileAction::SaveAs.enabled(&h.app));
@@ -3236,7 +3249,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_opens_the_first_sheet_of_the_open_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         assert!(!FileAction::NewDrawing.enabled(&h.app), "an empty design has nothing to draw");
         FileAction::NewDrawing.run(&mut h.app);
         assert!(h.app.session.doc.drawings.is_empty() && !crate::drawing_workspace::active(&h.app));
@@ -3260,7 +3272,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_that_fails_goes_back_to_design() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.preferences.part_drawing_template = "no-such-template".into();
         assert!(FileAction::NewDrawing.enabled(&h.app));
@@ -3276,7 +3287,6 @@ mod header_report_tests {
     fn file_menu_new_drawing_that_fails_in_drawing_stays_in_drawing() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.drawings_preview = true;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         let template = h.app.preferences.part_drawing_template.clone();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();

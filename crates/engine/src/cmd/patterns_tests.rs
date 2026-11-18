@@ -1815,6 +1815,49 @@ fn pattern_copies_share_their_bodys_meshes_through_a_move_to_a_component() {
     check(&s, "moved into a component");
 }
 
+/// A pattern of one placement of a part placed twice (`occurrences`) places that placement again,
+/// moved by the pattern, beside itself; the first placement is not what it copies.
+#[test]
+fn a_pattern_of_a_placement_places_that_placement_again() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Bracket"}));
+    let component = c["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 4, "body_name": "Base"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [50, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"occurrences": [[second]], "dir1": [0, 1, 0], "count1": 3, "spacing1": 40}));
+    let made: Vec<u64> = r["occurrences"].as_array().unwrap().iter().filter_map(Value::as_u64).collect();
+    assert_eq!(made.len(), 2, "{r}");
+    for (k, id) in made.iter().enumerate() {
+        let o = s.doc.occurrences.iter().find(|o| o.id == *id).unwrap();
+        assert_eq!((o.component, o.parent), (component, 0));
+        let at = [o.transform[3][0], o.transform[3][1], o.transform[3][2]];
+        let want = [50.0, 40.0 * (k as f64 + 1.0), 0.0];
+        assert!(at.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-9), "{at:?}, want {want:?}");
+    }
+    // No body is copied.
+    assert_eq!(s.model.state().bodies.len(), 1);
+    // `occurrences` that is not a list is refused, not read as none (which would copy the bodies).
+    for occurrences in [json!("7"), json!(7), json!({"path": [second]})] {
+        let p = json!({"occurrences": occurrences, "bodies": ["Base"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 40});
+        assert!(s.execute("solid.pattern.rectangular", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.model.state().bodies.len(), 1);
+    // `null` names none.
+    let p = json!({"occurrences": null, "components": ["Bracket"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 40});
+    assert!(s.execute("solid.pattern.rectangular", &p).is_ok(), "{p}");
+    // A placement shown moved and not captured yet is refused, as a body picked there is: the
+    // pattern goes by where the design places it, not where it is shown.
+    let mut moved = solidcraft_doc::IDENTITY;
+    moved[3] = [0.0, 0.0, 25.0, 1.0];
+    s.pending_moves.insert(second, moved);
+    let count = s.doc.occurrences.len();
+    let p = json!({"occurrences": [[second]], "dir1": [0, 1, 0], "count1": 2, "spacing1": 40});
+    let error = s.execute("solid.pattern.rectangular", &p).unwrap_err().to_string();
+    assert!(error.contains("not captured yet"), "{error}");
+    assert_eq!(s.doc.occurrences.len(), count, "nothing placed");
+}
+
 /// The box of `body` as the world shows it.
 fn world_bounds(s: &Session, body: &str) -> (solidcore_record::Vec3, solidcore_record::Vec3) {
     let b = s.world_state().unwrap().body(body).unwrap_or_else(|| panic!("no body `{body}`")).mesh().bounds();
@@ -1957,4 +2000,25 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     let placed = world.bodies.iter().find(|b| b.placed_definition().is_some()).unwrap();
     let _ = placed.body.record();
     assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
+}
+
+/// Review of #18732: a per-edge fillet whose picks include a smooth edge (dropped, with a note)
+/// copies each remaining edge at its own radius. A 60 x 40 x 30 block, its top front edge rounded
+/// r 5 first; then a per-edge fillet of that round's lower tangent edge (smooth, dropped) at 1 and
+/// the bottom front edge at 2, mirrored onto the bottom back edge. Each round of radius r on a
+/// 90 deg edge of length L removes (1 - pi/4) r^2 L: 72000 - 60 (1 - pi/4) (25 + 4 + 4). Copying
+/// each edge at its position among the picks gave the copy the dropped pick's radius, 1.
+#[test]
+fn a_mirror_of_a_per_edge_fillet_with_a_dropped_smooth_pick_keeps_each_edges_radius() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.fillet", json!({"body": "Box", "edges": [[30, 0, 30]], "radius": 5}));
+    run(
+        &mut s,
+        "solid.fillet",
+        json!({"body": "Box", "edges": [[30, 0, 25], [30, 0, 0]], "radius": 1, "edge_radii": [1, 2], "tangent_chain": false, "name": "Each"}),
+    );
+    run(&mut s, "solid.mirror", json!({"features": ["Each"], "plane": {"origin": [0, 20, 0], "normal": [0, 1, 0]}}));
+    let v = volume(&mut s);
+    assert!((v - 71575.08836352694).abs() < 1e-6 * v, "{v}");
 }

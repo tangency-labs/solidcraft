@@ -47,6 +47,7 @@ fn origin(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[Sh
 pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[SheetObject]) -> bool {
     !drawing_workspace::placing_view(app)
         && !drawing_workspace::placing_note(app)
+        && !drawing_workspace::placing_dimension(app)
         && (app.drawing_workspace.page.view_tools.drag.is_some()
             || (response.dragged_by(PointerButton::Primary) && origin(app, response, at, objects).is_some()))
 }

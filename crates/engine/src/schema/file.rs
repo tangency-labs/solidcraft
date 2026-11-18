@@ -482,9 +482,10 @@ pub enum HistoryParam {
     Solids,
 }
 
-/// `reader` of `doc.open` and `file.insert_step`: which reader reads a FreeCAD or Rhino file's
-/// solids, `solidcraft` (cadmpeg's STEP writer, then SolidCraft's own STEP reader, which keeps
-/// the STEP text) or `cadmpeg` (cadmpeg's model read straight into B-rep records), read as the
+/// `reader` of `doc.open` and `file.insert_step`: which reader reads a STEP, FreeCAD or Rhino
+/// file, `solidcraft` (SolidCraft's own STEP reader, which keeps the STEP text; a FreeCAD or
+/// Rhino file restated as STEP by cadmpeg's writer first) or `cadmpeg` (cadmpeg's model read
+/// straight into B-rep records: a STEP file decoded by cadmpeg's STEP decoder), read as the
 /// handler reads it.
 #[derive(Clone, Copy, Debug)]
 pub struct ReaderParam(pub solidcraft_io::StepReader);
@@ -505,7 +506,7 @@ impl JsonSchema for ReaderParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "solidcraft (the default) restates a FreeCAD or Rhino file's solids as STEP with cadmpeg's STEP writer, which SolidCraft's own STEP reader reads and the Import feature keeps; cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between. Matching ignores case and surrounding spaces.",
+            "description": "solidcraft (the default) is SolidCraft's own STEP reader, which keeps the STEP text (a FreeCAD or Rhino file is restated as STEP by cadmpeg's STEP writer first); cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between (a STEP file decoded by cadmpeg's STEP decoder), to compare the two. Matching ignores case and surrounding spaces.",
             "type": "string",
             "enum": ["solidcraft", "cadmpeg"]
         })
@@ -541,7 +542,8 @@ pub struct OpenParams {
     /// SolidCraft features, or only its solids as one Import feature. Default: features.
     #[serde(default)]
     pub history: Option<HistoryParam>,
-    /// For a FreeCAD or Rhino file (ignored for other files): which reader reads its solids.
+    /// For a STEP (`.step`, `.stp`), FreeCAD or Rhino file (ignored for other files): which
+    /// reader reads it.
     /// Default: solidcraft.
     #[serde(default)]
     pub reader: Option<ReaderParam>,
