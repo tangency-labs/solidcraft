@@ -221,6 +221,8 @@ pub struct JointForm {
     /// Animation phase, 0…1.
     pub phase: f64,
     pub hover: Hover,
+    /// Temporary hover mode in this dialog's Options section.
+    preview_alignment_on_hover: bool,
     /// Saved secondary references while editing; picked replacements live in the inputs.
     pub alignment: [Option<Value>; 2],
     pub reverse_alignment: [bool; 2],
@@ -258,6 +260,7 @@ impl JointForm {
             animate: false,
             phase: 0.0,
             hover: None,
+            preview_alignment_on_hover: true,
             alignment: [None, None],
             reverse_alignment: [false; 2],
             alignment_order: [0, 1],
@@ -1378,7 +1381,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                         enter |= expr_row(ui, l, v);
                     }
                 });
-                crate::ui_kit::options(ui, "joint_options", &mut [("Flip", &mut f.flip)]);
+                crate::ui_kit::options(
+                    ui,
+                    "joint_options",
+                    &mut [("Flip", &mut f.flip), ("dialog.preview_alignment_on_hover", &mut f.preview_alignment_on_hover)],
+                );
             }
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
@@ -2138,13 +2145,13 @@ pub(crate) fn alignment_input_available(d: &Dialog, index: usize) -> bool {
 }
 
 pub(crate) fn alignment_hover_commands(app: &SolveApp, d: &Dialog) -> Option<Vec<(String, Value)>> {
-    if !app.preferences.joint_auto_alignment {
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return None };
+    if !f.preview_alignment_on_hover {
         return None;
     }
     let side = alignment_side(&d.kind, d.active)?;
     // Highlight and snap markers are always available, but the first reference must be
     // clicked before a counterpart can transiently change the assembled pose.
-    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { return None };
     let other = 1 - side;
     let row = f.alignment_order.iter().position(|s| *s == other)? + 2;
     if f.alignment[other].is_none() && sel_items(&d.inputs, row).is_empty() {
@@ -2728,11 +2735,7 @@ pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: C
 fn build_world_scene(preview: &solidcraft_engine::Preview, colors: Colors, joint_motion: bool) -> Result<Built, String> {
     let (before, after) = (&preview.before, &preview.after);
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if joint_motion {
-            crate::preview::build_motion(before, after, colors)
-        } else {
-            crate::preview::build(before, after, colors)
-        }
+        if joint_motion { crate::preview::build_motion(before, after, colors) } else { crate::preview::build(before, after, colors) }
     }));
     match built {
         Ok(mut b) => {

@@ -276,46 +276,34 @@ fn rim(s: &Session, body: &str, center: Vec3) -> (crate::viewport::Hit, Sel) {
 }
 
 #[test]
-fn secondary_alignment_hover_preference_defaults_on_and_persists_transactions() {
-    let old: crate::prefs::Prefs = serde_json::from_value(json!({})).unwrap();
-    assert_eq!(serde_json::to_value(old).unwrap()["joint_auto_alignment"], true);
+fn secondary_alignment_hover_option_is_available_in_joint_and_resets_on_open() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     let before = h.app.session.doc.to_json();
-    h.call("ui.prefs", json!({"open":"Design"}));
-    h.app.prefs_window.shell.filter = "joint alignment".into();
-    h.frames(5);
-    crate::prefs::reveal_preference(&mut h, "prefs:joint_auto_alignment");
-    h.step(&json!({"click":{"handle":"prefs:joint_auto_alignment"}})).unwrap();
-    assert_eq!(
-        serde_json::to_value(&h.app.preferences).unwrap()["joint_auto_alignment"],
-        false,
-        "home={} window={:?} body={:?} control={:?}",
-        h.app.home.open,
-        crate::scenario::rect_of("prefs:window"),
-        crate::scenario::rect_of("dialog:page_body"),
-        crate::scenario::rect_of("prefs:joint_auto_alignment")
-    );
-    let mut restored = SolveApp::new(Session::default(), Default::default());
-    restored.load_prefs(&h.app.prefs());
-    // Unapplied preferences stay transactional, including what is saved to disk.
-    assert_eq!(serde_json::to_value(&restored.preferences).unwrap()["joint_auto_alignment"], true);
-    h.call("ui.prefs", json!({"button":"cancel"}));
-    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_auto_alignment"], true);
-    h.call("ui.prefs", json!({"open":"Design","joint_auto_alignment":false}));
-    h.call("ui.prefs", json!({"button":"apply"}));
-    restored.load_prefs(&h.app.prefs());
-    assert_eq!(serde_json::to_value(&restored.preferences).unwrap()["joint_auto_alignment"], false);
-    h.call("ui.prefs", json!({"button":"defaults"}));
-    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_auto_alignment"], true);
-    h.call("ui.prefs", json!({"button":"cancel"}));
-    assert_eq!(serde_json::to_value(&h.app.preferences).unwrap()["joint_auto_alignment"], false);
+    h.app.start("joint.create");
+    h.frames(3);
+    let enabled = |app: &SolveApp| {
+        let Kind::Assembly(Asm::Joint(form)) = &app.dialog.as_ref().unwrap().kind else { panic!("expected a Joint dialog") };
+        form.preview_alignment_on_hover
+    };
+    let click = json!({"click":{"handle":"dialog:dialog.preview_alignment_on_hover"}});
+    assert!(enabled(&h.app));
+    h.step(&click).unwrap();
+    assert!(!enabled(&h.app));
+    h.step(&click).unwrap();
+    assert!(enabled(&h.app));
+    h.step(&click).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    h.app.start("joint.create");
+    assert!(enabled(&h.app));
+    assert!(serde_json::to_value(&h.app.preferences).unwrap().get("joint_auto_alignment").is_none());
     assert_eq!(h.app.session.doc.to_json(), before);
     assert!(h.app.session.undo.is_empty());
 }
 
 #[test]
-fn secondary_alignment_hover_preference_disables_automatic_rim_alignment_but_keeps_explicit_picks() {
+fn secondary_alignment_hover_option_disables_automatic_rim_alignment_but_keeps_explicit_picks() {
     let mut app = round_plates();
     app.start("joint.create");
     let mut d = app.dialog.take().unwrap();
@@ -351,9 +339,9 @@ fn secondary_alignment_hover_preference_disables_automatic_rim_alignment_but_kee
     let before = apply_commands(&app, &d).unwrap();
     let doc = app.session.doc.clone();
     assert!(alignment_hover_commands(&app, &d).is_some());
-    let mut settings = serde_json::to_value(&app.preferences).unwrap();
-    settings["joint_auto_alignment"] = json!(false);
-    app.preferences = serde_json::from_value(settings).unwrap();
+    let Kind::Assembly(Asm::Joint(form)) = &mut d.kind else { panic!("expected a Joint dialog") };
+    form.preview_alignment_on_hover = false;
+    app.dialog = Some(d.clone());
     assert!(alignment_hover_commands(&app, &d).is_none());
     settle_alignment_update(&mut app, &ctx);
     assert_eq!(app.preview.interaction.as_ref().unwrap().to_document["Body2"], confirmed_pose);

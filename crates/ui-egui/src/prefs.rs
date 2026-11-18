@@ -1443,7 +1443,6 @@ preference_settings! {
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
     joint_moving_first: bool = false, PAGE_DESIGN => check_id_help("settings.joint_moving_first", "settings.joint_moving_first_help");
-    joint_auto_alignment: bool = true, PAGE_DESIGN => check_id_help("settings.joint_auto_alignment", "settings.joint_auto_alignment_help");
     joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
     /// Degrees per step after pulling the cursor outside the precision guide.
     joint_rotation_fine: f64 = 0.1, PAGE_TOOLS;
