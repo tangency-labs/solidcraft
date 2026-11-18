@@ -27,7 +27,7 @@
   },
   {
    "name": "box_origin_1e12_size_0p5_control",
-   "issue": "#377 control: far out but resolvable (ulp ~1.2e-4 < size), the box is built on both sides",
+   "issue": "#377 control: far out but resolvable (ulp ~1.2e-4 < size); refused since the WR-596/WR-662 flags retired, by the position-scaled degeneracy test in create_face (a kernel limit; main built 0 faces)",
    "inputs": {"op": "box", "args": [1e12, 1e12, 1e12, 0.5, 0.5, 0.5]}
   }
  ]
