@@ -332,6 +332,18 @@ impl Tiles {
         first.set_ratio_at(id, next, to) || second.set_ratio_at(id, next, to)
     }
 
+    /// Give each branch a share of its parent's area proportional to its cell count.
+    pub(crate) fn equal_sizes(&mut self) -> bool {
+        let Tiles::Split { ratio, first, second, .. } = self else { return false };
+        let first_count = first.len();
+        let equal_ratio = clamp_ratio(first_count as f32 / (first_count + second.len()) as f32);
+        let changed = *ratio != equal_ratio;
+        *ratio = equal_ratio;
+        let first_changed = first.equal_sizes();
+        let second_changed = second.equal_sizes();
+        changed || first_changed || second_changed
+    }
+
     /// Show `view` beside `target`, on its `edge`. False when `view` is shown already, `target`
     /// is not, or the window already shows [`MAX_TILES`] views.
     pub fn split_at(&mut self, target: u64, view: u64, edge: Edge) -> bool {
@@ -491,6 +503,19 @@ mod tests {
         assert!(grid().placed(1, Placement::Split { target: 4, edge: Edge::Bottom }).is_some());
         assert!(padded.placed(1, Placement::Replace(1)).is_none());
         assert!(padded.placed(1, Placement::Empty(2)).is_none());
+    }
+
+    #[test]
+    fn equal_sizes_preserves_the_layout_and_gives_empty_cells_the_same_area() {
+        let mut tiles = Tiles::preset_padded(Preset::LargeAndTwo, &[1, 2]).unwrap();
+        let area = Rect { x: 0.0, y: 0.0, w: 900.0, h: 600.0 };
+        assert!(tiles.set_ratio(1, 0.65));
+        assert!(tiles.equal_sizes());
+        assert_eq!(tiles.preset_kind(), Some(Preset::LargeAndTwo));
+        let regions = tiles.rects(area, 0.0);
+        assert_eq!(regions.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [1, 2, EMPTY]);
+        assert!(regions.iter().all(|(_, rect)| (rect.w * rect.h - 180_000.0).abs() < 1.0));
+        assert!(!tiles.equal_sizes());
     }
 
     /// Every preset shows its views in reading order, fills the area without overlap, and a preset

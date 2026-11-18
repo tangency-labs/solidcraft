@@ -279,6 +279,17 @@ const PLUS_MENU: [TabMenuRow<'static>; 4] = [
 ];
 const SWITCHER_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("as_tabs", "Show views as tabs", "")];
 
+const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
+    TabMenuRow::new("layout.single", "Single view", ""),
+    TabMenuRow::new("layout.side_by_side", "Two side by side", ""),
+    TabMenuRow::new("layout.stacked", "Two stacked", ""),
+    TabMenuRow::new("layout.large_and_two", "One large and two small", ""),
+    TabMenuRow::new("layout.grid", "Two by two", ""),
+    TabMenuRow::new("fill.angle", "A new angle of this view", ""),
+    TabMenuRow::new("fill.standard", "Standard angles", ""),
+    TabMenuRow::new("fill.ask", "A choice in each empty cell", ""),
+];
+
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
         name: "Model",
@@ -335,6 +346,7 @@ struct TabsRig {
     name: &'static str,
     detached: bool,
     clear: bool,
+    layout: Option<(usize, usize)>,
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
@@ -365,6 +377,7 @@ impl TabsRig {
             name: "One",
             detached: false,
             clear: false,
+            layout: None,
             pop_out: false,
             plus,
             rename: rename.map(|(k, _)| k),
@@ -400,6 +413,7 @@ impl TabsRig {
             &[]
         };
         let first = DocTab { views, ..tab(self.name) };
+        let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
             tabs: if self.pop_out { vec![first] } else { vec![first, tab("Two"), tab("Three")] },
@@ -430,10 +444,11 @@ impl TabsRig {
             view_right_row: "vright",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
-            layout_menu: &[],
-            layout_current: "",
+            layout_menu: if layout.is_some() { &LAYOUT_MENU } else { &[] },
+            view_layout: layout.as_ref(),
+            layout_current: "layout.single",
             layout_tip: "Layout",
-            layout_fill: "",
+            layout_fill: "fill.angle",
             layout_fill_heading: "",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
@@ -1562,4 +1577,75 @@ fn elsewhere_view_has_only_a_return_button_on_hover() {
     rig.frame(vec![egui::Event::PointerMoved(elsewhere)]);
     assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
     assert_eq!(rig.press(rig.at("t:view:1:return"), egui::PointerButton::Primary), vec![TabAction::ReturnView(1)]);
+}
+
+fn layout_test_data(visible: usize, window_count: usize) -> crate::view_layout_menu::LayoutMenu {
+    use crate::view_layout_menu::{LayoutMenu, LayoutView, LayoutWindow};
+    LayoutMenu {
+        design: "One".into(),
+        window: 0,
+        native: true,
+        visible,
+        link: "off".into(),
+        can_link: true,
+        clean: false,
+        windows: (0..window_count as u32)
+            .map(|id| LayoutWindow {
+                id,
+                name: format!("Window {}", id + 1),
+                display: None,
+                views: vec![LayoutView { id: u64::from(id) + 10, name: "Model".into(), kind: "model".into(), accent: egui::Color32::BLUE }],
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn layout_glyph_has_a_ground_and_cells_for_each_preset() {
+    let interior = Rect::from_min_size(Pos2::ZERO, vec2(14.0, 14.0));
+    for (key, count) in [("single", 1), ("side_by_side", 2), ("stacked", 2), ("large_and_two", 3), ("grid", 4)] {
+        let cells = layout_cells(interior, 1.0, key);
+        assert_eq!(cells.len(), count);
+        assert_eq!(cells[0].left_top(), interior.left_top());
+        assert!(cells.iter().all(|cell| cell.is_positive() && interior.contains_rect(*cell)));
+        for i in 0..cells.len() {
+            assert!(cells.iter().skip(i + 1).all(|other| !cells[i].intersects(*other)));
+        }
+    }
+    assert_eq!(layout_cells(interior, 1.0, "side_by_side")[1].top(), interior.top());
+    assert_eq!(layout_cells(interior, 1.0, "stacked")[1].left(), interior.left());
+}
+
+#[test]
+fn layout_menu_shows_sections_for_current_window_and_views() {
+    use crate::view_layout_menu::{Sections, sections};
+    assert_eq!(sections(&layout_test_data(1, 1)), Sections { equal: false, windows: false, link: false, detach: true });
+    assert_eq!(sections(&layout_test_data(2, 1)), Sections { equal: true, windows: false, link: true, detach: true });
+    assert_eq!(sections(&layout_test_data(1, 2)), Sections { equal: false, windows: true, link: false, detach: false });
+    assert_eq!(sections(&layout_test_data(2, 2)), Sections { equal: true, windows: true, link: true, detach: false });
+    let mut web = layout_test_data(1, 1);
+    web.native = false;
+    assert!(!sections(&web).detach);
+}
+
+#[test]
+fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.clear = true;
+    rig.layout = Some((2, 1));
+    rig.frame(Vec::new());
+    let button = rig.at("view:layout");
+    assert!(rig.press(button, egui::PointerButton::Primary).is_empty());
+    rig.frame(Vec::new());
+    let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    assert_eq!(rig.frame(vec![key(egui::Key::Enter)]), vec![TabAction::LayoutMenu { id: "layout.single".into() }]);
+    let side_by_side = rig.at("layout.side_by_side");
+    assert_eq!(rig.press(side_by_side, egui::PointerButton::Primary), vec![TabAction::LayoutMenu { id: "layout.side_by_side".into() }]);
+    assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+    rig.frame(vec![key(egui::Key::Escape)]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_none());
+    assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
 }

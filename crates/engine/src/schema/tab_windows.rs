@@ -71,6 +71,18 @@ pub struct TabWindowIdParams {
     pub window: u32,
 }
 
+/// Show or hide a design window's chrome for presentation.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowCleanParams {
+    /// The target window. Defaults to the last focused window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
+    /// True enters presentation mode. If omitted, toggle the current mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
 /// List the windows of the active design.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

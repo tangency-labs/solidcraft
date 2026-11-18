@@ -242,6 +242,16 @@ impl MoveError {
         }
     }
 }
+/// Camera components shared by the visible Model views in a window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CameraLinkMode {
+    #[default]
+    Off,
+    Orientation,
+    Zoom,
+    Both,
+}
+
 /// The views of a design in tab order, the active one, and the views closed lately.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSet {
@@ -257,6 +267,7 @@ pub struct ViewSet {
     elsewhere: usize,
     /// How the window lays its views out side by side. Dormant while the active view is outside it.
     tiles: Option<Tiles>,
+    camera_link: CameraLinkMode,
 }
 
 impl Default for ViewSet {
@@ -273,7 +284,18 @@ impl ViewSet {
     }
 
     fn strip(views: Vec<DesignView>, active: u64, next_id: u64, window_id: WindowId) -> Self {
-        Self { views, active, closed: Vec::new(), next_id, window_id, windows: Vec::new(), next_window: 1, elsewhere: 0, tiles: None }
+        Self {
+            views,
+            active,
+            closed: Vec::new(),
+            next_id,
+            window_id,
+            windows: Vec::new(),
+            next_window: 1,
+            elsewhere: 0,
+            tiles: None,
+            camera_link: CameraLinkMode::Off,
+        }
     }
 
     /// The open pop-outs in this design. The main strip is this ViewSet itself.
@@ -968,6 +990,19 @@ impl ViewSet {
         self.tiles.as_mut().is_some_and(|tiles| tiles.set_ratio(splitter, ratio))
     }
 
+    /// Give every tile the same share of the available area without moving views between cells.
+    pub fn equal_sizes(&mut self) -> bool {
+        self.tiles.as_mut().is_some_and(Tiles::equal_sizes)
+    }
+
+    pub fn camera_link(&self) -> CameraLinkMode {
+        self.camera_link
+    }
+
+    pub fn set_camera_link(&mut self, mode: CameraLinkMode) {
+        self.camera_link = mode;
+    }
+
     /// Swap the places of two shown views.
     pub fn swap_tiles(&mut self, a: u64, b: u64) -> bool {
         self.tiles.as_mut().is_some_and(|tiles| tiles.swap(a, b))
@@ -1201,6 +1236,21 @@ mod tests {
             set.open(ViewKind::Sketch, Some(format!("s{i}")), false);
         }
         set
+    }
+
+    #[test]
+    fn camera_link_is_local_to_the_window() {
+        let mut main = ViewSet::new();
+        let second = main.duplicate(main.active().id).unwrap();
+        main.set_camera_link(CameraLinkMode::Orientation);
+
+        let moved = main.move_to_window(second, new_window()).unwrap();
+        let pop_out = main.window_mut(moved.window).unwrap();
+        assert_eq!(pop_out.views.camera_link(), CameraLinkMode::Off);
+        pop_out.views.set_camera_link(CameraLinkMode::Zoom);
+
+        assert_eq!(main.camera_link(), CameraLinkMode::Orientation);
+        assert_eq!(main.views_of(moved.window).unwrap().camera_link(), CameraLinkMode::Zoom);
     }
 
     #[test]
