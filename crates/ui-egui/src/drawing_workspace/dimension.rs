@@ -29,14 +29,11 @@ pub(super) struct Draft {
 
 pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let key = if app.drawing_workspace.dimension.is_some() { "ui.drawing_dimension_tool.place" } else { "ui.drawing_dimension_tool.pick" };
-    let close = egui::Frame::NONE
-        .inner_margin(Tokens::get().space_12)
-        .show(ui, |ui| {
-            ui_kit::text(ui, solidcraft_ui_text::tr(key), ui_kit::Text::Note(key));
-            ui.separator();
-            ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), Button::Normal).clicked()
-        })
-        .inner;
+    let close = super::inset(ui, |ui| {
+        ui_kit::text(ui, solidcraft_ui_text::tr(key), ui_kit::Text::Note(key));
+        ui.separator();
+        ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), Button::Normal).clicked()
+    });
     if close {
         close_panel(app);
     }
