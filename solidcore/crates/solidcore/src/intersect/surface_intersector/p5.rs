@@ -1689,4 +1689,65 @@ mod tests {
         // the seam itself is the closure
         assert!(is_closure_curve(&si, &seam, &along_seam).unwrap());
     }
+
+    /// A ribbon folded back on itself (#18930): a vertical segment of height 2 swept along the
+    /// offset by 2 towards its centres of curvature of the parabola y = x^2 / 2 over
+    /// [-2, 2] (101 points), a swallowtail: past the apex's radius 1 the offset has two cusps
+    /// and crosses itself where 1 + x^2 = 4, at (0, 2.5).
+    fn swallowtail_ribbon() -> Surface {
+        use crate::nurbs::crv_fit::p1::ParamMethod;
+        let points: Vec<Point3> = (0..101)
+            .map(|i| {
+                let x = -2.0 + 4.0 * f64::from(i) / 100.0;
+                let l = (1.0 + x * x).sqrt();
+                Point3::new(x - 2.0 * x / l, x * x / 2.0 + 2.0 / l, 0.0)
+            })
+            .collect();
+        let path = BSplineCurve::interpolate_points(
+            &points,
+            None,
+            3,
+            None,
+            None,
+            false,
+            ParamMethod::ChordLength,
+        )
+        .unwrap();
+        let segment = BSplineCurve::interpolate_points(
+            &[Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 2.0)],
+            None,
+            1,
+            None,
+            None,
+            false,
+            ParamMethod::ChordLength,
+        )
+        .unwrap();
+        Surface::from(
+            BSplineSurface::create_sweep_surface(&segment, &path, None, false, 1e-4).unwrap(),
+        )
+    }
+
+    /// A surface folded back on itself (#18930): the swallowtail ribbon's self intersection is
+    /// the one vertical line where it crosses itself, at (0, 2.5). Its two cusp lines, where the
+    /// ribbon turns back and its two sheets meet at equal parameters, are no self intersection:
+    /// with the tangential curve pass (`ssi_tangent_curve_tracer`) a self intersection traced
+    /// them as tangent curves, its solves sliding onto the trivial solution there.
+    #[test]
+    fn a_folded_ribbon_crosses_itself_once_with_the_tangent_curve_tracer() {
+        let mut k = Kernel::default();
+        k.fixes.ssi_tangent_curve_tracer = true;
+        let ribbon = swallowtail_ribbon();
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let x = ribbon
+            .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
+            .unwrap();
+        assert_eq!(x.curve_types, [TsectCurveType::Crossing]);
+        let c = x.curves_3d.first().unwrap();
+        let iv = c.natural_interval();
+        for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let p = c.evaluate_point(&k, iv.evaluate(f)).unwrap();
+            assert!(p.x.abs() < 1e-3 && (p.y - 2.5).abs() < 1e-3, "{f}: {p:?}");
+        }
+    }
 }
