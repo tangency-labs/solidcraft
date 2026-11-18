@@ -259,7 +259,9 @@ fn ladder_012_variable_round_runs_on_into_the_upright_round() {
 /// the box's top back edge r5, the top right edge r3 alone (it runs
 /// on at y = 35 into the r5 round's end arc), then the upright (60, 40) r2 with its tangent
 /// chain, up the arc and along the seam. The case's invariants: 11 faces, one valid body;
-/// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices, 47589.770467. Capped (#2364):
+/// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices, 47589.770467; 47589.770999 since a
+/// round is fitted as finely as its edge is known (its edges at 4e-5, not 1.6e-4), which
+/// moves the volume's closure of tolerant gaps (#16735) by 5.3e-4. Capped (#2364):
 /// 25 edges, 16 vertices, 47591.482.
 #[test]
 fn ladder_021_round_runs_on_into_the_earlier_round() {
@@ -277,7 +279,7 @@ fn ladder_021_round_runs_on_into_the_earlier_round() {
     blend(&mut k, &mut b, Kind::Round, &chain, 2.0).unwrap();
     let (counts, v) = measured(&mut k, &mut b);
     assert_eq!(counts, (11, 24, 15));
-    assert_rel(v, 47_589.770_467, 1e-8, "021");
+    assert_rel(v, 47_589.770_999, 1e-8, "021");
 }
 
 /// fillets/1207-fillet-box-end-edge-into-unblended-round-partial-chain, also SolidCraft's
