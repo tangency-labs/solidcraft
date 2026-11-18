@@ -311,3 +311,45 @@ fn cycling_component_color_is_saved_undoable_and_shared_by_instances() {
     assert!(s.execute("component.cycle_color", &json!({"component":"missing"})).is_err());
     assert!(s.execute("component.cycle_color", &json!({"component":0})).is_err());
 }
+
+/// #16677: a component takes a colour of its own, or goes back to the automatic one, without the
+/// Component Colors switch moving either way.
+#[test]
+fn a_components_own_color_is_set_and_cleared_and_leaves_the_colored_components_switch_alone() {
+    let mut s = Session::default();
+    let component = s.execute("component.create", &json!({"name":"Part"})).unwrap()["component"].as_u64().unwrap();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    let own = |s: &Session| s.doc.components.iter().find(|c| c.id == component).and_then(|c| c.identification_color);
+    let result = s.execute("component.set_color", &json!({"component":component,"color":[12,34,56]})).unwrap();
+    assert_eq!((&result["color"], &result["own"]), (&json!([12, 34, 56]), &json!(true)));
+    assert_eq!(own(&s), Some([12, 34, 56]));
+    assert!(s.colored_components.is_none(), "a colour of its own leaves the 3D view as it was");
+    assert_eq!(component_color(&s, component), None, "so the view tints nothing");
+    // The colour is the component's, so every instance shares it and the design keeps it.
+    s.execute("occurrence.copy", &json!({"component":component,"translate":[20,0,0]})).unwrap();
+    let loaded = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(loaded.doc.component_identification_color(component), [12, 34, 56]);
+    // "#rrggbb" says the same as [r, g, b].
+    s.execute("component.set_color", &json!({"component":component,"color":"#0c2238"})).unwrap();
+    assert_eq!(own(&s), Some([12, 34, 56]));
+    // No colour: the automatic one, which only Component Colors shows. Undo brings its own back.
+    let result = s.execute("component.set_color", &json!({"component":component})).unwrap();
+    assert_eq!(own(&s), None);
+    assert_eq!((&result["color"], &result["own"]), (&json!(s.doc.component_identification_color(component)), &json!(false)));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(own(&s), Some([12, 34, 56]));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(own(&s), None);
+    s.execute("edit.undo", &json!({})).unwrap();
+    for refused in [
+        json!({"component":component,"color":[300,0,0]}),
+        json!({"component":component,"color":[0,0]}),
+        json!({"component":component,"color":"not a colour"}),
+        json!({"component":component,"color":{"r":1}}),
+        json!({"component":"missing","color":[1,2,3]}),
+        json!({"component":0,"color":[1,2,3]}),
+    ] {
+        assert!(s.execute("component.set_color", &refused).is_err(), "{refused} is refused");
+    }
+    assert_eq!(own(&s), Some([12, 34, 56]), "a refused call changes nothing");
+}

@@ -9,8 +9,8 @@ use super::{
     FromBodiesResult, GroundParams, GroundResult, HistoryVisibilityParams, HistoryVisibilityResult, ListParams, ListResult, MoveBodiesParams,
     MoveBodiesResult, MoveFeaturesParams, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams,
     OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams, PasteNewResult,
-    PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult, UnlockParams,
-    UnlockResult,
+    PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams, RevertPositionParams, RevertPositionResult, SetColorParams,
+    SetColorResult, UnlockParams, UnlockResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -51,6 +51,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<UnlockParams>(), &["component"]);
     assert_keys(input_schema_for::<HistoryVisibilityParams>(), &["component"]);
     assert_keys(input_schema_for::<CycleColorParams>(), &["component"]);
+    assert_keys(input_schema_for::<SetColorParams>(), &["color", "component"]);
     assert_keys(input_schema_for::<CapturePositionParams>(), &[]);
     assert_keys(input_schema_for::<RevertPositionParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<GroundParams>(), &["grounded", "occurrence", "path"]);
@@ -396,6 +397,49 @@ fn cycle_color_answers_the_component_and_its_colour() {
     // A key the command doesn't take is a warning, not a refusal, and the reply still matches.
     let warned = s.execute("component.cycle_color", &json!({"component": id, "components": id})).unwrap_or_else(|e| panic!("{e}"));
     assert!(warned["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("components")))), "{warned}");
+    assert!(conforms(&schema, &schema, &warned), "{warned} doesn't match {schema}");
+}
+
+/// #16677: `component.set_color` answers the component, the colour it shows now and whether that
+/// colour is its own; the published schema requires the component and takes the colour either way.
+#[test]
+fn set_color_answers_the_colour_and_whether_it_is_the_components_own() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let id = s.execute("component.create", &json!({"name": "Arm"})).unwrap()["component"].as_u64().unwrap();
+    let schema = output_schema_for::<SetColorResult>().as_value().clone();
+    let described = s.execute("engine.describe", &json!({"command": "component.set_color"})).unwrap();
+    assert_eq!(described["input"]["required"], json!(["component"]), "the handler refuses a call without it");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    let spec = crate::find_command("component.set_color").unwrap();
+    assert!(spec.contract.is_some() && spec.output.is_some() && spec.undoable, "the command describes itself and undoes");
+
+    // Both the name and the id are calls the command takes, and both colour forms are one colour.
+    for (key, color) in [(json!("Arm"), json!([12, 34, 56])), (json!(id), json!("#0c2238"))] {
+        let r = s.execute("component.set_color", &json!({"component": key, "color": color})).unwrap_or_else(|e| panic!("{key}: {e}"));
+        assert_eq!(r, json!({"component": id, "color": [12, 34, 56], "own": true}), "set_color changed the JSON it returned");
+        matches(output_schema_for::<SetColorResult>(), "component.set_color", &r);
+        assert_eq!(s.doc.component_identification_color(id), [12, 34, 56], "the design holds the colour it answered");
+    }
+    assert!(s.colored_components.is_none(), "the Component Colors flag is left as the window had it");
+    // No colour: the automatic one of its place in the palette, which is not the component's own.
+    let r = s.execute("component.set_color", &json!({"component": id})).unwrap();
+    assert_eq!(r, json!({"component": id, "color": s.doc.component_identification_color(id), "own": false}));
+    assert_ne!(r["color"], json!([12, 34, 56]), "the component no longer holds the colour it was given");
+    matches(output_schema_for::<SetColorResult>(), "component.set_color", &r);
+    // The design itself has no colour, a component that isn't there is refused, and so is a
+    // colour that is no colour.
+    for p in [
+        json!({"component": 0}),
+        json!({"component": "no such part"}),
+        json!({"component": id, "color": [12, 34]}),
+        json!({"component": id, "color": [12, 34, 560]}),
+        json!({"component": id, "color": "cornflower"}),
+    ] {
+        assert!(s.execute("component.set_color", &p).is_err(), "{p} should be refused");
+    }
+    // A key the command doesn't take is a warning, not a refusal, and the reply still matches.
+    let warned = s.execute("component.set_color", &json!({"component": id, "colour": [1, 2, 3]})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(warned["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("colour")))), "{warned}");
     assert!(conforms(&schema, &schema, &warned), "{warned} doesn't match {schema}");
 }
 
