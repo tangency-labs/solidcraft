@@ -9,7 +9,76 @@ fn background(textures: &[&str]) -> Shader {
         source: "dusk.wgsl".into(),
         textures: textures.iter().map(|t| ShaderTexture { name: (*t).into(), file: format!("{t}.png") }).collect(),
         animated: false,
+        state: None,
     }
+}
+
+/// An animated background with a `width` by `height` state grid.
+fn stateful(width: u32, height: u32) -> Shader {
+    Shader { animated: true, state: Some(ShaderState { width, height }), ..background(&[]) }
+}
+
+/// The state example in docs/plugin-examples/trails.
+const TRAILS: &str = include_str!("../../../../docs/plugin-examples/trails/trails.wgsl");
+
+/// A state's `fn state` must be there with the grid, and a grid needs no state of its own
+/// otherwise; both sides of the manifest are checked.
+#[test]
+fn a_state_grid_needs_fn_state_and_fn_state_needs_a_grid() {
+    let shader = stateful(64, 64);
+    assert!(reason(compile(&shader, GRADIENT).unwrap_err()).contains("fn state"));
+    compile(&shader, TRAILS).unwrap();
+    let plain = reason(compile(&background(&[]), TRAILS).unwrap_err());
+    assert!(plain.contains("no state grid"), "{plain}");
+}
+
+#[test]
+fn a_state_grid_is_animated_and_sized_within_1024() {
+    validate(&[stateful(64, 64)]).unwrap();
+    validate(&[stateful(1024, 1)]).unwrap();
+    for (width, height) in [(0, 64), (64, 0), (1025, 64), (64, 1025)] {
+        assert!(validate(&[stateful(width, height)]).is_err(), "{width}x{height}");
+    }
+    let still = Shader { animated: false, ..stateful(64, 64) };
+    assert!(validate(&[still]).is_err(), "a state needs animated");
+}
+
+#[test]
+fn the_state_grid_wires_its_two_bindings_and_its_entry_point() {
+    let compiled = compile(&stateful(64, 64), TRAILS).unwrap();
+    assert!(compiled.wgsl.contains("fn sc_state_fragment"), "{}", compiled.wgsl);
+    assert!(compiled.wgsl.contains("@binding(7)") && compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
+    naga::front::wgsl::parse_str(&compiled.wgsl).unwrap();
+    // Without a grid the host declares none of it.
+    let plain = compile(&background(&[]), GRADIENT).unwrap();
+    assert!(!plain.wgsl.contains("sc_state"), "{}", plain.wgsl);
+}
+
+/// With a grid the `sc_state*` names are the host's, so a shader cannot declare them itself.
+#[test]
+fn sc_state_names_are_reserved() {
+    assert!(compile(&stateful(64, 64), &format!("var<private> sc_state_prev: f32 = 1.0;\n{TRAILS}")).is_err());
+    let function = format!("fn sc_state_help() -> f32 {{ return 1.0; }}\n{TRAILS}");
+    assert!(compile(&stateful(64, 64), &function).is_err());
+    let binding = format!("@group(0) @binding(9) var sc_state_other: texture_2d<f32>;\n{TRAILS}");
+    assert!(compile(&stateful(64, 64), &binding).is_err());
+}
+
+/// The state step is budgeted like the background: its loops and calls spend the same budget.
+#[test]
+fn the_state_step_spends_the_loop_budget_too() {
+    let plain = compile(&stateful(64, 64), TRAILS).unwrap();
+    let looped = TRAILS.replace("    let fade", "    loop { }\n    let fade");
+    let compiled = compile(&stateful(64, 64), &looped).unwrap();
+    assert!(compiled.wgsl.matches("sc_loop_budget").count() > plain.wgsl.matches("sc_loop_budget").count(), "the loop in fn state spends the budget");
+}
+
+/// A state entry point of the plugin's own is refused, and so is a second fn state.
+#[test]
+fn a_state_shader_brings_no_entry_points_of_its_own() {
+    let entry = format!("{TRAILS}@fragment fn sc_state_mine() -> @location(0) vec4<f32> {{ return vec4<f32>(1.0); }}\n");
+    assert!(reason(compile(&stateful(64, 64), &entry).unwrap_err()).contains("entry point"));
+    assert!(compile(&stateful(64, 64), &format!("{TRAILS}fn state(px: ScStatePixel) -> vec4<f32> {{ return vec4<f32>(0.0); }}\n")).is_err());
 }
 
 const GRADIENT: &str = "fn background(px: ScPixel) -> vec4<f32> {\n    return mix(sc.bottom, sc.top, 0.5 + 0.5 * px.ray.z);\n}\n";
@@ -125,7 +194,7 @@ fn the_manifest_list_checks_ids_files_and_texture_names() {
 
 #[test]
 fn the_host_uniform_size_matches_the_prelude() {
-    let module = naga::front::wgsl::parse_str(&format!("{GRADIENT}\n{}", PRELUDE.replace("{textures}", ""))).unwrap();
+    let module = naga::front::wgsl::parse_str(&format!("{GRADIENT}\n{}", PRELUDE.replace("{textures}", "").replace("{state}", ""))).unwrap();
     let (_, host) = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("ScHost")).unwrap();
     let naga::TypeInner::Struct { span, .. } = host.inner else { panic!("ScHost is a struct") };
     assert_eq!(span as usize, HOST_UNIFORM_BYTES);
@@ -168,6 +237,11 @@ fn the_documented_examples_compile() {
             "panorama",
             include_str!("../../../../docs/plugin-examples/panorama/plugin.json"),
             include_str!("../../../../docs/plugin-examples/panorama/panorama.wgsl"),
+        ),
+        (
+            "trails",
+            include_str!("../../../../docs/plugin-examples/trails/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/trails/trails.wgsl"),
         ),
     ] {
         let manifest = crate::parse_manifest(manifest_text.as_bytes(), folder).unwrap();
@@ -229,4 +303,31 @@ fn background_is_found_with_comments_between_its_tokens() {
 fn sky() {}
 ";
     assert!(reason(compile(&background(&[]), commented_out).unwrap_err()).contains("fn background"));
+}
+
+/// A plugin written before `state` existed: no `state` key, so it parses, validates, serialises
+/// without one, and compiles to a module that declares none of the state bindings.
+#[test]
+fn a_plugin_without_a_state_grid_is_unchanged() {
+    let manifest_text = include_str!("../../../../docs/plugin-examples/dusk/plugin.json");
+    let manifest = crate::parse_manifest(manifest_text.as_bytes(), "dusk").unwrap();
+    let shader = &manifest.shaders[0];
+    assert_eq!(shader.state, None);
+    assert!(shader.animated);
+    assert!(!serde_json::to_string(shader).unwrap().contains("state"));
+    validate(&manifest.shaders).unwrap();
+    let compiled = compile(shader, include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")).unwrap();
+    assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
+    assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
+    naga::front::wgsl::parse_str(&compiled.wgsl).unwrap();
+}
+
+/// Without a grid the state names are the plugin's own, as before `state` existed: a `fn state` helper
+/// and private `sc_` globals still compile.
+#[test]
+fn a_shader_without_a_grid_may_use_state_and_sc_names_of_its_own() {
+    let source = format!(
+        "var<private> sc_x: f32 = 1.0;\nvar<private> sc_state: f32 = 2.0;\nfn state(v: f32) -> f32 {{ return v * sc_x * sc_state; }}\n{GRADIENT}"
+    );
+    compile(&background(&[]), &source).unwrap();
 }
