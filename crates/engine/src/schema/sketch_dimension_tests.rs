@@ -307,9 +307,9 @@ fn replies_match_the_output_schema() {
     // An angle between two lines, in degrees.
     let r = dim(&mut s, json!({"entities": ["l3", "l4"], "type": "angle", "value": "45 deg"}));
     assert!(r["type"] == "AngularDimension" && r["unit"] == "deg", "{r}");
-    // A driven dimension: no parameter, the keys only a driving one reads are not read.
+    // A driven dimension: a read-only parameter (#5582), the keys only a driving one reads are not read.
     let r = dim(&mut s, json!({"entities": ["l2"], "driven": true, "value": true, "scale_sketch": "yes", "if_redundant": 3, "type": "length"}));
-    assert!(r["param"].is_null() && r["driven"] == true && r.get("expression").is_none(), "{r}");
+    assert!(r["param"].is_string() && r["driven"] == true && r.get("expression").is_none(), "{r}");
     // One the sketch already determines, placed as driven instead.
     let r = dim(&mut s, json!({"entities": ["l1.start", "l1.end"], "if_redundant": "driven"}));
     assert!(r["redundant"] == true && r["driven"] == true && r["determined_by"].as_array().is_some_and(|a| !a.is_empty()), "{r}");

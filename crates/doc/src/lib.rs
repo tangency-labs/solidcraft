@@ -30,6 +30,7 @@ mod document;
 pub mod drafting_profile;
 pub mod drawing;
 pub mod drawing_view;
+mod driven;
 pub mod end_cap;
 mod eval;
 pub mod expr;
@@ -102,6 +103,7 @@ pub use assembly::{
     mat_inverse, mat_mul, mat_volume_scale, reframe_plane_placements, rigid,
 };
 pub use document::*;
+pub use driven::{DrivenIndex, DrivenParam, is_driven_problem};
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
