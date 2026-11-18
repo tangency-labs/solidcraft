@@ -580,10 +580,13 @@ fn conic_param(k: &Conic, x: Point3) -> f64 {
 }
 
 /// The parameter of an ellipse `k` on the plane through `at` with unit normal `normal`, a
-/// section of `q`, that `x` stands at round `q`'s axis: `x` moved along a cylinder's or
-/// cone's axis onto the plane, and the conic's point on the half-line to it from where the
-/// axis crosses the plane (both keep the angle about the axis, which the conic's points,
-/// the faces' and their edges' share). Not the fork's, which read `x` off the conic about
+/// section of `q`, the offset of `face`, that `x` stands at round `q`'s axis: `x` moved
+/// along a cylinder's or cone's axis onto the plane, and the conic's point on the half-line
+/// to it from where the axis crosses the plane (both keep the angle about the axis, which
+/// the conic's points, the faces' and their edges' share). A cylinder offset past its axis
+/// (a ball larger than a convex face's radius) lies the other way round it, its `side`
+/// turned: there the ball's centre is half a turn from its contact, and `x` is read on the
+/// half-line the other way. Not the fork's, which read `x` off the conic about
 /// its centre: a point of the edge, far from a small conic against its size, reads there at
 /// an angle that has nothing to do with where it lies round the axis. Of another quadric,
 /// and of an axis along the plane, `x` is read about the conic's centre
@@ -593,6 +596,7 @@ fn ellipse_param_about_axis(
     at: Point3,
     normal: Vec3,
     q: &BlendQuadric,
+    face: &BlendQuadric,
     x: Point3,
 ) -> f64 {
     let along = q.dir.dot(normal);
@@ -608,7 +612,11 @@ fn ellipse_param_about_axis(
     };
     let (a0, a1) = coords(axis_at);
     let (m0, m1) = coords(moved);
-    let (w0, w1) = (m0 - a0, m1 - a1);
+    let turned = q.kind == QuadricKind::Cylinder
+        && face.kind == QuadricKind::Cylinder
+        && q.side != face.side;
+    let way = if turned { -1.0 } else { 1.0 };
+    let (w0, w1) = (way * (m0 - a0), way * (m1 - a1));
     let ww = w0 * w0 + w1 * w1;
     let aw = a0 * w0 + a1 * w1;
     let disc = aw * aw - ww * (a0 * a0 + a1 * a1 - 1.0);
@@ -929,10 +937,10 @@ pub fn calc_rational_spine_fillet_geom(
     let mut segs: Vec<Segment> = Vec::new();
     if matches!(blend.spine, BlendSpine::Conic | BlendSpine::ConicPair) {
         // the conic: the plane's section of the other quadric (either, for a pair)
-        let q = if o0.kind == QuadricKind::Plane {
-            o1
+        let (q, q_face) = if o0.kind == QuadricKind::Plane {
+            (o1, blend.faces[1])
         } else {
-            o0
+            (o0, blend.faces[0])
         };
         let mut kc = plane_section(blend.point, blend.dir, &q)?;
         if kc.kind == ConicKind::Hyperbola && (start - kc.c).dot(kc.a1) < 0.0 {
@@ -954,7 +962,8 @@ pub fn calc_rational_spine_fillet_geom(
             } else {
                 // the arc t0 -> t1 one way or the other, by where the edge's middle lies
                 // round the quadric's axis
-                let mid = ellipse_param_about_axis(&kc, blend.point, blend.dir, &q, edge_mid);
+                let mid =
+                    ellipse_param_about_axis(&kc, blend.point, blend.dir, &q, &q_face, edge_mid);
                 let within = |a: f64, span: f64, t: f64| {
                     let mut d = (t - a) * if span >= 0.0 { 1.0 } else { -1.0 };
                     d -= 2.0 * PI * (d / (2.0 * PI)).floor();
@@ -1469,6 +1478,51 @@ mod tests {
             }
             let p = conic_point(&kc, t);
             assert!((conic_param(&kc, p) - t.sin().atan2(t.cos())).abs() < 1e-12);
+        }
+    }
+
+    /// A point of a tilted convex cylinder, far along the axis from the plane of the spine
+    /// ellipse, reads at the spine parameter of the ball's centre for that point: the same
+    /// angle round the axis where the ball is smaller than the cylinder's radius, half a turn
+    /// on where it is larger and the offset lies past the axis (#18824).
+    #[test]
+    fn a_point_of_the_face_reads_where_its_balls_centre_lies_on_the_spine_ellipse() {
+        let tau = 0.7f64;
+        let axis = Vec3::new(0.0, tau.sin(), tau.cos());
+        let e1 = Vec3::new(1.0, 0.0, 0.0);
+        let e2 = axis.cross(e1);
+        let face = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point: Point3::ZERO,
+            dir: axis,
+            radius: 1.0,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let normal = Vec3::new(0.0, 1.0, 0.0);
+        for ball in [0.3, 0.966, 1.4] {
+            let q = face.offset(-ball, 1e-12);
+            assert_eq!(q.side < 0.0, ball > 1.0);
+            let at = Point3::new(0.0, 0.5, 0.0);
+            let kc = plane_section(at, normal, &q).unwrap();
+            assert_eq!(kc.kind, ConicKind::Ellipse);
+            for i in 0..12 {
+                let phi = 0.3 + 0.5 * f64::from(i);
+                let radial = e1 * phi.cos() + e2 * phi.sin();
+                // a point of the face 3 along the axis from the plane, and its ball's centre
+                // moved along the axis onto the plane
+                let x = axis * 3.0 + radial;
+                let centre = x - radial * ball;
+                let on_plane = centre - axis * ((centre - at).dot(normal) / axis.dot(normal));
+                let truth = conic_param(&kc, on_plane);
+                let read = ellipse_param_about_axis(&kc, at, normal, &q, &face, x);
+                let off = (read - truth).sin().abs() + (1.0 - (read - truth).cos());
+                assert!(
+                    off < 1e-12,
+                    "ball {ball} phi {phi}: read {read} truth {truth}"
+                );
+            }
         }
     }
 
