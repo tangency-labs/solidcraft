@@ -126,6 +126,82 @@ fn a_box_corner_s_three_chamfers_mitre_or_take_the_facet() {
     }
 }
 
+/// Eight chamfers on a 20 mm cube remove eight prisms of volume 20 * 2^2 / 2.
+/// At each top corner, inclusion-exclusion adds back 3 * 2^3 / 3 - 2^3 / 4 = 6.
+/// The remaining volume is 8000 - 8 * 40 + 4 * 6 = 7704, with eight added faces.
+#[test]
+#[ignore = "#17026: intersecting chamfer ends with different input vertices need a shared edge"]
+fn top_and_vertical_chamfers_build_in_either_order() {
+    all_fixes();
+    let top = [
+        [10.0, 0.0, 20.0],
+        [10.0, 20.0, 20.0],
+        [0.0, 10.0, 20.0],
+        [20.0, 10.0, 20.0],
+    ];
+    let vertical = [
+        [0.0, 0.0, 9.0],
+        [20.0, 0.0, 9.0],
+        [0.0, 20.0, 9.0],
+        [20.0, 20.0, 9.0],
+    ];
+    for picks in [&[vertical, top][..], &[top, vertical][..]] {
+        let b = make_box([0.0; 3], [20.0; 3]).unwrap();
+        for points in picks {
+            let picked: Vec<_> = points.iter().map(|&p| common::edge_at(&b, p)).collect();
+            solidcore_ops::blend(&b, Blend::Chamfer, &picked, &[2.0], &[], Corners::Filled)
+                .unwrap();
+        }
+        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        assert_eq!(b.counts().unwrap(), [14, 36, 24]);
+        let v = b.volume(1e-10).unwrap();
+        assert!((v - 7704.0).abs() <= 1e-9 * 7704.0, "{v} vs 7704");
+    }
+}
+
+/// Before the top chamfers meet, each horizontal slice takes four disjoint strips from
+/// the vertically chamfered octagon. At width t their area is 4 * (16 t + t^2), so a
+/// top setback s removes 32 s^2 + 4 s^3 / 3 from 7840. At s = 1 the short top edges
+/// of the vertical chamfers collapse; beyond that size the new chamfers need shared edges.
+#[test]
+fn top_chamfers_before_the_end_collision_match_the_octagon_slices() {
+    all_fixes();
+    let vertical = [
+        [0.0, 0.0, 9.0],
+        [20.0, 0.0, 9.0],
+        [0.0, 20.0, 9.0],
+        [20.0, 20.0, 9.0],
+    ];
+    let top = [
+        [10.0, 0.0, 20.0],
+        [10.0, 20.0, 20.0],
+        [0.0, 10.0, 20.0],
+        [20.0, 10.0, 20.0],
+    ];
+    for (s, want, counts) in [
+        (0.5, 46991.0 / 6.0, [14, 36, 24]),
+        (1.0, 23420.0 / 3.0, [14, 32, 20]),
+    ] {
+        let b = make_box([0.0; 3], [20.0; 3]).unwrap();
+        for (points, distance) in [(vertical, 2.0), (top, s)] {
+            let picked: Vec<_> = points.iter().map(|&p| common::edge_at(&b, p)).collect();
+            solidcore_ops::blend(
+                &b,
+                Blend::Chamfer,
+                &picked,
+                &[distance],
+                &[],
+                Corners::Filled,
+            )
+            .unwrap();
+        }
+        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        assert_eq!(b.counts().unwrap(), counts);
+        let v = b.volume(1e-10).unwrap();
+        assert!((v - want).abs() <= 1e-9 * want, "s={s}: {v} vs {want}");
+    }
+}
+
 /// The square pyramid of base 20 about the origin and apex (0, 0, 10), its four apex edges
 /// chamfered at the distance `2 sqrt(2 / 3)` (the kernel's `pyramid_apex_of_four_equal_chamfers_
 /// is_a_facet`: radius `2 sqrt 2` across the 120 degree edges, `r / sqrt 3` along each face). The
