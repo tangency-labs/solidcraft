@@ -267,6 +267,9 @@ pub struct Matrices {
     pub view: [f32; 16],
 }
 
+/// How much more the model turns than the ball under the pointer would.
+const TURN_GAIN: f32 = 2.0;
+
 impl Orbit {
     /// Start a drag at view point `x`, `y` (points from the bottom left) of a view `width` by
     /// `height`. `None` for a point or size that isn't one.
@@ -282,7 +285,9 @@ impl Orbit {
             self.axes = grab.axes;
             return;
         };
-        let angle = ball::dot(grab.from, to).clamp(-1.0, 1.0).acos();
+        // Twice the ball's own angle, so a drag across the view turns the model a full half
+        // turn: the ball alone feels sluggish beside the app's viewport.
+        let angle = TURN_GAIN * ball::dot(grab.from, to).clamp(-1.0, 1.0).acos();
         // The turn in the view's frame (Rodrigues), applied to the view's axes at the start:
         // each row of the result is a combination of the starting rows.
         let (s, c) = angle.sin_cos();

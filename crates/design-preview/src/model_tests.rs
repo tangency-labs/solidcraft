@@ -129,12 +129,17 @@ fn the_model_turns_as_a_ball_under_the_pointer_about_every_axis() {
     // Back to where the drag started, the model is where it was.
     orbit.drag_to(&grab, 200.0, 150.0, w, h);
     assert_eq!(orbit.axes, start.axes);
-    // A drag up over the top shows the model upside down: no pole stops it.
-    let mut over = start;
-    let low = over.grab(200.0, 10.0, w, h).unwrap();
-    over.drag_to(&low, 200.0, 290.0, w, h);
-    let mut again = over;
-    let next = again.grab(200.0, 10.0, w, h).unwrap();
+    // The model turns twice as far as the ball under the pointer: a drag a fifth of the view
+    // across turns that front point by twice the ball's angle.
+    let mut wide = start;
+    wide.drag_to(&grab, 280.0, 150.0, w, h);
+    let [x, _, z] = in_view(&wide, front);
+    let ball = (80.0_f32 / 150.0).asin();
+    assert!((x.atan2(z) - 2.0 * ball).abs() < 1e-3, "{x} {z}");
+    // Two drags from the middle to the top show the model upside down: no pole stops it.
+    let mut again = start;
+    again.drag_to(&grab, 200.0, 290.0, w, h);
+    let next = again.grab(200.0, 150.0, w, h).unwrap();
     again.drag_to(&next, 200.0, 290.0, w, h);
     assert!(in_view(&again, [0.0, 0.0, 1.0])[1] < 0.0, "Z points down after going over");
     // A drag around the edge turns the model mostly about the line of sight (roll).
