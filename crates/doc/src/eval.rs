@@ -7734,12 +7734,7 @@ fn feature_tools_with_constructor(
             // The plane To Object ends on, when it is flat: a face's plane, square to the
             // extrusion or at a slant to it (but not within 5 degrees of running along it), or
             // the plane parallel to the sketch through a point or an edge (#18825).
-            let to_end_plane = extent.to.and_then(|p| match to_end_face {
-                Some(face) if square_face_level(&tst, face, &ss.plane).is_none() => {
-                    slanted_plane(&tst, face, n).filter(|slope| slope.normal().dot(n).abs() >= FROM_SLOPE_LEAST_SINE)
-                }
-                face => Some(ss.plane.offset(height_at(&tst, face, &ss.plane, centre, p.0))),
-            });
+            let to_end_plane = extent.to.and_then(|p| flat_to_end(&tst, to_end_face, &ss.plane, centre, p.0));
             let ends = ExtrudeEnds {
                 to: extent.to.map(|_| to_end_plane.is_some()),
                 through_all: extent.through_all,
@@ -10162,7 +10157,11 @@ fn level_start_reason(slope: &Plane, n: Vec3, ends: &ExtrudeEnds) -> Option<&'st
         Some(true) if ends.two_sided => return Some("To Object is set with a second side"),
         _ => {}
     }
-    if ends.through_all {
+    if ends.through_all && ends.to.is_some() {
+        // To Object decides where the extrude ends, as it does without a slanted From face; the
+        // extrude keeps starting at the face's level, as it did before To could end it there.
+        Some("To Object is set together with Through All")
+    } else if ends.through_all {
         Some("Through All is set")
     } else if ends.tapered {
         Some("the extrude is tapered")
@@ -10190,17 +10189,29 @@ pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3, 
     Some(level_along(plane, centre + n * ((slope.origin - centre).dot(m) / n.dot(m))))
 }
 
-/// Whether a To Object pick at `p` ends an extrude on `plane` on a flat plane: a point off every
-/// face, a face square to the extrusion, or a flat face at a slant to it but not within 5 degrees
-/// of running along it. With such a To, an extrude From a slanted face starts on that face
-/// (#18825); with any other, at the face's level.
-pub fn to_end_is_flat(st: &ModelState, plane: &Plane, p: Vec3) -> bool {
+/// The plane a To Object end `face` (found as the build finds it, `None` for a point or an edge
+/// pick that stands for its own level) gives an extrude on `plane`, when it is flat: the face's
+/// plane, square to the extrusion or at a slant to it but not within 5 degrees of running along
+/// it, or the plane parallel to the sketch through the pick `p`. `None` for any other face. With
+/// a flat end, an extrude From a slanted face starts on that face (#18825); with any other, at
+/// the face's level.
+fn flat_to_end(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centre: Vec3, p: Vec3) -> Option<Plane> {
     let n = plane.normal();
-    match face_at(st, p, Some(n)) {
-        None => true,
-        Some(face) if square_face_level(st, face, plane).is_some() => true,
-        Some(face) => slanted_plane(st, face, n).is_some_and(|slope| slope.normal().dot(n).abs() >= FROM_SLOPE_LEAST_SINE),
+    match face {
+        Some(face) if square_face_level(st, face, plane).is_none() => {
+            slanted_plane(st, face, n).filter(|slope| slope.normal().dot(n).abs() >= FROM_SLOPE_LEAST_SINE)
+        }
+        face => Some(plane.offset(height_at(st, face, plane, centre, p))),
     }
+}
+
+/// Whether a To Object pick at `p` ends an extrude on `plane` on a flat plane ([`flat_to_end`]),
+/// with its face found as the build finds one picked there: the face at the point, unless the
+/// point is a vertex or an edge point with no face square to the extrusion there, which stands
+/// for its own level ([`on_edge_without_cap`]).
+pub fn to_end_is_flat(st: &ModelState, plane: &Plane, p: Vec3) -> bool {
+    let face = object_face_at_level(st, None, p, plane).filter(|face| !on_edge_without_cap(st, *face, p, plane.normal()));
+    flat_to_end(st, face, plane, p, p).is_some()
 }
 
 /// How far `q` lies along `plane`'s normal from its origin.
@@ -10793,10 +10804,13 @@ fn planes_cross_over(from: &Plane, to: &Plane, plane: &Plane, regions: &[Region2
             solidcore_record::Seg2::Arc { center, radius, start, sweep } => {
                 points.extend([center + Vec2::from_angle(start) * radius, center + Vec2::from_angle(start + sweep) * radius]);
                 if let Some(down) = down {
-                    // Whether the arc passes the angle of `down`, going from `start` by `sweep`.
-                    let turn = (down.y.atan2(down.x) - start) * sweep.signum();
+                    // The arc's point at angle `t` is `center + from_angle(t) * radius`, as at its
+                    // ends, so with a negative radius its lowest point lies at the angle opposite
+                    // `down`. Whether the arc passes that angle, going from `start` by `sweep`:
+                    let toward = if radius < 0.0 { down * -1.0 } else { down };
+                    let turn = (toward.y.atan2(toward.x) - start) * sweep.signum();
                     if turn.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
-                        points.push(center + down * radius.abs());
+                        points.push(center + toward * radius);
                     }
                 }
             }

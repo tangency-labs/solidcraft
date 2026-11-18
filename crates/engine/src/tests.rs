@@ -5319,6 +5319,82 @@ fn a_cut_that_removes_very_little_says_nothing_and_planes_crossing_a_curved_prof
     assert!(crossed.as_ref().is_err_and(|e| e.to_string().contains("cross over the profile")), "{crossed:?}");
 }
 
+/// The extrude window's start rule (`from_slope_height`, which places its arrow) and the build
+/// agree on whether an extrude From the slanted wall of `slanted_slot_block` starts on it, for
+/// seven To picks (none, a point, a face square to the extrusion, the other slanted wall, a
+/// cylinder's side, the tangent edge between a block's side and a fillet, the fillet) with and
+/// without Through All, a taper and a second side (#18825). With To and Through All both set,
+/// To decides the end and the warning doesn't blame Through All.
+#[test]
+fn the_arrow_and_the_build_agree_where_an_extrude_from_a_slanted_face_starts() {
+    let wall = [20.0 / 7.0, -6.0, 5.0];
+    let tos: Vec<(&str, Option<[f64; 3]>)> = vec![
+        ("none", None),
+        ("point", Some([30.0, 30.0, 30.0])),
+        ("square face", Some([10.0, 5.0, 5.0])),
+        ("other wall", Some([2.0 + 20.0 / 7.0, -6.0, 5.0])),
+        ("cylinder side", Some([11.0, -2.0, 5.0])),
+        ("fillet tangent edge", Some([16.0, 10.0, 7.0])),
+        ("fillet face", Some([16.0, 10.0 - 3.0 + 3.0 * std::f64::consts::FRAC_1_SQRT_2, 7.0 + 3.0 * std::f64::consts::FRAC_1_SQRT_2])),
+    ];
+    let mut report = Vec::new();
+    for (to_name, to) in &tos {
+        for through_all in [false, true] {
+            for taper in [false, true] {
+                for two_sided in [false, true] {
+                    let mut s = Session::default();
+                    slanted_slot_block(&mut s);
+                    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 4], "p1": [-1, 6]}));
+                    run(&mut s, "sketch.finish", json!({}));
+                    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 12, "base": [14, -2, -1], "body_name": "Cyl"}));
+                    run(&mut s, "solid.box", json!({"corner": [12, 0, 0], "length": 8, "width": 10, "height": 10, "body_name": "Edge"}));
+                    run(&mut s, "solid.fillet", json!({"edges": [[16, 10, 10]], "radius": 3}));
+                    let mut p = json!({"sketch": "Across", "from": wall, "distance": 4, "operation": "new", "body_name": "Fill", "name": "FT"});
+                    if let Some(t) = to {
+                        p["to"] = json!(t);
+                    }
+                    if through_all {
+                        p["through_all"] = json!(true);
+                    }
+                    if taper {
+                        p["taper"] = json!("5 deg");
+                    }
+                    if two_sided {
+                        p["distance2"] = json!(3);
+                    }
+                    let built = s.execute("solid.extrude", &p);
+                    let warn = s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+                    let level_build = warn.contains("From Object starts on a plane parallel");
+                    let st = s.world_state().unwrap();
+                    let centre = solidcore_record::Vec3::new(3.0, -2.0, 5.0);
+                    let plane = solidcore_record::Plane::from_normal(centre, solidcore_record::Vec3::new(1.0, 0.0, 0.0)).unwrap();
+                    let ends = solidcraft_doc::ExtrudeEnds { to: None, through_all, tapered: taper, two_sided };
+                    let arrow = solidcraft_doc::from_slope_height(
+                        &st,
+                        &plane,
+                        centre,
+                        solidcore_record::Vec3::new(wall[0], wall[1], wall[2]),
+                        to.map(|t| solidcore_record::Vec3::new(t[0], t[1], t[2])),
+                        ends,
+                    );
+                    let line = format!(
+                        "to={to_name:20} all={through_all:5} taper={taper:5} two={two_sided:5} | build ok={:5} level={level_build:5} | arrow level={:5} {}",
+                        built.is_ok(),
+                        arrow.is_none(),
+                        if built.is_ok() && level_build != arrow.is_none() { "MISMATCH" } else { "" }
+                    );
+                    if to.is_some() && through_all {
+                        assert!(!warn.contains("because Through All is set"), "{line}: {warn}");
+                    }
+                    report.push(line);
+                }
+            }
+        }
+    }
+    let mismatched: Vec<&String> = report.iter().filter(|l| l.ends_with("MISMATCH")).collect();
+    assert!(mismatched.is_empty(), "{}", report.join("\n"));
+}
+
 /// Revolve Two Sides, Symmetric and To Object.
 #[test]
 fn revolve_two_sides_symmetric_and_to_object() {
