@@ -74,8 +74,12 @@
 //! - **Tangential curves (WR-75, #395; opt-in `ssi_tangent_curve_tracer`).** After the
 //!   interior curves, the SolidCraft fork's tangential curve pass traces the curves along
 //!   which the surfaces touch and the crossing branches through their contact points
-//!   (`super::tangent_curves`). Not in a self intersection (#18930), where the surface
-//!   touches itself everywhere at equal parameters.
+//!   (`super::tangent_curves`). Not in a self intersection whose two domains overlap or touch
+//!   (#18930, `AdvSurfaceIntersector::trivial_solution_in_both_domains`), where the surface
+//!   touches itself everywhere at equal parameters; a self tangency at two different
+//!   parameters there is left to the marcher, as without the flag. A self intersection also
+//!   skips the boundary start point search, the tangential contact point search (WR-74) and
+//!   the singular point splits (WR-77).
 //! - **Empty trace (WR-80).** A curve is traced back the other way
 //!   ([`SurfaceIntersector::trace_back`], part 4) only when `TraceCurve` produced
 //!   points. Upstream also reverses the empty curve of a trace
@@ -799,12 +803,13 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
 
         // not upstream (WR-75, opt-in; the fork's FindTangentCurves): trace the
         // tangential curves the marcher above cannot follow. Not in a self intersection
-        // (#18930): there every point of the surface solves the tracer's equations with
-        // itself at the same parameters (S(x) - S(x) = 0, n = n), so the tracer's solves
-        // land on that trivial solution and it traces the surface against itself.
+        // whose two domains overlap or touch (#18930): there every point of the surface solves
+        // the tracer's equations with itself at equal parameters (S(x) - S(x) = 0, n = n),
+        // and its solves seeded beside a fold land on that trivial solution, so it traced
+        // the surface against itself.
         let mut tangent_nodes = Vec::new();
         let seeds = core::mem::take(&mut self.tangent_curve_seeds);
-        if k.fixes.ssi_tangent_curve_tracer && !self.base.doing_self_intersection {
+        if k.fixes.ssi_tangent_curve_tracer && !self.trivial_solution_in_both_domains() {
             let size = crate::math::min2(root1.size().length(), root2.size().length());
             let mut curves = TsectCurves {
                 curves_3d: core::mem::take(&mut interior.curves_3d),
@@ -1737,25 +1742,75 @@ mod tests {
     }
 
     /// A surface folded back on itself (#18930): the swallowtail ribbon's self intersection is
-    /// the one vertical line where it crosses itself, at (0, 2.5). Its two cusp lines, where the
-    /// ribbon turns back and its two sheets meet at equal parameters, are no self intersection:
-    /// with the tangential curve pass (`ssi_tangent_curve_tracer`) a self intersection traced
-    /// them as tangent curves, its solves sliding onto the trivial solution there.
+    /// the one vertical line where it crosses itself, at (0, 2.5), over the ribbon's height
+    /// 0..2, with the tangential curve pass (`ssi_tangent_curve_tracer`) as without it. With the
+    /// pass, a self intersection also returned six tangent curves: seeded beside the two cusp
+    /// lines, where the ribbon turns back and its sheets meet at equal parameters, the pass
+    /// traced the surface against itself.
     #[test]
     fn a_folded_ribbon_crosses_itself_once_with_the_tangent_curve_tracer() {
-        let mut k = Kernel::default();
-        k.fixes.ssi_tangent_curve_tracer = true;
         let ribbon = swallowtail_ribbon();
-        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
-        let x = ribbon
-            .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
-            .unwrap();
-        assert_eq!(x.curve_types, [TsectCurveType::Crossing]);
-        let c = x.curves_3d.first().unwrap();
-        let iv = c.natural_interval();
-        for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
-            let p = c.evaluate_point(&k, iv.evaluate(f)).unwrap();
-            assert!(p.x.abs() < 1e-3 && (p.y - 2.5).abs() < 1e-3, "{f}: {p:?}");
+        for tracer in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.ssi_tangent_curve_tracer = tracer;
+            let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+            let x = ribbon
+                .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
+                .unwrap();
+            assert_eq!(x.curve_types, [TsectCurveType::Crossing], "{tracer}");
+            let c = x.curves_3d.first().unwrap();
+            let iv = c.natural_interval();
+            let mut z = Vec::new();
+            for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let p = c.evaluate_point(&k, iv.evaluate(f)).unwrap();
+                assert!(
+                    p.x.abs() < 1e-3 && (p.y - 2.5).abs() < 1e-3,
+                    "{tracer} {f}: {p:?}"
+                );
+                z.push(p.z);
+            }
+            // end to end over the height, monotone
+            let (z0, z1) = (*z.first().unwrap(), *z.last().unwrap());
+            assert!(
+                z0.min(z1).abs() < 1e-4 && (z0.max(z1) - 2.0).abs() < 1e-4,
+                "{tracer}: {z:?}"
+            );
+            assert!(
+                z.windows(2)
+                    .all(|w| matches!(w, [a, b] if (b - a) * (z1 - z0) > 0.0)),
+                "{tracer}: {z:?}"
+            );
         }
+    }
+
+    /// Where a self intersection's trivial solution lies (#18930): two domains of one surface
+    /// that are the same, overlap or touch both hold the points the surface shares with itself
+    /// at equal parameters, so the tangential curve pass does not run; two disjoint domains of
+    /// one surface, and two surfaces over the same domain, hold none, so it runs.
+    #[test]
+    fn a_self_intersection_meets_its_trivial_solution_where_its_domains_overlap_or_touch() {
+        let k = Kernel::default();
+        let ribbon = swallowtail_ribbon();
+        let copy = swallowtail_ribbon();
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let (u0, u1, v0, v1) = (dom.u_min(), dom.u_max(), dom.v_min(), dom.v_max());
+        let part =
+            |a: f64, b: f64| Extent2d::from_bounds(u0 + a * (u1 - u0), v0, u0 + b * (u1 - u0), v1);
+        let meets = |other: &Surface, d1: &Extent2d, d2: &Extent2d| {
+            AdvSurfaceIntersector::<'_, '_, NoSurfaceHandle>::new(&k, &ribbon, d1, other, d2, false)
+                .unwrap()
+                .trivial_solution_in_both_domains()
+        };
+        assert!(meets(&ribbon, &dom, &dom), "the same domain");
+        assert!(
+            meets(&ribbon, &part(0.0, 0.6), &part(0.4, 1.0)),
+            "overlapping"
+        );
+        assert!(meets(&ribbon, &part(0.0, 0.5), &part(0.5, 1.0)), "touching");
+        assert!(
+            !meets(&ribbon, &part(0.0, 0.4), &part(0.6, 1.0)),
+            "disjoint"
+        );
+        assert!(!meets(&copy, &dom, &dom), "two surfaces");
     }
 }
