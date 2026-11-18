@@ -311,7 +311,8 @@ fn a_failed_closest_point_counts_as_off_the_piece() {
 /// with a half annulus prism, r 4..5 about (e, 10), z 2..20, whose cap sits on the ring's top. Two
 /// equal circles a little apart cross; they do not coincide over a tiny edge. The stack's volume
 /// is 113 pi whatever e is.
-/// solidcore's own test (issue_1979) checks the curve/curve crossing behind it.
+/// This path passes with `simple_coincidence_crossing_is_point` off too, so the test holds the
+/// result here and does not single out that flag (solidcore's own test does).
 #[test]
 fn a_ring_and_a_lip_with_walls_nearly_together() {
     use super::sweep::extrude;

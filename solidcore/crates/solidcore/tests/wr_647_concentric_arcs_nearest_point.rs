@@ -10,7 +10,10 @@
 //! coincident skins of tangency-labs/solidcore#1036.) A crossing of two distinct curves
 //! or touch seen through the tolerance is decided on the merged range in
 //! `GlobalCurveIntersect` (`issue_1979_ring_lip_crossing_not_coincidence.rs`, and the
-//! crossing and touch tests below).
+//! crossing and touch tests below), with or without
+//! `Kernel::fixes.simple_coincidence_crossing_is_point`. That flag keeps only 04b42b4's
+//! case 3e: with it, a span pair whose separation keeps one side without vanishing is the
+//! one point where the curves come nearest (the `..._are_their_nearest_point` test).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -18,7 +21,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::curve::curve::p8::{meetings_lie_in_one_interval, CurveIntersectOptions};
+use solidcore::curve::curve::p8::CurveIntersectOptions;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::geom::extent1d::Extent1d;
@@ -42,14 +45,20 @@ impl SolutionObject for H {
     }
 }
 
+fn kernel(fix: bool) -> Kernel {
+    let mut k = Kernel::default();
+    k.fixes.simple_coincidence_crossing_is_point = fix;
+    k
+}
+
 fn arc(r: f64) -> Curve {
     Curve::from(create_arc(Point3::new(0.0, 0.0, 0.0), r, 0.0, 90.0).unwrap())
 }
 
 /// `SimpleCoincidenceChecker` of the arc r 5 against the arc r 5 + `gap`, over their natural
 /// intervals.
-fn check(gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
-    let k = Kernel::default();
+fn check(fix: bool, gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
+    let k = kernel(fix);
     let a = arc(5.0);
     let b = arc(5.0 + gap);
     let (ia, ib) = (a.natural_interval(), b.natural_interval());
@@ -64,7 +73,7 @@ fn check(gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
 fn wr_647_concentric_arcs_within_tolerance_are_a_range() {
     let k = Kernel::default();
     for gap in [1e-6, 5e-6, 1e-9] {
-        let (a, b, sols) = check(gap);
+        let (a, b, sols) = check(false, gap);
         assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
         let s = &sols[0];
         assert_eq!(s.solution_type, SolutionType::RangeOfValues, "gap {gap}");
@@ -125,19 +134,125 @@ fn wr_647_concentric_arcs_intersect_in_one_range() {
     }
 }
 
-/// The same arc twice: the separation vanishes, so it stays a range.
+#[test]
+fn wr_647_crossing_is_point_is_off_by_default() {
+    assert!(!Kernel::default().fixes.simple_coincidence_crossing_is_point);
+}
+
+/// Upstream: one coincidence range over the whole arcs.
+#[test]
+fn wr_647_concentric_arcs_within_tolerance_are_a_range_by_default() {
+    for gap in [1e-6, 5e-6, 1e-9] {
+        let (a, b, sols) = check(false, gap);
+        assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
+        let s = &sols[0];
+        assert_eq!(s.solution_type, SolutionType::RangeOfValues, "gap {gap}");
+        let (ia, ib) = (a.natural_interval(), b.natural_interval());
+        assert!(
+            (s.start.parameters[0] - ia.min()).abs() < 1e-9,
+            "gap {gap}: {s:?}"
+        );
+        assert!(
+            (s.end.parameters[0] - ia.max()).abs() < 1e-9,
+            "gap {gap}: {s:?}"
+        );
+        assert!(
+            (s.start.parameters[1] - ib.min()).abs() < 1e-9,
+            "gap {gap}: {s:?}"
+        );
+        assert!(
+            (s.end.parameters[1] - ib.max()).abs() < 1e-9,
+            "gap {gap}: {s:?}"
+        );
+    }
+}
+
+/// With the fix (04b42b4's case 3e): one point, where the arcs are `gap` apart.
+#[test]
+fn wr_647_concentric_arcs_within_tolerance_are_their_nearest_point() {
+    let k = Kernel::default();
+    for gap in [1e-6, 5e-6, 1e-9] {
+        let (a, b, sols) = check(true, gap);
+        eprintln!("WR647 3e gap {gap}: {sols:?}");
+        assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
+        let s = &sols[0];
+        assert_eq!(s.solution_type, SolutionType::SingleValue, "gap {gap}");
+        let p = a.evaluate_point(&k, s.start.parameters[0]).unwrap();
+        let q = b.evaluate_point(&k, s.start.parameters[1]).unwrap();
+        assert!(
+            (p.distance(q) - gap).abs() <= 1e-12,
+            "gap {gap}: the points are {} apart",
+            p.distance(q)
+        );
+    }
+}
+
+/// The same arc twice: the separation vanishes, so it stays a range in both settings.
 #[test]
 fn wr_647_the_same_arc_twice_stays_a_range() {
-    let (_, _, sols) = check(0.0);
+    for fix in [false, true] {
+        let (_, _, sols) = check(fix, 0.0);
+        assert_eq!(sols.len(), 1, "fix {fix}: {sols:?}");
+        assert_eq!(
+            sols[0].solution_type,
+            SolutionType::RangeOfValues,
+            "fix {fix}"
+        );
+    }
+}
+
+/// An arc against a copy of itself that stops 4.8e-6 short of each end (an edge against
+/// its coincident copy in a body cut by itself): the curves lie on each other, yet the end
+/// pairs' separations run along the curves, forward at one end and back at the other. With
+/// `simple_coincidence_crossing_is_point` upstream read that as a crossing: one point (where
+/// the curves cannot cross, they lie on each other), or a failure where no crossing is
+/// found. The side is taken across the curve, nothing changes sides, and the answer is the
+/// coincidence range over the shorter arc.
+#[test]
+fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
+    let shortfall_deg = (4.8e-6 / 5.0_f64).to_degrees();
+    let k = kernel(true);
+    let a = arc(5.0);
+    let b = Curve::from(
+        create_arc(
+            Point3::new(0.0, 0.0, 0.0),
+            5.0,
+            shortfall_deg,
+            90.0 - shortfall_deg,
+        )
+        .unwrap(),
+    );
+    let (ia, ib) = (a.natural_interval(), b.natural_interval());
+    let sols = a
+        .simple_coincidence_checker(&k, &ia, &b, &ib, TOL, None, None, [Some(0u8), Some(1u8)])
+        .unwrap();
     assert_eq!(sols.len(), 1, "{sols:?}");
-    assert_eq!(sols[0].solution_type, SolutionType::RangeOfValues);
+    let s = &sols[0];
+    assert_eq!(s.solution_type, SolutionType::RangeOfValues, "{s:?}");
+    // the range covers the copy, end to end
+    assert!((s.start.parameters[1] - ib.min()).abs() < 1e-9, "{s:?}");
+    assert!((s.end.parameters[1] - ib.max()).abs() < 1e-9, "{s:?}");
+    for (t, u) in [
+        (s.start.parameters[0], ib.min()),
+        (s.end.parameters[0], ib.max()),
+    ] {
+        let gap = a
+            .evaluate_point(&k, t)
+            .unwrap()
+            .distance(b.evaluate_point(&k, u).unwrap());
+        // the range's ends pair points within the tolerance (the shortfall, 4.8e-6)
+        assert!(
+            gap <= 4.8e-6 + 1e-12,
+            "the range's ends lie on each other: {gap}"
+        );
+    }
 }
 
 /// An arc against a copy of itself that stops 4.8e-6 short of each end (an edge against
 /// its coincident copy in a body cut by itself): the curves lie on each other, and the answer
 /// is the coincidence range over the shorter arc.
 #[test]
-fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
+fn an_arc_and_its_shorter_copy_coincide_over_the_copy_by_default() {
     let shortfall_deg = (4.8e-6 / 5.0_f64).to_degrees();
     let k = Kernel::default();
     let a = arc(5.0);
@@ -850,6 +965,29 @@ fn wr_647_an_exact_overlap_with_a_conic_stays_a_range() {
 /// leave the circle's plane by `lift` at their inner controls and 4 `lift` at the ends
 /// (review r5's probe).
 fn arc_spline_of(theta: f64, ell: f64, lift: f64) -> Curve {
+    arc_spline_near(theta, ell, lift, 0.0, 0.0, 1.0)
+}
+
+/// [`arc_spline_of`] with every control point moved radially about the circle's axis by
+/// the factor `1 + dr` (the middle span a concentric arc of radius `1 + dr`) and lifted by
+/// `dz`, then the whole curve scaled about the origin by `scale` (review r6's probe; the
+/// control points unchanged when `dr`, `dz` are 0 and `scale` is 1).
+fn arc_spline_near(theta: f64, ell: f64, lift: f64, dr: f64, dz: f64, scale: f64) -> Curve {
+    arc_spline_stretched(theta, ell, lift, dr, dz, scale, 1.0)
+}
+
+/// [`arc_spline_near`] with knots 0, `l`, `l` + 1, 2 `l` + 1: the same control points and
+/// weights, each span the same quadratic Bezier, so the same geometry, but the arc span is
+/// 1 / (2 `l` + 1) of the spline's natural interval (review r7's probe E3).
+fn arc_spline_stretched(
+    theta: f64,
+    ell: f64,
+    lift: f64,
+    dr: f64,
+    dz: f64,
+    scale: f64,
+    l: f64,
+) -> Curve {
     let h = (theta / 2.0).to_radians();
     let (a0, a1) = (
         -std::f64::consts::FRAC_PI_2 - h,
@@ -869,6 +1007,17 @@ fn arc_spline_of(theta: f64, ell: f64, lift: f64) -> Curve {
         p4 + ahead * (ell / 2.0) + z * lift,
         p4 + ahead * ell + z * (4.0 * lift),
     ];
+    let pts = if dr == 0.0 && dz == 0.0 && scale == 1.0 {
+        pts
+    } else {
+        pts.map(|p| {
+            Point3::new(
+                0.5 + (p.x - 0.5) * (1.0 + dr),
+                1.0 + (p.y - 1.0) * (1.0 + dr),
+                p.z + dz,
+            ) * scale
+        })
+    };
     let w = [1.0, 1.0, 1.0, h.cos(), 1.0, 1.0, 1.0];
     Curve::from(
         BSplineCurve::create_canonical(&CanonicalData {
@@ -877,7 +1026,7 @@ fn arc_spline_of(theta: f64, ell: f64, lift: f64) -> Curve {
             control_points: &pts,
             form: BSplineCurveForm::default(),
             knot_multiplicities: &[3, 2, 2, 3],
-            knots: &[0.0, 1.0, 2.0, 3.0],
+            knots: &[0.0, l, l + 1.0, 2.0 * l + 1.0],
             knot_type: KnotType::default(),
             weights: Some(&w),
             trim: None,
@@ -907,23 +1056,6 @@ fn wr_647_short_exact_overlaps_with_a_conic_stay_ranges() {
                     "{theta} degrees, lift {lift}: the middle span is off the circle by {off:e}"
                 );
             }
-            // the band certificate refuses the overlap itself, either way round
-            let whole = (
-                circle.natural_interval().min(),
-                circle.natural_interval().max(),
-            );
-            assert!(!meetings_lie_in_one_interval(
-                &circle,
-                whole,
-                &s,
-                (0.0, 3.0)
-            ));
-            assert!(!meetings_lie_in_one_interval(
-                &s,
-                (0.0, 3.0),
-                &circle,
-                whole
-            ));
             for (all, side) in [
                 (intersect_at(&circle, &s, 1e-2), 1),
                 (intersect_at(&s, &circle, 1e-2), 0),
@@ -938,6 +1070,133 @@ fn wr_647_short_exact_overlaps_with_a_conic_stay_ranges() {
                     covered,
                     "{theta} degrees, lift {lift}: the overlap s in [1, 2] is lost: {all:?}"
                 );
+            }
+        }
+    }
+}
+
+/// Review r6: a curve within the meeting zero of a planar conic over an arc, but not on
+/// it (a concentric arc `dr` off the circle, or lifted `dz` off its plane, both between
+/// the rounding and the scaled zero, about 3e-12 here), meets it at every point of the
+/// arc: a run of meetings, not one. A range must still cover s in [1, 2] (main's answer),
+/// both ways round, at 30 and 60 degrees. The last rows are the same at 50 times the size
+/// (the scaled zero about 1.5e-10, the ops tangent-floor case's scale), `dr` 1e-12.
+#[test]
+fn wr_647_near_overlaps_within_the_zero_stay_ranges() {
+    let k = Kernel::default();
+    let rows = [
+        // (theta, ell, dr, dz, scale)
+        (30.0, 3.0, 1e-13, 0.0, 1.0),
+        (30.0, 3.0, 5e-13, 0.0, 1.0),
+        (60.0, 0.23094, 1e-13, 0.0, 1.0),
+        (60.0, 0.23094, 5e-13, 0.0, 1.0),
+        (30.0, 3.0, 0.0, 1e-13, 1.0),
+        (30.0, 3.0, 0.0, 1e-12, 1.0),
+        (60.0, 0.23094, 0.0, 1e-13, 1.0),
+        (30.0, 3.0, 1e-12, 0.0, 50.0),
+        (60.0, 0.23094, 1e-12, 0.0, 50.0),
+    ];
+    for (theta, ell, dr, dz, scale) in rows {
+        let circle = if scale == 1.0 {
+            floor_circle(&k)
+        } else {
+            Curve::from(
+                Ellipse::new(
+                    &k,
+                    Vec3::new(0.5, 1.0, 0.0) * scale,
+                    Vec3::X,
+                    Vec3::Y,
+                    Extent1d::from_min_max(0.0, 360.0),
+                    scale,
+                    scale,
+                    &EllipseOptions::default(),
+                )
+                .unwrap(),
+            )
+        };
+        let s = arc_spline_near(theta, ell, 1e-3, dr, dz, scale);
+        let tag = format!("{theta} degrees, dr {dr:e}, dz {dz:e}, scale {scale}");
+        // the middle span is off the circle by about dr (radially) or dz (lifted), within
+        // the scaled zero: every point of it is a meeting
+        let zero = 1e-12 * (1.0 + 2.0 * scale);
+        for i in 0..=20 {
+            let p = s.evaluate_point(&k, 1.0 + f64::from(i) / 20.0).unwrap() * (1.0 / scale);
+            let rho = ((p.x - 0.5).powi(2) + (p.y - 1.0).powi(2)).sqrt();
+            let off = ((rho - 1.0).powi(2) + p.z * p.z).sqrt() * scale;
+            assert!(
+                off <= zero / 2.0 && off >= (dr + dz) * scale / 4.0,
+                "{tag}: the middle span is off the circle by {off:e}"
+            );
+        }
+        for (all, side) in [
+            (intersect_at(&circle, &s, 1e-2 * scale), 1),
+            (intersect_at(&s, &circle, 1e-2 * scale), 0),
+        ] {
+            let covered = all.iter().any(|x| {
+                x.solution_type == SolutionType::RangeOfValues && {
+                    let (a, b) = (x.start.parameters[side], x.end.parameters[side]);
+                    a.min(b) <= 1.0 && 2.0 <= a.max(b)
+                }
+            });
+            assert!(covered, "{tag}: the run s in [1, 2] is lost: {all:?}");
+        }
+    }
+}
+
+/// `GlobalCurveIntersect` of `a` against `b` at `tol` with the flag set to `fix`.
+fn intersect_with(fix: bool, a: &Curve, b: &Curve, tol: f64) -> Vec<Solution<H>> {
+    let k = kernel(fix);
+    let (ia, ib) = (a.natural_interval(), b.natural_interval());
+    a.global_curve_intersect(&k, &ia, b, &ib, tol, &CurveIntersectOptions::<H>::default())
+        .unwrap()
+        .as_slice()
+        .to_vec()
+}
+
+/// Review r7 (probe E3): the near and exact overlaps above, with the spline's knots
+/// stretched to 0, `L`, `L` + 1, 2 `L` + 1 (the geometry unchanged), so the arc span is
+/// below a tenth of the spline's natural interval (1/21 at `L` = 10, 1/61 at `L` = 30) and
+/// the 10 and 5 degree arcs below a tenth of the circle's. Each is still a run of
+/// meetings, not one: a range must cover s in [`L`, `L` + 1] (main's answer), both ways
+/// round, at tolerance 1e-2, with `simple_coincidence_crossing_is_point` off and on (its
+/// nearest point needs the largest distance past the scaled zero, which these are within).
+/// A zero-run cut at a tenth of both curves collapsed 11 of these rows at `L` = 10 to one
+/// point at the end of the overlap.
+#[test]
+fn wr_647_sub_tenth_near_overlaps_with_a_conic_stay_ranges() {
+    let k = Kernel::default();
+    let circle = floor_circle(&k);
+    let mut rows = Vec::new();
+    for dr in [1e-13, 5e-13] {
+        for (theta, ell) in [(30.0, 3.0), (10.0, 1.0), (5.0, 1.0)] {
+            rows.push((theta, ell, dr, 0.0));
+        }
+    }
+    for dz in [1e-13, 1e-12] {
+        for (theta, ell) in [(30.0, 3.0), (10.0, 1.0)] {
+            rows.push((theta, ell, 0.0, dz));
+        }
+    }
+    // exact overlaps
+    rows.push((30.0, 3.0, 0.0, 0.0));
+    rows.push((5.0, 1.0, 0.0, 0.0));
+    for l in [10.0, 30.0] {
+        for &(theta, ell, dr, dz) in &rows {
+            let s = arc_spline_stretched(theta, ell, 1e-3, dr, dz, 1.0, l);
+            for fix in [false, true] {
+                let tag = format!("L {l}, {theta} degrees, dr {dr:e}, dz {dz:e}, flag {fix}");
+                for (all, side) in [
+                    (intersect_with(fix, &circle, &s, 1e-2), 1),
+                    (intersect_with(fix, &s, &circle, 1e-2), 0),
+                ] {
+                    let covered = all.iter().any(|x| {
+                        x.solution_type == SolutionType::RangeOfValues && {
+                            let (a, b) = (x.start.parameters[side], x.end.parameters[side]);
+                            a.min(b) <= l + 1e-9 && l + 1.0 - 1e-9 <= a.max(b)
+                        }
+                    });
+                    assert!(covered, "{tag}: the run s in [L, L + 1] is lost: {all:?}");
+                }
             }
         }
     }

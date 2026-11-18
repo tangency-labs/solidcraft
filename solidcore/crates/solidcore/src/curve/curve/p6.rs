@@ -84,7 +84,10 @@
 //!   `curve.curve_p8`),
 //!   where it shows whether the range ends where the curves part or where one of them
 //!   stops; on one span pair a fitted copy of a curve (its separation tolerance-scale
-//!   noise) looks the same as a grazing crossing.
+//!   noise) looks the same as a grazing crossing. With
+//!   `Kernel::fixes.simple_coincidence_crossing_is_point`, a span pair whose separation
+//!   keeps one side without vanishing is still the one point where the curves come
+//!   nearest (the fork's 04b42b4, case 3e).
 //! - **Statuses passed on (WR-663).** The statuses SMLib drops are passed on, as the
 //!   fork (tangency-labs/smlib 8311f8e):`CalculateBoundingBox`'s samples, interval and
 //!   boxes, `CurveMaxDistanceBetween`'s knots, `DeformToEndPointTargets`' drops (a target
@@ -1362,12 +1365,16 @@ impl Curve {
     /// point (one drop or a tiny parameter range: the better end), two points (the
     /// first and last drops when the curves separate by more than `tol` between them,
     /// or either range is degenerate), or one coincident range. `objects` name this
-    /// curve and `other` in the solutions.
+    /// curve and `other` in the solutions. With
+    /// `Kernel::fixes.simple_coincidence_crossing_is_point` (WR-647) a range whose
+    /// separation keeps one side without vanishing is the one point where the curves come
+    /// nearest; a range whose separation changes sides stays a range in every kernel.
     ///
     /// # Errors
     ///
     /// Those of the evaluations, [`Curve::local_point_solve`] and
-    /// [`Curve::curve_max_distance_between`].
+    /// [`Curve::curve_max_distance_between`]; with the WR-647 opt-in, those of
+    /// [`Curve::local_curve_solve`], and `SM_ERR` when it finds no point.
     pub fn simple_coincidence_checker<O: Copy>(
         &self,
         k: &Kernel,
@@ -1522,6 +1529,8 @@ impl Curve {
         let mut ivl_t2 = Extent1d::from_value(first.1);
         ivl_t2.add_value(last.1);
         let max_degree = self.degree()?.max(other.degree()?);
+        // `dDistanceBetween`: set below whenever the coincidence test is reached
+        let mut distance_between = 0.0;
 
         // degenerate intervals are never coincidentIntervals
         if are_same(ivl_t1.max(), ivl_t1.min()) || are_same(ivl_t2.max(), ivl_t2.min()) {
@@ -1537,6 +1546,7 @@ impl Curve {
                 max_degree as u64 + 3,
                 Some(tol),
             )?;
+            distance_between = gap.distance;
 
             // when maxDistance is greater than tolerance
             if gap.distance > tol {
@@ -1551,6 +1561,56 @@ impl Curve {
                 pair_solution(objects, first, None),
                 pair_solution(objects, last, None),
             ]);
+        }
+
+        // The curves stay within tolerance over the interval. With
+        // `Kernel::fixes.simple_coincidence_crossing_is_point`, a separation that keeps one
+        // side without vanishing is an approach, not a coincidence: the contact is where the
+        // curves come nearest, a point (fork 04b42b4, case 3e). A separation that changes sides
+        // is left to the merged range (`contacts_seen_through_tolerance`, WR-647), and so is
+        // one that vanishes to numeric zero (it has no side).
+        if k.fixes.simple_coincidence_crossing_is_point {
+            let this_a = self.evaluate_point(k, first.0)?;
+            let this_b = self.evaluate_point(k, last.0)?;
+            let other_a = other.evaluate_point(k, first.1)?;
+            let other_b = other.evaluate_point(k, last.1)?;
+            // The side is taken across this curve, its tangent's component removed (an end of
+            // one curve that runs past the other's end drops onto that end, and the pair's
+            // difference then points along the curves)
+            let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
+            let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
+            let scaled_zero =
+                EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
+            let changes_sides = separation_a.length() > scaled_zero
+                && separation_b.length() > scaled_zero
+                && separation_a.dot(separation_b) < 0.0;
+            if !changes_sides && distance_between > scaled_zero {
+                let (found, mut nearest) = self.local_curve_solve(
+                    k,
+                    &ivl_t1,
+                    other,
+                    &ivl_t2,
+                    SolverOperation::Minimize,
+                    tol,
+                    None,
+                    None,
+                    [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
+                    objects,
+                )?;
+                if !found {
+                    // curves within tolerance but no nearest point found
+                    return Err(SolidError::curve_failed(
+                        "curve::simple_coincidence_checker (nearest)",
+                        "the curves are within tolerance but no nearest point was found",
+                    ));
+                }
+                nearest.num_variables = 2;
+                nearest.num_objects = 2;
+                nearest.solution_type = SolutionType::SingleValue;
+                nearest.objects[0] = objects[0];
+                nearest.objects[1] = objects[1];
+                return Ok(vec![nearest]);
+            }
         }
 
         // add 1 coincident intersection to solution array (whether a range found here is a
