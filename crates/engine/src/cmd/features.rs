@@ -2835,14 +2835,7 @@ fn finish_pattern(
         let mut reply = add_feature(
             s,
             p,
-            FeatureKind::Pattern {
-                features,
-                pattern,
-                bodies: Vec::new(),
-                placements: Vec::new(),
-                components,
-                occurrences: Vec::new(),
-            },
+            FeatureKind::Pattern { features, pattern, bodies: Vec::new(), placements: Vec::new(), components, occurrences: Vec::new() },
         )?;
         let made = s
             .doc
