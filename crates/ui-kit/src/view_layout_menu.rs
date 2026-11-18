@@ -255,13 +255,12 @@ fn detach_action(ui: &mut Ui, data: &LayoutMenu, focus_first: bool) -> Option<St
 pub(crate) fn show(ui: &mut Ui, strip: &TabStrip, data: &LayoutMenu, opened: u64) -> MenuOut {
     let flags = sections(data);
     let id = strip.id.with(("layout_menu", opened));
-    let first_frame = ui.ctx().data_mut(|memory| {
-        let first = memory.get_temp::<bool>(id).is_none();
-        if ui.is_visible() {
+    let first_frame = ui.is_visible()
+        && ui.ctx().data_mut(|memory| {
+            let first = memory.get_temp::<bool>(id).is_none();
             memory.insert_temp(id, true);
-        }
-        first && ui.is_visible()
-    });
+            first
+        });
     let mut open = ui.ctx().data(|memory| memory.get_temp::<Flyout>(id.with("flyout")));
     let old_open = open;
     Menu::heading(ui, tr("view_layout.heading"));
