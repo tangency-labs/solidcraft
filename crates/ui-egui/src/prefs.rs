@@ -1965,6 +1965,9 @@ preference_settings! {
     /// less than `sketch_tools::MIN_GLYPH_SPAN_PX` (#10518). Off: glyphs stay at a fixed screen
     /// size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
+    /// Opt in to showing constraint glyphs only for selected sketch curves and points (#18817).
+    /// Conflicting constraints still show; off keeps all non-dimension glyphs visible as before.
+    constraint_glyphs_selected_only: bool = false, PAGE_SKETCH;
     /// The Ellipse tool draws the major and minor axes as construction lines with the ellipse, so
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.

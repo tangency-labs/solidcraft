@@ -1976,6 +1976,29 @@ fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<It
     })
 }
 
+/// Whether a constraint refers to the selected point or curve. Selecting a point also
+/// exposes constraints on curves that use that point, so clicking a tangent endpoint can
+/// reveal its line/circle constraint without turning on every other badge (#18817).
+fn constraint_matches_selection(
+    sk: &solidcraft_engine::sketch::Sketch,
+    kind: &solidcraft_engine::sketch::ConstraintKind,
+    selected: &[solidcraft_engine::Sel],
+) -> bool {
+    let (curves, points) = constraint_entities(kind);
+    selected.iter().any(|item| match item {
+        solidcraft_engine::Sel::SketchCurve { id, .. } => curves.iter().any(|&index| sk.curves.get(index).is_some_and(|curve| curve.id == *id)),
+        solidcraft_engine::Sel::SketchPoint { id } => {
+            points.iter().any(|&index| sk.points.get(index).is_some_and(|point| point.id == *id))
+                || curves.iter().any(|&index| {
+                    sk.curves.get(index).is_some_and(|curve| {
+                        curve.kind.point_ids().into_iter().any(|p| sk.points.get(p).is_some_and(|point| point.id == *id))
+                    })
+                })
+        }
+        _ => false,
+    })
+}
+
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
 fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
     let a = proj.to_screen(plane.to_world(Vec2::ZERO))?;
@@ -2016,6 +2039,18 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     for c in glyph_constraints(&ss.sketch) {
+        if app.preferences.constraint_glyphs_selected_only
+            && !ss.report.failing.contains(&c.id)
+            && picked.as_deref() != Some(c.id.as_str())
+            && !app
+                .session
+                .selection
+                .iter()
+                .any(|sel| matches!(sel, solidcraft_engine::Sel::SketchConstraint { id } if id == &c.id))
+            && !constraint_matches_selection(&ss.sketch, &c.kind, &app.session.selection)
+        {
+            continue;
+        }
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.
@@ -2310,6 +2345,33 @@ mod glyph_zoom_tests {
         assert_eq!(anchors.len(), 1);
         assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
         assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
+    }
+
+    /// Opt-in filtering ties visible glyphs to selected curves and points, including a
+    /// curve's endpoints. Without a selection the normal glyph list is untouched (#18817).
+    #[test]
+    fn selected_geometry_can_reveal_its_constraint_glyphs() {
+        use solidcraft_engine::Sel;
+        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(super::Vec2::new(20.0, 0.0), None).unwrap();
+        let other = sk.add_point(super::Vec2::new(0.0, 20.0), None).unwrap();
+        let line = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        let horizontal = ConstraintKind::Horizontal { l: line };
+        let curve = Sel::SketchCurve { id: sk.curves[line].id.clone(), sketch: None };
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[curve]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[b].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &horizontal, &[]), "unselected geometry has no filtered glyph");
+        assert!(
+            !super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]),
+            "unrelated points do not reveal every constraint"
+        );
+        let point_constraint = ConstraintKind::Fix { p: other };
+        assert!(super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(!crate::prefs::Prefs::default().constraint_glyphs_selected_only, "the old display remains the default");
     }
 
     #[test]
