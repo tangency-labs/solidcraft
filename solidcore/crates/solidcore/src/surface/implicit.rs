@@ -555,8 +555,7 @@ pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<O
             };
             // (not a number refuses; as [`distance_bound`], the `γ` model leaves out
             // underflow, inside the final growth only with `τ ≥ MIN_POSITIVE / ε`)
-            let normal = power.lo >= f64::MIN_POSITIVE
-                && r.tol >= f64::MIN_POSITIVE / f64::EPSILON;
+            let normal = power.lo >= f64::MIN_POSITIVE && r.tol >= f64::MIN_POSITIVE / f64::EPSILON;
             if !normal {
                 return Ok(None);
             }
@@ -2798,7 +2797,10 @@ mod tests {
             normal: Vec3::X,
         };
         assert_eq!(off_surface_bound(&patch, &nan_plane).unwrap(), None);
-        assert_eq!(off_surface_bound(&patch, &cone(1.0, f64::NAN)).unwrap(), None);
+        assert_eq!(
+            off_surface_bound(&patch, &cone(1.0, f64::NAN)).unwrap(),
+            None
+        );
         let nan_patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
             u_degree: 1,
             v_degree: 1,
@@ -2845,7 +2847,10 @@ mod tests {
         assert_eq!(off_surface_bound(&tiny, &tiny_plane).unwrap(), None);
         // (a surface that cannot be made from it is refused earlier, as well)
         if let Ok(nan_patch) = nan_patch {
-            assert_eq!(off_surface_bound(&nan_patch, &plane(2.0)).unwrap_or(None), None);
+            assert_eq!(
+                off_surface_bound(&nan_patch, &plane(2.0)).unwrap_or(None),
+                None
+            );
         }
     }
 

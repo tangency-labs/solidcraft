@@ -91,7 +91,9 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::solution_array::SolutionObject;
 use crate::intersect::curve_class::p1::CurveInterval;
-use crate::intersect::point_class::{ClassGeometry, ClassObject, PointClassType, PointClassification};
+use crate::intersect::point_class::{
+    ClassGeometry, ClassObject, PointClassType, PointClassification,
+};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -451,7 +453,8 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
             }
             Far::Edge(n, tc) => {
                 let rec = b.edge(n)?;
-                let (Some(n_curve), n_ivl, n_tol) = (rec.curve.as_ref(), rec.interval, rec.tolerance)
+                let (Some(n_curve), n_ivl, n_tol) =
+                    (rec.curve.as_ref(), rec.interval, rec.tolerance)
                 else {
                     return Ok(false);
                 };
@@ -630,9 +633,16 @@ fn end_at(start: Option<VertexId>, end: Option<VertexId>, v: VertexId) -> Option
 /// the segment between the points. `None` when the points are half the net's `domain` or
 /// more apart in u or in v, or are not numbers: across a periodic seam they are a period
 /// apart, and the segment is not the strip's boundary.
-fn junction(a: Extent2d, b: Extent2d, pa: Point2, pb: Point2, domain: &Extent2d) -> Option<Extent2d> {
+fn junction(
+    a: Extent2d,
+    b: Extent2d,
+    pa: Point2,
+    pb: Point2,
+    domain: &Extent2d,
+) -> Option<Extent2d> {
     let (lo, hi) = (domain.min(), domain.max());
-    let near = (pa.x - pb.x).abs() < 0.5 * (hi.x - lo.x) && (pa.y - pb.y).abs() < 0.5 * (hi.y - lo.y);
+    let near =
+        (pa.x - pb.x).abs() < 0.5 * (hi.x - lo.x) && (pa.y - pb.y).abs() < 0.5 * (hi.y - lo.y);
     near.then(|| union(a, b))
 }
 
@@ -1042,15 +1052,15 @@ mod tests {
             &domain,
         );
         assert!(seam_u.is_none());
-        let seam_v = junction(
+        let seam_v = junction(a, b, Point2::new(0.4, 0.0), Point2::new(0.4, 1.0), &domain);
+        assert!(seam_v.is_none());
+        let nan = junction(
             a,
             b,
-            Point2::new(0.4, 0.0),
-            Point2::new(0.4, 1.0),
+            Point2::new(f64::NAN, 0.2),
+            Point2::new(0.4, 0.2),
             &domain,
         );
-        assert!(seam_v.is_none());
-        let nan = junction(a, b, Point2::new(f64::NAN, 0.2), Point2::new(0.4, 0.2), &domain);
         assert!(nan.is_none());
     }
 
@@ -1171,9 +1181,8 @@ mod tests {
             net: net.clone(),
             net_bound,
         };
-        let tied = |a: &FaceA<'_>, reach| {
-            gap_within(&k, a, &curve, &uv, [0.0, 1.0], reach, 1e-9).unwrap()
-        };
+        let tied =
+            |a: &FaceA<'_>, reach| gap_within(&k, a, &curve, &uv, [0.0, 1.0], reach, 1e-9).unwrap();
         assert!(tied(&face(0.0), 5e-6));
         assert!(!tied(&face(0.0), 1e-7));
         assert!(!tied(&face(5e-6), 5e-6));

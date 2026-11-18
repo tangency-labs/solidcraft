@@ -682,4 +682,3 @@ fn curved_strip_join_union_is_one_valid_solid() {
         "union {v:?}, body {body_v:?}, kept {kept_v:?}"
     );
 }
-
