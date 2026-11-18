@@ -31,7 +31,8 @@
 //! | [`BlendDefinition`](solidcore_record::brep::blend::BlendDefinition) (a face's blend) | `FaceDefinition` | [`blend::blend`] | [`blend::record_blend`] |
 //!
 //! [`brep`] converts the record's B-rep to the kernel's body and back; [`cell_grid`] the cell
-//! grid's spec and plan; [`living_hinge`] the living hinge's.
+//! grid's spec and plan; [`develop`] a sheet metal part's surfaces and its flat pattern;
+//! [`living_hinge`] the living hinge's.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::disallowed_methods)]
@@ -39,6 +40,7 @@
 pub mod blend;
 pub mod brep;
 pub mod cell_grid;
+pub mod develop;
 pub mod living_hinge;
 
 use solidcore::eval as k;

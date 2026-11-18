@@ -43,10 +43,11 @@ pub(crate) fn tools(
     else {
         return Err(DocError::Invalid("not a cell grid".into()));
     };
-    // Sheet metal cuts become cut-outs of the flat pattern, which a grid of cells cannot be. Only
-    // the bodies the cut reaches count: its targets, else its participants, else its component.
+    // A cut of a sheet metal body is read back onto the sheet's panels, which a grid of cells is not
+    // yet. Only the bodies the cut reaches count: its targets, else its participants, else its
+    // component.
     let (_, scope) = boolean_scope(st, f, &crate::plain(targets));
-    if st.sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
+    if st.surface_sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
         return Err(DocError::Invalid("not supported yet: a cell grid cannot cut sheet metal; use sheet.perforate".into()));
     }
     let ss = constructor_profile_in_frame(
