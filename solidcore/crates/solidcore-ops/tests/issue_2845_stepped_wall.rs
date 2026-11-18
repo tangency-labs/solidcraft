@@ -11,6 +11,9 @@
     clippy::disallowed_methods
 )] // test: the closed form uses pi
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use common::{all_fixes, built, edge_at, kernel_copy, volume};
@@ -89,11 +92,7 @@ fn the_same_on_the_default_kernel() {
 /// The case's record body (`fillets/12342-*`): the same L, each face's plane bounded to its
 /// face (x 16..23 for the back face), as SolidCraft writes it; on the kernel rig's fix set.
 fn recorded_stepped_wall() -> Body {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let path = format!(
         "{}/../solidcore/tests/kernel_cases/fillets/12342-round-wall-edge-r5-past-the-wall-refused.bodies.json.gz",
         env!("CARGO_MANIFEST_DIR")
