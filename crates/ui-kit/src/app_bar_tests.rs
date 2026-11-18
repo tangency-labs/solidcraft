@@ -25,6 +25,7 @@ struct BarRig {
     width: f32,
     name: &'static str,
     time: std::cell::Cell<f64>,
+    screen_height: f32,
     out: std::cell::RefCell<Option<BarOut>>,
 }
 
@@ -338,6 +339,7 @@ const TAB_MENU: [TabMenuRow<'static>; 2] = [TabMenuRow::new("close", "Close", ""
 struct TabsRig {
     ctx: egui::Context,
     time: std::cell::Cell<f64>,
+    screen_height: f32,
     /// The first design has the three [`VIEWS`], shown as sub-tabs (`Some(true)`) or behind a
     /// switcher (`Some(false)`); the strip then has more room.
     views: Option<bool>,
@@ -371,6 +373,7 @@ impl TabsRig {
         let rig = TabsRig {
             ctx: crate::test_support::context(),
             time: std::cell::Cell::new(0.0),
+            screen_height: 400.0,
             views,
             room: None,
             single_view: false,
@@ -392,7 +395,7 @@ impl TabsRig {
         solidcraft_ui_registry::clear_handles();
         self.time.set(self.time.get() + 1.0 / 60.0);
         let input = egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 400.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, self.screen_height))),
             time: Some(self.time.get()),
             events,
             focused: true,
@@ -1626,6 +1629,23 @@ fn layout_menu_shows_sections_for_current_window_and_views() {
     let mut web = layout_test_data(1, 1);
     web.native = false;
     assert!(!sections(&web).detach);
+}
+
+#[test]
+fn adding_a_window_expands_the_layout_menu_to_its_extra_rows() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.clear = true;
+    rig.layout = Some((1, 1));
+    rig.screen_height = 900.0;
+    rig.frame(Vec::new());
+    rig.press(rig.at("view:layout"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+
+    rig.layout = Some((2, 2));
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let reset = rig.at("menu:layout.reset");
+    assert_eq!(rig.press(reset, egui::PointerButton::Primary), vec![TabAction::LayoutMenu { id: "layout.reset".into() }]);
 }
 
 #[test]

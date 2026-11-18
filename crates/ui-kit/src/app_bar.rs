@@ -2389,13 +2389,17 @@ fn clear_layout_popup(ui: &egui::Ui, strip: &TabStrip, data: &crate::view_layout
     let left = (opener.right() - width).clamp(screen.left(), (screen.right() - width).max(screen.left()));
     let above = opener.top() - height;
     let top = if opener.bottom() + height > screen.bottom() && above >= screen.top() { above } else { opener.bottom() };
+    let available_height = (screen.bottom() - top).max(0.0);
     let response = crate::Container::new(ui.ctx(), crate::Surface::Popup).area(id).fixed_pos(pos2(left, top)).order(egui::Order::Foreground).show(
         ui.ctx(),
         |ui| {
+            // egui remembers the earlier popup size. The one-window menu must be able to grow
+            // when another window appears.
+            ui.set_max_height(available_height);
             crate::menu::Menu::show(ui, width, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("layout_controls")
-                    .max_height((screen.bottom() - top - 14.0).max(0.0))
+                    .max_height((available_height - 14.0).max(0.0))
                     .auto_shrink([false, true])
                     .show(ui, |ui| view_layout_menu::show(ui, strip, data, opened))
                     .inner
