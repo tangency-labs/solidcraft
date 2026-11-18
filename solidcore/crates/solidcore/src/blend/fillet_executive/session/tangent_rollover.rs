@@ -73,6 +73,10 @@ fn face_vertices(target: &Brep, face: FaceId) -> Result<Vec<VertexId>> {
     Ok(out)
 }
 
+/// A round's closed-form decision ([`tangent_rollover_supports`]): the face it rolls onto on
+/// each side, or `None` for a round outside the sections it decides.
+type Decision = Option<[Option<Rollover>; 2]>;
+
 /// The intervals a round's edge is cut into to tell where its ball's contacts lie: the ball's
 /// section is solved at each cut, the edge's ends among them.
 const SAMPLES: u32 = 16;
@@ -117,28 +121,52 @@ impl FilletSession<'_> {
             })
             .collect();
         let ends = self.rounds_ends(&ids)?;
-        // each round's closed-form decision, on the faces as they are before any round rolls
-        // (rolling changes a solver's offset surfaces, not the body), for the others' apart
-        // test: `None` for a round outside the sections it decides, without the inputs, or
-        // whose decision fails (taken as a round that may roll anywhere)
-        let mut all_inputs = Vec::with_capacity(ids.len());
-        let mut decided = Vec::with_capacity(ids.len());
-        for &id in &ids {
-            let own = self.rollover_inputs(id)?;
-            decided.push(match (&own, lone) {
-                (Some(own), false) => probe(tangent_rollover_supports(
-                    k,
-                    &mut *self.objects.target,
-                    own.edge,
-                    own.faces,
-                    own.offsets,
-                    own.tangency,
-                ))?
-                .flatten(),
-                _ => None,
-            });
-            all_inputs.push(own);
+        // each round's closed-form decision, made once on the faces as they are before any
+        // round rolls (rolling changes a solver's offset surfaces, not the body): the round's
+        // own where it is lone or apart, and for the others' apart test, where a decision
+        // that is `None` (outside the sections it decides, or no inputs) or fails is taken
+        // as a round that may roll anywhere. A round that is not apart rolls by its ball's
+        // sections instead; on the faces the closed form decides (planes and cylinders
+        // parallel to a straight edge) every section across the edge is the same, so the
+        // sections find the contact on the same side of each smooth far edge as the closed
+        // form's one section does.
+        let all_inputs: Vec<Option<Inputs>> = ids
+            .iter()
+            .map(|&id| self.rollover_inputs(id))
+            .collect::<Result<_>>()?;
+        let mut own_decisions: Vec<Option<Result<Decision>>> = all_inputs
+            .iter()
+            .map(|own| {
+                own.as_ref().map(|own| {
+                    tangent_rollover_supports(
+                        k,
+                        &mut *self.objects.target,
+                        own.edge,
+                        own.faces,
+                        own.offsets,
+                        own.tangency,
+                    )
+                })
+            })
+            .collect();
+        for decision in &mut own_decisions {
+            // only a cancellation or an unported step stops here, as `probe` lets through;
+            // any other failure is the round's own to report where it is decided
+            if let Some(Err(error)) = decision.as_ref() {
+                if error.is_unported_or_cancelled() {
+                    if let Some(Err(error)) = decision.take() {
+                        return Err(error);
+                    }
+                }
+            }
         }
+        let decided: Vec<Decision> = own_decisions
+            .iter()
+            .map(|d| match d {
+                Some(Ok(sides)) => *sides,
+                _ => None,
+            })
+            .collect();
         for (i, &id) in ids.iter().enumerate() {
             self.objects.solver_mut(id)?.base_mut().rollover_proof = RolloverProof::AfterTrace;
             let Some(inputs) = all_inputs.get(i).and_then(Option::as_ref) else {
@@ -146,14 +174,10 @@ impl FilletSession<'_> {
             };
             let apart = !lone && self.round_apart(k, i, ends.as_deref(), inputs, &decided)?;
             let closed = if lone || apart {
-                tangent_rollover_supports(
-                    k,
-                    &mut *self.objects.target,
-                    inputs.edge,
-                    inputs.faces,
-                    inputs.offsets,
-                    inputs.tangency,
-                )?
+                match own_decisions.get_mut(i).and_then(Option::take) {
+                    Some(decision) => decision?,
+                    None => return Err(stage_failed()),
+                }
             } else {
                 None
             };
@@ -212,7 +236,7 @@ impl FilletSession<'_> {
         i: usize,
         ends: Option<&[Vec<VertexId>]>,
         inputs: &Inputs,
-        decided: &[Option<[Option<Rollover>; 2]>],
+        decided: &[Decision],
     ) -> Result<bool> {
         let Some(ends) = ends else {
             return Ok(false);

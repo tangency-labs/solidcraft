@@ -2814,22 +2814,52 @@ fn slot_roots_beside_a_hole_s_seam_round_in_one_fillet() {
     }
 }
 
-/// Controls for #18830: rounds beside the hole's seam that another round of the fillet does
-/// meet on the wall beyond the seam. Two slots at 14.8 and -14.8 degrees put a side 5 degrees
-/// either side of the seam: both rounds roll over the seam, the opposite ways, and their bands
-/// overlap. A side at -9 degrees (a slot at -18.8) keeps its round on the wall beyond the seam,
-/// where the round rolled from the slot at 14.8 lands within its band. Neither may build an
-/// invalid body.
+/// The angle on the hole's wall between a slot's middle and its side, in degrees: the side
+/// is the line `SLOT_W / 2` from the slot's middle.
+fn slot_half_angle() -> f64 {
+    (SLOT_W / 2.0 / HOLE_R).asin().to_degrees()
+}
+
+/// Controls for #18830: a second slot on the far side of the hole's seam, all four roots of
+/// both slots rounded R0.5 in one fillet. The first slot (at 14.8 degrees, a side 5 degrees
+/// past the seam) rolls one round over the seam onto the wall the second slot's near side
+/// stands on. With that side `past` degrees the other way from the seam, the round on it
+/// takes about 7.1 degrees of wall (its ball touches the wall 0.36 from its edge) and the
+/// rolled round about 2.1 degrees past the seam, so the bands overlap below about 9.2 degrees:
+/// at 8 and 9 degrees the fillet is refused as having no room; at 12 and 20 degrees all four
+/// rounds build, each its exact [`root_area`] along the hole's depth. (At 5 degrees both near
+/// sides roll over the seam from both sides; that is refused before the rollover is decided,
+/// on main too, and is not a case of this change.)
 #[test]
-fn slot_roots_meeting_across_a_hole_s_seam_build_valid_or_are_refused() {
+fn slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping() {
+    let r = 0.5;
     fixes();
-    for slots in [[14.8, -14.8], [14.8, -18.8]] {
+    let area = root_area(HOLE_R, r, SLOT_W / 2.0);
+    for past in [8.0, 9.0, 12.0, 20.0] {
+        let slots = [14.8, -(past + slot_half_angle())];
         let b = slotted_hole(&slots);
+        let before = b.volume(1e-9).unwrap();
         let mut edges = slot_roots(&b, slots[0]).to_vec();
         edges.extend(slot_roots(&b, slots[1]));
-        if blend(&b, Blend::Round, &edges, &[0.5; 4], &[], Corners::Filled).is_ok() {
-            let report = b.check(CheckLevel::All).unwrap();
-            assert!(report.is_valid(), "{slots:?}: {report}");
+        let result = blend(&b, Blend::Round, &edges, &[r; 4], &[], Corners::Filled);
+        if past < 10.0 {
+            assert!(
+                matches!(result, Err(Error::NoRoom)),
+                "side {past} degrees past the seam: {result:?}"
+            );
+            continue;
         }
+        result.unwrap_or_else(|err| panic!("side {past} degrees past the seam: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(
+            report.is_valid(),
+            "side {past} degrees past the seam: {report}"
+        );
+        let expected = before - 4.0 * (BLOCK_TOP - HOLE_FLOOR) * area;
+        let v = b.volume(1e-9).unwrap();
+        assert!(
+            (v - expected).abs() < 1e-6,
+            "side {past} degrees past the seam: volume {v}, expected {expected}"
+        );
     }
 }
