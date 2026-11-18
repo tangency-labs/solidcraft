@@ -635,3 +635,15 @@ fn a_patch_is_not_continued_far_round_where_it_closes_or_where_its_trims_are_on_
     // Along v it does not close: continued there.
     assert!(extend::extended(&cylinder, [[0.0, 4.0], [0.0, 1.01]], 1e-6).is_some());
 }
+
+/// A face on a plane whose pcurves the kernel makes is trimmed within its own boundary's box,
+/// a quarter wider on every side (at least ten times the tolerance): a plane bounds nothing.
+#[test]
+fn a_plane_faces_trims_are_made_within_its_boundarys_box() {
+    let plane = BSurface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    assert_eq!(bounded_by(&plane, [[0.0, 10.0], [-2.0, 2.0]], 1e-3), Some([[-2.5, 12.5], [-3.0, 3.0]]));
+    // A boundary of no width along a direction is still given room.
+    assert_eq!(bounded_by(&plane, [[1.0, 1.0], [0.0, 4.0]], 1e-3), Some([[0.99, 1.01], [-1.0, 5.0]]));
+    assert_eq!(bounded_by(&plane, [[0.0, f64::INFINITY], [0.0, 1.0]], 1e-3), None);
+    assert_eq!(bounded_by(&plane, [[1.0, 0.0], [0.0, 1.0]], 1e-3), None);
+}

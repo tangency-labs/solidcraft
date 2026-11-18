@@ -1330,7 +1330,15 @@ impl<'t> Assembly<'t> {
             Some(trims) if missing => {
                 let domain = match box_on_form {
                     Some(d) => d,
-                    None => natural_box(&surface).ok_or_else(|| unsupported("a face on an unbounded surface without closed-form pcurves"))?,
+                    None => match natural_box(&surface) {
+                        Some(d) => d,
+                        // An unbounded surface (a plane) is bounded where the face is: its
+                        // boundary's box, with room round it.
+                        None => self
+                            .face_extent(fi)?
+                            .and_then(|e| bounded_by(&surface, e, tol))
+                            .ok_or_else(|| unsupported("a face on an unbounded surface without closed-form pcurves"))?,
+                    },
                 };
                 Some(trims.trims(&self.trim_face(&label, form.as_ref(), domain, &edge_loops, exact)?)?)
             }
@@ -1754,6 +1762,28 @@ fn natural_box(s: &BSurface) -> Option<[[f64; 2]; 2]> {
         [Natural::Range(a, b), Natural::Range(c, d)] if [a, b, c, d].iter().all(|x| x.is_finite()) => Some([[a, b], [c, d]]),
         _ => None,
     }
+}
+
+/// The box an unbounded surface's face is trimmed within: the face's `extent`, a quarter of its
+/// size (and at least ten times `tol`) wider on every side along a direction the surface does not
+/// bound, its natural range along one it does. `None` for an extent that is not finite.
+fn bounded_by(s: &BSurface, extent: [[f64; 2]; 2], tol: f64) -> Option<[[f64; 2]; 2]> {
+    let natural = solidcore_ops::label::surface_natural(s);
+    let mut out = extent;
+    for (d, o) in out.iter_mut().enumerate() {
+        let [a, b] = *o;
+        if !(a.is_finite() && b.is_finite() && a <= b) {
+            return None;
+        }
+        *o = match natural.get(d) {
+            Some(Natural::Range(lo, hi)) if lo.is_finite() && hi.is_finite() => [*lo, *hi],
+            _ => {
+                let pad = (0.25 * (b - a)).max(10.0 * tol);
+                [a - pad, b + pad]
+            }
+        };
+    }
+    Some(out)
 }
 
 /// Every edge of the loop is used in it exactly twice, once each way: a loop of seam uses alone.

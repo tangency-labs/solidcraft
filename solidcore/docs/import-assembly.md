@@ -48,7 +48,7 @@ The STEP reader reads its own surfaces of linear extrusion and of revolution, an
 5. Gives each edge its label and NURBS form.
 6. Makes every use's pcurve:
    - from the closed form, where the geometry has one;
-   - from the trims, otherwise;
+   - from the trims, otherwise, made within the face's NURBS form's domain, its surface's natural range, or (on a plane, which bounds nothing) its boundary's box with a quarter of its size round it;
    - from the edge's own angle and height, on a face that winds more than one turn about its axis.
 
    A spline face's pcurves that end a little past the patch's knot range are put on it where that moves the surface within their edges' tolerance. Where it would move it more, the patch is continued instead to reach them: each end span's polynomial (homogeneous, so a rational patch keeps its shape) is taken over a longer interval, by at most 5% of that span. The patch is the same surface on its old range, so the pcurves stay as they are. A direction the patch closes in, or a weight that would not stay positive, is not continued.
