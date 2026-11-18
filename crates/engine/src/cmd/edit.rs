@@ -2299,13 +2299,16 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
 /// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
 /// build finds it in the model before the feature. A From picked on another plane is a new
-/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
-/// placements must already be its own.
+/// choice, so it starts on that face, as a new extrude does. So does an edit that takes To Object
+/// off: a design saved with From and To since format 58 is marked only because To used to keep
+/// its From at the face's level (#18825), and without To a new extrude starts on the face.
+/// `after`'s face names and picked placements must already be its own.
 fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
     let FeatureKind::Extrude { extent: was, .. } = &before.kind else {
         return;
     };
-    let keep = was.from_level && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
+    let to_removed = was.to.is_some() && matches!(&after.kind, FeatureKind::Extrude { extent, .. } if extent.to.is_none());
+    let keep = was.from_level && !to_removed && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
     if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
         extent.from_level = keep;
     }

@@ -5206,6 +5206,69 @@ fn extrude_from_a_slanted_face_to_another_runs_between_their_planes() {
     assert!((lo - 32.0 / 7.0).abs() < 1e-6 && (hi - 10.0).abs() < 1e-6 && rel(v, 136.0 / 7.0) < 1e-9, "{lo} {hi} {v}");
 }
 
+/// What an extrude From a slanted wall of `slanted_slot_block` with To Object does not run
+/// between the two planes for (#18825). With a second side it starts at the From pick's level,
+/// x 20 / 7, as before, and says why: the square at y -3 to -1 runs from x 20 / 7 - 3 to the
+/// block's side at x 10, 4 (10 + 1 / 7) = 284 / 7 mm3. To the plane x 4.6, which crosses the
+/// wall's plane over the square at y -5 to -1, it is refused rather than dropping part of the
+/// profile. An extrude marked to start at the From face's level (`from_level`, as a design saved
+/// with From and To is) starts on the wall once an edit takes To off, as a new one does: x 4 (8 /
+/// 7) to 4 (10 / 7) + 3. A pin hole 1 mm across in a 1 m cube is a cut, and says nothing.
+#[test]
+fn extrude_from_a_slanted_face_with_to_and_a_second_side_crossing_planes_or_to_taken_off() {
+    let warning = |s: &Session| s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+    let x_span_and_volume = |s: &mut Session, body: &str| {
+        let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+        let b = &m["bodies"][0];
+        let f = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+        (f(&b["bbox"]["min"][0]), f(&b["bbox"]["max"][0]), f(&b["volume_mm3"]))
+    };
+    let wall = json!([20.0 / 7.0, -6, 5]);
+    let square = |s: &mut Session, y0: f64, y1: f64| {
+        run(s, "sketch.rectangle.two_point", json!({"p0": [y0, 4], "p1": [y1, 6]}));
+        run(s, "sketch.finish", json!({}));
+    };
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -3.0, -1.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Across", "from": wall, "to": [10, 5, 5], "distance2": 3, "operation": "new", "body_name": "Fill"}),
+    );
+    let (lo, hi, v) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - (20.0 / 7.0 - 3.0)).abs() < 1e-6 && (hi - 10.0).abs() < 1e-6 && rel(v, 284.0 / 7.0) < 1e-9, "{lo} {hi} {v}");
+    assert!(warning(&s).contains("second side"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -5.0, -1.0);
+    let crossed =
+        s.execute("solid.extrude", &json!({"sketch": "Across", "from": wall, "to": [4.6, 30, 30], "operation": "new", "body_name": "Fill"}));
+    assert!(crossed.as_ref().is_err_and(|e| e.to_string().contains("cross over the profile")), "{crossed:?}");
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -3.0, -1.0);
+    run(&mut s, "solid.extrude", json!({"sketch": "Across", "from": wall, "to": [10, 5, 5], "operation": "new", "body_name": "Fill", "name": "FT"}));
+    run(&mut s, "timeline.edit", json!({"feature": "FT", "set": {"extent": {"from_level": true}}}));
+    let (lo, _, _) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - 20.0 / 7.0).abs() < 1e-6, "{lo}");
+    run(&mut s, "timeline.edit", json!({"feature": "FT", "set": {"extent": {"to": null, "distance": "3"}}}));
+    let (lo, hi, v) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - 32.0 / 7.0).abs() < 1e-6 && (hi - (40.0 / 7.0 + 3.0)).abs() < 1e-6 && rel(v, 12.0) < 1e-9, "{lo} {hi} {v}");
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 1000, "width": 1000, "height": 1000, "name": "Big"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 1000, "name": "Pin"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [500, 500], "radius": 0.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pin", "distance": -1, "operation": "cut", "name": "PinHole"}));
+    assert!(rel(volume(&mut s), 1e9 - PI * 0.25) < 1e-12, "{}", volume(&mut s));
+    assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
+}
+
 /// Revolve Two Sides, Symmetric and To Object.
 #[test]
 fn revolve_two_sides_symmetric_and_to_object() {

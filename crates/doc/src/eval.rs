@@ -7745,6 +7745,7 @@ fn feature_tools_with_constructor(
                 Some(_) if extent.to.is_some() && to_end_plane.is_none() => {
                     Some("To Object is on a face that is not flat, or within 5 degrees of running along the extrusion")
                 }
+                Some(_) if extent.to.is_some() && extent.distance2.is_some() => Some("To Object is set with a second side"),
                 Some(_) if extent.through_all => Some("Through All is set"),
                 Some(_) if tapered => Some("the extrude is tapered"),
                 Some(slope) if slope.normal().dot(n).abs() < FROM_SLOPE_LEAST_SINE => {
@@ -7777,7 +7778,15 @@ fn feature_tools_with_constructor(
                         return Err(DocError::Invalid("the To object is where the extrude starts".into()));
                     }
                     let moved = |p: &Plane, d: f64| Plane { origin: p.origin + n * d, ..*p };
-                    Some((moved(fp, start_offset), moved(tp, to - h), to - start))
+                    let (from_plane, to_plane) = (moved(fp, start_offset), moved(tp, to - h));
+                    // Planes that cross over the profiles would leave out the part of them where
+                    // the To plane lies before the From one, chosen by where the middle falls.
+                    if planes_cross_over(&from_plane, &to_plane, &ss.plane, &regions, to - start)? {
+                        return Err(DocError::Invalid(
+                            "the From and To faces' planes cross over the profile, so part of it would have no extent; pick faces that don't cross over it, or use a distance".into(),
+                        ));
+                    }
+                    Some((from_plane, to_plane, to - start))
                 }
                 _ => None,
             };
@@ -9374,6 +9383,30 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
         .collect()
 }
 
+/// Whether `new` has a face on a surface no face of `old` lies on, read from the exact surfaces
+/// of both: a plane, a cylinder or a sphere of its own. A cut that removes material leaves one (a
+/// wall of the pocket); one that only splits faces where its tool touches them (#18825) leaves
+/// none. A face on another kind of surface settles nothing.
+fn has_a_new_surface(old: &Body, new: &Body) -> bool {
+    use kernel::FaceSurface as S;
+    let tol = (old.size().max(new.size()) * 1e-7).max(1e-7);
+    let olds: Vec<S> = (0..old.face_count()).filter_map(|fi| kernel::face_surface(old, fi)).collect();
+    let on_plane = |n: Vec3, p: Vec3, q: Vec3| (q - p).dot(n).abs() <= tol;
+    let same = |a: &S, b: &S| match (a, b) {
+        (S::Plane { normal: n, point: p }, S::Plane { normal: m, point: q }) => n.vec().cross(m.vec()).len() <= 1e-9 && on_plane(n.vec(), *p, *q),
+        (S::Cylinder { origin: o, axis: a, radius: r }, S::Cylinder { origin: p, axis: b, radius: s }) => {
+            let off = *p - *o;
+            (r - s).abs() <= tol && a.vec().cross(b.vec()).len() <= 1e-9 && (off - a.vec() * off.dot(a.vec())).len() <= tol
+        }
+        (S::Sphere { center: c, radius: r }, S::Sphere { center: d, radius: s }) => (r - s).abs() <= tol && c.dist(*d) <= tol,
+        _ => false,
+    };
+    (0..new.face_count())
+        .rev()
+        .filter_map(|fi| kernel::face_surface(new, fi))
+        .any(|surface| matches!(surface, S::Plane { .. } | S::Cylinder { .. } | S::Sphere { .. }) && !olds.iter().any(|o| same(o, &surface)))
+}
+
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
 /// Boxes only: a probe boolean for every hole of a large hole pattern would double its work. A
 /// body whose exact box is unknown, or one of another component (in another frame), leaves the
@@ -10698,6 +10731,22 @@ fn trim_between_planes(tools: Vec<Traced>, from: &Plane, to: &Plane, n: Vec3, si
     Ok(out)
 }
 
+/// Whether `to` lies before `from` along the extrusion (`n` times the sign of `d`, `n` the
+/// normal of `plane`) somewhere over the profiles' outer loops: the two planes cross over them.
+/// Both levels change linearly across the sketch, so the loops' points settle it; a crossing on
+/// a loop's edge, within a hair, does not count.
+fn planes_cross_over(from: &Plane, to: &Plane, plane: &Plane, regions: &[Region2], d: f64) -> Result<bool> {
+    let mut least = f64::INFINITY;
+    let mut reach = 0.0_f64;
+    for q in regions.iter().flat_map(|r| r.outer.polyline(1e-2)) {
+        let q = plane.to_world(q);
+        let gap = (level_on(plane, q, to)? - level_on(plane, q, from)?) * d.signum();
+        least = least.min(gap);
+        reach = reach.max(gap.abs());
+    }
+    Ok(least < -1e-9 * (1.0 + reach))
+}
+
 /// Where the line along `plane`'s normal through `centre` meets `face_plane`, as a level along
 /// that normal. Refused for a face plane that runs along the normal, which the line never meets.
 fn level_on(plane: &Plane, centre: Vec3, face_plane: &Plane) -> Result<f64> {
@@ -11037,16 +11086,22 @@ fn eval_feature_kind(
             // whether the cut went through sheet metal's flat pattern or the generic path. A body
             // the cut rebuilt with the volume it had lost nothing either: a tool lying in an
             // empty slot, touching its walls, splits their faces and removes nothing (#18825).
+            // A cut that removes material leaves a face on a surface of its own (a wall of the
+            // pocket), so the volumes are only compared when the body shows none: measuring
+            // them takes far longer than the cut.
             let before: Option<Vec<Body>> = (*operation == Operation::Cut).then(|| st.bodies.iter().map(|b| b.body.clone()).collect());
             let unchanged = |st: &ModelState, warning: &mut Option<String>| {
                 let same_volume = |old: &Body, new: &Body| match (old.volume_at(0.0), new.volume_at(0.0)) {
                     (Some(a), Some(b)) => (a - b).abs() <= 1e-9 * a.abs().max(b.abs()),
                     _ => false,
                 };
+                let kept = |b: &ModelBody, old: &Body| {
+                    old.same(&b.body) || (!b.body.is_mesh() && !old.is_mesh() && !has_a_new_surface(old, &b.body) && same_volume(old, &b.body))
+                };
                 if let Some(before) = &before
                     && !before.is_empty()
                     && st.bodies.len() == before.len()
-                    && st.bodies.iter().zip(before).all(|(b, old)| old.same(&b.body) || (!b.body.is_mesh() && same_volume(old, &b.body)))
+                    && st.bodies.iter().zip(before).all(|(b, old)| kept(b, old))
                 {
                     append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the distance".into());
                 }
