@@ -498,6 +498,20 @@ pub fn face_index_at(b: &crate::ModelBody, p: Vec3) -> Option<usize> {
     (d <= pick_tolerance(b)).then_some(f)
 }
 
+/// The faces of `b` whose surface passes within `tolerance` of `p`, in ascending order: one when
+/// `p` lies on a face, several when it lies on an edge or a vertex they share, none when it floats.
+pub fn faces_within(b: &crate::ModelBody, p: Vec3, tolerance: f64) -> Vec<usize> {
+    let m = b.mesh();
+    let mut out = std::collections::BTreeSet::new();
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        let Some([a, bb, c]) = m.tri(t) else { continue };
+        if closest_on_triangle(p, a, bb, c).dist(p) <= tolerance {
+            out.insert(*f as usize);
+        }
+    }
+    out.into_iter().collect()
+}
+
 /// The face of `b` nearest `p` and how far it is, however far.
 pub fn nearest_face(b: &crate::ModelBody, p: Vec3) -> Option<(f64, usize)> {
     let m = b.mesh();
