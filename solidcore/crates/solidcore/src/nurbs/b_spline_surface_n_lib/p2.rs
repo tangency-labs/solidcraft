@@ -967,9 +967,24 @@ impl BSplineSurface {
         // If we have 4 curves then we need to reverse opposite ones and make them
         // compatible
         if boundaries.len() == 4 {
+            // Not upstream (WR-613): the given 3D curves, as the body's edges run along
+            // them, that the face-sided patch's guard reads its seams along
+            let originals: Vec<SmCurve> = if face_sides != 0 && !create_bilinear_patch {
+                curves_3d
+                    .iter()
+                    .map(|c| {
+                        c.map(|c| SmCurve::from(c.clone())).ok_or_else(|| {
+                            SolidError::b_spline(OP, BSplineFailure::Missing("a boundary curve"))
+                        })
+                    })
+                    .collect::<Result<_>>()?
+            } else {
+                Vec::new()
+            };
             return corner_blend_4(
                 k,
                 boundaries,
+                &originals,
                 uv_crvs,
                 curve_orients,
                 surfaces,
@@ -2025,6 +2040,7 @@ const TOP: usize = 3;
 fn corner_blend_4(
     k: &crate::kernel::Kernel,
     mut boundaries: Vec<BSplineCurve>,
+    originals: &[SmCurve],
     mut uv_crvs: Vec<Option<BSplineCurve>>,
     curve_orients: &[OrientType],
     surfaces: &[Option<&SmSurface>],
@@ -2224,8 +2240,8 @@ fn corner_blend_4(
     let tangent =
         make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?;
 
-    // Not upstream (WR-613): a patch that meets its face sides exactly, where one is
-    // shown no worse than the mean-twist patch at every station
+    // Not upstream (WR-613): a patch that meets its face sides exactly, where its seams
+    // read no farther from tangent than the patch that ships otherwise, on every side
     if let Some((mut face_bounds, mut face_tans)) = face_sided {
         let twisted = BSplineSurface::create_coons_patch_on_faces(
             tol,
@@ -2235,12 +2251,13 @@ fn corner_blend_4(
             coons_face_sides,
         )?;
         let sides = CoonsSides {
+            curves: originals,
             uv_curves: &uv_crvs,
             surfaces,
             face_sides,
         };
         let bar = tangent.as_ref().unwrap_or(&coons);
-        if let Some(patch) = face_sided_patch(k, &twisted, &coons, bar, &sides)? {
+        if let Some(patch) = face_sided_patch(k, &twisted, bar, &sides)? {
             return Ok(vec![patch]);
         }
     }
@@ -3408,9 +3425,12 @@ fn make_coons_patch_tangent_to_sides(
     Ok(best)
 }
 
-/// A Coons corner patch's sides (left, bottom, right, top): each side's UV curve and
-/// surface, and which sides lie on faces of the body (bit `i` for side `i`; WR-613).
+/// A Coons corner patch's sides (left, bottom, right, top): each side's 3D curve, UV curve
+/// and surface, and which sides lie on faces of the body (bit `i` for side `i`; WR-613).
 struct CoonsSides<'c, 's> {
+    /// Each side's 3D curve as `CreateCornerBlend` was given it: the curve the body's edge
+    /// at that side runs along (not its non-rational approximation the patch interpolates).
+    curves: &'c [SmCurve],
     /// Each side's UV curve on its surface.
     uv_curves: &'c [Option<BSplineCurve>],
     /// Each side's surface.
@@ -3428,29 +3448,28 @@ const MAX_CORNER_GRADE: u32 = 3;
 
 /// Not the fork's (WR-613): a corner patch that meets every face side exactly (`twisted`,
 /// built with the blend side's twist at each corner between a face side and a blend side)
-/// and is shown no worse than `bar`, the mean-twist patch as WR-547 leaves it, at every
-/// station of every side; `None` when no candidate is, and the caller keeps `bar`.
+/// and is shown no worse than `bar` on every side; `None` when no candidate is, and the
+/// caller keeps `bar`. `bar` is the patch that ships otherwise: the mean-twist patch as
+/// WR-547 leaves it.
 ///
 /// Candidates, in order: `twisted` as built; then `twisted` refined to 8, 16, 32 and 64
 /// spans each way, each with 0 to [`MAX_CORNER_GRADE`] halvings of the first span along
 /// each blend side toward each face-side/blend-side corner, its side rows projected with
-/// the face sides ([`project_coons_side_rows`]). The first shown no worse is taken
-/// ([`no_worse_at_every_station`]). Every candidate and `bar` are measured at the same
-/// stations, the common stations of the unrefined mean-twist patch `bare`
-/// ([`coons_side_frames`]), each angle with its rounding bound ([`coons_side_angle`]). At
-/// most 1 + 4 x 4 candidates: bounded work.
+/// the face sides ([`project_coons_side_rows`]). The first no farther than `bar` on every
+/// side ([`no_farther_than_the_fallback`]) is taken. At most 1 + 4 x 4 candidates: bounded
+/// work.
 ///
-/// Why per station and not per side's largest angle: the face rule moves the control point
-/// next to a face side and a blend side into the face's plane, and the blend side takes
-/// the miss next to that corner. A side's largest angle often sits elsewhere (at a corner
-/// both patches share), so it hides a rise next to the corner: on `corner3x2` rows the
-/// blend side's largest angle was unchanged while one of its edges read 3.1e-7 radians
-/// farther than main's. Where no candidate clears every station (no bicubic corner with one
-/// twist can, if the two sides' twists differ enough), the mean-twist patch stays.
+/// The measure is the seam check's own: each side's seam reading ([`coons_side_seams`],
+/// through [`seam_normal_angle`]: the same function, stations and metric the seam check
+/// applies to the finished body's edges), and the same comparison
+/// ([`seam_angle_farther`]). A candidate is taken exactly when no side's reading is
+/// farther from tangent than `bar`'s beyond the two readings' rounding.
+///
+/// [`seam_normal_angle`]: crate::query::continuity::seam_normal_angle
+/// [`seam_angle_farther`]: crate::query::continuity::seam_angle_farther
 fn face_sided_patch(
     k: &crate::kernel::Kernel,
     twisted: &BSplineSurface,
-    bare: &BSplineSurface,
     bar: &BSplineSurface,
     sides: &CoonsSides<'_, '_>,
 ) -> Result<Option<BSplineSurface>> {
@@ -3458,13 +3477,13 @@ fn face_sided_patch(
         uv_curves,
         surfaces,
         face_sides,
+        ..
     } = *sides;
-    if twisted.is_rational() || bare.is_rational() || bar.is_rational() {
+    if twisted.is_rational() || bar.is_rational() {
         return Ok(None);
     }
-    let frames = coons_side_frames(k, bare, uv_curves, surfaces)?;
-    let bar_angle = coons_side_angle(bar, &frames, None)?;
-    if no_worse_at_every_station(&coons_side_angle(twisted, &frames, None)?, &bar_angle) {
+    let bar_seams = coons_side_seams(k, bar, sides)?;
+    if no_farther_than_the_fallback(&coons_side_seams(k, twisted, sides)?, &bar_seams) {
         return Ok(Some(twisted.clone()));
     }
     for spans in COONS_REFINEMENTS {
@@ -3474,7 +3493,7 @@ fn face_sided_patch(
             refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
             grade_corner_spans(&mut attempt, face_sides, grade)?;
             project_coons_side_rows(k, &mut attempt, uv_curves, surfaces, face_sides)?;
-            if no_worse_at_every_station(&coons_side_angle(&attempt, &frames, None)?, &bar_angle) {
+            if no_farther_than_the_fallback(&coons_side_seams(k, &attempt, sides)?, &bar_seams) {
                 return Ok(Some(attempt));
             }
         }
@@ -3482,28 +3501,68 @@ fn face_sided_patch(
     Ok(None)
 }
 
-/// Not the fork's (WR-613): whether `cand` is no worse than `bar` at every station `bar`
-/// certifies, on every side: `cand` certifies the station too, and its angle's enclosure
-/// ([`station_enclosure`], the angle with its rounding bound) does not lie wholly above
-/// `bar`'s. So `cand` is, at each station, closer to tangent than `bar` or equal to it
-/// within the two readings' rounding; no slack beyond the rounding at that angle. A NaN
-/// fails the comparison.
-fn no_worse_at_every_station(cand: &SideAngle, bar: &SideAngle) -> bool {
-    cand.sides
-        .iter()
-        .zip(&bar.sides)
-        .all(|(c, b)| match (c, b) {
-            (_, None) => true,
-            (None, Some(b)) => b.iter().all(Option::is_none),
-            (Some(c), Some(b)) => {
-                c.len() == b.len()
-                    && c.iter().zip(b).all(|(c, b)| match (c, b) {
-                        (_, None) => true,
-                        (None, Some(_)) => false,
-                        (Some(c), Some(b)) => station_enclosure(*c).0 <= station_enclosure(*b).1,
-                    })
-            }
-        })
+/// A side's seam reading in [`coons_side_seams`]: no surface on that side, or the reading.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SideSeam {
+    /// The side has no surface: nothing to meet.
+    Free,
+    /// [`seam_normal_angle`](crate::query::continuity::seam_normal_angle) along the side;
+    /// `None` where it reads nothing (too few stations, or an angle not finite).
+    Read(Option<f64>),
+}
+
+/// Not the fork's (WR-613): each side's seam reading of `patch` (left, bottom, right,
+/// top): [`seam_normal_angle`](crate::query::continuity::seam_normal_angle) between the
+/// patch and the side's surface along the side's 3D curve as given ([`CoonsSides::curves`],
+/// the curve the body's edge runs along) over its natural interval, both in their surfaces'
+/// own senses (the reading folds the senses out). Along the non-rational approximation the
+/// patch interpolates instead, the reading misses a rise the body's edge shows (#18640:
+/// `corner3x2` read 5.92e-3 on both patches where the body's edge reads main's 3.836e-3
+/// and the candidate's 3.2e-7 above it). A
+/// reading that fails with an error other than an unported call or a cancellation reads
+/// nothing.
+fn coons_side_seams(
+    k: &crate::kernel::Kernel,
+    patch: &BSplineSurface,
+    sides: &CoonsSides<'_, '_>,
+) -> Result<[SideSeam; 4]> {
+    let patch = SmSurface::from(patch.clone());
+    let mut out = [SideSeam::Free; 4];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let (Some(Some(surface)), Some(curve)) = (sides.surfaces.get(i), sides.curves.get(i))
+        else {
+            continue;
+        };
+        let read = crate::query::continuity::seam_normal_angle(
+            k,
+            curve,
+            curve.natural_interval(),
+            [(&patch, 1.0), (surface, 1.0)],
+        );
+        *slot = SideSeam::Read(match read {
+            Ok(angle) => angle,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => None,
+        });
+    }
+    Ok(out)
+}
+
+/// Not the fork's (WR-613): whether `cand` is no farther from tangent than `bar`, the
+/// patch that ships if `cand` is refused, on every side: where `bar` reads a side, `cand`
+/// reads it too and is not farther ([`seam_angle_farther`]: by more than the two
+/// readings' rounding). Where either reads nothing on a side with a surface, nothing
+/// shows `cand` no farther, and it is refused.
+///
+/// [`seam_angle_farther`]: crate::query::continuity::seam_angle_farther
+fn no_farther_than_the_fallback(cand: &[SideSeam; 4], bar: &[SideSeam; 4]) -> bool {
+    cand.iter().zip(bar).all(|(c, b)| match (c, b) {
+        (SideSeam::Free, SideSeam::Free) => true,
+        (SideSeam::Read(Some(c)), SideSeam::Read(Some(b))) => {
+            !crate::query::continuity::seam_angle_farther(*c, *b)
+        }
+        _ => false,
+    })
 }
 
 /// Not the fork's (WR-613): knots inserted in `surface` that halve its first knot span
@@ -4154,36 +4213,47 @@ mod tests {
         assert_eq!(v, [0.0, 0.25, 0.5, 0.75, 1.0]);
     }
 
-    /// WR-613: a candidate counts as no worse than the bar at a station only where its
-    /// angle's enclosure (the angle with its rounding bound) is not wholly above the bar's:
-    /// a rise beyond the two readings' rounding rejects it, at any one station, and a
-    /// station the bar certifies and the candidate does not rejects it too.
+    /// WR-613: a candidate is taken over the fallback exactly when no side's seam reading
+    /// is farther from tangent than the fallback's beyond the two readings' rounding (the
+    /// seam check's own test): a rise above the fallback by more than the rounding rejects
+    /// it, one within it does not, a side's reading below the fallback's is taken even
+    /// where it rises along the side (the reading is the side's largest angle), and a side
+    /// either reads nothing on, or a NaN, rejects it.
     #[test]
-    fn wr_613_face_sided_patch_is_no_worse_at_every_station() {
-        let side = |stations: Vec<StationAngle>| SideAngle {
-            sides: [Some(stations), None, None, None],
-        };
-        let bar = side(vec![Some((1e-3, 1e-12)), Some((6.8e-4, 4e-12)), None]);
-        // closer at one station, equal within rounding at the other
-        let ok = side(vec![
-            Some((1e-6, 1e-12)),
-            Some((6.8e-4 + 7e-12, 4e-12)),
-            Some((1.0, 0.1)),
-        ]);
-        assert!(no_worse_at_every_station(&ok, &bar));
-        // a rise of 1.35e-8 at one station (Heart's blend seam) is farther, not equal
-        let rise = side(vec![
-            Some((1e-6, 1e-12)),
-            Some((6.8e-4 + 1.35e-8, 4e-12)),
-            None,
-        ]);
-        assert!(!no_worse_at_every_station(&rise, &bar));
-        // a station the bar certifies and the candidate does not
-        let gap = side(vec![Some((1e-6, 1e-12)), None, None]);
-        assert!(!no_worse_at_every_station(&gap, &bar));
+    fn wr_613_face_sided_patch_is_no_farther_than_the_fallback() {
+        use SideSeam::{Free, Read};
+        let bar = [Read(Some(1e-3)), Read(Some(6.8e-4)), Free, Free];
+        // closer on one side, equal within rounding on the other
+        let ok = [Read(Some(1e-6)), Read(Some(6.8e-4 + 7e-12)), Free, Free];
+        assert!(no_farther_than_the_fallback(&ok, &bar));
+        // a rise above the fallback by 1.35e-8 (Heart's blend seam) is farther, not equal
+        let rise = [Read(Some(1e-3 + 1.35e-8)), Read(Some(6.8e-4)), Free, Free];
+        assert!(!no_farther_than_the_fallback(&rise, &bar));
+        // #16729's crease corner: the fallback's blend side reads 5.36e-3 (its far end
+        // 8.7e-7); the candidate's reads 3.58e-3 (its far end rising to 1.7e-6, below
+        // what the fallback ships on that side), its face side 1.5e-8 against 6.92e-3:
+        // accepted
+        let fallback = [
+            Read(Some(5.66e-3)),
+            Read(Some(5.36e-3)),
+            Read(Some(6.92e-3)),
+            Free,
+        ];
+        let far_end_rise = [
+            Read(Some(5.66e-3)),
+            Read(Some(3.58e-3)),
+            Read(Some(1.5e-8)),
+            Free,
+        ];
+        assert!(no_farther_than_the_fallback(&far_end_rise, &fallback));
+        // a side the candidate reads nothing on, or the fallback reads nothing on
+        let gap = [Read(None), Read(Some(6.8e-4)), Free, Free];
+        assert!(!no_farther_than_the_fallback(&gap, &bar));
+        let unread = [Read(None), Read(Some(6.8e-4)), Free, Free];
+        assert!(!no_farther_than_the_fallback(&ok, &unread));
         // NaN never passes
-        let nan = side(vec![Some((f64::NAN, 1e-12)), Some((0.0, 0.0)), None]);
-        assert!(!no_worse_at_every_station(&nan, &bar));
+        let nan = [Read(Some(f64::NAN)), Read(Some(6.8e-4)), Free, Free];
+        assert!(!no_farther_than_the_fallback(&nan, &bar));
     }
 
     /// A planar triangle as a cubic patch at `at`, its top side (v = 1) collapsed to the

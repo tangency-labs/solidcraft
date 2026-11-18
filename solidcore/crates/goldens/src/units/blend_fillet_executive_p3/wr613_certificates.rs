@@ -1,7 +1,9 @@
 //! WR-613 (#18640): a fillet corner patch between a face of the body and a round may take
 //! the round's twist at that corner, so the patch meets the face exactly. The kernel
-//! takes such a patch only where it is shown no worse than main's mean-twist patch at
-//! every station of every side, and otherwise keeps main's patch bit for bit
+//! takes such a patch only where, on every side, its seam reading is no farther from
+//! tangent than main's patch's, read by this module's own seam function
+//! ([`edge_seam_normal_angle`]'s [`seam_normal_angle`]) and compared by its own test
+//! ([`seam_angle_farther`]); otherwise it keeps main's patch bit for bit
 //! (`face_sided_patch` in `nurbs::b_spline_surface_n_lib::p2`). Each candidate row is
 //! checked against main's figures, recorded in [`ROWS`] by this module's own measures:
 //! - `check_brep` Level 2 reports nothing and the body is one closed manifold solid;
@@ -12,7 +14,7 @@
 //!   by [`Row::main_next_row_off`] (more than `IN_PLANE`): CLOSER; and every seam of those
 //!   patches, face side or blend side, reads a largest normal angle ([`seam_angle`]) that
 //!   is not above main's on that seam by more than the two readings' rounding
-//!   ([`angle_rounding`], at each angle): CLOSER where it is below by more, else EQUAL;
+//!   ([`seam_angle_rounding`], at each angle): CLOSER where it is below by more, else EQUAL;
 //! - a row where main's patch was kept: its volume, next-row distance and every seam's
 //!   angle are main's, bit for bit (EQUAL);
 //! - the row's volume lies in the body's certified volume enclosure ([`enclose_volume`]):
@@ -20,20 +22,21 @@
 //!   body is closer.
 //!
 //! [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
+//! [`seam_normal_angle`]: solidcore::query::continuity::seam_normal_angle
 
 use super::{apply, build, RealSolid};
 use solidcore::kernel::Kernel;
 use solidcore::mass::enclosure::enclose_volume;
 use solidcore::math::Vec3;
-use solidcore::query::continuity::continuity_over;
+use solidcore::query::continuity::{
+    edge_seam_normal_angle, seam_angle_farther, seam_angle_rounding, SEAM_DOT_ROUNDING,
+};
 use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::face::p2::faceuses;
 use solidcore::topology::topology_traverser::face_edges;
 use solidcore::topology::{Brep, EdgeId, FaceId};
-use std::f64::consts::PI;
 
 /// A row with corner-patch sides on plane faces, and main's figures for it (main's
 /// library, measured by this module's own [`patch_sides`] and [`seam_angle`]).
@@ -62,33 +65,14 @@ struct Row {
 /// to the same order. `8192u` (`9.1e-13`) bounds both readings with a factor 5 to spare.
 const IN_PLANE: f64 = 8192.0 * (f64::EPSILON / 2.0);
 
-/// The rounding of the dot product of two unit normals that [`seam_angle`]'s `acos`
-/// takes: `δ = 8u` (the product `γ_3`, each normal's length within `2u` of 1, twice).
-const DOT_ROUNDING: f64 = 8.0 * (f64::EPSILON / 2.0);
-
-/// The rounding of a [`seam_angle`] reading `theta`: `|acos(c + d) - acos(c)|` for
-/// `|d| <= δ` ([`DOT_ROUNDING`]). It is at most `sqrt(2 δ)` everywhere (worst at
-/// `c = 1`). Where `theta >= 2 sqrt(2 δ)` the exact angle is within `sqrt(2 δ) <= theta / 2`
-/// of the reading, so the derivative `1 / sin` of `acos` between them is at most
-/// `1 / sin(theta / 2) <= pi / theta`, and the rounding at most `pi δ / theta`:
-/// `4.1e-12` at Heart's `6.8e-4` radians, against `4.22e-8` at 0.
-fn angle_rounding(theta: f64) -> f64 {
-    let floor = (2.0 * DOT_ROUNDING).sqrt();
-    if theta >= 2.0 * floor {
-        PI * DOT_ROUNDING / theta
-    } else {
-        floor
-    }
-}
-
 #[test]
 fn angle_rounding_bounds_acos() {
     // the floor is the half-order loss of acos next to 1
-    let c = 1.0 - DOT_ROUNDING;
-    assert!(c.acos() <= angle_rounding(0.0));
+    let c = 1.0 - SEAM_DOT_ROUNDING;
+    assert!(c.acos() <= seam_angle_rounding(0.0));
     // away from 0 it is the first-order bound, and smaller
-    assert!(angle_rounding(6.8e-4) < 5e-12);
-    assert!(angle_rounding(6.8e-4) >= DOT_ROUNDING / (6.8e-4_f64).sin());
+    assert!(seam_angle_rounding(6.8e-4) < 5e-12);
+    assert!(seam_angle_rounding(6.8e-4) >= SEAM_DOT_ROUNDING / (6.8e-4_f64).sin());
 }
 
 /// The row's input, read as the goldens gate reads it (upstream file paths resolved).
@@ -227,39 +211,13 @@ fn patch_sides(b: &Brep) -> PatchSides {
 }
 
 /// The largest angle between the normals of the two faces at edge `e`, either way
-/// round (`min(θ, π - θ)`), read by [`continuity_over`] at 257 even stations along
-/// the edge and 129 over each end's 1/32 (where a corner patch's kink sits).
+/// round (`min(θ, π - θ)`): the kernel's seam reading ([`edge_seam_normal_angle`], 257
+/// even stations along the edge and 129 over each end's 1/32, where a corner patch's
+/// kink sits), the very function the kernel's WR-613 guard compares patches with.
 fn seam_angle(k: &Kernel, b: &Brep, e: EdgeId) -> f64 {
-    let mut fs = solidcore::topology::edge::faces(b, e, None).expect("edge faces");
-    fs.sort();
-    fs.dedup();
-    let &[fa, fb] = fs.as_slice() else {
-        panic!("edge {e:?} is not a seam of two faces: {fs:?}");
-    };
-    let use_of = |f| faceuses(b, f).expect("faceuses").0.expect("a faceuse");
-    let edge = b.edge(e).expect("edge");
-    let curve = edge.curve.as_ref().expect("an edge curve");
-    let mut worst = 0.0_f64;
-    let mut stations = 0;
-    for (part, n) in [([0.0, 1.0], 257), ([0.0, 1.0 / 32.0], 129), ([31.0 / 32.0, 1.0], 129)] {
-        let measured = continuity_over(
-            k,
-            curve,
-            edge.interval,
-            part,
-            [(b, use_of(fa)), (b, use_of(fb))],
-            n,
-        )
-        .expect("continuity");
-        for station in measured {
-            let t = station.measure.normal_angle;
-            assert!(t.is_finite(), "edge {e:?}: angle {t}");
-            worst = worst.max(t.min(PI - t));
-            stations += 1;
-        }
-    }
-    assert!(stations >= 257, "edge {e:?}: only {stations} stations measured");
-    worst
+    edge_seam_normal_angle(k, b, e)
+        .expect("continuity")
+        .unwrap_or_else(|| panic!("edge {e:?}: too few stations measured, or an angle not finite"))
 }
 
 /// The seams of `patches`: each edge's index in `b`'s edge list, with its angle.
@@ -339,8 +297,9 @@ fn check(name: &str) {
     // every seam of those patches: no farther from tangent than main's, beyond rounding
     let (mut closer, mut equal, mut farther) = (0, 0, Vec::new());
     for (&(edge, angle), &(_, main)) in measured.iter().zip(row.main_seams) {
-        let slack = angle_rounding(angle) + angle_rounding(main);
-        if angle > main + slack {
+        let slack = seam_angle_rounding(angle) + seam_angle_rounding(main);
+        // the kernel guard's own test
+        if seam_angle_farther(angle, main) {
             farther.push(edge);
         } else if angle < main - slack {
             closer += 1;
@@ -386,9 +345,9 @@ const ROWS: &[Row] = &[
     Row { name: "corner3x2-union-overhang-front-edges15-22-r1", moved: false, main_volume: 2599.998279385677, face_sides: 1, main_next_row_off: 3.8329594127972655e-5, main_seams: &[(28, 3.835983187671628e-3), (29, 4.9442328272613105e-3), (30, 6.234405521260424e-3), (35, 3.1512792353149705e-5)] },
     Row { name: "corner3x2-union-overhang-front-edges15-24-r1", moved: false, main_volume: 2599.9982794279304, face_sides: 1, main_next_row_off: 3.8329594127972655e-5, main_seams: &[(28, 3.8359826407469827e-3), (29, 4.94423282568946e-3), (30, 6.2344055211535744e-3), (35, 5.28937113769538e-5)] },
     Row { name: "curve-sih-box_diff_cyl-all-edges-r0.1", moved: true, main_volume: 950.6479346142942, face_sides: 4, main_next_row_off: 3.7687186704715714e-11, main_seams: &[(26, 2.1476597587614735e-3), (27, 0e0), (28, 4.307331468154267e-3), (29, 4.308603566563169e-3), (30, 0e0), (31, 2.1490285982051775e-3), (32, 2.1476595554466467e-3), (33, 0e0), (34, 4.308606168864467e-3), (35, 4.307331512539287e-3), (36, 0e0), (37, 2.14766389173986e-3), (70, 6.10261808574068e-3), (72, 6.102617056435018e-3), (73, 6.102618668961659e-3), (75, 6.102617784087809e-3)] },
-    Row { name: "curve-sih-box_diff_cyl-all-edges-r0.25", moved: false, main_volume: 949.2763535526113, face_sides: 4, main_next_row_off: 4.3016790129968285e-10, main_seams: &[(26, 1.065590352696303e-3), (27, 1.4901161193847656e-8), (28, 1.7413585711547235e-3), (29, 1.8175831203211463e-3), (30, 1.4901161193847656e-8), (31, 1.0655903441528411e-3), (32, 1.0655903540507544e-3), (33, 1.4901161193847656e-8), (34, 1.8175831143350696e-3), (35, 1.7413585795067821e-3), (36, 1.4901161193847656e-8), (37, 1.0655903455072924e-3), (70, 2.1250223989407236e-3), (72, 2.125022396380705e-3), (73, 2.125022400351346e-3), (75, 2.125022401239516e-3)] },
-    Row { name: "curve-sih-box_diff_cyl-all-edges-r0.5", moved: false, main_volume: 944.4771092314381, face_sides: 4, main_next_row_off: 8.602851764294428e-10, main_seams: &[(24, 2.927077601423078e-3), (25, 1.4901161193847656e-8), (26, 3.76907175142291e-3), (27, 3.769071754987111e-3), (28, 1.4901161193847656e-8), (29, 2.927077588261557e-3), (30, 2.927077600436912e-3), (31, 1.4901161193847656e-8), (32, 3.7690717561359036e-3), (33, 3.7690717516585598e-3), (34, 1.4901161193847656e-8), (35, 2.9270775902338884e-3), (69, 4.947288444525646e-3), (71, 4.947288441428769e-3), (73, 4.947288439453949e-3), (75, 4.947288441810268e-3)] },
-    Row { name: "curve-sih-box_diff_cyl-all-edges-r1.0", moved: false, main_volume: 925.9490134066059, face_sides: 4, main_next_row_off: 1.070619148890728e-10, main_seams: &[(24, 7.0176816800739525e-3), (25, 0e0), (26, 6.777931877701719e-3), (27, 6.7779318764404515e-3), (28, 0e0), (29, 7.017681677052238e-3), (30, 7.017681683079847e-3), (31, 0e0), (32, 6.777931874212759e-3), (33, 6.777931872984252e-3), (34, 0e0), (35, 7.017681676055546e-3), (69, 8.385535504448382e-3), (71, 8.385535508618949e-3), (73, 8.385535503071433e-3), (75, 8.385535509082345e-3)] },
+    Row { name: "curve-sih-box_diff_cyl-all-edges-r0.25", moved: true, main_volume: 949.2763535526113, face_sides: 4, main_next_row_off: 4.3016790129968285e-10, main_seams: &[(26, 1.065590352696303e-3), (27, 1.4901161193847656e-8), (28, 1.7413585711547235e-3), (29, 1.8175831203211463e-3), (30, 1.4901161193847656e-8), (31, 1.0655903441528411e-3), (32, 1.0655903540507544e-3), (33, 1.4901161193847656e-8), (34, 1.8175831143350696e-3), (35, 1.7413585795067821e-3), (36, 1.4901161193847656e-8), (37, 1.0655903455072924e-3), (70, 2.1250223989407236e-3), (72, 2.125022396380705e-3), (73, 2.125022400351346e-3), (75, 2.125022401239516e-3)] },
+    Row { name: "curve-sih-box_diff_cyl-all-edges-r0.5", moved: true, main_volume: 944.4771092314381, face_sides: 4, main_next_row_off: 8.602851764294428e-10, main_seams: &[(24, 2.927077601423078e-3), (25, 1.4901161193847656e-8), (26, 3.76907175142291e-3), (27, 3.769071754987111e-3), (28, 1.4901161193847656e-8), (29, 2.927077588261557e-3), (30, 2.927077600436912e-3), (31, 1.4901161193847656e-8), (32, 3.7690717561359036e-3), (33, 3.7690717516585598e-3), (34, 1.4901161193847656e-8), (35, 2.9270775902338884e-3), (69, 4.947288444525646e-3), (71, 4.947288441428769e-3), (73, 4.947288439453949e-3), (75, 4.947288441810268e-3)] },
+    Row { name: "curve-sih-box_diff_cyl-all-edges-r1.0", moved: true, main_volume: 925.9490134066059, face_sides: 4, main_next_row_off: 1.070619148890728e-10, main_seams: &[(24, 7.0176816800739525e-3), (25, 0e0), (26, 6.777931877701719e-3), (27, 6.7779318764404515e-3), (28, 0e0), (29, 7.017681677052238e-3), (30, 7.017681683079847e-3), (31, 0e0), (32, 6.777931874212759e-3), (33, 6.777931872984252e-3), (34, 0e0), (35, 7.017681676055546e-3), (69, 8.385535504448382e-3), (71, 8.385535508618949e-3), (73, 8.385535503071433e-3), (75, 8.385535509082345e-3)] },
     Row { name: "curve-sih-box_diff_cyl-all-edges-step2", moved: true, main_volume: 950.6479346142942, face_sides: 4, main_next_row_off: 3.7687186704715714e-11, main_seams: &[(26, 2.1476597587614735e-3), (27, 0e0), (28, 4.307331468154267e-3), (29, 4.308603566563169e-3), (30, 0e0), (31, 2.1490285982051775e-3), (32, 2.1476595554466467e-3), (33, 0e0), (34, 4.308606168864467e-3), (35, 4.307331512539287e-3), (36, 0e0), (37, 2.14766389173986e-3), (70, 6.10261808574068e-3), (72, 6.102617056435018e-3), (73, 6.102618668961659e-3), (75, 6.102617784087809e-3)] },
     Row { name: "source-file-box_diff_cyl-all-edges", moved: true, main_volume: 950.648098797075, face_sides: 2, main_next_row_off: 3.7687186704715714e-11, main_seams: &[(32, 2.1476595554466467e-3), (33, 0e0), (34, 4.308606168864467e-3), (35, 4.307331512539287e-3), (36, 0e0), (37, 2.14766389173986e-3), (73, 6.102618668961659e-3), (75, 6.102617784087809e-3)] },
     Row { name: "stubs3-union-inset-side-step-edges16-22-r1", moved: false, main_volume: 2601.7150940784886, face_sides: 1, main_next_row_off: 3.832959412441994e-5, main_seams: &[(30, 3.8359833419925227e-3), (31, 4.94423282663257e-3), (32, 6.2344055212960395e-3), (37, 3.674735418723121e-5)] },
@@ -396,7 +355,7 @@ const ROWS: &[Row] = &[
     Row { name: "stubs3-union-overhang-corner-edges14-22-r1", moved: false, main_volume: 2599.5690757124053, face_sides: 1, main_next_row_off: 3.8329594127972655e-5, main_seams: &[(29, 3.8359818943511496e-3), (30, 4.9442328269693955e-3), (31, 6.234405521563162e-3), (36, 3.63087639163081e-5)] },
     Row { name: "stubs3-union-overhang-corner-edges15-22-r1", moved: false, main_volume: 2598.710668410454, face_sides: 1, main_next_row_off: 3.832959412441994e-5, main_seams: &[(29, 3.8359873391677957e-3), (30, 4.944232827508315e-3), (31, 6.234405521527545e-3), (36, 3.14303040534913e-5)] },
     Row { name: "stubs3-union-overhang-front-edges14-22-r1", moved: false, main_volume: 2598.7106683663496, face_sides: 1, main_next_row_off: 3.8329594127972655e-5, main_seams: &[(29, 3.8359831066328964e-3), (30, 4.94423282703676e-3), (31, 6.234405521189191e-3), (36, 3.107451656219666e-5)] },
-    Row { name: "stubs4-Heart-all-edges-r0.1", moved: false, main_volume: 326.05828850789356, face_sides: 2, main_next_row_off: 1.609444153816142e-5, main_seams: &[(8, 5.834382971169943e-4), (9, 6.771257499057234e-4), (10, 1.7263064311850678e-3), (11, 6.770965791146431e-4), (12, 6.771191332215269e-4), (13, 1.5194066439734085e-3), (14, 6.770965794425795e-4), (15, 5.834382967364149e-4)] },
+    Row { name: "stubs4-Heart-all-edges-r0.1", moved: true, main_volume: 326.05828850789356, face_sides: 2, main_next_row_off: 1.609444153816142e-5, main_seams: &[(8, 5.834382971169943e-4), (9, 6.771257499057234e-4), (10, 1.7263064311850678e-3), (11, 6.770965791146431e-4), (12, 6.771191332215269e-4), (13, 1.5194066439734085e-3), (14, 6.770965794425795e-4), (15, 5.834382967364149e-4)] },
 ];
 
 /// One test per row, so the test runner spreads them over its threads.
