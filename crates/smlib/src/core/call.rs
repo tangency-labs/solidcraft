@@ -14,6 +14,13 @@ use std::sync::Once;
 
 use crate::{Error, Result};
 
+/// `SM_ERR_INVALID_INPUT`.
+const INVALID_INPUT: i32 = 1007;
+/// The statuses of a draft corner whose continued curves do not meet, and of a wall that closes
+/// before the far end, for a refusal that names no point.
+const ERR_CORNER_APART: i32 = -1108;
+const ERR_WALL_CLOSES: i32 = -1109;
+
 /// Names this crate's fixes to solidcore-ops' session, once: every kernel it makes or hands out
 /// from then on runs with them.
 fn configured() {
@@ -74,6 +81,25 @@ pub(crate) fn error(call: &'static str, e: solidcore_ops::Error, detail: Option<
         Ops::Exception => Error::Exception,
         Ops::Cancelled => Error::Cancelled(call),
         Ops::Internal(what) => Error::Internal(what),
+        // The sweeps' (tangency-labs/solidcore#3304): the kernel's statuses as they are, input
+        // it refuses as `SM_ERR_INVALID_INPUT`, and a refused draft corner with its point.
+        Ops::Status(s) => Error::Status(s),
+        Ops::Refused { .. } => Error::Status(INVALID_INPUT),
+        Ops::NotExact => Error::NotExact,
+        Ops::Unsupported(_) => Error::Unsupported,
+        Ops::Unported(what) => Error::Unported(what),
+        Ops::DraftCornerRefused { why, at } => {
+            use solidcore_ops::sweep::CornerRefusal as Why;
+            let (why, otherwise) = match why {
+                Why::Apart => (crate::sweeps::CornerRefusal::Apart, Error::Status(ERR_CORNER_APART)),
+                Why::WallCloses => (crate::sweeps::CornerRefusal::WallCloses, Error::Status(ERR_WALL_CLOSES)),
+                Why::NotExact => (crate::sweeps::CornerRefusal::NotExact, Error::NotExact),
+            };
+            match at {
+                Some(at) => Error::Corner { why, at },
+                None => otherwise,
+            }
+        }
         e => Error::Solidcore(match detail {
             Some(kernel) => format!("{call}: {kernel}"),
             None => format!("{call}: {e}"),

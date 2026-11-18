@@ -77,6 +77,16 @@ fn after_boolean(k: &mut Kernel, r: &mut Brep) -> KernelResult<()> {
     update_tolerances_after_boolean(k, r).map(|_| ())
 }
 
+/// The kernel's boolean of `a` less `b` (both consumed), its tolerances updated as every
+/// boolean's are ([`after_boolean`]), for an operation that builds its result from parts of its
+/// own (a ring swept round a closed path, [`crate::sweep::sweep_placed`]): no result contract
+/// here, the operation checks what it hands over.
+pub(crate) fn subtracted(k: &mut Kernel, a: Brep, b: Brep) -> KernelResult<Brep> {
+    let mut r = sm::boolean(k, a, b, operation(BooleanOp::Subtract))?;
+    after_boolean(k, &mut r.result)?;
+    Ok(r.result)
+}
+
 /// What the operands make a boolean's result: a solid when every operand is one under
 /// `contract` ([`Expect::under`]). Each comes with the proof its body held
 /// ([`Body::take_held`]), which [`Contract::Proved`] takes where it stands.

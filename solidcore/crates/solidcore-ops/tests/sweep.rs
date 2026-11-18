@@ -23,8 +23,9 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
     arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_to_point,
-    planar_faces, project_curves, revolve, screw_sweep, sweep_placed, sweep_stations, Affine,
-    CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame, SweepRoute, Verdict,
+    planar_faces, project_curves, revolve, screw_sweep, screw_sweep_walls, sweep_placed,
+    sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SplineWalls,
+    SweepFrame, SweepRoute, Verdict,
 };
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
@@ -1095,4 +1096,177 @@ fn a_segment_projects_onto_a_box_s_record_face_at_its_index() {
         Err(Error::Argument),
         "a direction of no length"
     );
+}
+
+/// A section with a curved piece lofts to a point on ruled walls: a circle to a point above its
+/// centre is the cone, `pi r^2 h / 3`; a half disc (a line and an arc) to a point above it is
+/// its area times a third of the height; an apex in the section's plane is refused.
+#[test]
+fn a_curved_section_lofts_to_a_point_on_ruled_walls() {
+    rig_fixes();
+    let ring = circle([0.0; 3], Z, [1.0, 0.0, 0.0], 5.0);
+    let cone = loft_to_point(std::slice::from_ref(&ring), [0.0, 0.0, 5.0]).unwrap();
+    let got = cone.volume(1e-8).unwrap();
+    assert!(rel(got, 125.0 * PI / 3.0) < 1e-6, "cone: {got}");
+    assert_eq!(faces(&cone), 2, "the base and one ruled wall");
+    assert_eq!(
+        loft_to_point(&[ring], [1.0, 2.0, 0.0]).err(),
+        Some(Error::Argument),
+        "an apex in the circle's plane"
+    );
+    let half = vec![
+        line([-5.0, 0.0, 0.0], [5.0, 0.0, 0.0]),
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: Z,
+            reference: [1.0, 0.0, 0.0],
+            radius: 5.0,
+            start: 0.0,
+            end: PI,
+        },
+    ];
+    let b = loft_to_point(&half, [0.0, 2.0, 6.0]).unwrap();
+    let got = b.volume(1e-8).unwrap();
+    assert!(rel(got, 12.5 * PI * 6.0 / 3.0) < 1e-6, "half disc: {got}");
+    assert_eq!(
+        faces(&b),
+        3,
+        "the base, a triangle on the line and a ruled wall on the arc"
+    );
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+}
+
+/// The square tooth of a thread: two sides along the axis (exact cylinders, a face per half
+/// turn) and two flanks.
+fn tooth() -> Vec<Curve> {
+    polygon(&[
+        [4.0, 0.0, 0.0],
+        [4.4, 0.0, 0.0],
+        [4.4, 0.0, 0.4],
+        [4.0, 0.0, 0.4],
+    ])
+}
+
+/// Joined, a screw sweep's B-spline walls run across the cylinders' half turns as one face
+/// each, and are cut only where the radial law turns; the body is the same solid.
+#[test]
+fn a_screw_sweep_s_spline_walls_join_across_the_half_turns() {
+    rig_fixes();
+    let volume = 0.16 * TAU * 4.2 * 3.0;
+    // Three turns: six half-turn pieces. Per piece, 2 flanks and 2 cylinders each; 2 caps.
+    let per_piece = screw_sweep(&tooth(), [0.0; 3], Z, 1.0, 3.0, None, 1e-4).unwrap();
+    assert_eq!(faces(&per_piece), 6 * 4 + 2);
+    let same = screw_sweep_walls(
+        &tooth(),
+        [0.0; 3],
+        Z,
+        1.0,
+        3.0,
+        None,
+        1e-4,
+        SplineWalls::PerPiece,
+    )
+    .unwrap();
+    assert_eq!(faces(&same), faces(&per_piece));
+    // Joined: each flank one face; the cylinders keep their six pieces.
+    let joined = screw_sweep_walls(
+        &tooth(),
+        [0.0; 3],
+        Z,
+        1.0,
+        3.0,
+        None,
+        1e-4,
+        SplineWalls::Joined,
+    )
+    .unwrap();
+    assert_eq!(faces(&joined), 2 + 6 * 2 + 2);
+    assert!(joined.check(CheckLevel::All).unwrap().is_valid());
+    for b in [&per_piece, &joined] {
+        let got = b.volume(1e-8).unwrap();
+        assert!(rel(got, volume) < 1e-4, "{got} vs {volume}");
+    }
+    // A linear radial law moves the sides off their cylinders: four B-spline walls, each one
+    // face, and two caps.
+    let law = [(0.0, 0.0), (3.0, 1.0)];
+    let b = screw_sweep_walls(
+        &tooth(),
+        [0.0; 3],
+        Z,
+        1.0,
+        3.0,
+        Some(&law),
+        1e-4,
+        SplineWalls::Joined,
+    )
+    .unwrap();
+    assert_eq!(faces(&b), 6);
+    // The law's corners stay face boundaries: three intervals, the flanks a face in each (6),
+    // the sides B-spline walls in the sloping one (2) and cylinders in the two level ones.
+    let law = [(0.0, 0.0), (0.65, 0.0), (1.9, 0.4), (3.2, 0.4)];
+    let b = screw_sweep_walls(
+        &tooth(),
+        [0.0; 3],
+        Z,
+        1.0,
+        3.2,
+        Some(&law),
+        1e-4,
+        SplineWalls::Joined,
+    )
+    .unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let per_piece = screw_sweep(&tooth(), [0.0; 3], Z, 1.0, 3.2, Some(&law), 1e-4).unwrap();
+    assert!(faces(&b) < faces(&per_piece));
+    let (joined, pieces) = (b.volume(1e-8).unwrap(), per_piece.volume(1e-8).unwrap());
+    assert!(rel(joined, pieces) < 1e-6, "{joined} vs {pieces}");
+}
+
+/// The circle of radius `r` about the z axis as one rational quadratic NURBS curve (four
+/// quarter arcs), from (r, 0, 0) counter-clockwise: a closed path that is no arc to the sweep.
+fn nurbs_circle(r: f64) -> Curve {
+    let w = 0.5_f64.sqrt();
+    let corners = [
+        [r, 0.0],
+        [r, r],
+        [0.0, r],
+        [-r, r],
+        [-r, 0.0],
+        [-r, -r],
+        [0.0, -r],
+        [r, -r],
+        [r, 0.0],
+    ];
+    Curve::Nurbs {
+        degree: 2,
+        points: corners
+            .iter()
+            .enumerate()
+            .map(|(i, c)| [c[0], c[1], 0.0, if i % 2 == 0 { 1.0 } else { w }])
+            .collect(),
+        knots: vec![
+            0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0,
+        ],
+    }
+}
+
+/// Round a closed path the curve sweep takes, a profile's hole stays empty: a ring (outer
+/// radius 2, bore 1) round a circle of radius 10 is Pappus's `2 pi R * pi (2^2 - 1^2)`, and the
+/// disc without the bore `2 pi R * pi 2^2`.
+#[test]
+fn a_ring_swept_round_a_closed_curved_path_keeps_its_hole_empty() {
+    rig_fixes();
+    let path = [nurbs_circle(10.0)];
+    // The profile square to the path where it starts: in the plane y = 0 about (10, 0, 0).
+    let about = |radius: f64| circle([10.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], radius);
+    let (ring, _, route) =
+        sweep_placed(&[about(2.0), about(1.0)], &path, SweepFrame::Follow, true).unwrap();
+    assert_eq!(route, SweepRoute::Curve(SweepFrame::Follow));
+    let got = ring.volume(1e-8).unwrap();
+    let want = TAU * 10.0 * PI * 3.0;
+    assert!(rel(got, want) < 1e-6, "ring: {got} vs {want}");
+    let (disc, _, _) = sweep_placed(&[about(2.0)], &path, SweepFrame::Follow, true).unwrap();
+    let got = disc.volume(1e-8).unwrap();
+    let want = TAU * 10.0 * PI * 4.0;
+    assert!(rel(got, want) < 1e-6, "disc: {got} vs {want}");
 }

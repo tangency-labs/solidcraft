@@ -40,7 +40,9 @@ use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId};
 
 use super::blend::{Miss, on_copy, p3, pick, points_ok, status as blend_status, tolerance_ok};
-use super::{Body, answer};
+use solidcore_ops::order::Order;
+
+use super::{Body, answer, call};
 use crate::{Error, Result};
 
 /// The capi's statuses as SolidCraft errors: an operation's own result.
@@ -147,6 +149,43 @@ pub(super) fn pick_faces(k: &mut Kernel, b: &mut Brep, points: &[[f64; 3]], tol:
         Ok(answer(face_closest_point_in_shape(k, shape, &objects, (ONE, f), p))?.map(|c| c.distance))
     })?;
     Ok(picked.map(|(p, _)| p.iter().filter_map(|&i| all.get(i).copied()).collect()))
+}
+
+/// The faces of `body` that `points` pick, in pick order and each once, as indices into the
+/// body's order as it stands (returned with them, for the ops call that takes them): each point
+/// picks the face nearest it within `tol`, by ops' distances to the faces as they are trimmed.
+/// A point with no face within `tol` is [`Error::NoMatch`]; one with a second face within `tol`
+/// and no farther than the nearest by more than the body's own tolerance is
+/// [`Error::Ambiguous`].
+pub(super) fn picked_faces(call: &'static str, body: &Body, points: &[[f64; 3]], tol: f64) -> Result<(Order, Vec<usize>)> {
+    let (order, model_tol, rows) = call::ops(call, || {
+        let order = body.native_order()?;
+        let model_tol = body.tolerance()?;
+        let rows = body.face_distances_within(&order, points, tol)?;
+        Ok((order, model_tol, rows))
+    })?;
+    let mut picked = Vec::new();
+    for i in 0..points.len() {
+        let (mut best, mut d0, mut d1) = (None, f64::INFINITY, f64::INFINITY);
+        for (f, row) in rows.iter().enumerate() {
+            let Some(d) = row.get(i).copied().flatten().filter(|d| d.is_finite()) else { continue };
+            if d < d0 {
+                d1 = d0;
+                d0 = d;
+                best = Some(f);
+            } else if d < d1 {
+                d1 = d;
+            }
+        }
+        let Some(best) = best.filter(|_| d0 <= tol) else { return Err(Error::NoMatch { point: i }) };
+        if d1 <= tol && d1 - d0 <= model_tol {
+            return Err(Error::Ambiguous { point: i });
+        }
+        if !picked.contains(&best) {
+            picked.push(best);
+        }
+    }
+    Ok((order, picked))
 }
 
 /// A face pick's failure as `pick_error` (ops.rs) reads it.

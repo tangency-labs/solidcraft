@@ -22,45 +22,19 @@ pub struct ScrewSweepOptions<'a> {
     pub tolerance: f64,
 }
 
-/// A 3D curve of a profile, path or section.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Curve {
-    Line {
-        start: [f64; 3],
-        end: [f64; 3],
-    },
-    /// Counter-clockwise about the unit `axis` from angle `start` to `end` (radians,
-    /// 0 < end - start <= 2 pi), angle 0 along the unit `reference` (square to `axis`).
-    Arc {
-        center: [f64; 3],
-        axis: [f64; 3],
-        reference: [f64; 3],
-        radius: f64,
-        start: f64,
-        end: f64,
-    },
-    /// Control points (x, y, z, weight > 0) and the clamped knot vector (points + degree + 1
-    /// knots).
-    Nurbs {
-        degree: usize,
-        points: Vec<[f64; 4]>,
-        knots: Vec<f64>,
-    },
-}
+/// A 3D curve of a profile, path or section: a line from `start` to `end`; an arc
+/// counter-clockwise about the unit `axis` from angle `start` to `end` (radians,
+/// 0 < end - start <= 2 pi), angle 0 along the unit `reference` (square to `axis`); or a NURBS
+/// curve by its control points (x, y, z, weight > 0) and clamped knot vector (points + degree + 1
+/// knots). solidcore-ops' own.
+pub use solidcore_ops::sweep::Curve;
 
 /// How a drafted [`Brep::extrude`] closes the gap its offset opens at a sharp corner of the
-/// profile. Where the offsets overlap instead, all three trim them where they cross.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum DraftCorner {
-    /// Each wall continues as itself (a line's plane, an arc's cone) until it meets its
-    /// neighbour: every section is the profile's curves offset and continued as themselves.
-    #[default]
-    Curvature,
-    /// Each offset curve continues straight along its end tangent: a flat face each side.
-    Tangent,
-    /// An arc about the corner: a cone about it.
-    Round,
-}
+/// profile; where the offsets overlap instead, each rule trims them where they cross.
+/// `Curvature` (the default) continues each wall as itself (a line's plane, an arc's cone) until
+/// it meets its neighbour, `Tangent` continues each offset curve straight along its end tangent,
+/// and `Round` puts an arc about the corner. solidcore-ops' own.
+pub use solidcore_ops::sweep::DraftCorner;
 
 /// Why [`DraftCorner::Curvature`] could not close a corner ([`Error::Corner`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,25 +57,15 @@ pub enum SweepFrame {
     Translate,
 }
 
-/// How the ends of a [`Brep::sweep_stations`] close.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Ends {
-    /// Left open: the swept sheet.
-    Open,
-    /// Capped by the first and last sections: a closed solid.
-    Capped,
-    /// Joined: the last section lies on the first (a sweep round a closed path), the walls' ends
-    /// glued to their starts into a closed solid.
-    Joined,
-}
+/// How the ends of a [`Brep::sweep_stations`] close: `Open` leaves the swept sheet, `Capped`
+/// closes a solid with the first and last sections, and `Joined` glues the walls' ends to their
+/// starts where the last section lies on the first (a sweep round a closed path).
+/// solidcore-ops' own.
+pub use solidcore_ops::sweep::Ends;
 
 /// An affine map of a [`Brep::sweep_stations`] station: a point `x` goes to `m · x + t`, `m`
-/// given by its columns.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Affine {
-    pub m: [[f64; 3]; 3],
-    pub t: [f64; 3],
-}
+/// given by its columns. solidcore-ops' own.
+pub use solidcore_ops::sweep::Affine;
 
 /// Most stations of one [`Brep::sweep_stations`].
 pub const MAX_STATIONS: usize = 4096;
@@ -110,11 +74,6 @@ pub const MAX_STATION_CURVES: usize = 400_000;
 
 /// Most curves one list may hold.
 pub const MAX_CURVES: usize = 16_384;
-/// Highest degree of a [`Curve::Nurbs`].
-pub(crate) const CURVE_MAX_DEGREE: usize = 25;
-/// Most control points of a [`Curve::Nurbs`].
-pub(crate) const CURVE_MAX_POINTS: usize = 100_000;
-
 impl Brep {
     /// A sheet of planar faces bounded by `loops`: closed loops of curves in one plane, in any
     /// order, nested as outer loops, their holes and islands in the holes.

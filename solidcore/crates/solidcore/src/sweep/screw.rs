@@ -521,9 +521,10 @@ fn cylinder_piece(
 /// arcs'. A wall's point is the curve's weighted mean of its control points' paths at
 /// the same parameter, which all turn and lift alike, so the wall is the profile curve
 /// turned and lifted as one.
-fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
+fn screw_wall(m: &Screw, c: &Nurbs, pieces: &[Stations]) -> Result<BSplineSurface> {
     let count = c.points.len();
-    let across = 2 * st.spans() + 1;
+    let spans = pieces.iter().map(Stations::spans).sum::<usize>();
+    let across = 2 * spans + 1;
     let size = count
         .checked_mul(across)
         .filter(|&n| n <= MAX_NET_POINTS)
@@ -532,9 +533,13 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
     let mut weights = Vec::new();
     for (l, &p) in c.points.iter().enumerate() {
         let w = c.weights.get(l).copied().unwrap_or(1.0);
-        for (j, q) in path(m, p, st).into_iter().enumerate() {
-            net.push(q);
-            weights.push(w * st.weight(j));
+        for (i, st) in pieces.iter().enumerate() {
+            // A piece after the first starts on the point the one before it ended on.
+            let skip = usize::from(i > 0);
+            for (j, q) in path(m, p, st).into_iter().enumerate().skip(skip) {
+                net.push(q);
+                weights.push(w * st.weight(j));
+            }
         }
     }
     if net.len() != size {
@@ -543,7 +548,16 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
             "the screw surface's control net has the wrong size",
         ));
     }
-    let (vknots, vmult) = st.knots();
+    // The knots across the stations of every piece: double inside (the arcs meet
+    // tangent), triple at the ends.
+    let mut vknots = Vec::new();
+    for (i, st) in pieces.iter().enumerate() {
+        vknots.extend(st.t.iter().copied().skip(usize::from(i > 0)));
+    }
+    let last = vknots.len().saturating_sub(1);
+    let vmult: Vec<usize> = (0..vknots.len())
+        .map(|i| if i == 0 || i == last { 3 } else { 2 })
+        .collect();
     BSplineSurface::create_canonical(&CanonicalSurfaceData {
         u_degree: c.degree,
         v_degree: 2,
@@ -655,8 +669,76 @@ pub fn screw_sweep_body(
     turns: f64,
     tolerance: f64,
 ) -> Result<Brep> {
+    screw_sweep_walls_body(
+        k,
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        None,
+        tolerance,
+        SplineWalls::PerPiece,
+    )
+}
+
+/// How a screw sweep lays out the faces of its B-spline walls (the walls of every profile
+/// curve but a line along the axis, whose wall is an exact cylinder).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SplineWalls {
+    /// A face per piece: where a profile line along the axis makes the sweep come in
+    /// pieces of half a turn, every wall has a face per piece, as the cylinders do.
+    #[default]
+    PerPiece,
+    /// One face across the cylinders' half turns: a B-spline wall is cut only at the
+    /// radial law's angles, where its tangent can change. Such a wall, joined across
+    /// pieces, keeps no sweep definition.
+    Joined,
+}
+
+/// [`screw_sweep_body`] or, with a `law`, [`screw_sweep_radial_body`], its B-spline walls
+/// laid out as `walls` says.
+///
+/// # Errors
+///
+/// Those of [`screw_sweep_body`] and [`screw_sweep_radial_body`].
+#[allow(clippy::too_many_arguments)]
+pub fn screw_sweep_walls_body(
+    k: &mut Kernel,
+    profile: &[Curve],
+    origin: Point3,
+    axis: Vec3,
+    pitch: f64,
+    turns: f64,
+    law: Option<&[(f64, f64)]>,
+    tolerance: f64,
+    walls: SplineWalls,
+) -> Result<Brep> {
     let mut m = screw_of(origin, axis, pitch, turns, tolerance)?;
-    sweep(k, profile, &mut m, tolerance)
+    let Some(law) = law else {
+        return sweep(k, profile, &mut m, tolerance, walls);
+    };
+    if law.is_empty() || law.len() > MAX_LAW {
+        return Err(bad("radial law size out of range"));
+    }
+    let mut prev: Option<f64> = None;
+    for &(turn, offset) in law {
+        if !(turn.is_finite() && offset.is_finite()) {
+            return Err(bad("radial law is not finite"));
+        }
+        if !(0.0..=turns).contains(&turn)
+            || prev.is_some_and(|p| !(turn > p))
+            || !(offset.abs() < MAX_COORD)
+        {
+            return Err(bad("radial law out of range"));
+        }
+        prev = Some(turn);
+    }
+    for &(turn, offset) in law {
+        m.angles.push(TAU * turn);
+        m.offsets.push(offset);
+    }
+    sweep(k, profile, &mut m, tolerance, walls)
 }
 
 /// [`screw_sweep`] with the section moved off the axis as it turns: a thread's groove
@@ -702,33 +784,28 @@ pub fn screw_sweep_radial_body(
     law: &[(f64, f64)],
     tolerance: f64,
 ) -> Result<Brep> {
-    let mut m = screw_of(origin, axis, pitch, turns, tolerance)?;
-    if law.is_empty() || law.len() > MAX_LAW {
-        return Err(bad("radial law size out of range"));
-    }
-    let mut prev: Option<f64> = None;
-    for &(turn, offset) in law {
-        if !(turn.is_finite() && offset.is_finite()) {
-            return Err(bad("radial law is not finite"));
-        }
-        if !(0.0..=turns).contains(&turn)
-            || prev.is_some_and(|p| !(turn > p))
-            || !(offset.abs() < MAX_COORD)
-        {
-            return Err(bad("radial law out of range"));
-        }
-        prev = Some(turn);
-    }
-    for &(turn, offset) in law {
-        m.angles.push(TAU * turn);
-        m.offsets.push(offset);
-    }
-    sweep(k, profile, &mut m, tolerance)
+    screw_sweep_walls_body(
+        k,
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        Some(law),
+        tolerance,
+        SplineWalls::PerPiece,
+    )
 }
 
 /// `screw_sweep` of the fork: both entry points, the motion `m` set but for its radial
 /// direction.
-fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Result<Brep> {
+fn sweep(
+    k: &mut Kernel,
+    profile: &[Curve],
+    m: &mut Screw,
+    tolerance: f64,
+    walls_as: SplineWalls,
+) -> Result<Brep> {
     if profile.is_empty() {
         return Err(bad("empty profile"));
     }
@@ -853,8 +930,17 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         crate::geom::tol::USE_DEFAULT,
         crate::geom::tol::USE_DEFAULT,
     )?;
-    for st in &pieces {
-        let (Some(&t0), Some(&t1)) = (st.t.first(), st.t.last()) else {
+    // A radial law's angles can change a wall's tangent, so they always bound faces. Half
+    // turns are only the cylinders' seams: with `SplineWalls::Joined` a B-spline wall runs
+    // across them as one face.
+    let joined = walls_as == SplineWalls::Joined;
+    for group in
+        pieces.chunk_by(|a, _| joined && a.t.last().is_some_and(|end| !m.angles.contains(end)))
+    {
+        let (Some(t0), Some(t1)) = (
+            group.first().and_then(|st| st.t.first().copied()),
+            group.last().and_then(|st| st.t.last().copied()),
+        ) else {
             return Err(SolidError::sweep_failed(
                 OP,
                 "a screw piece has no stations",
@@ -863,18 +949,38 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
-                cylinder_piece(k, &mut brep, m, ends.start, ends.end, r + m.offset(t0), st)?;
+                for st in group {
+                    let Some(&from) = st.t.first() else {
+                        return Err(SolidError::sweep_failed(
+                            OP,
+                            "a screw piece has no stations",
+                        ));
+                    };
+                    cylinder_piece(
+                        k,
+                        &mut brep,
+                        m,
+                        ends.start,
+                        ends.end,
+                        r + m.offset(from),
+                        st,
+                    )?;
+                }
                 continue;
             }
-            let net = screw_wall(m, wall, st)?;
+            let net = screw_wall(m, wall, group)?;
             let domain: Extent2d = net.natural_uv_domain();
             let mut surface = Surface::from(net);
-            surface.set_sweep_definition(ProceduralSweep::create(
-                nurbs,
-                motion.clone(),
-                &st.t,
-                st.half,
-            )?);
+            // One piece's spans turn alike, which the definition's bound rests on; a wall
+            // joined across pieces of different spans keeps none.
+            if let [st] = group {
+                surface.set_sweep_definition(ProceduralSweep::create(
+                    nurbs,
+                    motion.clone(),
+                    &st.t,
+                    st.half,
+                )?);
+            }
             with_face_env(k, &mut brep, |k, brep, fenv| {
                 p8::create_face_from_surface(k, brep, Some(surface), &domain, fenv)
             })?;

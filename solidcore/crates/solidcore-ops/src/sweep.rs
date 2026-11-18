@@ -30,9 +30,12 @@ use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::prism::profile as kp;
 use solidcore::surface::surface::p4::NoObject;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
@@ -40,6 +43,7 @@ use solidcore::sweep::api_brep::{
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::sweep::directed;
 use solidcore::sweep::extrude::{self as kextrude, Draft, ExtrudeTolerances};
+use solidcore::sweep::planar_loft::planar_loft;
 use solidcore::sweep::screw;
 use solidcore::sweep::segments::{
     build_faces, line_placements, sweep_along_segments, turn_placements,
@@ -49,7 +53,8 @@ use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::p8::{
-    create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves, FaceBuildEnv,
+    create_face_from_surface, create_planar_face_with_3d_curves,
+    create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
 use solidcore::topology::{Brep, FaceId};
@@ -63,8 +68,10 @@ pub use solidcore::geom::certified::Verdict;
 /// Why [`DraftCorner::Curvature`] could not close a corner ([`Error::DraftCornerRefused`]): the
 /// kernel's own reasons.
 pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
+/// How a screw sweep lays out the faces of its B-spline walls.
+pub use solidcore::sweep::screw::SplineWalls;
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish, finish_under, Body, Contract, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{run, with_body};
@@ -540,6 +547,17 @@ pub(crate) fn kernel_curves(
     parse(k, curves).map(|made| made.curves)
 }
 
+/// The result contract under `contract` ([`finish_under`]), the proof it may make left behind:
+/// a sweep's new body holds none.
+fn finished(
+    contract: Contract,
+    k: &mut Kernel,
+    b: Brep,
+    expect: Expect,
+) -> solidcore::Result<Out<Brep>> {
+    Ok(finish_under(k, b, expect, contract)?.map(|(b, _)| b))
+}
+
 /// Runs a call that makes a new body.
 fn making(
     call: &'static str,
@@ -674,6 +692,31 @@ pub fn extrude(
     corner: DraftCorner,
     cap: bool,
 ) -> Result<Body> {
+    extrude_with(
+        profile,
+        direction,
+        distance,
+        draft,
+        corner,
+        cap,
+        Contract::Closed,
+    )
+}
+
+/// [`extrude`] under `contract`.
+///
+/// # Errors
+/// As [`extrude`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a solid result not
+/// proved valid and facing out.
+pub fn extrude_with(
+    profile: &[Curve],
+    direction: [f64; 3],
+    distance: f64,
+    draft: f64,
+    corner: DraftCorner,
+    cap: bool,
+    contract: Contract,
+) -> Result<Body> {
     if !distance.is_finite()
         || !(distance > 1e-9 && distance < MAX_COORD)
         || !draft.is_finite()
@@ -701,7 +744,7 @@ pub fn extrude(
             cap,
             &DRAFT,
         ) {
-            Ok(TaperExtrude::Solid(r)) => finish(k, r, expect),
+            Ok(TaperExtrude::Solid(r)) => finished(contract, k, r, expect),
             Ok(TaperExtrude::Refused(r)) => Ok(Err(refused(r))),
             Err(SolidError::InvalidInput { operation, .. }) if operation == kextrude::OP => {
                 Ok(Err(Error::Argument))
@@ -734,6 +777,22 @@ pub fn revolve(
     angle: f64,
     cap: bool,
 ) -> Result<Body> {
+    revolve_with(profile, origin, axis, angle, cap, Contract::Closed)
+}
+
+/// [`revolve`] under `contract`.
+///
+/// # Errors
+/// As [`revolve`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a solid result not
+/// proved valid and facing out.
+pub fn revolve_with(
+    profile: &[Curve],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    angle: f64,
+    cap: bool,
+    contract: Contract,
+) -> Result<Body> {
     if !coord_ok(&origin) || !angle.is_finite() || !(angle > 1e-9 && angle <= TURN_LIMIT) {
         return Err(Error::Argument);
     }
@@ -742,7 +801,12 @@ pub fn revolve(
         // a whole turn at most
         let degrees = degrees(angle).min(360.0);
         match directed::revolve(k, &made.refs(), v3(origin), v3(axis), degrees, cap) {
-            Ok(r) => finish(k, r, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(r) => finished(
+                contract,
+                k,
+                r,
+                if cap { Expect::SOLID } else { Expect::FACES },
+            ),
             Err(e) => Ok(Err(directed_or_status(e))),
         }
     })
@@ -809,6 +873,21 @@ pub fn sweep_placed(
     frame: SweepFrame,
     cap: bool,
 ) -> Result<(Body, [Affine; 3], SweepRoute)> {
+    sweep_placed_with(profile, path, frame, cap, Contract::Closed)
+}
+
+/// [`sweep_placed`] under `contract`.
+///
+/// # Errors
+/// As [`sweep_placed`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a solid result not
+/// proved valid and facing out.
+pub fn sweep_placed_with(
+    profile: &[Curve],
+    path: &[Curve],
+    frame: SweepFrame,
+    cap: bool,
+    contract: Contract,
+) -> Result<(Body, [Affine; 3], SweepRoute)> {
     if let SweepFrame::Upright(u) = frame {
         if !u.iter().all(|x| x.is_finite()) {
             return Err(Error::Argument);
@@ -834,7 +913,7 @@ pub fn sweep_placed(
                 };
                 placed = line_placements(l.direction, l.length).map(|t| Affine::of(&t));
                 route = SweepRoute::Line;
-                return finish(k, r, expect);
+                return finished(contract, k, r, expect);
             }
             PathShape::Undecided(d) => doubt = Some(d),
             PathShape::Not => {}
@@ -855,7 +934,7 @@ pub fn sweep_placed(
                         Err(_) => return Ok(Err(Error::Argument)),
                     };
                     route = SweepRoute::Arc;
-                    return finish(k, r, expect);
+                    return finished(contract, k, r, expect);
                 }
                 PathShape::Undecided(d) => doubt = doubt.or(Some(d)),
                 PathShape::Not => {}
@@ -866,7 +945,7 @@ pub fn sweep_placed(
                         Ok((b, motions)) => {
                             placed = motions.map(|t| Affine::of(&t));
                             route = SweepRoute::Segments;
-                            finish(k, b, expect)
+                            finished(contract, k, b, expect)
                         }
                         Err(e) => Ok(Err(status(e))),
                     };
@@ -920,34 +999,84 @@ pub fn sweep_placed(
             },
             ..SweepOptions::default()
         };
-        let r = match create_curve_sweep_with_placements(
-            k,
-            &refs,
-            Some(&path_curve),
-            None,
-            None,
-            Some(&options),
-        ) {
-            Ok(r) => r,
-            Err(e) => return Ok(Err(status(e))),
+        // Round a closed path each loop of the profile closes into a tube of its own, and the
+        // curve sweep makes each tube bound a solid of its own: a hole's tube would add its
+        // volume instead of taking it away. So there each loop of a capped profile is swept on
+        // its own, and the holes' tubes (the loops after the first, as a region lists them) are
+        // taken from the first loop's.
+        let groups = if closed && cap {
+            profile_loops(k, &made.curves)?
+        } else {
+            vec![0..made.curves.len()]
         };
-        for (m, p) in placed.iter_mut().zip(&r.placements) {
-            *m = Affine::of(&Transform::of_placement(p));
-        }
-        let mut b = r.sweep.brep;
-        if closed {
-            let tol = b.tolerance();
-            match stitch_faces(k, &mut b, tol, None, false) {
-                // a solid asked for has no free edge left; a sheet (an open profile, or one
-                // not capped) keeps the profile's own ends free
-                Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
-                Ok(_) => b.refresh_cached_topology(),
+        let mut whole: Option<Brep> = None;
+        for (i, g) in groups.into_iter().enumerate() {
+            let Some(group) = made.curves.get(g) else {
+                return Ok(Err(Error::Argument));
+            };
+            let refs: Vec<Option<&KCurve>> = group.iter().map(Some).collect();
+            let r = match create_curve_sweep_with_placements(
+                k,
+                &refs,
+                Some(&path_curve),
+                None,
+                None,
+                Some(&options),
+            ) {
+                Ok(r) => r,
                 Err(e) => return Ok(Err(status(e))),
+            };
+            if i == 0 {
+                for (m, p) in placed.iter_mut().zip(&r.placements) {
+                    *m = Affine::of(&Transform::of_placement(p));
+                }
             }
+            let mut b = r.sweep.brep;
+            if closed {
+                let tol = b.tolerance();
+                match stitch_faces(k, &mut b, tol, None, false) {
+                    // a solid asked for has no free edge left; a sheet (an open profile, or
+                    // one not capped) keeps the profile's own ends free
+                    Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
+                    Ok(_) => b.refresh_cached_topology(),
+                    Err(e) => return Ok(Err(status(e))),
+                }
+            }
+            whole = Some(match whole {
+                None => b,
+                Some(outer) => match crate::boolean::subtracted(k, outer, b) {
+                    Ok(r) => r,
+                    Err(e) => return Ok(Err(status(e))),
+                },
+            });
         }
-        finish(k, b, expect)
+        let Some(b) = whole else {
+            return Ok(Err(Error::Argument));
+        };
+        finished(contract, k, b, expect)
     })?;
     Ok((body, placed, route))
+}
+
+/// The runs of `curves`, in order, that each close a loop: each run's last curve proved to end
+/// where its first starts, to 1e-6. One run of all of them when they do not split into closed
+/// loops.
+fn profile_loops(k: &Kernel, curves: &[KCurve]) -> solidcore::Result<Vec<std::ops::Range<usize>>> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (i, c) in curves.iter().enumerate() {
+        let Some(first) = curves.get(from) else {
+            break;
+        };
+        if arc::curves_meet(k, c, first, 1e-6)?.is_yes() {
+            out.push(from..i.saturating_add(1));
+            from = i.saturating_add(1);
+        }
+    }
+    if from != curves.len() || out.is_empty() {
+        return Ok(vec![0..curves.len()]);
+    }
+    Ok(out)
 }
 
 /// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
@@ -1013,12 +1142,28 @@ pub fn match_loft_sections(
     ))
 }
 
-/// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.
+/// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them. Two
+/// sections of lines in equal number whose sides are all flat (a prism, a tapered duct) are
+/// built as planar faces instead, each side on its own four lines, whatever the degree.
 ///
 /// # Errors
 /// [`Error::Argument`] for a section or number refused; the kernel's status; [`Error::Empty`],
 /// [`Error::NotSolid`].
 pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
+    loft_with(sections, degree, cap, Contract::Closed)
+}
+
+/// [`loft`] under `contract`.
+///
+/// # Errors
+/// As [`loft`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a solid result not
+/// proved valid and facing out.
+pub fn loft_with(
+    sections: &[Vec<Curve>],
+    degree: u32,
+    cap: bool,
+    contract: Contract,
+) -> Result<Body> {
     if sections.len() < 2 || sections.len() > MAX_CURVES || !(1..=3).contains(&degree) {
         return Err(Error::Argument);
     }
@@ -1031,36 +1176,79 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
         {
             return Ok(Err(Error::Argument));
         }
+        // Two sections of lines whose sides are all flat are planar faces, not a skin
+        // (the kernel's `planar_loft`).
+        if let [first, second] = sections {
+            let (a, b) = made.curves.split_at(first.len().min(made.curves.len()));
+            if b.len() == second.len() {
+                match planar_loft(k, a, b, cap) {
+                    Ok(Some(r)) => {
+                        let expect = if cap { Expect::SOLID } else { Expect::FACES };
+                        return finished(contract, k, r, expect);
+                    }
+                    Ok(None) => {}
+                    Err(e) => return Ok(Err(status(e))),
+                }
+            }
+        }
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
         match create_skin_primitive(k, &counts, &made.refs(), degree as usize, cap) {
-            Ok(r) => finish(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(r) => finished(
+                contract,
+                k,
+                r.brep,
+                if cap { Expect::SOLID } else { Expect::FACES },
+            ),
             Err(e) => Ok(Err(status(e))),
         }
     })
 }
 
-/// A pyramid from the planar `section` (one closed loop of lines, in order) to `apex` (off the
-/// section's plane): the base and a triangle on each line, stitched and oriented.
+/// The planar `section` (one closed loop of curves, in order) lofted to `apex` (off the
+/// section's plane): the base, a planar triangle on each line and, on each arc or spline, the
+/// ruled surface from it to the apex (a zero-length curve there, the wall's pole) as one face
+/// over the surface's whole box; stitched and oriented. A section of lines is a pyramid, a
+/// circle a cone. A section of lines alone has at least three, and its base is built on its
+/// corners; a section with a curved piece keeps its own curves as the base's edges.
 ///
 /// # Errors
-/// [`Error::Argument`] for a section that is not one closed loop of lines, or an apex not
-/// proved off its plane; the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// [`Error::Argument`] for a section that is not one closed loop of lines, arcs and B-splines,
+/// or an apex not proved off its plane; the kernel's status; [`Error::Empty`],
+/// [`Error::NotSolid`].
 pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
+    loft_to_point_with(section, apex, Contract::Closed)
+}
+
+/// [`loft_to_point`] under `contract`.
+///
+/// # Errors
+/// As [`loft_to_point`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a solid result not
+/// proved valid and facing out.
+pub fn loft_to_point_with(section: &[Curve], apex: [f64; 3], contract: Contract) -> Result<Body> {
     if !coord_ok(&apex) {
         return Err(Error::Argument);
     }
     making("loft_to_point", |k| {
         let made = parsed!(parse(k, section));
         let curves = &made.curves;
-        if curves.len() < 3 || !path::closed_loop(k, curves, 1e-6)?.is_yes() {
+        if !path::closed_loop(k, curves, 1e-6)?.is_yes() {
             return Ok(Err(Error::Argument));
         }
+        // Each piece's start, the base's corners; a curved piece's B-spline, for its wall.
         let mut corners = Vec::new();
+        let mut walls: Vec<Option<BSplineCurve>> = Vec::new();
         for c in curves {
-            if !matches!(c.kind(), CurveKind::Line(_)) {
-                return Ok(Err(Error::Argument));
-            }
             corners.push(c.ends(k)?.start);
+            walls.push(match c.kind() {
+                CurveKind::Line(_) => None,
+                CurveKind::Ellipse(e) => Some(e.base().clone()),
+                CurveKind::BSpline(s) => Some(s.clone()),
+                _ => return Ok(Err(Error::Argument)),
+            });
+        }
+        let curved = walls.iter().any(Option::is_some);
+        if !curved && curves.len() < 3 {
+            return Ok(Err(Error::Argument));
         }
         let top: Point3 = v3(apex);
         match path::point_off_plane_of(k, curves, top, 1e-9) {
@@ -1071,28 +1259,62 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
         let region = b.infinite_region();
         let tol = 1e-6;
         let built = build_faces(&mut b, |b, fenv| -> Out<()> {
-            let mut face =
-                |b: &mut Brep, fenv: &mut FaceBuildEnv<'_, '_>, pts: &[Point3]| -> Out<()> {
-                    let mut edges = Vec::new();
-                    for (i, &p) in pts.iter().enumerate() {
-                        let q = pts.get(i + 1).or_else(|| pts.first()).copied().unwrap_or(p);
-                        edges.push(KCurve::from(called(Line::create_line_segment(
-                            3, p, q, None,
-                        ))?));
-                    }
-                    called(create_planar_face_with_3d_curves(
-                        k, b, region, &edges, tol, fenv,
-                    ))
-                    .map(|_| ())
-                };
-            face(b, fenv, &corners)?;
-            for (i, &p) in corners.iter().enumerate() {
+            let face = |k: &mut Kernel,
+                        b: &mut Brep,
+                        fenv: &mut FaceBuildEnv<'_, '_>,
+                        pts: &[Point3]|
+             -> Out<()> {
+                let mut edges = Vec::new();
+                for (i, &p) in pts.iter().enumerate() {
+                    let q = pts.get(i + 1).or_else(|| pts.first()).copied().unwrap_or(p);
+                    edges.push(KCurve::from(called(Line::create_line_segment(
+                        3, p, q, None,
+                    ))?));
+                }
+                called(create_planar_face_with_3d_curves(
+                    k, b, region, &edges, tol, fenv,
+                ))
+                .map(|_| ())
+            };
+            if curved {
+                called(create_planar_face_with_3d_curves(
+                    k, b, region, curves, tol, fenv,
+                ))?;
+            } else {
+                face(k, b, fenv, &corners)?;
+            }
+            for (i, (&p, wall)) in corners.iter().zip(&walls).enumerate() {
                 let q = corners
                     .get(i + 1)
                     .or_else(|| corners.first())
                     .copied()
                     .unwrap_or(p);
-                face(b, fenv, &[p, q, top])?;
+                let Some(base) = wall else {
+                    face(k, b, fenv, &[p, q, top])?;
+                    continue;
+                };
+                // u = 0 and u = 1 are the rulings from the piece's ends, so the face is the
+                // surface's whole box.
+                let at_apex = [top, top];
+                let tip = called(BSplineCurve::create_canonical(&CanonicalData {
+                    dim: 3,
+                    degree: 1,
+                    control_points: &at_apex,
+                    form: BSplineCurveForm::Unspecified,
+                    knot_multiplicities: &[2, 2],
+                    knots: &[0.0, 1.0],
+                    knot_type: KnotType::Unspecified,
+                    weights: None,
+                    trim: None,
+                }))?;
+                let ruled = called(BSplineSurface::create_ruled_surface(
+                    base,
+                    &tip,
+                    SurfParamType::Unknown,
+                ))?;
+                let surface = Surface::from(ruled);
+                let domain = called(surface.natural_uv_domain_with_nurb(k))?;
+                called(create_face_from_surface(k, b, Some(surface), &domain, fenv))?;
             }
             Ok(())
         });
@@ -1103,7 +1325,7 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::SOLID)
+        finished(contract, k, b, Expect::SOLID)
     })
 }
 
@@ -1124,6 +1346,20 @@ fn maps_ok(stations: &[Affine]) -> bool {
 /// [`Error::Argument`] for a station or curve list refused; the kernel's status;
 /// [`Error::Empty`], [`Error::NotSolid`].
 pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Result<Body> {
+    sweep_stations_with(profile, stations, end, Contract::Closed)
+}
+
+/// [`sweep_stations`] under `contract`.
+///
+/// # Errors
+/// As [`sweep_stations`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a solid result not
+/// proved valid and facing out.
+pub fn sweep_stations_with(
+    profile: &[Curve],
+    stations: &[Affine],
+    end: Ends,
+    contract: Contract,
+) -> Result<Body> {
     if !(2..=MAX_STATIONS).contains(&stations.len()) {
         return Err(Error::Argument);
     }
@@ -1163,7 +1399,8 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
                 Err(e) => return Ok(Err(status(e))),
             }
         }
-        finish(
+        finished(
+            contract,
             k,
             r,
             if end == Ends::Open {
@@ -1191,6 +1428,66 @@ pub fn screw_sweep(
     turns: f64,
     law: Option<&[(f64, f64)]>,
     tolerance: f64,
+) -> Result<Body> {
+    screw_sweep_walls(
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        law,
+        tolerance,
+        SplineWalls::PerPiece,
+    )
+}
+
+/// [`screw_sweep`] with the faces of its B-spline walls laid out as `walls` says: a face per
+/// half turn beside a cylinder wall ([`SplineWalls::PerPiece`], as [`screw_sweep`]), or one face
+/// across the half turns, cut only at the radial law's turns ([`SplineWalls::Joined`]), so a
+/// thread's flank is one face.
+///
+/// # Errors
+/// As [`screw_sweep`].
+#[allow(clippy::too_many_arguments)]
+pub fn screw_sweep_walls(
+    profile: &[Curve],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    pitch: f64,
+    turns: f64,
+    law: Option<&[(f64, f64)]>,
+    tolerance: f64,
+    walls: SplineWalls,
+) -> Result<Body> {
+    screw_sweep_walls_with(
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        law,
+        tolerance,
+        walls,
+        Contract::Closed,
+    )
+}
+
+/// [`screw_sweep_walls`] under `contract`.
+///
+/// # Errors
+/// As [`screw_sweep_walls`]; under [`Contract::Proved`], [`Error::NotSolid`] too for a solid result not
+/// proved valid and facing out.
+#[allow(clippy::too_many_arguments)]
+pub fn screw_sweep_walls_with(
+    profile: &[Curve],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    pitch: f64,
+    turns: f64,
+    law: Option<&[(f64, f64)]>,
+    tolerance: f64,
+    walls: SplineWalls,
+    contract: Contract,
 ) -> Result<Body> {
     let ok = coord_ok(&origin)
         && pitch.is_finite()
@@ -1224,29 +1521,19 @@ pub fn screw_sweep(
     };
     making(call, |k| {
         let made = parsed!(parse(k, profile));
-        let built = match law {
-            None => screw::screw_sweep_body(
-                k,
-                &made.curves,
-                v3(origin),
-                v3(axis),
-                pitch,
-                turns,
-                tolerance,
-            ),
-            Some(l) => screw::screw_sweep_radial_body(
-                k,
-                &made.curves,
-                v3(origin),
-                v3(axis),
-                pitch,
-                turns,
-                l,
-                tolerance,
-            ),
-        };
+        let built = screw::screw_sweep_walls_body(
+            k,
+            &made.curves,
+            v3(origin),
+            v3(axis),
+            pitch,
+            turns,
+            law,
+            tolerance,
+            walls,
+        );
         match built {
-            Ok(b) => finish(k, b, Expect::SOLID),
+            Ok(b) => finished(contract, k, b, Expect::SOLID),
             Err(e) => Ok(Err(argument_or_status(e))),
         }
     })
