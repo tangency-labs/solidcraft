@@ -772,19 +772,23 @@
         "closed": true,
         "relative_volume_tolerance": 0.001,
         "bbox_tolerance_mm": 0.02,
-        "stock_bbox": {
-          "min": [
-            -15,
-            -15,
-            -3
-          ],
-          "max": [
-            15,
-            15,
-            33
-          ]
-        },
-        "stock_volume_mm3": 32400
+        "bodies": {
+          "Stock": {
+            "bbox": {
+              "min": [
+                -15,
+                -15,
+                -3
+              ],
+              "max": [
+                15,
+                15,
+                33
+              ]
+            },
+            "volume_mm3": 32400
+          }
+        }
       },
       "explanation": "Bounding stock is 30 \u00d7 30 \u00d7 36 around a radius-12, height-30 cylinder, with margin 3 on all sides."
     },

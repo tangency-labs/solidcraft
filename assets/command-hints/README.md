@@ -103,14 +103,34 @@ python3 -B assets/command-hints/tools/capture.py --port 54940 \
   --anchor target/command-illustrations/capture-anchor.sc
 ```
 
+Next regenerate the Sketch construction animations and their PNG posters:
+
+```sh
+python3 -B assets/command-hints/tools/capture-sketch-animation.py --port 54940 \
+  --token-dir target/command-illustrations/model-capture-control \
+  --anchor target/command-illustrations/capture-anchor.sc
+```
+
+The Extrude GIF and poster currently require a manual native capture. Build the
+`source/extrude.json` model, record the parameter-driven extrusion in the isolated
+window, and export the light and dark GIFs plus a 960 × 600 final-frame PNG poster
+for each theme. Neither authoring script regenerates that sequence.
+
 `--only chamfer,plane-offset` regenerates selected slugs. Intermediate captures
 and measurement reports stay under `target/command-illustrations/model-captures`.
 The tool verifies its scratch document, clean timeline, declared counts, volumes, closed bodies,
 bounding boxes, construction geometry and joint values. Named `expected.bodies` entries can
-check `center_of_mass` to distinguish a moved body from an unchanged one. Bounds and positions
+check `center_of_mass`, `bbox` and `volume_mm3` for one named body. Face counts, volume
+ceilings and measured material removal are checked when declared. Both theme files
+are staged before publication; a failed conversion preserves the previous pair. Bounds and positions
 use `bbox_tolerance_mm` or `geometry_tolerance_mm` (0.02 mm by default). Crops must contain at
 least 960 × 600 source pixels; insufficient display density is refused. It never replaces the original design,
-and restores the original view and reference display setting after each sample.
+and restores the original view and reference display setting after each sample. Scratch
+creation recovery closes only a positively tagged scratch tab. If a creation reply
+is lost before tagging, unmarked tabs stay open for inspection before retrying. A confirmed scratch tab carries a temporary metadata token, checked
+before restoration or closure. Global running-work checks guard startup and recovery.
+Pending control replies are polled on the original
+connection; if their bounded wait expires, cleanup leaves the documents untouched.
 Python and ImageMagick are needed only for authoring these assets.
 
 Menu-recipe cameras describe the model-render framing. The native capture crop

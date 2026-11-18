@@ -1654,7 +1654,16 @@
               16.0
             ]
           },
-          "all_closed": true
+          "all_closed": true,
+          "bodies": {
+            "Block": {
+              "center_of_mass": [
+                0,
+                0,
+                10
+              ]
+            }
+          }
         },
         "volume_relative_tolerance": 0.001,
         "validated_cli": "target/ci/solidcraft-cli"

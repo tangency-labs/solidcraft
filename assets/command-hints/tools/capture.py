@@ -4,19 +4,26 @@
 Python and ImageMagick are authoring tools only, never application dependencies.
 """
 import argparse
+from collections import Counter
 from contextlib import contextmanager
 import json
 import math
+import os
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 
 REPO = Path(__file__).resolve().parents[3]
 SIZE = (960, 600)
 # Keep the connection alive past the control server's 3600-second batch wait.
 BATCH_TIMEOUT = 3720
+PENDING_TIMEOUT = 3720
+CAPTURE_METADATA = 'io.tangencylabs.command-hints'
 
 
 class Control:
@@ -24,8 +31,10 @@ class Control:
         self.port = port
         self.token = (token_dir / f'{port}.token').read_text().strip()
         self.anchor = anchor.resolve(strict=True)
+        self.pending_work = False
 
     def preflight(self):
+        ensure_idle(self)
         documents = self.call('ui.documents')
         document = self.call('document.inspect')
         ui = self.call('ui.inspect')
@@ -48,10 +57,36 @@ class Control:
     def call(self, method, params=None):
         timeout = BATCH_TIMEOUT if method == 'engine.batch' else 120
         with socket.create_connection(('127.0.0.1', self.port), timeout=timeout) as sock:
-            message = {'id': 1, 'token': self.token, 'method': method, 'params': params or {}}
-            sock.sendall((json.dumps(message) + '\n').encode())
             with sock.makefile() as stream:
-                reply = json.loads(stream.readline())
+                def request(name, values, identifier):
+                    message = {'id': identifier, 'token': self.token, 'method': name, 'params': values}
+                    sock.sendall((json.dumps(message) + '\n').encode())
+                    line = stream.readline()
+                    if not line:
+                        raise RuntimeError(f'{method}: connection closed before the final reply')
+                    return json.loads(line)
+
+                self.pending_work = method == 'engine.batch'
+                reply = request(method, params or {}, 1)
+                if reply.get('running'):
+                    self.pending_work = True
+                    deadline = time.monotonic() + PENDING_TIMEOUT
+                    identifier = 2
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise RuntimeError(f'{method}: still running; capture cleanup is deferred')
+                        sock.settimeout(min(120, remaining))
+                        pending = request('control.pending', {}, identifier)
+                        identifier += 1
+                        result = pending.get('result', {})
+                        if not pending.get('ok') or result.get('pending') is None:
+                            raise RuntimeError(f'{method}: pending reply unavailable; capture cleanup is deferred')
+                        if result.get('done'):
+                            reply = result['reply']
+                            break
+                        time.sleep(0.2)
+                self.pending_work = False
         if not reply.get('ok'):
             raise RuntimeError(f'{method}: {reply.get("error")}')
         result = reply['result']
@@ -67,6 +102,30 @@ class Control:
             self.call('engine.batch', {'commands': commands})
 
 
+def ensure_idle(control):
+    running = control.call('control.running').get('running')
+    if not isinstance(running, list) or running:
+        raise RuntimeError('The capture window may still be processing a request; leaving documents untouched')
+
+
+def scratch_status(control, documents, token=None):
+    current = control.call('ui.documents')
+    count = len(documents['documents'])
+    if (len(current['documents']) != count + 1 or current.get('active') != count
+            or current['documents'][:count] != documents['documents']):
+        return None
+    document = control.call('document.inspect')
+    if document.get('path', 'unknown') is not None:
+        return None
+    if token is not None:
+        if document.get('metadata', {}).get(CAPTURE_METADATA) != {'token': token}:
+            return None
+    elif (document.get('dirty') is not False or document.get('metadata') != {}
+          or any(document.get(key) != [] for key in ('timeline', 'sketches', 'bodies', 'params'))):
+        return None
+    return current
+
+
 @contextmanager
 def scratch_document(control):
     control.preflight()
@@ -79,33 +138,49 @@ def scratch_document(control):
     count = len(documents['documents'])
     if count >= 32:
         raise RuntimeError('No free document slot; nothing changed')
-    created = control.call('ui.documents', {'action': 'new'})
-    if len(created['documents']) != count + 1 or created['active'] == documents['active']:
-        control.call('ui.set', original['ui'])
-        control.call('ui.set', {'showOrigin': None if origin_hidden is None else not origin_hidden})
-        control.call('ui.camera', original['camera'])
-        control.call('ui.home', {'open': original['home']})
-        raise RuntimeError('A separate scratch document was not created; refusing to edit')
+    token = uuid.uuid4().hex
     try:
+        created = control.call('ui.documents', {'action': 'new'})
+        if (created.get('active') != count or len(created.get('documents', [])) != count + 1
+                or created['documents'][:count] != documents['documents']):
+            raise RuntimeError('Scratch creation was not confirmed; refusing to edit')
+        if scratch_status(control, documents) is None:
+            raise RuntimeError('A separate empty scratch document was not identified; refusing to edit')
+        control.execute('document.metadata.set', {'key': CAPTURE_METADATA, 'value': {'token': token}})
+        if scratch_status(control, documents, token) is None:
+            raise RuntimeError('The capture scratch document could not be identified')
         yield
     finally:
-        errors = []
-        for method, params in [
-            ('ui.set', original['ui']),
-            ('ui.set', {'showOrigin': None if origin_hidden is None else not origin_hidden}),
-            ('ui.hint_capture', hint_style),
-            ('ui.prefs', {'reference_geometry_through_bodies': through_bodies}),
-            ('ui.camera', original['camera']),
-            ('ui.documents', {'action': 'close', 'index': created['active'], 'force': True}),
-            ('ui.documents', {'action': 'switch', 'index': documents['active']}),
-            ('ui.home', {'open': original['home']}),
-        ]:
-            try:
-                control.call(method, params)
-            except (OSError, RuntimeError, ValueError) as error:
-                errors.append(str(error))
-        if errors:
-            raise RuntimeError('Could not restore capture window: ' + '; '.join(errors))
+        if getattr(control, 'pending_work', False):
+            raise RuntimeError('Capture work is still pending; leaving documents untouched')
+        ensure_idle(control)
+        owned = scratch_status(control, documents, token)
+        if owned is None:
+            if control.call('ui.documents') != documents:
+                raise RuntimeError('Scratch identity is uncertain; leaving all documents untouched. Inspect the capture window before retrying.')
+        else:
+            errors = []
+            for method, params in [
+                ('ui.set', original['ui']),
+                ('ui.set', {'showOrigin': None if origin_hidden is None else not origin_hidden}),
+                ('ui.hint_capture', hint_style),
+                ('ui.prefs', {'reference_geometry_through_bodies': through_bodies}),
+                ('ui.camera', original['camera']),
+            ]:
+                try:
+                    control.call(method, params)
+                except (OSError, RuntimeError, ValueError) as error:
+                    if getattr(control, 'pending_work', False):
+                        raise RuntimeError('Restoration is still pending; leaving documents untouched') from error
+                    ensure_idle(control)
+                    errors.append(str(error))
+            if scratch_status(control, documents, token) is None:
+                raise RuntimeError('Scratch identity changed during restoration; leaving all documents untouched')
+            control.call('ui.documents', {'action': 'close', 'index': count, 'force': True})
+            control.call('ui.documents', {'action': 'switch', 'index': documents['active']})
+            control.call('ui.home', {'open': original['home']})
+            if errors:
+                raise RuntimeError('Could not restore capture window: ' + '; '.join(errors))
 
 
 def apply_ui(control, values):
@@ -188,7 +263,10 @@ def capture_state(control, sample, state, scratch):
                 raise RuntimeError(f'{sample["slug"]}: focus point is not visible')
             left, top = 384 + 480 * (1 - crop_scale), 216 + 300 * (1 - crop_scale)
             x, y = (point[0] - left) / crop_scale, (point[1] - top) / crop_scale
-            if not 10 <= x <= SIZE[0] - 10 or not 10 <= y <= SIZE[1] - 10:
+            marker_clearance = 11  # Radius 10 plus half the two-point outline.
+            left_edge, right_edge = ((240 + marker_clearance, 719 - marker_clearance)
+                                     if sample['presentation'] == 'pair' else (10, SIZE[0] - 10))
+            if not left_edge <= x <= right_edge or not 10 <= y <= SIZE[1] - 10:
                 raise RuntimeError(f'{sample["slug"]}: focus point leaves the illustration')
             subprocess.run([
                 'magick', str(images[theme]), '-fill', 'none', '-stroke', '#e79d00',
@@ -197,19 +275,59 @@ def capture_state(control, sample, state, scratch):
     return images
 
 
+@contextmanager
+def staged_exports(output, names):
+    staging = Path(tempfile.mkdtemp(prefix='.command-hints-', dir=output))
+    clean = True
+    try:
+        yield staging
+        for name in names:
+            if not (staging / name).is_file():
+                raise RuntimeError(f'Missing staged export: {name}')
+        backups = staging / 'previous'
+        backups.mkdir()
+        for name in names:
+            if (output / name).exists():
+                shutil.copy2(output / name, backups / name)
+        try:
+            for name in names:
+                os.replace(staging / name, output / name)
+        except (OSError, KeyboardInterrupt) as error:
+            failures = []
+            for name in reversed(names):
+                try:
+                    if (backups / name).exists():
+                        os.replace(backups / name, output / name)
+                    elif (output / name).exists():
+                        (output / name).unlink()
+                except (OSError, KeyboardInterrupt) as restore_error:
+                    failures.append(str(restore_error))
+            if failures:
+                clean = False
+                raise RuntimeError(f'Could not restore exports; backups remain in {backups}: {failures}') from error
+            raise
+    finally:
+        if clean:
+            shutil.rmtree(staging)
+
+
 def compose(sample, before, after, output):
-    for theme in ('light', 'dark'):
-        destination = output / f'{sample["slug"]}-{theme}.png'
-        if sample['presentation'] == 'single':
-            subprocess.run(['magick', str(after[theme]), str(destination)], check=True)
-        else:
-            arrow = '#b8c0cd' if theme == 'dark' else '#5e6a7b'
-            subprocess.run([
-                'magick', '(', str(before[theme]), '-crop', '480x600+240+0', '+repage', ')',
-                '(', str(after[theme]), '-crop', '480x600+240+0', '+repage', ')', '+append',
-                '-stroke', arrow, '-strokewidth', '2', '-draw',
-                'line 460,300 500,300 line 493,294 500,300 line 500,300 493,306', str(destination),
-            ], check=True)
+    validate_slug(sample['slug'])
+    names = [f'{sample["slug"]}-{theme}.png' for theme in ('light', 'dark')]
+    with staged_exports(output, names) as staging:
+        for theme in ('light', 'dark'):
+            destination = staging / f'{sample["slug"]}-{theme}.png'
+            if sample['presentation'] == 'single':
+                subprocess.run(['magick', str(after[theme]), str(destination)], check=True)
+            else:
+                arrow = '#b8c0cd' if theme == 'dark' else '#5e6a7b'
+                subprocess.run([
+                    'magick', '(', str(before[theme]), '-crop', '480x600+240+0', '+repage', ')',
+                    '(', str(after[theme]), '-crop', '480x600+240+0', '+repage', ')', '+append',
+                    '-stroke', arrow, '-strokewidth', '2', '-draw',
+                    'line 460,300 500,300 line 493,294 500,300 line 500,300 493,306', str(destination),
+                ], check=True)
+
 
 
 def vector(value, label):
@@ -280,7 +398,24 @@ def verify_construction(control, expected, tolerance, label):
     return actual
 
 
-def verify(control, sample, state):
+def verify_volume(actual, expected, root, label, before=None):
+    if 'volume_less_than_mm3' in expected and not actual < expected['volume_less_than_mm3']:
+        raise RuntimeError(f'{label}: volume must be less than {expected["volume_less_than_mm3"]}, got {actual}')
+    if 'volume_mm3' in expected:
+        tolerance = expected.get('volume_relative_tolerance', expected.get('relative_volume_tolerance',
+                                 root.get('volume_relative_tolerance', root.get('relative_volume_tolerance', 0.01))))
+        if actual is None or not math.isclose(actual, expected['volume_mm3'], rel_tol=tolerance, abs_tol=0.01):
+            raise RuntimeError(f'{label}: expected volume {expected["volume_mm3"]}, got {actual}')
+    if 'material_removed_mm3' in expected:
+        if before is None:
+            raise RuntimeError(f'{label}: material removal needs the measured before volume')
+        removed = before - actual
+        tolerance = expected.get('relative_removal_tolerance', root.get('relative_removal_tolerance', 0.01))
+        if not math.isclose(removed, expected['material_removed_mm3'], rel_tol=tolerance, abs_tol=0.01):
+            raise RuntimeError(f'{label}: expected removal {expected["material_removed_mm3"]}, got {removed}')
+
+
+def verify(control, sample, state, before=None):
     document = control.execute('document.inspect', {'measure': False})
     errors = [feature for feature in document['timeline'] if feature.get('error')]
     if errors:
@@ -289,27 +424,24 @@ def verify(control, sample, state):
     expected = sample.get('expected', {})
     expected = expected.get(state, expected)
     for key, actual in [('body_count', measurement['body_count']),
+                        ('faces', measurement['total'].get('faces')),
                         ('sketch_count', len(document['sketches'])),
                         ('sketch_curves', sum(sketch['curves'] for sketch in document['sketches'])),
                         ('sketch_profiles', sum(sketch['profiles'] for sketch in document['sketches']))]:
         if key in expected and expected[key] != actual:
             raise RuntimeError(f'{sample["slug"]} {state}: {key}: expected {expected[key]}, got {actual}')
-    if 'volume_mm3' in expected:
-        root = sample.get('expected', {})
-        tolerance = expected.get('volume_relative_tolerance', expected.get('relative_volume_tolerance',
-                                 root.get('volume_relative_tolerance', root.get('relative_volume_tolerance', 0.01))))
-        actual = measurement['total']['volume_mm3']
-        if not math.isclose(actual, expected['volume_mm3'], rel_tol=tolerance, abs_tol=0.01):
-            raise RuntimeError(f'{sample["slug"]} {state}: expected volume {expected["volume_mm3"]}, got {actual}')
     label = f'{sample["slug"]} {state}'
     root = sample.get('expected', {})
     tolerance = expected.get('bbox_tolerance_mm', root.get('bbox_tolerance_mm',
                             expected.get('geometry_tolerance_mm', root.get('geometry_tolerance_mm', 0.02))))
+    before_volume = None if before is None else before['measurement']['total']['volume_mm3']
+    verify_volume(measurement['total']['volume_mm3'], expected, root, label, before_volume)
     verify_body_geometry(measurement['bodies'], expected, tolerance, label)
     for name, wanted in expected.get('bodies', {}).items():
         body = next((body for body in measurement['bodies'] if body['name'] == name), None)
         if body is None:
             raise RuntimeError(f'{label}: missing body {name}')
+        verify_volume(body.get('volume_mm3'), wanted, root, f'{label} {name}')
         verify_body_geometry([body], wanted, tolerance, f'{label} {name}')
         if 'center_of_mass' in wanted:
             check_vector(body.get('center_of_mass'), wanted['center_of_mass'], tolerance, f'{label} {name} center_of_mass')
@@ -338,13 +470,32 @@ def capture(control, sample, scratch, output):
         reports = {}
         if sample['presentation'] == 'pair' and 'before' in sample.get('expected', {}):
             reports['before'] = verify(control, sample, 'before')
+        elif 'material_removed_mm3' in sample.get('expected', {}).get('after', sample.get('expected', {})):
+            reports['before'] = {'measurement': control.execute('inspect.measure')}
         before = capture_state(control, sample, 'before', scratch) if sample['presentation'] == 'pair' else {}
         control.batch(sample['operation'])
-        reports['after'] = verify(control, sample, 'after')
+        reports['after'] = verify(control, sample, 'after', before=reports.get('before'))
         after = capture_state(control, sample, 'after', scratch)
         compose(sample, before, after, output)
         (scratch / f'{sample["slug"]}-measurement.json').write_text(json.dumps(reports, indent=2) + '\n')
     print(f'{sample["command"]}: captured {sample["presentation"]}', flush=True)
+
+
+def validate_slug(slug):
+    if not isinstance(slug, str) or not slug or any(char not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for char in slug):
+        raise ValueError(f'Invalid recipe slug: {slug!r}')
+
+
+def select_samples(samples, wanted=None):
+    selected = [sample for sample in samples if wanted is None or sample['slug'] in wanted]
+    for sample in selected:
+        validate_slug(sample['slug'])
+    duplicates = sorted(slug for slug, count in Counter(sample['slug'] for sample in selected).items() if count > 1)
+    if duplicates:
+        raise ValueError('Duplicate recipe slugs: ' + ', '.join(duplicates))
+    if wanted and wanted != {sample['slug'] for sample in selected}:
+        raise ValueError('Unknown requested slug')
+    return selected
 
 
 def main():
@@ -361,13 +512,14 @@ def main():
         parser.error('port must be in 1..65535')
     args.output = args.output.resolve()
     args.scratch = args.scratch.resolve()
-    args.output.mkdir(parents=True, exist_ok=True)
-    args.scratch.mkdir(parents=True, exist_ok=True)
     sources = args.source or sorted((REPO / 'assets/command-hints/source').glob('*-menu.json'))
     wanted = set(args.only.split(',')) if args.only else None
-    samples = [sample for path in sources for sample in json.loads(path.read_text())['samples'] if wanted is None or sample['slug'] in wanted]
-    if wanted and wanted != {sample['slug'] for sample in samples}:
-        parser.error('unknown or duplicated requested slug')
+    try:
+        samples = select_samples([sample for path in sources for sample in json.loads(path.read_text())['samples']], wanted)
+    except ValueError as error:
+        parser.error(str(error))
+    args.output.mkdir(parents=True, exist_ok=True)
+    args.scratch.mkdir(parents=True, exist_ok=True)
     control = Control(args.port, args.token_dir.resolve(), args.anchor)
     control.preflight()
     control.call('ui.resize', {'width': 1728, 'height': 998})
