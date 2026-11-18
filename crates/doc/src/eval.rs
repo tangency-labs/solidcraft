@@ -7367,12 +7367,17 @@ fn feature_tools_with_constructor(
                     // A square end's reach: its weight (default 1), 0 for an end that is not square.
                     let reach = |s: Option<&crate::LoftSection>| s.filter(|s| s.square).map_or(0.0, |s| s.weight.unwrap_or(1.0).clamp(0.0, 100.0));
                     let flip = |s: Option<&crate::LoftSection>| s.is_some_and(|s| s.flip);
-                    kernel::loft_regions(&squared_ends(
-                        &secs,
-                        reach(sections.first()),
-                        reach(sections.last()),
-                        [flip(sections.first()), flip(sections.last())],
-                    ))?
+                    let (secs, fits) =
+                        squared_ends(&secs, reach(sections.first()), reach(sections.last()), [flip(sections.first()), flip(sections.last())]);
+                    kernel::loft_regions(&secs).map_err(|e| {
+                        if fits {
+                            DocError::from(e)
+                        } else {
+                            DocError::Invalid(
+                                "the loft can't bend that tightly between these faces: try Flip Start or Flip End, or other weights".into(),
+                            )
+                        }
+                    })?
                 }
             } else {
                 // Rails shape the sections' outlines; sections with holes wait for rails that
@@ -11538,7 +11543,7 @@ mod chain_tests {
 /// spine, so the bend keeps its full section instead of pinching (a straight skin between faces
 /// at an angle twists, and the kernel refuses it). More sections get a copy of each square end a
 /// quarter of the way to its neighbour. Ends already facing each other on one line stay as given.
-fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 2]) -> Vec<(Plane, Region2)> {
+fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 2]) -> (Vec<(Plane, Region2)>, bool) {
     let centre = |(p, r): &(Plane, Region2)| p.to_world(r.centroid());
     let unit = |v: Vec3| v.normalized().unwrap_or(v);
     // Which way a square end leaves, towards `other`; None when it needs no bending.
@@ -11558,9 +11563,9 @@ fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 
         Some(n)
     };
     let mut out = secs.to_vec();
-    let (Some(s0), Some(s1)) = (secs.first(), secs.last()) else { return out };
+    let (Some(s0), Some(s1)) = (secs.first(), secs.last()) else { return (out, true) };
     if secs.len() < 2 {
-        return out;
+        return (out, true);
     }
     if secs.len() > 2 {
         let helper = |end: &(Plane, Region2), next: &(Plane, Region2), w: f64, flip: bool| {
@@ -11579,7 +11584,7 @@ fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 
         {
             out.insert(1, h);
         }
-        return out;
+        return (out, true);
     }
     let (c0, c1) = (centre(s0), centre(s1));
     let chord = c1 - c0;
@@ -11588,7 +11593,7 @@ fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 
     let d0 = if first > 0.0 { leave(s0, c1, flips[0]) } else { None };
     let d1 = if last > 0.0 { leave(s1, c0, flips[1]) } else { None };
     if d0.is_none() && d1.is_none() {
-        return out;
+        return (out, true);
     }
     // The spine: a cubic Bezier leaving c0 along `dir0` and arriving at c1 along `dir1`.
     let dir0 = d0.unwrap_or(straight);
@@ -11612,7 +11617,8 @@ fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 
     // and the arch grows until its tightest bend clears the profile, so the skin never folds
     // through itself.
     let off = |q: Vec3| (q - c0 - straight * (q - c0).dot(straight)).len();
-    if (dir0.dot(straight) < 0.0 || dir1.dot(straight) < 0.0) && off(p1).max(off(p2)) < 0.25 * len {
+    let horseshoe = (dir0.dot(straight) < 0.0 || dir1.dot(straight) < 0.0) && off(p1).max(off(p2)) < 0.25 * len;
+    if horseshoe {
         let up = Vec3::new(0.0, 0.0, 1.0);
         let side = (up - straight * up.dot(straight))
             .normalized()
@@ -11651,68 +11657,157 @@ fn squared_ends(secs: &[(Plane, Region2)], first: f64, last: f64, flips: [bool; 
             grow *= 1.3;
         }
     }
-    let at = |t: f64| casteljau(&ctrl, t);
-    let diffs: Vec<Vec3> = ctrl.windows(2).map(|w| w[1] - w[0]).collect();
-    let tangent = |t: f64| unit(casteljau(&diffs, t));
-    // The least rotation taking unit `a` to unit `b`, applied to `v`.
-    let turn = |v: Vec3, a: Vec3, b: Vec3| {
-        let axis = a.cross(b);
-        let s = axis.len();
-        let c = a.dot(b);
-        if s <= 1e-12 {
-            if c > 0.0 {
-                return v;
-            }
-            // Half a turn about any axis square to `a`.
-            let any = if a.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
-            let k = unit(a.cross(any));
-            return k * (2.0 * k.dot(v)) - v;
-        }
-        let k = axis * (1.0 / s);
-        v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
-    };
-    // The start profile carried the whole way along the spine, its frame turned with the tangent
-    // (least rotation), then rolled about the tangent a little more at every step so it lands
-    // on the end profile: one shape all along, so the skin never twists between two.
     const STEPS: usize = 24;
-    let ts: Vec<f64> = (1..STEPS).map(|i| i as f64 / STEPS as f64).collect();
-    let c = s0.1.centroid();
-    let outline: Vec<Vec2> = s0.1.outer.segs.iter().map(|seg| seg.start() - c).collect();
-    let mut frames = Vec::with_capacity(STEPS);
-    let (mut x, mut y, mut prev) = (s0.0.x, s0.0.y, dir0);
-    for &t in ts.iter().chain(std::iter::once(&1.0)) {
-        let tan = if t >= 1.0 { dir1 } else { tangent(t) };
-        x = turn(x, prev, tan);
-        y = turn(y, prev, tan);
-        prev = tan;
-        frames.push((t, x, y, tan));
-    }
-    // The roll at the end that best lays the carried outline on the end section's outline.
-    let ends: Vec<Vec3> = s1.1.outer.segs.iter().map(|seg| s1.0.to_world(seg.start())).collect();
-    let roll = frames.last().map_or(0.0, |&(_, x, y, tan)| {
-        let miss = |a: f64| -> f64 {
-            let (xr, yr) = (turn_about(x, tan, a), turn_about(y, tan, a));
-            outline
-                .iter()
-                .map(|q| {
-                    let w = c1 + xr * q.x + yr * q.y;
-                    ends.iter().map(|e| (*e - w).len2()).fold(f64::INFINITY, f64::min)
-                })
-                .sum()
+    let at = |ctrl: &[Vec3], t: f64| casteljau(ctrl, t);
+    // The sections along one spine.
+    let build = |ctrl: &[Vec3]| -> Vec<(Plane, Region2)> {
+        let diffs: Vec<Vec3> = ctrl.windows(2).map(|w| w[1] - w[0]).collect();
+        let tangent = |t: f64| unit(casteljau(&diffs, t));
+        // The least rotation taking unit `a` to unit `b`, applied to `v`.
+        let turn = |v: Vec3, a: Vec3, b: Vec3| {
+            let axis = a.cross(b);
+            let s = axis.len();
+            let c = a.dot(b);
+            if s <= 1e-12 {
+                if c > 0.0 {
+                    return v;
+                }
+                // Half a turn about any axis square to `a`.
+                let any = if a.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+                let k = unit(a.cross(any));
+                return k * (2.0 * k.dot(v)) - v;
+            }
+            let k = axis * (1.0 / s);
+            v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
         };
-        (0..360)
-            .map(|d| (d as f64).to_radians())
-            .map(|a| (a, miss(a)))
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map_or(0.0, |(a, _)| if a > std::f64::consts::PI { a - std::f64::consts::TAU } else { a })
-    });
-    out = vec![s0.clone()];
-    for &(t, x, y, tan) in frames.iter().take(ts.len()) {
-        let (x, y) = (turn_about(x, tan, roll * t), turn_about(y, tan, roll * t));
-        out.push((Plane { origin: at(t) - x * c.x - y * c.y, x, y }, s0.1.clone()));
+        // The start profile carried along the spine, its frame turned with the tangent (least
+        // rotation), then rolled about the tangent a little more at every step so it lands on the
+        // end profile; polygons of the same corner count also blend their outline on the way.
+        let ts: Vec<f64> = (1..STEPS).map(|i| i as f64 / STEPS as f64).collect();
+        let c = s0.1.centroid();
+        let outline: Vec<Vec2> = s0.1.outer.segs.iter().map(|seg| seg.start() - c).collect();
+        let mut frames = Vec::with_capacity(STEPS);
+        let (mut x, mut y, mut prev) = (s0.0.x, s0.0.y, dir0);
+        for &t in ts.iter().chain(std::iter::once(&1.0)) {
+            let tan = if t >= 1.0 { dir1 } else { tangent(t) };
+            x = turn(x, prev, tan);
+            y = turn(y, prev, tan);
+            prev = tan;
+            frames.push((t, x, y, tan));
+        }
+        // The end section's corners, and whether the two ends are both plain polygons with the
+        // same number of corners: then the outline blends corner to corner along the way.
+        let ends: Vec<Vec3> = s1.1.outer.segs.iter().map(|seg| s1.0.to_world(seg.start())).collect();
+        let lines = |r: &Region2| r.holes.is_empty() && r.outer.segs.iter().all(|seg| matches!(seg, solidcore_record::Seg2::Line { .. }));
+        let blend = lines(&s0.1) && lines(&s1.1) && outline.len() == ends.len() && outline.len() >= 3;
+        // Both outlines' summed squared sizes, so a miss weighs the same at any scale.
+        let norm = (outline.iter().map(|q| q.len2()).sum::<f64>() + ends.iter().map(|e| (*e - c1).len2()).sum::<f64>()).max(1e-12);
+        // The end corners in a frame, and which end corner each start corner goes to (either
+        // way round), with the summed squared miss.
+        let pair = |xr: Vec3, yr: Vec3| -> (f64, Vec<Vec2>) {
+            let local: Vec<Vec2> = ends.iter().map(|e| Vec2::new((*e - c1).dot(xr), (*e - c1).dot(yr))).collect();
+            let n = local.len();
+            let mut best = (f64::INFINITY, Vec::new());
+            for back in [false, true] {
+                for k in 0..n {
+                    let order: Vec<Vec2> = (0..n).filter_map(|i| local.get(if back { (k + n - i) % n } else { (k + i) % n }).copied()).collect();
+                    let miss: f64 = outline.iter().zip(&order).map(|(p, q)| (*p - *q).len2()).sum();
+                    if miss < best.0 {
+                        best = (miss, order);
+                    }
+                }
+            }
+            best
+        };
+        // The roll at the end that best lays the carried outline on the end section's outline,
+        // weighed against how far it turns: a quarter turn is worth more than squashing the
+        // shape, so the loft only twists where the end face itself is turned.
+        let mut target: Vec<Vec2> = Vec::new();
+        let roll = frames.last().map_or(0.0, |&(_, x, y, tan)| {
+            let miss = |a: f64| -> f64 {
+                let (xr, yr) = (turn_about(x, tan, a), turn_about(y, tan, a));
+                if blend {
+                    return pair(xr, yr).0;
+                }
+                outline
+                    .iter()
+                    .map(|q| {
+                        let w = c1 + xr * q.x + yr * q.y;
+                        ends.iter().map(|e| (*e - w).len2()).fold(f64::INFINITY, f64::min)
+                    })
+                    .sum()
+            };
+            let roll = (-179..=180)
+                .map(|d| (d as f64).to_radians())
+                .map(|a| (a, miss(a) / norm + 0.2 * a * a))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map_or(0.0, |(a, _)| a);
+            if blend {
+                target = pair(turn_about(x, tan, roll), turn_about(y, tan, roll)).1;
+            }
+            roll
+        });
+        let mut out = vec![s0.clone()];
+        for &(t, x, y, tan) in frames.iter().take(ts.len()) {
+            let (x, y) = (turn_about(x, tan, roll * t), turn_about(y, tan, roll * t));
+            if blend && target.len() == outline.len() {
+                // Eased, so the size changes smoothly out of each end.
+                let s = t * t * (3.0 - 2.0 * t);
+                let pts: Vec<Vec2> = outline.iter().zip(&target).map(|(p, q)| *p * (1.0 - s) + *q * s).collect();
+                out.push((Plane { origin: at(ctrl, t), x, y }, Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: vec![] }));
+            } else {
+                out.push((Plane { origin: at(ctrl, t) - x * c.x - y * c.y, x, y }, s0.1.clone()));
+            }
+        }
+        out.push(s1.clone());
+        out
+    };
+    // How far the skin folds: the most any profile point reaches past its bend's centre, as a
+    // share of the bend radius (1 or more folds the skin through itself).
+    let folding = |ctrl: &[Vec3], secs: &[(Plane, Region2)]| -> f64 {
+        let d1: Vec<Vec3> = ctrl.windows(2).map(|w| w[1] - w[0]).collect();
+        let d2: Vec<Vec3> = d1.windows(2).map(|w| w[1] - w[0]).collect();
+        let n = (ctrl.len() - 1) as f64;
+        secs.iter()
+            .enumerate()
+            .skip(1)
+            .take(STEPS - 1)
+            .map(|(i, (p, r))| {
+                let t = i as f64 / STEPS as f64;
+                let (a, b) = (casteljau(&d1, t) * n, casteljau(&d2, t) * (n * (n - 1.0)));
+                let a2 = a.len2();
+                if !(a2 > 1e-18) {
+                    return f64::INFINITY;
+                }
+                let k = a.cross(b).cross(a) * (1.0 / (a2 * a2));
+                let mid = at(ctrl, t);
+                r.outer.segs.iter().map(|s| (p.to_world(s.start()) - mid).dot(k)).fold(0.0, f64::max)
+            })
+            .fold(0.0, f64::max)
+    };
+    let first_try = build(&ctrl);
+    if horseshoe || folding(&ctrl, &first_try) < 0.95 {
+        return (first_try, true);
     }
-    out.push(s1.clone());
-    out
+    // Too tight a bend for the profile: reach further out (or less far) before bending.
+    let mut best = (folding(&ctrl, &first_try), first_try);
+    for scale in [1.3, 1.7, 2.2, 2.9, 3.8, 0.75, 0.55] {
+        let ctrl = vec![c0, c0 + dir0 * (k0 * scale), c1 - dir1 * (k1 * scale), c1];
+        let secs = build(&ctrl);
+        let f = folding(&ctrl, &secs);
+        if f < best.0 {
+            best = (f, secs);
+        }
+        if best.0 < 0.95 {
+            return (best.1, true);
+        }
+    }
+    // No square spine fits: parallel faces loft straight between them (a skewed prism, which the
+    // kernel builds); anything else keeps the least folded spine and says it may not fit.
+    if s0.0.normal().cross(s1.0.normal()).len() < 1e-9 {
+        return (out, true);
+    }
+    (best.1, false)
 }
 
 /// A solid loft between two body faces, curved or flat, by their rims: the wall leaves each face

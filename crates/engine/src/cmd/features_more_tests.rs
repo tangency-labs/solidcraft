@@ -1168,6 +1168,34 @@ fn a_flipped_loft_between_faces_back_to_back_runs_straight() {
     assert!(s.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Loft { sections, .. } if sections.iter().all(|s| s.flip))));
 }
 
+/// A U-turn between the end faces of a tall and a short block side by side: the outline blends
+/// from one end face to the other without twisting, so the loft never rises above the tall block
+/// or dips below the floor (it used to carry the tall face round, roll it and snap at the end).
+#[test]
+fn a_loft_u_turn_between_end_faces_of_different_sizes_blends_without_twisting() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 48, "width": 10, "height": 22.5, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 39, 0], "length": 48, "width": 10, "height": 11.5, "body_name": "B"}));
+    run(&mut s, "solid.loft", json!({"sections": [{"face": [48, 5, 11.25]}, {"face": [48, 44, 5.75]}], "operation": "new"}));
+    let st = s.model.state();
+    let loft = st.bodies.iter().find(|b| b.name != "A" && b.name != "B").expect("a loft body");
+    let b = loft.body.exact_bounds().expect("bounds");
+    assert!(b.min.z > -1e-3 && b.max.z < 22.5 + 1e-3 && b.max.x > 48.0 + 5.0 && b.min.x > 48.0 - 1e-3, "{b:?}");
+}
+
+/// Two parallel plates offset so far sideways that no square bend fits between their big faces:
+/// the loft runs straight between them instead of failing with a folded skin.
+#[test]
+fn a_loft_between_parallel_plate_faces_too_close_to_bend_runs_straight() {
+    for (a, b) in [([40.0, 30.0, 0.0], [-62.0, 30.0, 58.4]), ([40.0, 30.0, 0.0], [-62.0, 30.0, 60.0])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, -1.6], "length": 80, "width": 60, "height": 1.6, "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"corner": [-102, 0, 58.4], "length": 80, "width": 60, "height": 1.6, "body_name": "B"}));
+        run(&mut s, "solid.loft", json!({"sections": [{"face": a}, {"face": b}], "operation": "new"}));
+        assert_eq!(s.model.state().bodies.len(), 3, "{a:?} {b:?}");
+    }
+}
+
 /// A face section mixes with a sketch section, and bad face sections are refused, leaving the
 /// design as it was.
 #[test]
