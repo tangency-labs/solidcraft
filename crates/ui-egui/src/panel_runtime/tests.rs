@@ -14333,3 +14333,26 @@ fn header_content_takes_the_titles_place_after_the_grip() {
         raw.host.set_header_content(id("lone"), None);
     }
 }
+
+#[test]
+fn pop_out_browser_draws_after_the_main_browser_without_replacing_its_rows() {
+    use crate::semantic_content::{self, ContentOwner, ContentRequest};
+
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    let mut detached = semantic_content::Detached::default();
+    let request = ContentRequest::Browser { shrink_height: true };
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        semantic_content::begin(&mut app, ui.ctx());
+        semantic_content::show(&mut app, ui, ContentOwner::BROWSER, request);
+        semantic_content::finalize(&mut app, ui.ctx());
+        let main_rows = semantic_content::output(ContentOwner::BROWSER).rows;
+        assert!(!main_rows.is_empty());
+        detached.show(&mut app, ui, |app, ui| {
+            semantic_content::show(app, ui, ContentOwner::BROWSER, request);
+            assert!(!semantic_content::output(ContentOwner::BROWSER).rows.is_empty());
+        });
+        assert_eq!(semantic_content::output(ContentOwner::BROWSER).rows, main_rows);
+    })
+    .drop_without_applying_deltas();
+}
