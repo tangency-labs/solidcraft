@@ -122,6 +122,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         1 => lines.push(tr("plugin_install.command_one").to_string()),
         n => lines.push(format("plugin_install.commands", &[("count", &n.to_string())])),
     }
+    // Effects the host draws (`effects@0.1`), chosen on the plugin's card.
+    let effects = list(plugin.get("effects"));
+    if !effects.is_empty() {
+        lines.push(format("plugin_install.effects", &[("names", &effects.join(", "))]));
+    }
     lines
 }
 

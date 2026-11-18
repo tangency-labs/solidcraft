@@ -1026,9 +1026,9 @@ macro_rules! preference_settings {
             $($(pub(super) fn $field(p: &Prefs) -> bool { ($accepted).contains(&p.$field) })?)*
         }
 
-        mod setting {
+        pub(crate) mod setting {
             use super::*;
-            $($(pub(super) fn $field(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
+            $($(pub(crate) fn $field(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
                 preference_settings!(@control app, ui, $field, $control($($args)*))
             })?)*
         }
@@ -1419,6 +1419,19 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// A plugin's effect the host draws (`effects@0.1`), `plugin-id/effect-id`; empty (the default)
+    /// for none. Chosen on its plugin's card.
+    ui_effect: String = String::new(), PAGE_PLUGINS;
+    /// The RGB wave, while `ui_effect` is chosen: the ribbon's command icons take its hue.
+    ui_effect_icons: bool = false, PAGE_PLUGINS => check_id("prefs.ui_effect_icons");
+    /// The same wave tints each ribbon button's block at low alpha.
+    ui_effect_buttons: bool = false, PAGE_PLUGINS => check_id("prefs.ui_effect_buttons");
+    /// The same wave over the UI's panels and bars.
+    ui_effect_panels: bool = false, PAGE_PLUGINS => check_id("prefs.ui_effect_panels");
+    /// How long one colour cycle of the wave is on screen (points).
+    ui_effect_length: f32 = 2400.0, PAGE_PLUGINS, accept(300.0..=8000.0) => slider("prefs.ui_effect_length", 300.0..=8000.0, 100.0, |v| format!("{v:.0} pt"), "prefs:ui_effect_length");
+    /// How fast the wave travels (points a second).
+    ui_effect_speed: f32 = 150.0, PAGE_PLUGINS, accept(10.0..=1500.0) => slider("prefs.ui_effect_speed", 10.0..=1500.0, 10.0, |v| format!("{v:.0} pt/s"), "prefs:ui_effect_speed");
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
@@ -4821,6 +4834,9 @@ fn prepare_preferences(
         || !["left", "right"].contains(&new.drawing_panel_side.as_str())
     {
         return Err("Drawing preferences require a valid docking position and panel width of 240…560".into());
+    }
+    if !accepted::ui_effect_length(&new) || !accepted::ui_effect_speed(&new) {
+        return Err("`ui_effect_length` must be 300…8000 and `ui_effect_speed` 10…1500".into());
     }
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());

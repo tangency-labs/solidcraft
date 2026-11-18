@@ -337,6 +337,9 @@ component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
 
+`effects@0.1` lets a plugin offer an effect the host draws, such as the RGB wave over the ribbon. The
+plugin only names the kind; the card chooses it. See [plugin effects](plugin-effects.md).
+
 ## Commands and permissions
 
 A plugin can call every command in the MCP catalog that its manifest lists. Commands that reach

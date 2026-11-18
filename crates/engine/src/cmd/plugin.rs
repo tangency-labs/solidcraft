@@ -152,6 +152,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
         opens: runtime.map(|r| r.entries.iter().flat_map(|e| e.extensions.iter().cloned()).collect()).unwrap_or_default(),
+        effects: manifest.effects.iter().map(|effect| format!("{}/{}", manifest.id, effect.id)).collect(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),

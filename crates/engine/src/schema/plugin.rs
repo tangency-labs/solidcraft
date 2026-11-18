@@ -271,6 +271,9 @@ pub struct InstallResult {
     /// For an importer: the file extensions it opens, lowercase, without the dot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opens: Vec<String>,
+    /// Its effects the host draws (`effects@0.1`), as `id/effect`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<String>,
     /// The installed plugin of the same id, `name version`, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
