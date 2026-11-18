@@ -160,6 +160,7 @@ struct Model<'a> {
     points: HashMap<&'a str, &'a cadmpeg_ir::topology::Point>,
     surfaces: HashMap<&'a str, &'a cadmpeg_ir::geometry::Surface>,
     procedural_surfaces: HashMap<&'a str, &'a cadmpeg_ir::geometry::ProceduralSurface>,
+    procedural_curves: HashMap<&'a str, &'a cadmpeg_ir::geometry::ProceduralCurve>,
     curves: HashMap<&'a str, &'a cadmpeg_ir::geometry::Curve>,
 }
 
@@ -186,8 +187,31 @@ impl<'a> Model<'a> {
                 .iter()
                 .map(|x| (x.id.as_str(), x))
                 .collect(),
+            procedural_curves: m
+                .procedural_curves
+                .iter()
+                .map(|x| (x.id.as_str(), x))
+                .collect(),
             curves: m.curves.iter().map(|x| (x.id.as_str(), x)).collect(),
         }
+    }
+
+    /// The fit tolerance a procedural surface's construction states for its solved cache (mm), or
+    /// 0 for a surface that is not procedural, or whose cache is exact.
+    fn surface_fit(&self, g: &cadmpeg_ir::geometry::SurfaceGeometry) -> f64 {
+        g.procedural_construction()
+            .and_then(|c| self.procedural_surfaces.get(c.as_str()))
+            .and_then(|p| p.definition().cache_fit_tolerance())
+            .map_or(0.0, |t| t.get())
+    }
+
+    /// The fit tolerance a procedural curve's construction states for its solved cache (mm), or
+    /// 0 for a curve that is not procedural, or whose cache is exact.
+    fn curve_fit(&self, g: &cadmpeg_ir::geometry::CurveGeometry) -> f64 {
+        g.procedural_construction()
+            .and_then(|c| self.procedural_curves.get(c.as_str()))
+            .and_then(|p| p.definition().cache_fit_tolerance())
+            .map_or(0.0, |t| t.get())
     }
 
     /// Whether vertices `a` and `b` are at one point, to within `tol`.
@@ -363,6 +387,9 @@ impl<'a> Builder<'_, 'a, '_> {
             self.vertex(edge.start.as_str())?,
             self.vertex(edge.end.as_str())?,
         );
+        // How far the carrier may lie from the curve it stands for, as its producer states it:
+        // a polyline's chordal deflection, or the fit of a procedural curve's cache.
+        let mut deviation = 0.0;
         let curve = match edge.carrier.curve() {
             Some(c) => {
                 let carrier = self
@@ -370,6 +397,8 @@ impl<'a> Builder<'_, 'a, '_> {
                     .curves
                     .get(c.as_str())
                     .ok_or_else(|| format!("missing curve {c}"))?;
+                deviation = geometry::curve_deviation(&carrier.geometry)
+                    .max(self.model.curve_fit(&carrier.geometry));
                 geometry::curve(&carrier.geometry).map_err(|m| format!("edge {id}: {m}"))?
             }
             None => None,
@@ -432,7 +461,14 @@ impl<'a> Builder<'_, 'a, '_> {
                             .into(),
                     ),
                 };
-                Ok(made.map_err(|m| format!("edge {id}: {m}"))?.0)
+                let e = made.map_err(|m| format!("edge {id}: {m}"))?.0;
+                // The edge holds that allowance: its chords or cache are not the curve itself.
+                if deviation > 0.0 {
+                    self.asm
+                        .hold_deviation(&Bound::Edges(vec![(e, true)]), deviation)
+                        .map_err(|m| format!("edge {id}: {m}"))?;
+                }
+                Ok(e)
             }
             // Collapsed to a point: its vertices are one ([`Builder::join_collapsed`]).
             None if start == end => Err(start),
@@ -456,8 +492,15 @@ impl<'a> Builder<'_, 'a, '_> {
             .surfaces
             .get(face.surface.as_str())
             .ok_or_else(|| format!("face {id}: missing surface {}", face.surface))?;
+        // A procedural surface's solved cache, read as the surface, is a fit within the tolerance
+        // its construction states: the face's edges hold it. Its definition, read instead when
+        // there is no cache, is exact.
+        let mut fit = 0.0;
         let read = match geometry::surface(&surface.geometry) {
-            Ok(Some(read)) => Ok(read),
+            Ok(Some(read)) => {
+                fit = self.model.surface_fit(&surface.geometry);
+                Ok(read)
+            }
             Ok(None) => self.procedural(&surface.geometry),
             Err(m) => Err(m),
         };
@@ -484,6 +527,13 @@ impl<'a> Builder<'_, 'a, '_> {
                 self.bound(l.as_str(), origin)
                     .map_err(|m| format!("face {id}: {m}"))?,
             );
+        }
+        if fit > 0.0 {
+            for bound in &bounds {
+                self.asm
+                    .hold_deviation(bound, fit)
+                    .map_err(|m| format!("face {id}: its solved cache: {m}"))?;
+            }
         }
         // A surface whose record form depends on the face is made from its bounds as they run
         // (about the face's normal), as the STEP reader makes it from its loops.

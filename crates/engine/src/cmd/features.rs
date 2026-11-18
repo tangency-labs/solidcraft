@@ -2785,7 +2785,8 @@ fn finish_pattern(
     (bodies, placements): (Vec<String>, Vec<Vec<u64>>),
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
-    if comps.is_empty() {
+    let paths = pattern_occurrences(p, "pattern (components)")?;
+    if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
         let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements })?;
         // The pattern is added either way: when it made no copies (the feature failed to
@@ -2811,18 +2812,56 @@ fn finish_pattern(
             made.push(s.doc_mut().add_occurrence(id, src.parent, solidcraft_doc::mat_mul(m, &src.transform))?);
         }
     }
+    // A placement picked by its path is placed again beside itself, in the component holding it,
+    // moved as the pattern moves it in the world: so a part placed several times, or inside a
+    // subassembly, is patterned from the placement picked, not from its first one.
+    shown_as_placed(s, paths.iter().map(|path| (format!("{path:?}"), path.as_slice())), cmd)?;
+    for path in &paths {
+        let lost = || bad(cmd, format!("no placement {path:?}"));
+        let (last, parent_path) = path.split_last().ok_or_else(lost)?;
+        let (parent, frame) = s.doc.path_placement(parent_path).ok_or_else(lost)?;
+        let o = s.doc.occurrences.iter().find(|o| o.id == *last && o.parent == parent).cloned().ok_or_else(lost)?;
+        let inverse = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, format!("the placement {path:?} is held in a singular frame")))?;
+        for m in &mats {
+            let moved = solidcraft_doc::mat_mul(&inverse, &solidcraft_doc::mat_mul(m, &frame));
+            made.push(s.doc_mut().add_occurrence(o.component, parent, solidcraft_doc::mat_mul(&moved, &o.transform))?);
+        }
+    }
     Ok(json!({"occurrences": made}))
+}
+
+/// The placements a pattern places again (`occurrences`: occurrence paths from the root, each a
+/// list of occurrence ids), empty when it names none.
+fn pattern_occurrences(p: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
+    let list = match p.get("occurrences") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(list) => list,
+    };
+    // Anything but a list is refused, not read as no placements: that would copy the bodies instead.
+    let want = || bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids");
+    let paths: Vec<Vec<u64>> = list
+        .as_array()
+        .ok_or_else(want)?
+        .iter()
+        .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()).filter(|ids| !ids.is_empty()))
+        .collect::<Option<_>>()
+        .ok_or_else(want)?;
+    if paths.len() > 1000 {
+        return Err(bad(cmd, "`occurrences` must list at most 1000 occurrence paths"));
+    }
+    Ok(paths)
 }
 
 /// The bodies a pattern copies and the placement each was picked at.
 type PatternBodies = (Vec<String>, Vec<Vec<u64>>);
 
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
-/// (`components: [names]`, placed again as occurrences). A body may be named as a placement of
-/// its part shows it (its world name, as the view and the Browser name it): it is copied where
-/// that placement shows it, as a mirror copies it.
+/// (`components: [names]`, or `occurrences: [paths]` for particular placements, placed again as
+/// occurrences). A body may be named as a placement of its part shows it (its world name, as the
+/// view and the Browser name it): it is copied where that placement shows it, as a mirror copies
+/// it.
 fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, PatternBodies)> {
-    if !string_list(cmd, p, "components")?.is_empty() {
+    if !string_list(cmd, p, "components")?.is_empty() || !pattern_occurrences(p, cmd)?.is_empty() {
         return Ok((Vec::new(), (Vec::new(), Vec::new())));
     }
     let bodies = string_list(cmd, p, "bodies")?;
@@ -3106,14 +3145,25 @@ fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<(Vec<Stri
     if !crate::frames::placed(s) && picked.iter().all(|(_, component, _)| *component == s.active_component) {
         return Ok((names, Vec::new()));
     }
-    let uncaptured = s.uncaptured_moves();
-    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| uncaptured.contains_key(id))) {
-        return Err(bad(cmd, format!("`{name}` has a position that is not captured yet: Capture Position (component.capture_position) first")));
-    }
-    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| s.pending_moves.contains_key(id))) {
-        return Err(bad(cmd, format!("`{name}` is shown in an exploded view: show it assembled (explode.show with no view) first")));
-    }
+    shown_as_placed(s, picked.iter().map(|(own, _, path)| (own.clone(), path.as_slice())), cmd)?;
     Ok(picked.into_iter().map(|(own, _, path)| (own, path)).unzip())
+}
+
+/// Refuses a picked placement (`what` names it, with its occurrence path from the root) that the
+/// view shows elsewhere than the design places it: moved and not captured yet, or in an exploded
+/// view. A body copied where a placement shows it and a placement patterned again both go by the
+/// design's placement, so they are refused alike.
+fn shown_as_placed<'a>(s: &Session, picked: impl IntoIterator<Item = (String, &'a [u64])>, cmd: &str) -> Result<()> {
+    let uncaptured = s.uncaptured_moves();
+    for (what, path) in picked {
+        if path.iter().any(|id| uncaptured.contains_key(id)) {
+            return Err(bad(cmd, format!("`{what}` has a position that is not captured yet: Capture Position (component.capture_position) first")));
+        }
+        if path.iter().any(|id| s.pending_moves.contains_key(id)) {
+            return Err(bad(cmd, format!("`{what}` is shown in an exploded view: show it assembled (explode.show with no view) first")));
+        }
+    }
+    Ok(())
 }
 
 /// The other name of an origin plane (`Top` for `XY`, `XY` for `Top`...), if `name` is one.

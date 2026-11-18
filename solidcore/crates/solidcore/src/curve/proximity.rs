@@ -704,6 +704,13 @@ impl Curve {
         Ok(true)
     }
 
+    /// Whether the proofs here can enclose this curve at all (a line, or a B-spline form
+    /// with its NURB: a B-spline, ellipse, hyperbola or parabola). Of any other kind
+    /// ([`Curve::proved_near`] and [`Curve::proved_together`]) nothing is proved.
+    pub(crate) fn can_be_proved(&self) -> bool {
+        form(self).is_some()
+    }
+
     /// Whether the two curves are proved to stay within `radius` of each other over their
     /// intervals: every point of each within `radius` of the other or in one of the balls
     /// `ends` ([`Curve::proved_near`] both ways).

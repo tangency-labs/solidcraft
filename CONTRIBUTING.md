@@ -69,6 +69,7 @@ you also need [`trunk`](https://github.com/trunk-rs/trunk)
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft
 cargo run --release -p solidcraft -- --sample      # desktop app with a sample part
 cargo xtask test                                   # unit, engine and UI-scenario tests
+cargo xtask fast                                   # what your change touches (quick)
 cargo xtask ci                                     # everything a PR must pass (see below)
 ```
 

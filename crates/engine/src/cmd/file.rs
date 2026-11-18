@@ -63,7 +63,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences or joints: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); reader?: solidcraft|cadmpeg for a .step/.stp, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP reader, which keeps the STEP text, a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP file decoded by cadmpeg's STEP decoder, to compare the two); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences or joints: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); reader?: solidcraft|cadmpeg for a .step/.stp, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP reader, which keeps the STEP text, a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP file decoded by cadmpeg's STEP decoder, to compare the two; `flatten` works with either); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -520,6 +520,17 @@ fn next_group_name(doc: &Document) -> String {
     (1..=doc.timeline_groups.len() + 1).map(|n| format!("Group #{n}")).find(|name| !taken(name)).unwrap_or_else(|| "Group".into())
 }
 
+/// The options of a STEP `doc.open` that change the imported design, as the import cache keys
+/// them ([`solidcraft_io::ImportCache::key`]).
+fn import_key_options(options: &StepOptions) -> Value {
+    let mut key =
+        json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder, "reader": format!("{:?}", options.reader)});
+    if !solidcraft_kernel::heals_tolerance_defects() {
+        key["tolerance_heal"] = json!(false);
+    }
+    key
+}
+
 /// Cache only a fresh open, never a live design, insert, or later edit. Read the source once:
 /// the bytes hashed here are exactly the bytes imported on a miss.
 fn open_step(
@@ -538,12 +549,9 @@ fn open_step(
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     // Every `doc.open` option that changes the imported design is in the key: a reused import is
-    // the one this open asks for.
-    let key = solidcraft_io::ImportCache::key(
-        &bytes,
-        path,
-        &json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder, "reader": format!("{:?}", options.reader)}),
-    );
+    // the one this open asks for. The tolerance heal preference too, named only when it is off
+    // (the default on keeps the keys written before it).
+    let key = solidcraft_io::ImportCache::key(&bytes, path, &import_key_options(&options));
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
@@ -658,13 +666,9 @@ fn add_mesh(
 ) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let gltf = solidcraft_io::is_gltf_path(path);
-    // A glTF file is read up to the limit for STEP and import files, which Preferences raise (#17446).
-    let bytes = if gltf {
-        solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step)
-    } else {
-        solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES)
-    }
-    .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // A mesh file is read up to the limit for STEP and import files, which Preferences raise
+    // (#17446, #14548).
+    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let (mut mf, plan, looks) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
@@ -4019,6 +4023,41 @@ mod tests {
             assert_eq!(display(&cold), expected);
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A model saved with the tolerance heal preference one way is not reused with it the other
+    /// way, in both directions: its imports were healed or read as they are, and its Repair healed
+    /// first or not. The model is evaluated again instead. The import cache key differs only when
+    /// the preference is off, so keys written with it on (the default) stay valid.
+    #[test]
+    fn a_model_saved_with_the_heal_preference_one_way_is_not_reused_the_other_way() {
+        let saved_with = |on: bool| {
+            let _pref = solidcraft_kernel::heal_preference_for_tests(on);
+            let mut s = Session::new(Document::new("Heal preference"));
+            s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+            assert_eq!(s.model.heals(), on, "the model keeps the setting it was evaluated with");
+            let (saved, _) = s.model.saved_now(&s.doc).unwrap();
+            (s.doc.clone(), saved)
+        };
+        let adopted = |doc: &std::sync::Arc<Document>, saved: &solidcraft_doc::SavedModel, on: bool| {
+            let _pref = solidcraft_kernel::heal_preference_for_tests(on);
+            Session::saved_model(doc, Some(saved)).map(|m| m.heals())
+        };
+        let (off_doc, off) = saved_with(false);
+        let (on_doc, on) = saved_with(true);
+        assert_eq!(adopted(&off_doc, &off, false), Some(false), "saved off, opened off: reused, still off");
+        assert_eq!(adopted(&off_doc, &off, true), None, "saved off, opened on: evaluated again, so the parts heal");
+        assert_eq!(adopted(&on_doc, &on, true), Some(true), "saved on, opened on: reused");
+        assert_eq!(adopted(&on_doc, &on, false), None, "saved on, opened off: evaluated again, Repair without the heal");
+
+        let options = step_options(&json!({}), "file.open").unwrap();
+        let key = |on: bool| {
+            let _pref = solidcraft_kernel::heal_preference_for_tests(on);
+            import_key_options(&options)
+        };
+        assert!(key(true).get("tolerance_heal").is_none(), "on: the key as before the preference");
+        assert_eq!(key(false)["tolerance_heal"], json!(false));
+        assert_ne!(key(false), key(true));
     }
 
     /// #9170: a design holding a mesh body (an inserted STL) keeps its saved model and opens from

@@ -3103,6 +3103,219 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
 
+/// When an import's background checks end having healed a part, the model takes the healed
+/// body in the import's place: settling marks the import and what follows it stale, the next
+/// evaluation reads the healed body under another fingerprint, and settling the same heal again
+/// changes nothing. Another model of the same design, whose checks healed nothing, keeps the
+/// file's bodies.
+#[test]
+fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
+    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    let later = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    let volumes = |m: &Model| {
+        let mut v = m.state().bodies.iter().map(|b| b.body.volume_at(1e-6).unwrap().round()).collect::<Vec<_>>();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    assert_eq!(volumes(&model), [125.0, 1000.0]);
+    let fingerprints = |m: &Model| m.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>();
+    let before = fingerprints(&model);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+    let face_origin = vec![0; healed.face_count()];
+    // Each healed face says which face of the body as read it was: here in reverse order.
+    let face_source: Vec<usize> = (0..healed.face_count()).rev().collect();
+    let body_of = |m: &Model, volume: f64| {
+        let st = m.state();
+        let b = st.bodies.iter().find(|b| b.body.volume_at(1e-6).unwrap().round() == volume).unwrap().clone();
+        crate::naming::face_names(&b)
+    };
+    let names_before = body_of(&model, 1000.0);
+    let checks = kernel::ImportChecks::ended_for_tests(
+        vec![issue],
+        vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
+    );
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks: checks.clone() }));
+
+    assert!(model.settle_import_checks(), "a heal changes the import");
+    assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
+    assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
+    model.evaluate(&doc);
+    assert_eq!(volumes(&model), [27.0, 125.0], "the healed part replaces the file's");
+    // A reference to a face of the body as read finds the face it became.
+    let names_after = body_of(&model, 27.0);
+    assert_eq!(names_after.len(), face_source.len());
+    for (k, &from) in face_source.iter().enumerate() {
+        assert_eq!(names_after[k], names_before[from], "healed face {k} is read face {from}");
+    }
+    let after = fingerprints(&model);
+    assert!(after.iter().zip(&before).all(|(a, b)| a != b), "no result keeps an unhealed fingerprint");
+    assert!(model.result(later).unwrap().error.is_none());
+
+    // The same heal settled again: nothing to do.
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    assert!(!model.settle_import_checks());
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(fingerprints(&model), after);
+
+    let mut other = Model::new();
+    other.evaluate(&doc);
+    assert_eq!(volumes(&other), [125.0, 1000.0], "another model keeps the file's bodies");
+    assert_eq!(fingerprints(&other), before);
+}
+
+/// #17708 review: the evaluation that brings an import's healed parts in reads the file again,
+/// and that read's checks heal it again. When they end with the heals the model already has,
+/// the import is not news: the window is told of the heal once, and nothing goes stale.
+#[test]
+fn a_heal_the_next_read_finds_again_is_told_once() {
+    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    let _on = kernel::heal_preference_for_tests(true);
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    // A run of the import's checks that healed its first part (each run its own, as each read
+    // starts one).
+    let run = || {
+        let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+        let n = healed.face_count();
+        kernel::ImportChecks::ended_for_tests(
+            vec![issue.clone()],
+            vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+        )
+    };
+    let ended = |model: &mut Model, checks: kernel::ImportChecks| {
+        let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    };
+    ended(&mut model, run());
+    assert!(model.settle_import_checks());
+    assert_eq!(model.take_import_notices(), [import], "the heal is news once");
+    model.evaluate(&doc);
+    let fingerprints: Vec<u64> = model.results.iter().map(|r| r.fingerprint).collect();
+    // The checks of the read that brought the heal in end with the same heals.
+    ended(&mut model, run());
+    assert!(!model.settle_import_checks(), "the same heals owe no evaluation");
+    assert!(model.take_import_notices().is_empty(), "the same heal found again is not news");
+    assert!(model.results.iter().all(|r| !r.stale));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
+}
+
+/// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
+/// other feature's: turned off, the model is not current and evaluates both again (the import
+/// read as it is, the Repair without its heal); turned back on, it comes back to the first
+/// fingerprints.
+#[test]
+fn turning_the_heal_preference_off_evaluates_imports_and_repair_again() {
+    let mut doc = placed_imports(1);
+    let mut model = Model::new();
+    {
+        let _on = kernel::heal_preference_for_tests(true);
+        model.evaluate(&doc);
+    }
+    let body = model.state().bodies[0].name.clone();
+    let repair = doc.add_feature(FeatureKind::Repair { body: body.into(), gap: "0.2 mm".into(), patch_holes: false }, None).unwrap();
+    let import = doc.features[0].id;
+    let fingerprint_of = |m: &Model, id: u64| m.result(id).unwrap().fingerprint;
+    let (on_import, on_repair) = {
+        let _on = kernel::heal_preference_for_tests(true);
+        model.evaluate(&doc);
+        assert!(model.heals() && model.is_current(&doc));
+        (fingerprint_of(&model, import), fingerprint_of(&model, repair))
+    };
+    {
+        let _off = kernel::heal_preference_for_tests(false);
+        assert!(!model.is_current(&doc), "the preference turned off: the model is owed an evaluation");
+        model.evaluate(&doc);
+        assert!(!model.heals());
+        assert!(model.last_recomputed >= 2, "the import and the Repair evaluated again: {}", model.last_recomputed);
+        assert_ne!(fingerprint_of(&model, import), on_import);
+        assert_ne!(fingerprint_of(&model, repair), on_repair);
+        assert!(model.is_current(&doc));
+    }
+    let _on = kernel::heal_preference_for_tests(true);
+    assert!(!model.is_current(&doc), "turned back on: owed again");
+    model.evaluate(&doc);
+    assert_eq!((fingerprint_of(&model, import), fingerprint_of(&model, repair)), (on_import, on_repair));
+
+    // A feature that is neither keeps its fingerprint either way.
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let f = doc.feature(sketch).unwrap();
+    let off = super::ImportDigests { heal_off: true, ..super::ImportDigests::default() };
+    let print = |steps: &super::ImportDigests| super::fingerprint(&doc, 7, f, &BTreeMap::new(), false, steps);
+    assert_eq!(print(&off), print(&super::ImportDigests::default()));
+    let r = doc.feature(repair).unwrap();
+    assert_ne!(
+        super::fingerprint(&doc, 7, r, &BTreeMap::new(), false, &off),
+        super::fingerprint(&doc, 7, r, &BTreeMap::new(), false, &super::ImportDigests::default())
+    );
+}
+
+/// A background heal that ends after the preference was turned off is not taken, nor its note:
+/// the import keeps no "healed" warning or report over the part as read, nothing is told, and
+/// the import and what follows it are stale, owed an evaluation that reads it again.
+#[test]
+fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
+    let mut doc = placed_imports(1);
+    doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+    let n = healed.face_count();
+    let checks = kernel::ImportChecks::ended_for_tests(
+        vec![issue],
+        vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+    );
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+
+    assert!(model.settle_import_checks_under(false), "an evaluation is owed: the import is read again");
+    assert!(!model.has_import_heals(), "the heal is not taken");
+    assert!(model.take_import_notices().is_empty(), "nothing is told of a heal not taken");
+    let r = model.result(import).unwrap();
+    assert!(!r.warning.as_deref().unwrap_or("").contains("healed"), "{:?}", r.warning);
+    assert!(r.import_report.as_ref().is_none_or(|i| i.current().issues.iter().all(|i| !i.detail.contains("healed"))), "{:?}", r.import_report);
+    assert!(model.settle_import_checks_under(false), "settled again: still owed");
+    assert!(!model.has_import_heals() && model.take_import_notices().is_empty());
+    assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
+}
+
 /// A cut measures the tight box of its tool, and the body's only when the box can show
 /// the tool apart of it (#18821): the kernel takes minutes to work out the tight box of
 /// a body with many faces (347 s for the cup of the report), against 30 s for the cut
