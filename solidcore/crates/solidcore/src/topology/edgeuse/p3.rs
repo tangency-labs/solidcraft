@@ -117,6 +117,7 @@ use crate::geom::tol::{
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -1578,15 +1579,32 @@ fn brute_force(
     fail.create_path_type = CreateUvTrimCurvePathType::PointDropDegenCurveRecovery;
     fail.brep = brep_handle(b, eu)?;
 
-    let mut new_curve = BSplineCurve::interpolate_points(
-        &points,
-        Some(&params),
-        3, // in : degree
-        None,
-        None,
-        false,
-        ParamMethod::ChordLength,
-    )?;
+    // of degree 3, or as high as the points carry: degree p needs p + 1 points, and two
+    // give the line through them at their parameters (WR-16922: upstream fits a cubic
+    // with two or three control points, which no reader accepts)
+    let mut new_curve = if let [_, _] = points.as_slice() {
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 1,
+            control_points: &points,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[2, 2],
+            knots: &params,
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })?
+    } else {
+        BSplineCurve::interpolate_points(
+            &points,
+            Some(&params),
+            (points.len() - 1).min(3), // in : degree
+            None,
+            None,
+            false,
+            ParamMethod::ChordLength,
+        )?
+    };
     new_curve.convert_to_2d()?;
 
     // clean up Surface Cache side-effect of attaching 2nd UVTrimCurve
