@@ -1,7 +1,7 @@
 use solidcraft_geom::tess::EvaluateMesh as _;
 use std::collections::HashMap;
 
-use solidcore_record::Vec3;
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
 
 use solidcore_record::brep::Curve;
