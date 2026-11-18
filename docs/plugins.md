@@ -259,6 +259,14 @@ key is the argument the plugin receives. The design follows the
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
   themselves; nothing fills them from the selection.
 
+### Seating a custom fastener
+
+To fit a custom fastener into an existing bore, accept `face` and `edge` picks in a selection
+field. Call `parts.seats` with those references in `picks` before creating hardware. Each seat
+supplies a world-space point and outward normal, and an `origin` that can be passed directly
+as side A of `joint.create`. Place the screw with its head facing outward, then use a rigid
+joint to attach its seating point to the bore. Declare both commands in the plugin manifest.
+
 ### Icons and pictures
 
 A plugin can ship vector images in its package and name them with `x-solidcraft-icon`, a
