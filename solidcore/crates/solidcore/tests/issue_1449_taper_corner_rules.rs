@@ -431,6 +431,34 @@ fn a_free_form_corner_is_not_exact() {
     assert_eq!(faces, 14);
 }
 
+/// #16639: the rectangle with its bottom side a straight B-spline segment drafts as the
+/// rectangle of lines under both corner rules (the curvature rule refused it as not exact):
+/// 6 faces, 12 edges, 8 vertices, the prismatoid's volume.
+#[test]
+fn a_straight_spline_side_drafts_as_its_line() {
+    use solidcore::nurbs::b_spline_curve::p1::BSplineCurve;
+    let expected = drafted_rectangle_volume(true);
+    let mut curves = rectangle();
+    curves[0] =
+        Curve::from(BSplineCurve::create_line_segment(3, p(0.0, 0.0), p(20.0, 0.0)).unwrap());
+    for corner in [
+        OffsetCornerType::LinearExtension,
+        OffsetCornerType::CurveExtension,
+    ] {
+        let mut k = kernel();
+        let TaperExtrude::Solid(b) = taper(&mut k, &curves, -10.0, corner) else {
+            panic!("{corner:?}: refused");
+        };
+        assert_eq!(
+            (b.faces().len(), b.edges().len(), b.vertices().len()),
+            (6, 12, 8),
+            "{corner:?}"
+        );
+        let (_, v) = built(&mut k, &curves, -10.0, corner);
+        assert_rel(v, expected, 1e-9);
+    }
+}
+
 /// A leg on a foot (#18452, the foot of a lettering "Omega"): the foot's top runs left into a
 /// sharp notch, where a curve (a parabola, so the tangent rule takes SMLib's offset method)
 /// leaves it at 27.5 degrees, 0.83 from the leg's far side, x = 0.

@@ -5,8 +5,8 @@
 //! Its sides as lines, or as B-spline segments (#16639), now take the tangent corner rule,
 //! which builds the pyramid directly (#17265); bowed a little, the cancel cases below, they
 //! take the offset method. The taper then takes its surface intersection method: the
-//! untrimmed walls are merged
-//! piecewise, which splits them into a number of faces that grows as the square of the
+//! untrimmed walls are merged piecewise, which splits them into a number of faces that
+//! grows as the square of the
 //! sides, and the faces that do not reach their generating curve's
 //! ends are deleted one by one. Each deletion walks the shells of the whole merged
 //! B-rep, and the loop never checked the kernel's cancel token: cancelled at 240 s, the
@@ -124,7 +124,7 @@ fn bowed_polygon(sides: u64) -> Vec<Curve> {
         .map(|i| {
             let (a, b) = (corner(i), corner(i + 1));
             let mid = (a + b) * 0.5;
-            // a quadratic's middle is a quarter of its middle control point's offset away
+            // a quadratic's middle is half its middle control point's offset away
             let control = [a, mid + mid.unitize().unwrap() * (2.0 * BOW), b];
             Curve::from(
                 BSplineCurve::create_canonical(&CanonicalData {
