@@ -8489,7 +8489,7 @@ fn feature_tools_with_constructor(
                     crate::construct::GeoRef::Edge { .. } | crate::construct::GeoRef::Face { .. } => {
                         // Pick and orient the axis in the same frame as the command and viewport.
                         let world = construction_state(doc, st, 0)?;
-                        let (origin, direction) = crate::construct::model_axis(&world, geo)?;
+                        let (origin, direction) = crate::construct::coil_model_axis(&world, geo)?;
                         line_from_world(origin, direction)?
                     }
                     _ => crate::construct::model_axis_in(Some(doc), st, geo, f.component)?,

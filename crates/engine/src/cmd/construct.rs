@@ -171,7 +171,13 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
     let g = geo(s, Some(v), cmd, "axis")?;
-    let (o, d) = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &*s.world_state()?, &g, 0).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    let state = s.world_state()?;
+    let line = if cmd == "solid.coil" {
+        solidcraft_doc::construct::coil_model_axis(&state, &g)
+    } else {
+        solidcraft_doc::construct::model_axis_in(Some(&s.doc), &state, &g, 0)
+    };
+    let (o, d) = line.map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
     Ok(Some((g, o, d)))
 }
 

@@ -1095,8 +1095,8 @@ fn a_coil_keeps_the_picked_world_direction_as_its_model_axis_moves() {
 }
 
 #[test]
-fn a_named_model_axis_keeps_its_edge_at_a_shared_vertex() {
-    use crate::construct::{GeoRef, model_axis};
+fn a_named_coil_axis_keeps_its_edge_at_a_shared_vertex() {
+    use crate::construct::{GeoRef, coil_model_axis};
 
     let mut doc = Document::new("an edge at a box corner");
     add_in(
@@ -1116,7 +1116,7 @@ fn a_named_model_axis_keeps_its_edge_at_a_shared_vertex() {
     let expected = (end - start).normalized().unwrap();
     let name = crate::naming::edge_names(body)[index].clone();
     for at in [(start + end) * 0.5, Vec3::ZERO] {
-        let (_, direction) = model_axis(&state, &GeoRef::Edge { at, name: Some(name.clone()) }).unwrap();
+        let (_, direction) = coil_model_axis(&state, &GeoRef::Edge { at, name: Some(name.clone()) }).unwrap();
         assert!(direction.dot(expected).abs() >= 1. - 1e-9, "{at:?}: {direction:?} versus {expected:?}");
     }
 }

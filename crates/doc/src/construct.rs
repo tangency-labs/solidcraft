@@ -353,9 +353,9 @@ fn edge_points(st: &ModelState, at: Vec3, name: &Option<String>) -> Result<Vec<V
 /// edge picked with a name is the edge the name finds, or the reference fails, asking for it to
 /// be picked again.
 fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&'a ModelBody, usize, Vec<Vec3>)> {
-    if let Some(name) = name {
-        let (body, hit) = named_edge(st, at, name).ok_or_else(|| DocError::reselect(name))?;
-        return Ok((body, hit.edge, indexed_edge_points(body, hit.edge).ok_or_else(|| DocError::reselect(name))?));
+    let mut at = at;
+    if let Some(n) = name {
+        at = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok()).ok_or_else(|| DocError::reselect(n.as_str()))?;
     }
     let mut best: Option<(f64, &ModelBody, usize, Vec<Vec3>)> = None;
     for b in bodies(st) {
@@ -717,9 +717,20 @@ pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylind
 /// oriented the same way however the edge or surface runs (its largest component positive), so
 /// the feature keeps its turn when an edit rebuilds the edge reversed.
 pub fn model_axis(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
-    let (o, d) = model_line(st, g)?;
-    let d = d.normalized().filter(|_| o.is_finite()).ok_or_else(|| bad("the axis has no direction"))?;
-    Ok((o, canonical_dir(d)))
+    oriented_axis(model_line(st, g)?)
+}
+
+/// Coil's model axis. Keep the index of a named edge even when its pick is on a shared vertex.
+pub fn coil_model_axis(st: &ModelState, geo: &GeoRef) -> Result<(Vec3, Vec3)> {
+    let GeoRef::Edge { at, name: Some(name) } = geo else { return model_axis(st, geo) };
+    let (body, hit) = named_edge(st, *at, name).ok_or_else(|| DocError::reselect(name))?;
+    let points = indexed_edge_points(body, hit.edge).ok_or_else(|| DocError::reselect(name))?;
+    oriented_axis(line_of_edge(body, hit.edge, &points)?)
+}
+
+fn oriented_axis((origin, direction): (Vec3, Vec3)) -> Result<(Vec3, Vec3)> {
+    let direction = direction.normalized().filter(|_| origin.is_finite()).ok_or_else(|| bad("the axis has no direction"))?;
+    Ok((origin, canonical_dir(direction)))
 }
 
 /// [`model_axis`] for references that may name a component's origin datum: the datum is placed
@@ -1221,10 +1232,13 @@ impl GeoRef {
     /// edge or face that is gone.
     pub fn picked_point(&self, st: &ModelState) -> Option<Vec3> {
         match self {
-            GeoRef::Edge { at, name } => match name.as_deref() {
-                Some(name) => named_edge(st, *at, name).map(|(_, hit)| hit.point),
-                None => edge_pick(st, *at, &None).ok().map(|_| *at),
-            },
+            GeoRef::Edge { at, name } => {
+                let on = match name.as_deref() {
+                    Some(n) => bodies(st).find_map(|b| crate::naming::find_edge(b, n, *at).ok())?,
+                    None => *at,
+                };
+                edge_pick(st, on, &None).ok().map(|_| on)
+            }
             GeoRef::Face { at, name } => face_of(st, *at, name).ok().map(|(_, _, p)| p),
             _ => None,
         }
