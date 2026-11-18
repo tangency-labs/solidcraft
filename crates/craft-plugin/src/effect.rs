@@ -163,4 +163,11 @@ mod tests {
         assert_eq!(parsed.picture, None);
         assert_eq!(serde_json::to_string(&parsed).unwrap(), text);
     }
+
+    #[test]
+    fn a_rain_effect_is_accepted_with_or_without_a_picture() {
+        assert_eq!(validate(&[with_picture("rain", None)], &caps()), Ok(()));
+        assert_eq!(validate(&[with_picture("rain", Some("city/night.png"))], &caps()), Ok(()));
+        assert!(validate(&[with_picture("rain", Some("../night.png"))], &caps()).is_err());
+    }
 }

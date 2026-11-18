@@ -137,6 +137,7 @@ mod tests {
     }
 
     const GALAXY: &str = r#"{"id":"sky","name":"Sky","version":"1","description":"","capabilities":["effects@0.1"],"effects":[{"id":"stars","name":"Stars","kind":"galaxy","picture":"stars.jpg"}]}"#;
+    const RAIN: &str = r#"{"id":"wet","name":"Wet","version":"1","description":"","capabilities":["effects@0.1"],"effects":[{"id":"rain","name":"Rain","kind":"rain","picture":"night.png"}]}"#;
     const BARE_GALAXY: &str = r#"{"id":"sky","name":"Sky","version":"1","description":"","capabilities":["effects@0.1"],"effects":[{"id":"stars","name":"Stars","kind":"galaxy"}]}"#;
     const WAVE: &str = r#"{"id":"waves","name":"Waves","version":"1","description":"","capabilities":["effects@0.1"],"effects":[{"id":"rgb-wave","name":"RGB wave","kind":"hue-wave"}]}"#;
     const NONE: &str = r#"{"id":"old","name":"Old","version":"1","description":"","capabilities":["commands@0.1"]}"#;
@@ -185,6 +186,46 @@ mod tests {
             h.app.preferences.ui_effect_icons = true;
             assert!(sky(&mut h.app).is_none(), "{key:?}: no sky");
             assert_eq!(wave_set(&mut h.app).on, key == "waves/rgb-wave", "{key:?}: the wave as before");
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            assert!(!crate::gpu::paint_sky(&mut h.app, &painter, rect), "{key:?}: no sky layer drawn");
+            assert!(!crate::gpu::sky_shown(&ctx), "{key:?}: glass sees no sky");
+        }
+    }
+
+    #[test]
+    fn a_chosen_rain_is_the_sky_with_its_picture_or_none() {
+        let (mut h, dir) = harness();
+        put(&dir, "wet", RAIN, &[("night.png", b"x")]);
+        h.app.preferences.ui_effect = "wet/rain".into();
+        let chosen = sky(&mut h.app).expect("the rain is chosen");
+        assert_eq!((chosen.kind, chosen.picture), (SkyKind::Rain, Some(dir.join("wet").join("night.png"))));
+        put(&dir, "wet", &RAIN.replace(r#","picture":"night.png""#, ""), &[]);
+        forget(&mut h.app);
+        assert_eq!(sky(&mut h.app).map(|s| (s.kind, s.picture)), Some((SkyKind::Rain, None)));
+    }
+
+    #[test]
+    fn the_rain_amount_defaults_to_the_hosts_and_stays_between_none_and_full() {
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.preferences.rain_amount, 0.6);
+        crate::prefs::control(&mut h.app, &serde_json::json!({"rain_amount": 0.25})).unwrap();
+        assert_eq!(h.app.preferences.rain_amount, 0.25);
+        assert!(crate::prefs::control(&mut h.app, &serde_json::json!({"rain_amount": 1.5})).is_err());
+        assert_eq!(h.app.preferences.rain_amount, 0.25, "a refused value changes nothing");
+    }
+
+    /// A hue-wave-only plugin and one with no effects are not made rainy by the rain setting.
+    #[test]
+    fn a_legacy_plugin_has_no_rain_whatever_the_rain_amount() {
+        let (mut h, dir) = harness();
+        put(&dir, "waves", WAVE, &[]);
+        put(&dir, "old", NONE, &[]);
+        h.app.preferences.rain_amount = 1.0;
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        for key in ["", "waves/rgb-wave", "old/anything"] {
+            h.app.preferences.ui_effect = key.into();
+            assert!(sky(&mut h.app).is_none(), "{key:?}: no sky");
             let painter = ctx.layer_painter(egui::LayerId::background());
             assert!(!crate::gpu::paint_sky(&mut h.app, &painter, rect), "{key:?}: no sky layer drawn");
             assert!(!crate::gpu::sky_shown(&ctx), "{key:?}: glass sees no sky");

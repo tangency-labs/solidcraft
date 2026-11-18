@@ -295,4 +295,11 @@ mod tests {
         let squeezed = level(&round, [2048, 1024], [1600, 256]);
         assert!((squeezed - (2048.0 / std::f32::consts::TAU / 256.0).log2()).abs() < 1e-5, "{squeezed}");
     }
+
+    #[test]
+    fn rain_is_drawn_from_the_whole_picture() {
+        let rain = SkyView::Rain { min: [0.0, 0.0], max: [1.0, 1.0], time: 3.0, amount: RAIN_AMOUNT };
+        assert_eq!(level(&rain, [4096, 2048], [400, 200]), 0.0);
+        assert_eq!(RAIN_AMOUNT, 0.6);
+    }
 }

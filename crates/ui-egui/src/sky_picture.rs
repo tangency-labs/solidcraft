@@ -153,4 +153,17 @@ mod tests {
         assert_eq!(decode(png.get_ref(), 16).unwrap().size, [16, 8]);
         assert!(decode(b"not a picture", 1024).is_err());
     }
+
+    #[test]
+    fn the_rain_without_a_picture_is_a_dark_flat_night_with_lights() {
+        let night = rain_night(640);
+        assert_eq!(night.size, [640, 360]);
+        assert!(!is_panorama(night.size), "rain shows a flat picture");
+        assert!(night.rgba == rain_night(640).rgba, "the same every time");
+        let all: Vec<f32> = (0..360).flat_map(|y| (0..640).map(move |x| (x, y))).map(|(x, y)| luma(&night, x, y)).collect();
+        let mean = all.iter().sum::<f32>() / all.len() as f32;
+        assert!((0.03..0.4).contains(&mean), "a night: {mean}");
+        assert!(all.iter().any(|&l| l > 0.5), "with lights in it");
+        assert!(night.rgba.chunks(4).all(|px| px[3] == 255), "opaque");
+    }
 }

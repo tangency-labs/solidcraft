@@ -1851,6 +1851,29 @@ mod install_zip {
     }
 
     #[test]
+    fn a_rain_plugin_installs_with_its_own_picture_or_with_none() {
+        let (mut s, root) = session("rain");
+        let png: &[u8] = b"\x89PNG\r\n\x1a\n a picture";
+        let manifest = |picture: bool| {
+            let mut effect = json!({"id": "rain", "name": "Rain", "kind": "rain"});
+            if picture {
+                effect["picture"] = json!("night.png");
+            }
+            serde_json::to_vec(&json!({"id": "wet", "name": "Wet", "version": "1.0.0", "capabilities": ["effects@0.1"], "effects": [effect]}))
+                .unwrap()
+        };
+        let path = put(&root, "wet.zip", &zip(&[("plugin.json", &manifest(true)[..]), ("night.png", png)]));
+        assert_eq!(s.execute("plugin.install", &json!({"path": path})).unwrap()["effects"], json!(["wet/rain"]));
+        s.execute("plugin.remove", &json!({"id": "wet"})).unwrap();
+        let bare = put(&root, "bare.zip", &zip(&[("plugin.json", &manifest(false)[..])]));
+        assert_eq!(s.execute("plugin.install", &json!({"path": bare})).unwrap()["effects"], json!(["wet/rain"]));
+        let missing = put(&root, "missing.zip", &zip(&[("plugin.json", &manifest(true)[..])]));
+        s.execute("plugin.remove", &json!({"id": "wet"})).unwrap();
+        assert!(s.execute("plugin.install", &json!({"path": missing})).is_err(), "a named picture must be in the package");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_hue_wave_only_plugin_installs_and_reads_back_exactly_as_before() {
         let (mut s, root) = session("legacy-hue-wave");
         let manifest = serde_json::to_vec(&json!({"id": "wave", "name": "Wave", "version": "1.0.0", "capabilities": ["effects@0.1"],

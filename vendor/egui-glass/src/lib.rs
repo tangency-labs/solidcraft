@@ -48,6 +48,7 @@ mod context_gpu;
 mod live;
 mod live_quality;
 mod mipgen;
+mod rain;
 mod renderer;
 mod scene;
 mod sky;
