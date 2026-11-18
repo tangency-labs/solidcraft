@@ -4841,6 +4841,10 @@ mod app_bar_tests {
         // plugin's row at its foot is on screen without scrolling the menu.
         h.call("ui.resize", json!({"width":1600,"height":1600}));
         h.frames(3);
+        // The plugin slot is the File menu's last row, and Revert to Saved made the menu one row taller:
+        // in the default 1600 x 1000 window it would sit below the fold, so give the window room.
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
         h.frames(2);
