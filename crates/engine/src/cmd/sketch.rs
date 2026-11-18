@@ -1936,7 +1936,8 @@ pub(super) fn corner_arg(doc: &solidcraft_doc::Document, sk: &Sketch, p: &Value,
 }
 
 /// How the text form of a snap begins: a midpoint, a point on a curve, a crossing of two curves, a
-/// model vertex. The one list the commands, their schemas and the drawing tools read.
+/// model vertex. Read by `is_snap`, the rectangle corners' schema pattern and the rectangle tools'
+/// `held`; `snap_points` and the other drawing tools still keep their own copies.
 pub const SNAP_PREFIXES: [&str; 4] = ["mid:", "on:", "x:", "vertex:"];
 
 /// Whether a point argument is a snap `sketch_project::snap_points` turns into a point: a click
