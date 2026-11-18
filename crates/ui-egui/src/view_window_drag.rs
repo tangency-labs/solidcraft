@@ -207,8 +207,10 @@ fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> Picture {
     }
     let frame = if app.docs.views.active().id == view {
         app.viewport.rect
-    } else {
+    } else if app.docs.views.is_tiled() && app.docs.views.tiles().is_some_and(|tiles| tiles.contains(view)) {
         app.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
+    } else {
+        None
     };
     if let Some(frame) = frame.map(|frame| frame.intersect(ctx.viewport_rect())).filter(|frame| frame.is_positive() && frame.is_finite()) {
         let output = Arc::downgrade(&picture);
@@ -659,7 +661,7 @@ fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: R
     let header_height = (24.0 + 4.0 * detail).min(rect.height());
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), header_height));
     if form == Form::Card && detail > 0.65 {
-        crate::view_tiles::paint_card_header(painter, header, radius, &view.name, 30.0);
+        crate::view_tiles::paint_card_header(painter, header, radius, &view.name, header.left() + 30.0);
         paint_kind(painter, header.left_center() + vec2(16.0, 0.0), view, t.accent, 15.0);
     } else {
         let bar = if form == Form::Window { t.app_bar } else { t.app_bar_hover_strong };
