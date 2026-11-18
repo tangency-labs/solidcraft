@@ -2,10 +2,12 @@
 //!
 //! The rib is its definition: at the curves' parameter `t` the section `sigma(t)` of the
 //! fillet surface S meets the end surface E, `F(t, y) = S(sigma(t), alpha) − E(u, v) = 0` in
-//! the unknowns `y = (alpha, u, v)`. Over a piece `T` of a span, Krawczyk's test on a box `Y`
-//! (`crate::geom::krawczyk`, `F` enclosed over `T` and its partials over `T x Y`) proves for
-//! every `t` in `T` exactly one root `y(t)` in `Y`, and at a piece's end, a point `T`, a box
-//! of rounding's width. Each of the rib's three curves (3D; on the fillet surface's UV; on
+//! the unknowns `y = (alpha, u, v)`. Over a piece `T` of a span, Krawczyk's test
+//! (`crate::geom::krawczyk`) on `z = y − c(t)`, `c` the quadratic through the Newton roots at
+//! the piece's ends and middle, proves for every `t` in `T` exactly one root `y(t)` in
+//! `c(t) + Z`: `F(t, c(t))` is enclosed by its mean-value form about the middle and the
+//! partials over `T x (c(T) + Z)`. At a piece's end, a point, the root is in a box of
+//! rounding's width. Each of the rib's three curves (3D; on the fillet surface's UV; on
 //! the end surface's UV) has an error `e` against the root: its 3D point less the rib's
 //! point, its UV point less `(sigma, alpha)` or `(u, v)`. At the piece's ends `e` is
 //! enclosed from those small boxes; between them `|e(t)|` is at most the larger end's plus
@@ -206,10 +208,11 @@ impl Rib<'_> {
         Some([arr(s(0, 1)), arr(neg(e.at(1, 0))), arr(neg(e.at(0, 1)))])
     }
 
-    /// The box about `mid` that Krawczyk's test proves to hold one root for every `t` in
-    /// `t`, or `None`.
-    fn root_over(&self, t: Ivl, mid: [f64; 3]) -> Result<Option<[Ivl; 3]>> {
-        let Some(j) = self.columns(Ivl::from(t.mid()), mid.map(Ivl::from)) else {
+    /// The box about `mid` that Krawczyk's test proves to hold the one root at `t`, or
+    /// `None`.
+    fn root_at(&self, t: f64, mid: [f64; 3]) -> Result<Option<[Ivl; 3]>> {
+        let t = Ivl::from(t);
+        let Some(j) = self.columns(t, mid.map(Ivl::from)) else {
             return Ok(None);
         };
         let Some(c) = inverse_of_columns3(&j.map(|col| col.map(Ivl::mid))) else {
@@ -218,6 +221,68 @@ impl Rib<'_> {
         krawczyk(mid, c, &|y| Ok(self.value(t, y)), &|y| {
             Ok(self.columns(t, y))
         })
+    }
+
+    /// The box that holds the root for every `t` of the piece between `a` and `b` (the
+    /// Newton root `mid` at its middle), or `None`. The root moves across the piece, so
+    /// Krawczyk's test runs on `z = y − c(t)`, `c` the quadratic through the three Newton
+    /// roots: `F(t, c(t))` is enclosed by its mean-value form about the middle, which
+    /// shrinks with the piece's width squared where a fixed centre's shrinks with it once.
+    fn path_over(&self, a: &End, b: &End, mid: [f64; 3]) -> Result<Option<[Ivl; 3]>> {
+        let tm = 0.5 * (a.t + b.t);
+        let h = 0.5 * (b.t - a.t);
+        // c(t) = mid + beta (t − t_m) + gamma (t − t_m)², per unknown
+        let quad = |ya: f64, ym: f64, yb: f64| {
+            (
+                ym,
+                (yb - ya) / (2.0 * h),
+                (yb - 2.0 * ym + ya) / (2.0 * h * h),
+            )
+        };
+        let ([a0, a1, a2], [m0, m1, m2], [b0, b1, b2]) = (a.y, mid, b.y);
+        let coef = [quad(a0, m0, b0), quad(a1, m1, b1), quad(a2, m2, b2)];
+        if !coef
+            .iter()
+            .all(|&(_, be, ga)| be.is_finite() && ga.is_finite())
+        {
+            return Ok(None);
+        }
+        let t = Ivl::new(a.t, b.t);
+        let d = t - Ivl::from(tm);
+        let two = Ivl::from(2.0);
+        let c = coef.map(|(m, be, ga)| Ivl::from(m) + Ivl::from(be) * d + Ivl::from(ga) * (d * d));
+        let [dc0, dc1, dc2] = coef.map(|(_, be, ga)| Ivl::from(be) + two * Ivl::from(ga) * d);
+        let shift = |[z0, z1, z2]: [Ivl; 3]| {
+            let [c0, c1, c2] = c;
+            [c0 + z0, c1 + z1, c2 + z2]
+        };
+        let [ca, cu, cv] = c;
+        // F(t, c(t)) ∈ F(t_m, mid) + (t − t_m) (S_sigma sigma' + F_y c') over the piece
+        let value = |_: [Ivl; 3]| -> Result<Option<[Ivl; 3]>> {
+            let Some([x, y, z]) = self.value(Ivl::from(tm), mid.map(Ivl::from)) else {
+                return Ok(None);
+            };
+            let (sigma, ds, _) = self.sigma(t);
+            let Some(s) = self.fillet_over(sigma, ca, 1) else {
+                return Ok(None);
+            };
+            let Some(e) = partials_over(self.end, cu, cv, 1) else {
+                return Ok(None);
+            };
+            let slope = v_add(
+                v_add(v_scale(s(1, 0), ds), v_scale(s(0, 1), dc0)),
+                neg(v_add(v_scale(e.at(1, 0), dc1), v_scale(e.at(0, 1), dc2))),
+            );
+            Ok(Some(arr(v_add(V3 { x, y, z }, v_scale(slope, d)))))
+        };
+        let Some(j) = self.columns(Ivl::from(tm), mid.map(Ivl::from)) else {
+            return Ok(None);
+        };
+        let Some(inv) = inverse_of_columns3(&j.map(|col| col.map(Ivl::mid))) else {
+            return Ok(None);
+        };
+        let z = krawczyk([0.0; 3], inv, &value, &|z| Ok(self.columns(t, shift(z))))?;
+        Ok(z.map(shift))
     }
 
     /// The errors' magnitudes at `t`, the root in the box `y`.
@@ -327,7 +392,7 @@ impl Rib<'_> {
     /// The piece end at `t` from the Newton root `y` there: the root proved in a point box
     /// and the errors there, or `None`.
     fn end_at(&self, t: f64, y: [f64; 3]) -> Result<Option<End>> {
-        let Some(b) = self.root_over(Ivl::from(t), y)? else {
+        let Some(b) = self.root_at(t, y)? else {
             return Ok(None);
         };
         Ok(self.errors_at(t, b).map(|e| End { t, y, e }))
@@ -340,7 +405,7 @@ impl Rib<'_> {
     /// about its middle, whichever is less.
     fn piece(&self, a: &End, b: &End, mid: [f64; 3], tol: f64) -> Result<Option<f64>> {
         let t = Ivl::new(a.t, b.t);
-        let Some(y) = self.root_over(t, mid)? else {
+        let Some(y) = self.path_over(a, b, mid)? else {
             return Ok(None);
         };
         let w = Ivl::from(b.t) - Ivl::from(a.t);

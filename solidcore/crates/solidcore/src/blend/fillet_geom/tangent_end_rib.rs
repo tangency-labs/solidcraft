@@ -24,6 +24,7 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
+use crate::geom::krawczyk::{inverse_of_columns3, newton, Linearised};
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
@@ -438,13 +439,49 @@ pub fn tangent_end_rib(
     };
 
     // the exact rib point at t, from a guess; on the other end's side of the tangent end
+    // Not upstream (#17744): the point's Newton steps go on until they settle
+    // (`geom::krawczyk::newton`). Its residual stop leaves alpha off by the residual over
+    // the Jacobian's least singular value, which vanishes toward the tangent end: on a G3
+    // round's rib 4e-5 along the rail, which the certificate sees at the stations.
+    let settle = |sigma: f64, y: [f64; 3]| -> Result<Linearised<3>> {
+        let [a, u, v] = y;
+        let fil_uv = if section == 0 {
+            Point2::new(sigma, a)
+        } else {
+            Point2::new(a, sigma)
+        };
+        let (Ok((f, f_u, f_v)), Ok((x, e_u, e_v))) = (
+            first_derivs(k, fillet, fil_uv),
+            first_derivs(k, end, Point2::new(u, v)),
+        ) else {
+            return Ok(None);
+        };
+        let f_a = if section == 0 { f_v } else { f_u };
+        let r = f - x;
+        let col = |c: Vec3| [c.x, c.y, c.z];
+        Ok(Some(([r.x, r.y, r.z], [col(f_a), col(-e_u), col(-e_v)])))
+    };
     let solve = |t: f64, alpha: f64, uv: Point2| -> Result<Option<(f64, Point2, Point3)>> {
-        let found = tangent_end_rib_point(k, fillet, end, section, sigma_at(t), alpha, uv)?;
+        let sigma = sigma_at(t);
+        let Some((a, e, x)) = tangent_end_rib_point(k, fillet, end, section, sigma, alpha, uv)?
+        else {
+            return Ok(None);
+        };
+        let start = [a, e.x, e.y];
+        let settled = newton(start, &|y| settle(sigma, y), &inverse_of_columns3)?;
+        let found = match settled {
+            Some([a1, u, v]) if [a1, u, v] != start => {
+                let e1 = Point2::new(u, v);
+                let x1 = first_derivs(k, end, e1).ok().map(|(x1, _, _)| x1);
+                x1.map_or((a, e, x), |x1| (a1, e1, x1))
+            }
+            _ => (a, e, x),
+        };
         // (`<= 0.0` fails the point; a NaN product keeps it, as upstream's test)
         #[allow(clippy::neg_cmp_op_on_partial_ord)]
-        Ok(found.filter(|&(a, _, _)| !((a - alpha0) * (alpha1 - alpha0) <= 0.0)))
+        Ok(Some(found).filter(|&(a, _, _)| !((a - alpha0) * (alpha1 - alpha0) <= 0.0)))
     };
-    let newton = |t: f64, y: [f64; 3]| -> Result<Option<[f64; 3]>> {
+    let rib_newton = |t: f64, y: [f64; 3]| -> Result<Option<[f64; 3]>> {
         let [a, u, v] = y;
         Ok(solve(t, a, Point2::new(u, v))?.map(|(a, e, _)| [a, e.x, e.y]))
     };
@@ -604,9 +641,9 @@ pub fn tangent_end_rib(
             let within = match &rib {
                 // the span at the tangent end, on pieces graded toward it
                 Some(rib) if jj == 0 => rib
-                    .first_span_bound(&newton, ends.0 .1, ends.1, approx_tol)?
+                    .first_span_bound(&rib_newton, ends.0 .1, ends.1, approx_tol)?
                     .map(|(b, _)| b),
-                Some(rib) => rib.span_bound(&newton, ends.0, ends.1, approx_tol)?,
+                Some(rib) => rib.span_bound(&rib_newton, ends.0, ends.1, approx_tol)?,
                 None => None,
             };
             match within {
