@@ -57,6 +57,7 @@ mod navigation_menu;
 mod navigation_settings;
 pub mod panel;
 mod panel_host;
+mod panel_search;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -133,6 +134,7 @@ pub use panel::{DialogButtons, Window};
 #[cfg(any(test, feature = "test-support"))]
 pub use panel::{collapsible_header, header};
 pub use panel_host::*;
+pub use panel_search::*;
 pub use preferences::*;
 pub use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
