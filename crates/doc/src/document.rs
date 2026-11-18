@@ -2255,8 +2255,9 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         copy_frames: Vec<crate::Mat>,
     },
-    /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
-    /// in the design (it is the B-rep), so the design reopens without the original file.
+    /// A non-parametric base feature: bodies imported from a STEP file, or from a file read
+    /// through cadmpeg as B-rep records. The STEP text or the records are kept in the design
+    /// (they are the B-rep), so the design reopens without the original file.
     Import {
         /// Source file name (display only).
         file: String,
@@ -2271,6 +2272,11 @@ pub enum FeatureKind {
         /// component (#1386). Empty in designs from before format 22: every body is built.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skip: Vec<u64>,
+        /// The import kept as B-rep records instead of STEP text (a FreeCAD or Rhino file read
+        /// through cadmpeg's neutral model), `step` then empty; shared like `step`. Designs
+        /// from before `format/pending/import-records.rs` have none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
     /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
     /// constant-section part, planar facets for any other closed mesh.

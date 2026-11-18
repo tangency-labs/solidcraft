@@ -1733,6 +1733,8 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
 #[derive(Clone, Debug, Default)]
 struct ImportDigests {
     steps: std::collections::HashMap<u64, (Arc<str>, u64)>,
+    /// An import kept as records: its records and their digest, computed once per records.
+    records: std::collections::HashMap<u64, (Arc<kernel::ImportRecords>, u64)>,
     meshes: std::collections::HashMap<u64, Vec<MeshDigest>>,
 }
 
@@ -1757,9 +1759,13 @@ impl ImportDigests {
         let mut out = ImportDigests::default();
         for f in &doc.features {
             match &f.kind {
-                FeatureKind::Import { step, .. } => {
+                FeatureKind::Import { step, records, .. } => {
                     let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
                     out.steps.insert(f.id, (step.clone(), digest));
+                    if let Some(r) = records {
+                        let digest = known.records_digest(f.id, r).unwrap_or_else(|| records_digest(r));
+                        out.records.insert(f.id, (r.clone(), digest));
+                    }
                 }
                 FeatureKind::MeshImport { meshes, .. } => {
                     let digests = meshes
@@ -1787,6 +1793,10 @@ impl ImportDigests {
         self.steps.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
     }
 
+    fn records_digest(&self, id: u64, records: &Arc<kernel::ImportRecords>) -> Option<u64> {
+        self.records.get(&id).filter(|(r, _)| Arc::ptr_eq(r, records)).map(|(_, digest)| *digest)
+    }
+
     fn mesh(&self, id: u64, index: usize, mesh: &crate::MeshData) -> Option<u64> {
         self.meshes.get(&id)?.get(index).filter(|cached| cached.matches(mesh)).map(|cached| cached.digest)
     }
@@ -1805,6 +1815,12 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
         n.to_bits().hash(&mut h);
     }
     h.finish()
+}
+
+/// An import's records digested as their serialised form; records that will not serialise
+/// digest as nothing (their evaluation fails and says why).
+fn records_digest(records: &kernel::ImportRecords) -> u64 {
+    step_text_digest(&kernel::records_text(records).unwrap_or_default())
 }
 
 fn step_text_digest(text: &str) -> u64 {
@@ -1902,11 +1918,17 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
         // writing the large numeric arrays out again. Equal content in fresh Arcs hashes alike.
         return serde_json::to_string(&(g, digests)).unwrap_or_default();
     }
-    if let FeatureKind::Import { step, .. } = &f.kind {
+    if let FeatureKind::Import { step, records, .. } = &f.kind {
         let mut g = f.clone();
-        if let FeatureKind::Import { step: text, .. } = &mut g.kind {
+        if let FeatureKind::Import { step: text, records: kept, .. } = &mut g.kind {
             let digest = steps.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
-            *text = Arc::from(format!("{digest:016x}:{}", step.len()));
+            // Records stand in by their digest, as the STEP text does.
+            let of_records = records.as_ref().map(|r| steps.records_digest(f.id, r).unwrap_or_else(|| records_digest(r)));
+            *kept = None;
+            *text = match of_records {
+                Some(r) => Arc::from(format!("{digest:016x}:{}:records:{r:016x}", step.len())),
+                None => Arc::from(format!("{digest:016x}:{}", step.len())),
+            };
         }
         return serde_json::to_string(&g).unwrap_or_default();
     }
@@ -12005,9 +12027,11 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Import { step, skip, .. } => {
-            let imp = kernel::step_import_shared(step)?;
-            let digest = crate::config::payload_digest(step);
+        FeatureKind::Import { step, skip, records, .. } => {
+            let (imp, digest) = match records {
+                Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
+                None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
+            };
             let names = import_body_names(st, &f.body_names, &imp, skip);
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
@@ -13252,13 +13276,15 @@ mod world_placement_cache_tests {
     #[test]
     fn an_imports_body_is_asked_for_its_own_slots_name() {
         let mut doc = Document::new("names");
-        let id =
-            doc.add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0] }, None).unwrap();
+        let id = doc
+            .add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0], records: None }, None)
+            .unwrap();
         doc.feature_mut(id).unwrap().body_names = vec!["A".into(), "B".into()];
         let mut state = ModelState::default();
         state.bodies.push(ModelBody::new("B (2)".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), id));
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("B"));
-        doc.feature_mut(id).unwrap().kind = FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new() };
+        doc.feature_mut(id).unwrap().kind =
+            FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: None };
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("A"));
     }
 
