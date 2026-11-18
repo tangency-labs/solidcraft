@@ -129,6 +129,13 @@ fn grouped(n: u64) -> String {
     out
 }
 
+/// The GPU time row: the span of the view's passes and the longest of them, by the label the
+/// pass carries in GPU profilers.
+fn gpu_time(gpu: &solidcraft_viewport_gpu::view::PassTimes) -> String {
+    let ms = |us: u32| f64::from(us) / 1000.0;
+    format!("{:.1} ms · {} {:.1}", ms(gpu.span_us), gpu.slowest, ms(gpu.slowest_us))
+}
+
 /// A frame time's colour: within 60 FPS, within 30 FPS, slower (with the buckets' allowance for
 /// jitter).
 fn budget_colour(t: &Tokens, ms: f32) -> Color32 {
@@ -166,7 +173,12 @@ pub(crate) fn beside_panes(mut readout: Rect, view: Rect, panes: &[Rect]) -> Rec
 /// view idle.
 pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, rect: Rect) {
     app.frame_rate.top = None;
-    if !app.preferences.show_frame_rate {
+    // The renderer times its passes on the GPU only while the readout is shown.
+    let on = app.preferences.show_frame_rate;
+    if let Some(mut s) = app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok()) {
+        s.time_passes = on;
+    }
+    if !on {
         app.frame_rate = FrameRate::default();
         return;
     }
@@ -216,7 +228,8 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
 fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, drawn: crate::gpu::DrawStats, font: &FontId) -> Option<Rect> {
     let t = Tokens::get();
     let (pad, row, label_h, graph_h, hist_h) = (8.0, 16.0, 12.0, 56.0, 40.0);
-    let lines = 7.0 + 0.8; // seven rows and the adapter's name
+    // Seven rows (eight with the GPU time) and the adapter's name.
+    let lines = if drawn.gpu.is_some() { 8.0 } else { 7.0 } + 0.8;
     let w = 300.0_f32.min(below.right() - view.left() - MARGIN);
     let h = pad * 2.0 + row + label_h + graph_h + 6.0 + hist_h + row + lines * row;
     if w < 160.0 || h > view.height() - below.height() - 30.0 {
@@ -314,6 +327,10 @@ fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, dra
     kv(tr("perf.viewport"), format!("{:.0}×{:.0} · MSAA {msaa}×{ss}", px.x, px.y));
     kv(tr("perf.ui_time"), format!("{:.1} ms", app.frame_ms));
     kv(tr("perf.scene_build"), format!("{:.1} ms", app.viewport.build_ms));
+    // The view's own passes on the GPU (start of the first to end of the last), and the longest.
+    if let Some(gpu) = drawn.gpu {
+        kv(tr("perf.gpu_time"), gpu_time(&gpu));
+    }
     // The adapter's name can be long: on a line of its own, cut to the panel's width.
     let (backend, adapter) = app.viewport.adapter.split_once(" · ").unwrap_or(("CPU", ""));
     kv(tr("perf.renderer"), backend.to_string());

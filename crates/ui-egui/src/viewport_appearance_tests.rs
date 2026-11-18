@@ -90,7 +90,10 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let mut document = doc::Document::default();
     let component = document.add_component(Some("Imported part"), 0).unwrap();
     let feature = document
-        .add_feature(doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+        .add_feature(
+            doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
         .unwrap();
     document.features.iter_mut().find(|f| f.id == feature).unwrap().component = component;
     let mut session = Session::new(document);
@@ -290,6 +293,71 @@ fn appearance_edits_upload_palette_rows_only() {
     let glass = draw(&app);
     assert_eq!(glass.geometry, 0, "a see-through body's colour edit uploads no geometry: {glass:?}");
     assert!(glass.palette > 0, "it writes the palette: {glass:?}");
+}
+
+/// A part placed many times goes to the GPU once: drawn indirectly, its triangles are uploaded
+/// to the indirect draws' buffer alone, not to buffers of their own as well; a scene adding a
+/// part that fits the buffer's room uploads that part's triangles alone, not again every part
+/// before it; and the same parts again upload none. Every placement is drawn each time. Skipped without a GPU adapter.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_placed_parts_triangles_are_uploaded_once_and_a_part_added_alone_after() {
+    const SIZE: u32 = 64;
+    let Some(mut frames) = crate::gpu::OffscreenFrames::new(SIZE, false) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.viewport.gpu = frames.target();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.cylinder", json!({"radius": 5, "height": 10, "base": [30, 0, 0]})).unwrap();
+    app.fit_view();
+    // The cylinder first: the buffers made for it have room for half as much again, which the
+    // box added after fits in (a part that does not fit makes them again, with every part).
+    let meshes: Vec<_> = app.session.model.state().bodies.iter().rev().map(|b| std::sync::Arc::new(crate::gpu::SharedTris::new(&b.mesh()))).collect();
+    assert_eq!(meshes.len(), 2, "a cylinder and a box");
+    assert!(meshes[1].vertices.len() * 2 < meshes[0].vertices.len(), "the box is the smaller");
+    let bytes = |t: &crate::gpu::SharedTris| (t.vertices.len() + t.indices.len() * 4) as u64;
+    // Each part placed three times, close together (all in view).
+    let scene = |parts: usize| {
+        let mut sc = crate::gpu::GpuScene::default();
+        let red = sc.color([200, 30, 30, 255]);
+        for (k, tris) in meshes.iter().take(parts).enumerate() {
+            let mut inst = solidcraft_viewport_gpu::view::InstancedMesh {
+                key: k as u64 + 1,
+                tris: tris.clone(),
+                instances: Vec::new(),
+                look: solidcraft_viewport_gpu::view::InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: true,
+            };
+            for i in 0..3 {
+                inst.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.5 * i as f32], [0.0, 0.0, 1.0, 0.0]], red);
+            }
+            sc.instanced.push(inst);
+        }
+        sc
+    };
+    let none: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut key = 0;
+    let mut draw = |parts: usize| {
+        key += 1;
+        let slot: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(scene(parts))));
+        frames.frame(crate::scale_tests::view_frame(&app, SIZE, (key, &slot), (0, &none)));
+        (frames.uploads(), frames.stats().triangles)
+    };
+    let drawn = |parts: usize| meshes.iter().take(parts).map(|t| 3 * (t.indices.len() as u64 / 3)).sum::<u64>();
+    let (one, triangles) = draw(1);
+    assert_eq!(one.geometry, bytes(&meshes[0]), "the first part's triangles, once");
+    assert_eq!(triangles, drawn(1), "its three placements are drawn");
+    let (two, triangles) = draw(2);
+    assert_eq!(two.geometry, bytes(&meshes[1]), "the part added alone");
+    assert_eq!(triangles, drawn(2), "every placement of both parts is drawn");
+    let (again, triangles) = draw(2);
+    assert_eq!(again.geometry, 0, "the same parts upload no triangles");
+    assert_eq!(triangles, drawn(2), "and are drawn as before");
 }
 
 /// A body out of the view is left out of its block's draws: two boxes far apart, drawn with
