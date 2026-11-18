@@ -304,6 +304,26 @@ impl Kept<'_> {
     }
 }
 
+/// Which of a cloud's points `filters` keep, by each point's own value, as the view shows its
+/// dots; a point without the filtered property is not filtered by it.
+pub fn kept_points(c: &PointCloud, filters: &[Filter]) -> Vec<bool> {
+    let mut kept = vec![true; c.len()];
+    for f in filters {
+        let Some(s) = c.source(&f.property, On::Point) else { continue };
+        let k = Kept::of(f);
+        for (i, keep) in kept.iter_mut().enumerate() {
+            let v = match s {
+                Source::Coordinate(axis) => c.world_point(i).and_then(|p| [p.x, p.y, p.z].get(axis).copied()).unwrap_or(f64::NAN),
+                Source::Corners(v) | Source::Element(v) => v.get(i).map_or(f64::NAN, |x| f64::from(*x)),
+            };
+            if !k.keeps(k.cut.band(v)) {
+                *keep = false;
+            }
+        }
+    }
+    kept
+}
+
 /// The values of `s` at an element's corners: element `e` of a kind, on points `ids`.
 fn corners(s: Source, e: usize, ids: [u32; 3], world: &[[f64; 3]]) -> [f64; 3] {
     match s {

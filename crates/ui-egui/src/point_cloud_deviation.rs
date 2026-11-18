@@ -426,7 +426,10 @@ pub(crate) fn probe(app: &SolveApp, painter: &Painter, proj: &Proj) {
     let Some(pointer) = painter.ctx().pointer_hover_pos().filter(|p| proj.rect.contains(*p)) else {
         return;
     };
-    let Some((index, k, at)) = nearest(c, &shown.report, proj, pointer) else { return };
+    // Only the points the view shows: the cloud's filters, one playing at its range now.
+    let drawn = crate::point_clouds::as_drawn(c, |k| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(c.id, k)));
+    let kept = if drawn.filters.is_empty() { Vec::new() } else { solidcraft_engine::doc::point_cloud_distribution::kept_points(&drawn, &drawn.filters) };
+    let Some((index, k, at)) = nearest(c, &shown.report, &kept, proj, pointer) else { return };
     let (Some(d), Some(closest)) = (shown.report.distances.get(k).copied().flatten(), shown.report.closest.get(k).copied().flatten()) else {
         return;
     };
@@ -456,9 +459,9 @@ pub(crate) fn probe(app: &SolveApp, painter: &Painter, proj: &Proj) {
     painter.galley(rect.min + vec2(4.0, 4.0), galley, t.text);
 }
 
-/// The measured point nearest `pointer` on screen, within [`PROBE_RADIUS`]: its index in the
-/// cloud, its place in the report, and where it is on screen.
-fn nearest(c: &PointCloud, report: &Report, proj: &Proj, pointer: egui::Pos2) -> Option<(usize, usize, egui::Pos2)> {
+/// The measured point nearest `pointer` on screen, within [`PROBE_RADIUS`], among those `kept`
+/// (shown): its index in the cloud, its place in the report, and where it is on screen.
+fn nearest(c: &PointCloud, report: &Report, kept: &[bool], proj: &Proj, pointer: egui::Pos2) -> Option<(usize, usize, egui::Pos2)> {
     let step = report.sample_step.max(1);
     let mut best: Option<(f32, usize, usize, egui::Pos2)> = None;
     for (k, d) in report.distances.iter().enumerate() {
@@ -466,6 +469,9 @@ fn nearest(c: &PointCloud, report: &Report, proj: &Proj, pointer: egui::Pos2) ->
             continue;
         }
         let index = k * step;
+        if !kept.get(index).copied().unwrap_or(true) {
+            continue;
+        }
         let Some(at) = c.world_point(index).and_then(|p| proj.to_screen(p)) else { continue };
         let gap = at.distance(pointer);
         if gap <= PROBE_RADIUS && best.is_none_or(|b| gap < b.0) {

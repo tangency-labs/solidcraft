@@ -143,6 +143,16 @@ fn labels_change_where_the_next_element_has_another() {
 }
 
 #[test]
+fn kept_points_are_the_points_every_filter_keeps() {
+    let c = cloud(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]], &[], &[], vec![column("t", On::Point, false, &[0.0, 10.0, 7.0])]);
+    assert_eq!(kept_points(&c, &[]), [true, true, true]);
+    assert_eq!(kept_points(&c, &[range("x", [5.0, 20.0])]), [false, true, true], "both ends are kept");
+    assert_eq!(kept_points(&c, &[range("x", [5.0, 20.0]), range("t", [0.0, 8.0])]), [false, false, true]);
+    // A property the cloud lacks filters nothing.
+    assert_eq!(kept_points(&c, &[range("missing", [0.0, 1.0])]), [true, true, true]);
+}
+
+#[test]
 fn the_automatic_range_is_what_every_filter_keeps() {
     // t runs 0 to 10 along x; filtered by x from 2 to 4, coloured by t: the range is 2 to 4,
     // though no filter is on t (its span within filters on t would be 0 to 10).
