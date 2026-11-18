@@ -69,6 +69,9 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     set_open(app, &scope, path.is_empty() || start_open, true);
     set_open(app, &format!("{scope}/history"), true, true);
+    for folder in folder_chain(&app.session.doc.timeline_groups, id) {
+        crate::timeline_folders::set_open(app, folder, true);
+    }
     app.tree.reveal_feature = Some(Reveal { id, path, history: true });
 }
 
@@ -456,17 +459,32 @@ fn folder_row(app: &mut SolveApp, rows: &mut Rows<'_>, folders: &[TimelineGroup]
     let selected = app.tree.picked_timeline_groups.contains(&folder.id);
     let icon = crate::timeline::folder_kind_icon(app, folder.id).unwrap_or("feature_group");
     let key = format!("{}{}", crate::timeline_folders::KEY, folder.id);
+    // Closed, it carries the worst mark of its features, as in the vertical History (#8592).
+    let (status, tip) =
+        if open { (None, None) } else { crate::timeline::worst_status(app, &crate::timeline_left::folder_features(app, &[folder.id])) };
     let r = node_row(
         rows,
         Spec { key: &key, ..Default::default() },
-        Row { depth, fold: Some(open), icon, label: &folder.name, name: true, rename: true, selected, ..Default::default() },
+        Row {
+            depth,
+            fold: Some(open),
+            icon,
+            label: &folder.name,
+            name: true,
+            rename: true,
+            selected,
+            status,
+            status_tip: tip.as_ref(),
+            ..Default::default()
+        },
     );
     if let Some(rect) = r.rect {
         crate::scenario::publish_handle(&format!("browser-history-folder:{}", folder.name), rect.center());
     }
     let what = crate::context_menu::RenameWhat::TimelineGroup(folder.id);
-    // F2 and Group Features start the rename before the row is known; the row takes it over.
-    if let Some(rename) = app.menu.rename.as_mut().filter(|rename| rename.what == what && !rename.inline) {
+    // F2 and Group Features start the rename before the row is known (the vertical History's own
+    // menu marks it inline without a row); the row takes it over.
+    if let Some(rename) = app.menu.rename.as_mut().filter(|rename| rename.what == what && (!rename.inline || rename.inline_id.is_none())) {
         rename.inline = true;
         rename.inline_id = r.row_id;
         rename.focused = false;
@@ -2050,6 +2068,33 @@ mod tests {
         assert!(crate::context_menu::rename_selection(&mut h.app, Pos2::ZERO), "F2 renames the picked folder");
         h.frames(2);
         assert!(h.app.menu.rename.as_ref().is_some_and(|rename| rename.inline), "in its row, not in a box");
+    }
+
+    /// #7221: a closed folder carries the worst mark of its features, Find in Timeline opens the
+    /// folders around its feature, and a folder named from the vertical History's menu (marked
+    /// inline but without a row) is typed in its header row.
+    #[test]
+    fn browser_history_closed_folder_marks_reveals_and_names() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"First","body_name":"A"})).unwrap();
+        let broken =
+            h.app.run("solid.box", json!({"length":6,"width":6,"height":6,"name":"Broken","body_name":"B"})).unwrap()["feature"].as_u64().unwrap();
+        let folder = h.app.run("timeline.group", json!({"features":[broken],"name":"Holes"})).unwrap()["group"].as_u64().unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        settle_heavy(&mut h);
+        h.app.session.model.results.iter_mut().find(|r| r.id == broken).unwrap().error = Some("the blend is too large".into());
+        crate::timeline_folders::set_open(&mut h.app, folder, false);
+        h.frames(2);
+        assert!(!crate::scenario::handles("status:error:Holes").is_empty(), "the closed folder shows its feature's mark");
+
+        reveal_in_history(&mut h.app, broken);
+        settle_heavy(&mut h);
+        assert!(crate::timeline_folders::is_open(&h.app, folder, true), "Find in Timeline opens the folder");
+        assert!(h.app.tree.reveal_feature.is_none(), "the feature row was drawn and scrolled to");
+
+        crate::timeline_left::start_folder_rename(&mut h.app, folder);
+        h.frames(2);
+        assert!(h.app.menu.rename.as_ref().is_some_and(|rename| rename.inline_id.is_some()), "the header row took the rename");
     }
 
     /// #7221 with #9565: a row dragged between a folder's rows joins the folder, and one dragged
