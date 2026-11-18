@@ -472,8 +472,8 @@ reply says `rolled_back: false`, marks the step `still_running` and lists it in 
 will apply when it finishes.
 
 `batch` rollback goes back to an engine checkpoint (`edit.checkpoint`) taken before the first
-step: the design, the active sketch and the undo history are restored exactly as they were,
-however long the history is. Batches that call `file.new` or `doc.open` get the design back,
+step: the design (its drawings too), the active sketch, the drawing open and the undo history
+are restored exactly as they were, however long the history is. Batches that call `file.new` or `doc.open` get the design back,
 not its file path. (An older app without checkpoints falls back to undoing as many steps as
 the batch added to the undo history.) A checkpoint that a step of the batch takes stays after a
 batch that went through; a rollback that goes back uses it up.

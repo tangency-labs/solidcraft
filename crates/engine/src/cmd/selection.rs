@@ -164,7 +164,7 @@ impl<'a> Context<'a> {
                 }
             }
             // What these are (origin, direction, position) comes from the measurement above.
-            Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {}
+            Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } | Sel::Drawing { .. } => {}
         }
     }
 
@@ -289,7 +289,7 @@ fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
         Sel::ExternalSketchCurve { sketch, id } => sketch_curve_point(s, Some(*sketch), id),
         // An occurrence: where it is placed in the world.
         Sel::Occurrence { path } => s.occurrence_placement(path).ok().map(|p| solidcraft_doc::apply_point(&p.world, Vec3::ZERO)),
-        Sel::Feature { .. } | Sel::SketchConstraint { .. } | Sel::Profile { .. } => None,
+        Sel::Feature { .. } | Sel::SketchConstraint { .. } | Sel::Profile { .. } | Sel::Drawing { .. } => None,
     }
 }
 

@@ -12,6 +12,22 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 static PROCESS_HOST_LIMITS: std::sync::OnceLock<HostLimits> = std::sync::OnceLock::new();
+/// The command line's and headless MCP's plugins: the plugins folder of every session of the process
+/// (`None`: the per-user one) and whether its grants are kept in that folder's grant store between
+/// runs. Unset: the per-user folder, with grants that last for the session.
+static PROCESS_PLUGINS: std::sync::OnceLock<(Option<PathBuf>, bool)> = std::sync::OnceLock::new();
+/// Make every session this process opens from now on use the plugins folder `plugins` (`None`: the
+/// per-user one) and, with `keep_grants`, keep approved grants in that folder's grant store and read
+/// them back there, as the desktop app does. Without it, approvals last for the session, as before
+/// there was a store. The command line and headless MCP call this once, before any session.
+pub fn configure_process_plugins(plugins: Option<PathBuf>, keep_grants: bool) -> Result<()> {
+    if let Some(dir) = &plugins
+        && !dir.is_absolute()
+    {
+        return Err(error("the plugins folder must be an absolute path"));
+    }
+    PROCESS_PLUGINS.set((plugins, keep_grants)).map_err(|_| error("the process plugins folder is already configured"))
+}
 pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     limits.validate()?;
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
@@ -59,6 +75,10 @@ pub struct AppState {
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
+    /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
+    /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
+    /// grants live only in this session, or the app keeps them itself (the desktop app).
+    pub stored: Option<grant_store::Synced>,
 }
 
 impl AppState {
@@ -68,6 +88,43 @@ impl AppState {
             return None;
         }
         self.plugins_dir.clone().or_else(|| crate::recovery::data_dir().map(|p| p.join("plugins")))
+    }
+
+    /// A new session's plugin state: the process's plugins folder ([`configure_process_plugins`]),
+    /// and when the process keeps grants between runs, one that reads and writes its grant store.
+    pub fn for_process() -> Self {
+        match PROCESS_PLUGINS.get() {
+            Some((plugins, keep)) => Self { plugins_dir: plugins.clone(), stored: keep.then(Default::default), ..Default::default() },
+            None => Self::default(),
+        }
+    }
+
+    /// Take in grants another program stored or revoked since this session last looked. Nothing
+    /// to do unless this session keeps its grants in the store.
+    pub fn refresh_stored(&mut self) {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return };
+        if let Some(synced) = self.stored.as_mut() {
+            synced.refresh(&dir, &mut self.grants);
+        }
+    }
+
+    /// Delete plugin `id`'s record from the store, when this session keeps its grants there, even
+    /// one this session never read: a removed or revoked plugin leaves no approval behind.
+    pub fn forget_stored(&mut self, id: &str) -> Result<()> {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return Ok(()) };
+        match self.stored.as_mut() {
+            Some(synced) => synced.forget(&dir, id).map_err(|e| error(format!("could not take back the approvals for later sessions: {e}"))),
+            None => Ok(()),
+        }
+    }
+
+    /// Write this session's changed grants to the store, when it keeps them there.
+    pub fn persist_stored(&mut self) -> Result<()> {
+        let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return Ok(()) };
+        match self.stored.as_mut() {
+            Some(synced) => synced.persist(&dir, &self.grants).map_err(|e| error(format!("could not save the approvals for later sessions: {e}"))),
+            None => Ok(()),
+        }
     }
 
     /// Discovery must not replace a package path explicitly selected by inspection.
@@ -192,6 +249,19 @@ pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimit
     limits
 }
 
+/// Take back what was approved for plugin `id`, keeping it installed: it then runs with nothing
+/// granted until it is installed again with approvals. Whether there was anything to take back.
+pub fn revoke(s: &mut Session, id: &str) -> Result<bool> {
+    if !valid_id(id) {
+        return Err(HostError::InvalidInput { field: "id".into(), reason: "invalid plugin id".into() }.into());
+    }
+    s.plugin_state.refresh_stored();
+    let revoked = s.plugin_state.grants.remove(id).is_some();
+    s.plugin_state.persist_stored()?;
+    s.plugin_state.forget_stored(id)?;
+    Ok(revoked)
+}
+
 /// The most files and folders one plugin folder holds; install and removal both stop there.
 pub(super) const MAX_FILES: usize = 1024;
 
@@ -205,6 +275,7 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
 }
 
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+    session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
     }
@@ -274,6 +345,8 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+pub mod check;
+pub mod grant_store;
 mod import;
 pub mod install;
 #[cfg(not(target_arch = "wasm32"))]
