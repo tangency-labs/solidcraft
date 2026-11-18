@@ -566,29 +566,32 @@ enum Wit {
     V0_1,
 }
 
+/// Record an interface version before compilation can fail on a validator limit.
+fn note_version(name: &str, found: &mut BTreeSet<String>) -> Result<()> {
+    let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
+    let version_of = |name: &str| -> Option<String> {
+        name.strip_prefix(&format!("{package}/")).and_then(|rest| rest.split_once('@')).map(|(_, version)| version.chars().take(32).collect())
+    };
+    let Some(version) = version_of(name) else { return Ok(()) };
+    if !craft_plugin::WIT_VERSIONS.contains(&version.as_str()) {
+        return Err(HostError::UnsupportedCapability {
+            capability: format!("{package}@{version}"),
+            reason: format!(
+                "built against {package}@{version}, and this host runs {package} {}; update the app or the plugin",
+                craft_plugin::WIT_VERSIONS.join(" and ")
+            ),
+        });
+    }
+    found.insert(version);
+    Ok(())
+}
+
 /// Refuse reserved network imports even when Wasmtime elides an unused import instance, and read
 /// the WIT version the component's imports and exports name: one the host runs, and only one.
 fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
     use wasmtime::component::types::ComponentItem;
     let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
-    let version_of = |name: &str| -> Option<String> {
-        name.strip_prefix(&format!("{package}/")).and_then(|rest| rest.split_once('@')).map(|(_, version)| version.chars().take(32).collect())
-    };
     let mut found = BTreeSet::new();
-    let note = |name: &str, found: &mut BTreeSet<String>| -> Result<()> {
-        let Some(version) = version_of(name) else { return Ok(()) };
-        if !craft_plugin::WIT_VERSIONS.contains(&version.as_str()) {
-            return Err(HostError::UnsupportedCapability {
-                capability: format!("{package}@{version}"),
-                reason: format!(
-                    "built against {package}@{version}, and this host runs {package} {}; update the app or the plugin",
-                    craft_plugin::WIT_VERSIONS.join(" and ")
-                ),
-            });
-        }
-        found.insert(version);
-        Ok(())
-    };
     /// One import (`import`) or export and everything in it, at most `remaining` items in all.
     #[allow(clippy::too_many_arguments)]
     fn check(
@@ -624,12 +627,12 @@ fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
     }
     let mut remaining = 4096;
     for (name, import) in component.component_type().imports(engine) {
-        check(engine, package, true, name, import.ty, 0, &mut remaining, &mut |name| note(name, &mut found))?;
+        check(engine, package, true, name, import.ty, 0, &mut remaining, &mut |name| note_version(name, &mut found))?;
     }
     // Exports are read the same way, members of exported instances too, with a budget of their own.
     let mut remaining = 4096;
     for (name, export) in component.component_type().exports(engine) {
-        check(engine, package, false, name, export.ty, 0, &mut remaining, &mut |name| note(name, &mut found))?;
+        check(engine, package, false, name, export.ty, 0, &mut remaining, &mut |name| note_version(name, &mut found))?;
     }
     if found.len() > 1 {
         let versions = found.iter().map(String::as_str).collect::<Vec<_>>().join(" and ");
@@ -932,14 +935,70 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     Ok((engine, component))
 }
 
+/// The parser exposes limit failures as messages rather than a public error kind.
+fn component_parse_error(error: &wasmtime::wasmparser::BinaryReaderError) -> HostError {
+    if error.message().contains("exceeds limit") {
+        limit(&format!("component validation: {}", error.message()))
+    } else {
+        trap(format!("component parsing failed: {error}"))
+    }
+}
+
+/// Read the outer interface before Wasmtime validation. Exporting an instance creates another
+/// instance index, so its 1000-instance limit can precede our 4096-interface limit. The typed scan
+/// still checks nested interfaces after compilation; this pass does not interpret private names.
+fn check_outer_interfaces(bytes: &[u8]) -> Result<()> {
+    use wasmtime::wasmparser::{Parser, Payload};
+    let mut depth = 0usize;
+    let mut imports = 0usize;
+    let mut exports = 0usize;
+    let mut found = BTreeSet::new();
+    for payload in Parser::new(0).parse_all(bytes) {
+        let payload = payload.map_err(|e| component_parse_error(&e))?;
+        match payload {
+            Payload::Version { .. } => depth += 1,
+            Payload::End(_) => depth = depth.saturating_sub(1),
+            Payload::ComponentImportSection(section) if depth == 1 => {
+                for import in section {
+                    let import = import.map_err(|e| component_parse_error(&e))?;
+                    imports += 1;
+                    note_version(import.name.name, &mut found)?;
+                }
+            }
+            Payload::ComponentExportSection(section) if depth == 1 => {
+                for export in section {
+                    let export = export.map_err(|e| component_parse_error(&e))?;
+                    exports += 1;
+                    note_version(export.name.name, &mut found)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    if imports > 4096 {
+        return Err(limit("plugin import interface count or depth"));
+    }
+    if exports > 4096 {
+        return Err(limit("plugin export interface count or depth"));
+    }
+    Ok(())
+}
+
 /// Compiles `bytes` under the host's configuration, without the cache.
 fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+    check_outer_interfaces(bytes)?;
     let mut config = Config::new();
     config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
     // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
     config.async_stack_size(stack_bytes.saturating_add(1 << 20));
     let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
-    let component = Component::from_binary(&engine, bytes).map_err(|e| trap(format!("component compilation failed: {e:#}")))?;
+    let component = Component::from_binary(&engine, bytes).map_err(|e| {
+        // Inspect the parser error itself, not plugin names in the compilation context.
+        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
+            return component_parse_error(error);
+        }
+        trap(format!("component compilation failed: {e:#}"))
+    })?;
     Ok((engine, component))
 }
 
