@@ -2593,10 +2593,13 @@ fn rolled_volume(r1: f64, r2: f64) -> f64 {
 }
 
 /// The kernel's certified enclosure of `b`'s volume holds `want`, and is narrower than
-/// `width` (so that it decides `want` against a nearby value).
+/// `width` (so that it decides `want` against a nearby value). The enclosure is asked for
+/// `width` itself: refinement stops as soon as it is that narrow, and a tighter ask only
+/// refines further, past what is asserted (on the ledge, into strips that settle at 7.4e-4
+/// and spend the cell budget).
 fn enclosure_holds(b: &Body, want: f64, width: f64) {
     let (k, mut brep) = kernel_copy(b);
-    let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, width / 4.0).unwrap();
+    let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, width).unwrap();
     assert!(e.lo <= want && want <= e.hi, "{} {want} {}", e.lo, e.hi);
     assert!(e.hi - e.lo <= width, "{} {}", e.lo, e.hi);
 }
