@@ -448,6 +448,29 @@ fn the_view_menu_brings_the_browser_tree_back() {
     assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the setting runs the command: {echo}");
 }
 
+/// Whether the panel layout holds the Browser tree open, and how it is asked to be.
+fn browser_layout_open(app: &crate::SolveApp) -> Option<bool> {
+    app.panel_runtime()
+        .and_then(|runtime| runtime.layout().layout().instances.iter().find(|panel| panel.id.0 == "browser").map(|panel| panel.requested_open))
+}
+
+/// The View menu row runs `view.browser` without parameters, which toggles the tree: two quick
+/// toggles leave it open again, not closed (#16058).
+#[test]
+fn a_double_toggle_of_the_browser_tree_leaves_it_open() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the tree starts open in the layout");
+    // The tree closes.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(!h.app.ui.show_browser, "the first toggle closes the tree");
+    // The tree opens again: the second toggle reads the closed state, before the panels sync.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(h.app.ui.show_browser, "the second toggle leaves the tree open");
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the layout holds it open again");
+    assert!(crate::browser::panel_open(&h.app), "the tree is open again");
+}
+
 #[test]
 fn origin_axes_display_menu_and_preferences_share_an_opt_in_setting() {
     let mut h = Harness::new();
