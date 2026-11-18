@@ -25,7 +25,7 @@ pub(super) enum Tool {
     Projected,
     Edit(Option<u64>),
     Dimension(Option<u64>),
-    Note,
+    Note(Option<u64>),
     PartsList(Option<u64>),
 }
 
@@ -36,7 +36,7 @@ impl Tool {
             "drawing.view.projected" | "drawing.view.projected.planned" => Some(Self::Projected),
             "drawing.view.edit" => Some(Self::Edit(None)),
             "drawing.dimension" => Some(Self::Dimension(None)),
-            "drawing.note" => Some(Self::Note),
+            "drawing.note" => Some(Self::Note(None)),
             "drawing.parts_list" => Some(Self::PartsList(None)),
             _ => None,
         }
@@ -48,7 +48,7 @@ impl Tool {
             Self::Projected => tr("ui.drawing_panel.projected"),
             Self::Edit(_) => tr("ui.drawing_panel.edit"),
             Self::Dimension(_) => tr("ui.drawing_panel.dimension"),
-            Self::Note => tr("ui.drawing_panel.note"),
+            Self::Note(_) => tr("ui.drawing_panel.note"),
             Self::PartsList(_) => tr("ui.drawing_panel.parts_list"),
         }
     }
@@ -117,13 +117,7 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
         Tool::Base | Tool::Projected => base_view(ui, &app.session.doc.name, tool == Tool::Projected),
         Tool::Edit(view) => edit_view(ui, drawing, sheet, view),
         Tool::Dimension(selected) => dimension(ui, drawing, sheet, selected),
-        Tool::Note => {
-            ui.add_enabled_ui(false, |ui| {
-                text(ui, tr("ui.drawing_panel.text"), "");
-                choice(ui, tr("ui.drawing_panel.text_style"), 0, &[tr("ui.drawing_panel.default")]);
-            })
-            .inner
-        }
+        Tool::Note(_) => {}
         Tool::PartsList(table) => parts_list(ui, drawing, sheet, table, &app.session.doc.name),
     }
 }
