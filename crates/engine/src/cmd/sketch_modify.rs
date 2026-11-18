@@ -658,6 +658,9 @@ fn release_trim_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
         return Ok(Vec::new());
     }
     let id = curve.id.clone();
+    if let Some(curves) = sk.break_offset_topology(&id)? {
+        return Ok(curves);
+    }
     let family = |id: &String| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).and_then(|c| released_family(&c.kind));
     let line_or_arc = |id: &String| {
         sk.curve_index(id).and_then(|i| sk.curves.get(i)).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. }))
@@ -978,10 +981,7 @@ fn next_crossing(sk: &Sketch, path: &[Vec2], after: (usize, f64)) -> Option<(usi
 /// Whether trim may change curve `ci` (what [`curve_arg`] accepts, and not an infinite line).
 fn curve_ok(sk: &Sketch, ci: usize) -> bool {
     let Some(c) = sk.curves.get(ci) else { return false };
-    !c.infinite
-        && !sk.is_linked_curve(ci)
-        && !sk.freeform_offsets.iter().any(|offset| offset.output == c.id)
-        && !sk.offsets.iter().filter_map(|offset| offset.topology.as_ref()).any(|topology| topology.roles.iter().any(|role| role.output == c.id))
+    !c.infinite && !sk.is_linked_curve(ci) && !sk.freeform_offsets.iter().any(|offset| offset.output == c.id)
 }
 
 /// Where segment `a`–`b` crosses segment `c`–`d`: the parameter along `a`–`b` and the point.
@@ -2891,6 +2891,153 @@ fn piece_dist(p: &Piece, q: Vec2) -> f64 {
     }
 }
 
+/// A line or an arc of a chain as the chain walks it, from `from` to `to`; an arc turns round
+/// `c` anticlockwise when `ccw`.
+#[derive(Clone, Copy)]
+enum Walked {
+    Line { from: Vec2, to: Vec2 },
+    Arc { c: Vec2, from: Vec2, to: Vec2, ccw: bool },
+}
+
+fn cross2(u: Vec2, v: Vec2) -> f64 {
+    u.x * v.y - u.y * v.x
+}
+
+impl Walked {
+    fn of(sk: &Sketch, curve: usize, forward: bool) -> Option<Walked> {
+        match sk.curves.get(curve)?.kind {
+            CurveKind::Line { a, b } => {
+                let (a, b) = (sk.point(a)?, sk.point(b)?);
+                Some(if forward { Walked::Line { from: a, to: b } } else { Walked::Line { from: b, to: a } })
+            }
+            CurveKind::Arc { c, a, b } => {
+                let (c, a, b) = (sk.point(c)?, sk.point(a)?, sk.point(b)?);
+                Some(if forward { Walked::Arc { c, from: a, to: b, ccw: true } } else { Walked::Arc { c, from: b, to: a, ccw: false } })
+            }
+            _ => None,
+        }
+    }
+    fn ends(&self) -> (Vec2, Vec2) {
+        match *self {
+            Walked::Line { from, to } | Walked::Arc { from, to, .. } => (from, to),
+        }
+    }
+    /// An arc's centre, radius, and its anticlockwise start and sweep (the sketch's arc, `a` to
+    /// `b`, whichever way the chain walks it).
+    fn circle(&self) -> Option<(Vec2, f64, Vec2, f64)> {
+        let Walked::Arc { c, from, to, ccw } = *self else { return None };
+        let (a, b) = if ccw { (from, to) } else { (to, from) };
+        Some((c, (a - c).len(), a, ((b - c).angle() - (a - c).angle()).rem_euclid(TAU)))
+    }
+    /// The point of the piece nearest `q`, and the way the chain runs there.
+    fn nearest(&self, q: Vec2) -> (Vec2, Vec2) {
+        match *self {
+            Walked::Line { from, to } => {
+                let along = to - from;
+                let t = if along.len2() > 0.0 { ((q - from).dot(along) / along.len2()).clamp(0.0, 1.0) } else { 0.0 };
+                (from + along * t, along)
+            }
+            Walked::Arc { c, from, to, ccw } => {
+                let (centre, r, a, sweep) = self.circle().unwrap_or((c, 0.0, from, 0.0));
+                let w = q - centre;
+                let on_span = w.len2() > 0.0 && (w.angle() - (a - centre).angle()).rem_euclid(TAU) <= sweep;
+                let p = if on_span {
+                    centre + w * (r / w.len())
+                } else if q.dist(from) <= q.dist(to) {
+                    from
+                } else {
+                    to
+                };
+                // Anticlockwise the way on is the radius turned a quarter left.
+                let radial = p - centre;
+                let tangent = Vec2::new(-radial.y, radial.x);
+                (p, if ccw { tangent } else { tangent * -1.0 })
+            }
+        }
+    }
+}
+
+/// Whether `q` is on the left of a chain of lines and arcs, as it is walked, or `None` when
+/// the chain has another kind of curve. A closed chain is a loop, so the side is inside or
+/// outside it: the loop's winding number round `q`, counted on its own lines and arcs, is
+/// positive inside an anticlockwise loop and negative inside a clockwise one; outside, the
+/// loop's signed area (its chord polygon and each arc's segment) gives its way round. An open chain has no
+/// inside: `q` is on the side of the piece whose nearest point to it is nearest, read off the
+/// way the chain runs at that point. Two pieces as near meet there, tangent on a smooth chain,
+/// so either gives the same side.
+fn chain_side(sk: &Sketch, order: &[(usize, bool)], closed: bool, q: Vec2) -> Option<bool> {
+    let pieces = order.iter().map(|(i, f)| Walked::of(sk, *i, *f)).collect::<Option<Vec<_>>>()?;
+    if !closed {
+        let (mut best, mut left) = (f64::INFINITY, None);
+        for piece in &pieces {
+            let (p, along) = piece.nearest(q);
+            let d = q.dist(p);
+            if d < best {
+                (best, left) = (d, Some(cross2(along, q - p) >= 0.0));
+            }
+        }
+        return left;
+    }
+    // The winding number counts the loop's crossings of the ray from `q` toward +x, up +1 and
+    // down -1, each crossing taken on a stretch of the loop that only rises or only falls, with
+    // its lower end counted and its upper end not, so a joint on the ray counts once. The gaps
+    // between pieces' ends (where a chain joins ends that are merely close) are stretches too.
+    let (mut winding, mut area2) = (0i64, 0.0);
+    let cross_line = |p0: Vec2, p1: Vec2| {
+        let turn = cross2(p1 - p0, q - p0);
+        if p0.y <= q.y && q.y < p1.y && turn > 0.0 {
+            1
+        } else if p1.y <= q.y && q.y < p0.y && turn < 0.0 {
+            -1
+        } else {
+            0
+        }
+    };
+    for (k, piece) in pieces.iter().enumerate() {
+        let (from, to) = piece.ends();
+        let next = pieces.get((k + 1) % pieces.len()).map_or(from, |n| n.ends().0);
+        area2 += cross2(from, to) + cross2(to, next);
+        winding += cross_line(to, next);
+        match (*piece, piece.circle()) {
+            (Walked::Line { .. }, _) => winding += cross_line(from, to),
+            (Walked::Arc { ccw, .. }, Some((c, r, a, sweep))) => {
+                let way = if ccw { 1.0 } else { -1.0 };
+                // The region between the arc and its chord, its own way round.
+                area2 += way * r * r * (sweep - sweep.sin());
+                // Split at the top and bottom of the circle, where it stops rising or falling;
+                // the arc's own ends stay its points, so they meet the next pieces exactly.
+                let start = (a - c).angle();
+                let mut cuts = vec![(start, a)];
+                let mut turn = ((start - FRAC_PI_2) / PI).floor() + 1.0;
+                while FRAC_PI_2 + turn * PI < start + sweep {
+                    let t = FRAC_PI_2 + turn * PI;
+                    cuts.push((t, c + Vec2::new(r * t.cos(), r * t.sin())));
+                    turn += 1.0;
+                }
+                let end = if ccw { to } else { from };
+                cuts.push((start + sweep, end));
+                for w in cuts.windows(2) {
+                    let &[(t0, p0), (t1, p1)] = w else { continue };
+                    let (lo, hi) = if p0.y <= p1.y { (p0.y, p1.y) } else { (p1.y, p0.y) };
+                    if lo > q.y || q.y >= hi {
+                        continue;
+                    }
+                    // Right or left half of the circle, by the stretch's middle.
+                    let half = if ((t0 + t1) * 0.5).cos() >= 0.0 { 1.0 } else { -1.0 };
+                    let x = c.x + half * (r * r - (q.y - c.y) * (q.y - c.y)).max(0.0).sqrt();
+                    if x > q.x {
+                        // Rising anticlockwise, walked the arc's own way.
+                        let rises = (p1.y > p0.y) == ccw;
+                        winding += if rises { 1 } else { -1 };
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(if winding != 0 { winding > 0 } else { area2 < 0.0 })
+}
+
 /// One side of an offset. The curves created at the signed distance, the parallel constraints
 /// added with them, and the association when the boundary carries an offset topology.
 struct Side {
@@ -3086,6 +3233,9 @@ fn offset_instances(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
 #[derive(Clone, Copy)]
 struct OffsetOptions {
     side: Option<Vec2>,
+    /// `side` is the caller's point, read against the whole chain ([`chain_side`]); off, it is
+    /// a later instance's step past the first curve ([`offset_beyond`]), read off that curve.
+    side_of_chain: bool,
     chain: bool,
     distance: f64,
     symmetric: bool,
@@ -3095,7 +3245,7 @@ struct OffsetOptions {
 /// Build every side of one connected source group. The pool is frozen before any output
 /// is created, so later groups cannot accidentally walk a newly created offset.
 fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::HashSet<String>, options: OffsetOptions) -> Result<Vec<Side>> {
-    let OffsetOptions { side, chain: use_chain, distance: d0, symmetric, distance2 } = options;
+    let OffsetOptions { side, side_of_chain, chain: use_chain, distance: d0, symmetric, distance2 } = options;
     let cmd = "sketch.offset";
     sk.refresh_offsets()?;
     let sel: Vec<usize> = ids.iter().map(|i| sk.curve_index(i).ok_or_else(|| bad(cmd, format!("unknown curve `{i}`")))).collect::<Result<_>>()?;
@@ -3160,8 +3310,13 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
     // for the distance can turn it round; other curves compare both offsets' distance to it.
     let d = match side {
         Some(q) => {
+            // An arc's own circle only says which side of the whole chain `q` is on when the
+            // arc is alone: a fillet's circle is small, and a point in the middle of the
+            // outline is outside it though on the arc's inner side (#18606). A chain of lines
+            // and arcs answers for itself ([`chain_side`]); other chains ask the first curve.
+            let chained = if side_of_chain && order.len() > 1 { chain_side(sk, &order, closed, q) } else { None };
             let forward = order.iter().find(|x| x.0 == first).is_none_or(|x| x.1);
-            let left = match sk.curves.get(first).map(|c| c.kind.clone()) {
+            let left = chained.or_else(|| match sk.curves.get(first).map(|c| c.kind.clone()) {
                 Some(CurveKind::Line { a, b }) => {
                     let (a, b) = (sk.point(a).unwrap_or_default(), sk.point(b).unwrap_or_default());
                     let (from, along) = if forward { (a, b - a) } else { (b, a - b) };
@@ -3173,7 +3328,7 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
                     Some((q.dist(c) <= c.dist(a)) == forward)
                 }
                 _ => None,
-            };
+            });
             let toward = left.unwrap_or_else(|| {
                 let dist = |dd: f64| offset_piece(sk, first, forward, dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
                 dist(d0.abs()) <= dist(-d0.abs())
@@ -3353,7 +3508,7 @@ fn offset_ladder(
             // One side at a time from here: the side this rung follows is the whole of its
             // direction, so `side`, `symmetric` and `distance2` had their say in the first rung.
             let beyond = offset_beyond(sk, curves);
-            let step = OffsetOptions { side: beyond, chain: false, distance: *distance, symmetric: false, distance2: None };
+            let step = OffsetOptions { side: beyond, side_of_chain: false, chain: false, distance: *distance, symmetric: false, distance2: None };
             // Which instance ran out of room is the whole of the answer, so the refusal names it
             // in front of the reason, rather than wrapping one "invalid parameters" in another.
             let (made, _) = offset_rung(sk, cmd, curves, eligible, step, std::slice::from_ref(name)).map_err(|error| {
@@ -3444,7 +3599,7 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         let mut pending = ids.clone();
         let mut sides = Vec::new();
         while !pending.is_empty() {
-            let options = OffsetOptions { side, chain: use_chain, distance: d0, symmetric, distance2 };
+            let options = OffsetOptions { side, side_of_chain: true, chain: use_chain, distance: d0, symmetric, distance2 };
             let (group, sources) = offset_ladder(sk, cmd, &pending, &eligible, options, instances, &made)?;
             let before = pending.len();
             pending.retain(|id| !sources.contains(id));

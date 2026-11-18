@@ -205,6 +205,7 @@ fn a_newer_files_reply_matches_the_output_schema() {
         bytes: 3,
         name: "a".into(),
         kept_format: Some("solidcraft/99".into()),
+        cache_not_saved: None,
         warnings: Some(vec!["Not kept: x. The previous file is `a.sc.bak`.".into()]),
         not_kept: Some(vec!["x".into()]),
         param_warnings: Vec::new(),

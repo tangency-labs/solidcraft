@@ -114,18 +114,13 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
 
 fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet: &Sheet, key: &str) {
     for (kind, label, icon, present) in [
-        ("paper", "ui.drawing_browser_sheet_border", "lock", true),
-        ("border", "ui.drawing_browser_drawing_border", "lock", sheet.border.is_some()),
+        ("paper", "ui.drawing_browser_sheet_border", "", true),
+        ("border", "ui.drawing_browser_drawing_border", "", sheet.border.is_some()),
         ("title-block", "ui.drawing_browser_title_block", "drawing_edit_table", sheet.title_block.is_some()),
     ] {
         if present {
             let label = app.tr(label).to_string();
-            row(
-                rows,
-                &format!("{key}:{kind}"),
-                Row { depth: 2, label: &label, icon, name: true, badges: &["lock"], ..Row::default() },
-                NodeMenu::None,
-            );
+            row(rows, &format!("{key}:{kind}"), Row { depth: 2, label: &label, icon, name: true, ..Row::default() }, NodeMenu::None);
         }
     }
 
@@ -147,7 +142,7 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
                 None => {
                     let msg = format!("ui.drawing_browser_{kind}");
                     let label = solidcraft_ui_text::format(&msg, &[("number", &(index + 1).to_string())]);
-                    (label, (kind == "dimension").then_some(kind))
+                    (label, matches!(kind, "dimension" | "note").then_some(kind))
                 }
             };
             let hit = row(
