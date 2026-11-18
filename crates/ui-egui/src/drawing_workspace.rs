@@ -1020,6 +1020,39 @@ mod tests {
         assert_eq!(centre(&h), Vec2::new(175.0, 140.0));
     }
 
+    /// A blank sheet's ribbon offers every tool that has a working panel: a click opens it.
+    #[test]
+    fn a_blank_sheets_working_tools_open_from_the_ribbon() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.frames(6);
+        for (tab, id, tool) in [
+            ("DRAWING LAYOUT", "drawing.view.base.planned", Tool::Base),
+            ("DRAWING ANNOTATE", "drawing.dimension", Tool::Dimension(None)),
+            ("DRAWING ANNOTATE", "drawing.note", Tool::Note(None)),
+            ("DRAWING PARTS", "drawing.parts_list", Tool::PartsList(None)),
+        ] {
+            close_panel(&mut h.app);
+            h.app.ui.tab = tab.into();
+            h.frames(4);
+            assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is on {tab}");
+            h.step(&serde_json::json!({"click":{"handle":format!("button:{id}")}})).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.drawing_workspace.options, Some(tool), "{id} opens its panel from the ribbon");
+            let spec = solidcraft_engine::find_command(id).unwrap();
+            assert!(!crate::toolbar::coming_soon(&h.app, spec), "{id} is drawn as a working tool, not faded");
+        }
+        for id in ["drawing.update.planned", "drawing.view.section.planned", "drawing.export.planned"] {
+            let spec = solidcraft_engine::find_command(id).unwrap();
+            assert!(crate::toolbar::coming_soon(&h.app, spec), "{id} opens nothing yet: faded, coming soon");
+        }
+        assert_eq!(h.app.tr("ui.drawing_ribbon.planned"), "Coming soon");
+    }
+
     #[test]
     fn base_view_places_projected_views_until_escape() {
         use solidcraft_engine::doc::drawing::view::{ViewKind, ViewPlace};
