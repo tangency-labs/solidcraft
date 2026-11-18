@@ -11,10 +11,12 @@
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcore::math::Point2;
+use solidcore::error::Reason;
+use solidcore::error::Result;
+use solidcore::math::{Point2, Vec2};
 use solidcore::prism::profile::Seg2;
 use solidcore::weld::groove::{
-    groove_section, Contour, GrooveNotice, GrooveSection, GrooveWeld, WeldSide,
+    fill, Contour, FillOptions, GrooveNote, GrooveSection, GrooveWeld, WeldFailure, WeldSide,
 };
 use solidcore::SolidError;
 
@@ -53,19 +55,59 @@ fn mirror(wall: &[Seg2]) -> Vec<Seg2> {
         .collect()
 }
 
-fn weld(left: Vec<Seg2>, right: Vec<Seg2>) -> GrooveWeld {
-    GrooveWeld {
-        left,
-        right,
-        ..GrooveWeld::default()
+/// One test case: the groove's section and the options it is filled with, flat faces and the
+/// whole groove unless a case says otherwise.
+#[derive(Debug, Clone)]
+struct Case {
+    left: Vec<Seg2>,
+    right: Vec<Seg2>,
+    plate_normal: Option<Vec2>,
+    face: Contour,
+    second_face: Option<Contour>,
+    depth: Option<f64>,
+}
+
+impl Default for Case {
+    fn default() -> Self {
+        Self {
+            left: Vec::new(),
+            right: Vec::new(),
+            plate_normal: None,
+            face: Contour::Flat,
+            second_face: None,
+            depth: None,
+        }
     }
 }
 
-fn section(w: &GrooveWeld) -> GrooveSection {
-    groove_section(w).unwrap()
+fn weld(left: Vec<Seg2>, right: Vec<Seg2>) -> Case {
+    Case {
+        left,
+        right,
+        ..Case::default()
+    }
 }
 
-fn area(w: &GrooveWeld) -> f64 {
+/// The two kernel steps: the groove's section (here built by hand), then the fill.
+fn run(c: &Case) -> Result<GrooveWeld> {
+    let section = GrooveSection {
+        left: c.left.clone(),
+        right: c.right.clone(),
+        plate_normal: c.plate_normal,
+    };
+    let options = FillOptions {
+        face: c.face,
+        second_face: c.second_face,
+        depth: c.depth,
+    };
+    fill(&section, &options)
+}
+
+fn section(w: &Case) -> GrooveWeld {
+    run(w).unwrap()
+}
+
+fn area(w: &Case) -> f64 {
     let s = section(w);
     assert!(s.region.holes.is_empty());
     s.region.signed_area().unwrap().value
@@ -161,7 +203,7 @@ fn every_standard_groove_is_filled_to_its_closed_form_area() {
     let s = section(&v);
     assert!(s.through);
     assert!((s.groove_depth - t).abs() < 1e-12);
-    assert!(s.notices.is_empty());
+    assert!(s.notes.is_empty());
 
     let (l, r) = bevel_walls(t, 45.0, 0.0);
     close(area(&weld(l, r)), G * t + t * t / 2.0);
@@ -239,7 +281,7 @@ fn convex_faces_add_their_segments_and_a_one_sided_root_stays_flat() {
     let (l, r) = v_walls(t, 60.0, 0.0);
     let groove = G * t + t * t * tan(30.0);
     let half = G / 2.0 + t * tan(30.0);
-    let w = GrooveWeld {
+    let w = Case {
         face: Contour::Convex { height: 1.5 },
         ..weld(l.clone(), r.clone())
     };
@@ -254,7 +296,7 @@ fn convex_faces_add_their_segments_and_a_one_sided_root_stays_flat() {
         .flat_map(|seg| (0..=16).map(move |i| seg.point_at(f64::from(i) / 16.0).y))
         .fold(f64::MAX, f64::min);
     assert!((lowest + t).abs() < 1e-12, "root at {lowest}");
-    assert!(s.notices.is_empty());
+    assert!(s.notes.is_empty());
 
     // welded from both sides: each face follows its own contour, flat by default
     let (t2, c2) = (12.0, 2.0);
@@ -262,19 +304,19 @@ fn convex_faces_add_their_segments_and_a_one_sided_root_stays_flat() {
     let (l, r) = x_walls(t2, c2);
     let half = G / 2.0 + d * tan(30.0);
     let x_groove = G * t2 + 2.0 * d * d * tan(30.0);
-    let w = GrooveWeld {
+    let w = Case {
         face: Contour::Convex { height: 1.0 },
         second_face: Some(Contour::Convex { height: 1.2 }),
         ..weld(l.clone(), r.clone())
     };
     close(area(&w), x_groove + segment(half, 1.0) + segment(half, 1.2));
-    let w = GrooveWeld {
+    let w = Case {
         face: Contour::Convex { height: 1.0 },
         second_face: Some(Contour::Flat),
         ..weld(l.clone(), r.clone())
     };
     close(area(&w), x_groove + segment(half, 1.0));
-    let w = GrooveWeld {
+    let w = Case {
         second_face: Some(Contour::Convex { height: 1.2 }),
         ..weld(l, r)
     };
@@ -302,11 +344,11 @@ fn blended_toes_run_out_tangentially_past_the_groove() {
     let groove = G * t + t * t * tan(30.0);
     let a = G / 2.0 + t * tan(30.0);
     let h = 1.5;
-    // the default overlap is the crest height
-    let w = GrooveWeld {
+    // an overlap equal to the crest height (ops' default)
+    let w = Case {
         face: Contour::ConvexBlended {
             height: h,
-            overlap: None,
+            overlap: h,
         },
         ..weld(l.clone(), r.clone())
     };
@@ -343,20 +385,20 @@ fn blended_toes_run_out_tangentially_past_the_groove() {
     }
 
     // a chosen overlap
-    let w = GrooveWeld {
+    let w = Case {
         face: Contour::ConvexBlended {
             height: h,
-            overlap: Some(0.5),
+            overlap: 0.5,
         },
         ..weld(l.clone(), r.clone())
     };
     close(area(&w), groove + blended_cap(a, h, 0.5));
 
     // no overlap is the plain convex face
-    let w = GrooveWeld {
+    let w = Case {
         face: Contour::ConvexBlended {
             height: h,
-            overlap: Some(0.0),
+            overlap: 0.0,
         },
         ..weld(l, r)
     };
@@ -379,16 +421,17 @@ fn a_concave_face_is_built_and_says_how_deep_it_dips() {
     let (l, r) = v_walls(t, 60.0, 0.0);
     let groove = G * t + t * t * tan(30.0);
     let a = G / 2.0 + t * tan(30.0);
-    let w = GrooveWeld {
+    let w = Case {
         face: Contour::Concave { depth: 1.0 },
         ..weld(l, r)
     };
     close(area(&w), groove - segment(a, 1.0));
     assert_eq!(
-        section(&w).notices,
-        vec![GrooveNotice::BelowToes {
+        section(&w).notes,
+        vec![GrooveNote::BelowToes {
             side: WeldSide::Face,
             depth: 1.0,
+            below: [1.0, 1.0],
             ratio: 1.0 / 6.0,
         }]
     );
@@ -396,7 +439,7 @@ fn a_concave_face_is_built_and_says_how_deep_it_dips() {
     let (t2, c2) = (12.0, 2.0);
     let d = (t2 - c2) / 2.0;
     let (xl, xr) = x_walls(t2, c2);
-    let w = GrooveWeld {
+    let w = Case {
         second_face: Some(Contour::Concave { depth: 0.5 }),
         ..weld(xl, xr)
     };
@@ -405,10 +448,11 @@ fn a_concave_face_is_built_and_says_how_deep_it_dips() {
         G * t2 + 2.0 * d * d * tan(30.0) - segment(G / 2.0 + d * tan(30.0), 0.5),
     );
     assert_eq!(
-        section(&w).notices,
-        vec![GrooveNotice::BelowToes {
+        section(&w).notes,
+        vec![GrooveNote::BelowToes {
             side: WeldSide::Second,
             depth: 0.5,
+            below: [0.5, 0.5],
             ratio: 0.5 / 12.0,
         }]
     );
@@ -419,11 +463,21 @@ fn a_concave_face_across_the_walls_is_refused_with_the_deepest_that_builds() {
     let t = 6.0;
     let (l, r) = v_walls(t, 60.0, 0.0);
     let a = G / 2.0 + t * tan(30.0);
-    let w = GrooveWeld {
+    let w = Case {
         face: Contour::Concave { depth: 3.0 },
         ..weld(l, r)
     };
-    let err = groove_section(&w).unwrap_err();
+    let err = run(&w).unwrap_err();
+    let SolidError::Failed(failure) = &err else {
+        panic!("not a typed refusal: {err:?}");
+    };
+    assert_eq!(
+        failure.reason,
+        Reason::Weld(WeldFailure::ConcaveFaceCrossesWall {
+            side: WeldSide::Face,
+            depth: 3.0,
+        })
+    );
     // the arc leaves the 60 degree V where its end tangent is steeper than the wall: at
     // 2 atan(d / a) = 60 degrees
     let fit = err
@@ -431,11 +485,11 @@ fn a_concave_face_across_the_walls_is_refused_with_the_deepest_that_builds() {
         .expect("the refusal says the depth that builds")
         .size;
     assert!((fit - a * tan(30.0)).abs() < 1e-3, "fit {fit}");
-    let builds = GrooveWeld {
+    let builds = Case {
         face: Contour::Concave { depth: fit },
         ..w
     };
-    assert!(groove_section(&builds).is_ok());
+    assert!(run(&builds).is_ok());
 }
 
 #[test]
@@ -444,31 +498,31 @@ fn a_penetration_depth_fills_the_groove_only_that_deep() {
     let (l, r) = v_walls(t, 60.0, 0.0);
     let s = 4.0;
     // a second face does not apply: the weld ends inside the groove
-    let w = GrooveWeld {
+    let w = Case {
         depth: Some(s),
         second_face: Some(Contour::Convex { height: 0.8 }),
         ..weld(l.clone(), r.clone())
     };
     close(area(&w), G * s + tan(30.0) * (t * t - (t - s) * (t - s)));
-    assert!(section(&w).notices.is_empty());
+    assert!(section(&w).notes.is_empty());
 
     // as deep as the plate: full penetration, nothing to say
-    let w = GrooveWeld {
+    let w = Case {
         depth: Some(t),
         ..weld(l.clone(), r.clone())
     };
     close(area(&w), G * t + t * t * tan(30.0));
-    assert!(section(&w).notices.is_empty());
+    assert!(section(&w).notes.is_empty());
 
     // past the plate: full penetration, and the user is told
-    let w = GrooveWeld {
+    let w = Case {
         depth: Some(8.0),
         ..weld(l, r)
     };
     close(area(&w), G * t + t * t * tan(30.0));
     assert_eq!(
-        section(&w).notices,
-        vec![GrooveNotice::DeeperThanPlate {
+        section(&w).notes,
+        vec![GrooveNote::DeeperThanPlate {
             asked: 8.0,
             plate: 6.0
         }]
@@ -476,7 +530,7 @@ fn a_penetration_depth_fills_the_groove_only_that_deep() {
 
     // a U groove cut on its round
     let right = u_right();
-    let w = GrooveWeld {
+    let w = Case {
         depth: Some(8.0),
         ..weld(mirror(&right), right)
     };
@@ -494,7 +548,7 @@ fn a_depth_past_a_closed_groove_fills_the_groove_and_says_so() {
     let top = 6.0 * tan(30.0);
     let left = vec![line(p(-top, 0.0), p(0.0, -6.0))];
     let right = mirror(&left);
-    let w = GrooveWeld {
+    let w = Case {
         depth: Some(8.0),
         second_face: Some(Contour::Convex { height: 1.0 }),
         ..weld(left, right)
@@ -503,8 +557,8 @@ fn a_depth_past_a_closed_groove_fills_the_groove_and_says_so() {
     assert!(!s.through);
     close(area(&w), 36.0 * tan(30.0));
     assert_eq!(
-        s.notices,
-        vec![GrooveNotice::DeeperThanGroove {
+        s.notes,
+        vec![GrooveNote::DeeperThanGroove {
             asked: 8.0,
             groove: 6.0
         }]
@@ -540,32 +594,222 @@ fn bad_walls_contours_and_depths_are_refused_as_invalid_input() {
             vec![line(p(-4.0, 0.0), p(2.0, -6.0))],
             vec![line(p(4.0, 0.0), p(-2.0, -6.0))],
         ),
-        GrooveWeld {
+        Case {
             face: Contour::Convex { height: 0.0 },
             ..ok.clone()
         },
-        GrooveWeld {
+        Case {
             face: Contour::Concave { depth: -1.0 },
             ..ok.clone()
         },
-        GrooveWeld {
+        Case {
             second_face: Some(Contour::ConvexBlended {
                 height: 1.0,
-                overlap: Some(f64::NAN),
+                overlap: f64::NAN,
             }),
             ..ok.clone()
         },
-        GrooveWeld {
+        Case {
             depth: Some(0.0),
             ..ok.clone()
         },
     ];
     for (i, w) in bad.iter().enumerate() {
-        let err = groove_section(w).unwrap_err();
+        let err = run(w).unwrap_err();
         assert!(
             matches!(err, SolidError::InvalidInput { .. }),
             "case {i}: {err:?}"
         );
     }
-    assert!(groove_section(&ok).is_ok());
+    assert!(run(&ok).is_ok());
+}
+
+/// The area of a polygon, its corners in either order.
+fn polygon(corners: &[Point2]) -> f64 {
+    let n = corners.len();
+    0.5 * (0..n)
+        .map(|i| {
+            let (a, b) = (corners[i], corners[(i + 1) % n]);
+            a.x * b.y - a.y * b.x
+        })
+        .sum::<f64>()
+        .abs()
+}
+
+/// The lowest point of a weld's section.
+fn lowest(w: &GrooveWeld) -> f64 {
+    w.region
+        .outer
+        .segs
+        .iter()
+        .flat_map(|seg| (0..=16).map(move |i| seg.point_at(f64::from(i) / 16.0).y))
+        .fold(f64::MAX, f64::min)
+}
+
+/// The x of a straight wall `y` on a straight wall from `a` to `b`.
+fn x_at(a: Point2, b: Point2, y: f64) -> f64 {
+    a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y)
+}
+
+#[test]
+fn the_depth_is_measured_from_the_lower_plate_where_the_plates_are_parallel() {
+    let up = Some(Vec2::new(0.0, 1.0));
+    // a 60 degree V between plates 10 and 8 thick, their undersides flush (at -10)
+    let (l0, lb) = (p(-(G / 2.0 + 10.0 * tan(30.0)), 0.0), p(-G / 2.0, -10.0));
+    let (r0, rb) = (p(G / 2.0 + 8.0 * tan(30.0), -2.0), p(G / 2.0, -10.0));
+    let unequal = Case {
+        plate_normal: up,
+        ..weld(vec![line(l0, lb)], vec![line(r0, rb)])
+    };
+    // s = 6 from the thinner (lower) plate's face: the weld's bottom level at -8, 6 into the
+    // thinner plate and 8 into the thicker
+    let w = Case {
+        depth: Some(6.0),
+        ..unequal.clone()
+    };
+    let got = section(&w);
+    assert!(
+        (lowest(&got) + 8.0).abs() < 1e-12,
+        "bottom at {}",
+        lowest(&got)
+    );
+    assert!((got.filled_depth - 6.0).abs() < 1e-12);
+    assert!((got.groove_depth - 8.0).abs() < 1e-12);
+    assert!(got.notes.is_empty());
+    close(
+        area(&w),
+        polygon(&[
+            l0,
+            p(x_at(l0, lb, -8.0), -8.0),
+            p(x_at(r0, rb, -8.0), -8.0),
+            r0,
+        ]),
+    );
+    // past the thinner plate: full penetration, and the user is told
+    let w = Case {
+        depth: Some(9.0),
+        ..unequal.clone()
+    };
+    let got = section(&w);
+    close(area(&w), polygon(&[l0, lb, rb, r0]));
+    assert!((got.filled_depth - 8.0).abs() < 1e-12);
+    assert_eq!(
+        got.notes,
+        vec![GrooveNote::DeeperThanPlate {
+            asked: 9.0,
+            plate: 8.0
+        }]
+    );
+    // without the plates' normal the depth is measured from the chord: not level
+    let chord = section(&Case {
+        depth: Some(6.0),
+        plate_normal: None,
+        ..unequal
+    });
+    assert!((lowest(&chord) + 8.0).abs() > 0.1);
+
+    // two 8 mm plates, the right one 2 lower: s from the right plate's face
+    let (l0, lb) = (p(-(G / 2.0 + 8.0 * tan(30.0)), 0.0), p(-G / 2.0, -8.0));
+    let (r0, rb) = (p(G / 2.0 + 8.0 * tan(30.0), -2.0), p(G / 2.0, -10.0));
+    let offset = Case {
+        plate_normal: up,
+        ..weld(vec![line(l0, lb)], vec![line(r0, rb)])
+    };
+    let w = Case {
+        depth: Some(5.0),
+        ..offset.clone()
+    };
+    assert!((lowest(&section(&w)) + 7.0).abs() < 1e-12);
+    close(
+        area(&w),
+        polygon(&[
+            l0,
+            p(x_at(l0, lb, -7.0), -7.0),
+            p(x_at(r0, rb, -7.0), -7.0),
+            r0,
+        ]),
+    );
+    // the groove opens under the upper plate 6 below the lower plate's face: deeper is full
+    // penetration, the whole groove filled to its deepest point
+    let w = Case {
+        depth: Some(7.0),
+        ..offset
+    };
+    let got = section(&w);
+    close(area(&w), polygon(&[l0, lb, rb, r0]));
+    assert!((got.filled_depth - 8.0).abs() < 1e-12);
+    assert_eq!(
+        got.notes,
+        vec![GrooveNote::DeeperThanPlate {
+            asked: 7.0,
+            plate: 6.0
+        }]
+    );
+}
+
+#[test]
+fn a_concave_face_between_offset_plates_says_how_deep_it_dips_below_each() {
+    let (l0, lb) = (p(-(G / 2.0 + 8.0 * tan(30.0)), 0.0), p(-G / 2.0, -8.0));
+    let (r0, rb) = (p(G / 2.0 + 8.0 * tan(30.0), -2.0), p(G / 2.0, -10.0));
+    let w = Case {
+        plate_normal: Some(Vec2::new(0.0, 1.0)),
+        face: Contour::Concave { depth: 1.0 },
+        ..weld(vec![line(l0, lb)], vec![line(r0, rb)])
+    };
+    let got = section(&w);
+    let [GrooveNote::BelowToes {
+        side, depth, below, ..
+    }] = got.notes[..]
+    else {
+        panic!("{:?}", got.notes);
+    };
+    assert_eq!((side, depth), (WeldSide::Face, 1.0));
+    // the face's lowest point below each plate's face: the plates' step apart, and below the
+    // lower plate's face too (the arc leaves the lower toe rising more steeply than the chord
+    // falls)
+    assert!((below[0] - below[1] - 2.0).abs() < 1e-9, "{below:?}");
+    assert!(below[1] > 0.0, "{below:?}");
+    // the lowest point of the face's arc, sampled, agrees
+    let face_low = got
+        .region
+        .outer
+        .segs
+        .iter()
+        .filter(|seg| matches!(seg, Seg2::Arc { .. }))
+        .flat_map(|seg| (0..=4096).map(move |i| seg.point_at(f64::from(i) / 4096.0).y))
+        .fold(f64::MAX, f64::min);
+    assert!((face_low + below[0]).abs() < 1e-6, "{face_low} {below:?}");
+}
+
+#[test]
+fn a_plates_normal_that_is_not_finite_or_points_into_the_plates_is_refused() {
+    let (l, r) = v_walls(6.0, 60.0, 0.0);
+    for n in [
+        Vec2::new(0.0, -1.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(f64::NAN, 1.0),
+    ] {
+        let err = run(&Case {
+            plate_normal: Some(n),
+            ..weld(l.clone(), r.clone())
+        })
+        .unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { .. }),
+            "{n:?}: {err:?}"
+        );
+    }
+    // a normal of any length works, and on plates in one plane changes nothing
+    let one_plane = run(&Case {
+        plate_normal: Some(Vec2::new(0.0, 3.0)),
+        depth: Some(4.0),
+        ..weld(l.clone(), r.clone())
+    })
+    .unwrap();
+    let chord = run(&Case {
+        depth: Some(4.0),
+        ..weld(l, r)
+    })
+    .unwrap();
+    assert_eq!(one_plane, chord);
 }

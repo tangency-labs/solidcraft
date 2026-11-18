@@ -33,6 +33,7 @@
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
 //! | [`surface::SurfaceFailure`] | none: the surface routines' failures             |
 //! | [`blend::BlendFailure`]     | none: the blend routines' failures               |
+//! | [`weld::WeldFailure`]       | none: why a weld is refused (not upstream, #18500) |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns a
@@ -98,6 +99,7 @@ pub mod query;
 pub mod surface;
 pub mod sweep;
 pub mod topology;
+pub mod weld;
 
 use crate::math::Point3;
 use crate::topology::{
@@ -1048,6 +1050,8 @@ pub enum Reason {
     Surface(surface::SurfaceFailure),
     /// A blend routine failed.
     Blend(blend::BlendFailure),
+    /// A weld cannot be built as defined (not upstream, #18500).
+    Weld(weld::WeldFailure),
     /// A blend certificate's feet box runs past a support's net in a direction the
     /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
     /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
@@ -1073,6 +1077,7 @@ impl Reason {
             Self::Failed(_)
             | Self::Nurbs(_)
             | Self::Defeature(_)
+            | Self::Weld(_)
             | Self::Intersect(_)
             | Self::Primitive(_)
             | Self::Sweep(_)
@@ -1110,6 +1115,7 @@ impl Reason {
             Self::Topology(t) => t.comparison_status(),
             Self::Surface(s) => s.comparison_status(),
             Self::Blend(b) => b.comparison_status(),
+            Self::Weld(w) => w.comparison_status(),
         }
     }
 
@@ -1134,6 +1140,7 @@ impl Reason {
             Self::Topology(t) => t.kind(),
             Self::Surface(s) => s.kind(),
             Self::Blend(b) => b.class(),
+            Self::Weld(w) => w.kind(),
         }
     }
 }
@@ -1157,6 +1164,7 @@ impl core::fmt::Display for Reason {
             Self::Topology(t) => t.fmt(f),
             Self::Surface(s) => s.fmt(f),
             Self::Blend(b) => b.fmt(f),
+            Self::Weld(w) => w.fmt(f),
             Self::FootPastDomainEnd {
                 support,
                 s,
@@ -1180,6 +1188,12 @@ impl From<boolean::BooleanFailure> for Reason {
 impl From<nurbs::NurbsFailure> for Reason {
     fn from(n: nurbs::NurbsFailure) -> Self {
         Self::Nurbs(n)
+    }
+}
+
+impl From<weld::WeldFailure> for Reason {
+    fn from(w: weld::WeldFailure) -> Self {
+        Self::Weld(w)
     }
 }
 
