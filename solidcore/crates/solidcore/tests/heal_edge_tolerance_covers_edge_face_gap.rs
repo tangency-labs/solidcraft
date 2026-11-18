@@ -1724,7 +1724,8 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 }
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
-/// functions on main. The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
+/// that fillet's result (the other 28 are unchanged there). The 19 equal digests (`0x30d463838d7fca03`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
 /// same body and status.
 const FILLET_MAIN: [u64; 29] = [
@@ -1735,7 +1736,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xc0013e51f46a74a,
     0x357c96c0893f37a2,
     0x2dd7a7af4ca5bb1e,
-    0x9362785e2dee39d1,
+    0x51f6abb34e90bff2,
     0xb716929faf389955,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
