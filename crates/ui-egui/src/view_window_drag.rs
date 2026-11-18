@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 pub(crate) struct State {
     strips: Vec<Strip>,
+    canvases: Vec<DockCanvas>,
     drag: Option<Drag>,
     flight: Option<Flight>,
 }
@@ -31,6 +32,7 @@ struct Drag {
     target: Option<Target>,
     pointer: Pos2,
     screen: Option<Screen>,
+    source_is_last: bool,
 }
 
 struct Flight {
@@ -40,6 +42,16 @@ struct Flight {
     origin: Rect,
     start: f64,
     picture: Picture,
+}
+
+struct DockCanvas {
+    viewport: egui::ViewportId,
+    tab: u64,
+    window: WindowId,
+    screen: Screen,
+    bounds: Rect,
+    covers: Vec<Rect>,
+    targets: Option<(u64, Vec<DockTarget>)>,
 }
 
 struct Strip {
@@ -86,7 +98,7 @@ struct Slot {
 
 enum Target {
     Strip { slot: Slot, label: String, blocked: bool },
-    Dock { dock: DockTarget, attraction: f32 },
+    Dock { dock: DockTarget, attraction: f32, viewport: egui::ViewportId, window: WindowId },
     Window { window: DragWindow, refusal: Option<&'static str> },
 }
 
@@ -100,7 +112,26 @@ impl Target {
     }
 
     fn viewport(&self, source: egui::ViewportId) -> egui::ViewportId {
-        if let Self::Strip { slot, blocked: false, .. } = self { slot.viewport } else { source }
+        match self {
+            Self::Strip { slot, blocked: false, .. } => slot.viewport,
+            Self::Dock { viewport, .. } => *viewport,
+            _ => source,
+        }
+    }
+}
+
+impl DockCanvas {
+    fn target_at(&self, drag: &Drag, point: Pos2) -> Option<Target> {
+        let (view, targets) = self.targets.as_ref()?;
+        if *view != drag.view.id || self.covers.iter().any(|rect| rect.contains(point)) {
+            return None;
+        }
+        let previous = match &drag.target {
+            Some(Target::Dock { dock, attraction, viewport, .. }) if *viewport == self.viewport && *attraction == 1.0 => Some(dock.placement),
+            _ => None,
+        };
+        let (dock, attraction) = crate::view_tiles::dock_at(targets, point, previous)?;
+        Some(Target::Dock { dock: dock.clone(), attraction, viewport: self.viewport, window: self.window })
     }
 }
 
@@ -198,6 +229,55 @@ pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, 
     }
 }
 
+/// Record the canvas after the receiving window has laid out its viewport and panels.
+pub(crate) fn record_canvas(app: &mut SolveApp, ctx: &Context) {
+    let viewport = ctx.viewport_id();
+    let native = Screen::current(ctx);
+    let window = app.view_windows.current_window();
+    let canvas = native.map(|screen| {
+        let covers = crate::shell::covered_rects(app);
+        let targets = app.view_window_drag.drag.as_ref().filter(|drag| drag.viewport != viewport && drag.tab == app.docs.current_tab()).map(|drag| {
+            let mut targets = crate::view_tiles::incoming_dock_targets(app, &drag.view, &covers);
+            if drag.source_is_last {
+                for target in &mut targets {
+                    target.blocked = true;
+                    target.label = app.tr("multi_window.last_view").to_owned();
+                }
+            }
+            (drag.view.id, targets)
+        });
+        DockCanvas { viewport, tab: app.docs.current_tab(), window, screen, bounds: ctx.viewport_rect(), covers, targets }
+    });
+    let state = &mut app.view_window_drag;
+    ctx.input(|input| {
+        state.canvases.retain(|canvas| input.raw.viewports.get(&canvas.viewport).is_some_and(|info| info.minimized != Some(true)));
+    });
+    if let Some(canvas) = canvas {
+        let first_targets = canvas.targets.as_ref().is_some_and(|(view, _)| {
+            !state.canvases.iter().any(|old| old.viewport == viewport && old.targets.as_ref().is_some_and(|(old_view, _)| old_view == view))
+        });
+        if first_targets && let Some(drag) = &state.drag {
+            ctx.request_repaint_of(drag.viewport);
+        }
+        state.canvases.retain(|old| old.viewport != viewport);
+        state.canvases.push(canvas);
+    } else {
+        state.canvases.retain(|old| old.viewport != viewport);
+    }
+    if let Some(drag) = &state.drag
+        && let Some(Target::Dock { dock, attraction, viewport: destination, .. }) = &drag.target
+        && drag.viewport != viewport
+        && *destination == viewport
+        && let (Some(source), Some(screen)) = (drag.screen, native)
+    {
+        let convert = |point| screen.local(source.desktop(point));
+        let origin = Rect::from_min_max(convert(drag.origin.min), convert(drag.origin.max));
+        let pointer = convert(drag.pointer);
+        let picture = drag.picture.lock().ok().and_then(|image| image.clone());
+        paint_preview(ctx, &drag.view, origin, pointer, picture.as_ref(), Preview::Dock { dock, attraction: *attraction, displaced: None });
+    }
+}
+
 type Picture = Arc<Mutex<Option<egui::TextureHandle>>>;
 
 fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> (Picture, Option<u64>) {
@@ -266,6 +346,7 @@ fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool)
         target: None,
         pointer: origin.center(),
         screen: Screen::current(ctx),
+        source_is_last: app.view_windows.current_window() == 0 && app.docs.views.len() == 1,
     })
 }
 
@@ -288,18 +369,28 @@ fn take_target(app: &SolveApp, ctx: &Context, drag: &Drag, pointer: Pos2) -> Opt
         if let Some(target) = strip_at(false) {
             return Some(target);
         }
+        if let Some(desktop) = desktop
+            && let Some(canvas) = app
+                .view_window_drag
+                .canvases
+                .iter()
+                .rev()
+                .find(|canvas| canvas.tab == drag.tab && canvas.viewport != drag.viewport && canvas.bounds.contains(canvas.screen.local(desktop)))
+        {
+            return canvas.target_at(drag, canvas.screen.local(desktop));
+        }
     }
     if let Some(target) = strip_at(true) {
         return Some(target);
     }
     if client.contains(pointer) && !crate::shell::covered(app, pointer) {
         let previous = match &drag.target {
-            Some(Target::Dock { dock, attraction }) if *attraction == 1.0 => Some(dock.placement),
+            Some(Target::Dock { dock, attraction, viewport, .. }) if *viewport == drag.viewport && *attraction == 1.0 => Some(dock.placement),
             _ => None,
         };
         let targets = crate::view_tiles::dock_targets(app, drag.view.id);
         if let Some((dock, attraction)) = crate::view_tiles::dock_at(&targets, pointer, previous) {
-            return Some(Target::Dock { dock: dock.clone(), attraction });
+            return Some(Target::Dock { dock: dock.clone(), attraction, viewport: drag.viewport, window: drag.window });
         }
     }
     let edge = if matches!(drag.target, Some(Target::Window { .. })) { 6.0 } else { 12.0 };
@@ -381,10 +472,12 @@ pub(crate) fn keyboard(app: &mut SolveApp, ctx: &Context) {
         .filter(|strip| strip.tab == drag.tab && strip.viewport == drag.viewport)
         .flat_map(|strip| strip.keyboard_slots(from.map(|index| index + 1)).into_iter().map(|slot| strip.destination(app, &drag, slot)))
         .collect::<Vec<_>>();
-    let dock = crate::view_tiles::dock_targets(app, drag.view.id)
-        .into_iter()
-        .filter(|dock| !dock.blocked)
-        .map(|dock| Target::Dock { dock, attraction: 1.0 });
+    let dock = crate::view_tiles::dock_targets(app, drag.view.id).into_iter().filter(|dock| !dock.blocked).map(|dock| Target::Dock {
+        dock,
+        attraction: 1.0,
+        viewport: drag.viewport,
+        window: drag.window,
+    });
     let other = strips
         .iter()
         .filter(|strip| strip.tab == drag.tab && strip.viewport != drag.viewport)
@@ -476,8 +569,13 @@ fn finish(app: &mut SolveApp, ctx: &Context, mut drag: Drag) {
                 app.run("tab.view.move_to_window", serde_json::json!({"view":drag.view.id,"window":slot.window,"index":slot.index})).map(|_| ())
             }
         }
-        Some(Target::Dock { dock, attraction }) if !dock.blocked && attraction == 1.0 => {
-            crate::view_tiles::commit_dock(app, drag.view.id, dock.placement)
+        Some(Target::Dock { dock, attraction, window, .. }) if !dock.blocked && attraction == 1.0 => {
+            if window == drag.window {
+                crate::view_tiles::commit_dock(app, drag.view.id, dock.placement)
+            } else {
+                let placement = solidcraft_engine::schema::tab_views::TabViewPlacement::from(dock.placement);
+                app.run("tab.view.move_to_window", serde_json::json!({"view":drag.view.id,"window":window,"placement":placement})).map(|_| ())
+            }
         }
         Some(Target::Window { window, refusal: None }) => crate::view_windows::drop_new_window(app, drag.view.id, window),
         _ => {
@@ -605,7 +703,7 @@ fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
     }
     match &drag.target {
         Some(Target::Strip { slot, label, blocked: false }) => paint_tab(ctx, &drag.view, drag.origin, *slot, drag.pointer, label),
-        Some(Target::Dock { dock, attraction }) => {
+        Some(Target::Dock { dock, attraction, .. }) => {
             let displaced = dock.displaced.and_then(|(id, rect)| app.docs.views.get(id).map(|view| (view, rect)));
             paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Dock { dock, attraction: *attraction, displaced });
         }

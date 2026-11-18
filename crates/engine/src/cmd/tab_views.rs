@@ -115,12 +115,15 @@ fn move_to_window(_s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut request: TabViewMoveToWindowParams = parse(cmd, p)?;
     if let TabWindowTarget::Existing(_) = request.window {
+        if request.placement.is_some() && request.index.is_some() {
+            return Err(bad(cmd, "placement and index cannot be combined"));
+        }
         if ["display", "x", "y", "w", "h", "level"].into_iter().any(|key| p.get(key).is_some()) {
             return Err(bad(cmd, "display, geometry and level require window: new"));
         }
     } else {
-        if p.get("index").is_some() {
-            return Err(bad(cmd, "index requires an existing window id"));
+        if p.get("index").is_some() || p.get("placement").is_some() {
+            return Err(bad(cmd, "index and placement require an existing window id"));
         }
         request.level = Some(request.level.unwrap_or_default());
     }
