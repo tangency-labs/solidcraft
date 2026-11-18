@@ -165,7 +165,8 @@ fn file_scopes_require_separate_read_and_write_approvals() {
     for command in ["file.insert_step", "file.insert_mesh", "file.insert_gerber", "file.gerber_files", "sketch.insert_dxf", "sketch.insert_svg"] {
         assert!(input_only_command(command), "{command} reads its supplied file");
     }
-    for command in ["file.save_as", "file.copy", "file.move", "file.trash", "file.export_step", "doc.open", "doc.recovery_discard", "library.export"] {
+    for command in ["file.save_as", "file.copy", "file.move", "file.trash", "file.export_step", "doc.open", "doc.recovery_discard", "library.export"]
+    {
         assert!(!input_only_command(command), "{command} needs the stricter write-capable scope");
     }
 }
