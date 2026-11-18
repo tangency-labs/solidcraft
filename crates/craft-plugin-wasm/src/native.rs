@@ -781,6 +781,63 @@ fn stack_bytes(limits: &Limits, options: RuntimeOptions, importer: bool) -> Resu
     Ok(bytes)
 }
 
+/// The first eight bytes of a core WebAssembly module; a component's header names layer 1 instead.
+const CORE_MODULE_HEADER: [u8; 8] = *b"\0asm\x01\0\0\0";
+
+/// A host that answers nothing: [`check_component`] links against it and never instantiates.
+struct Inert;
+impl PluginHost for Inert {
+    fn command_catalog(&self) -> Vec<CommandSchema> {
+        Vec::new()
+    }
+    fn run_command(&mut self, name: &str, _args: &Value) -> Result<Value> {
+        Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") })
+    }
+    fn begin_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn commit_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn rollback_transaction(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn granted_folders(&self) -> Vec<craft_plugin::FileGrant> {
+        Vec::new()
+    }
+    fn log(&mut self, _message: &str) {}
+    fn progress(&mut self, _fraction: f32, _message: &str) {}
+}
+
+fn component_error(reason: impl Into<String>) -> HostError {
+    HostError::InvalidInput { field: "component".into(), reason: reason.into() }
+}
+
+pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: RuntimeOptions) -> Result<()> {
+    let runtime =
+        manifest.runtime.as_ref().ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
+    runtime.validate()?;
+    if bytes.len() > runtime.max_component_bytes() {
+        return Err(limit(&format!("component size: {} bytes is over {} MiB", bytes.len(), runtime.max_component_bytes() >> 20)));
+    }
+    if bytes.starts_with(&CORE_MODULE_HEADER) {
+        return Err(component_error("this is a core WebAssembly module, not a component"));
+    }
+    let importer = runtime.is_importer();
+    let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer)?)?;
+    reject_network_imports(&engine, &component)?;
+    let mut linker = Linker::<State<Inert>>::new(&engine);
+    let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
+    if importer {
+        importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else {
+        bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    }
+    Ok(())
+}
+
 type Compiled = (Arc<[u8]>, usize, Engine, Component);
 /// The most recently compiled component. Compiling a large importer takes tens of seconds; keeping
 /// the compiled code in memory (never on disk, which would need unsafe deserialization) lets the
@@ -795,15 +852,21 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((engine.clone(), component.clone()));
     }
+    let (engine, component) = compile_with(bytes, stack_bytes)?;
+    if let Ok(mut cache) = COMPILED.lock() {
+        *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
+    }
+    Ok((engine, component))
+}
+
+/// Compiles `bytes` under the host's configuration, without the cache.
+fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     let mut config = Config::new();
     config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
     // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
     config.async_stack_size(stack_bytes.saturating_add(1 << 20));
     let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
     let component = Component::from_binary(&engine, bytes).map_err(|e| trap(format!("component compilation failed: {e:#}")))?;
-    if let Ok(mut cache) = COMPILED.lock() {
-        *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
-    }
     Ok((engine, component))
 }
 
@@ -878,7 +941,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
-        effect: Effect::Edit,
+        effect: Effect::Open,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,

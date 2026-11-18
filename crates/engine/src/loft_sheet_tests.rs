@@ -61,3 +61,30 @@ fn a_loft_between_equal_squares_is_a_prism_of_planes() {
     let types = face_types(&mut s, "Prism");
     assert_eq!(types["plane"].as_u64(), Some(6), "{types}");
 }
+
+/// A loft between two equal 20 x 10 rectangles on planes 45° apart that share one of their long
+/// sides on the planes' common line (the x axis) is a ruled wedge: each cross-section across x
+/// is the triangle (0, 0), (10, 0), 10·(cos 45°, sin 45°), so the volume is 20 · ½ · 10 · 10 ·
+/// sin 45° mm³. It may also be refused in words, but today it fails with a bare "SMLib failed
+/// (status 1001)" ([T-156](https://tickets.solidcraft.io/t/156)). With the rectangles 5 mm off
+/// the line it builds.
+#[test]
+fn a_loft_between_sections_sharing_an_edge_on_their_planes_common_line_is_a_wedge() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "A"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": "45 deg", "name": "Tilt"}));
+    run(&mut s, "sketch.create", json!({"plane": "Tilt", "name": "B"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let loft = json!({"sections": [{"sketch": "A", "profiles": [0]}, {"sketch": "B", "profiles": [0]}], "operation": "new", "body_name": "Wedge"});
+    match s.execute("solid.loft", &loft) {
+        Ok(_) => {
+            let want = 20.0 * 0.5 * 10.0 * 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+            let got = run(&mut s, "inspect.measure", json!({"bodies": ["Wedge"]}))["bodies"][0]["volume_mm3"].as_f64().unwrap();
+            assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+        }
+        Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
+    }
+}
