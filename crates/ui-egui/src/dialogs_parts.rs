@@ -78,8 +78,8 @@ pub struct Pt {
     pub picture: Option<(usize, usize, Option<usize>)>,
     /// The library, read once.
     pub lib: Option<Vec<Family>>,
-    /// The other way round: in from the other end of each hole picked, or turned over at the
-    /// origin with none picked.
+    /// Turned over where it sits (the command's `flip`): for a screw that a pick seats upside
+    /// down, as one on the outer edge of a counterbore's floor does.
     pub flip: bool,
 }
 
@@ -123,10 +123,9 @@ pub fn insert_params(lib: &[Family], k: &Pt, holes: &[Sel]) -> Result<Value, Str
         1 => p["at"] = at.into_iter().next().unwrap_or(Value::Null),
         _ => p["at"] = Value::Array(at),
     }
-    // Flipped, a part in a hole goes in from the hole's other end; one at the origin turns over.
+    // Flipped, the part turns over where it sits: in each hole picked, or at the origin.
     if k.flip {
-        let key = if p.get("at").is_some() { "other_side" } else { "flip" };
-        p[key] = json!(true);
+        p["flip"] = json!(true);
     }
     if !k.name.trim().is_empty() {
         p["name"] = json!(k.name.trim());
@@ -392,19 +391,19 @@ mod tests {
         assert!(insert_params(&[], &k, &[]).is_err());
     }
 
-    /// #16688: Flip puts a part in a hole in from the hole's other end, and turns a part at the
-    /// origin over. Unticked, the command gets neither word.
+    /// #16688: Flip turns the part over where it sits, in a hole picked and at the origin.
+    /// Unticked, the command is not asked to flip.
     #[test]
-    fn flip_asks_for_the_other_side_of_a_hole() {
+    fn flip_turns_the_part_over_where_it_sits() {
         let l = lib();
         let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
         let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, flip: true };
         let p = insert_params(&l, &k, std::slice::from_ref(&hole)).unwrap();
-        assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0], "other_side": true}));
+        assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0], "flip": true}));
         let p = insert_params(&l, &k, &[]).unwrap();
-        assert_eq!((p["flip"].as_bool(), p.get("other_side")), (Some(true), None), "{p}");
+        assert_eq!(p["flip"], true, "{p}");
         let p = insert_params(&l, &Pt { flip: false, ..k }, std::slice::from_ref(&hole)).unwrap();
-        assert!(p.get("flip").is_none() && p.get("other_side").is_none(), "{p}");
+        assert!(p.get("flip").is_none(), "{p}");
     }
 
     /// The Flip row is in the dialog, and ticking it reaches the command OK runs.
