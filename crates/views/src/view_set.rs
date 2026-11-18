@@ -1663,12 +1663,16 @@ mod tests {
         let placement =
             WindowPlacement { display: Some("Display 2".into()), x: -25.0, y: 16.0, w: 700.0, h: 500.0, maximised: false, fullscreen: false };
         let id = set.move_to_window(2, WindowTarget::New { placement: Some(placement) }).unwrap().window;
-        let options = crate::WindowOptions { card_headers: crate::CardHeaders::Hover, keep_on_top: true };
+        let options = crate::WindowOptions { card_headers: crate::CardHeaders::Hover, keep_on_top: true, ..crate::WindowOptions::new_pop_out() };
         set.window_mut(id).unwrap().options = options;
         let mut saved = set.to_json();
         let restored = ViewSet::from_json(&saved).unwrap();
         assert_eq!(restored.to_json(), saved);
         assert_eq!(restored.window(id).unwrap().options, options);
+        saved["windows"][0]["options"] = json!({"card_headers":"hover","keep_on_top":true});
+        let old_options = ViewSet::from_json(&saved).unwrap().window(id).unwrap().options;
+        assert!(!old_options.ribbon && old_options.ribbon_auto_hide);
+        assert_eq!(old_options.card_headers, crate::CardHeaders::Hover);
         saved["windows"][0].as_object_mut().unwrap().remove("options");
         saved["windows"][0]["active"] = json!(5);
         saved["windows"][0]["level"] = json!("unknown future mode");

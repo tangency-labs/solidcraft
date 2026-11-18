@@ -41,12 +41,16 @@ pub struct WindowMenu<'a> {
     pub displays: &'a [DisplayChoice<'a>],
     pub card_headers: CardHeaders,
     pub keep_on_top: bool,
+    pub ribbon: bool,
+    pub ribbon_auto_hide: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     CardHeaders(CardHeaders),
     KeepOnTop(bool),
+    Ribbon(bool),
+    RibbonAutoHide(bool),
     MoveToDisplay(usize),
     Rename,
     UseAsDefault,
@@ -194,7 +198,7 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut
     });
     ui.add_space(6.0);
     let preview_height = (height - 26.0 - 2.0 * ROW_HEIGHT - 80.0).clamp(0.0, 208.0);
-    crate::window_preview::show(ui, menu.card_headers, preview_height);
+    crate::window_preview::show(ui, menu, preview_height);
     let middle_height = (height - ui.min_rect().height() - 2.0 * ROW_HEIGHT - 26.0).max(0.0);
     let mut focus = FocusRows::new(state.scroll_focus);
     let (mut action, flyout) = egui::ScrollArea::vertical()
@@ -222,7 +226,8 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut
 
 fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
     Menu::heading(ui, tr("window_menu.show_here"));
-    let mut action = card_headers(ui, menu.card_headers, focus);
+    let mut action = ribbon_options(ui, menu, focus);
+    action = card_headers(ui, menu.card_headers, focus).or(action);
     Menu::separator(ui);
     Menu::heading(ui, tr("window_menu.window"));
     let mut on = menu.keep_on_top;
@@ -254,6 +259,46 @@ fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: 
         }
     }
     (action, flyout)
+}
+
+fn ribbon_options(ui: &mut Ui, menu: &WindowMenu<'_>, focus: &mut FocusRows) -> Option<Action> {
+    use crate::BackingTooltipExt as _;
+    let mut ribbon = menu.ribbon;
+    let mut auto_hide = menu.ribbon_auto_hide;
+    let t = Tokens::get();
+    let label = tr("window_ribbon.ribbon");
+    ui.horizontal(|ui| {
+        ui.add_space(t.space_8);
+        ui.label(label);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(t.space_8);
+            let response = crate::preferences::theme_option_switch(ui, label, &mut ribbon);
+            solidcraft_ui_registry::publish_target("window_options:ribbon", response.rect);
+            focus.row(ui, &response);
+        });
+    });
+    let label = tr("window_ribbon.auto_hide");
+    let available = menu.ribbon;
+    let name = if available { label } else { tr("window_ribbon.auto_hide_unavailable") };
+    ui.add_enabled_ui(available, |ui| {
+        ui.horizontal(|ui| {
+            ui.add_space(t.space_8 + 22.0);
+            ui.label(label).backing_on_disabled_hover_text(name);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(t.space_8);
+                let response = crate::preferences::theme_option_switch(ui, name, &mut auto_hide);
+                solidcraft_ui_registry::publish_target("window_options:ribbon_auto_hide", response.rect);
+                focus.row(ui, &response);
+            });
+        });
+    });
+    if ribbon != menu.ribbon {
+        Some(Action::Ribbon(ribbon))
+    } else if auto_hide != menu.ribbon_auto_hide {
+        Some(Action::RibbonAutoHide(auto_hide))
+    } else {
+        None
+    }
 }
 
 fn card_headers(ui: &mut Ui, headers: CardHeaders, focus: &mut FocusRows) -> Option<Action> {

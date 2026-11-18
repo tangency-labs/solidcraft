@@ -233,7 +233,7 @@ fn clean_window(_s: &mut Session, p: &Value) -> Result<Value> {
 
 fn requested_window_options(cmd: &str, p: &Value) -> Result<Value> {
     let requested: TabWindowOptionParams = parse(cmd, p)?;
-    let request = TabWindowSetOptionsParams { window: requested.window, card_headers: None, keep_on_top: None };
+    let request = TabWindowSetOptionsParams { window: requested.window, card_headers: None, keep_on_top: None, ribbon: None, ribbon_auto_hide: None };
     reply(cmd, TabWindowOptionsReply::Requested(request))
 }
 

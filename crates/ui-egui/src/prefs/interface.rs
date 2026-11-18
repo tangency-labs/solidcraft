@@ -330,6 +330,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 "tab_double_click_renames",
             );
             windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
+            layout_check(
+                ui,
+                app.tr("window_ribbon.ribbon"),
+                app.tr("window_ribbon.preference_help"),
+                &mut app.preferences.pop_out_window_defaults.ribbon,
+                "pop_out_ribbon",
+            );
+            ui.add_enabled_ui(app.preferences.pop_out_window_defaults.ribbon, |ui| {
+                layout_check(
+                    ui,
+                    app.tr("window_ribbon.auto_hide"),
+                    app.tr("window_ribbon.auto_hide_help"),
+                    &mut app.preferences.pop_out_window_defaults.ribbon_auto_hide,
+                    "pop_out_ribbon_auto_hide",
+                );
+            });
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 use solidcraft_views::CardHeaders;
                 let labels = [app.tr("window_options.always"), app.tr("window_options.on_hover"), app.tr("window_options.hidden")];

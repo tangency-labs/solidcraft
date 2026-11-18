@@ -18,6 +18,7 @@ pub(crate) struct Windows {
     parked: Option<(u64, Vec<u64>)>,
     focus: Option<(u64, WindowId)>,
     last_focus: Option<(u64, WindowId)>,
+    tool_owner: std::collections::BTreeMap<u64, WindowId>,
     root_rect: Option<egui::Rect>,
     monitor_size: Option<egui::Vec2>,
     root_scale: Option<f32>,
@@ -67,6 +68,13 @@ struct Host {
     view_placement: Option<(u64, u64)>,
     menu: crate::context_menu::MenuState,
     preview: crate::preview::PreviewState,
+    ribbon_reveal: crate::ui_kit::reveal::State,
+    ribbon_focus_pending: bool,
+    ribbon_tab: String,
+    ribbon_view_workspace: &'static str,
+    ribbon_context: Option<String>,
+    ribbon_popup: Option<egui::Id>,
+    sketch_return_tab: Option<String>,
     ready: bool,
     startup: Option<f64>,
 }
@@ -90,6 +98,18 @@ fn viewport_id(tab: u64, id: WindowId) -> ViewportId {
 }
 
 impl Windows {
+    pub(crate) fn child_tool_owner(&self, tab: u64) -> Option<WindowId> {
+        self.tool_owner.get(&tab).copied()
+    }
+
+    pub(crate) fn start_tool_panel(&mut self, tab: u64) {
+        if let Some(id) = self.painting {
+            self.tool_owner.insert(tab, id);
+        } else {
+            self.tool_owner.remove(&tab);
+        }
+    }
+
     pub(crate) fn setup_snapshot(&self) -> Option<&Value> {
         self.setup_snapshot.as_ref()
     }
@@ -716,6 +736,12 @@ fn options_command(app: &mut SolveApp, command: &str, request: Value) -> Result<
         if let Some(keep_on_top) = change.keep_on_top {
             current.keep_on_top = keep_on_top;
         }
+        if let Some(ribbon) = change.ribbon {
+            current.ribbon = ribbon;
+        }
+        if let Some(ribbon_auto_hide) = change.ribbon_auto_hide {
+            current.ribbon_auto_hide = ribbon_auto_hide;
+        }
     }
     let options = *current;
     if command == "window.options.use_as_default" {
@@ -1027,7 +1053,14 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         .map(|(id, (display, name))| DisplayChoice { id, name, current: current == Some(display.name.as_str()) })
         .collect();
     let title = window_name(app, id);
-    let menu = WindowMenu { title: &title, displays: &displays, card_headers, keep_on_top: options.keep_on_top };
+    let menu = WindowMenu {
+        title: &title,
+        displays: &displays,
+        card_headers,
+        keep_on_top: options.keep_on_top,
+        ribbon: options.ribbon,
+        ribbon_auto_hide: options.ribbon_auto_hide,
+    };
     let Some(action) = kit::show(ui, anchor, context_open, &menu) else { return };
     let (command, request) = match action {
         Action::CardHeaders(headers) => {
@@ -1039,6 +1072,8 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
             ("tab.window.set_options", json!({"window": id, "card_headers": value}))
         }
         Action::KeepOnTop(on) => ("tab.window.set_options", json!({"window": id, "keep_on_top": on})),
+        Action::Ribbon(on) => ("tab.window.set_options", json!({"window": id, "ribbon": on})),
+        Action::RibbonAutoHide(on) => ("tab.window.set_options", json!({"window": id, "ribbon_auto_hide": on})),
         Action::MoveToDisplay(display) => ("tab.window.move_to_display", json!({"window": id, "display": display})),
         Action::UseAsDefault => ("window.options.use_as_default", json!({"window": id})),
         Action::ReturnViews | Action::Close => ("tab.window.close", json!({"window": id})),
@@ -1102,9 +1137,14 @@ fn show_window_rename(app: &mut SolveApp, ctx: &Context, id: WindowId) {
     });
 }
 
-fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
+fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, ribbon: (f32, bool), had_dialog: bool) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if is_clean(app) {
+        let tab = app.docs.current_tab();
+        if app.view_windows.child_tool_owner(tab) == Some(id) {
+            app.view_windows.tool_owner.remove(&tab);
+        }
+        app.shell.ribbon_overlay = None;
         show_clean(app, ui);
         return;
     }
@@ -1173,6 +1213,11 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
     );
     let rect = ui.available_rect_before_wrap();
     app.shell.content = Some(rect);
+    if child_options(app).ribbon {
+        crate::toolbar::pop_out_ribbon(app, ui, rect, ribbon.0, ribbon.1);
+    } else {
+        app.shell.ribbon_overlay = None;
+    }
     let mut canvas = ui.new_child(egui::UiBuilder::new().max_rect(rect));
     app.show_workspace(&mut canvas);
     if let Some(rect) = app.viewport.rect.filter(|r| r.is_positive() && r.is_finite()) {
@@ -1188,6 +1233,17 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
     app.resolve_fit(ui.ctx());
     documents::sync_linked_active(app);
     crate::shortcut_box::show(app, ui.ctx());
+    let tab = app.docs.current_tab();
+    if !had_dialog && app.dialog.is_some() {
+        app.view_windows.start_tool_panel(tab);
+    }
+    if app.view_windows.child_tool_owner(tab) == Some(id) {
+        crate::view_confirm::show(app, ui.ctx());
+        crate::dialogs::show(app, ui.ctx());
+        if app.dialog.is_none() {
+            app.view_windows.tool_owner.remove(&tab);
+        }
+    }
     show_window_rename(app, ui.ctx(), id);
     crate::context_menu::show(app, ui.ctx());
     documents::sync_window_title(app, ui.ctx());
@@ -1211,9 +1267,72 @@ impl Host {
             view_placement: None,
             menu: Default::default(),
             preview: Default::default(),
+            ribbon_reveal: Default::default(),
+            ribbon_focus_pending: false,
+            ribbon_tab: String::new(),
+            ribbon_view_workspace: "",
+            ribbon_context: None,
+            ribbon_popup: None,
+            sketch_return_tab: None,
             ready: false,
             startup: None,
         }
+    }
+
+    fn ribbon(&mut self, app: &SolveApp, ctx: &Context) -> (f32, bool) {
+        use crate::ui_kit::reveal::{Input, reveal_step};
+        let options = child_options(app);
+        if !options.ribbon || is_clean(app) {
+            self.ribbon_reveal = Default::default();
+            self.ribbon_focus_pending = false;
+            ctx.data_mut(|data| data.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+            return (0.0, false);
+        }
+        let (hovered, focused, now) = ctx.input(|i| (i.pointer.hover_pos().is_some(), i.viewport().focused.unwrap_or(i.focused), i.time));
+        let keyboard_show = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F10));
+        let ribbon_focused = crate::toolbar::pop_out_ribbon_focus(ctx);
+        let panel_open = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
+        let popup_open = ctx.any_popup_open() || app.viewport.context_menu.is_some() || panel_open;
+        let escape = !popup_open
+            && (self.ribbon_reveal.keyboard() || ribbon_focused)
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        self.ribbon_focus_pending = keyboard_show || (self.ribbon_focus_pending && focused && !ribbon_focused && !escape);
+        if escape || (!focused && ribbon_focused) {
+            ctx.memory_mut(|memory| {
+                if let Some(focus) = memory.focused() {
+                    memory.surrender_focus(focus);
+                }
+            });
+        }
+        let held = popup_open || ctx.dragged_id().is_some();
+        let reduced_motion = keyboard_show || solidcraft_theme::panel_motion_duration(ctx, false) == 0.0;
+        self.ribbon_reveal = reveal_step(
+            self.ribbon_reveal,
+            Input { hovered, focused, held, keyboard_show, escape: escape || !focused, reduced_motion, ..Input::default() },
+            now,
+        );
+        if options.ribbon_auto_hide {
+            if let Some(delay) = self.ribbon_reveal.repaint_after(now) {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(delay));
+            }
+            (self.ribbon_reveal.fraction(now), self.ribbon_focus_pending)
+        } else {
+            (1.0, self.ribbon_focus_pending)
+        }
+    }
+
+    fn swap_ribbon_popup(&mut self, ctx: &Context) {
+        // egui's temporary widget data is shared across viewports; the ribbon drop-down is
+        // part of this window's interaction, even though the controls act on the same design.
+        ctx.data_mut(|data| {
+            let key = egui::Id::unique("sc_panel_open");
+            let previous = data.get_temp::<egui::Id>(key);
+            data.remove::<egui::Id>(key);
+            if let Some(open) = self.ribbon_popup.take() {
+                data.insert_temp(key, open);
+            }
+            self.ribbon_popup = previous;
+        });
     }
 
     fn swap(&mut self, app: &mut SolveApp) {
@@ -1248,12 +1367,12 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
     }
     toast(app, ctx);
     let open_windows = documents::view_window_ids(app);
+    app.view_windows.tool_owner.retain(|tab, id| open_windows.contains(&(*tab, *id)));
     app.view_windows.clean.retain(|(tab, id)| if *id == 0 { app.docs.tab_open(*tab) } else { open_windows.contains(&(*tab, *id)) });
     let root = app.docs.active_tab();
     let root_home = app.home.open;
     let mut old = std::mem::take(&mut app.view_windows.hosts);
     let mut retired = Vec::new();
-    let mut tool_tab = None;
     let mut returned_focus_tab = None;
     for (tab, id) in open_windows {
         let mut host = old.iter().position(|host| (host.tab, host.id) == (tab, id)).map_or_else(|| Host::new(tab, id), |index| old.remove(index));
@@ -1370,18 +1489,27 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let decorations = (app.custom_titlebar, app.integrated_titlebar);
             (app.custom_titlebar, app.integrated_titlebar) = (custom, !custom);
             let home = std::mem::replace(&mut app.home.open, false);
-            let ribbon = std::mem::replace(&mut app.ui.tab, documents::view_workspace(app.docs.views.active().kind).into());
+            let workspace = documents::view_workspace(app.docs.views.active().kind);
+            let options = window.options;
+            if host.ribbon_view_workspace != workspace {
+                host.ribbon_view_workspace = workspace;
+                host.ribbon_tab = workspace.into();
+                host.ribbon_context = None;
+            }
+            let child_tab = if options.ribbon { host.ribbon_tab.clone() } else { workspace.into() };
+            let ribbon = std::mem::replace(&mut app.ui.tab, child_tab);
+            std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
+            std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
             documents::show_active_look(app);
             app.view_windows.painting = Some(id);
             app.view_windows.painting_options = Some(window.options);
             let revision = app.session.revision;
             let had_dialog = app.dialog.is_some();
+            host.swap_ribbon_popup(ui.ctx());
+            let ribbon_geometry = host.ribbon(app, ui.ctx());
             app.view_window_logic(ui.ctx());
-            window_content(app, ui, id);
-            if !had_dialog && app.dialog.is_some() {
-                tool_tab = Some(tab);
-                ctx.send_viewport_cmd_to(ViewportId::ROOT, ViewportCommand::Focus);
-            }
+            window_content(app, ui, id, ribbon_geometry, had_dialog);
+            host.swap_ribbon_popup(ui.ctx());
             if crate::render_workspace::active(app) || crate::render_workspace::tiled(app) {
                 crate::render_workspace::tick_live(app, ui.ctx());
             }
@@ -1389,8 +1517,10 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let on_child_design = app.docs.current_tab() == tab;
             if on_child_design {
                 documents::park_active_look(app);
-                app.ui.tab = ribbon;
+                host.ribbon_tab = std::mem::replace(&mut app.ui.tab, ribbon);
             }
+            std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
+            std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
             app.home.open = home;
             (app.custom_titlebar, app.integrated_titlebar) = decorations;
             app.view_windows.painting = None;
@@ -1469,7 +1599,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             retired.extend(host.viewport.window_scene_slots());
         }
     }
-    let root_focus = tool_tab.or(returned_focus_tab);
+    let root_focus = returned_focus_tab;
     documents::select_tab(app, root_focus.unwrap_or(root));
     app.home.open = root_focus.is_none() && root_home;
     crate::view_window_drag::show_native_preview(app, ctx);
