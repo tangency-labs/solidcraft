@@ -1701,6 +1701,8 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> O
         format!("feature {feature} has an error")
     } else if s.active_sketch.is_some() {
         "a sketch is being edited".into()
+    } else if !s.pending_moves.is_empty() {
+        "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
         "there are no evaluated bodies to cache".into()
     } else {
@@ -3554,7 +3556,11 @@ mod tests {
         s.execute("file.save", &json!({})).unwrap();
         s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
         assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
-        s.execute("file.save", &json!({})).unwrap();
+        let saved = s.execute("file.save", &json!({})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("temporary placements omit the model cache");
+        assert!(notice.contains("temporary component placements"), "{notice}");
+        assert!(!notice.contains("design file budget"), "do not misdiagnose an eligible-model encoding failure: {notice}");
+        assert_eq!(saved["warnings"][0], notice);
         s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
         assert!(s.is_dirty());
         assert!(s.execute("file.save", &json!({})).is_err());
