@@ -331,7 +331,7 @@ fn panel_options(ui: &mut Ui, current: bool, focus: &mut FocusRows) -> Option<Ac
             ui.add_space(t.space_8);
             let response = crate::preferences::theme_option_switch(ui, label, &mut panels).backing_on_hover_text(description);
             solidcraft_ui_registry::publish_target("window_options:other_panels", response.rect);
-            focus.row(&response);
+            focus.row(ui, &response);
         });
     });
     (panels != current).then_some(Action::Panels(panels))
