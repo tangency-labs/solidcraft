@@ -2602,6 +2602,18 @@ pub trait FaceConstructionAccess<O: ClassObject + SolutionObject + Ord>:
         body: O,
         executive: &mut FilletExecutive<O>,
     ) -> Result<()>;
+    /// Bound open-ended native sheets before their first stitch. Abstract adapters
+    /// have no live open-end geometry; the session supplies that construction.
+    ///
+    /// # Errors
+    /// The boundary construction's errors, preserving its refusal and fit metadata.
+    fn faces_bound_open_ends(
+        &mut self,
+        _k: &mut Kernel,
+        _executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 impl<O, A> FaceConstructionAccess<O> for A
 where
@@ -3642,6 +3654,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             index += 1;
         }
+        access.faces_bound_open_ends(k, self)?;
         Ok(fillet)
     }
 

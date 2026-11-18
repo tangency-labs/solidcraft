@@ -473,12 +473,14 @@ fn two_chamfers_past_the_feet_of_two_step_tops_of_one_plane_build() {
         "volume {v_low}"
     );
     let (_, n_high) = built(&blend_edges(slotted_stepped_bar, &[high], 4.0, true));
-    assert_builds(
-        &blend_edges(slotted_stepped_bar, &[low, high], 4.0, true),
-        2060.0,
-        CLOSED_REL,
-        n_low + n_high - bar_faces,
-    );
+    for edges in [[low, high], [high, low]] {
+        assert_builds(
+            &blend_edges(slotted_stepped_bar, &edges, 4.0, true),
+            2060.0,
+            CLOSED_REL,
+            n_low + n_high - bar_faces,
+        );
+    }
 }
 
 /// The issue's hooked bar: its profile (0, 5), an R3 arc about (3/√2, 5 + 3/√2) to its far
@@ -528,11 +530,26 @@ fn two_rounds_past_two_flats_of_one_plane_build_as_each_alone() {
     let (bar_volume, bar_faces) = (volume(&k, &mut bar), bar.faces().ids().count());
     let (v_low, n_low) = built(&blend_edges(slotted_hook, &[low], 5.0, false));
     let (v_high, n_high) = built(&blend_edges(slotted_hook, &[high], 5.0, false));
+    // In the orthonormal frame along the tip's flats, the old R3 arc has centre
+    // (3, -3). The R5 centre is (5, sqrt(60) - 3), eight from that centre;
+    // their contact angle is acos(1/4). Integrating the two circular arcs around
+    // the removed section gives 8 sqrt(15) - 9 - 8 acos(1/4) - 9 pi/4.
+    let removed = 8.0 * 15.0_f64.sqrt() - 9.0 - 8.0 * 0.25_f64.acos() - 2.25 * std::f64::consts::PI;
+    let exact_bar = 1295.0 + 510.0 * 2.0_f64.sqrt() - 90.0 * std::f64::consts::PI;
+    assert!((bar_volume - exact_bar).abs() <= CLOSED_REL * exact_bar);
+    for single in [v_low, v_high] {
+        let exact_single = exact_bar - 10.0 * removed;
+        assert!((single - exact_single).abs() <= CLOSED_REL * exact_single);
+    }
     let expected = v_low + v_high - bar_volume;
-    assert_builds(
-        &blend_edges(slotted_hook, &[low, high], 5.0, false),
-        expected,
-        CLOSED_REL,
-        n_low + n_high - bar_faces,
-    );
+    let exact_pair = exact_bar - 20.0 * removed;
+    assert!((expected - exact_pair).abs() <= CLOSED_REL * exact_pair);
+    for edges in [[low, high], [high, low]] {
+        assert_builds(
+            &blend_edges(slotted_hook, &edges, 5.0, false),
+            expected,
+            CLOSED_REL,
+            n_low + n_high - bar_faces,
+        );
+    }
 }
