@@ -2694,7 +2694,7 @@ fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_o
 fn shaft_with_coil_pattern(doc: &mut Document, count: Option<usize>) -> (f64, Counts) {
     let shaft = FeatureKind::Cylinder {
         base: point_expr(Vec3::ZERO),
-        axis: Dir(Vec3::Z),
+        axis: crate::dir_expr(Vec3::Z),
         radius: "10".into(),
         height: "40".into(),
         operation: Operation::NewBody,
