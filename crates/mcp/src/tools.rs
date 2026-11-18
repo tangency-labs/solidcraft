@@ -579,7 +579,10 @@ pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Optio
     let empty = Map::new();
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
-        _ if crate::plugin_tools::is_plugin_tool(name) => crate::plugin_tools::call(b, name, a),
+        _ if crate::plugin_tools::is_plugin_tool(name) => match args.as_object() {
+            Some(args) => crate::plugin_tools::call(b, name, args),
+            None => Err(format!("`{name}`: arguments must be an object")),
+        },
         "screenshot" => return screenshot(b, a),
         "compare_picture" => return compare_picture(b, a, opts),
         "batch" => return batch(b, a, opts),

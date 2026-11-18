@@ -6249,7 +6249,7 @@ fn plugin_runs_always_keep_per_run_consent() {
 
 /// A plugin tool the agent calls by name (`<plugin>.<entry>`) waits for the user's answer in
 /// every mode, even one that allows everything or remembers the tool; listing the plugin tools
-/// asks nothing; arguments the entry does not declare are refused before anything is asked.
+/// asks nothing; legacy named calls pass undeclared arguments through after approval.
 #[test]
 fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
     let dir = std::env::temp_dir().join(format!("sc-agent-chat-plugin-tool-{}", std::process::id()));
@@ -6272,12 +6272,11 @@ fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
         assert!(call.try_recv().is_err(), "{mode:?}: nothing runs before the answer");
         let undeclared = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"colour":"red"}}}));
         pump_tools(&mut app);
-        let refused = undeclared.try_recv().unwrap();
-        assert_eq!(refused["ok"], false);
-        assert!(refused["error"].as_str().unwrap().contains("params.colour"), "{refused}");
+        assert!(undeclared.try_recv().is_err(), "legacy named inputs still wait for approval");
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: undeclared inputs pass through the legacy call");
         let list = ask(&tx, "engine.execute", json!({"command":"plugin.tools"}));
         pump_tools(&mut app);
-        assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: listing asks nothing");
+        assert_eq!(app.agent_chat.waiting(), 2, "{mode:?}: listing asks nothing");
         drop(list);
     }
     let _ = std::fs::remove_dir_all(&dir);

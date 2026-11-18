@@ -1,9 +1,8 @@
-//! Arguments checked against an entry's declared input schema, before any plugin code runs. A
-//! program calling an entry by name (an MCP or assistant tool call, `<plugin>.<entry>`) gets the
-//! same strict checks as an app command: the declared types, required fields, fixed values and
-//! ranges, and no field the schema does not declare (an object schema that says nothing about
-//! other fields, `additionalProperties`, takes only its declared properties). The schema is the plugin's, so the check is
-//! bounded in depth and work and never fails on a schema it does not understand.
+//! MCP tool arguments checked against an entry's declared input schema before
+//! plugin code runs: declared types, required fields, fixed values and ranges. Object schemas
+//! default to accepting only declared properties unless they use unsupported schema composition;
+//! `oneOf`/`anyOf` options do not implicitly close the object they constrain. The schema is the
+//! plugin's, so the check is bounded in depth and work and ignores unsupported keywords.
 
 use crate::{HostError, Result};
 use serde_json::{Map, Value};
@@ -16,40 +15,61 @@ const MAX_STEPS: usize = 100_000;
 /// `Ok` when `value` fits `schema`; otherwise the first field that does not, and why.
 pub fn check_input(schema: &Value, value: &Value) -> Result<()> {
     let mut steps = 0;
-    check(schema, value, "params", 0, &mut steps)
+    check(schema, value, "params", 0, &mut steps, true)
 }
 
-/// The schema as a tool lists it: an object schema refuses any field it does not declare unless
-/// it says otherwise (`additionalProperties`), as [`check_input`] does.
+/// The schema as a tool lists it, with the same default-closed object rules as [`check_input`].
 pub fn strict_input_schema(schema: &Value) -> Value {
-    fn strict(schema: &mut Value, depth: usize) {
+    fn strict(schema: &mut Value, depth: usize, closed: bool) {
         if depth > MAX_DEPTH {
             return;
         }
         let Some(o) = schema.as_object_mut() else { return };
         let object = o.get("type").and_then(Value::as_str) == Some("object") || o.get("properties").is_some_and(Value::is_object);
-        if object && !o.contains_key("additionalProperties") {
+        if object && defaults_closed(o, closed) && !o.contains_key("additionalProperties") {
             o.insert("additionalProperties".into(), Value::Bool(false));
         }
         if let Some(Value::Object(properties)) = o.get_mut("properties") {
             for property in properties.values_mut() {
-                strict(property, depth + 1);
+                strict(property, depth + 1, true);
             }
         }
+        if let Some(extra @ Value::Object(_)) = o.get_mut("additionalProperties") {
+            strict(extra, depth + 1, true);
+        }
         if let Some(items) = o.get_mut("items") {
-            strict(items, depth + 1);
+            strict(items, depth + 1, true);
         }
         for key in ["oneOf", "anyOf"] {
             if let Some(Value::Array(options)) = o.get_mut(key) {
                 for option in options.iter_mut().take(256) {
-                    strict(option, depth + 1);
+                    strict(option, depth + 1, false);
                 }
             }
         }
     }
     let mut schema = schema.clone();
-    strict(&mut schema, 0);
+    strict(&mut schema, 0, true);
     schema
+}
+
+// These keywords can describe fields outside `properties`, which this checker cannot resolve.
+// Branches also constrain an existing object rather than declaring all its fields.
+fn defaults_closed(schema: &Map<String, Value>, closed: bool) -> bool {
+    const UNSUPPORTED: [&str; 11] = [
+        "allOf",
+        "$ref",
+        "$dynamicRef",
+        "patternProperties",
+        "dependentSchemas",
+        "dependencies",
+        "if",
+        "then",
+        "else",
+        "unevaluatedProperties",
+        "propertyNames",
+    ];
+    closed && !UNSUPPORTED.iter().any(|key| schema.contains_key(*key))
 }
 
 fn bad(field: &str, reason: impl Into<String>) -> HostError {
@@ -83,7 +103,7 @@ fn count(schema: &Map<String, Value>, key: &str) -> Option<usize> {
     schema.get(key).and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX))
 }
 
-fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut usize) -> Result<()> {
+fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut usize, closed: bool) -> Result<()> {
     *steps += 1;
     if depth > MAX_DEPTH || *steps > MAX_STEPS {
         return Err(bad(field, "is nested too deeply to check"));
@@ -117,7 +137,7 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         {
             let mut matched = false;
             for option in options.iter().take(256) {
-                if check(option, value, field, depth + 1, steps).is_ok() {
+                if check(option, value, field, depth + 1, steps, false).is_ok() {
                     matched = true;
                     break;
                 }
@@ -173,7 +193,7 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         }
         if let Some(item) = schema.get("items") {
             for (i, value) in items.iter().enumerate() {
-                check(item, value, &format!("{field}[{i}]"), depth + 1, steps)?;
+                check(item, value, &format!("{field}[{i}]"), depth + 1, steps, true)?;
             }
         }
     }
@@ -188,15 +208,15 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         let properties = schema.get("properties").and_then(Value::as_object);
         let additional = schema.get("additionalProperties");
         // An object schema that says nothing about other fields declares exactly its properties.
-        let declared = properties.is_some() || schema.get("type").and_then(Value::as_str) == Some("object");
+        let declared = defaults_closed(schema, closed) && (properties.is_some() || schema.get("type").and_then(Value::as_str) == Some("object"));
         for (name, value) in object {
             let field = format!("{field}.{name}");
             match (properties.and_then(|p| p.get(name)), additional) {
-                (Some(property), _) => check(property, value, &field, depth + 1, steps)?,
+                (Some(property), _) => check(property, value, &field, depth + 1, steps, true)?,
                 (None, Some(Value::Bool(false))) => return Err(bad(&field, "is not an input of this entry")),
                 // Declared properties and nothing said about others: as strict as an app command.
                 (None, None) if declared => return Err(bad(&field, "is not an input of this entry")),
-                (None, Some(extra @ Value::Object(_))) => check(extra, value, &field, depth + 1, steps)?,
+                (None, Some(extra @ Value::Object(_))) => check(extra, value, &field, depth + 1, steps, true)?,
                 (None, _) => {}
             }
         }

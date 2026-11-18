@@ -564,8 +564,7 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     let approval =
         params.get("approval").and_then(Value::as_str).ok_or_else(|| crate::params::bad(id, "approval from plugin.inspect is required"))?;
     let inputs = params.get("params").cloned().unwrap_or(json!({}));
-    // Called by name, an entry's inputs are checked as strictly as a command's parameters.
-    tools::check_entry_inputs(s, path, id, entry, &inputs)?;
+    // Preserve direct calls' input pass-through; tool callers validate their listed schema.
     // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
     Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
 }

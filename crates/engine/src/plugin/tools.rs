@@ -104,15 +104,6 @@ fn importer_schema(entry: &Entry) -> Value {
     })
 }
 
-/// Checks a `<plugin>.<entry>` call's inputs against the entry's declared schema, as strictly as
-/// an app command's parameters, before any plugin code runs.
-pub(super) fn check_entry_inputs(session: &Session, folder: &str, id: &str, entry: &str, inputs: &Value) -> Result<()> {
-    let manifest = with_installed(session, folder, || import::read_manifest(folder))?;
-    let declared = manifest.runtime.as_ref().and_then(|r| r.entries.iter().find(|e| e.name == entry && e.kind == EntryKind::Command));
-    let Some(declared) = declared else { return Err(EngineError::UnknownCommand(id.into())) };
-    craft_plugin::check_input(&declared.input_schema, inputs).map_err(Into::into)
-}
-
 /// The refusal of a call that needs a grant `plugin` does not have.
 pub fn missing_grant(plugin: &str, grant: &str) -> EngineError {
     EngineError::Other(format!("plugin `{plugin}` does not have the grant `{grant}`: {APPROVE}"))

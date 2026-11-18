@@ -94,7 +94,7 @@ fn definition(t: &Value) -> Option<Value> {
 
 /// The plugin tools for `tools/list`, after the built-in ones.
 pub fn definitions(b: &mut dyn Backend) -> Vec<Value> {
-    listed(b, None).unwrap_or_default().iter().take(512).filter_map(definition).collect()
+    listed(b, None).unwrap_or_default().iter().filter_map(definition).collect()
 }
 
 /// Run plugin tool `name`: its arguments checked against the entry's declared schema, then the

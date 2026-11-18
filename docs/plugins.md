@@ -341,10 +341,11 @@ beside the built-in tools, so an agent can find and use what a plugin offers wit
   `file.import`. Export slots get their tools when exporters land.
 - **Fresh every listing.** `tools/list` asks `plugin.tools` each time, so a plugin turned off or
   removed is gone from the next listing, and calling its tool is an unknown tool.
-- **Strict arguments.** A tool's arguments, and the inputs of any `<plugin>.<entry>` call, are
-  checked against the entry's declared schema as strictly as an app command's parameters: the
-  declared types, required fields, fixed values and ranges, and no field it does not declare
-  (unless the schema allows others with `additionalProperties`). Nothing runs when they don't fit.
+- **Strict arguments.** MCP tool arguments are checked against the entry's declared schema:
+  declared types, required fields, fixed values and ranges. Object schemas accept only declared
+  fields unless they allow others with `additionalProperties` or use unsupported schema keywords.
+  Composition options do not implicitly close objects. Nothing runs when the arguments don't fit.
+  Existing `<plugin>.<entry>` engine calls keep passing inputs through to the plugin unchanged.
 - **Headless, under existing grants.** A tool call opens none of the plugin's dialogs and runs
   with the grants it was given at install, as one undo step, like any command.
 - **A `read` entry stays read-only.** Whoever runs it, a person or a tool call, the host refuses it

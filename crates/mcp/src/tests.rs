@@ -4695,6 +4695,64 @@ fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
     assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
 }
 
+struct PluginToolsBackend {
+    entries: usize,
+    calls: Vec<(String, Value)>,
+}
+
+impl crate::Backend for PluginToolsBackend {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.into(), params.clone()));
+        if method == "engine.execute" && params["command"] == "plugin.tools" {
+            let tools: Vec<Value> = (0..self.entries)
+                .map(|i| {
+                    json!({"name":format!("fixture.entry{i}"),"plugin":"fixture","entry":format!("entry{i}"),
+                    "kind":"command","effect":"read","approval":"approved","input_schema":{"type":"object"}})
+                })
+                .collect();
+            Ok(json!({"tools":tools}))
+        } else {
+            Ok(json!({}))
+        }
+    }
+    fn has_ui(&self) -> bool {
+        false
+    }
+    fn describe(&self) -> String {
+        "synthetic plugin tools".into()
+    }
+}
+
+#[test]
+fn plugin_tool_listing_keeps_entries_after_512() {
+    let backend = PluginToolsBackend { entries: 513, calls: Vec::new() };
+    let mut s = Server::new(Box::new(backend));
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    let plugins: Vec<&Value> = listed["result"]["tools"].as_array().unwrap().iter().filter(|t| t["plugin"].is_object()).collect();
+    assert_eq!(plugins.len(), 513);
+    assert_eq!(plugins.last().unwrap()["name"], "fixture.entry512");
+}
+
+#[test]
+fn plugin_tool_arguments_must_be_objects_before_any_backend_call() {
+    let mut backend = PluginToolsBackend { entries: 1, calls: Vec::new() };
+    for args in [Value::Null, json!([]), json!([{}]), json!(true), json!(42), json!("text")] {
+        let reply = crate::call_tool(&mut backend, "fixture.entry0", &args);
+        assert_eq!(reply["isError"], true, "{reply}");
+        assert!(reply["content"][0]["text"].as_str().unwrap().contains("arguments must be an object"), "{reply}");
+        assert!(backend.calls.is_empty(), "invalid arguments must not reach the plugin: {:?}", backend.calls);
+    }
+    let reply = crate::call_tool(&mut backend, "fixture.entry0", &json!({}));
+    assert_ne!(reply["isError"], true, "{reply}");
+    assert_eq!(backend.calls.len(), 2);
+    assert_eq!(backend.calls[1].1["command"], "fixture.entry0");
+    assert_eq!(backend.calls[1].1["params"]["params"], json!({}));
+    // Built-in tools keep accepting non-object arguments as an empty argument map.
+    let reply = crate::call_tool(&mut backend, "running", &Value::Null);
+    assert_ne!(reply["isError"], true, "{reply}");
+    assert_eq!(backend.calls.last().unwrap().0, "control.running");
+}
+
 /// Installed plugins are tools (RFC 0002 section 6c): listed with a `plugin` field and their
 /// own text marked as plugin text, called with strict arguments, refused with the missing grant
 /// as data, and gone from the next listing once removed.

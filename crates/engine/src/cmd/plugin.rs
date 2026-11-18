@@ -200,14 +200,14 @@ fn mesh(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn list(s: &mut Session, _p: &Value) -> Result<Value> {
-    // Discovery is inert, and uses the caller's file scope when reading each package.
+    // Discovery is inert; installed packages use the app's authority.
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(root) = s.plugin_state.plugins_dir()
         && let Ok(folders) = std::fs::read_dir(root)
     {
         for folder in folders.flatten().take(1024) {
             let path = folder.path().to_string_lossy().into_owned();
-            if let Ok(package) = plugin::read_package(&path) {
+            if let Ok(package) = plugin::with_installed(s, &path, || plugin::read_package(&path)) {
                 s.plugin_state.register_discovered(package.manifest.id, path);
             }
         }

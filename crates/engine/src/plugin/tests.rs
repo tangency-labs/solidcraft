@@ -963,6 +963,35 @@ mod native {
         assert_eq!(direct["result"], namespaced["result"]);
     }
 
+    #[test]
+    fn named_calls_preserve_input_pass_through() {
+        let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"size":{"type":"number","minimum":1}}}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        for inputs in [json!({"colour":"red"}), json!({"size":0}), json!({"size":"large"})] {
+            let result = s.execute("sample.make", &json!({"approval":approval,"params":inputs})).unwrap();
+            assert_eq!(result["result"], inputs, "direct calls pass inputs to the plugin unchanged");
+        }
+    }
+
+    #[test]
+    fn a_scoped_fresh_session_lists_installed_commands_before_tools_are_requested() {
+        let f = Fixture::new("call $box");
+        let mut installed = Session::default();
+        f.install(&mut installed, json!({}));
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = installed.plugin_state.plugins_dir.clone();
+        assert!(s.plugin_state.packages.is_empty());
+        solidcraft_io::vfs::scoped(Some(Default::default()), || {
+            let listed = s.execute("plugin.list", &json!({})).unwrap();
+            assert_eq!(listed["plugins"].as_array().unwrap().len(), 1, "{listed}");
+            assert_eq!(listed["plugins"][0]["commands"], json!(["sample.make"]));
+        });
+    }
+
     /// An installed plugin's entry is a tool: listed with its plugin's text and strict inputs,
     /// called by name as one undo step, gone from the listing once turned off or removed.
     #[test]
@@ -992,9 +1021,6 @@ mod native {
         assert_eq!((s.doc.features.len(), s.undo.len()), (1, undo + 1));
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.doc.features.is_empty(), "one undo takes back the whole call");
-        let refused = s.execute("sample.make", &json!({"approval": approval, "params": {"colour": "red"}})).unwrap_err();
-        assert!(matches!(&refused, EngineError::Plugin(HostError::InvalidInput { field, .. }) if field == "params.colour"), "{refused}");
-        assert!(s.doc.features.is_empty(), "refused before any plugin code ran");
         s.disabled_plugins.insert("sample".into());
         assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
         s.disabled_plugins.clear();

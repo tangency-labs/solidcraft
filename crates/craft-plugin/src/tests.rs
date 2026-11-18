@@ -340,3 +340,40 @@ fn entry_arguments_are_checked_as_strictly_as_app_commands() {
     }
     assert!(check_input(&deep, &value).is_err());
 }
+
+#[test]
+fn additional_property_schemas_are_listed_as_strictly_as_they_are_checked() {
+    let schema = json!({"type":"object","additionalProperties":{"type":"object","properties":{"x":{}}}});
+    let listed = strict_input_schema(&schema);
+    assert_eq!(listed["additionalProperties"]["additionalProperties"], false);
+    for candidate in [&schema, &listed] {
+        assert_eq!(check_input(candidate, &json!({"k":{"x":1}})), Ok(()));
+        assert!(matches!(check_input(candidate, &json!({"k":{"x":1,"y":2}})),
+            Err(HostError::InvalidInput { field, .. }) if field == "params.k.y"));
+    }
+}
+
+#[test]
+fn schema_composition_does_not_implicitly_close_object_constraints() {
+    let schema = json!({"type":"object","allOf":[{"properties":{"a":{"type":"integer"}}}]});
+    let listed = strict_input_schema(&schema);
+    assert!(listed.get("additionalProperties").is_none());
+    assert_eq!(check_input(&schema, &json!({"a":1})), Ok(()));
+    assert_eq!(check_input(&listed, &json!({"a":1})), Ok(()));
+    for keyword in ["oneOf", "anyOf"] {
+        let mut schema = json!({"type":"object","properties":{"a":{},"b":{}}});
+        schema[keyword] = json!([{"type":"object","required":["a"]},{"type":"object","required":["b"]}]);
+        let listed = strict_input_schema(&schema);
+        assert_eq!(listed["additionalProperties"], false);
+        assert!(listed[keyword][0].get("additionalProperties").is_none());
+        for candidate in [&schema, &listed] {
+            assert_eq!(check_input(candidate, &json!({"a":1})), Ok(()));
+            assert_eq!(check_input(candidate, &json!({"b":2})), Ok(()));
+            assert!(check_input(candidate, &json!({})).is_err());
+            assert!(check_input(candidate, &json!({"a":1,"extra":2})).is_err());
+        }
+        // An explicitly closed branch still refuses undeclared fields.
+        schema[keyword][0]["additionalProperties"] = json!(false);
+        assert!(check_input(&schema, &json!({"a":1})).is_err());
+    }
+}
