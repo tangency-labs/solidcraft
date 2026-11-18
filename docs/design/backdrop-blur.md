@@ -52,6 +52,7 @@ Non-goals
   existing reason).
 - A new look. For a marker on its own the output must match today's within 1/255.
 - Blurring what is painted *after* a panel, or across windows.
+- Blurring anything that is translucent only to show what is behind it (section 3.7).
 
 ## 3. Design
 
@@ -158,7 +159,38 @@ It returns `Shape::Noop` when blur is off, so a caller adds it unconditionally. 
 stays in `ui_kit::container` and is documented there as the single place that decides which
 default surfaces blur. HUDs, toasts, input shields and the application bar stay out.
 
-### 3.7 What is deliberately not cached
+### 3.7 Only a themed glass material blurs; see-through never does
+
+Blur belongs to the *material* a theme gives a surface (a translucent fill on a Panel, Feature,
+Palette or Chrome surface), not to alpha as such. An element that is translucent because it is
+meant to let the model show through, or because it is fading, never blurs:
+
+- the Translucent browser option (`browser_float`) and the History stacked under it (#10395);
+- the navigation bar dimmed by dim-when-not-hovered, and any other fade or dim;
+- anything else a host makes translucent at run time (a hover fade, a drag ghost).
+
+Today `decorate` decides from alpha alone: it blurs any fill with alpha 1 to 254, and also an
+*opaque* fill whose painter opacity is below 1 (`blur_native.rs`, the early return in `decorate`),
+and the marker carries that opacity into the shader (`p[3]`). That is how a dimmed bar ends up
+blurred. The rule changes to:
+
+- `decorate` returns the ordinary shape whenever `painter.opacity() < 1.0`. The marker no longer
+  carries an opacity, and the shader's opacity multiplier is removed (alpha comes from the fill
+  alone). A fade-in therefore starts without blur and the blur appears when the element reaches
+  full opacity; the fixture for this checks there is no flash.
+- `Container` gets `see_through(self) -> Self`. A surface built with it never requests a backdrop,
+  whatever its fill alpha. The Translucent browser and anything stacked under it set it, so
+  `browser_float` needs no code that reaches into the blur setting. The theme's saved blur radius
+  is not touched and unrelated panels keep blurring.
+- `Container::adaptive` keeps one meaning ("takes the themed surface treatment"). A second,
+  separate check, `Container::blurs`, is `adaptive() && !see_through`.
+- A surface whose fill alpha is lowered by a preference (the fill is then no longer the theme's
+  glass) counts as see-through. The code that lowers it calls `see_through()` in the same place.
+
+This also settles the open question about #10395: that issue becomes a one-line `see_through()` on
+the Browser host and its stack once this lands.
+
+### 3.8 What is deliberately not cached
 
 Today S has a key, so an unchanged scene skips work. The blur result depends on everything painted
 before each marker, so it cannot be cached by the viewport's key. egui already skips frames when
@@ -175,7 +207,8 @@ That is a follow-up only if measured to matter.
 | `crates/ui-kit/src/blur_plan.rs` (new) | The pure planner and its unit tests. |
 | `crates/ui-kit/src/blur.wgsl` | Remove `background`; `down` and `up` unchanged (scissor does the region). |
 | `crates/ui-kit/src/blur.rs` | `Backdrop`; remove `viewport`, `source_*`; wasm stubs follow. |
-| `crates/ui-kit/src/container.rs` | Drop `ROOT` checks. |
+| `crates/ui-kit/src/container.rs` | Drop `ROOT` checks; add `see_through()` and `blurs()` (section 3.7). |
+| Browser, History and navigation bar hosts | Call `see_through()` for the translucent and dimmed states. |
 | `crates/ui-egui/src/viewport.rs:6774`, `render_workspace.rs:3714` | Plain paint callback. |
 | `crates/ui-egui/src/lib.rs` (`ui`, `blur_source`), `prefs.rs` (`blur_availability*`) | Drop the source argument and reason. |
 | `crates/ui-egui/src/panel_runtime/*`, `agent_chat/panel.rs` | `begin` per window. |
@@ -196,6 +229,9 @@ hooks it needs are already there. No design-format change, no new command, no ne
 4. Per-window state and `begin` in the pop-out hosts; remove the `ROOT` checks.
 5. Per-marker degradation; area budget replaces the count cap.
 6. `Backdrop` constructor and a first non-`Container` user; docs rewrite; screenshots.
+7. (Can go first, since it needs none of the above.) The see-through rule of section 3.7:
+   `decorate` ignores faded painters, `see_through()`, and the Browser, History and navigation bar
+   hosts use it.
 
 ## 6. Verification
 
@@ -210,7 +246,11 @@ refused by production policy, so they use `FixturePolicy::Rendering`):
 - Pop-out window with a translucent panel.
 - Blur off (radius 0), and a frame with no marker: counters stay zero, no extra passes, pixels
   identical to the ordinary pass.
-- unorm and sRGB formats; rounded corners; clip; `opacity` below 1.
+- unorm and sRGB formats; rounded corners; clip.
+- No blur, and no marker, for: a surface built with `see_through()`; a painter at opacity below 1
+  (the dimmed navigation bar); the Translucent browser with a blurring theme (its backing shows
+  the model unblurred and the theme's radius is unchanged); a fade-in, which gains blur only at
+  full opacity. A sibling panel on the same theme still blurs.
 - The existing blur fixtures (see #17280 for the composition one) still pass, with any
   "resting source" assertion replaced by one that asserts the frame has no source.
 
@@ -242,8 +282,9 @@ Decided here:
   the blur to the rect (a visibly different look).
 - Stacked glass blurs what is directly under it (a card over a card sees the card below).
 - The web stays unavailable with its current reason.
+- Translucent for see-through or fading (Translucent browser, dimmed navigation bar) never blurs;
+  only a theme's glass material does (section 3.7).
 
-Open for review: whether the "Translucent browser" option (#10395) should stop requesting a
-backdrop through this API once it lands, rather than being handled in the Browser.
+Open for review: none right now.
 
 Related: #9809, #8876, #10395, #11218, #14251 (the UI kit now owns this code).
