@@ -1223,8 +1223,9 @@ fn past_u() -> Curve2 {
 }
 
 /// A degree-(1, 1) rational patch is bounded; the same surface with every homogeneous
-/// coordinate times 1e-200 or 1e200 is refused, its weight products underflowing to zero or
-/// overflowing to infinity, never accepted with a bound that leaves them out.
+/// coordinate times 1e-200, 1e-160 or 1e200 is refused, its weight products underflowing to
+/// zero, below the normal range (where their rounding is no longer relative) or overflowing to
+/// infinity, never accepted with a bound that leaves them out.
 #[test]
 fn a_rational_net_whose_weight_products_underflow_or_overflow_is_refused() {
     let linear = vec![0.0, 0.0, 1.0, 1.0];
@@ -1240,10 +1241,14 @@ fn a_rational_net_whose_weight_products_underflow_or_overflow_is_refused() {
         .unwrap()
         .unwrap();
     assert!(home.displacement > 0.1, "{}", home.displacement);
-    for scale in [1e-200, 1e200] {
+    for (scale, why) in [
+        (1e-200, "products underflow"),
+        (1e-160, "products underflow"),
+        (1e200, "not finite"),
+    ] {
         let scaled = pcurve_onto_knots(&patch(scale), &past_u(), 1.0);
         assert!(
-            matches!(scaled, Err(EvalError::Unevaluable(_))),
+            matches!(&scaled, Err(EvalError::Unevaluable(m)) if m.contains(why)),
             "{scale:e}: {scaled:?}"
         );
     }
@@ -1266,7 +1271,10 @@ fn a_rational_net_that_jumps_at_a_knot_is_refused() {
         ],
     );
     let onto = pcurve_onto_knots(&s, &past_u(), 1.0);
-    assert!(matches!(onto, Err(EvalError::Invalid(_))), "{onto:?}");
+    assert!(
+        matches!(&onto, Err(EvalError::Invalid(m)) if m.contains("multiplicity")),
+        "{onto:?}"
+    );
 }
 
 /// What a rational net cannot be bounded on is refused: a weight that turns negative past the
