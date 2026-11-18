@@ -3377,7 +3377,12 @@ mod tests {
         let second = view_duplicate(&mut app, first).unwrap();
         let third = view_duplicate(&mut app, second).unwrap();
         assert!(view_rename(&mut app, third, "Original angle"));
-        app.run("tab.view.move_to_window", json!({"view":third})).unwrap();
+        let window = app.run("tab.view.move_to_window", json!({"view":third})).unwrap()["window"].clone();
+        let options = app.run("tab.window.options", json!({"window":window})).unwrap()["options"].clone();
+        assert_eq!(options, json!({"card_headers":"always","keep_on_top":false}));
+        let edited = app.run("tab.window.set_options", json!({"window":window, "card_headers":"hidden","keep_on_top":true})).unwrap();
+        app.run("window.options.use_as_default", json!({"window":window})).unwrap();
+        assert_eq!(serde_json::to_value(app.preferences.pop_out_window_defaults).unwrap(), edited["options"]);
         app.run("tab.view.layout", json!({"window":0,"layout":"side_by_side"})).unwrap();
         assert_eq!(app.run("tab.layout.save", json!({"name":"Side monitors"})).unwrap()["name"], "Side monitors");
         assert_eq!(app.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Side monitors"]));
@@ -3401,13 +3406,21 @@ mod tests {
         assert_eq!(child.views.ids().collect::<Vec<_>>(), [b]);
         assert_eq!(child.views.active().name, "Keep this name");
         let id = child.id;
+        assert_eq!(serde_json::to_value(child.options).unwrap(), edited["options"]);
+        target.run("tab.window.set_options", json!({"window":id,"keep_on_top":false})).unwrap();
+        assert_eq!(crate::view_setups::matching_name(&target), None);
         target.run("tab.layout.apply", json!({"name":"Side monitors"})).unwrap();
         assert_eq!(target.docs.views.windows().first().unwrap().id, id);
+        assert_eq!(target.run("tab.window.options", json!({"window":id})).unwrap()["options"], edited["options"]);
         assert!(target.docs.views.check());
         assert_eq!(target.run("tab.layout.rename", json!({"name":"Side monitors","new_name":"Review"})).unwrap()["new_name"], "Review");
         assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Review"]));
         assert_eq!(target.run("tab.layout.remove", json!({"name":"Review"})).unwrap()["name"], "Review");
         assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!([]));
+        target.run("tab.window.close", json!({"window":id})).unwrap();
+        assert_eq!(target.run("tab.window.options", json!({"window":id})).unwrap_err(), "window_not_found");
+        let reopened = target.run("tab.view.move_to_window", json!({"view":b})).unwrap()["window"].clone();
+        assert_eq!(target.run("tab.window.options", json!({"window":reopened})).unwrap()["options"], edited["options"]);
     }
 
     #[test]

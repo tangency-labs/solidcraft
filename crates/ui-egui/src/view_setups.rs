@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use solidcraft_views::{EMPTY, MAX_POPOUTS, MAX_VIEWS, Tiles, WindowArrangement, WindowLevel, WindowPlacement};
+use solidcraft_views::{EMPTY, MAX_POPOUTS, MAX_VIEWS, Tiles, WindowArrangement, WindowLevel, WindowOptions, WindowPlacement};
 
 use crate::{SolveApp, documents, view_windows};
 
@@ -17,6 +17,7 @@ struct Setup {
 struct SetupWindow {
     views: usize,
     level: SetupLevel,
+    options: WindowOptions,
     placement: Option<Placement>,
     tiles: Option<Value>,
 }
@@ -97,6 +98,7 @@ impl Setup {
                 Some(SetupWindow {
                     views: views.len(),
                     level: view_windows::setup_level(app, id),
+                    options: app.docs.views.window(id).map_or_else(WindowOptions::default, |window| window.options),
                     placement: view_windows::setup_placement(app, id).map(|placement| Placement::capture(app, placement)),
                     tiles,
                 })
@@ -153,7 +155,8 @@ impl Setup {
                     Some(tiles.to_json())
                 }
             };
-            windows.push(SetupWindow { views, level, placement, tiles });
+            let options = window.get("options").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
+            windows.push(SetupWindow { views, level, options, placement, tiles });
         }
         (total <= MAX_VIEWS).then_some(Self { windows })
     }
@@ -163,6 +166,7 @@ impl Setup {
             && self.windows.iter().zip(&actual.windows).all(|(saved, actual)| {
                 saved.views == actual.views
                     && saved.level == actual.level
+                    && saved.options == actual.options
                     && saved.tiles == actual.tiles
                     && saved.placement.as_ref().is_none_or(|placement| actual.placement.as_ref().is_none_or(|actual| placement.same_position(actual)))
             })
@@ -245,6 +249,7 @@ fn apply(app: &mut SolveApp, name: &str) -> Result<(), String> {
                 active,
                 tiles,
                 level: template.level.into(),
+                options: template.options,
                 placement: template.placement.map(|placement| view_windows::resolve_setup_placement(app, placement)),
             })
         })

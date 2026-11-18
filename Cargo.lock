@@ -6571,6 +6571,8 @@ dependencies = [
 name = "solidcraft-views"
 version = "0.45.0"
 dependencies = [
+ "schemars",
+ "serde",
  "serde_json",
  "solidcraft-viewport",
 ]
