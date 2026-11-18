@@ -666,34 +666,89 @@ fn the_sub_tabs_return_what_was_clicked_and_dragged() {
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:vclose"), egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 2, id: "vclose".into() }]);
     // Drag the first sub-tab past the last.
-    let from = rig.at("t:view:0");
+    let origin = solidcraft_ui_registry::rect_of("t:view:0").expect("view 0 is drawn");
+    let from = origin.center();
     let to = solidcraft_ui_registry::rect_of("t:view:2").map(|r| r.right_center() - vec2(4.0, 0.0)).expect("view 2 is drawn");
     let mut actions = rig.frame(vec![egui::Event::PointerMoved(from)]);
     actions.extend(rig.frame(vec![press(from, true)]));
-    actions.extend(rig.frame(vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))]));
-    actions.extend(rig.frame(vec![egui::Event::PointerMoved(to)]));
-    actions.extend(rig.frame(vec![egui::Event::PointerMoved(to)]));
-    actions.extend(rig.frame(vec![press(to, false)]));
-    assert_eq!(actions, vec![TabAction::ReorderView { from: 0, to: 2 }]);
+    actions.extend(rig.frame(vec![egui::Event::PointerMoved(from + vec2(3.0, 0.0))]));
+    assert!(actions.is_empty(), "three pixels stay a click");
+    let pointer = from + vec2(4.0, 0.0);
+    assert_eq!(rig.frame(vec![egui::Event::PointerMoved(pointer)]), vec![TabAction::DockView { view: 0, origin, pointer, released: false }]);
+    assert_eq!(rig.frame(vec![egui::Event::PointerMoved(to)]), vec![TabAction::DockView { view: 0, origin, pointer: to, released: false }]);
+    assert_eq!(
+        rig.frame(vec![press(to, false)]),
+        vec![TabAction::DockView { view: 0, origin, pointer: to, released: true }, TabAction::ReorderView { from: 0, to: 2 }]
+    );
 }
 
 #[test]
 fn a_view_drag_reports_release_outside_the_client_and_escape_cancels_it() {
     let rig = TabsRig::with(Some(true));
-    let from = rig.at("t:view:0");
+    let origin = solidcraft_ui_registry::rect_of("t:view:0").expect("view 0 is drawn");
+    let from = origin.center();
     let outside = pos2(850.0, from.y);
     let escape = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
     for cancel in [false, true] {
         rig.frame(vec![egui::Event::PointerMoved(from)]);
         rig.frame(vec![press(from, true)]);
         rig.frame(vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))]);
-        assert!(rig.frame(vec![egui::Event::PointerMoved(outside)]).contains(&TabAction::DockView { view: 0, pointer: outside, released: false }));
+        assert!(rig.frame(vec![egui::Event::PointerMoved(outside)]).contains(&TabAction::DockView {
+            view: 0,
+            origin,
+            pointer: outside,
+            released: false
+        }));
         if cancel {
-            rig.frame(vec![escape.clone()]);
+            assert!(rig.frame(vec![escape.clone()]).is_empty());
+            assert!(rig.frame(vec![egui::Event::PointerMoved(outside + vec2(4.0, 0.0))]).is_empty(), "a cancelled press stays cancelled");
         }
         let actions = rig.frame(vec![press(outside, false)]);
-        assert_eq!(actions.contains(&TabAction::DockView { view: 0, pointer: outside, released: true }), !cancel);
+        assert_eq!(actions.contains(&TabAction::DockView { view: 0, origin, pointer: outside, released: true }), !cancel);
     }
+}
+
+#[test]
+fn touch_lifts_a_view_tab_only_after_the_hold_threshold() {
+    let rig = TabsRig::with(Some(true));
+    let origin = solidcraft_ui_registry::rect_of("t:view:0").expect("view 0 is drawn");
+    let pointer = origin.center();
+    let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos: pointer, force: None };
+    rig.frame(vec![egui::Event::PointerMoved(pointer)]);
+    assert!(rig.frame(vec![touch(egui::TouchPhase::Start), press(pointer, true)]).is_empty());
+    rig.time.set(rig.time.get() + 0.200);
+    assert!(rig.frame(Vec::new()).is_empty());
+    rig.time.set(rig.time.get() + 0.025);
+    assert_eq!(rig.frame(Vec::new()), vec![TabAction::DockView { view: 0, origin, pointer, released: false }]);
+    assert_eq!(
+        rig.frame(vec![touch(egui::TouchPhase::End), press(pointer, false)]),
+        vec![TabAction::DockView { view: 0, origin, pointer, released: true }]
+    );
+}
+
+#[test]
+fn space_lifts_a_focused_local_view_tab_without_selecting_it() {
+    let rig = TabsRig::with(Some(true));
+    let origin = solidcraft_ui_registry::rect_of("t:view:1").expect("view 1 is drawn");
+    assert_eq!(rig.press(origin.center(), egui::PointerButton::Primary), vec![TabAction::SelectView(1)]);
+    let space = egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    assert_eq!(rig.frame(vec![space]), vec![TabAction::LiftView { view: 1, origin }]);
+}
+
+#[test]
+fn a_view_drop_slot_shifts_only_neighbours_at_or_after_the_local_index() {
+    let rig = TabsRig::with(Some(true));
+    rig.ctx.global_style_mut(|style| style.animation_time = 0.0);
+    let strip = egui::Id::unique("test_tabs");
+    let first = rig.at("t:view:0");
+    let second = rig.at("t:view:1");
+    set_view_drag_slot(&rig.ctx, strip, Some(1), 38.0);
+    rig.frame(Vec::new());
+    assert_eq!(rig.at("t:view:0"), first);
+    assert_eq!(rig.at("t:view:1"), second + vec2(38.0 + VIEW_GAP, 0.0));
+    set_view_drag_slot(&rig.ctx, strip, None, 0.0);
+    rig.frame(Vec::new());
+    assert_eq!(rig.at("t:view:1"), second);
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.

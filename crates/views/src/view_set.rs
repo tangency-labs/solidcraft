@@ -6,7 +6,7 @@
 use serde_json::{Value, json};
 use solidcraft_viewport::ViewSpec;
 
-use crate::tiles::{Edge, Placement, Preset, Tiles};
+use crate::tiles::{Edge, Placement, Preset, Rect, Tiles};
 
 /// Most views one design keeps open (and most a saved set may hold).
 pub const MAX_VIEWS: usize = 64;
@@ -143,6 +143,44 @@ impl WindowPlacement {
             fullscreen: value.get("fullscreen").and_then(Value::as_bool).unwrap_or(false),
         };
         placement.is_valid().then_some(placement)
+    }
+}
+
+/// Place a new pop-out in a display's work area. The source and cell sizes are captured at
+/// lift. The work area and pointer use the same logical display coordinates.
+pub fn window_rect_for(source: Rect, cell: Option<Rect>, work_area: Rect, pointer: Option<[f32; 2]>, snap: bool) -> Option<Rect> {
+    let tab_size = |span: f32| (f64::from(span) * 0.6) as f32;
+    let (width, height) = cell.map_or_else(|| (tab_size(source.w), tab_size(source.h)), |cell| (cell.w, cell.h));
+    if ![width, height, work_area.w, work_area.h].into_iter().all(|size| size.is_finite() && size > 0.0)
+        || ![work_area.x, work_area.y, work_area.x + work_area.w, work_area.y + work_area.h].into_iter().all(f32::is_finite)
+        || pointer.is_some_and(|point| !point.into_iter().all(f32::is_finite))
+    {
+        return None;
+    }
+    let max_width = work_area.w * 0.9;
+    let max_height = work_area.h * 0.9;
+    let w = width.clamp(640.0_f32.min(max_width), max_width);
+    let h = height.clamp(420.0_f32.min(max_height), max_height);
+    let room_x = work_area.w - w;
+    let room_y = work_area.h - h;
+    let [x, y] = pointer.map_or([room_x * 0.5, room_y * 0.5], |[x, y]| {
+        [anchored_window_axis(x - work_area.x - 24.0, room_x, snap), anchored_window_axis(y - work_area.y - 14.0, room_y, snap)]
+    });
+    Some(Rect { x: work_area.x + x, y: work_area.y + y, w, h })
+}
+
+fn anchored_window_axis(wanted: f32, room: f32, snap: bool) -> f32 {
+    let position = wanted.clamp(0.0, room);
+    if !snap {
+        return position;
+    }
+    let far = room - position;
+    if position <= 16.0 && position <= far {
+        0.0
+    } else if far <= 16.0 {
+        room
+    } else {
+        position
     }
 }
 
@@ -872,10 +910,8 @@ impl ViewSet {
         }
         let next = if let Some(tiles) = self.tiles.as_ref().filter(|tiles| tiles.contains(self.active)) {
             tiles.placed(id, placement)
-        } else if matches!(placement, Placement::Split { .. }) {
-            Tiles::Leaf(self.active).placed(id, placement)
         } else {
-            None
+            Tiles::Leaf(self.active).placed(id, placement)
         }?;
         next.views().into_iter().all(|other| other == id || self.can_tile_with(id, other)).then_some(next)
     }
@@ -886,7 +922,7 @@ impl ViewSet {
         if !tiles.contains(self.active) {
             self.active = id;
         }
-        self.tiles = Some(tiles);
+        self.tiles = (tiles.len() > 1).then_some(tiles);
         true
     }
 
@@ -1169,6 +1205,59 @@ mod tests {
 
     fn new_window() -> WindowTarget {
         WindowTarget::New { placement: None }
+    }
+
+    #[test]
+    fn replacing_a_single_ground_shows_the_new_view_without_tiling() {
+        let mut set = models(3);
+        assert_eq!(set.preview_placement(2, Placement::Replace(3)), Some(Tiles::Leaf(2)));
+        assert_eq!(set.preview_placement(2, Placement::Replace(1)), None);
+        assert_eq!(set.preview_placement(2, Placement::Empty(0)), None);
+        assert!(set.place_tile(2, Placement::Replace(3)));
+        assert_eq!(set.active().id, 2);
+        assert!(set.tiles().is_none());
+        assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn window_rect_uses_the_grab_point_or_centres_without_a_pointer() {
+        let display = Rect { x: -1600.0, y: 40.0, w: 1600.0, h: 960.0 };
+        let source = Rect { x: 10.0, y: 20.0, w: 1200.0, h: 800.0 };
+        let cell = Rect { x: 12.0, y: 80.0, w: 800.0, h: 500.0 };
+        assert_eq!(
+            window_rect_for(source, Some(cell), display, Some([-1100.0, 400.0]), true),
+            Some(Rect { x: -1124.0, y: 386.0, w: 800.0, h: 500.0 }),
+        );
+        assert_eq!(window_rect_for(source, None, display, None, true), Some(Rect { x: -1160.0, y: 280.0, w: 720.0, h: 480.0 }));
+    }
+
+    #[test]
+    fn window_rect_snaps_to_the_work_area_and_alt_leaves_the_grab_point() {
+        let display = Rect { x: 0.0, y: 28.0, w: 1200.0, h: 800.0 };
+        let source = Rect { x: 0.0, y: 0.0, w: 640.0, h: 420.0 };
+        let pointer = Some([574.0, 410.0]);
+        assert_eq!(window_rect_for(source, Some(source), display, pointer, true), Some(Rect { x: 560.0, y: 408.0, w: 640.0, h: 420.0 }),);
+        assert_eq!(window_rect_for(source, Some(source), display, pointer, false), Some(Rect { x: 550.0, y: 396.0, w: 640.0, h: 420.0 }),);
+        assert_eq!(window_rect_for(source, Some(source), display, Some([0.0, 28.0]), false), Some(Rect { x: 0.0, y: 28.0, w: 640.0, h: 420.0 }),);
+    }
+
+    #[test]
+    fn window_rect_recomputes_the_clamp_for_each_display_and_handles_hostile_input() {
+        let source = Rect { x: 0.0, y: 0.0, w: 1150.0, h: 1000.0 };
+        let small_display = Rect { x: 1200.0, y: 0.0, w: 1000.0, h: 700.0 };
+        let large_display = Rect { x: 0.0, y: -800.0, w: 1200.0, h: 800.0 };
+        assert_eq!(
+            window_rect_for(source, Some(source), small_display, Some([2200.0, 700.0]), true),
+            Some(Rect { x: 1300.0, y: 70.0, w: 900.0, h: 630.0 }),
+        );
+        assert_eq!(
+            window_rect_for(source, Some(source), large_display, Some([1200.0, 0.0]), true),
+            Some(Rect { x: 120.0, y: -720.0, w: 1080.0, h: 720.0 }),
+        );
+        let tiny_display = Rect { w: 200.0, h: 100.0, ..large_display };
+        assert_eq!(window_rect_for(source, None, tiny_display, None, false), Some(Rect { x: 10.0, y: -795.0, w: 180.0, h: 90.0 }),);
+        assert_eq!(window_rect_for(source, None, tiny_display, Some([f32::NAN, 0.0]), false), None);
+        assert_eq!(window_rect_for(source, None, Rect { w: -30.0, ..small_display }, None, false), None);
     }
 
     #[test]

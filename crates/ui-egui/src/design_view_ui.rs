@@ -122,7 +122,7 @@ fn view_id(app: &SolveApp, index: usize) -> Option<u64> {
 }
 
 /// Carry out one of the strip's view actions. False for an action that is not a view action.
-pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> bool {
+pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bool {
     match action {
         TabAction::SelectView(i) => {
             if let Some(id) = view_id(app, i) {
@@ -138,11 +138,6 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> boo
             documents::view_open(app, ViewKind::Model, None, false);
         }
         TabAction::ReorderView { from, to } => documents::view_move(app, from, to),
-        TabAction::DockView { view, pointer, released } => {
-            if let Some(id) = view_id(app, view) {
-                crate::view_tiles::tab_drag(app, ctx, id, pointer, released);
-            }
-        }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
         TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),

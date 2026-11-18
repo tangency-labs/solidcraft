@@ -231,11 +231,82 @@ fn placement(app: &SolveApp, view: u64, request: &Value, pointer: Option<egui::P
     })
 }
 
-pub(crate) fn drag_window_outline(app: &SolveApp, view: u64, pointer: Option<egui::Pos2>) -> Option<egui::Rect> {
-    let placement = placement(app, view, &Value::Null, pointer)?;
-    let display = app.view_windows.displays.iter().find(|display| placement.display.as_deref() == Some(display.name.as_str()))?;
-    let origin = display.bounds.min + egui::vec2(placement.x, placement.y) * display.scale;
-    Some(egui::Rect::from_min_size(origin, egui::vec2(placement.w, placement.h) * display.scale))
+#[derive(Clone, Copy)]
+pub(crate) struct DragSource {
+    frame: solidcraft_views::Rect,
+    cell: Option<solidcraft_views::Rect>,
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct DragWindow {
+    placement: WindowPlacement,
+    pub(crate) outline: egui::Rect,
+    pub(crate) label: String,
+}
+
+pub(crate) fn drag_source(app: &SolveApp, view: u64, frame: egui::Rect) -> DragSource {
+    let convert = |rect: egui::Rect| solidcraft_views::Rect { x: rect.left(), y: rect.top(), w: rect.width(), h: rect.height() };
+    let card = app.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect);
+    let tile = app.docs.views.tiles().is_some_and(|tiles| app.docs.views.is_tiled() && tiles.contains(view));
+    let fitted = if app.docs.views.active().id == view { app.viewport.rect } else { card };
+    let cell = fitted.filter(|rect| rect.is_finite() && rect.is_positive()).map(|mut rect| {
+        if tile {
+            rect.min.y -= crate::view_tiles::HEADER;
+        }
+        convert(rect)
+    });
+    DragSource { frame: convert(frame), cell }
+}
+
+pub(crate) fn drag_display_count(app: &SolveApp) -> usize {
+    app.view_windows.displays.len().max(1)
+}
+
+pub(crate) fn drag_window(
+    app: &SolveApp,
+    source: DragSource,
+    pointer: Option<egui::Pos2>,
+    display_index: Option<usize>,
+    snap: bool,
+) -> Option<DragWindow> {
+    let displays = &app.view_windows.displays;
+    let target = display_index
+        .and_then(|index| displays.get(index))
+        .or_else(|| pointer.and_then(|point| displays.iter().find(|display| display.bounds.contains(point))))
+        .or_else(|| displays.iter().find(|display| display.primary))
+        .or(displays.first());
+    let fallback = egui::Rect::from_min_size(egui::Pos2::ZERO, app.view_windows.monitor_size.unwrap_or(egui::vec2(1920.0, 1080.0)));
+    let (bounds, scale) = target.map_or((fallback, 1.0), |display| (display.bounds, display.scale));
+    let size = bounds.size() / scale;
+    let point = pointer.map(|point| (point - bounds.min) / scale).map(|point| [point.x, point.y]);
+    let work = solidcraft_views::Rect { x: 0.0, y: 0.0, w: size.x, h: size.y };
+    let rect = solidcraft_views::window_rect_for(source.frame, source.cell, work, point, snap)?;
+    let origin = bounds.min + egui::vec2(rect.x, rect.y) * scale;
+    let outline = egui::Rect::from_min_size(origin, egui::vec2(rect.w, rect.h) * scale);
+    let number = target.and_then(|target| displays.iter().position(|display| std::ptr::eq(display, target)));
+    let label = number.map_or_else(
+        || app.tr("multi_window.drag_display").to_owned(),
+        |index| solidcraft_ui_text::format("multi_window.display_number", &[("n", &(index + 1).to_string())]),
+    );
+    let placement = WindowPlacement {
+        display: target.map(|display| display.name.clone()),
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        maximised: false,
+        fullscreen: false,
+    };
+    Some(DragWindow { placement, outline, label })
+}
+
+pub(crate) fn drop_new_window(app: &mut SolveApp, view: u64, target: DragWindow) -> Result<(), String> {
+    let rect = target.placement;
+    let mut request = json!({"view":view,"window":"new","x":rect.x,"y":rect.y,"w":rect.w,"h":rect.h});
+    if let Some(display) = rect.display {
+        request["display"] = json!(display);
+    }
+    app.run("tab.view.move_to_window", request).map(|_| ())
 }
 
 fn placement_json(placement: Option<&WindowPlacement>) -> Value {
@@ -309,12 +380,13 @@ fn move_view(app: &mut SolveApp, view: u64, target: WindowTarget) -> Result<Valu
 
 pub(crate) fn detach(app: &mut SolveApp, view: u64, request: &Value) -> Result<Value, String> {
     let target = match request.get("window").and_then(Value::as_u64).and_then(|id| WindowId::try_from(id).ok()) {
-        Some(window) => WindowTarget::Existing { window, index: None },
+        Some(window) => WindowTarget::Existing { window, index: request.get("index").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()) },
         None => WindowTarget::New { placement: placement(app, view, request, None) },
     };
     move_view(app, view, target)
 }
 
+#[cfg(test)]
 pub(crate) fn drag_drop(app: &mut SolveApp, view: u64, target: Option<(WindowId, usize)>, screen: Option<egui::Pos2>) -> Result<(), String> {
     let target = match target {
         Some((window, index)) => WindowTarget::Existing { window, index: Some(index) },

@@ -114,7 +114,7 @@ fn bad_view_requests_are_refused() {
 
 #[test]
 fn window_commands_check_and_echo_requests_without_editing_the_design() {
-    assert_keys(input_schema_for::<TabViewMoveToWindowParams>(), &["display", "h", "level", "view", "w", "window", "x", "y"]);
+    assert_keys(input_schema_for::<TabViewMoveToWindowParams>(), &["display", "h", "index", "level", "view", "w", "window", "x", "y"]);
     assert_keys(input_schema_for::<TabWindowIdParams>(), &["window"]);
     assert_keys(input_schema_for::<TabWindowListParams>(), &[]);
 
@@ -141,6 +141,12 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
             output_schema_for::<TabWindowMoveReply>(),
         ),
         ("tab.view.move_to_window", json!({"view": 2, "window": 0}), json!({"view": 2, "window": 0}), output_schema_for::<TabWindowMoveReply>()),
+        (
+            "tab.view.move_to_window",
+            json!({"view": 2, "window": 0, "index": 3}),
+            json!({"view": 2, "window": 0, "index": 3}),
+            output_schema_for::<TabWindowMoveReply>(),
+        ),
         ("tab.window.list", Value::Null, json!({}), output_schema_for::<TabWindowListReply>()),
         ("tab.window.focus", json!({"window": 0}), json!({"window": 0}), output_schema_for::<TabWindowIdParams>()),
         ("tab.window.close", json!({"window": 1}), json!({"window": 1}), output_schema_for::<TabWindowCloseReply>()),
@@ -184,6 +190,10 @@ fn window_commands_refuse_malformed_requests() {
         ("tab.view.move_to_window", json!({"view": 2, "window": 1, "display": 0})),
         ("tab.view.move_to_window", json!({"view": 2, "window": 1, "x": 0})),
         ("tab.view.move_to_window", json!({"view": 2, "window": 1, "level": "views_only"})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": 1, "index": -1})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": 1, "index": "0"})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": "new", "index": 0})),
+        ("tab.view.move_to_window", json!({"view": 2, "index": 0})),
         ("tab.view.move_to_window", json!({"view": 2, "level": "clean"})),
         ("tab.view.move_to_window", json!({"view": 2, "display": -1})),
         ("tab.view.move_to_window", json!({"view": 2, "display": 4_294_967_296_u64})),

@@ -39,6 +39,9 @@ pub struct TabViewMoveToWindowParams {
     /// Open a new window by default, or move to an existing window (main is 0).
     #[serde(default)]
     pub window: TabWindowTarget,
+    /// Zero-based insertion position in an existing strip, after removing the view if it was there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<TabWindowDisplay>,
     /// Horizontal position in logical points relative to the selected display.
