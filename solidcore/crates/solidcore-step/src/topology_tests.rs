@@ -3004,3 +3004,102 @@ fn restarted_curve_errors_keep_their_step_messages() {
     let open = BCurve::Polyline { points: vec![[0.; 3], [1.; 3], [2.; 3]] };
     assert_eq!(crate::kernel::restart_curve(&open, 0.5).unwrap_err(), "spline seam endpoints do not coincide");
 }
+
+/// Swept closed conics preserve their profile's points and period, including when the face's
+/// seam lies close to a quarter line.
+#[test]
+fn bent_wire_sweeps_keep_their_closed_profiles() {
+    use crate::geom::{Axis1, Surface};
+    use std::sync::Arc;
+
+    let position = Placement { origin: [2.0, 3.0, 5.0], axis: [0.0, 0.0, 1.0], ref_direction: [1.0, 0.0, 0.0] };
+    let axis = v3([0.0, 1.0, 6e-6]).normalized().unwrap();
+    for profile in [Curve::Circle { position: position.clone(), radius: 0.3 }, Curve::Ellipse { position, semi_axis_1: 0.3, semi_axis_2: 0.2 }] {
+        let profile = Arc::new(profile);
+        let surfaces = [
+            Surface::Extrusion { profile: profile.clone(), direction: [0.1, 0.0, 1.0], magnitude: 1.0 },
+            // The axis is slightly out of the profile's plane, so this remains a placed
+            // revolution and closes along the profile.
+            Surface::Revolution { profile, axis: Axis1 { origin: [0.0, 3.0, 5.0], direction: [axis.x, axis.y, axis.z] } },
+        ];
+        for surface in surfaces {
+            for seam in [-2e-12, 0.0, 2e-12, 0.2] {
+                let closed_direction = usize::from(matches!(surface, Surface::Revolution { .. }));
+                let point = |t, s| v3(if closed_direction == 0 { surface.point(t, s) } else { surface.point(s, t) }.unwrap());
+                let walk: Vec<Vec3> = (0..=16).map(|k| point(seam + TAU * f64::from(k) / 16.0, 0.0)).collect();
+                let ext = swept::Extent {
+                    points: walk.iter().copied().chain((0..=16).map(|k| point(seam + TAU * f64::from(k) / 16.0, 1.0))).collect(),
+                    seam: (0..=8).map(|k| point(seam, f64::from(k) / 8.0)).collect(),
+                    walks: vec![walk],
+                };
+                let (record, _) = swept::map_surface(&surface, &ext, MIN_TOLERANCE).unwrap();
+                let eval = SurfaceEval::new(&record).unwrap();
+                let domain = eval.domain();
+                let period = domain.period[closed_direction].unwrap();
+                assert!((period - 4.0).abs() < 1e-12, "{seam}: {period}");
+                for k in 0..=32 {
+                    let angle = seam + TAU * f64::from(k) / 32.0;
+                    let profile_parameter = crate::kernel::form::param(angle);
+                    for sweep_parameter in [0.0, 0.5, 1.0] {
+                        let uv = if closed_direction == 0 { [profile_parameter, sweep_parameter] } else { [sweep_parameter, profile_parameter] };
+                        let expected = point(angle, sweep_parameter);
+                        let actual = eval.point(uv).unwrap();
+                        let rounding = 1e-12 * expected.len();
+                        assert!(actual.dist(expected) < rounding, "{seam}, {uv:?}: {actual:?} vs {expected:?}");
+                        let mut next_turn = uv;
+                        next_turn[closed_direction] += period;
+                        let repeated = eval.point(next_turn).unwrap();
+                        assert!(repeated.dist(actual) < rounding, "{seam}, {uv:?}: {actual:?} vs {repeated:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A circular extrusion skewed off its profile's axis, closed by a seam near a quarter line
+/// and two planar caps. Its exact volume is the circle's area times the normal height.
+#[test]
+fn an_oblique_circular_extrusion_with_a_seam_near_a_quarter_line_imports_closed() {
+    for angle in [-2e-12_f64, 0.0, 2e-12, 0.2] {
+        let mut w = W::default();
+        let radius = 0.3;
+        let height = 1.3;
+        let shift = [0.1, 0.0, height];
+        let centres = [[0.0; 3], shift];
+        let vertices: Vec<(u64, V)> = centres
+            .iter()
+            .map(|c| {
+                let p = [c[0] + radius * angle.cos(), c[1] + radius * angle.sin(), c[2]];
+                (w.vertex(p), p)
+            })
+            .collect();
+        let circles: Vec<u64> = centres.iter().map(|&c| w.circle(c, [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], radius)).collect();
+        let rims: Vec<u64> = circles.iter().zip(&vertices).map(|(circle, (v, _))| w.add(format!("EDGE_CURVE('',#{v},#{v},#{circle},.T.)"))).collect();
+        let seam = w.line_edge(vertices[0], vertices[1], true, 1.0);
+        let d = w.dir(shift);
+        let vector = w.add(format!("VECTOR('',#{d},1.)"));
+        let surface = w.add(format!("SURFACE_OF_LINEAR_EXTRUSION('',#{},#{vector})", circles[0]));
+        let uses: Vec<u64> = [(seam, true), (rims[1], false), (seam, false), (rims[0], true)].into_iter().map(|(e, o)| w.oe(e, o)).collect();
+        let bound = w.bound(&uses, true, true);
+        let side = w.face(&[bound], surface, true);
+        let mut faces = vec![side];
+        for (i, &centre) in centres.iter().enumerate() {
+            let oriented = w.oe(rims[i], i == 1);
+            let bound = w.bound(&[oriented], true, true);
+            let plane = w.plane(centre, [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+            faces.push(w.face(&[bound], plane, i == 1));
+        }
+        let shell = closed_shell(&mut w, &faces);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('oblique wire',#{shell})"));
+        let s = one_solid(&w.file(&[solid]));
+        assert!(!s.sheet, "{angle}: {:?}", s.notes);
+        assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+        let (body, _) = solidcore_ops::Body::from_record(&s.brep, false).unwrap();
+        let (rebuilt, _) = body.to_record().unwrap();
+        solidcore_ops::record_check::validate(&rebuilt).unwrap();
+        let volume = body.volume(1e-9).unwrap();
+        let expected = std::f64::consts::PI * radius * radius * height;
+        assert!((volume - expected).abs() < 1e-8 * expected, "{angle}: {volume} vs {expected}");
+    }
+}
