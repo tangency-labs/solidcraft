@@ -19,7 +19,6 @@ fn plate_sheet() -> (Harness, String) {
     let front = front["view"].as_str().unwrap().to_owned();
     h.app.run("drawing.view.projected", json!({"parent": front, "side": "right"})).unwrap();
     h.app.run("drawing.dimension.add", json!({"view": front, "kind": {"length": {"edge": [50, 0, 20]}}})).unwrap();
-    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     settle(&mut h);
     (h, front)
@@ -374,7 +373,6 @@ fn a_single_sheet_sketch_is_painted_when_its_last_step_finishes() {
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     let drawing = h.app.run("drawing.create", json!({})).unwrap();
-    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     h.frames(2);
     let made = h.app.run("drawing.sketch.create", json!({"owner": drawing["sheets"][0]["id"]})).unwrap();
@@ -432,7 +430,6 @@ fn a_views_state_is_in_words() {
 fn no_drawing_open_shows_the_note() {
     let mut h = Harness::new();
     h.app.home.open = false;
-    h.app.preferences.drawings_preview = true;
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     h.frames(2);
     assert_eq!(page(&mut h), Value::Null);

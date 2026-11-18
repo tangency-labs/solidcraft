@@ -61,6 +61,13 @@ pub struct RecordBody {
     pub sheet: bool,
 }
 
+/// The pcurves an importer gives the shared assembly stage for edge uses with no closed form:
+/// SMLib's own, as a STEP import's are. Readers outside the kernel (cadmpeg's neutral model, in
+/// `solidcraft-io`) pass this, so only the kernel uses SMLib.
+pub fn import_trims() -> &'static (dyn solidcore_ops::pcurve::Trims + Sync) {
+    &solidcraft_smlib::pcurves::SmlibTrims
+}
+
 /// The bodies an import kept as records makes, with its tree and warnings: what a STEP import
 /// gives, so a design uses either the same way.
 pub fn records_import(records: &ImportRecords) -> Result<StepImport> {

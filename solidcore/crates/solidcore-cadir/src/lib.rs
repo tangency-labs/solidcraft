@@ -47,6 +47,9 @@ pub struct Read {
     pub region: usize,
     /// The record; each of its faces' origin is that face's index in the model's faces.
     pub solid: Solid,
+    /// Where the body's placement puts the record (column-major 4 × 4, millimetres), when it
+    /// moves it. Only a rigid placement is taken: a body placed otherwise is refused.
+    pub placement: Option<[[f64; 4]; 4]>,
 }
 
 /// A body region that could not be read, and why.
@@ -93,6 +96,29 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
             BodyKind::Wire => None,
         };
         let Some(kind) = kind else { continue };
+        // A body placed by anything but a rotation and a move is left out with the reason: its
+        // geometry would come in at the wrong place or size otherwise.
+        let placement = match body
+            .transform
+            .map(|t| geometry::Similarity::of(geometry::Rows3::rows3(&t)))
+        {
+            None => None,
+            Some(Ok(s)) if s.is_rigid() => s.column_major(),
+            refused => {
+                let why = match refused {
+                    Some(Err(m)) => m,
+                    _ => "not supported yet: a placement that scales".to_string(),
+                };
+                for k in 0..body.regions.len() {
+                    out.failures.push(Failure {
+                        body: id.clone(),
+                        region: k,
+                        message: format!("its placement: {why}"),
+                    });
+                }
+                continue;
+            }
+        };
         for (k, region) in body.regions.iter().enumerate() {
             let name = body.name.clone().unwrap_or_default();
             match model.region(
@@ -103,11 +129,14 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
                 trims,
                 &mut budget,
             ) {
-                Ok(solid) => out.read.push(Read {
-                    body: id.clone(),
-                    region: k,
-                    solid,
-                }),
+                Ok(solid) => {
+                    out.read.push(Read {
+                        body: id.clone(),
+                        region: k,
+                        solid,
+                        placement,
+                    });
+                }
                 Err(message) => out.failures.push(Failure {
                     body: id.clone(),
                     region: k,
@@ -347,42 +376,63 @@ impl<'a> Builder<'_, 'a, '_> {
         };
         let made = match curve {
             Some(carrier) => {
-                let interval = edge.param_range().map(|r| r.get()).ok_or_else(|| {
-                    format!("edge {id}: not supported yet: an edge without a parameter range")
-                })?;
-                let (curve, interval) = match carrier {
-                    geometry::Carrier::Curve {
-                        curve,
-                        periodic: false,
-                    } => (curve, interval),
-                    geometry::Carrier::Curve {
-                        curve,
-                        periodic: true,
-                    } => periodic_edge(curve, interval).map_err(|m| format!("edge {id}: {m}"))?,
-                    geometry::Carrier::Parabola {
-                        vertex,
-                        axis,
-                        reference,
-                        focal,
-                    } => (
+                let ends = [start, end];
+                let made = match (carrier, edge.param_range().map(|r| r.get())) {
+                    (
+                        geometry::Carrier::Curve {
+                            curve,
+                            periodic: false,
+                        },
+                        Some(interval),
+                    ) => self.asm.add_edge(origin, curve, interval, ends),
+                    (
+                        geometry::Carrier::Curve {
+                            curve,
+                            periodic: true,
+                        },
+                        Some(interval),
+                    ) => periodic_edge(curve, interval).and_then(|(curve, interval)| {
+                        self.asm.add_edge(origin, curve, interval, ends)
+                    }),
+                    (
+                        geometry::Carrier::Parabola {
+                            vertex,
+                            axis,
+                            reference,
+                            focal,
+                        },
+                        Some(interval),
+                    ) => self.asm.add_edge(
+                        origin,
                         parabola_curve(vertex, axis, reference, focal, interval),
                         interval,
+                        ends,
                     ),
-                    geometry::Carrier::Hyperbola {
-                        center,
-                        axis,
-                        reference,
-                        radii,
-                    } => (
+                    (
+                        geometry::Carrier::Hyperbola {
+                            center,
+                            axis,
+                            reference,
+                            radii,
+                        },
+                        Some(interval),
+                    ) => self.asm.add_edge(
+                        origin,
                         hyperbola_curve(center, axis, reference, radii, interval),
                         interval,
+                        ends,
+                    ),
+                    // An edge with no interval (a STEP file's, bounded by its vertices alone) is
+                    // where its vertices lie on its curve.
+                    (geometry::Carrier::Curve { curve, .. }, None) => {
+                        self.asm.add_edge_on(origin, curve, ends)
+                    }
+                    (_, None) => Err(
+                        "not supported yet: a parabola or hyperbola edge without a parameter range"
+                            .into(),
                     ),
                 };
-                Ok(self
-                    .asm
-                    .add_edge(origin, curve, interval, [start, end])
-                    .map_err(|m| format!("edge {id}: {m}"))?
-                    .0)
+                Ok(made.map_err(|m| format!("edge {id}: {m}"))?.0)
             }
             // Collapsed to a point: its vertices are one ([`Builder::join_collapsed`]).
             None if start == end => Err(start),

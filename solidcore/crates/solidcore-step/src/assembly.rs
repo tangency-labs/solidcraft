@@ -302,6 +302,20 @@ impl<'t> Assembly<'t> {
         Ok(vec![Bound::Edges(vec![(e, true), (e, false)])])
     }
 
+    /// An edge between vertices `ends` on `curve` where the producer gives no interval: the
+    /// interval is where the vertices lie on the curve (the whole of a closed curve when both
+    /// ends are one vertex or one point), the edge running from `ends[0]` along the curve, as a
+    /// STEP edge is read. Then as [`Assembly::add_edge`].
+    pub fn add_edge_on(&mut self, origin: u64, curve: BCurve, ends: [u32; 2]) -> R<(u32, bool)> {
+        let (ps, pe) = (self.point(ends[0])?, self.point(ends[1])?);
+        let closed = ends[0] == ends[1];
+        let full = closed || ps == pe;
+        let (curve, interval, with) =
+            crate::topology::record_edge(curve, ps, pe, closed, full, self.tol).map_err(|m| format!("edge #{origin}: {m}"))?;
+        let (e, along) = self.add_edge(origin, curve, interval, if with { ends } else { [ends[1], ends[0]] })?;
+        Ok((e, along == with))
+    }
+
     /// A face on `surface` bounded by `bounds`, its index. Each bound is relative to the
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's

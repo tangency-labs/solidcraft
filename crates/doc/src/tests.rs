@@ -1853,9 +1853,10 @@ fn fillet_edge_radii_default_to_none_round_trip_and_are_checked() {
     let mut m = Model::new();
     m.evaluate(&opened);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-    let spandrel = |r: f64| (1.0 - std::f64::consts::PI / 4.0) * r * r;
     let v = measure(&m.state().bodies[0].body).unwrap().volume;
-    let want = 12000.0 - 40.0 * (spandrel(1.0) + spandrel(2.0));
+    // A 40 x 30 x 10 block, two 40-long edges rounded at 1 and 2: each round of radius r on a
+    // 90 deg edge of length L removes (1 - pi/4) r^2 L, so 12000 - 40 (1 - pi/4) (1 + 4).
+    let want = 11957.07963267949;
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
     for (bad, says) in [
         (fillet(&["1"], false, Default::default()), "gives 1 radii for 2 picked edges"),
