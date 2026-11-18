@@ -53,9 +53,10 @@
 //! - [`evaluate_curve_continuity`] judges G2 by the geometry (WR-380): the two sides'
 //!   Frenet curvature vectors (upstream computes them with `smgu_FrenetFromDerivatives`
 //!   and never reads them) are compared by length, relative to the larger, and by the
-//!   angle between their normals. Upstream compares the raw second-derivative lengths
-//!   against an absolute gap and measures the first normal against itself. The debug-only
-//!   (and unused) `sDist` / projected-line computations of other functions are omitted.
+//!   angle between their normals where both exceed the length gap. Upstream compares the
+//!   raw second-derivative lengths against an absolute gap and measures the first normal
+//!   against itself. The debug-only (and unused) `sDist` / projected-line computations of
+//!   other functions are omitted.
 //! - Calls into `geom.geom_utility_p1` use [`p1`] directly, through small private
 //!   adapters where the output shapes differ (`sm_AddClosestPoint` on a
 //!   [`SegmentHits`], `smgu_LineIntersectSphere` as a count and array,
@@ -1143,7 +1144,8 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 /// G2 is geometric (WR-380, not upstream's test): the curvature vectors are the Frenet
 /// ones (`smgu_FrenetFromDerivatives`, `|P' x P''| / |P'|^3` along the normal), their
 /// lengths are compared relative to the larger (`SM_EFF_ZERO_SQRT / 10 * (1 + max)`), and
-/// the angle is between the two normals. Upstream takes the curvatures as the lengths of
+/// the angle is between the two normals, where both curvatures exceed that gap (a smaller
+/// one is zero at it and has no normal). Upstream takes the curvatures as the lengths of
 /// the raw second derivatives (which depend on the parameter speed), compares them with
 /// an absolute `SM_EFF_ZERO_SQRT / 10`, and measures the angle of the first normal with
 /// itself (always 0).
@@ -1229,8 +1231,10 @@ pub fn evaluate_curve_continuity(
     let curvature1 = k1.length();
     let curvature2 = k2.length();
     let gap_tol = EFF_ZERO_SQRT / 10.0 * (1.0 + max2(curvature1, curvature2));
+    // a curvature within the gap tolerance of zero is zero at it and has no normal
+    // (upstream: `SM_IS_ZERO`, which compares a straight join's rounding noise)
     let mut ang_rad = 0.0;
-    if !is_zero(curvature1) && !is_zero(curvature2) {
+    if curvature1 > gap_tol && curvature2 > gap_tol {
         let mut normal1 = k1;
         normal1 /= curvature1;
         let mut normal2 = k2;
