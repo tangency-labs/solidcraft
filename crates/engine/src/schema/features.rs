@@ -144,6 +144,12 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
+    /// On a Join To Object, leave the body selected by `to` separate instead of joining it.
+    /// Requires explicit non-empty `targets` or `participants`; automatic scope may merge
+    /// the To body. Default false; `to` still determines the extrusion distance.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub to_body_apart: Option<bool>,
     /// Start at this face or point (From Object). On a flat face at a slant the start follows the
     /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]

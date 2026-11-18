@@ -302,6 +302,67 @@ fn join_extrude_to_another_body_joins_that_body() {
     assert_eq!(state.body("Base").unwrap().body.lumps().map_or(1, |l| l.len()), 1, "one piece");
 }
 
+/// #18428: a To Object face may set the height of a Join without joining its own body.
+#[test]
+fn join_to_object_can_keep_the_to_body_apart() {
+    for apart in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
+        run(&mut s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
+        let plane = s.model.state().sketch(sketch).unwrap().plane;
+        let at = |x: f64, y: f64| {
+            let p = plane.to_local(Vec3::new(x, y, 10.0));
+            json!([p.x, p.y])
+        };
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":at(10.0,10.0),"p1":at(30.0,30.0)}));
+        run(&mut s, "sketch.finish", json!({}));
+        s.param_check = crate::schema::ParamCheck::Strict;
+        let params = json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":apart});
+        let before = s.doc.to_json();
+        for bad_params in [
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":"true"}),
+            json!({"sketch":sketch,"distance":30,"operation":"join","targets":["Base"],"to_body_apart":true}),
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"cut","targets":["Base"],"to_body_apart":true}),
+            // Automatic scope may still join the To body, so opt-in separation
+            // must name the bodies that may take part.
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"join","to_body_apart":true}),
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":[],"to_body_apart":true}),
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"join","participants":[],"to_body_apart":true}),
+        ] {
+            assert!(s.execute("solid.extrude", &bad_params).is_err(), "{bad_params}");
+            assert_eq!(s.doc.to_json(), before, "invalid parameters leave no feature");
+        }
+        let result = run(&mut s, "solid.extrude", params.clone());
+        let FeatureKind::Extrude { extent, .. } = &s.doc.feature(result["feature"].as_u64().unwrap()).unwrap().kind else { panic!("extrude") };
+        assert_eq!(extent.to_body_apart, apart);
+        let check = |s: &Session| {
+            assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+            let state = s.model.state();
+            let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+            assert_eq!(state.bodies.len(), if apart { 2 } else { 1 });
+            assert!((volume("Base") - if apart { 28_000.0 } else { 60_000.0 }).abs() < 1e-6);
+            if apart {
+                assert!((volume("Target") - 32_000.0).abs() < 1e-6);
+            }
+        };
+        check(&s);
+        check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()));
+        if apart {
+            // An omitted flag on redefinition preserves the original choice.
+            run(&mut s, "timeline.redefine", json!({"feature":result["feature"],"command":"solid.extrude","params":{
+                "sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]
+            }}));
+            check(&s);
+            // An explicit flag can also switch back to the historical default.
+            run(&mut s, "timeline.redefine", json!({"feature":result["feature"],"command":"solid.extrude","params":{
+                "sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":false
+            }}));
+            assert_eq!(s.model.state().bodies.len(), 1);
+        }
+    }
+}
+
 /// #8151: a design saved before a Join To Object also joined the body it runs to (format 39 and
 /// older) keeps that body apart when it opens, so its later features still find it, and an edit
 /// of the extrude keeps it apart too.
