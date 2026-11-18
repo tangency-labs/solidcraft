@@ -2811,6 +2811,20 @@ impl SolveApp {
             let _ = self.run_heavy(id, json!({}));
             return;
         }
+        // Move Features to Component takes the features selected in the Browser or the History,
+        // into the active component; started with none, it says so instead of the command's
+        // "`features` must list 1...1000 features" (#18702).
+        if id == "component.move_features" {
+            let features = timeline::selected_feature_ids(self);
+            if features.is_empty() {
+                let hint = self.tr("ui.move_features_needs_features").to_owned();
+                self.set_status(hint, true);
+                self.restore_command_tab();
+            } else if self.run(id, json!({ "features": features })).is_err() {
+                self.restore_command_tab();
+            }
+            return;
+        }
         // Change Part Size with no standard part selected (its dialog had nothing to open on).
         if id == "parts.resize" {
             dialogs_part_size::needs_a_part(self);
