@@ -36,6 +36,41 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM scratch AS site
 COPY --from=build /src/dist/web/ /
 
+# The server edition (docs/server-edition.md): `solidcraft-cli serve` with the web app baked in,
+# on port 8787, designs in /data (a volume, or a bind mount of a folder or git checkout). Built with `--target server`; the default target is
+# still the static image below.
+#
+#   docker build -f packaging/docker/Dockerfile --target server -t solidcraft-server .
+#   docker run --rm -p 127.0.0.1:8787:8787 -e SOLIDCRAFT_SERVE_TOKEN="$(openssl rand -hex 32)" \
+#     -v solidcraft-data:/data --read-only --tmpfs /tmp --cap-drop ALL solidcraft-server
+FROM rust:${RUST_VERSION}-slim-bookworm AS cli-build
+# Parallel jobs for the build (empty: cargo's default, one per CPU).
+ARG CARGO_BUILD_JOBS=
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target-docker \
+    CARGO_TARGET_DIR=/src/target-docker cargo build --release --locked ${CARGO_BUILD_JOBS:+-j $CARGO_BUILD_JOBS} -p solidcraft-cli --bin solidcraft-cli \
+ && install -D -m 0755 /src/target-docker/release/solidcraft-cli /out/solidcraft-cli
+
+FROM debian:bookworm-slim AS server
+RUN useradd --system --uid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin solidcraft \
+ && install -d -o 10001 -g 10001 -m 0700 /data
+COPY --from=cli-build /out/solidcraft-cli /usr/local/bin/solidcraft-cli
+COPY LICENSE-MIT LICENSE-APACHE NOTICE THIRD-PARTY-LICENSES.txt /usr/share/doc/solidcraft/
+COPY --from=site / /srv/solidcraft/
+# Only /data and /tmp (a tmpfs in compose.yaml) are written; HOME there keeps the app's own
+# folders (recovery, preferences) off the read-only image.
+ENV HOME=/tmp SOLIDCRAFT_GPU=cpu
+USER 10001:10001
+VOLUME /data
+EXPOSE 8787
+# No curl or wget in the image: bash's /dev/tcp asks the health check.
+HEALTHCHECK --interval=30s --timeout=5s CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8787 && printf 'GET /api/v1/health HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+ENTRYPOINT ["solidcraft-cli", "serve"]
+CMD ["--dir", "/data", "--listen", "0.0.0.0:8787", "--web", "/srv/solidcraft"]
+
 FROM nginxinc/nginx-unprivileged:1.29-alpine
 COPY packaging/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY LICENSE-MIT LICENSE-APACHE NOTICE THIRD-PARTY-LICENSES.txt /usr/share/doc/solidcraft/

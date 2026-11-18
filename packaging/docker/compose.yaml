@@ -7,6 +7,16 @@
 #
 # SOLIDCRAFT_PORT picks the host port (default 8080). Saving designs needs HTTPS or localhost:
 # on a server, put a TLS reverse proxy (Caddy, Traefik, nginx) in front of it.
+#
+# The server edition (docs/server-edition.md) is the `server` profile: designs kept on the server
+# in the `solidcraft-data` volume, and MCP over HTTP for agents. Put the token in server.env first
+# (see server.env.example), then:
+#
+#   docker compose --profile server up -d solidcraft-server
+#
+# It listens on this host's loopback only (SOLIDCRAFT_SERVER_PORT, default 8787), for a TLS
+# reverse proxy or `tailscale serve --bg 8787` on the same host: it speaks plain HTTP, and the
+# browser app won't send the token over plain HTTP to another computer.
 name: solidcraft
 services:
   solidcraft:
@@ -24,3 +34,32 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+
+  solidcraft-server:
+    profiles: [server]
+    image: ghcr.io/tangency-labs/solidcraft-server:latest
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+      target: server
+    env_file:
+      - path: server.env
+        required: true
+    ports:
+      - "127.0.0.1:${SOLIDCRAFT_SERVER_PORT:-8787}:8787"
+    # A named volume; or a folder of your own, a git checkout too (saves go into its files in
+    # place), with `- /path/to/designs:/data`; add `user: "UID:GID"` with the folder owner's ids so
+    # saves keep that owner (the image's own user is 10001).
+    volumes:
+      - solidcraft-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  solidcraft-data:

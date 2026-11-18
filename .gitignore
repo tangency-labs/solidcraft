@@ -17,3 +17,6 @@ mutants.out*/
 /corpus/
 
 # Separately compiled original plugin example.
+
+# The server edition's token (packaging/docker/server.env.example).
+packaging/docker/server.env
