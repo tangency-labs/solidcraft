@@ -336,12 +336,8 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["drawing.update.planned", "drawing.check.planned", "drawing.replace_model"],
     },
-    Section {
-        tab: "DRAWING REVIEW",
-        panel: "REVISION",
-        promoted: 3,
-        ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
-    },
+    // Revisions are added and issued in the revision table itself, not from the ribbon (#18985).
+    Section { tab: "DRAWING REVIEW", panel: "REVISION", promoted: 1, ids: &["drawing.revision.tag.add.planned"] },
     Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
     Section {
         tab: "MODEL",
@@ -673,8 +669,6 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.note", "Note"),
     ("drawing.replace_model", "Replace"),
     ("drawing.print", "Print"),
-    ("drawing.revise.planned", "Issue Rev."),
-    ("drawing.revision", "Add Revision"),
     ("drawing.revision_table", "Revision Tbl."),
     ("drawing.surface_texture", "Surface Text."),
     ("drawing.table.edit.planned", "Edit Table"),
