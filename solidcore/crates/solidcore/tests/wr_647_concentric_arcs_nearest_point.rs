@@ -20,8 +20,10 @@
 
 use solidcore::curve::curve::p8::CurveIntersectOptions;
 use solidcore::curve::curve::Curve;
+use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
-use solidcore::math::Point3;
+use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
 };
@@ -750,6 +752,94 @@ fn wr_647_two_meetings_within_a_planar_curves_band_are_both_kept() {
                 }
             });
             assert!(held, "tol {tol}: the meeting at X = {x} is lost: {all:?}");
+        }
+    }
+}
+
+/// The unit circle about (0.5, 1, 0) in the plane z = 0 (review r4).
+fn floor_circle(k: &Kernel) -> Curve {
+    Curve::from(
+        Ellipse::new(
+            k,
+            Vec3::new(0.5, 1.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(0.0, 360.0),
+            1.0,
+            1.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap(),
+    )
+}
+
+/// A rational quadratic spline (knots 0, 1, 2, 3) whose middle span is exactly the 60
+/// degree arc of [`floor_circle`] below its centre (weights 1, cos 30°, 1), and whose outer
+/// spans leave the circle's plane by `lift` at their inner controls and 4 `lift` at the
+/// ends (review r4's probe).
+fn arc_spline(lift: f64) -> Curve {
+    let co = 0.866_025_403_784_438_6_f64;
+    let p2 = Point3::new(0.0, 1.0 - co, 0.0);
+    let p4 = Point3::new(1.0, 1.0 - co, 0.0);
+    let pts = [
+        p2 + Vec3::new(-0.2, 0.1155, 4.0 * lift),
+        p2 + Vec3::new(-0.1, 0.0577, lift),
+        p2,
+        Point3::new(0.5, 1.0 - 1.0 / co, 0.0),
+        p4,
+        p4 + Vec3::new(0.1, 0.0577, lift),
+        p4 + Vec3::new(0.2, 0.1155, 4.0 * lift),
+    ];
+    let w = [1.0, 1.0, 1.0, co, 1.0, 1.0, 1.0];
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &pts,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[3, 2, 2, 3],
+            knots: &[0.0, 1.0, 2.0, 3.0],
+            knot_type: KnotType::default(),
+            weights: Some(&w),
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// Review r4: a curve lying exactly on a planar conic over 60 degrees and leaving its
+/// plane on both sides overlaps it over that arc. The overlap is not one meeting: a range
+/// must still cover it (main's answer), at a tolerance where the stretch reaches past it,
+/// both ways round.
+#[test]
+fn wr_647_an_exact_overlap_with_a_conic_stays_a_range() {
+    let k = Kernel::default();
+    let circle = floor_circle(&k);
+    for lift in [1e-3, 1e-4] {
+        let s = arc_spline(lift);
+        for i in 0..=20 {
+            let p = s.evaluate_point(&k, 1.0 + f64::from(i) / 20.0).unwrap();
+            let rho = ((p.x - 0.5).powi(2) + (p.y - 1.0).powi(2)).sqrt();
+            let off = ((rho - 1.0).powi(2) + p.z * p.z).sqrt();
+            assert!(
+                off <= 1e-15,
+                "lift {lift}: the middle span is off the circle by {off:e}"
+            );
+        }
+        for (all, side) in [
+            (intersect_at(&circle, &s, 1e-2), 1),
+            (intersect_at(&s, &circle, 1e-2), 0),
+        ] {
+            let covered = all.iter().any(|x| {
+                x.solution_type == SolutionType::RangeOfValues && {
+                    let (a, b) = (x.start.parameters[side], x.end.parameters[side]);
+                    a.min(b) <= 1.0 && 2.0 <= a.max(b)
+                }
+            });
+            assert!(
+                covered,
+                "lift {lift}: the overlap s in [1, 2] is lost: {all:?}"
+            );
         }
     }
 }
