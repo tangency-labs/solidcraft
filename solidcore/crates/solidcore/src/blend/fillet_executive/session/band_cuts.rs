@@ -599,14 +599,23 @@ pub(crate) struct ConcaveFill {
 
 /// The least of `a + b cos θ + c sin θ` over `θ` in `[t0, t1]` (`t1 - t0` under a turn):
 /// at an end, or at the one angle where `b cos θ + c sin θ` is least, `-sqrt(b² + c²)`.
+/// NaN where any of these is (so a comparison `least >= m` fails).
 fn least_on_arc(a: f64, b: f64, c: f64, t0: f64, t1: f64) -> f64 {
+    // the lesser, NaN where either is (`f64::min` drops a NaN operand)
+    let lesser = |x: f64, y: f64| {
+        if x.is_nan() || y.is_nan() {
+            f64::NAN
+        } else {
+            x.min(y)
+        }
+    };
     let f = |t: f64| a + b * t.cos() + c * t.sin();
-    let mut least = f(t0).min(f(t1));
+    let mut least = lesser(f(t0), f(t1));
     let at = (-c).atan2(-b);
     let turn = 2.0 * std::f64::consts::PI;
     for t in [at - turn, at, at + turn] {
         if t > t0 && t < t1 {
-            least = least.min(a - (b * b + c * c).sqrt());
+            least = lesser(least, a - (b * b + c * c).sqrt());
         }
     }
     least
@@ -1444,4 +1453,24 @@ pub(crate) fn band_breaks_through_the_part_cached(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::least_on_arc;
+
+    /// `least_on_arc` is the least of `a + b cos θ + c sin θ`: inside the arc at the angle
+    /// of `-(b, c)`, `a - sqrt(b² + c²)`; at an end otherwise; and NaN where an input is.
+    #[test]
+    fn least_on_arc_is_the_closed_form_minimum_and_keeps_nan() {
+        let pi = std::f64::consts::PI;
+        // 1 + cos θ is least, 0, at θ = π
+        assert_eq!(least_on_arc(1.0, 1.0, 0.0, 0.5 * pi, 1.5 * pi), 0.0);
+        // not reached on [0, π/2]: least at the end π/2, 1
+        assert!((least_on_arc(1.0, 1.0, 0.0, 0.0, 0.5 * pi) - 1.0).abs() < 1e-15);
+        assert!(least_on_arc(f64::NAN, 1.0, 0.0, 0.0, 1.0).is_nan());
+        assert!(least_on_arc(1.0, 1.0, 0.0, f64::NAN, 1.0).is_nan());
+        assert!(least_on_arc(1.0, 1.0, 0.0, 0.0, f64::NAN).is_nan());
+        assert!(!(least_on_arc(1.0, f64::NAN, 0.0, 0.0, 1.0) >= 0.0));
+    }
 }

@@ -331,9 +331,10 @@ fn a_round_over_a_through_hole_between_its_rails_builds() {
 
 /// A blind pocket from below, its ceiling at z = 9.5 under the blended top face: the
 /// section breaks through the pocket's ceiling and wall, faces that share no edge with
-/// the blended faces. Refused; built anyway, the round is not trimmed by them and comes
-/// 0.83 short of the closed form 8000 - 9.5 pi - (16 - 4 pi) 40 plus the removed section
-/// inside the pocket (above y = 16 + sqrt(16 - 3.5^2), where it reaches below 9.5).
+/// the blended faces. Refused. (Historical, measured at the merge base with the refusal
+/// off, a path that no longer exists: built anyway, the round was not trimmed by them and
+/// came 0.83 short of the closed form 8000 - 9.5 pi - (16 - 4 pi) 40 plus the removed
+/// section inside the pocket, above y = 16 + sqrt(16 - 3.5^2), where it reaches below 9.5.)
 #[test]
 fn a_round_opening_a_blind_pocket_is_refused() {
     let mut k = kernel();

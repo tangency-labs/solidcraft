@@ -161,9 +161,63 @@ fn an_inside_round_holds_the_wall_an_outer_round_runs_over() {
     let wall = thin_walled();
     let top = edge_at(&wall, [0.0, 32.0, 42.0]);
     let inside = edge_at(&wall, [0.0, 30.0, 40.0]);
-    close(
-        round(&wall, &[top, inside], &[7.0]).unwrap(),
-        39_509.938_040_025_9,
+    for (sizes, want) in [
+        (&[7.0, 7.0], 39_509.938_040_025_9),
+        // the outer arc's closest approach to the inside round's centre (23, 33) is
+        // 13.8 - 4.8 sqrt2 = 7.0118: 0.012 of wall between the two rounds, and the same
+        // closed form, 39552 - (1 - pi/4) (13.8^2 104 - 49 100)
+        (&[13.8, 7.0], 36_353.196_528_043),
+    ] {
+        let c = wall.copy().unwrap();
+        blend(
+            &c,
+            Blend::Round,
+            &[top, inside],
+            sizes,
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        close(volume(&c), want);
+        assert!(c.check(CheckLevel::All).unwrap().is_valid(), "{sizes:?}");
+    }
+}
+
+/// A concave round of the same fillet too small to fill what the outer round takes inside
+/// the hollow is no fill: R8 outside with R1 inside is still refused for breaking through.
+/// The outer arc (centre (24, 34)) runs through the hollow at 41.4 to 48.6 degrees; at 45
+/// it is (29.657, 39.657), 0.929 from the inside round's centre (29, 39), inside its ball
+/// and so not in what that round adds. The fit is where the outer arc's closest approach
+/// to (29, 39), r - sqrt2 (r - 3), is 1: r = (3 sqrt2 - 1) / (sqrt2 - 1) = 7.828, above the
+/// 6.828 of the outer round alone (the fit counts the fill).
+#[test]
+fn an_inside_round_too_small_to_fill_the_hollow_is_still_refused() {
+    all_fixes();
+    let wall = thin_walled();
+    let top = edge_at(&wall, [0.0, 32.0, 42.0]);
+    let inside = edge_at(&wall, [0.0, 30.0, 40.0]);
+    let s2 = std::f64::consts::SQRT_2;
+    breaks_through(
+        round(&wall, &[top, inside], &[8.0, 1.0]),
+        (3.0 * s2 - 1.0) / (s2 - 1.0),
+        [0.0, 32.0, 42.0],
     );
-    assert!(round(&wall, &[top, inside], &[13.8, 7.0]).is_ok());
+}
+
+/// The inside round counts as a fill only where it ends alone: with the inside roof edge
+/// at the end (x = 50) rounded in the same fillet, a corner patch replaces the inside round
+/// at their shared vertex, so the R7 outer round is judged against the part alone and
+/// refused with the fit of the outer round alone, 4 + 2 sqrt2.
+#[test]
+fn an_inside_round_meeting_another_round_is_no_fill() {
+    all_fixes();
+    let wall = thin_walled();
+    let top = edge_at(&wall, [0.0, 32.0, 42.0]);
+    let inside = edge_at(&wall, [0.0, 30.0, 40.0]);
+    let end = edge_at(&wall, [50.0, 0.0, 40.0]);
+    breaks_through(
+        round(&wall, &[top, inside, end], &[7.0]),
+        4.0 + 2.0 * std::f64::consts::SQRT_2,
+        [0.0, 32.0, 42.0],
+    );
 }

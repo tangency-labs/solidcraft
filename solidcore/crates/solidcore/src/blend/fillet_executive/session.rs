@@ -3953,29 +3953,72 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             return Ok(None);
         }
         // the material the concave rounds of the same blend add, which the section may run
-        // through (the rig's 1668-fillet-both-sides-of-thin-wall-r7)
+        // through (the rig's 1668-fillet-both-sides-of-thin-wall-r7). Counted only where
+        // the round adds its whole section along its whole edge:
+        // - not in the Roll-over's second pass, whose concave overflow across the cliff is
+        //   accepted and trimmed flush with the cliff (`choose_cliff_overflow`); anywhere
+        //   else a concave round whose rail leaves its face is refused there
+        //   (`ConcaveOverflow`), so a fillet that builds has every rail on its face;
+        // - not where an end of its edge is a set-back vertex or meets the edge of another
+        //   blend of this fillet: a corner or set-back patch replaces the round there, and
+        //   its shape is not known yet (the corners are made after this judgement)
         let mut fills = Vec::new();
-        for (index, other) in self.solvers.iter_mut().enumerate() {
-            let Some(other) = other.as_mut() else {
-                continue;
-            };
-            if index == id.0 as usize {
-                continue;
+        if self.roll_over_ends.is_empty() {
+            let mut edges = Vec::new();
+            for (index, solver) in self.solvers.iter().enumerate() {
+                let Some(solver) = solver.as_ref() else {
+                    continue;
+                };
+                if let Some(edge) = solver
+                    .base()
+                    .edgeuse(0)?
+                    .map(|edgeuse| crate::topology::edgeuse::p1::edge(self.target, edgeuse))
+                    .transpose()?
+                    .flatten()
+                {
+                    edges.push((index, edge));
+                }
             }
-            let Some(other_edge) = other
-                .base()
-                .edgeuse(0)?
-                .map(|edgeuse| crate::topology::edgeuse::p1::edge(self.target, edgeuse))
-                .transpose()?
+            for &(index, other_edge) in &edges {
+                if index == id.0 as usize
+                    || !crate::blend::fillet_solver::p5::is_concave_edge(
+                        k,
+                        self.target,
+                        other_edge,
+                    )?
+                {
+                    continue;
+                }
+                let (start, end) =
+                    crate::topology::edge::start_end_vertices(self.target, other_edge)?;
+                let (Some(start), Some(end)) = (start, end) else {
+                    continue;
+                };
+                let mut alone = !self.set_back_vertices.contains(&start)
+                    && !self.set_back_vertices.contains(&end);
+                for &(j, edge) in &edges {
+                    if !alone || j == index {
+                        continue;
+                    }
+                    let (s, e) = crate::topology::edge::start_end_vertices(self.target, edge)?;
+                    alone = ![s, e].iter().flatten().any(|v| *v == start || *v == end);
+                }
+                if !alone {
+                    continue;
+                }
+                let Some(other) = self.solvers.get_mut(index).and_then(Option::as_mut) else {
+                    continue;
+                };
+                // a failure to solve the round's section counts no fill (the refusing side)
+                if let Some(fill) = crate::error::native_failure(band_cuts::ConcaveFill::of_round(
+                    k,
+                    self.target,
+                    other,
+                ))?
                 .flatten()
-            else {
-                continue;
-            };
-            if !crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, other_edge)? {
-                continue;
-            }
-            if let Some(fill) = band_cuts::ConcaveFill::of_round(k, self.target, other)? {
-                fills.push(fill);
+                {
+                    fills.push(fill);
+                }
             }
         }
         let current = self
