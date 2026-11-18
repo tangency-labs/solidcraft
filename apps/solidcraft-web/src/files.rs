@@ -90,6 +90,8 @@ pub struct Files {
     pub kept_failed: RefCell<std::collections::HashMap<String, f64>>,
     /// Copies earlier pages left, newer than their design's last save: offered at start.
     pub keep_offered: RefCell<Vec<keep::Entry>>,
+    /// The SolidCraft server the page came from, if it is one (`server.rs`).
+    pub server: crate::server::Server,
 }
 
 impl Files {
@@ -102,6 +104,12 @@ impl Files {
     pub fn failed_disk(&self, path: &str, error: &str) {
         self.unsaved.borrow_mut().push(path.to_string());
         self.say(format!("Not saved to your computer: {error}"), true);
+    }
+
+    /// Saving the design at server `path` failed: say so, and take its "saved" back.
+    pub fn failed_server(&self, path: &str, error: &str) {
+        self.unsaved.borrow_mut().push(path.to_string());
+        self.say(format!("Not saved to the server: {error}"), true);
     }
 
     /// A file arrived from the computer.
@@ -347,6 +355,10 @@ pub fn start(files: &Rc<Files>) {
 /// Store what commands wrote: OPFS paths into OPFS, download paths as downloads.
 pub fn flush(files: &Rc<Files>) {
     for (path, bytes) in vfs::take_writes() {
+        if crate::server::is_server_path(&path) {
+            crate::server::enqueue(files, &path, bytes);
+            continue;
+        }
         match disk::route(&path) {
             disk::WriteTo::Opfs => {
                 let name = path.strip_prefix(OPFS).unwrap_or(&path).to_string();
