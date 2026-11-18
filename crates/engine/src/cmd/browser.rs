@@ -1488,6 +1488,8 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
         closed: report.closed,
         modelling: report.modelling,
         volume,
+        healed: report.healed.as_ref().map(solidcraft_kernel::ToleranceHeal::summary),
+        heal_failed: report.heal_failed.clone(),
     };
     let list =
         |k: &str| v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();

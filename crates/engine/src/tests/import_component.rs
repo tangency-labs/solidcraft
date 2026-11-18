@@ -294,6 +294,29 @@ fn a_flattened_step_assembly_is_one_component_of_bodies_where_the_file_places_th
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `flatten` with `reader: "cadmpeg"`: the records route's product tree is flattened the same
+/// way, every placement a body of the import's one component where the file places it, named
+/// after its part as with SolidCraft's reader, and it rebuilds to the same bodies.
+#[test]
+fn a_flattened_step_assembly_read_by_cadmpeg_is_the_same_bodies() {
+    let dir = temp_dir("flatten-cadmpeg");
+    let path = rig_file(&dir);
+    let mut ours = Session::default();
+    run(&mut ours, "file.insert_step", json!({"path": path, "flatten": true}));
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "flatten": true, "reader": "cadmpeg"}));
+    assert!(r.get("subcomponents").is_none() && r.get("rigid_joints").is_none(), "{r}");
+    assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (1, 1), "only the import's own component");
+    assert!(s.doc.assembly.joints.is_empty());
+    assert!(matches!(&s.doc.features[0].kind, solidcraft_doc::FeatureKind::Import { skip, .. } if skip.is_empty()), "a flat import skips nothing");
+    assert_eq!(shown_boxes(&s), file_boxes(&path));
+    assert_eq!(body_names(&s), body_names(&ours));
+    let before = (body_names(&s), shown_boxes(&s));
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!((body_names(&s), shown_boxes(&s)), before, "rebuilt");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Each occurrence's degrees of freedom, as `joint.list` gives them.
 fn dofs(s: &mut Session) -> (std::collections::BTreeMap<u64, u64>, Value) {
     let r = run(s, "joint.list", json!({}));

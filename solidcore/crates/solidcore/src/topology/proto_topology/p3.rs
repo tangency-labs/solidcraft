@@ -15,11 +15,14 @@
 //! | [`ProtoTopologyManager::resolve_overlapping_proto_edges`] | `SmProtoTopologyManager::ResolveOverlappingProtoEdges` |
 //!
 //! Deviations:
-//! - **Vertices placed by their best edge crossing** (not upstream, WR-410,
-//!   tangency-labs/solidcore#1059, opt-in `Kernel::fixes.boolean_vertex_by_best_crossing`;
+//! - **Vertices placed by their best certified edge crossing** (not upstream, WR-410,
+//!   tangency-labs/solidcore#1059, the default since its flag was retired;
 //!   the SolidCraft fork's `FindOrCreateProtoEdge` change): after each end's proto vertex,
 //!   [`ProtoTopologyManager::add_crossing`] with the angle at which the face pair's curve
-//!   crosses the edge its end lies on (`crossing_sine`).
+//!   crosses the edge its end lies on (`crossing_sine`) and that curve. A later crossing
+//!   with a smaller misplacement bound (gap over sine) moves the vertex only where a
+//!   certified bound proves the edge stretch it moves along stays within tolerance of the
+//!   other object and of the first crossing's curve; otherwise the first placement stays.
 //! - **One proto vertex per crossing of an edge with a face** (not upstream, #17595). A face
 //!   pair's curve ends where its own face's surface meets the other face, so the two faces at
 //!   an edge with a loose tolerance give two points on that edge where it crosses a face of
@@ -339,7 +342,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
     ) -> Result<(Option<ProtoVertexId>, bool)> {
-        self.find_or_create_proto_vertex_crossing(k, geometry, pc1, pc2, None)
+        self.find_or_create_proto_vertex_crossing(k, geometry, pc1, pc2, None, [false; 2])
     }
 
     /// [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] for an end of a curve
@@ -348,7 +351,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// edge as far as the curve's crossing of the edge is known ([`crossing_region`]), and
     /// a proto vertex is found where the regions are not proved apart. With no `crossing`,
     /// two classifications onto edges are the crossing of those two edges; any other point
-    /// is known to its tolerance alone.
+    /// is known to its tolerance alone. Not upstream (tangency-labs/solidcore#3339): `along`
+    /// says, for `pc1` and `pc2`, whether the interval runs along the seam its end lies on
+    /// ([`runs_along_seam`]): the curve does not cross that seam there, so it fixes no reach
+    /// along it.
     ///
     /// # Errors
     ///
@@ -360,6 +366,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
         crossing: Option<(O, f64)>,
+        along: [bool; 2],
     ) -> Result<(Option<ProtoVertexId>, bool)> {
         // Skip PtXSects that don't classify to Region, Face, Edge, or Vertex in both Breps
         if !can_imprint(pc1.point_class()) {
@@ -433,7 +440,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let point_tol = self.proto_vertex_tolerance_of_pcs(k, geometry, deviation, pc1, pc2)?;
         let point_tol = zone_tol3d(k, point_tol);
         let limit = crate::query::face::p2::proto_vertex_capture_distance(self);
-        let region = crossing_region(k, geometry, crossing, pc1, pc2, position, point_tol, limit)?;
+        let region = crossing_region(
+            k, geometry, crossing, along, pc1, pc2, position, point_tol, limit,
+        )?;
         let within = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
         let found = self.find_proto_vertex_holding(k, geometry, position, pc1, pc2, within)?;
 
@@ -514,16 +523,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         if can_imprint(ci1.start.point_class()) && can_imprint(ci2.start.point_class()) {
             // (the curve the interval lies on, and its parameter at this end)
             let crossing = classification1.curve().map(|c| (c, ci1.interval.min()));
+            let along = [
+                runs_along_seam(geometry, &ci1.start, &ci1.mid, &ci2.mid)?,
+                runs_along_seam(geometry, &ci2.start, &ci2.mid, &ci1.mid)?,
+            ];
             start_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.start,
                 &mut ci2.start,
                 crossing,
+                along,
             ))?
             .and_then(|r| r.0);
-            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (start_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
+            // moves the vertex only where certified (`add_crossing`)
+            if let Some(pv) = start_pv {
                 let sine = crossing_sine(
                     k,
                     &*geometry,
@@ -533,22 +548,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     ci2,
                     false,
                 )?;
-                self.add_crossing(k, &*geometry, pv, &ci1.start, &ci2.start, sine)?;
+                self.add_crossing(k, &*geometry, pv, &ci1.start, &ci2.start, sine, crossing)?;
             }
         }
         if can_imprint(ci1.end.point_class()) && can_imprint(ci2.end.point_class()) {
             // (the curve the interval lies on, and its parameter at this end)
             let crossing = classification1.curve().map(|c| (c, ci1.interval.max()));
+            let along = [
+                runs_along_seam(geometry, &ci1.end, &ci1.mid, &ci2.mid)?,
+                runs_along_seam(geometry, &ci2.end, &ci2.mid, &ci1.mid)?,
+            ];
             end_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.end,
                 &mut ci2.end,
                 crossing,
+                along,
             ))?
             .and_then(|r| r.0);
-            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (end_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
+            // moves the vertex only where certified (`add_crossing`)
+            if let Some(pv) = end_pv {
                 let sine = crossing_sine(
                     k,
                     &*geometry,
@@ -558,7 +579,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     ci2,
                     true,
                 )?;
-                self.add_crossing(k, &*geometry, pv, &ci1.end, &ci2.end, sine)?;
+                self.add_crossing(k, &*geometry, pv, &ci1.end, &ci2.end, sine, crossing)?;
             }
         }
 
@@ -2518,13 +2539,16 @@ fn edge_direction<O: ClassObject>(
 /// known along the edge only to the tolerance over the sine of that angle, which nothing
 /// here encloses: its reach is `limit` (an edge 1e-9 into a plane crosses it at 2.8e-5 rad,
 /// so its two crossings 1.4e-4 apart are one point with the end of the line the two touch
-/// along). Of several crossings the one known worst counts. Any other point has the ball
+/// along). Of several crossings the one known worst counts. Not upstream
+/// (tangency-labs/solidcore#3339): an edge `along` marks (the interval runs along that seam,
+/// [`runs_along_seam`]) is not crossed there and gives no crossing. Any other point has the ball
 /// of its tolerance.
 #[allow(clippy::too_many_arguments)] // the point, what fixes it and how well
 fn crossing_region<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ProtoBrep<O>,
     crossing: Option<(O, f64)>,
+    along: [bool; 2],
     pc1: &PointClassification<O>,
     pc2: &PointClassification<O>,
     position: Vec3,
@@ -2545,7 +2569,12 @@ fn crossing_region<O: ClassObject>(
     // parameter, the edge's classification)
     let mut crossings = Vec::new();
     if let Some((curve, t)) = crossing.and_then(|(c, t)| geometry.curve(c).map(|c| (c, t))) {
-        for (edge, pc) in [(edge1, pc1), (edge2, pc2)] {
+        for ((edge, pc), along) in [(edge1, pc1), (edge2, pc2)].into_iter().zip(along) {
+            // (not upstream, tangency-labs/solidcore#3339: an interval running along a seam
+            // ends where it leaves it, not where it crosses it)
+            if along {
+                continue;
+            }
             if let Some((e, s)) = edge {
                 crossings.push((Some((curve, t)), e, s, pc));
             }
@@ -2586,6 +2615,41 @@ fn crossing_region<O: ClassObject>(
         stray.map(|stray| (reach, stray)),
         limit,
     ))
+}
+
+/// Not upstream (tangency-labs/solidcore#3339): whether an interval whose end classifies as
+/// `end` and middle as `mid` runs along a seam that end lies on, inside the other B-rep's
+/// face (`other_mid`): both on the same edge, one with the same face on every use. A seam bounds no material (docs/booleans.md, "Seams and
+/// poles"), so the face pair that classified the run is the only one that meets it there,
+/// and where the run leaves the seam is where its curve does, known to its own tolerance:
+/// an intersection curve running within the tolerance of the seam does not cross it at
+/// that end, and its angle to the seam fixes no reach along it ([`crossing_region`]).
+///
+/// # Errors
+///
+/// Those of the edge's use walk.
+fn runs_along_seam<O: ClassObject>(
+    geometry: &impl ProtoBrep<O>,
+    end: &PointClassification<O>,
+    mid: &PointClassification<O>,
+    other_mid: &PointClassification<O>,
+) -> Result<bool> {
+    if other_mid.point_class() != PointClassType::Face {
+        return Ok(false);
+    }
+    let Some(e) = end.edge_object() else {
+        return Ok(false);
+    };
+    if mid.edge_object() != Some(e) {
+        return Ok(false);
+    }
+    let faces = geometry.edge_use_faces(e)?;
+    Ok(match faces.split_first() {
+        Some((first, rest)) => {
+            first.is_some() && !rest.is_empty() && rest.iter().all(|f| f == first)
+        }
+        None => false,
+    })
 }
 
 /// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingSine`): the sine of the angle
@@ -2969,9 +3033,10 @@ mod tests {
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
     }
 
-    /// A vertex definition first placed by a grazing crossing is placed again by a
-    /// steeper one, whose misplacement bound along the edge (gap over sine) is smaller,
-    /// and not by a later, more grazing one (WR-410, #1059).
+    /// A vertex definition first placed by a grazing crossing is placed again by a later
+    /// one whose misplacement bound along the edge (gap over sine) is smaller (here the
+    /// same gap at a steeper angle), and not by one whose bound is larger (WR-410, #1059).
+    /// Its points lie on a curve, not an edge, so no moved edge stretch needs a certificate.
     #[test]
     fn issue_1059_a_steeper_crossing_places_the_vertex_definition() {
         let k = Kernel::default();
@@ -2997,11 +3062,17 @@ mod tests {
         )
         .unwrap();
         // the first crossing to arrive places it, here at a grazing angle
-        assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.02).unwrap());
+        assert!(!vd
+            .place_by_crossing(&k, &pool, &pc1, &pc2, 0.02, None)
+            .unwrap());
         // a steeper crossing fixes it more closely
-        assert!(vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.9).unwrap());
+        assert!(vd
+            .place_by_crossing(&k, &pool, &pc1, &pc2, 0.9, None)
+            .unwrap());
         // a more grazing one than that does not
-        assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.5).unwrap());
+        assert!(!vd
+            .place_by_crossing(&k, &pool, &pc1, &pc2, 0.5, None)
+            .unwrap());
     }
 
     /// A proto vertex relates two vertices within their intersection tolerance (two zones

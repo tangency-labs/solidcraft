@@ -235,7 +235,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let size = point_size(p, cmd)?.unwrap_or(2.0);
     let colors = (color_by(p, cmd)?, color(p, cmd)?, height_range(p, cmd)?);
     let center = bool_(p, "center").unwrap_or(false);
-    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_POINT_CLOUD_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::PointCloud).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let read = solidcraft_io::read_point_cloud(&bytes, path, scale, max_points).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let warnings = read.warnings;
     drop(bytes);
@@ -376,8 +376,13 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
     let path = c.source.clone();
     let scale = unit_scale(&c.units).unwrap_or(1.0);
     let max_points = reload_limit(&c);
-    let bytes = solidcraft_io::vfs::read_design_path(&path, s.path.as_deref(), solidcraft_io::MAX_POINT_CLOUD_BYTES)
-        .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // The file is read up to the limit for point cloud files, which the preference raises
+    // (#14548). The path comes from the design, so it is checked before anything is read.
+    let max = usize::try_from(solidcraft_io::limits::Kind::PointCloud.limit()).unwrap_or(usize::MAX);
+    let bytes = solidcraft_io::vfs::read_design_path(&path, s.path.as_deref(), max).map_err(|e| {
+        let e = solidcraft_io::limits::explain(solidcraft_io::limits::Kind::PointCloud, e);
+        EngineError::Other(format!("{path}: {e}"))
+    })?;
     let read = solidcraft_io::read_point_cloud(&bytes, &path, scale, max_points).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     c.origin = read.origin;
     c.points = Points::new(read.points.into());

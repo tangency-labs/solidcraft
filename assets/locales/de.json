@@ -5921,7 +5921,7 @@
   "ui.drawing_ribbon.align": "Ausrichten",
   "ui.drawing_ribbon.issue_short": "Rev. freigeben",
   "ui.drawing_ribbon.model_dims_short": "Modellmaße",
-  "ui.drawing_ribbon.planned": "(geplant)",
+  "ui.drawing_ribbon.planned": "Demnächst verfügbar",
   "ui.drawing_ribbon.space": "Verteilen",
   "ui.drawing_ribbon.surface_texture_short": "Oberfläche",
   "ui.drawing_settings.immediate": "Blattänderungen gelten sofort. Jede Änderung ist ein Rückgängig-Schritt.",

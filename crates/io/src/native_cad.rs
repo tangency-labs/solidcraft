@@ -46,6 +46,20 @@ pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel
     )
 }
 
+/// Read a STEP file (`file` is its name) with cadmpeg's STEP decoder into an import kept as
+/// B-rep records, as FreeCAD and Rhino files are read: an alternative to SolidCraft's own STEP
+/// reader, chosen by the caller ([`crate::StepReader`]), to compare the two. Panics inside cadmpeg
+/// or the reader become errors.
+pub fn cadmpeg_step_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg STEP import", || convert::step_records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
+        |e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        },
+    )
+}
+
 /// A FreeCAD file's design history rebuilt as features (sketches, Pad and Pocket, Revolution and
 /// Groove, Fillet and Chamfer), checked against the file's own solids: each rebuilt body has the
 /// volume and extent of one of them. The error says why the history was not rebuilt; the file's
@@ -69,12 +83,14 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
-/// `ir`'s bodies as an import kept as records, one product called `product`, written by
-/// `system`: each body region assembled into a record by `solidcore_cadir`, its pcurves without a
-/// closed form made as a STEP import's are ([`solidcraft_kernel::import_trims`]). Nothing passes
-/// through STEP text. CADIR's bodies come with their own names, visibility and rigid placements,
-/// which the records keep. What could not be read (and what was repaired on the way) is in the
-/// warnings, each naming its body.
+/// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
+/// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
+/// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
+/// come with their own names, visibility and rigid placements, which the records keep. Where the
+/// file has a product structure (occurrences), the tree is that structure and each body is placed
+/// once for each use of its part ([`assembly`]); otherwise the bodies are one product called
+/// `product`. What could not be read (and what was repaired on the way) is in the warnings, each
+/// naming its body.
 pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str) -> solidcraft_kernel::ImportRecords {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
@@ -82,11 +98,11 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
     let by_id: std::collections::HashMap<&str, &cadmpeg_ir::topology::Body> = ir.model.bodies.iter().map(|b| (b.id.as_str(), b)).collect();
     let label = |id: &str| by_id.get(id).and_then(|b| b.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| id.to_string());
     let mut warnings = Vec::new();
-    let mut bodies = Vec::with_capacity(read.read.len());
+    let mut unplaced = Vec::with_capacity(read.read.len());
     for r in read.read {
         let body = by_id.get(r.body.as_str());
         warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
-        bodies.push(RecordBody {
+        let record = RecordBody {
             name: body.and_then(|b| b.name.clone()).unwrap_or_default(),
             path: vec![product.to_string()],
             instance: None,
@@ -95,24 +111,33 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
             color: None,
             hidden: body.is_some_and(|b| b.visible == Some(false)),
             placement: r.placement,
-            brep: r.solid.brep,
+            brep: Some(r.solid.brep),
             face_origin: r.solid.face_origin,
             sheet: r.solid.sheet,
-        });
+            copy_of: None,
+        };
+        unplaced.push(assembly::Unplaced { body: r.body, record });
     }
     warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
-    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
-    let tree = vec![StepNode {
-        name: product.to_string(),
-        transform: identity,
-        bodies: (0..bodies.len()).collect(),
-        items: Vec::new(),
-        left_out: Vec::new(),
-        children: Vec::new(),
-    }];
+    let (bodies, tree) = if ir.model.occurrences.is_empty() {
+        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
+        let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let tree = vec![StepNode {
+            name: product.to_string(),
+            transform: identity,
+            bodies: (0..bodies.len()).collect(),
+            items: Vec::new(),
+            left_out: Vec::new(),
+            children: Vec::new(),
+        }];
+        (bodies, tree)
+    } else {
+        assembly::placed(ir, product, unplaced, &mut warnings)
+    };
     ImportRecords { bodies, tree, warnings, system: system.to_string() }
 }
 
+mod assembly;
 mod design;
 pub use design::NativeDesign;
 
@@ -310,7 +335,22 @@ mod convert {
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
             return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
         }
-        let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
+        records_of(name, &ext, bytes, &ACCEPTED)
+    }
+
+    /// A STEP file (`name`) read by cadmpeg's STEP decoder into an import kept as records.
+    pub(super) fn step_records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        if !matches!(ext.as_str(), "step" | "stp") {
+            return Err(format!("{name}: not a STEP file (.step or .stp)"));
+        }
+        records_of(name, &ext, bytes, &["step"])
+    }
+
+    /// `bytes` decoded by the cadmpeg codec they are, if it is one of `accepted`, and read into
+    /// records.
+    fn records_of(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        let (format, decoded) = decode_at(name, ext, bytes, accepted, DecodeDepth::Full)?;
         let policy = policy();
         let (mut ir, report, _) = decoded.into_parts();
         hide_body_members(&mut ir);
@@ -333,6 +373,7 @@ mod convert {
         let system = match format.as_str() {
             "fcstd" => "FreeCAD",
             "rhino" => "Rhino",
+            "step" => "",
             other => other,
         };
         let records = super::cadir_records(&ir, &product, system);
