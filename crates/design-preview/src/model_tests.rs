@@ -109,38 +109,38 @@ fn the_orbit_starts_isometric_and_keeps_the_model_in_view() {
 }
 
 #[test]
-fn dragging_turns_freely_over_the_top_and_zoom_is_clamped() {
-    let mut orbit = Orbit::default();
-    let m = orbit.matrices(10.0, 1.0);
-    let front = [m.view[2], m.view[6], m.view[10]].map(|v| v * 5.0); // the point nearest the eye
-    let before = project(&m, front);
-    // Dragging right moves the front of the model right; dragging up moves it up.
-    orbit.drag(20.0, 0.0);
-    assert!(project(&orbit.matrices(10.0, 1.0), front)[0] > before[0]);
-    let mut up = Orbit::default();
-    up.drag(0.0, 20.0);
-    assert!(project(&up.matrices(10.0, 1.0), front)[1] > before[1]);
-    // A long vertical drag goes over the top: the model ends upside down, axes still square.
-    let mut over = Orbit::default();
-    for _ in 0..157 {
+fn dragging_orbits_as_the_app_does_and_drags_back_to_the_start() {
+    let start = Orbit::default();
+    let mut orbit = start;
+    // The app's rate: 0.008 radians per point, right turns the yaw, down raises the pitch.
+    orbit.drag(100.0, 0.0);
+    assert!((orbit.yaw - (start.yaw + 0.8)).abs() < 1e-5);
+    orbit.drag(0.0, 50.0);
+    assert!((orbit.pitch - (start.pitch + 0.4)).abs() < 1e-5);
+    // Dragging back to where the drag started brings the view back.
+    orbit.drag(0.0, -50.0);
+    orbit.drag(-100.0, 0.0);
+    assert!((orbit.yaw - start.yaw).abs() < 1e-5 && (orbit.pitch - start.pitch).abs() < 1e-5);
+    // A long drag down goes over the top: the view is upside down, Z points down on screen.
+    let mut over = start;
+    for _ in 0..100 {
         over.drag(0.0, 2.0);
     }
-    assert!(over.axes[1][2] < 0.0, "Z points down on screen after half a turn: {:?}", over.axes);
-    for (i, a) in over.axes.iter().enumerate() {
-        for (j, b) in over.axes.iter().enumerate() {
-            let d: f32 = (0..3).map(|k| a[k] * b[k]).sum();
-            assert!((d - if i == j { 1.0 } else { 0.0 }).abs() < 1e-4);
-        }
-    }
-    // A full roll comes back to the start.
-    let mut rolled = Orbit::default();
-    (0..4).for_each(|_| rolled.roll(std::f32::consts::FRAC_PI_2));
-    assert!((0..3).all(|i| (0..3).all(|k| (rolled.axes[i][k] - Orbit::default().axes[i][k]).abs() < 1e-4)));
+    assert!(over.pitch.cos() < 0.0);
+    let m = over.matrices(10.0, 1.0);
+    assert!(project(&m, [0.0, 0.0, 5.0])[1] < 0.0, "upside down after going over the top");
+    // Upside down, a drag to the right still turns the side facing the viewer to the right.
+    let mut flipped = over;
+    flipped.drag(10.0, 0.0);
+    assert!((flipped.yaw - (over.yaw - 0.08)).abs() < 1e-5);
+    // The pitch stays within one turn.
+    let mut far = start;
+    far.drag(0.0, 1e6);
+    assert!(far.pitch.abs() <= std::f32::consts::PI);
     // Hostile input changes nothing.
     let before = orbit;
     orbit.drag(f32::NAN, 1.0);
-    orbit.drag(0.0, 0.0);
-    orbit.roll(f32::INFINITY);
+    orbit.drag(1.0, f32::INFINITY);
     orbit.zoom_by(f32::INFINITY);
     orbit.zoom_by(-1.0);
     assert_eq!(orbit, before);
