@@ -169,7 +169,7 @@ impl Product {
             Self::History => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser,
             Self::Assistant => crate::agent_chat::shown(app) && !app.preferences.agent_chat_popped,
             Self::RenderBrowser | Self::RenderLibrary | Self::RenderInspector | Self::RenderShots => render && !crate::render_ui::focused(app),
-            Self::SketchOptions => !render && crate::sketch_palette::editing(app),
+            Self::SketchOptions => !render && (crate::sketch_palette::editing(app) || crate::sketch_palette::image_tool(app)),
             Self::Bom => crate::bom_panel::available(app),
             Self::DrawingSheets => {
                 crate::drawing_workspace::active(app)
