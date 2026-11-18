@@ -1,16 +1,18 @@
-package craft:plugin@0.1.0;
+package craft:plugin@0.2.0;
 
 // Capabilities are sets of the interfaces in this file. A plugin names the ones it needs in its
 // manifest's `capabilities` list:
-// - `commands@0.1`: types, commands, log, control, files, clock and entry (world `command-plugin`);
-// - `formats@0.1`: file-format slots (RFC 0015 §4). An import slot is world `importer-plugin`
+// - `commands@0.2`: types, commands, log, control, files, clock and entry (world `command-plugin`);
+// - `formats@0.2`: file-format slots (RFC 0015 §4). An import slot is world `importer-plugin`
 //   (types, log, control, clock, source, design and importer); an export slot is world
 //   `exporter-plugin` (types, commands, log, control, clock and formats-provider). A plugin
 //   declares its slots in its manifest (kind, extensions, label, options, needs_plugin_data), so
 //   the install review shows them before any of its code runs;
-// - `evaluate@0.1`: with `formats`, evaluate, so an importer can check its result.
+// - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result.
 // Later capabilities (ui, viewport, storage) arrive as their own interfaces. While the version is
-// 0.x, a minor version may break the one before it.
+// 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
+// still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
+// component's imports and exports, and shows their `invalid-input` as before.
 // App commands and their schemas are data; this world never names app types.
 interface types {
     type json = string;
@@ -24,6 +26,11 @@ interface types {
         invalid-input(field-failure),
         trap(string),
         cancelled,
+        // The input is valid, but this plugin does not handle it: a file it can open in general
+        // but not this one (no solids, a newer file version, a feature it does not convert), or
+        // an option value it does not offer. The text says what it does not support, in the
+        // user's words. Use `invalid-input` for input that is broken.
+        unsupported(string),
     }
 }
 // The app's command surface: the same commands, inputs and results its MCP clients get.
@@ -72,7 +79,7 @@ interface design {
     use types.{plugin-error};
     write: func(bytes: list<u8>) -> result<_, plugin-error>;
 }
-// An importer checks its own result in the app (capability `evaluate@0.1`). It stages a design
+// An importer checks its own result in the app (capability `evaluate@0.2`). It stages a design
 // file it made; the app opens it in a private session, apart from every open design and every
 // file, and runs read-only commands on it. Nothing here reaches the user's designs or files.
 interface evaluate {

@@ -154,8 +154,9 @@ struct CaseFolder {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Expect {
-    /// The call fails with this kind of error (`permission_denied`, `limit_exceeded`, `trap`,
-    /// `invalid_input`, `command_failed`, `cancelled`, ...), or `any`. Default: it succeeds.
+    /// The call fails with this kind of error (`permission_denied`, `limit_exceeded`, `exhausted`,
+    /// `over_ceiling`, `unsupported`, `trap`, `invalid_input`, `command_failed`, `cancelled`, ...),
+    /// or `any`. Default: it succeeds.
     #[serde(default)]
     error: Option<String>,
     /// Text the error message contains.
@@ -515,7 +516,7 @@ fn run_case(
             (Err(e), None) => return Err(format!("failed: {e}")),
             (Err(e), Some(kind)) => {
                 let got = error_kind(&e);
-                if kind != "any" && *kind != got {
+                if !kind_matches(kind, &got) {
                     return Err(format!("failed with a {got} error, and the test expects {kind}: {e}"));
                 }
                 if let Some(text) = &case.expect.message
@@ -542,10 +543,19 @@ fn run_case(
     CaseResult { failure, design, journal }
 }
 
+/// Whether an error of kind `got` is the `expected` one. `limit_exceeded` also covers the two
+/// limit errors that carry numbers, `exhausted` (a budget ran out) and `over_ceiling` (refused
+/// before it ran), so a test written before they existed still passes.
+fn kind_matches(expected: &str, got: &str) -> bool {
+    expected == "any" || expected == got || (expected == "limit_exceeded" && matches!(got, "exhausted" | "over_ceiling"))
+}
+
 /// The kind of an engine error, as a plugin error names it (`permission_denied`, ...), or `other`.
 fn error_kind(e: &EngineError) -> String {
+    if let Some(e) = e.host_error() {
+        return serde_json::to_value(e).ok().and_then(|v| v["kind"].as_str().map(String::from)).unwrap_or_else(|| "other".into());
+    }
     match e {
-        EngineError::Plugin(e) => serde_json::to_value(e).ok().and_then(|v| v["kind"].as_str().map(String::from)).unwrap_or_else(|| "other".into()),
         EngineError::BadParams { .. } => "invalid_input".into(),
         EngineError::Cancelled(_) => "cancelled".into(),
         _ => "other".into(),

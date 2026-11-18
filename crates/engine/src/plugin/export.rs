@@ -47,6 +47,11 @@ pub(super) fn refuse_unreadable(runtime: &RuntimeManifest) -> Result<()> {
 /// succeeds, and then in one step: an export that fails, traps or runs out of fuel leaves the file
 /// that was there (or no file) as it was. The design is never changed.
 pub fn export_file(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {
+    let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
+    convert(session, exporter, path, options).map_err(super::messages::named_export(&exporter.name, &file))
+}
+
+fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the exporter's options are an object".into() }.into());
     }
@@ -97,10 +102,7 @@ pub fn export_file(session: &mut Session, exporter: &FormatSlot, path: &str, opt
                 .join()
                 .map_err(|_| HostError::Trap { reason: "the export stopped unexpectedly".into() })?
         });
-        let bytes = result.map_err(|e| match e {
-            HostError::Trap { reason } => HostError::Trap { reason: format!("{} failed exporting {file}: {reason}", package.manifest.name) },
-            e => e,
-        })?;
+        let bytes = result?;
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
