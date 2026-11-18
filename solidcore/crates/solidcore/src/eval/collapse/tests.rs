@@ -1214,6 +1214,56 @@ fn a_pcurve_past_a_rational_net_far_from_the_origin_is_put_on_it() {
     );
 }
 
+/// The pcurve from u = −0.1 to 0.9 at v = 0.5, moved 0.1 along u onto [0, 1].
+fn past_u() -> Curve2 {
+    Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[-0.1, 0.5], [0.9, 0.5]],
+    }
+}
+
+/// A degree-(1, 1) rational patch is bounded; the same surface with every homogeneous
+/// coordinate times 1e-200 is refused, its weight products underflowing to zero, never
+/// accepted with a bound of zero.
+#[test]
+fn a_rational_net_whose_weight_products_underflow_is_refused() {
+    let linear = vec![0.0, 0.0, 1.0, 1.0];
+    let patch = |scale: f64| {
+        let row = |u: f64, w: f64| vec![([u, 0.0, u], w * scale), ([u, 1.0, 2.0 * u], w * scale)];
+        net(
+            [1, 1],
+            &[linear.clone(), linear.clone()],
+            &[row(0.0, 1.0), row(1.0, 2.0)],
+        )
+    };
+    let home = pcurve_onto_knots(&patch(1.0), &past_u(), 1.0)
+        .unwrap()
+        .unwrap();
+    assert!(home.displacement > 0.1, "{}", home.displacement);
+    let tiny = pcurve_onto_knots(&patch(1e-200), &past_u(), 1.0);
+    assert!(matches!(tiny, Err(EvalError::Unevaluable(_))), "{tiny:?}");
+}
+
+/// Knots 0, 0, 0.5, 0.5, 1, 1 along u at degree 1: x is 0 below u = 0.5 and 100 above it, each
+/// piece flat along u, and the move from u = 0.48 to 0.522 at t = 0.58 crosses the jump. The
+/// knot's multiplicity is above the degree, so the knots do not fit and the move is refused.
+#[test]
+fn a_rational_net_that_jumps_at_a_knot_is_refused() {
+    let jump = |x: f64, w: f64| vec![([x, 0.0, 0.0], w), ([x, 1.0, 0.0], w)];
+    let s = net(
+        [1, 1],
+        &[vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+        &[
+            jump(0.0, 1.0),
+            jump(0.0, 2.0),
+            jump(100.0, 1.0),
+            jump(100.0, 2.0),
+        ],
+    );
+    let onto = pcurve_onto_knots(&s, &past_u(), 1.0);
+    assert!(matches!(onto, Err(EvalError::Invalid(_))), "{onto:?}");
+}
+
 /// What a rational net cannot be bounded on is refused: a weight that turns negative past the
 /// range, a move past the tolerance, and a pcurve whose knots do not fit its points.
 #[test]
