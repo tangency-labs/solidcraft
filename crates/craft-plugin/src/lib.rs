@@ -31,6 +31,8 @@ pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
 pub const MAX_MEMORY_MIB: usize = 4096;
 
+pub mod effect;
+
 pub type Result<T> = std::result::Result<T, HostError>;
 
 /// An open document session and its committed history state, kept outside authored document data.
@@ -151,6 +153,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("commands", (0, 2)),
     ("design", (0, 1)),
     ("dialog", (0, 1)),
+    ("effects", (0, 1)),
     ("evaluate", (0, 2)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
@@ -544,6 +547,9 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+    /// Effects the host draws for the plugin (capability `effects@0.1`), such as the RGB wave.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<effect::EffectDecl>,
 }
 
 /// A read-only entry called after a coalesced whole-document invalidation. Listeners refresh
@@ -875,6 +881,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("runtime.listeners", "design listeners require capability design@0.1"));
     }
     check_storage(&manifest)?;
+    effect::validate(&manifest.effects, &manifest.capabilities)?;
     Ok(manifest)
 }
 

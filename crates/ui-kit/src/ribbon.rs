@@ -691,7 +691,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             }
             if let Some(icon) = group.icon {
                 let icon_rect = Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0));
-                crate::icons::paint_icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
+                crate::icons::wave::paint_ribbon_block(&painter, br, t.radius_sm, group.enabled);
+                crate::icons::wave::paint_ribbon_icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
             }
             dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
             if fresp.backing_on_hover_text(group.tip).clicked() && group.enabled {
@@ -747,7 +748,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let side = if exit { 30.0 } else { 26.0 };
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
+            crate::icons::wave::paint_ribbon_block(&painter, whole, t.radius_sm, b.enabled);
+            crate::icons::wave::paint_ribbon_icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
             if !b.app_paints {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && b.enabled, b.name));
             }
@@ -829,7 +831,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     paint_reveal(&painter, cell, &accent, r.strength, true);
                     solidcraft_ui_registry::publish_rect(h.reveal, cell);
                 }
-                crate::icons::paint_icon(
+                crate::icons::wave::paint_ribbon_block(&painter, cell, t.radius_sm, c.enabled);
+                crate::icons::wave::paint_ribbon_icon(
                     &painter,
                     Rect::from_center_size(cell.center(), vec2(15.0, 15.0)),
                     c.icon,
@@ -1775,7 +1778,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         painter.add(neutral);
         None
     };
-    crate::icons::paint_icon(
+    crate::icons::wave::paint_ribbon_icon(
         &painter,
         Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)),
         entry.icon,

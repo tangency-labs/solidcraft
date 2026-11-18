@@ -261,7 +261,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let bar = app_bar::AppBar {
                 items: Some(&app.toolbar_custom.app_bar),
                 quick_ids: &quick_ids,
-                mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
+                mark: &|painter, at| icons::brand_mark(painter, at),
                 name: "SolidCraft",
                 leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
@@ -1177,6 +1177,7 @@ struct RibbonShape {
 }
 
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
+    icons::set_wave(ui.ctx(), crate::plugin_effects::wave_set(app));
     let t = Tokens::get();
     crate::workspace::sync_context(app);
     let layout = shell_layout(app);
