@@ -2117,8 +2117,28 @@ fn sheet_prism_cut(
 /// The exact box of `body`, grown by twice its tolerance: bodies whose boxes are apart do not
 /// meet. None when it can't be worked out.
 pub(super) fn exact_box(body: &Body) -> Option<Aabb3> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.tight_boxes += 1);
     let b = body.exact_bounds().ok()?;
     (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * body.record().tolerance + 1e-6))
+}
+
+/// Whether every tool of `reach` lies inside `mb`: its box is inside the box of the
+/// body's mesh, which holds the body's points (a mesh's vertices are on the surface) and
+/// is nearly free.
+///
+/// A tool inside the body is not apart from it, so the kernel's tight box of the body
+/// cannot show the tool apart of it and need not be measured: measuring it costs the
+/// kernel minutes on a body with many faces (#18821: 347 s for the cup of the report,
+/// against 30 s for the cut the box was measured for). The cut is made all the same,
+/// exactly as the tight box would have left it.
+pub(super) fn tools_inside(mb: &ModelBody, reach: &[Option<Aabb3>]) -> bool {
+    let b = mb.mesh_bounds();
+    if b.is_empty() || !b.min.is_finite() || !b.max.is_finite() {
+        return false;
+    }
+    let b = b.inflated(2.0 * mb.body.record().tolerance + 1e-6);
+    reach.iter().flatten().all(|tool| b.contains(tool.min) && b.contains(tool.max))
 }
 
 /// Whether the line through `at` along `dir` is known to pass farther than `reach` from the
