@@ -5,6 +5,9 @@
 #![allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use std::f64::consts::PI;
@@ -17,11 +20,7 @@ use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLeve
 /// The box 30 x 20 x 20 with its vertical edge at the origin rounded R5, joined with the r2
 /// cylinder 6 long along +x through (x0, 0, 15).
 fn operand(x0: f64) -> Result<Body, Error> {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let b = make_box([0.0; 3], [30.0, 20.0, 20.0]).unwrap();
     let e = edge_at(&b, [0.0, 0.0, 10.0]);
     blend(&b, Blend::Round, &[e], &[5.0], &[], Corners::Filled).unwrap();

@@ -155,10 +155,9 @@
 //! - **Not upstream: [`shrink_geometry_with`]** (tangency-labs/solidcore#472) passes
 //!   [`TrimOptions`] to the surface trim; [`shrink_geometry`] uses the defaults
 //!   (upstream). See `nurbs::b_spline_surface_n_lib::p2`'s Deviations.
-//! - **Not upstream (WR-729, opt-in `Kernel::fixes.face_swap_uv_transposes_trims`):**
-//!   [`swap_uv`] swaps its UV trims' control point coordinates exactly
-//!   ([`BSplineCurve::create_transposed_curve`]) instead of mirroring them through
-//!   upstream's rounded `u = v` mirror matrix.
+//! - **Not upstream (WR-729):** [`swap_uv`] swaps its UV trims' control point
+//!   coordinates exactly ([`BSplineCurve::create_transposed_curve`]) instead of
+//!   mirroring them through upstream's rounded `u = v` mirror matrix.
 
 use core::cmp::Ordering;
 
@@ -708,6 +707,10 @@ pub struct OrientedTrimBoundary {
     /// `rTrimBoundary`: the curves, loop by loop (counter-clockwise for the first loop,
     /// clockwise for the others).
     pub curves: Vec<Curve>,
+    /// Not upstream (#16735): the edge use each of [`OrientedTrimBoundary::curves`] is the
+    /// trim (or trimmed edge curve) of, `None` for a UV line filling a gap; empty for a
+    /// boundary not built by [`create_oriented_trim_boundary`].
+    pub edgeuses: Vec<Option<EdgeuseId>>,
 }
 
 /// `CreateOrientedTrimBoundary`: copies of the face's boundary curves in loop order,
@@ -753,6 +756,7 @@ pub fn create_oriented_trim_boundary(
     let mut out = OrientedTrimBoundary {
         loops: Vec::new(),
         curves: Vec::new(),
+        edgeuses: Vec::new(),
     };
 
     // get face's loop-use array
@@ -788,6 +792,7 @@ pub fn create_oriented_trim_boundary(
         // not close that way is made again as upstream does.
         for wrap in [periods != [None, None], false] {
             out.curves.truncate(first_curve);
+            out.edgeuses.truncate(first_curve);
             let mut shift = Vec3::new(0.0, 0.0, 0.0);
 
             // the last edge's end-point (status ignored)
@@ -819,6 +824,7 @@ pub fn create_oriented_trim_boundary(
                         // If there is a gap create a line to fill it
                         edges_in_loop += 1;
                         out.curves.push(gap_line(last_pnt, pnt)?);
+                        out.edgeuses.push(None);
                     }
 
                     // Get UVCurve->End UVPoint
@@ -846,6 +852,7 @@ pub fn create_oriented_trim_boundary(
                         let e = edge_deref(b, eu)?;
                         out.curves.push(trimmed_edge_curve(k, b, e)?);
                     }
+                    out.edgeuses.push(Some(eu));
                 } else {
                     let mut bsc = if parameter_space {
                         let orig = get_or_create_uv_trim_curve(k, b, eu)?;
@@ -875,6 +882,7 @@ pub fn create_oriented_trim_boundary(
                         // If there is a gap create a line to fill it
                         edges_in_loop += 1;
                         out.curves.push(gap_line(last_pnt, pnt)?);
+                        out.edgeuses.push(None);
                     }
                     last_pnt = bsc.evaluate_point(k, ivl.max())?;
                     if wrap {
@@ -885,6 +893,7 @@ pub fn create_oriented_trim_boundary(
                         shift_curve(k, &mut bsc, shift)?;
                     }
                     out.curves.push(bsc);
+                    out.edgeuses.push(Some(eu));
                 }
             }
 
@@ -1564,26 +1573,15 @@ fn swap_uv_notifying(
         ));
     }
     surface_deref(b, f)?;
-    let x_axis = Vec3::new(1.0, 1.0, 0.0).unitize()?;
-    let mut mirror = Axis2Placement::default();
-    // x:[1 1 0] y:[0 0 1] z=cross(x,y):[1 -1 0] (status ignored upstream, passed on by
-    // the fork, tangency-labs/smlib 6997962)
-    mirror.set_canonical(Point3::new(0.0, 0.0, 0.0), x_axis, Vec3::new(0.0, 0.0, 1.0))?;
 
     // Mirror the UV trims and swap the surface (the steps that can fail) before changing
     // the face, so that a failure leaves the face unchanged.
 
-    // (WR-729, opt-in: the mirror about u = v is the swap of each control point's u and
-    // v, made exactly; the rounded mirror matrix moves every coordinate by an ulp and a
-    // trim's end on a domain bound past it)
-    let transpose = k.fixes.face_swap_uv_transposes_trims;
-    let mirror_curve = |c: &BSplineCurve| {
-        if transpose {
-            c.create_transposed_curve()
-        } else {
-            c.create_mirror_curve(&mirror)
-        }
-    };
+    // (WR-729: upstream mirrors each trim about the plane through the origin with x axis
+    // (1, 1, 0) unitised; the mirror about u = v is the swap of each control point's u
+    // and v, made here exactly, where the rounded mirror matrix moves every coordinate by
+    // an ulp and a trim's end on a domain bound past it)
+    let transpose = BSplineCurve::create_transposed_curve;
 
     let upward = upward_loopuses(b, f)?;
 
@@ -1595,12 +1593,12 @@ fn swap_uv_notifying(
                 // (upstream dereferences the mate only for an edge use with a curve)
                 let eu_mate = eu1::mate(b, eu)?.ok_or_else(|| null("edge use without mate"))?;
                 let mirrored = match uv.kind() {
-                    CurveKind::BSpline(c) => mirror_curve(c)?,
+                    CurveKind::BSpline(c) => transpose(c)?,
                     // (MakeNurb's status is ignored upstream: mirror the base as it is)
                     CurveKind::Line(c) => match c.base_with_nurb() {
-                        Ok(base) => mirror_curve(&base)?,
+                        Ok(base) => transpose(&base)?,
                         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                        Err(_) => mirror_curve(c.base())?,
+                        Err(_) => transpose(c.base())?,
                     },
                     // the conics: MakeNurb (their override) when missing, then the
                     // SmBSplineCurve mirror of that NURB (statuses ignored as upstream)
@@ -1609,21 +1607,21 @@ fn swap_uv_notifying(
                         if c.base().gw_nurb().is_none() {
                             ignore_status(c.make_nurb(k))?;
                         }
-                        mirror_curve(c.base())?
+                        transpose(c.base())?
                     }
                     CurveKind::Parabola(c) => {
                         let mut c = c.clone();
                         if c.base().gw_nurb().is_none() {
                             ignore_status(c.make_nurb(None))?;
                         }
-                        mirror_curve(c.base())?
+                        transpose(c.base())?
                     }
                     CurveKind::Hyperbola(c) => {
                         let mut c = c.clone();
                         if c.base().gw_nurb().is_none() {
                             ignore_status(c.make_nurb(None))?;
                         }
-                        mirror_curve(c.base())?
+                        transpose(c.base())?
                     }
                     // A UV trim curve is an SmBSplineCurve*: upstream's only subclasses are
                     // SmLine, SmEllipse, SmHyperbola and SmParabola (the arms above);

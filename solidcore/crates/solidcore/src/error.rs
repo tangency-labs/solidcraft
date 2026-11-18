@@ -177,17 +177,6 @@ pub(crate) fn ignored_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<Optio
     ignored(passed_on(r, pass_on)?)
 }
 
-/// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
-/// drops it and the fork passes it on (`SER(...)`): returned as the error with
-/// `pass_on`, dropped without (except [`SolidError::Unported`] and
-/// [`SolidError::Cancelled`], which always propagate).
-pub(crate) fn status_passed_on(status: Option<SolidError>, pass_on: bool) -> Result<()> {
-    match status {
-        Some(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
-        _ => Ok(()),
-    }
-}
-
 /// A reference to one topological entity, used as error context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EntityRef {
@@ -540,8 +529,7 @@ pub const SM_ERR_TESS_FAIL_FACE: i32 = 1041;
 /// SMLib fork status `SM_ERR_OFFSET_WALLS_TOUCH` (tangency-labs/smlib a759622,
 /// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
 /// an offset (a shell, a solid offset) whose walls would meet, because loops of an offset
-/// face touch without crossing. Returned only with
-/// `Kernel::fixes.offset_resolve_crossing_loops`.
+/// face touch without crossing.
 pub const SM_ERR_OFFSET_WALLS_TOUCH: i32 = 1042;
 
 /// SMLib fork status `SM_ERR_OFFSET_EDGE_VANISHES` (tangency-labs/smlib 34318f4,
@@ -2067,7 +2055,6 @@ mod tests {
             passed_on::<()>(Err(e.clone()), false).map(|_| ()),
             Err(e.clone())
         );
-        assert_eq!(status_passed_on(Some(e.clone()), false), Err(e.clone()));
         assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
         assert!(!SolidError::sm_err("t").is_not_certified());
     }
@@ -2360,8 +2347,8 @@ mod tests {
                     BooleanFailure::SolidLeaks { face },
                 )
                 .into_error(),
-                "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
-                 the solid it bounds into the outside",
+                "boolean::merge::p4::manifold_boolean: the union deleted face 7 and the solid \
+                 it bounded merged into the outside",
                 ErrorKind::Failed,
                 SM_ERR,
             ),

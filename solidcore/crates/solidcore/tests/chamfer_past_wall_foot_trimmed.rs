@@ -1,11 +1,11 @@
 //! A chamfer whose leg runs off its face past a wall's foot into the body's material, built by
-//! the cliff overflow's trim at creases (`fillet_overflow_trim_at_creases`) as the subtraction
-//! already builds it. Two defects of the trim stopped it: the extension's `takes_off` probed the
-//! material a hundredth of the run's length beside the run, which landed on the far side of a
-//! strip narrower than that (the leg just past the foot), so the one loop that closes was refused
-//! ("does not close on the face in one way"); and the extension's runs from the chain's ends to
-//! its feet were not imprinted on the walls beside it, so what the blend takes off them was not
-//! fenced ("reaches every face of the body").
+//! the cliff overflow's trim at creases (WR-695, once `fillet_overflow_trim_at_creases`) as the
+//! subtraction it replaced built it. Two defects of the trim stopped it: the extension's
+//! `takes_off` probed the material a hundredth of the run's length beside the run, which
+//! landed on the far side of a strip narrower than that (the leg just past the foot), so the
+//! one loop that closes was refused ("does not close on the face in one way"); and the
+//! extension's runs from the chain's ends to its feet were not imprinted on the walls beside
+//! it, so what the blend takes off them was not fenced ("reaches every face of the body").
 //!
 //! The body is `wr631_cliff_overflow_choice`'s stepped bar: its profile in the xy plane,
 //! `(0,0) (10,0) (10,5) (7,5) (7,10) (0,10)`, swept 20 along z. The edge at (10,5) is convex
@@ -49,7 +49,6 @@ const BAR: f64 = (10.0 * 5.0 + 7.0 * 5.0) * LENGTH;
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_overflow_trim_at_creases = true;
     k
 }
 

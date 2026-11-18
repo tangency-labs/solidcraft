@@ -553,11 +553,17 @@ fn run_side_edge_on_along_its_line(
     // cone, a ruling of it (its UV trim a line): the surface continues as itself past its
     // domain (`offset_extension_as_itself`), along that line. A closed rim's seam is one: a
     // disc's rim rounded past its 2 mm wall meets the seam's line below the wall.
+    let uv_linear = uv_trim.is_linear(k, EFF_ZERO, false)?.linear;
     if !(side_3d.is_linear(k, EFF_ZERO, false)?.linear
-        && uv_trim.is_linear(k, EFF_ZERO, false)?.linear
+        && uv_linear
         && (base.is_planar(k, EFF_ZERO)?.is_planar
             || matches!(base.kind(), crate::surface::surface::SurfaceKind::Cone(_))))
     {
+        if uv_linear {
+            return run_tangent_seam_on_in_its_surface(
+                k, b, side_eu, side_edge, uv_trim, base, solver, intervals,
+            );
+        }
         return Ok(false);
     }
     let edge_ivl = intervals
@@ -643,6 +649,160 @@ fn run_side_edge_on_along_its_line(
         return Ok(true);
     }
     Ok(false)
+}
+
+/// Not the fork's (tangency-labs/solidcraft#17715): a side edge whose faces meet
+/// tangentially at the corner's vertex (a tangent seam T, as in
+/// [`run_side_edge_on_along_its_line`]), and whose UV trim on the rail's surface is a line
+/// of that surface's parameters, runs on past that vertex along the same line, as far as
+/// the line stays in the surface's own domain. That run-on lies on the surface itself, so
+/// it is exact whatever the surface's kind and the edge's curve (the circle of a torus's
+/// generating point through the seam). Where the face across T ends at the vertex, short
+/// of the rail, the rail meets T there continued: a concave round between a revolved end
+/// cap and a ring's round band, whose cap closes to a cusp against a flat side running
+/// tangent into the band, touches the band on T's circle a little past the cap's plane.
+/// Returns whether it widened the interval.
+///
+/// # Errors
+/// Those of the topology queries, the tangency test, the domain and the trim's evaluation.
+#[allow(clippy::too_many_arguments)] // the solve's state, read in place
+fn run_tangent_seam_on_in_its_surface(
+    k: &Kernel,
+    b: &mut Brep,
+    side_eu: EdgeuseId,
+    side_edge: EdgeId,
+    uv_trim: &Curve,
+    base: &Surface,
+    solver: &FilletSolver,
+    intervals: &mut ExtentNd,
+) -> Result<bool> {
+    let filleted = match solver.edgeuse(0)? {
+        Some(eu) => eu::edge(b, eu)?,
+        None => None,
+    };
+    let Some(filleted) = filleted else {
+        return Ok(false);
+    };
+    let (filleted_start, filleted_end) = edge::start_end_vertices(b, filleted)?;
+    let (side_start, side_end) = edge::start_end_vertices(b, side_edge)?;
+    let on_filleted =
+        |v: Option<VertexId>| v.is_some() && (v == filleted_start || v == filleted_end);
+    // the end of the side edge at the corner, and only one
+    let (corner_vertex, at_start) = match (on_filleted(side_start), on_filleted(side_end)) {
+        (true, false) => (side_start, true),
+        (false, true) => (side_end, false),
+        _ => return Ok(false),
+    };
+    let Some(corner_vertex) = corner_vertex else {
+        return Ok(false);
+    };
+    if !crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex(
+        k,
+        b,
+        side_eu,
+        corner_vertex,
+        rad_to_deg(solver.tangency_tolerance()),
+    )? {
+        return Ok(false);
+    }
+    let edge_ivl = intervals
+        .get(0)
+        .ok_or_else(|| invalid("no edge-use parameter interval"))?;
+    let own = base.natural_uv_domain_with_nurb(k)?;
+    let (before, after) = if at_start {
+        (
+            trim_runs_on_in(k, uv_trim, edge_ivl.min(), -1.0, &own)?,
+            0.0,
+        )
+    } else {
+        (0.0, trim_runs_on_in(k, uv_trim, edge_ivl.max(), 1.0, &own)?)
+    };
+    if !(before > 0.0 || after > 0.0) {
+        return Ok(false);
+    }
+    set_interval(
+        intervals,
+        0,
+        Extent1d::from_min_max(edge_ivl.min() - before, edge_ivl.max() + after),
+    );
+    Ok(true)
+}
+
+/// How far in its own parameter the straight UV trim `uv_trim` runs on from `from` (one end
+/// of its interval) in the direction `sign` (+1 past the end, -1 before the start) before it
+/// reaches the boundary of `domain`, its points evaluated past its interval as the rail solve
+/// evaluates them ([`continue_bspline_trim_past_its_ends`]): 0 where it is outside `domain`
+/// already, does not move there, or turns back before the boundary.
+///
+/// The point where the trim's line leaves the box is fixed by the line alone; the parameter
+/// that reaches it is the root of the trim's position along the line, found by Newton's
+/// method from the first-order estimate, so a straight trim whose parameter runs at an uneven
+/// rate stops at the boundary as an even one does (tangency-labs/solidcraft#17715). The chord
+/// between the interval's ends would not: on a quadratic with control points 0, 0.25 and 1
+/// over [0, 1] it carries the trim to t = 1.5 for a boundary at u = 1.5, where u = 1.875.
+///
+/// # Errors
+/// Those of the trim's evaluation.
+fn trim_runs_on_in(
+    k: &Kernel,
+    uv_trim: &Curve,
+    from: f64,
+    sign: f64,
+    domain: &Extent2d,
+) -> Result<f64> {
+    let mut trim = uv_trim.clone();
+    continue_bspline_trim_past_its_ends(&mut trim);
+    let at = |t: f64| -> Result<(Point3, Vec3)> {
+        let pv = trim.evaluate(k, t, 1, sign > 0.0, true)?;
+        match (pv.first(), pv.get(1)) {
+            (Some(&p), Some(&d)) => Ok((p, d)),
+            _ => Err(invalid("the trim's evaluation has no derivative")),
+        }
+    };
+    let (a, d) = at(from)?;
+    let out = [d.x * sign, d.y * sign];
+    let speed = out[0].hypot(out[1]);
+    if speed.is_nan() || speed <= 0.0 {
+        return Ok(0.0);
+    }
+    let dir = [out[0] / speed, out[1] / speed];
+    let (lo, hi) = ([domain.min.x, domain.min.y], [domain.max.x, domain.max.y]);
+    // the largest length along the line from `a` that stays in the box
+    let mut reach = f64::INFINITY;
+    for ((&p, &v), (&l, &h)) in [a.x, a.y].iter().zip(&dir).zip(lo.iter().zip(&hi)) {
+        if p.is_nan() || p < l || p > h {
+            return Ok(0.0);
+        }
+        if v > 0.0 {
+            reach = reach.min((h - p) / v);
+        } else if v < 0.0 {
+            reach = reach.min((l - p) / v);
+        }
+    }
+    if !reach.is_finite() || reach <= 0.0 {
+        return Ok(0.0);
+    }
+    // Newton on g(t) = (trim(t) - a) . dir - reach, g'(t) = trim'(t) . dir; the trim must run
+    // outward (sign g' > 0) at every step, or it turns back
+    let mut t = from + sign * reach / speed;
+    let mut last_step = f64::INFINITY;
+    for _ in 0..64 {
+        let (p, d) = at(t)?;
+        let rate = d.x * dir[0] + d.y * dir[1];
+        let outward = sign * rate;
+        if outward.is_nan() || outward <= 0.0 {
+            return Ok(0.0);
+        }
+        let g = (p.x - a.x) * dir[0] + (p.y - a.y) * dir[1] - reach;
+        let step = g / rate;
+        if !step.is_finite() || step.abs() >= last_step {
+            break;
+        }
+        last_step = step.abs();
+        t -= step;
+    }
+    let past = sign * (t - from);
+    Ok(if past > 0.0 { past } else { 0.0 })
 }
 
 /// How far (in its parameters) the linear UV trim `uv_trim` runs on past the start and
@@ -992,10 +1152,7 @@ impl FilletSolver {
         // CreateConePatch() makes a STEP-parameterized cone,
         // we go the other way: u along the edge, v around the fillet surface.
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            cone_patch.swap_uv(),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        cone_patch.swap_uv()?;
 
         // Copy pConePatch, when possible as an analytic surface. Not the fork (#2405): the
         // class's cylinder is the analytic cone CopyAndAddAnalytics recognises in the patch,
@@ -1158,10 +1315,7 @@ impl FilletSolver {
         cone.adjust_step_uv_domain(k, &step_domain)?;
         let mut cone = Surface::from(cone);
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            cone.swap_uv(k),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        cone.swap_uv(k)?;
 
         let uv_domain = cone.natural_uv_domain_with_nurb(k)?;
         let ivl = Extent1d::from_min_max(uv_domain.min.x, uv_domain.max.x);
@@ -1493,21 +1647,7 @@ impl FilletSolver {
 
         // CCWAngleBetween status ignored upstream: dSpanAng stays 0 on a failure
         // fork 66b02de passes this on (SER)
-        let mut span_ang = match crate::error::passed_on(
-            axis_of_revolution.ccw_angle_between(vec, end_vec),
-            k.fixes.fillet_statuses_pass_on,
-        )? {
-            Ok(a) => a,
-            Err(e)
-                if matches!(
-                    e,
-                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
-                ) || e.is_not_certified() =>
-            {
-                return Err(e)
-            }
-            Err(_) => 0.0,
-        };
+        let mut span_ang = axis_of_revolution.ccw_angle_between(vec, end_vec)?;
         if span_ang < ANG_TOL_RAD {
             span_ang += 2.0 * PI;
         }
@@ -1631,10 +1771,7 @@ impl FilletSolver {
             cs.rotate_about_axis(PI, ref_frame.z_axis());
             cs.translate(ref_frame.origin());
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                arc.transform(&cs, None),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            arc.transform(&cs, None)?;
         }
 
         // create surface of revolution
@@ -2700,10 +2837,7 @@ impl FilletSolver {
                 let tk = edge_zone_kernel(k, edge::tolerance(pseudo.brep(), cross_section)?);
                 // Set the cross section curve interval (status ignored upstream)
                 // fork 66b02de passes this on (SER)
-                ignore_status(crate::error::passed_on(
-                    cs_curve.trim(&tk, &mut trim_ivl, TrimMode::Notify),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                cs_curve.trim(&tk, &mut trim_ivl, TrimMode::Notify)?;
                 if let Some(c) = pseudo.brep_mut().edge_mut(cross_section)?.curve.as_mut() {
                     *c = cs_curve.clone();
                 }
@@ -2716,10 +2850,7 @@ impl FilletSolver {
                 for e_u in [prim, mate] {
                     if let Some(uv) = pseudo.brep_mut().edgeuse_mut(e_u)?.uv_trim_curve.as_mut() {
                         // fork 66b02de passes this on (SER)
-                        ignore_status(crate::error::passed_on(
-                            uv.trim(&tk, &mut trim_ivl, TrimMode::Notify),
-                            k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        uv.trim(&tk, &mut trim_ivl, TrimMode::Notify)?;
                     }
                 }
             }
@@ -4189,5 +4320,44 @@ mod tests {
             1e-6
         )
         .is_none());
+    }
+
+    /// A straight trim whose parameter runs at an uneven rate (the quadratic with u control
+    /// points 0, 0.25 and 1 over [0, 1], u(t) = (t + t^2) / 2) runs on to the domain's
+    /// boundary u = 1.5 at t = (sqrt(13) - 1) / 2, the root of t^2 + t - 3, not to the chord's
+    /// t = 1.5 (where u = 1.875, past the boundary); from its start on the boundary u = 0 it
+    /// does not run on.
+    #[test]
+    fn a_tangent_seam_s_trim_runs_on_to_the_boundary_at_its_own_rate() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let k = Kernel::default();
+        let control = [
+            Point3::new(0.0, 0.5, 0.0),
+            Point3::new(0.25, 0.5, 0.0),
+            Point3::new(1.0, 0.5, 0.0),
+        ];
+        let trim = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 2,
+                degree: 2,
+                control_points: &control,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[3, 3],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.5, 1.0);
+        let past = trim_runs_on_in(&k, &trim, 1.0, 1.0, &domain).unwrap();
+        let exact = (13.0_f64.sqrt() - 1.0) / 2.0;
+        assert!((1.0 + past - exact).abs() < 1e-12, "{past}");
+        let mut run_on = trim.clone();
+        continue_bspline_trim_past_its_ends(&mut run_on);
+        let at = run_on.evaluate_point(&k, 1.0 + past).unwrap();
+        assert!((at.x - 1.5).abs() < 1e-12, "{at:?}");
+        assert_eq!(trim_runs_on_in(&k, &trim, 0.0, -1.0, &domain).unwrap(), 0.0);
     }
 }

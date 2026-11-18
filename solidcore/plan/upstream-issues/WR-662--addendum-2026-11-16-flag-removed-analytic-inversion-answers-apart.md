@@ -1,0 +1,8 @@
+Updates: WR-662
+
+#### WR-662 (update, 2026-11-16). `analytic_inversion_answers_apart` is removed
+
+An analytic `STEPInversion` now always tells its answers apart from failures. A surface of revolution, which includes cones and cylinders, returns `SM_ERR_NOT_WITHIN_TOLERANCE` for a point off its generator and `SM_ERR_OUTSIDE_OF_DOMAIN` for a point outside its sweep. A sphere returns `SM_ERR_NOT_WITHIN_TOLERANCE` for a point off the sphere. In all three cases upstream returned `SM_ERR`. The cone and sphere intersection callers pass on an inversion that did not answer, where upstream read it as exterior. This is the SolidCraft fork's tangency-labs/smlib dfc7cb6. It is now the only path, and the flag is gone. Removed: the field, the flag-off branches, SolidCraft's preset line, its entries in `fixes.json` and the c494a18 list, and the flag-off halves of the tests.
+
+- **Results:** 3,294 golden rows change, in `surface.surface_p2`, `surface.surf_of_revolution_p2` and `surface.offset_surface`. Each is a failure before and after. The only change is that `SM_ERR` (1001) becomes 1021 for a point off the generator, or 1020 for a point outside the sweep. Topology, every other value and every other status are unchanged. No success became a failure, and no failure became a success.
+- **Tests:** `crates/goldens/tests/wr662_inversion_status_moves.rs` replays every moved row from the PR's goldens diff. It checks that the retired code gives the new row, and that setting the told-apart statuses back to 1001 gives exactly the old row. Unit tests: `surface::cone::p2` `cone_inversion_answers_read_as_locations`, `surface::sphere` `inversion_location_passes_on_a_failed_inversion`, and `tests/issue_2009_group_c_inversion.rs`.

@@ -62,6 +62,8 @@ request that names it. Check all three, and build on the existing work rather th
   faces and tangent contacts.
 - [docs/offset-and-shell.md](docs/offset-and-shell.md): offsets of the definition, folds and the
   largest wall, the offset construction, shell and thicken.
+- [docs/failure-codes-and-reproduction.md](docs/failure-codes-and-reproduction.md): a failure's
+  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design).
 - [docs/coordinating.md](docs/coordinating.md): if you lead other agents: how to understand the
   problem, search for related work, split it into briefs and inspect what comes back.
 
@@ -235,7 +237,11 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
   unchanged bit for bit, or the cases that change and why the new result is right).
 - **Retire the existing flags.** The `UpstreamFixes` fields that exist are left from the port.
   Turning one on by default, deleting its off path and the solidcore-only `WR-` patches made to
-  it, is welcome work: a few flags per PR, each with the cases whose results change.
+  it, is welcome work: a few flags per PR, each with the cases whose results change. Each flag
+  is its own file, `crates/solidcore/src/kernel/fixes/<flag>.md` (its doc): retiring it deletes
+  that file, so flag PRs share no line. A flag SolidCraft holds back is also listed in
+  `HELD_BACK` (`crates/smlib/src/core.rs`, in SolidCraft) and `crates/solidcore/tests/kernel_cases/held_back.json`:
+  retiring one deletes it from both lists too, or their tests fail on the unknown name.
 - **Record upstream defects, don't hide them.** When solidcore is more correct than the C++ for
   a case, record the C++ defect as a confirmed `plan/upstream-issues/` entry, and bless the
   goldens your fix moves with their justification (§1). Never loosen a tolerance.

@@ -1,6 +1,6 @@
 # SolidCraft: instructions for agents
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, egui UI). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
+SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, egui UI). This file is a router: the hard rules, then the skill for each task. Humans: CONTRIBUTING.md.
 
 ## Start here
 Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
@@ -27,7 +27,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
 - English throughout; independent work in parallel, dependent work in sequence: `skills/solidcraft-contributing/SKILL.md`.
 - Screenshots only for a visible UI or model change, captured yourself.
-- Run `cargo xtask ci` before every commit; `cargo xtask skills` checks this file and `skills/`.
+- Run `cargo xtask fast` before each commit; CI runs the full gate. `cargo xtask skills` checks this file and `skills/`.
 
 ## Working on X: read the skill first
 | Working on | Read |

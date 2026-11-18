@@ -327,6 +327,9 @@ struct SessionObjects<'target> {
     /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
     /// kept by the clean-up.
     cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
+    /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
+    /// open result must keep to be kept ([`finish::OpenInput`]).
+    open_input: finish::OpenInput,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -1441,57 +1444,6 @@ fn body_attributes(
     Ok(store)
 }
 
-/// (not upstream) Whether `a` is an application attribute (`SM_AI_USER_1` and up), not
-/// one of the kernel's own ids, which the session's executive keeps and finds by handle.
-fn is_application_attribute(a: &Attribute) -> bool {
-    a.attribute_id() >= ids::USER_1
-}
-
-/// (not upstream) [`body_attributes`] of `body`'s application attributes alone
-/// ([`is_application_attribute`]): what an operation that consumes and rebuilds `body`
-/// (the cliff overflow's Boolean) carries on its objects, as upstream's live on them.
-fn body_application_attributes(
-    attributes: &AttributeStore,
-    body: &Brep,
-    serial: u64,
-) -> Result<AttributeStore> {
-    let mut store = body_attributes(attributes, body, serial)?;
-    for key in store.attributed_objects() {
-        for h in store.attributes(key) {
-            if store.get(h).is_some_and(|a| !is_application_attribute(a)) {
-                store.remove_attribute(key, h, true)?;
-            }
-        }
-    }
-    store.retain_listed();
-    Ok(store)
-}
-
-/// (not upstream) Replaces, in the session store, the application attributes of the
-/// objects issued `serial` by those `body`'s own store holds (pair of
-/// [`body_application_attributes`], once the operation that carried them succeeded):
-/// the old lists' application entries are dropped (their attributes left without those
-/// users), then `body`'s are seeded and taken from it.
-fn replace_application_attributes(
-    attributes: &mut AttributeStore,
-    body: &mut Brep,
-    serial: u64,
-) -> Result<()> {
-    for key in attributes.attributed_objects() {
-        if crate::topology::brep::p3::topology_entity(serial, key).is_none() {
-            continue;
-        }
-        for h in attributes.attributes(key) {
-            if attributes.get(h).is_some_and(is_application_attribute) {
-                attributes.remove_attribute(key, h, true)?;
-            }
-        }
-    }
-    seed_body_attributes(attributes, body, serial)?;
-    body.take_attributes();
-    Ok(())
-}
-
 /// `~SmFilletExecutive`: `m_pAttributeE` leaves each of its users and is deleted.
 /// (not upstream) Then the bodies get their attributes back from the session store.
 impl Drop for FilletSession<'_> {
@@ -1599,6 +1551,7 @@ impl<'target> FilletSession<'target> {
                 attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
+                open_input: finish::OpenInput::default(),
                 extended_surfaces: BTreeMap::new(),
                 edge_caches: BTreeMap::new(),
                 target_serial,
@@ -5004,7 +4957,7 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                     FilletCornerKind::NByOne | FilletCornerKind::Open
                 );
                 let end_patch = nx1
-                    && (corner.edges.len() == 3 || corner.turned_back_cap())
+                    && (corner.edges.len() == 3 || corner.wide_cap())
                     && corner.extended_surface_patch;
                 // The fork's (WR-697, 79d4763): a Ball's patch is its sphere's
                 // (SmBlendCorner::CreateBallPatch)
@@ -5510,13 +5463,12 @@ impl RailTrimAccess<FilletObject> for SessionObjects<'_> {
         &mut self,
         k: &mut Kernel,
         solver: FilletObject,
-        executive: &mut FilletExecutive<FilletObject>,
+        _executive: &mut FilletExecutive<FilletObject>,
     ) -> Result<bool> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        let lone = executive.solvers.len() == 1;
-        self.rolled_rails_on_their_faces(k, id, lone)
+        self.rolled_rails_on_their_faces(k, id)
     }
 }
 
@@ -5867,7 +5819,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 let edge_start_b = edge_curve_b.evaluate_point(k, edge_ivl_b.min())?;
                 let edge_end_b = edge_curve_b.evaluate_point(k, edge_ivl_b.max())?;
                 for (ia, (face_a, curve_a, kept_a)) in rails_a.iter().enumerate() {
-                    for (ib, (face_b, curve_b, _)) in rails_b.iter().enumerate() {
+                    for (ib, (face_b, curve_b, kept_b)) in rails_b.iter().enumerate() {
                         if face_a != face_b {
                             continue;
                         }
@@ -5892,14 +5844,39 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             let mut grown = *eb;
                             grown.expand_absolute(reach);
                             if box_a.are_disjoint(&grown, 0.0) {
-                                continue; // no sample can fall inside the band
+                                // no sample can fall inside the band, and the rails cannot
+                                // cross: `grown` holds rail `b`'s box
+                                continue;
                             }
                         }
                         let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
-                        for s in 1..16_u32 {
-                            let p =
-                                curve_a.evaluate_point(k, ivl_a.evaluate(f64::from(s) / 16.0))?;
+                        // Not the fork's (#18178): where the kept rails cross on the face they
+                        // share. The samples alone can step over a short overlap (two chamfers
+                        // at a narrow place, where one's corner mitre reaches a few hundredths
+                        // past the other's rail). The crossings, found exactly by the curves'
+                        // intersection within the solvers' tolerance, cut rail `a` into pieces
+                        // that each lie wholly on one side of rail `b`, so the middle of each
+                        // piece is judged too, by the same band test as the samples: a piece
+                        // inside the band refuses, and rails that only touch (bands meeting at
+                        // their fit, closer than `apart`) do not.
+                        let mut at: Vec<f64> = (1..16_u32)
+                            .map(|s| ivl_a.evaluate(f64::from(s) / 16.0))
+                            .collect();
+                        let crossings = crate::intersect::api_intersectors::curve_crossings(
+                            k, curve_a, kept_a, curve_b, kept_b, None, tol,
+                        )?;
+                        if !crossings.is_empty() {
+                            let mut cuts = vec![ivl_a.min()];
+                            cuts.extend(crossings.iter().map(|&(t, _)| t));
+                            cuts.push(ivl_a.max());
+                            at.extend(cuts.windows(2).filter_map(|w| match w {
+                                [lo, hi] if lo < hi => Some(0.5 * (lo + hi)),
+                                _ => None,
+                            }));
+                        }
+                        for t_a in at {
+                            let p = curve_a.evaluate_point(k, t_a)?;
                             // Main classifies the sample first and drops a sample off its
                             // face before any of the geometry below. The classification is
                             // the costly step, so the geometry runs first; where it fails
@@ -5973,6 +5950,34 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             }
                             let mut chord = e - r;
                             let width = chord.length();
+                            // Not the fork's (#16654): the rail's point nearest `p` is the
+                            // band's across from `e` only where it is near the rail's point
+                            // across from `e` itself; a rail run on past an end where its
+                            // blend shrinks to a vertex (two tubes of one radius) comes back
+                            // round the far side, and its point there spans no band.
+                            let across = curve_b.drop_point(
+                                k,
+                                &ivl_b,
+                                e,
+                                None,
+                                crate::math::BIG_DOUBLE,
+                                None,
+                                SolverOperation::Minimize,
+                            )?;
+                            if across.success {
+                                let band =
+                                    (curve_b.evaluate_point(k, across.parameter)? - e).length();
+                                // A sample inside the band at `e` is within `band` of `e`, and
+                                // within `band` of the rail's point across from `e`; the
+                                // rail's point nearest it is no further from it than that
+                                // one. So the chord from `e` to that nearest point is at most
+                                // `band + band` long, by the triangle through the sample: a
+                                // longer one (past the margin) is to a point of the rail's
+                                // run on, not across this band.
+                                if width > 2.0 * band + apart {
+                                    continue;
+                                }
+                            }
                             if !matches!(
                                 width.partial_cmp(&(2.0 * apart)),
                                 Some(core::cmp::Ordering::Greater)
@@ -6329,11 +6334,13 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
         Ok(crate::topology::edge::blend_edgeuse(k, self.target, id)?
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(id))))
     }
-    fn parameters_edge_tolerance(&self, edge: FilletObject) -> Result<f64> {
+    fn parameters_edge_tolerance(&mut self, k: &Kernel, edge: FilletObject) -> Result<f64> {
         let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) = edge else {
             return Err(invalid("edge is not in the target"));
         };
-        crate::topology::edge::tolerance(self.target, id)
+        // not upstream: the fit tolerance (the edge tolerance unless that only covers the
+        // edge's edge/face gap)
+        crate::topology::edgeuse::p3::fit_tolerance(k, self.target, id)
     }
     fn parameters_new_solver(
         &mut self,
@@ -6659,10 +6666,7 @@ impl SessionObjects<'_> {
         // without having the filletSurface - do so
 
         // set filletVertex->Positions (fork 66b02de passes this on: SER)
-        crate::error::ignore_status(crate::error::passed_on(
-            self.calc_nx1_corner_vert_geom(k, id),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        self.calc_nx1_corner_vert_geom(k, id)?;
 
         // set FilletSideEdge->Curves
         for edge in [gaps.edge1, gaps.edge2] {
@@ -6697,10 +6701,7 @@ impl SessionObjects<'_> {
             );
             replay_corner_error(&mut executive.error, &note);
             // fork 66b02de passes this on (SER)
-            crate::error::ignore_status(crate::error::passed_on(
-                result,
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            result?;
         }
 
         // When proposing an extended surface
@@ -6755,8 +6756,8 @@ impl SessionObjects<'_> {
             .ok_or_else(|| invalid("corner is not live"))?;
         // get extendedSurface/OtherSideEdge coincidence to within tolerance (fork
         // 66b02de passes this on: SER)
-        let found = crate::error::ignored(crate::error::passed_on(
-            surface.simple_coincidence_checker::<crate::topology::ObjectHandle>(
+        let found = surface
+            .simple_coincidence_checker::<crate::topology::ObjectHandle>(
                 k,
                 &surface.natural_uv_domain_with_nurb(k)?,
                 curve,
@@ -6764,11 +6765,8 @@ impl SessionObjects<'_> {
                 corner.approx_tol_3d,
                 false,
                 [None, None],
-            ),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?
-        .flatten()
-        .is_some();
+            )?
+            .is_some();
         // when extendedSurface/OtherSideEdge are not coincident
         if !found {
             // can't define endFace->Surface as a sideFace->ExtendedSurface
@@ -7075,6 +7073,109 @@ impl SessionObjects<'_> {
             ));
         }
         Ok(())
+    }
+
+    /// Not the fork's (#17224): the vertex geometry of corner `id` failed with `error`. Where
+    /// it is a Join whose round's contact line never reaches the edge between its faces
+    /// ([`FilletCorner::join_rail_misses_side_edge`]), the round is refused as too large:
+    /// `SM_FILERR_NO_ROOM` noted at the vertex
+    /// ([`crate::blend::fillet_corner::topology::join::JOIN_RAIL_MISSES_SIDE_EDGE`]), the
+    /// fit on the first blend's edge (the largest ball touching the side edge, less the fork's
+    /// `FitMargin`, a thousand of that edge's tolerances, as the other open fits: at that
+    /// radius the contact line only touches the edge), and the returned error the typed
+    /// [`crate::error::blend::BlendFailure::NoRoom`]
+    /// ([`super::NoRoomReason::JoinRailMissesSideEdge`]) carrying that fit. Anything else
+    /// returns `error` as it is. Asked only after the failure, so it never refuses a Join
+    /// that builds.
+    ///
+    /// # Errors
+    /// Those of the side-edge check and of the topology queries.
+    fn join_rail_missing_side_edge(
+        &mut self,
+        k: &Kernel,
+        id: FilletCornerId,
+        executive: &mut FilletExecutive<FilletObject>,
+        error: SolidError,
+    ) -> Result<SolidError> {
+        use crate::blend::fillet_corner::topology::join::JOIN_RAIL_MISSES_SIDE_EDGE;
+        const OP_JOIN: &str = "SmBlendCorner::CalcCornerVertGeom";
+        let Some(corner) = self.corners.get(id.0 as usize) else {
+            return Ok(error);
+        };
+        if !corner
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_join)
+        {
+            return Ok(error);
+        }
+        let mut solver_eu_solvers = Vec::new();
+        for &eu in corner.solver_eus.as_deref().unwrap_or_default() {
+            let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(eu));
+            solver_eu_solvers.push(match executive.fillet_solver_of_edgeuse(object) {
+                Some(FilletObject::Solver(solver)) => Some(solver),
+                _ => None,
+            });
+        }
+        let Some(builds) = corner.join_rail_misses_side_edge(
+            k,
+            &mut *self.target,
+            &self.solvers,
+            &solver_eu_solvers,
+        )?
+        else {
+            return Ok(error);
+        };
+        let Some(first) = corner
+            .solver_eus
+            .as_deref()
+            .and_then(|eus| eus.first().copied())
+        else {
+            return Ok(error);
+        };
+        let vertex = corner.filleted_vertex();
+        let location = match vertex {
+            Some(v) => crate::topology::vertex::point(self.target, v).ok(),
+            None => None,
+        };
+        executive.error.note_vertex_error(
+            vertex.map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
+            location,
+            crate::blend::fillet_geom::p1::FilStatus::Failure,
+            crate::blend::fillet_geom::p1::FilletErrorType::NoRoom,
+            Some(JOIN_RAIL_MISSES_SIDE_EDGE),
+        );
+        executive.error.no_room =
+            Some(crate::blend::fillet_executive::NoRoomReason::JoinRailMissesSideEdge);
+        let edge = crate::topology::edgeuse::p1::edge(self.target, first)?;
+        let margin = match edge {
+            Some(e) => 1000.0 * crate::topology::edge::tolerance(self.target, e)?,
+            None => 0.0,
+        };
+        let fit = (builds - margin).max(0.0);
+        let edge_object =
+            edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e)));
+        executive.note_fit_radius(
+            fit,
+            edge_object,
+            crate::blend::fillet_executive::p3::FitKind::Radius,
+        );
+        let mut failure = crate::error::Failure::new(
+            OP_JOIN,
+            crate::error::blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::JoinRailMissesSideEdge,
+            ),
+        )
+        .with_fit(crate::error::Fit::new(
+            fit,
+            crate::error::FitMeasure::Radius,
+            edge_object
+                .as_ref()
+                .and_then(crate::error::TargetEdge::of_fillet_object),
+        ));
+        if let Some(v) = vertex {
+            failure = failure.at(EntityRef::Vertex(v));
+        }
+        Ok(failure.into_error())
     }
 
     /// The fork's `SmBlendCorner::MakeEndAtSmoothVertex` (41a39ec) with the solver of the
@@ -7564,7 +7665,12 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
                     rolls_over,
                 )?
         };
-        self.calc_nx1_corner_vert_geom_rolling(k, id, rolled_end)
+        match self.calc_nx1_corner_vert_geom_rolling(k, id, rolled_end) {
+            Err(e) if !e.is_unported_or_cancelled() => {
+                Err(self.join_rail_missing_side_edge(k, id, executive, e)?)
+            }
+            result => result,
+        }
     }
 }
 

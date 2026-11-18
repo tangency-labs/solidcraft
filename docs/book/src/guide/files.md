@@ -248,11 +248,22 @@ points up (+Z), a positive angle lowers the leading edge: the usual washout at t
 ]}
 ```
 
+## Opening a file while SolidCraft runs
+
+Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
+running opens it in that window, as File > Open does, and no second app starts. The two launches
+talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
+nothing listens on the network, and only file paths are sent. If the running window does not answer
+within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
+a separate app.
+
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files
-up to **256 MB**. A larger file is refused before it is read, and the message says how to raise
-the limit. In the desktop app you can raise both:
+up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, XYZ, PTS) follow the
+limit for import files: a point cloud file is read up to 1 GB, and more when that limit is raised.
+A larger file is refused before it is read, and the message says how to raise the limit. In the
+desktop app you can raise both:
 
 - **Preferences › General › Largest file to open** sets each limit in MB, from its default up to
   16 GB (16384 MB). It is kept between runs; Restore page defaults on the General page puts back 512 MB

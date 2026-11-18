@@ -22,7 +22,8 @@
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
-//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections),
+//! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
+//! region booleans and extrusion, prism sections),
 //! [`cell_grid`] (the cells of a grid over a profile).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
@@ -50,11 +51,14 @@ pub mod curve_gap;
 pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
+pub mod develop;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod hatch;
+pub mod heal;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
@@ -64,8 +68,10 @@ pub mod offset;
 pub mod order;
 pub mod path_export;
 pub mod pcurve;
+pub mod pick;
 pub mod prism;
 pub mod provenance;
+pub mod query;
 pub mod record_check;
 pub mod session;
 pub mod split;
@@ -80,12 +86,17 @@ pub mod untrim;
 pub mod vertex_meet;
 
 pub use blend::{
-    band_room, blend, blend_ordered, carried_faces, carried_faces_ordered, chamfer_sides,
-    chamfer_sides_ordered, edge_faces_along, edge_faces_along_ordered, fillet_variable,
-    fillet_variable_ordered, tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace,
-    ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
+    band_room, blend, blend_ordered, blend_with, carried_faces, carried_faces_ordered,
+    chamfer_sides, chamfer_sides_facing, chamfer_sides_facing_with, chamfer_sides_ordered,
+    chamfer_sides_ordered_with, chamfer_sides_with, edge_faces_along, edge_faces_along_ordered,
+    edges_share_wedge, fillet_variable, fillet_variable_from, fillet_variable_from_with,
+    fillet_variable_ordered, fillet_variable_ordered_with, fillet_variable_with, tangent_chain,
+    BandRoom, Blend, BlendOptions, Blended, CarriedFace, ChamferCorner, ChamferSecond, Corners,
+    EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
 };
-pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, TurnedOver};
+pub use body::{
+    make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, Contract, TurnedOver,
+};
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
@@ -94,8 +105,10 @@ pub use error::{
     Unsoundness,
 };
 pub use measure::{
-    point_distance, points_meet, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
-    MassPropertiesEstimate, Normal, PointClass, SquareFaceLevel,
+    point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
+    EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample, MassPropertiesEstimate,
+    MembersClosest, Normal, PointClass, PointSetSummary, RayEntity, RayHit, SquareFaceLevel,
+    EDGE_POINTS_MAX,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;

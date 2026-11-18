@@ -947,6 +947,27 @@ fn coincident_takes_a_line_midpoint_either_way_round() {
     }
 }
 
+/// A model edge's middle, `{midpoint: {edge}}`, is that edge's middle (#17920): the edge is
+/// projected (linked) and the point is tied to the projected line's middle, not put anywhere
+/// on the edge or at its end, wherever along the edge it was picked.
+#[test]
+fn coincident_takes_a_model_edge_midpoint() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": "20 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "30 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [40, 80], "id": "target"}));
+    let edge = json!({"edge": [100, 10, 20], "body": "Body1"});
+    let result = run(&mut s, "sketch.constraint.coincident", json!({"a": "target", "b": {"midpoint": edge}}));
+    let sk = sketch(&s);
+    let at = sk.point(sk.resolve_point("target").unwrap()).unwrap();
+    assert!(at.dist(Vec2::new(100.0, 25.0)) < 1e-6, "the right-hand edge's middle, not {at:?}: {result}");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })), "{result}");
+    assert!(!sk.links.is_empty(), "the edge is projected linked");
+}
+
 /// A middle Coincident can't take (not a line, an unknown curve, the same middle twice, or the
 /// point already tied there) is refused and leaves the sketch as it was.
 #[test]
@@ -1881,6 +1902,40 @@ fn conflict_lists_the_constraints_instead_of_claiming_the_entities_are_fixed() {
         assert!(!e.contains("fixed or fully constrained"), "{cmd} {params}: {e}");
         assert!(e.contains("conflicts with"), "{cmd} {params}: {e}");
     }
+}
+
+/// The constraint commands say which selection they take whole (#5501): two lines give the
+/// line pairs their `a, b` in pick order, a line and a circle give Tangent, and a selection a
+/// command can't take whole (or a command outside a sketch) gives nothing.
+#[test]
+fn constraints_take_the_selection_from_their_own_specs() {
+    use crate::Sel;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 5], [10, 8]], "ids": ["l2"]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 10], "radius": 5, "id": "c"}));
+    let curve = |id: &str| Sel::SketchCurve { id: id.into(), sketch: None };
+    let fits =
+        |s: &Session| -> Vec<&'static str> { crate::command_specs().into_iter().filter(|c| c.for_selection(s).is_some()).map(|c| c.id).collect() };
+    s.selection = vec![curve("l2"), curve("l1")];
+    let two_lines = fits(&s);
+    for id in ["sketch.constraint.parallel", "sketch.constraint.perpendicular", "sketch.constraint.collinear", "sketch.constraint.equal"] {
+        assert!(two_lines.contains(&id), "{id} takes two lines: {two_lines:?}");
+        let p = crate::find_command(id).and_then(|c| c.for_selection(&s)).unwrap();
+        assert_eq!(p, json!({"a": "l2", "b": "l1"}), "{id} keeps pick order");
+    }
+    assert!(!two_lines.contains(&"sketch.constraint.horizontal_vertical"), "{two_lines:?}");
+    s.selection = vec![curve("l1"), curve("c")];
+    assert!(fits(&s).contains(&"sketch.constraint.tangent"));
+    // The same curve twice, and nothing selected, fit no pair.
+    s.selection = vec![curve("l1"), curve("l1")];
+    assert!(!fits(&s).contains(&"sketch.constraint.parallel"));
+    s.selection.clear();
+    assert!(fits(&s).is_empty(), "{:?}", fits(&s));
+    // Outside a sketch the constraints are disabled, so they take nothing.
+    run(&mut s, "sketch.finish", json!({}));
+    s.selection = vec![curve("l2"), curve("l1")];
+    assert!(fits(&s).is_empty(), "{:?}", fits(&s));
 }
 
 /// A point placed by a parameter expression (#16554): the inspection says why it is fixed,

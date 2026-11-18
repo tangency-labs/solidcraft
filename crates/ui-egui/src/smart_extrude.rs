@@ -15,7 +15,8 @@
 //!   so is a body shown or hidden while the window is open (#9919). With no body shown it is a
 //!   New Body: there is nothing to join or cut. A zero
 //!   distance changes nothing. Choosing an operation by hand ends the automatic choice for
-//!   the rest of the extrude.
+//!   the rest of the extrude. Choosing Cut by hand also turns the direction into the body when it
+//!   points away from it and the user has not set the direction (#18243).
 
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
@@ -47,6 +48,8 @@ pub struct Smart {
     /// The engine's automatic operation for the last parameters and design: a key over all it
     /// depends on, and its answer. It probes the bodies' triangles, too slow to ask every frame.
     pub auto: Option<(u64, Option<&'static str>)>,
+    /// Cut was just chosen by hand: the direction turns into the body if it points away (#18243).
+    pub point_cut: bool,
 }
 
 /// One-side direction for a new pick: 0 (along the normal) or 1 (reversed). `ray` is the view

@@ -52,6 +52,11 @@ class Synthetic(unittest.TestCase):
     def test_reverse_dependencies_are_added(self):
         self.assertEqual(affected.select(SYNTH, ["crates/base/src/lib.rs"]), (False, ["base", "mid", "top"]))
 
+    def test_owners_leave_out_the_dependents(self):
+        self.assertEqual(affected.owners(SYNTH, ["crates/base/src/lib.rs", "docs/x.md"]), (False, {"base"}))
+        self.assertEqual(affected.owners(SYNTH, ["Cargo.lock", "crates/base/src/lib.rs"]), (True, {"base"}))
+        self.assertEqual(affected.select(SYNTH, ["Cargo.lock", "crates/base/src/lib.rs"]), (True, []))
+
     def test_unrelated_package_is_not_selected(self):
         full, pk = affected.select(SYNTH, ["crates/mid/Cargo.toml"])
         self.assertEqual((full, pk), (False, ["mid", "top"]))
@@ -136,8 +141,8 @@ class RealWorkspace(unittest.TestCase):
     def test_unmapped_test_data_selects_full(self):
         self.assertEqual(affected.select(self.meta, ["tests/tools/x.json"]), (True, []))
 
-    def test_vendored_egui_wgpu_selects_the_ui_and_apps_not_the_kernel(self):
-        full, pk = affected.select(self.meta, ["vendor/egui-wgpu/src/winit.rs"])
+    def test_vendored_egui_selects_the_ui_and_apps_not_the_kernel(self):
+        full, pk = affected.select(self.meta, ["vendor/egui/crates/egui-wgpu/src/winit.rs"])
         self.assertFalse(full)
         self.assertIn("solidcraft-ui-egui", pk)
         self.assertIn("solidcraft", pk)

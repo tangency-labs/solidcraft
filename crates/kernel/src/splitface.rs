@@ -543,14 +543,31 @@ fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {
 /// is, and where that does not cut the body into closed solids, the whole sheet as it is), or
 /// one sketch line swept along its direction. Every part is closed with the piece of the
 /// tool's surface inside the body; parts on the tool's back come first, each side's in
-/// face order. A body the tool misses comes back whole. Each part's history is over `[body]`:
-/// its faces the body's (or pieces of them), the section new.
+/// face order. A body the tool misses comes back whole, and so does one it only nicks: a face
+/// that ends inside the body leaves no part that is a closed solid. Each part's history is over
+/// `[body]`: its faces the body's (or pieces of them), the section new.
 pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "split_body");
     body.require_brep(SPLIT_BODY)?;
     let SplitTool::Face { body: sheet, face } = tool else { return split_by(body, tool) };
     let smooth = smooth_sheet(sheet, *face)?;
-    let parts = if smooth.len() > 1 { split_by_sheet(body, sheet, *face, &smooth)? } else { split_by(body, tool)? };
+    let parts = if smooth.len() > 1 {
+        split_by_sheet(body, sheet, *face, &smooth)?
+    } else {
+        match split_by(body, tool) {
+            Ok(p) if closed_solids(&p).unwrap_or(false) => p,
+            Ok(p) if sheet.is_surface() => match split_by_sheet(body, sheet, *face, &smooth) {
+                Ok(sheet_parts) if closed_solids(&sheet_parts).unwrap_or(false) => sheet_parts,
+                _ => p,
+            },
+            Err(e) if sheet.is_surface() => match split_by_sheet(body, sheet, *face, &smooth) {
+                Ok(sheet_parts) if closed_solids(&sheet_parts).unwrap_or(false) => sheet_parts,
+                _ => return Err(e),
+            },
+            Ok(p) => p,
+            Err(e) => return Err(e),
+        }
+    };
     // The picked face and its smooth neighbours are the tool where they cut the body into closed
     // solids. Where they do not (they end inside it, or miss it), the whole sheet the face
     // belongs to is, across any crease between its faces (#17250): a loft between two spline
@@ -964,6 +981,48 @@ mod tests {
         let nicked = split_body(&cube, &SplitTool::Face { body: &short, face: first }).unwrap();
         let info: Vec<_> = nicked.iter().map(|b| (measure(b).unwrap().volume, b.face_count(), b.lumps().unwrap().len())).collect();
         assert_eq!(nicked.len(), 1, "{info:?}");
+    }
+
+    /// A face that ends inside the body only nicks it: Split Body leaves the body whole, never a
+    /// lamina and a body with a slit, neither of them closed (#17192). One span alone runs over
+    /// x -3…3 and ends inside the cube 0…10.
+    #[test]
+    fn a_face_that_ends_inside_the_body_leaves_it_whole() {
+        let sheet = spans(&[[5.0, 5.0, 4.0, 4.0]]);
+        assert_eq!(sheet.face_count(), 1);
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let parts = split_body(&cube, &SplitTool::Face { body: &sheet, face: 0 }).unwrap();
+        let info: Vec<_> = parts.iter().map(|b| (measure(b).unwrap().volume, b.face_count())).collect();
+        assert_eq!(parts.len(), 1, "{info:?}");
+        assert!(rel(measure(&parts[0]).unwrap().volume, 1000.0) < 1e-9, "{info:?}");
+        assert_eq!(parts[0].face_count(), 6, "{info:?}");
+    }
+
+    /// A single-face open sheet that crosses the body cuts it through into closed solids (#18891).
+    #[test]
+    fn a_single_face_sheet_that_crosses_the_body_splits_it() {
+        use crate::{PathPiece, PointPath, SweepControl};
+        let d = 20.0 / std::f64::consts::SQRT_2;
+        let wavy = vec![
+            Vec3::new(20.0, 0.0, 9.0),
+            Vec3::new(d, d, 4.0),
+            Vec3::new(0.0, 20.0, 9.0),
+            Vec3::new(-d, d, 4.0),
+            Vec3::new(-20.0, 0.0, 9.0),
+            Vec3::new(-d, -d, 4.0),
+            Vec3::new(0.0, -20.0, 9.0),
+            Vec3::new(d, -d, 4.0),
+            Vec3::new(20.0, 0.0, 9.0),
+        ];
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit: wavy, reversed: false }] };
+        let flat_at = Plane { origin: Vec3::new(0.0, 0.0, 9.0), x: Vec3::X, y: Vec3::Y };
+        let radial = vec![Seg2::Line { a: Vec2::new(15.0, 0.0), b: Vec2::new(25.0, 0.0) }];
+        let wall = crate::sweep_sheet_point_path_with(&flat_at, &[radial], &path, &SweepControl::default()).unwrap();
+        assert_eq!(wall.face_count(), 1);
+        let cube = crate::box_solid(Vec3::new(18.0, -2.0, 7.0), Vec3::new(22.0, 2.0, 11.0)).unwrap();
+        let parts = split_body(&cube, &SplitTool::Face { body: &wall, face: 0 }).unwrap();
+        assert_eq!(parts.len(), 2, "parts: {:?}", parts.len());
+        assert!(closed_solids(&parts).unwrap());
     }
 
     /// A face of a creased sheet that cuts the body through on its own keeps cutting alone: a flat

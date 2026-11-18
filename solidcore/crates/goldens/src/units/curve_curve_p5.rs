@@ -1848,6 +1848,91 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::contact_certificate::{certify_gap_move, gap_intersection};
+    use solidcore::curve::curve::p2::CurveKind;
+    use solidcore::nurbs::b_spline_curve::GapFix;
+
+    /// For each `cleanup` case whose answer moved when WR-455's contacts at curve ends
+    /// became the default: the contacts `(t0, t1)` (each point and both ends of each
+    /// range) of each intersection `trim_gap` runs (one per gap closed, in order), as
+    /// they were before.
+    const OLD_CLEANUP_CONTACTS: [(&str, &[&[[f64; 2]]]); 3] = [
+        ("gen0428", &[&[[1.0188312146625207, -0.03]]]),
+        (
+            "gen2239",
+            &[&[
+                [0.9125913931343632, 0.3333333333333333],
+                [1.0, 0.0],
+                [1.0161097229422875, -0.03],
+            ]],
+        ),
+        (
+            "gen2289",
+            &[
+                &[[0.69922041278211, -0.01958266915528615]],
+                &[[0.9815331600646027, -0.03], [1.03, -0.02197773000302504]],
+            ],
+        ),
+    ];
+
+    /// WR-455: every moved `cleanup` row comes from a `trim_gap` intersection naming a
+    /// contact at a curve's end, certified ([`certify_gap_move`]: each solution now is a
+    /// contact, each one before is joined to one now within the tolerance; no
+    /// sampling). The chain is replayed as `crvs_cleanup` walks it (the same tiny-curve
+    /// test, then the library's `trim_gap` on the pair around each removed curve), and
+    /// each intersection is certified before its gap is closed. The table holds the
+    /// contacts each call reported with the move off; a later call's curves follow the
+    /// earlier closes, so its old contacts are joined on today's curves (gen2289's
+    /// second call, whose input moved by about 1e-8).
+    #[test]
+    fn cleanup_gap_contacts_at_curve_ends_are_certified() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let k = Kernel::default();
+        let mut counts = Vec::new();
+        for (name, old) in OLD_CLEANUP_CONTACTS {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let op: OpIn = case.parse().unwrap();
+            let OpIn::Cleanup { curves, tol } = &op else {
+                panic!("{name}: a cleanup case");
+            };
+            let mut cs: Vec<Curve> = curves.iter().map(|c| build(&k, c).unwrap()).collect();
+            let tol_sq = tol * tol;
+            let (mut ii, mut call, mut moved) = (0, 0, 0);
+            while ii < cs.len() {
+                let d = cs[ii].natural_interval();
+                let s = cs[ii].evaluate_point(&k, d.evaluate(0.0)).unwrap();
+                let e = cs[ii].evaluate_point(&k, d.evaluate(1.0)).unwrap();
+                let m = cs[ii].evaluate_point(&k, d.evaluate(0.4567)).unwrap();
+                if (e - s).length_squared() >= tol_sq || (e - m).length_squared() > tol_sq {
+                    ii += 1;
+                    continue;
+                }
+                cs.remove(ii);
+                if ii > 0 && ii < cs.len() {
+                    let (head, tail) = cs.split_at_mut(ii);
+                    let (CurveKind::BSpline(b0), CurveKind::BSpline(b1)) =
+                        (head.last_mut().unwrap().kind_mut(), tail[0].kind_mut())
+                    else {
+                        panic!("{name}: B-spline neighbours");
+                    };
+                    let g = gap_intersection(&k, b0, b1, *tol).expect("an intersection");
+                    let before = old.get(call).copied().unwrap_or_default();
+                    moved += usize::from(certify_gap_move(&k, name, &g, before));
+                    let _ = b0.trim_gap(&k, b1, GapFix::Both, *tol);
+                    call += 1;
+                }
+            }
+            counts.push((name, call, old.len(), moved));
+        }
+        for (name, calls, entries, moved) in counts {
+            assert_eq!(calls, entries, "{name}: one table entry per gap closed");
+            assert!(moved > 0, "{name}: an intersection moved");
+        }
+    }
 
     #[test]
     fn generated_cases_are_valid_and_diverse() {
