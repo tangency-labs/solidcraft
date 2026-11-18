@@ -573,8 +573,7 @@ fn an_import_after_a_moved_sketch_is_not_read_again() {
 
     // The part turns: the sketch on its face follows it, and the import after it is not read
     // again: the import reads the file and nothing of the model.
-    doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap().transform =
-        rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_3);
+    doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap().transform = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_3);
     let work = counted(|| model.evaluate(&doc));
     assert_eq!(work.imports_read, 0, "the import after the sketch must not be read again: {work:?}");
     assert_eq!(model.last_recomputed, 1, "only the sketch is evaluated again: {work:?}");
