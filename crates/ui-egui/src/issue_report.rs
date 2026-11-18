@@ -2574,10 +2574,7 @@ mod tests {
 
         // A failed modeling command still offers its design. A successful import step
         // also does not suppress design attachments to a later report.
-        let failed = payload::Failing {
-            command: Some("solid.fillet".into()), params: None,
-            error: "too large".into(), origin: None, code: None,
-        };
+        let failed = payload::Failing { command: Some("solid.fillet".into()), params: None, error: "too large".into(), origin: None, code: None };
         assert!(ticket::evidence(&app, None, Some(failed), None).design.is_some());
         app.issue_report.steps.back_mut().unwrap()["ok"] = json!(true);
         assert!(ticket::evidence(&app, None, None, None).design.is_some());

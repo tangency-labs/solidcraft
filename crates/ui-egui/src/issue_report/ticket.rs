@@ -168,8 +168,9 @@ pub fn step(id: &str, params: Option<&Value>, error: Option<&str>, home: Option<
                 s["importer"] = json!(importer.chars().filter(|c| !c.is_control()).take(120).collect::<String>());
             }
             if let Some(options) = p.get("options").and_then(Value::as_object) {
-                s["option_keys"] =
-                    json!(options.keys().take(32).map(|key| key.chars().filter(|c| !c.is_control()).take(100).collect::<String>()).collect::<Vec<_>>());
+                s["option_keys"] = json!(
+                    options.keys().take(32).map(|key| key.chars().filter(|c| !c.is_control()).take(100).collect::<String>()).collect::<Vec<_>>()
+                );
             }
         }
         return s;
