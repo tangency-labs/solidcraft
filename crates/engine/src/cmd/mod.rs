@@ -75,7 +75,9 @@ pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
-pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_expr_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
+pub(crate) use features::{
+    EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_expr_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key,
+};
 pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, large_thread_size, shown_scope};
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};

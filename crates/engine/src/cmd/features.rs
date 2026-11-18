@@ -1663,7 +1663,9 @@ fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc:
         *slot = x;
     }
     let [x, y, z] = now;
-    let dir = Vec3::new(x, y, z).normalized().ok_or_else(|| bad(cmd, "`axis` is [0, 0, 0] with these parameter values: give a direction that isn't zero"))?;
+    let dir = Vec3::new(x, y, z)
+        .normalized()
+        .ok_or_else(|| bad(cmd, "`axis` is [0, 0, 0] with these parameter values: give a direction that isn't zero"))?;
     Ok((d, dir))
 }
 

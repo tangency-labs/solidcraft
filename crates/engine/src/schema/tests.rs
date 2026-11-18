@@ -86,13 +86,7 @@ fn axes_and_scale_factors_match_their_readers() {
 fn an_expression_axis_matches_its_reader() {
     let root = schemars::schema_for!(AxisDirExpr);
     let root = root.as_value();
-    let given = [
-        json!("X"),
-        json!(" y "),
-        json!([0, 0, 1]),
-        json!([0, "-sin(t)", "-cos(t)"]),
-        json!({"x": "a", "y": 0, "z": 1}),
-    ];
+    let given = [json!("X"), json!(" y "), json!([0, 0, 1]), json!([0, "-sin(t)", "-cos(t)"]), json!({"x": "a", "y": 0, "z": 1})];
     for v in given {
         assert!(crate::cmd::axis_expr_form(&v).is_ok(), "{v}");
         assert!(parse::<AxisDirExpr>(v.clone()).is_some(), "{v}");
