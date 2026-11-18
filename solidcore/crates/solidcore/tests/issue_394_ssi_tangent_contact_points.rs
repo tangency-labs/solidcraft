@@ -212,6 +212,43 @@ fn issue_394_finds_the_four_points() {
     );
 }
 
+/// The nonnegative graph `(x²-a²)²/(4a²) + y²` has exactly two zeros, at
+/// `(±a, 0)`. These Bernstein coefficients describe it over `[-l, l] × [-b, b]`.
+fn nearby_contacts(a: f64, l: f64, b: f64) -> Surface {
+    let a2 = a * a;
+    let l2 = l * l;
+    let end = (l2 - a2) * (l2 - a2) / (4.0 * a2);
+    let adjacent = end - l2 * (l2 - a2) / (2.0 * a2);
+    let x = [end, adjacent, end + 2.0 * l2 / 3.0, adjacent, end];
+    let y = [1.0, 0.0, -1.0 / 3.0, 0.0, 1.0];
+    let mut points = Vec::new();
+    for (i, cx) in x.into_iter().enumerate() {
+        for (j, cy) in y.into_iter().enumerate() {
+            points.push([
+                l * (i as f64 / 2.0 - 1.0),
+                b * (j as f64 / 2.0 - 1.0),
+                cx + b * b * cy,
+            ]);
+        }
+    }
+    bezier(4, &points)
+}
+
+#[test]
+fn nearby_distinct_tangent_contacts_are_not_one_contact() {
+    let a = 2.5e-5;
+    let graph = nearby_contacts(a, 0.001, 0.01);
+    let plane = plane_z0();
+    for (first, second) in [(&graph, &plane), (&plane, &graph)] {
+        let result = intersect(first, second);
+        assert_points(
+            &touching_points(&result, first, second),
+            &[[-a, 0.0, 0.0], [a, 0.0, 0.0]],
+            1e-9,
+        );
+    }
+}
+
 #[test]
 fn issue_394_finds_the_y23_tangential_point() {
     let (a, b) = y23_t6_ex4();
