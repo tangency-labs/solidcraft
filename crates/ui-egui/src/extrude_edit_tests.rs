@@ -231,15 +231,21 @@ fn profile_invert_retains_the_resolved_sketch_after_clearing_all() {
     h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
     assert!(!h.app.dialog.as_ref().unwrap().inputs[0].items.iter().any(|x| matches!(x, Sel::Profile { .. })));
     h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Profile { sketch: first, index: 0 }],
-        "the next inversion reselects the original sketch, not the later one");
+    assert_eq!(
+        h.app.dialog.as_ref().unwrap().inputs[0].items,
+        vec![Sel::Profile { sketch: first, index: 0 }],
+        "the next inversion reselects the original sketch, not the later one"
+    );
 
     h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch: later, index: 0 }];
     h.frames(2);
     h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Profile { sketch: later, index: 0 }],
-        "an explicit pick moves the inversion context to the new sketch");
+    assert_eq!(
+        h.app.dialog.as_ref().unwrap().inputs[0].items,
+        vec![Sel::Profile { sketch: later, index: 0 }],
+        "an explicit pick moves the inversion context to the new sketch"
+    );
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);
 }
