@@ -180,17 +180,22 @@ fn an_importers_cases_open_their_files_and_check_the_loss_report() {
     let scratch = Scratch::new();
     let open = json!({"entry":"convert","file":"bracket.smp",
         "expect":{"reply":{"bodies":1,"loss_report":{"summary":"Copied the file","items":[{"severity":"dropped"}]}},"model":{"body_count":1}}});
-    let traps = json!({"entry":"convert","file":"trap.smp","expect":{"error":"trap","message":"Copier failed on trap.smp"}});
-    let path = package(&scratch.0, &importer_manifest(), &wat::parse_str(fixture("importer")).unwrap(), &[("open", open), ("traps", traps)]);
+    let traps = json!({"entry":"convert","file":"trap.smp","expect":{"error":"trap","message":"Copier could not open trap.smp"}});
+    // A valid file the importer does not convert is `unsupported`, named with the plugin and the file.
+    let refuses = json!({"entry":"convert","file":"sketch.smp","expect":{"error":"unsupported","message":"Copier does not support sketch.smp: the model has no solids"}});
+    let cases = [("open", open), ("traps", traps), ("refuses", refuses)];
+    let path = package(&scratch.0, &importer_manifest(), &wat::parse_str(fixture("importer")).unwrap(), &cases);
     // The fixture copies the file into the design: give it a design's bytes. A file starting with T traps.
     let mut made = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
     std::fs::write(Path::new(&path).join("tests/bracket.smp"), solidcraft_engine::io::write_design(&made.doc)).unwrap();
     std::fs::write(Path::new(&path).join("tests/trap.smp"), b"T").unwrap();
+    std::fs::write(Path::new(&path).join("tests/sketch.smp"), b"U").unwrap();
     let output = cli(&["plugin", "test", &path]);
     let stdout = text(&output.stdout);
     assert!(output.status.success(), "{stdout}{}", text(&output.stderr));
     assert!(stdout.contains("pass  open (convert)") && stdout.contains("pass  traps (convert)"), "{stdout}");
+    assert!(stdout.contains("pass  refuses (convert)"), "{stdout}");
     // A case for a file that is not there fails with the reason.
     std::fs::write(Path::new(&path).join("tests/missing.json"), json!({"entry":"convert","file":"missing.smp"}).to_string()).unwrap();
     let output = cli(&["plugin", "test", &path]);

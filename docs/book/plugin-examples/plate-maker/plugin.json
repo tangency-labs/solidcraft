@@ -3,7 +3,7 @@
   "name": "Plate Maker",
   "version": "0.1.0",
   "description": "Adds a square plate.",
-  "capabilities": ["commands@0.1"],
+  "capabilities": ["commands@0.2"],
   "runtime": {
     "module": "plate-maker.wasm",
     "commands": ["solid.box"],

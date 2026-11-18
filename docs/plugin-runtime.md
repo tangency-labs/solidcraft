@@ -144,11 +144,14 @@ package. These are host preferences, never design data.
 
 ## Versions and capabilities
 
-The WIT package is `craft:plugin@0.1.0`. Its interfaces (`types`, `commands`, `log`, `control`,
-`files`, `clock` and the exported `entry`) make up the capability `commands@0.1`. Later
+The WIT package is `craft:plugin@0.2.0`. Its interfaces (`types`, `commands`, `log`, `control`,
+`files`, `clock` and the exported `entry`) make up the capability `commands@0.2`. Later
 capabilities arrive as their own interfaces, each named and versioned on its own in the manifest:
 `ui`, `viewport`, `formats` and `storage`. While a version is 0.x, a minor version may break the
-previous one, so a host for `commands@0.1` runs only `commands@0.1` plugins.
+previous one. 0.2 added `plugin-error.unsupported`; the host also serves the frozen
+`craft:plugin@0.1.0` (`crates/craft-plugin/wit-0.1/plugin.wit`, `OLDER_CAPABILITIES`), choosing
+the bindings by the version the component's imports and exports name, so plugins built against
+0.1 run unchanged and see `invalid-input` where 0.2 has `unsupported`.
 
 ## Per-design plugin data
 

@@ -181,6 +181,10 @@ pub struct DropPt {
     pub entering_domain: Option<bool>,
     /// `m_eDropDerivRtn`: the status of the derivative drop ([`BIG_ULONG`] unset).
     pub drop_deriv_rtn: i32,
+    /// Not upstream: whether the drop point is on a `u = knot` line and on a `v = knot`
+    /// line across which the surface is smooth and only `C0` in its parameters
+    /// (`surface_drop_lib::knot_lines`), set by [`DropPt::set_properties`].
+    pub on_knot_line: [bool; 2],
 }
 
 /// What [`DropPt::test_span_accuracy`] measured (`TestSpanAccuracy`'s outputs).
@@ -272,6 +276,7 @@ impl DropPt {
             leaving_domain: None,
             entering_domain: None,
             drop_deriv_rtn: BIG_ULONG,
+            on_knot_line: [false; 2],
         };
         s.set_uninitialized();
         s.t = t;
@@ -310,6 +315,7 @@ impl DropPt {
         self.leaving_domain = None;
         self.entering_domain = None;
         self.drop_deriv_rtn = BIG_ULONG;
+        self.on_knot_line = [false; 2];
     }
 
     /// True when the curve tangent drops to the surface within 3 degrees and without

@@ -2,7 +2,7 @@
   "id": "box-importer",
   "name": "Box Importer",
   "version": "0.1.0",
-  "capabilities": ["formats@0.1"],
+  "capabilities": ["formats@0.2"],
   "runtime": {
     "module": "box-importer.wasm",
     "commands": [],

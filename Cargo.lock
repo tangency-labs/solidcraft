@@ -6069,6 +6069,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
+ "solidcraft-ui-text",
  "solidcraft-viewport",
  "thiserror 2.0.21",
  "tiny-skia",

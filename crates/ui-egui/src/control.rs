@@ -12,6 +12,8 @@
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
 //! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
 //!   for a host that keeps the files itself (#8517)
+//! - document.close {document_id?}: close the active clean design, refusing unsaved changes
+//!   or a tab switched since document.revision (#18781); the last tab becomes blank.
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -672,6 +674,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "document.export" => wrap(crate::documents::export(app)),
         "document.import" => wrap(crate::documents::import(app, p)),
         "document.saved" => wrap(crate::documents::saved(app, p)),
+        "document.close" => wrap(crate::documents::close_clean(app, p)),
         // The connection already counts as subscribed (`DocumentWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
@@ -2396,6 +2399,57 @@ mod tests {
             out.textures_delta.clear();
         }
         assert!(app.synthetic.is_empty());
+    }
+
+    /// The control bridge closes clean designs only, without discarding unsaved work (#18781).
+    #[test]
+    fn document_close_refuses_dirty_or_switched_tabs_and_keeps_other_designs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let empty = h.call("document.close", json!({}));
+        assert_eq!(empty["ok"], false, "{empty}");
+        assert_eq!(h.app.docs.count(), 1);
+
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let first = h.app.session.document_id.clone();
+        let old = h.app.session.doc.to_json();
+        for bad in [json!({"document_id":"different"}), json!({"force":true}), json!({"document_id":7}), json!([])] {
+            let reply = h.call("document.close", bad);
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.session.document_id, first);
+            assert_eq!(h.app.session.doc.to_json(), old);
+        }
+        let reply = h.call("document.close", json!({"document_id":first}));
+        assert_eq!(reply["ok"], false, "unsaved design is preserved: {reply}");
+        assert!(reply["error"].as_str().unwrap().contains("unsaved"));
+        assert!(h.app.docs.closing.is_none(), "no interactive prompt blocks an agent");
+        assert_eq!(h.app.session.doc.to_json(), old);
+
+        let path = h.dir.join("close-safe.solidcraft");
+        h.app.run("file.save_as", json!({"path": path.to_string_lossy()})).unwrap();
+        assert!(!h.app.session.is_dirty());
+        let reply = h.call("document.close", json!({"document_id":first}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["closed_document_id"], first);
+        assert_ne!(reply["result"]["document_id"], first);
+        assert_eq!(reply["result"]["documents"], 1);
+        assert!(crate::documents::active_is_blank(&h.app));
+        assert!(h.app.docs.closing.is_none());
+        assert!(path.exists(), "closing never deletes the saved file");
+
+        h.app.run("solid.box", json!({"length":3,"width":4,"height":5,"body_name":"Keep"})).unwrap();
+        h.app.run("file.save_as", json!({"path": h.dir.join("keep.solidcraft").to_string_lossy()})).unwrap();
+        let kept = h.app.session.document_id.clone();
+        let unchanged = h.app.session.doc.to_json();
+        let new = h.call("ui.documents", json!({"action":"new"}));
+        assert_eq!(new["result"]["documents"].as_array().unwrap().len(), 2);
+        assert_ne!(h.app.session.document_id, kept);
+        let closed = h.call("document.close", json!({}));
+        assert_eq!(closed["ok"], true, "{closed}");
+        assert_eq!(closed["result"]["document_id"], kept);
+        assert_eq!(h.app.session.doc.to_json(), unchanged, "the other tab is unchanged");
+        assert_eq!(h.app.docs.count(), 1);
+        assert!(crate::control_job::changes_the_design("document.close"), "it must wait for computation");
     }
 
     /// #6646: `document.revision` names the active design and what it holds. The revision moves on

@@ -18,7 +18,9 @@
 //!   polynomial of degree `ORDER - 1` at the cell's middle, every coefficient enclosed at
 //!   that point and the polynomial integrated exactly, and the Lagrange remainder from the
 //!   coefficients of degree `ORDER` enclosed over the whole cell (rounded interval
-//!   arithmetic, [`Ivl`]; the surface's partials over a box, [`nurbs_partials_within_span`]).
+//!   arithmetic, [`Ivl`]; the surface's partials over a box,
+//!   [`nurbs_partials_within_span_centred`]: its rational quotient taken about the box's
+//!   middle point, so a face's distance from the origin does not widen them).
 //!   A cell is first evaluated at the low degree [`FIRST_ORDER`] and at `ORDER` only once it
 //!   is the widest. The expansion holds where the cell's image lies on one polynomial piece
 //!   of the surface; a cell whose image may cross a knot line is enclosed by the integrand's
@@ -69,7 +71,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 
 use crate::blend::fillet_section::certificate::{
-    curve_derivs_over, nurbs_partials_within_span, partials_hull, NurbsCurve,
+    curve_derivs_over, nurbs_partials_within_span_centred, partials_hull, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
@@ -974,9 +976,11 @@ fn breaks_within(knots: &[f64], degree: usize, x: Ivl) -> bool {
     })
 }
 
-/// The partials of piece `(ku, kv)` over the box ([`nurbs_partials_within_span`]), or `None`
-/// where its weights are not proved positive over it (its one failure: a box too large for
-/// the interval evaluation, which a smaller one proves; a cell answers it by refining).
+/// The partials of piece `(ku, kv)` over the box ([`nurbs_partials_within_span_centred`]:
+/// the quotient taken about the box's middle point, not the origin, so on a rational face
+/// far from the origin they are of the box's size), or `None` where its weights are not
+/// proved positive over it (its one failure: a box too large for the interval evaluation,
+/// which a smaller one proves; a cell answers it by refining).
 fn piece_partials(
     cn: &Nurbs,
     (ku, kv): (usize, usize),
@@ -984,7 +988,7 @@ fn piece_partials(
     v: Ivl,
     lk: usize,
 ) -> Option<Partials<Ivl>> {
-    nurbs_partials_within_span(cn, ku, kv, u.lo, u.hi, v.lo, v.hi, lk).ok()
+    nurbs_partials_within_span_centred(cn, ku, kv, u.lo, u.hi, v.lo, v.hi, lk).ok()
 }
 
 /// The surface's partials up to order `lk` at every point of the box, from every piece it
@@ -2746,5 +2750,123 @@ mod tests {
         w.add_piece(face, &segment([u0, v1], [u1, v1]).unwrap(), 1.0)
             .unwrap();
         assert!(w.items.len() > before.1);
+    }
+
+    /// The box 40 x 30 x 20 with its edge through (20, 30, 20) rounded at radius 3: the
+    /// round's face is rational and lies 20 to 40 from the origin.
+    fn rounded_box(k: &mut Kernel) -> Brep {
+        let mut b = crate::primitive::api_primitives::create_box(
+            k,
+            Point3::new(0.0, 0.0, 0.0),
+            40.0,
+            30.0,
+            20.0,
+        )
+        .unwrap();
+        let q = Point3::new(20.0, 30.0, 20.0);
+        let e = b
+            .edge_list()
+            .iter()
+            .copied()
+            .find(|&e| {
+                crate::query::api_queries::edge_closest_point(k, &b, e, q)
+                    .is_ok_and(|c| c.closest.distance < 1e-9)
+            })
+            .unwrap();
+        crate::blend::fillet_executive::api::fillet_edges(k, &mut b, &[e], 3.0, 1, 1, 1.0).unwrap();
+        b
+    }
+
+    /// A cell of the round's face (a rational face 20 to 40 from the origin), a sixteenth of
+    /// its piece each way: the partials taken about the cell's middle ([`piece_partials`])
+    /// and about the origin ([`nurbs_partials_within_span`]) both hold the face's partials
+    /// at a grid of points of the cell (each point's own interval enclosure lies inside them,
+    /// so its exact partial does). Taken about the cell, each component of the first partial
+    /// along the direction the weights vary in is at least `NARROWER` times narrower (7.8 to
+    /// 17 times, measured). A box that is one point is enclosed exactly as before (no shift).
+    /// Taken about the origin, the quotient's `w_ij S` terms are as wide
+    /// as the face's distance from the origin: the area enclosure's cells then never proved
+    /// `|S_u x S_v|^2` positive, fell back to range times area, and spent the whole budget.
+    #[test]
+    fn a_far_rational_cells_partials_are_taken_about_the_cell() {
+        use crate::blend::fillet_section::certificate::nurbs_partials_within_span;
+        use crate::blend::fillet_section::station::nurbs_partials;
+        const NARROWER: f64 = 6.0;
+        let mut k = Kernel::default();
+        let mut b = rounded_box(&mut k);
+        let w = Work::new(&k, &mut b).unwrap();
+        let weight = |cn: &Nurbs, i: usize, j: usize| cn.pw[4 * (i * cn.nv + j) + 3];
+        // whether the weights vary along u (else along v), on a rational face
+        let varies = |cn: &Nurbs| {
+            let along_u =
+                (0..cn.nv).any(|j| (1..cn.nu).any(|i| weight(cn, i, j) != weight(cn, 0, j)));
+            let along_v =
+                (0..cn.nu).any(|i| (1..cn.nv).any(|j| weight(cn, i, j) != weight(cn, i, 0)));
+            (along_u || along_v).then_some(along_u)
+        };
+        let (cn, along_u) = w
+            .faces
+            .iter()
+            .find_map(|f| varies(&f.cn).map(|d| (&f.cn, d)))
+            .unwrap();
+        let mid = |k: &[f64]| 0.5 * (k.first().unwrap() + k.last().unwrap());
+        let (ku, kv) = (
+            span(&cn.u, cn.p, cn.nu, mid(&cn.u)),
+            span(&cn.v, cn.q, cn.nv, mid(&cn.v)),
+        );
+        // a sixteenth of the piece each way, about its middle
+        let cell = |k: &[f64], s: usize| {
+            let (a, b) = (knot(k, s as isize), knot(k, s as isize + 1));
+            let (m, h) = (0.5 * (a + b), (b - a) / 32.0);
+            (m - h, m + h)
+        };
+        let ((ua, ub), (va, vb)) = (cell(&cn.u, ku), cell(&cn.v, kv));
+        let lk = 2;
+        let new = piece_partials(cn, (ku, kv), Ivl::new(ua, ub), Ivl::new(va, vb), lk).unwrap();
+        let old = nurbs_partials_within_span(cn, ku, kv, ua, ub, va, vb, lk).unwrap();
+        let comps = |p: V3<Ivl>| [p.x, p.y, p.z];
+        let inside = |p: Ivl, e: Ivl| e.lo <= p.lo && p.hi <= e.hi;
+        // the grid's last point is the box's end exactly (a + (b - a) may round past b)
+        let grid = |a: f64, b: f64, n: i32| {
+            if n == 4 {
+                b
+            } else {
+                a + (b - a) * f64::from(n) / 4.0
+            }
+        };
+        for i in 0..=4 {
+            for j in 0..=4 {
+                let u = grid(ua, ub, i);
+                let v = grid(va, vb, j);
+                let at = nurbs_partials(cn, ku, kv, Ivl::from(u), Ivl::from(v), lk);
+                for a in 0..=lk {
+                    for c in 0..=(lk - a) {
+                        let x = comps(at.at(a, c));
+                        for (name, e) in [("about the cell", &new), ("about the origin", &old)] {
+                            for (xe, ee) in x.iter().zip(comps(e.at(a, c))) {
+                                assert!(
+                                    inside(*xe, ee),
+                                    "{name}: P[{a}][{c}] at ({u}, {v}): {xe:?} not in {ee:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let width = |i: Ivl| i.hi - i.lo;
+        let (a, c) = if along_u { (1, 0) } else { (0, 1) };
+        for (n, o) in comps(new.at(a, c)).into_iter().zip(comps(old.at(a, c))) {
+            assert!(
+                NARROWER * width(n) <= width(o),
+                "P[{a}][{c}]: {n:?} against {o:?}"
+            );
+        }
+        // a box that is one point is enclosed as before, exactly
+        let (u, v) = (0.5 * (ua + ub), 0.5 * (va + vb));
+        assert_eq!(
+            piece_partials(cn, (ku, kv), Ivl::from(u), Ivl::from(v), lk).unwrap(),
+            nurbs_partials_within_span(cn, ku, kv, u, u, v, v, lk).unwrap()
+        );
     }
 }

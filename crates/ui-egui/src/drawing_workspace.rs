@@ -854,7 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn view_boundary_opens_the_card_and_moves_a_view_in_one_undo_step() {
+    fn view_interior_opens_the_card_and_moves_a_view_in_one_undo_step() {
         use serde_json::json;
         use solidcraft_engine::{doc::ids::decode, drawing_scene};
 
@@ -871,9 +871,14 @@ mod tests {
         drawing_scene::step(&mut h.app.session);
         h.frames(6);
         let paper = crate::scenario::rect_of("sheet:paper").unwrap();
-        let mm_x = created["boundary_mm"]["min"][0].as_f64().unwrap() as f32;
+        let mm_x = 175.0;
         let x = paper.left() + paper.width() * (mm_x / 420.0);
         let y = paper.bottom() - paper.height() * (140.0 / 297.0);
+        h.step(&json!({"move":[x,y]})).unwrap();
+        let hover = &crate::drawing_sheet_page::inspect(&h.app)["hover"];
+        assert_eq!(hover["object"], created["view"]);
+        assert_eq!(hover["on_edge"], false);
+        assert_eq!(hover["outlined"], true);
         h.step(&json!({"click":[x,y]})).unwrap();
         h.frames(3);
         assert!(crate::scenario::handle_at("drawing:view_selection:project").is_some());

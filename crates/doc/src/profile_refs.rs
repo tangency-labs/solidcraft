@@ -5,6 +5,10 @@ use std::collections::BTreeSet;
 use crate::{DocError, ProfileSel, Result, SolvedSketch, WholeProfileBoundary};
 
 const MAX_SELECTIONS: usize = 128;
+/// An exact model profile may have many independent spline-drawn holes (#18759). Its
+/// curve count and per-boundary sizes are still bounded below.
+const MAX_MODEL_WHOLE_HOLES: usize = 1024;
+/// Drawing fills retain their separate 128-hole policy until their own limits are reviewed.
 pub(crate) const WHOLE_MAX_HOLES: usize = 128;
 pub(crate) const WHOLE_MAX_BOUNDARY_CURVES: usize = 512;
 pub(crate) const WHOLE_MAX_TOTAL_CURVES: usize = 20_000;
@@ -22,8 +26,11 @@ pub(crate) fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
     let mut total = 0usize;
     let mut identities = BTreeSet::new();
     for profile in profiles {
-        if profile.holes.len() > WHOLE_MAX_HOLES || !identities.insert((&profile.outer, &profile.holes)) {
-            return Err(DocError::Invalid("invalid whole-source profile holes or duplicate identity".into()));
+        if profile.holes.len() > MAX_MODEL_WHOLE_HOLES {
+            return Err(DocError::Invalid(format!("whole-source profile exceeds {MAX_MODEL_WHOLE_HOLES} holes")));
+        }
+        if !identities.insert((&profile.outer, &profile.holes)) {
+            return Err(DocError::Invalid("whole-source profile has a duplicate identity".into()));
         }
         // Holes may share a curve: a curve that splits an island bounds two of its regions, and
         // both are holes of the profile around the island (#17613). No hole shares the outer's.
@@ -582,6 +589,27 @@ mod tests {
         assert_eq!(regions.len(), 600);
         assert!(regions.iter().all(|region| (region.area() - std::f64::consts::PI * 9.).abs() < 1e-9));
         assert!(profile_selection_indices(&ss, &ProfileSel::Indices { indices: vec![1] }).is_err());
+    }
+
+    /// An SVG-traced sketch can have hundreds of spline-bounded holes. The total curve
+    /// budget still bounds the validator, and drawing fills keep their separate limit.
+    #[test]
+    fn whole_source_accepts_many_spline_holes_within_curve_budget() {
+        let profile = |count: usize, edges: usize| WholeProfileBoundary {
+            outer: vec!["outer".to_string()],
+            holes: (0..count).map(|i| (0..edges).map(|edge| format!("h{i:04}-{edge:03}")).collect()).collect(),
+        };
+        assert_eq!(WHOLE_MAX_HOLES, 128, "the drawing-fill hole cap stays unchanged");
+        for count in [128, 129, 707, MAX_MODEL_WHOLE_HOLES] {
+            let large = profile(count, 4);
+            validate_whole(std::slice::from_ref(&large)).unwrap_or_else(|e| panic!("{count} holes should be accepted: {e}"));
+            let duplicate = validate_whole(&[large.clone(), large]).unwrap_err().to_string();
+            assert!(duplicate.contains("duplicate identity"), "{duplicate}");
+        }
+        let exceeded = validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES + 1, 4)]).unwrap_err().to_string();
+        assert!(exceeded.contains("1024 holes"), "{exceeded}");
+        let too_many_curves = validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES, 20)]).unwrap_err().to_string();
+        assert!(too_many_curves.contains("identity budget"), "{too_many_curves}");
     }
 
     #[test]

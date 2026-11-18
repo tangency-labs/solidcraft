@@ -310,13 +310,22 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
 
 ## Versions
 
-The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:
-running app commands, logging, progress and cancellation, named files, a clock, and the exported
-entry. A plugin's `plugin.json` lists what it needs, for example
-`"capabilities": ["commands@0.1"]`; the host refuses an unknown or newer capability when it reads
-the manifest, with a plain message such as "needs commands 0.2; update SolidCraft or the plugin".
-`formats@0.1` adds importers (below). `ui`, `viewport` and `storage` arrive later as their own
+The WIT package is `craft:plugin@0.2.0`. Its capability `commands@0.2` runs app commands, logs,
+reports progress and cancellation, reads named files and a clock, and exports the entry. A plugin's
+`plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
+an unknown or newer capability when it reads the manifest, with a plain message such as "needs
+commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers and `evaluate@0.2`
+lets an importer check its result (below). `ui`, `viewport` and `storage` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
+
+0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
+not handle it, such as a file with no solids or a newer version of its format. Use it instead of
+`invalid-input`, which means the input is broken; SolidCraft then says "Sample does not support
+bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`commands@0.1`,
+`formats@0.1`, `evaluate@0.1`) still run unchanged: the host reads the WIT version from the
+component's own imports and exports, and serves the frozen 0.1 WIT
+(`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
+not run, or two versions at once, is refused before any of its code runs.
 
 ## Commands and permissions
 
@@ -325,7 +334,7 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors. Phase 2 adds importers (below) and the
+and invalid manifest fields return structured errors (see Errors below). Phase 2 adds importers (below) and the
 author tools (`plugin check` and `plugin test`, below); exporters and browser execution follow.
 
 ## Checking and testing a plugin
@@ -357,14 +366,14 @@ plugin and importer.
 ## Importers
 
 An importer turns a file of another format into a SolidCraft design. Its manifest says
-`"capabilities": ["formats@0.1"]`, and each of its entries has `"kind": "importer"` and the
+`"capabilities": ["formats@0.2"]`, and each of its entries has `"kind": "importer"` and the
 extensions it claims, lowercase without the dot. An importer's effect is `open`: it opens a file
 as a new design and leaves the open one as it is. It need not say so; `plugin.list` and
 `plugin.install` report it, and an importer that says `"effect": "edit"` is still read as `open`.
 Only an importer may say `open`.
 
 ```json
-{"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.1"],
+{"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.2"],
  "runtime": {"module": "sample.wasm", "commands": [],
    "entries": [{"name": "convert", "kind": "importer", "extensions": ["smp"],
                 "input_schema": {"type": "object", "properties": {"units": {"type": "string", "enum": ["mm", "in"], "default": "mm"}}}}],
@@ -404,7 +413,7 @@ Only an importer may say `open`.
   the plugin's other grants for that exact package; a plugin copied in by hand, or one whose grant
   is for another package, reads only the file itself. Hidden names, links and paths
   outside the folder are refused; an import reads at most 1 GiB and writes a design of at most 256 MiB.
-- **Checking the result** (capability `evaluate@0.1`, beside `formats@0.1`). A converter that
+- **Checking the result** (capability `evaluate@0.2`, beside `formats@0.2`). A converter that
   rebuilds a design's history can check it the way it would with the app's command line: it stages
   a design file it made with `evaluate.stage` (1 MiB per call, 256 MiB in all), and `evaluate.run`
   opens that design in a private session, apart from every open design and every file, and runs one
@@ -415,13 +424,36 @@ Only an importer may say `open`.
   time counts against the import's deadline, and Cancel stops the import between commands. A
   design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
   call only, so the importer can report its history as unchecked instead of failing.
-- **Failures.** A trap fails that one import ("Sample failed on bracket.smp: ...") and the next
-  one gets a fresh instance. The compiled component stays in memory, so the next file opens
+- **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
+  could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
+  `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
   without compiling again; nothing compiled is written to disk.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
+
+## Errors
+
+Every plugin failure starts with the plugin's name, and an importer's with the file's name too.
+Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
+text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
+and MCP give the English.
+
+| What happened | What the user reads |
+|---|---|
+| `unsupported` from the plugin | Sample does not support sketch.smp: the model has no solids |
+| `invalid-input` from the plugin | Sample could not open broken.smp: (its reason) |
+| More memory than plugins may use | Sample could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file). |
+| More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
+| It ran out of fuel, memory, stack or time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, stack in KiB, time in seconds) |
+| Its design is over 256 MiB | ... the design it made is larger than 256 MiB, the most a plugin can hand over. |
+| A trap | ... it stopped on an error inside the plugin (details). Report this to its author. |
+
+`plugin.inspect` words `limits_error` the same way. The structured kinds are `unsupported`
+(`reason`), `over_ceiling` (`limit` is `fuel` or `memory_mib`, with `requested` and `allowed`) and
+`exhausted` (`limit` is `fuel`, `memory_mib`, `stack_kib`, `deadline_ms` or `design_mib`, with
+`allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design
 
