@@ -240,6 +240,51 @@ fn through_all_on_either_side_with_a_distance_on_the_other() {
     }
 }
 
+/// The second side takes the extent types of the first (#18691): Through All, or To Object with
+/// its own offset. A 40 mm cube round the origin, and an r5 hole sketched 10 mm above its
+/// middle: the first side goes up and the second down, so the removed depth is how far each
+/// reaches added together.
+#[test]
+fn the_second_side_takes_through_all_and_to_object() {
+    let hole = std::f64::consts::PI * 25.0;
+    for (settings, depth) in [
+        // Both sides through all: 10 mm up to the top face and 30 mm down to the bottom one.
+        (json!({"through_all":true,"through_all2":true}), 40.0),
+        // A distance up and through all down.
+        (json!({"distance":"5 mm","through_all2":true}), 35.0),
+        // To the bottom face, picked at a point on it; the offset carries the end 5 mm short.
+        (json!({"distance":"5 mm","to2":[0,0,-20]}), 35.0),
+        (json!({"distance":"5 mm","to2":[0,0,-20],"to_offset2":"-5 mm"}), 30.0),
+        // Through all up, to an object down.
+        (json!({"through_all":true,"to2":[0,0,-20]}), 40.0),
+        // To an object up and through all down.
+        (json!({"to":[0,0,20],"through_all2":true}), 40.0),
+        // To an object on both sides.
+        (json!({"to":[0,0,20],"to2":[0,0,-20]}), 40.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":40,"height":40,"corner":[-20,-20,-20],"body_name":"Box"}));
+        run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":10,"name":"Above"}));
+        run(&mut s, "sketch.create", json!({"plane":"Above","name":"Hole"}));
+        run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":5}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch":"Hole","operation":"cut","targets":["Box"],"name":"Bore"});
+        p.as_object_mut().unwrap().extend(settings.as_object().unwrap().clone());
+        run(&mut s, "solid.extrude", p);
+        let removed = |s: &Session| {
+            assert!(s.model.results.iter().all(|r| r.error.is_none()), "{settings}: {:?}", s.model.results);
+            let st = s.model.state();
+            (64000.0 - solidcraft_kernel::measure(&st.body("Box").unwrap().body).unwrap().volume) / hole
+        };
+        let deep = removed(&s);
+        assert!((deep - depth).abs() < 0.05, "{settings}: {deep} deep, want {depth}");
+        // Saved and opened again, it keeps both extents.
+        let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+        let deep = removed(&reopened);
+        assert!((deep - depth).abs() < 0.05, "{settings} reopened: {deep} deep, want {depth}");
+    }
+}
+
 /// Through all keeps the side a saved negative distance points to (#10415): switching an inward
 /// cut to Through All must not turn it to the plane's positive side. A 40 mm cube round the
 /// origin, and an r5 hole sketched 10 mm above its middle: positive reaches 10 mm up to the

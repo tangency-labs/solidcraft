@@ -307,12 +307,18 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() {
+            if extent.through_all
+                || extent.through_all2
+                || extent.taper.is_some()
+                || extent.to.is_some()
+                || extent.to2.is_some()
+                || extent.from.is_some()
+            {
                 return Err(DocError::Invalid("not supported yet: a surface extrude through all, to or from an object, or with a taper".into()));
             }
             let d = val(vals, &extent.distance, Kind::Length)?;
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
-            let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
+            let (a, b) = extent_sides(vals, extent, d, extent.direction, None)?;
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
             let body = kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?;
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));

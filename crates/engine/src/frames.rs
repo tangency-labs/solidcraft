@@ -60,9 +60,16 @@ const PICKED_PLANES: [&str; 4] =
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
-        "solid.extrude" => {
-            &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
-        }
+        "solid.extrude" => &[
+            ("face", Pick),
+            ("faces", Picks),
+            ("face_body", Body),
+            ("from", Make),
+            ("to", Make),
+            ("to2", Make),
+            ("targets", Body),
+            ("participants", Body),
+        ],
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
         // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
         // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
@@ -833,9 +840,9 @@ fn map_local_with_input(
             }
         }
         let points = match (&feature.kind, cmd) {
-            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None)],
-            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from)],
-            _ => [("to", None), ("from", None)],
+            (solidcraft_doc::FeatureKind::Revolve { to, .. }, "solid.revolve") => [("to", *to), ("from", None), ("to2", None)],
+            (solidcraft_doc::FeatureKind::Extrude { extent, .. }, "solid.extrude") => [("to", extent.to), ("from", extent.from), ("to2", extent.to2)],
+            _ => [("to", None), ("from", None), ("to2", None)],
         };
         for (key, point) in points {
             if let Some(point) = point {
