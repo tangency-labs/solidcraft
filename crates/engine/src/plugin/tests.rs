@@ -1090,6 +1090,72 @@ mod native {
         assert_eq!(direct["result"], namespaced["result"]);
     }
 
+    /// A component whose entry runs `storage.set` with `{"document":{"teeth":24}}`.
+    fn storage_component() -> Vec<u8> {
+        let template = component_template();
+        let code = "      call $box\n      call $box\n";
+        let data = "    (data (;2;) (i32.const 2048) \"file.export\")\n";
+        assert!(template.contains(code) && template.contains(data));
+        let source = template.replacen(code, "      i32.const 2560 i32.const 11 i32.const 3072 i32.const 25 i32.const 0 call $run\n", 1).replacen(
+            data,
+            &format!(
+                "{data}    (data (i32.const 2560) \"storage.set\")\n    (data (i32.const 3072) \"{{\\22document\\22:{{\\22teeth\\22:24}}}}\")\n"
+            ),
+            1,
+        );
+        wat::parse_str(source).unwrap()
+    }
+    #[test]
+    fn a_plugin_keeps_its_data_in_the_design_as_one_undo_step_and_a_newer_formats_data_stays_read_only() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), storage_component()).unwrap();
+        let write_manifest = |data_format: u32| {
+            let mut m = manifest();
+            m["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
+            m["runtime"]["commands"] = json!(["storage.set"]);
+            m["runtime"]["data_format"] = json!(data_format);
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        };
+        write_manifest(2);
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        f.run(&mut s).unwrap();
+        assert_eq!(s.undo.len(), 1);
+        let data = s.execute("storage.get", &json!({"plugin":"sample"})).unwrap();
+        assert_eq!((data["document"].clone(), data["format"].clone(), data["name"].clone()), (json!({"teeth":24}), json!(2), json!("Sample")));
+        // Only the plugin's own run writes it.
+        assert!(s.execute("storage.set", &json!({"document":{}})).unwrap_err().to_string().contains("only a plugin changes its data"));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.plugin_data.is_empty(), "one undo takes the data out again");
+        s.execute("edit.redo", &json!({})).unwrap();
+        let saved = s.doc.to_json();
+
+        // Opened where the plugin is not installed, the data is kept and says whose it is.
+        let mut elsewhere = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        elsewhere.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        let listed = elsewhere.execute("storage.list", &json!({})).unwrap();
+        assert_eq!(listed["plugins"][0]["status"], "missing");
+        assert_eq!((listed["plugins"][0]["name"].clone(), listed["plugins"][0]["read_only"].clone()), (json!("Sample"), json!(true)));
+        assert_eq!(elsewhere.doc.plugin_data, s.doc.plugin_data);
+
+        // An older version of the plugin reads the data but never changes it.
+        write_manifest(1);
+        let before = s.doc.to_json();
+        let refused = f.run(&mut s).unwrap_err().to_string();
+        assert!(refused.contains("saved by a newer version of the plugin (data format 2; this version writes 1)"), "{refused}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 1));
+        assert_eq!(s.execute("storage.list", &json!({})).unwrap()["plugins"][0]["status"], "older");
+        // A newer one migrates it: the next write saves it in the newer format.
+        write_manifest(3);
+        assert_eq!(s.execute("storage.list", &json!({})).unwrap()["plugins"][0]["status"], "migrate");
+        f.run(&mut s).unwrap();
+        assert_eq!(s.execute("storage.get", &json!({"plugin":"sample"})).unwrap()["format"], 3);
+        // storage commands need the capability.
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["storage.get"]);
+        let refused = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err().to_string();
+        assert!(refused.contains("needs the storage capability"), "{refused}");
+    }
     #[test]
     fn named_calls_preserve_input_pass_through() {
         let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
@@ -2107,6 +2173,179 @@ mod install_zip {
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());
         let _ = std::fs::remove_dir_all(root);
     }
+}
+
+/// The `storage.*` commands as a running plugin sees them: its own data only, files in parts, a
+/// merge patch, and the size limits.
+#[test]
+fn storage_commands_reach_only_the_running_plugins_data_within_its_limits() {
+    let mut s = Session::default();
+    let other = solidcraft_doc::canvas::base64_encode(br#"{"kept":true}"#);
+    s.doc_mut().plugin_data.insert("other-tool/data.json".into(), other.clone().into());
+    s.plugin_state.storage_caller =
+        Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1.4.0".into(), data_format: 3 });
+    s.execute("storage.set", &json!({"document":{"teeth":24,"module":{"value":2,"unit":"mm"}}})).unwrap();
+    s.execute("storage.patch", &json!({"patch":{"teeth":30,"module":{"unit":null},"name":"spur"}})).unwrap();
+    let data = s.execute("storage.get", &json!({})).unwrap();
+    assert_eq!(data["document"], json!({"teeth":30,"module":{"value":2},"name":"spur"}));
+    assert_eq!((data["format"].clone(), data["plugin_format"].clone(), data["read_only"].clone()), (json!(3), json!(3), json!(false)));
+    let meta = solidcraft_doc::plugin_data::meta(&s.doc.plugin_data, "gears");
+    assert_eq!((meta.name.as_str(), meta.plugin_version.as_str(), meta.format), ("Gears", "1.4.0", 3));
+    // A plugin reads only its own data, and never changes another's.
+    assert!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap_err().to_string().contains("only its own data"));
+    assert_eq!(s.doc.plugin_data["other-tool/data.json"].as_ref(), other.as_str());
+
+    // A file written in parts reads back in parts; writing it as a cache file moves it.
+    let b64 = solidcraft_doc::canvas::base64_encode;
+    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[1, 2, 3])})).unwrap();
+    let grown = s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[4, 5]),"append":true})).unwrap();
+    assert_eq!(grown["bytes"], 5);
+    let part = s.execute("storage.get_blob", &json!({"name":"paths/op3.bin","offset":3,"len":10})).unwrap();
+    assert_eq!((part["data"].clone(), part["bytes"].clone()), (json!(b64(&[4, 5])), json!(5)));
+    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[9]),"cache":true})).unwrap();
+    let blobs = s.execute("storage.get", &json!({})).unwrap()["blobs"].clone();
+    assert_eq!(blobs, json!([{"name":"paths/op3.bin","cache":true,"bytes":1}]));
+    assert!(s.execute("storage.put_blob", &json!({"name":"../escape","data":""})).is_err());
+    assert!(s.execute("storage.put_blob", &json!({"name":"x","data":"not base64!"})).is_err());
+    assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], true);
+    assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], false);
+    // Over the main document's limit, nothing changes.
+    let before = s.doc.plugin_data.clone();
+    let big = "x".repeat(storage::MAX_DOCUMENT_BYTES);
+    assert!(s.execute("storage.set", &json!({"document":big})).unwrap_err().to_string().contains("16 MiB"));
+    assert_eq!(s.doc.plugin_data, before);
+    // Outside a plugin's run, reads name the plugin and writes are refused.
+    s.plugin_state.storage_caller = None;
+    assert!(s.execute("storage.get", &json!({})).is_err());
+    assert_eq!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap()["document"], json!({"kept":true}));
+    assert!(s.execute("storage.patch", &json!({"patch":{}})).is_err());
+}
+
+#[test]
+fn storage_large_main_document_reads_in_bounded_parts() {
+    let mut s = Session::default();
+    s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
+    let empty = s.execute("storage.get", &json!({"offset":0})).unwrap();
+    assert_eq!(empty["bytes"], 0);
+    assert_eq!(empty["data"], "");
+    let first = "x".repeat(600 * 1024);
+    // Include multibyte JSON text: chunks are bytes, not independently parsed JSON strings.
+    let second = "é".repeat(300 * 1024);
+    s.execute("storage.patch", &json!({"patch":{"first":first}})).unwrap();
+    s.execute("storage.patch", &json!({"patch":{"second":second}})).unwrap();
+    let expected = json!({"first":first,"second":second});
+    assert!(serde_json::to_vec(&expected).unwrap().len() > 1 << 20);
+    let mut joined = Vec::new();
+    for _ in 0..3 {
+        let part = s.execute("storage.get", &json!({"offset":joined.len()})).unwrap();
+        assert!(serde_json::to_vec(&part).unwrap().len() <= 1 << 20);
+        assert_eq!(part["offset"], joined.len());
+        assert!(part.get("document").is_none());
+        let decoded = solidcraft_doc::canvas::base64_decode(part["data"].as_str().unwrap()).unwrap();
+        assert!(!decoded.is_empty());
+        joined.extend_from_slice(&decoded);
+        if joined.len() as u64 == part["bytes"].as_u64().unwrap() {
+            break;
+        }
+    }
+    assert_eq!(serde_json::from_slice::<Value>(&joined).unwrap(), expected);
+    let prefix = s.execute("storage.get", &json!({"len":5})).unwrap();
+    assert_eq!(prefix["offset"], 0);
+    assert_eq!(solidcraft_doc::canvas::base64_decode(prefix["data"].as_str().unwrap()).unwrap(), joined[..5]);
+    let past_end = s.execute("storage.get", &json!({"offset":u64::MAX})).unwrap();
+    assert_eq!(past_end["data"], "");
+    for len in [0, storage::MAX_READ_BYTES + 1] {
+        assert!(s.execute("storage.get", &json!({"len":len})).is_err());
+    }
+    assert!(s.execute("storage.get", &json!({"plugin":"other-tool","offset":0})).is_err());
+    s.plugin_state.storage_caller = None;
+    assert!(s.execute("storage.get", &json!({"offset":0})).is_err());
+    let outside = s.execute("storage.get", &json!({"plugin":"gears","offset":0,"len":5})).unwrap();
+    assert_eq!(outside["data"], prefix["data"]);
+}
+
+// Fill a quota with shared encoded chunks, keeping boundary tests small in memory.
+fn fill_storage_bytes(s: &mut Session, bytes: u64) {
+    let chunk = 1 << 20;
+    let encoded: std::sync::Arc<str> = solidcraft_doc::canvas::base64_encode(&vec![0; chunk]).into();
+    for i in 0..bytes / chunk as u64 {
+        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), encoded.clone());
+    }
+    let tail = bytes as usize % chunk;
+    if tail != 0 {
+        s.doc_mut().plugin_data.insert("filler/blobs/tail".into(), solidcraft_doc::canvas::base64_encode(&vec![0; tail]).into());
+    }
+}
+
+#[test]
+fn storage_append_preserves_bytes_when_changing_categories() {
+    let mut s = Session::default();
+    s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
+    let b64 = solidcraft_doc::canvas::base64_encode;
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[1,2,3]),"cache":true})).unwrap();
+    for (cache, next, expected) in [(false, 4, vec![1, 2, 3, 4]), (true, 5, vec![1, 2, 3, 4, 5])] {
+        s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[next]),"append":true,"cache":cache})).unwrap();
+        let read = s.execute("storage.get_blob", &json!({"name":"tool.bin"})).unwrap();
+        assert_eq!(read["data"], b64(&expected));
+        assert_eq!(read["cache"], cache);
+        assert_eq!(s.doc.plugin_data.len(), 2);
+    }
+}
+
+#[test]
+fn storage_category_replacement_uses_final_file_and_byte_counts() {
+    let mut s = Session::default();
+    s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
+    let b64 = solidcraft_doc::canvas::base64_encode;
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[1,2,3])})).unwrap();
+    for i in 0..solidcraft_doc::plugin_data::MAX_FILES - 2 {
+        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), "".into());
+    }
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[4]),"cache":true})).unwrap();
+    assert_eq!(s.doc.plugin_data.len(), solidcraft_doc::plugin_data::MAX_FILES);
+    assert_eq!(storage::blob(&s.doc, "gears", "cache/tool.bin"), Some(vec![4]));
+    let before = s.doc.plugin_data.clone();
+    assert!(s.execute("storage.put_blob", &json!({"name":"new.bin","data":""})).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+
+    s.doc_mut().plugin_data.retain(|key, _| key.starts_with("gears/"));
+    let meta_bytes = storage::blob(&s.doc, "gears", "meta.json").unwrap().len() as u64;
+    fill_storage_bytes(&mut s, storage::MAX_TOTAL_BYTES - meta_bytes - 1);
+    // The final total is exactly the limit even though the destination is new.
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[5])})).unwrap();
+    let before = s.doc.plugin_data.clone();
+    assert!(s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[6,7]),"cache":true})).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+    assert_eq!(storage::blob(&s.doc, "gears", "blobs/tool.bin"), Some(vec![5]));
+}
+
+#[test]
+fn storage_total_counts_metadata_creation_growth_and_shrinkage_before_mutation() {
+    let mut s = Session::default();
+    let mut caller = storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 };
+    fill_storage_bytes(&mut s, storage::MAX_TOTAL_BYTES - 1);
+    let before = s.doc.plugin_data.clone();
+    assert!(storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[1])).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+
+    s.doc_mut().plugin_data.clear();
+    storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[1])).unwrap();
+    let meta_bytes = storage::blob(&s.doc, "gears", "meta.json").unwrap().len() as u64;
+    fill_storage_bytes(&mut s, storage::MAX_TOTAL_BYTES - meta_bytes - 1);
+    let before = s.doc.plugin_data.clone();
+    caller.name.push('s');
+    assert!(storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[1])).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+    // Even deleting a payload must account for a metadata increase larger than that payload.
+    caller.name.push('s');
+    assert!(storage::put(&mut s, &caller, "blobs/tool.bin", None).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+    // A shrinking payload can pay for a growing metadata record.
+    caller.name.pop();
+    storage::put(&mut s, &caller, "blobs/tool.bin", None).unwrap();
+    // A shrinking metadata record can pay for a growing payload.
+    caller.name = "Gears".into();
+    storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[2])).unwrap();
 }
 
 /// The grant store the desktop app, the command line and headless MCP share.

@@ -339,6 +339,38 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     assert!(matches!(parse(&newer), Err(HostError::UnsupportedCapability { .. })));
 }
 
+#[test]
+fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
+    let mut keeps = manifest();
+    keeps["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
+    keeps["runtime"]["data_format"] = json!(3);
+    assert_eq!(parse(&keeps).unwrap().runtime.unwrap().data_format, Some(3));
+    let refused = |change: &dyn Fn(&mut Value), field: &str| {
+        let mut value = keeps.clone();
+        change(&mut value);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field: f, .. }) if f == field), "{field}");
+    };
+    refused(
+        &|v| {
+            v["runtime"].as_object_mut().unwrap().remove("data_format");
+        },
+        "runtime.data_format",
+    );
+    refused(&|v| v["runtime"]["data_format"] = json!(0), "runtime.data_format");
+    refused(&|v| v["runtime"]["data_format"] = json!(MAX_DATA_FORMAT + 1), "runtime.data_format");
+    refused(&|v| v["capabilities"] = json!(["commands@0.1"]), "runtime.data_format");
+    // An importer keeps nothing in the open design.
+    let mut importing = importer();
+    importing["capabilities"] = json!(["formats@0.1", "storage@0.1"]);
+    importing["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    // An exporter only reads the open design and keeps no data there.
+    let mut exporting = exporter();
+    exporting["capabilities"] = json!(["formats@0.1", "storage@0.1"]);
+    exporting["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&exporting), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+}
+
 fn empty_item() -> LossItem {
     LossItem { severity: LossSeverity::Info, title: String::new(), subject: String::new(), message: String::new(), code: String::new() }
 }

@@ -316,8 +316,9 @@ reports progress and cancellation, reads named files and a clock, and exports th
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
 commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds file-format slots: importers and
-exporters; `evaluate@0.2` lets an importer check its result (below). `ui`, `viewport` and `storage`
-arrive later as their own versioned interfaces. While a version is 0.x, a minor version may break the one before it.
+exporters; `evaluate@0.2` lets an importer check its result, and `storage@0.1` keeps data in a
+design (below). `ui` and `viewport` arrive later as their own versioned interfaces. While a version
+is 0.x, a minor version may break the one before it.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
@@ -515,8 +516,9 @@ are listed in `runtime.commands`:
   when the whole export succeeded. An export that fails, traps, runs out of fuel or is cancelled
   leaves the folder as it was.
 - **Plugin data.** `"needs_plugin_data": true` marks a slot that will also read the design's own
-  data of its plugin (RFC 0015 §5). It is accepted, and until per-design plugin data lands the export
-  runs without it and its reply carries a warning saying so.
+  data of its plugin (RFC 0015 §5). The flag is accepted, but exporters do not yet receive plugin
+  data. The export runs without it and its reply carries a warning saying so. The `storage@0.1`
+  capability is available to command plugins (below).
 - **Limits.** As an importer: a component of up to 64 MiB, a deadline of up to 10 minutes and a
   `stack_kib` of up to 64 MiB, with fuel and memory within the user's ceilings.
 - **One kind per plugin.** A runtime's entries are all commands, all importers or all exporters, so
@@ -548,4 +550,46 @@ and MCP give the English.
 
 A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
 saved back untouched when the plugin is missing, and opening a design never fails because a plugin
-is missing. The `storage` capability will let plugins read and write them.
+is missing.
+
+A command plugin keeps its own data there with the `storage@0.1` capability and a data format
+number. Its manifest lists the `storage.*` commands it calls, like any other command:
+
+```json
+{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.1", "storage@0.1"],
+ "runtime": {"module": "gears.wasm", "entries": ["make"], "data_format": 3,
+   "commands": ["solid.box", "storage.get", "storage.patch", "storage.put_blob"]}}
+```
+
+- **What it keeps.** One main JSON document (`data.json`, at most 16 MiB) and files of its own
+  (`blobs/<name>`; with `cache: true`, `cache/<name>`, files it can make again). Files are at most
+  256 MiB per plugin per design, and all plugin data in a design at most 256 MiB.
+  SolidCraft writes `meta.json` beside them: the plugin's id, name and version and the data's format.
+- **Reading.** `storage.get` returns the main document, the data's `format`, the running plugin's
+  `plugin_format`, `read_only` and the list of files. To read a large main document within the
+  plugin host's 1 MiB result limit, supply `offset` or `len`: `storage.get {offset: 0}` returns
+  `{plugin, data, offset, bytes}`, with `data` holding base64 of up to 512 KiB of the saved JSON
+  bytes and `bytes` the whole document size. Advance `offset` by the number of decoded bytes,
+  concatenate the decoded parts, then parse the JSON. `len` defaults to 524288 and accepts
+  1 through 524288; `offset` defaults to 0. Parts omit metadata and the file list. Past the end,
+  or without a saved document, `data` is empty (`bytes` is 0 without a document). Documents
+  still accept up to 16 MiB; plugins should use parts when the full reply could exceed 1 MiB.
+  `storage.get_blob {name, offset?, len?}`
+  returns up to 512 KiB of a file, base64, so a reply stays inside a plugin's 1 MiB. Inside a
+  plugin's run these reach only that plugin's own data. Agents and scripts read any plugin's
+  data by naming it: `storage.get {"plugin": "gears"}`.
+- **Writing.** `storage.set {document}`, `storage.patch {patch}` (an RFC 7396 merge patch),
+  `storage.put_blob {name, data, cache?, append?}` (base64; `append` writes a large file in
+  parts) and `storage.delete_blob {name}` change only the running plugin's own data, and only
+  from its run: the whole run is one undo step, and a failed run changes nothing. Called from
+  anywhere else they are refused. A `read` entry can't call them.
+- **Formats.** Every write saves the data in the plugin's `data_format`. When `storage.get` says
+  `format` is lower than `plugin_format`, the data is from an older version of the plugin: the
+  plugin reads it, converts it and writes it back, which saves it in the new format as one undo
+  step. When `format` is higher, the data is from a newer version: this version reads it, and
+  every write is refused with "saved by a newer version of the plugin".
+- **Without the plugin.** The design opens as usual and the status line says so: "Contains Gears
+  data (plugin 1.4.0). Install it to edit." (or turn it on, or update it, when it's off or older
+  than the data). The data is saved back byte for byte. Nothing is downloaded, installed or run.
+  `storage.list` lists every plugin that keeps data in the open design, with its `status`
+  (`ready`, `migrate`, `missing`, `disabled` or `older`) and size.

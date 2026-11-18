@@ -8,8 +8,10 @@ package craft:plugin@0.2.0;
 //   `exporter-plugin` (types, commands, log, control, clock and formats-provider). A plugin
 //   declares its slots in its manifest (kind, extensions, label, options, needs_plugin_data), so
 //   the install review shows them before any of its code runs;
-// - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result.
-// Later capabilities (ui, viewport, storage) arrive as their own interfaces. While the version is
+// - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
+// - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
+//   in the open design (no interface of its own).
+// Later capabilities (ui, viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
 // component's imports and exports, and shows their `invalid-input` as before.
