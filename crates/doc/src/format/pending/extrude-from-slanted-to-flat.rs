@@ -4,8 +4,11 @@
 //! sketch, at the level where the From face meets the middle of the profiles, and ran it to the
 //! To face from there. This step marks every saved extrude with both a From and a To Object
 //! `from_level`, which keeps that reading, so designs saved before rebuild the bodies they had.
-//! Extrudes from a face square to the extrusion or from a point build the same either way. The
-//! last release reads `from_level` already and builds such a design as it did before.
+//! Extrudes from a face square to the extrusion or from a point build the same either way.
+//! Nothing new is saved: a design made with this build stores such an extrude without
+//! `from_level`. The last release opens that design with a warning about its newer format number
+//! (asking for an update), and builds the extrude from the face's level as it always did, not
+//! between the two planes; a design it saved itself, marked by this step, opens the same in both.
 use serde_json::Value;
 
 pub fn step(v: &mut Value) -> crate::Result<()> {

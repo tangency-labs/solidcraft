@@ -459,8 +459,11 @@ fn the_arrow_from_a_slanted_face_with_to_starts_where_the_build_does() {
         }
         h.app.run("solid.extrude", p).unwrap();
         h.frames(4);
-        let bounds = h.app.session.world_state().unwrap().body("Fill").unwrap().mesh().bounds();
-        let built = if two_sides { bounds.min.x + 3.0 } else { bounds.min.x + 2.0 * 4.0 / 7.0 / 2.0 };
+        // Where the body starts under the square's middle (y -2, z 5): a ray along +X first
+        // meets it there, 3 mm before the start with Two Sides.
+        let mesh = h.app.session.world_state().unwrap().body("Fill").unwrap().mesh();
+        let (t, _) = mesh.raycast(solidcore_record::Vec3::new(-20.0, -2.0, 5.0), solidcore_record::Vec3::new(1.0, 0.0, 0.0)).unwrap();
+        let built = -20.0 + t + if two_sides { 3.0 } else { 0.0 };
         assert!((built - start_x).abs() < 1e-6, "two sides {two_sides}: the build starts at x {built}");
         open(&mut h);
         let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;

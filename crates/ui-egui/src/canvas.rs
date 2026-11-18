@@ -100,6 +100,9 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
             let two_sided = crate::dialogs::two_sided(*direction);
+            // The window sends a taper only with one side (positive or negative), as the build
+            // gets it.
+            let taper = if *direction < 2 { taper.as_str() } else { "" };
             let from = from_slope_height(app, d, &plane, at, *all, taper, two_sided)
                 .or_else(|| reference_height(app, d, "From Object", &plane, at))
                 .unwrap_or(0.0);
@@ -238,10 +241,11 @@ fn from_slope_height(
         Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
     });
     let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
-    let kept_level = d
-        .editing
-        .and_then(|(id, _)| app.session.doc.feature(id))
-        .is_some_and(|f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level));
+    // An edit that takes To Object off clears `from_level`, as `timeline.edit` does.
+    let has_to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+    let kept_level = d.editing.and_then(|(id, _)| app.session.doc.feature(id)).is_some_and(
+        |f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level && (has_to || extent.to.is_none())),
+    );
     if kept_level {
         return None;
     }
