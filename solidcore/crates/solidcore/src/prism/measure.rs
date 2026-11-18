@@ -10,9 +10,10 @@
 //!   the plane's normal); each cap loop read exactly ([`super::read::planar_pieces`]), lines and
 //!   arcs, its signed area enclosed.
 //! - **Walls:** a plane label with its normal square to the direction; a cylinder label with its
-//!   axis along it; or a net ruled along it (degree one across, each pair of rows a translation
-//!   along the direction within its hull's bound). Each wall stands on cap edges at both levels
-//!   (its support read in the frame is the cap's), its other edges lines along the direction.
+//!   axis along it; an extrusion along it; or a net ruled along it (degree one across, each
+//!   pair of rows a translation along the direction within its hull's bound). Each wall stands
+//!   on cap edges at both levels (its support read in the frame is the cap's), its other edges
+//!   lines along the direction.
 //! - **The section:** the caps' loops matched one to one; a convex straight outline or a circle
 //!   with separated round holes (the profiles the separation proof covers).
 //! - **The volume:** the section's area interval, widened by the strip the corridor allows,
@@ -154,10 +155,13 @@ fn net_of(s: &Surface) -> Option<Net> {
     Some((rows, nurb.u_knots().to_vec(), nurb.v_knots().to_vec()))
 }
 
-/// A whole bound on how far the wall strays across the direction `d` over `height`: a plane's
-/// normal against `d`, a cylinder's axis against it, a ruled net's rows against it (positive
-/// weights make the hull a bound on the surface). `None` where none is proved.
-fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Option<f64> {
+/// A whole bound on how far the wall strays across the direction `d` (a unit vector) over
+/// `height`: a plane's normal against `d`, a cylinder's axis against it, an extrusion's
+/// direction against it (its rulings are straight along that direction, whatever its
+/// generator), a ruled net's rows against it (positive weights make the hull a bound on the
+/// surface). `None` where none is proved. Shared with the groove weld's walls
+/// (`crate::weld::groove`).
+pub(crate) fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Option<f64> {
     if let Some((_, n)) = plane_of(surface) {
         let error = 1024.0
             * f64::EPSILON
@@ -165,6 +169,15 @@ fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Opti
         return Some((n.dot(d).abs() + error) * height * 2.0);
     }
     if let Some((_, a, _)) = cylinder_of(surface) {
+        return Some((a.cross(d).length() + 1024.0 * f64::EPSILON) * height * 4.0);
+    }
+    if let SurfaceKind::SurfOfExtrusion(x) = surface.kind() {
+        let e = x.extrusion_vec;
+        let length = e.length();
+        if !(e.x.is_finite() && e.y.is_finite() && e.z.is_finite() && length > 0.0) {
+            return None;
+        }
+        let a = e * (1.0 / length);
         return Some((a.cross(d).length() + 1024.0 * f64::EPSILON) * height * 4.0);
     }
     let (points, _, _) = net_of(surface)?;

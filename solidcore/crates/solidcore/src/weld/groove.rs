@@ -5,8 +5,13 @@
 //! section, read from the parts ([`GrooveSection`]), and [`fill`], which fills it with the
 //! user's options and returns the weld ([`GrooveWeld`]). Nothing here sees or changes a part.
 //! For now the section is plain planar geometry the caller passes in (the two walls in the
-//! plane square to the joint); reading it from the parts, and the body along the joint, are
-//! the next steps of #18500.
+//! plane square to the joint); reading it from the parts is the next step of #18500.
+//!
+//! **Along a straight joint** the weld is its section swept along the joint ([`body`], the
+//! kernel's linear sweep of the section's curves), which is the weld exactly only where every
+//! groove face runs straight along the joint: [`wall_straying`] proves that from the faces'
+//! own geometry (planes square to the joint, cylinders and extrusions along it, nets ruled
+//! along it), or says it cannot. It reads the parts and never changes them.
 //!
 //! | Rust              | What it is                                                           |
 //! |-------------------|----------------------------------------------------------------------|
@@ -16,6 +21,8 @@
 //! | [`fill`]          | The weld: the groove filled, closed by its faces                     |
 //! | [`GrooveWeld`]    | The weld's section, the groove's and the filled depth, its notes     |
 //! | [`GrooveNote`]    | What the weld tool tells the user about a weld it built              |
+//! | [`wall_straying`] | A proved bound on how far groove faces stray across the joint        |
+//! | [`body`]          | The weld's body along a straight joint: its section swept            |
 //! | [`WeldFailure`]   | Why a weld is refused (shared by every weld type, `error::weld`)     |
 //!
 //! The options have no defaults here: the caller (ops) sets them (a flush face, a blend
@@ -78,9 +85,14 @@
 use std::f64::consts::TAU;
 
 use crate::error::{Failure, Fit, FitMeasure, Reason, Result, SolidError};
-use crate::math::{Point2, Vec2};
+use crate::eval::Frame;
+use crate::kernel::Kernel;
+use crate::math::{Point2, Vec2, Vec3};
+use crate::prism::extrude::extrude_region;
+use crate::prism::measure::wall_error;
 use crate::prism::path_export::{bulge_arc, Vertex};
 use crate::prism::profile::{check_regions, Loop2, ProfileRefusal, Region2, Seg2};
+use crate::topology::{Brep, FaceId};
 
 pub use crate::error::weld::{WeldFailure, WeldSide};
 
@@ -218,6 +230,50 @@ pub fn fill(section: &GrooveSection, options: &FillOptions) -> Result<GrooveWeld
         Ok(weld) => Ok(weld),
         Err(Crossing) => Err(concave_fit(section, options)?),
     }
+}
+
+/// A proved bound on how far the groove faces `faces` of `part` stray across the joint's
+/// direction `along` over `length` of joint: the largest over the faces, each read from its
+/// surface (a plane's normal against the direction, a cylinder's or an extrusion's axis, a ruled
+/// net's rows; the bound `prism::measure` proves a prism's walls with). `None` where it is not
+/// proved for some face: a face of another kind, or with no surface, or input not finite. The
+/// part is only read.
+#[must_use]
+pub fn wall_straying(part: &Brep, faces: &[FaceId], along: Vec3, length: f64) -> Option<f64> {
+    let size = along.length();
+    if !(size.is_finite() && size > 0.0 && length.is_finite() && length > 0.0) || faces.is_empty() {
+        return None;
+    }
+    let d = along * (1.0 / size);
+    // the work budget `prism::measure` gives one body's walls
+    let mut work = 262_144usize;
+    let mut worst: f64 = 0.0;
+    for &f in faces {
+        let surface = part.face(f).ok()?.surface.as_ref()?;
+        worst = worst.max(wall_error(surface, d, length, &mut work)?);
+    }
+    Some(worst)
+}
+
+/// The weld's body along a straight joint: `weld`'s section placed on `joint` (the section's x
+/// along the frame's x axis, its y, out of the face, along the frame's y axis, the joint along
+/// the frame's normal) and swept `length` along the joint, capped at both ends.
+///
+/// It is the weld exactly only where the groove faces run straight along the joint
+/// ([`wall_straying`]); the caller proves that first.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a length that is not finite and positive; those of the
+/// sweep.
+pub fn body(k: &mut Kernel, weld: &GrooveWeld, joint: &Frame, length: f64) -> Result<Brep> {
+    if !(length.is_finite() && length > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a joint length that is not finite and positive",
+        ));
+    }
+    extrude_region(k, joint, &weld.region, 0.0, length)
 }
 
 /// The weld crosses itself.

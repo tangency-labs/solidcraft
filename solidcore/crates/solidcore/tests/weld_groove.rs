@@ -1,7 +1,8 @@
 //! Groove welds (`weld::groove`): the section of every standard groove and of grooves that
 //! match no standard against closed-form areas, the contour of each face (a weld from one side
 //! has a flat root, a weld from both sides a second face of its own), the penetration depth and
-//! its notices, and the refusals.
+//! its notices, and the refusals; the body along a straight joint, and the proof that the
+//! part's groove faces run straight along it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -13,12 +14,19 @@ use std::f64::consts::{FRAC_PI_2, PI};
 
 use solidcore::error::Reason;
 use solidcore::error::Result;
+use solidcore::eval::Frame;
+use solidcore::mass::integrator::properties::brep_volume_default;
 use solidcore::math::{Point2, Vec2};
+use solidcore::prism::extrude::extrude_region;
 use solidcore::prism::profile::Seg2;
+use solidcore::prism::profile::{Loop2, Region2};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::weld::groove::{
-    fill, Contour, FillOptions, GrooveNote, GrooveSection, GrooveWeld, WeldFailure, WeldSide,
+    body, fill, wall_straying, Contour, FillOptions, GrooveNote, GrooveSection, GrooveWeld,
+    WeldFailure, WeldSide,
 };
 use solidcore::SolidError;
+use solidcore::{Brep, Kernel, Vec3};
 
 /// Gap between the plates in every example.
 const G: f64 = 1.0;
@@ -843,4 +851,173 @@ fn a_concave_face_past_half_a_circle_is_refused_with_the_half_circle() {
     );
     let fit = err.fit().unwrap().size;
     assert!((fit - 3.0).abs() < 1e-3, "fit {fit}");
+}
+
+/// The section's frame on a joint along z: the section's x along x, its y (out of the face)
+/// along y.
+fn joint_frame() -> Frame {
+    Frame {
+        origin: [0.0, 0.0, 0.0],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    }
+}
+
+fn valid(k: &mut Kernel, b: &mut Brep) {
+    b.use_arena_naming().unwrap();
+    let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
+    assert!(lines.is_empty(), "{lines:?}");
+}
+
+#[test]
+fn a_straight_groove_weld_is_its_section_swept_along_the_joint() {
+    let mut k = Kernel::default();
+    let (l, r) = v_walls(6.0, 60.0, 0.0);
+    let length = 120.0;
+    for face in [
+        Contour::Flat,
+        Contour::Convex { height: 1.5 },
+        Contour::ConvexBlended {
+            height: 1.5,
+            overlap: 1.5,
+        },
+        Contour::Concave { depth: 1.0 },
+    ] {
+        let w = section(&Case {
+            face,
+            ..weld(l.clone(), r.clone())
+        });
+        let area = w.region.signed_area().unwrap().value;
+        let mut b = body(&mut k, &w, &joint_frame(), length).unwrap();
+        valid(&mut k, &mut b);
+        let volume = brep_volume_default(&k, &mut b, 1e-9).unwrap();
+        assert!(
+            (volume - area * length).abs() <= 1e-7 * area * length,
+            "{face:?}: volume {volume} != {}",
+            area * length
+        );
+    }
+    let w = section(&weld(l, r));
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let err = body(&mut k, &w, &joint_frame(), bad).unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { .. }),
+            "{bad}: {err:?}"
+        );
+    }
+}
+
+/// A plate with the left wall of a groove: its outline in the section (counter-clockwise)
+/// swept `length` along z.
+fn plate(k: &mut Kernel, outline: Vec<Seg2>, length: f64) -> Brep {
+    let region = Region2 {
+        outer: Loop2 { segs: outline },
+        holes: Vec::new(),
+    };
+    extrude_region(k, &joint_frame(), &region, 0.0, length).unwrap()
+}
+
+fn closed(points: &[Point2]) -> Vec<Seg2> {
+    (0..points.len())
+        .map(|i| line(points[i], points[(i + 1) % points.len()]))
+        .collect()
+}
+
+#[test]
+fn the_parts_groove_faces_are_proved_straight_along_the_joint() {
+    let mut k = Kernel::default();
+    let length = 120.0;
+    // the left plate of a 60 degree V, 6 thick: its bevel, its underside, its far end, its top
+    let top = G / 2.0 + 6.0 * tan(30.0);
+    let left = plate(
+        &mut k,
+        closed(&[
+            p(-top, 0.0),
+            p(-40.0, 0.0),
+            p(-40.0, -6.0),
+            p(-G / 2.0, -6.0),
+        ]),
+        length,
+    );
+    let before = format!("{left:?}");
+    let faces = left.face_list();
+    assert_eq!(faces.len(), 6);
+    let along = Vec3::new(0.0, 0.0, 1.0);
+    let straying: Vec<Option<f64>> = faces
+        .iter()
+        .map(|&f| wall_straying(&left, &[f], along, length))
+        .collect();
+    // the four side faces run along the joint; the two ends stand square to it
+    let straight = straying
+        .iter()
+        .filter(|e| e.is_some_and(|e| e < 1e-9))
+        .count();
+    let ends = straying
+        .iter()
+        .filter(|e| e.is_some_and(|e| e >= length))
+        .count();
+    assert_eq!((straight, ends), (4, 2), "{straying:?}");
+    // a joint 1 degree off: the faces that run along x stray across it by about
+    // length * sin(1 degree) and more
+    let skew = Vec3::new(0.0, 1.0_f64.to_radians().sin(), 1.0_f64.to_radians().cos());
+    let side: Vec<_> = faces
+        .iter()
+        .copied()
+        .zip(&straying)
+        .filter(|(_, e)| e.is_some_and(|e| e < 1e-9))
+        .map(|(f, _)| f)
+        .collect();
+    assert!(wall_straying(&left, &side, skew, length).unwrap() > 1.0);
+    // nothing proved from bad input
+    assert!(wall_straying(&left, &side, Vec3::new(0.0, 0.0, 0.0), length).is_none());
+    assert!(wall_straying(&left, &side, along, f64::NAN).is_none());
+    assert!(wall_straying(&left, &[], along, length).is_none());
+    // the part is only read
+    assert_eq!(format!("{left:?}"), before);
+
+    // a right plate whose groove face is a free-form curve swept along the joint (an
+    // extrusion): proved straight along it too
+    let right = plate(
+        &mut k,
+        vec![
+            Seg2::Cubic {
+                p0: p(G / 2.0, -6.0),
+                p1: p(G / 2.0 + 1.0, -4.0),
+                p2: p(G / 2.0 + 2.0, -1.0),
+                p3: p(top, 0.0),
+            },
+            line(p(top, 0.0), p(40.0, 0.0)),
+            line(p(40.0, 0.0), p(40.0, -6.0)),
+            line(p(40.0, -6.0), p(G / 2.0, -6.0)),
+        ],
+        length,
+    );
+    let curved: Vec<_> = right
+        .face_list()
+        .iter()
+        .copied()
+        .filter(|&f| {
+            !matches!(
+                right.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                solidcore::surface::surface::SurfaceKind::Plane(_)
+            )
+        })
+        .collect();
+    assert_eq!(curved.len(), 1, "one face is not a plane");
+    assert!(
+        matches!(
+            right
+                .face(curved[0])
+                .unwrap()
+                .surface
+                .as_ref()
+                .unwrap()
+                .kind(),
+            solidcore::surface::surface::SurfaceKind::SurfOfExtrusion(_)
+        ),
+        "the swept curve is an extrusion"
+    );
+    let e = wall_straying(&right, &curved, along, length).expect("an extrusion is proved");
+    assert!(e < 1e-9, "{e}");
+    assert!(wall_straying(&right, &curved, skew, length).unwrap() > 1.0);
 }
