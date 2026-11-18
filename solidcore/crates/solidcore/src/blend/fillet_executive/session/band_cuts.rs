@@ -997,7 +997,10 @@ struct Band {
 impl Band {
     /// The band of the section `centre`, `rails` at the edge's point `at` (`chord` for a
     /// chamfer), along `dir` over `span`. `None` where the rails are opposite or together
-    /// (no section, as `section_breaks_through`).
+    /// (no section, as `section_breaks_through`). The section is taken square to `dir`
+    /// (`e1`, `e2` and the rails' chord across the edge), as a section of a straight edge
+    /// between two planes is to the solver's tolerance; a tilt `eps` moves `misses`' and
+    /// `line_crossings`' bounds by about `eps` times the span, below `tol`.
     fn new(
         centre: Point3,
         rails: [Point3; 2],
@@ -1350,7 +1353,9 @@ impl Band {
 /// Not the fork's (WR-707): the band of the convex `solver` along its edge `edge_id` (curve
 /// `curve` over `ivl`), with its events ([`Band::events`]), where it is known in closed form:
 /// a straight edge between two planes, its section solved at the edge's middle. `None`
-/// otherwise.
+/// otherwise. That solve runs before the events are known, so it also runs when the band
+/// turns out uncertified: it makes the same solver calls every station's `keeps` makes
+/// (with no `near` to carry), so the stations read nothing it leaves behind.
 ///
 /// # Errors
 /// Those of the topology queries, the section's solve and the evaluations.
