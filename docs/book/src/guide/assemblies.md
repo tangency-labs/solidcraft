@@ -826,9 +826,15 @@ the adjacent rim face), `cylinder` (`name`), `construction` (`feature` id), `ske
 Omit a field to leave that side unchanged; pass `null` to clear it. Supplying `occurrence`
 also checks the exact picked instance of a shared definition.
 
-### Automatic alignment preview preference
+### Alignment preview in the Joint dialog
 
-In **Preferences > Design**, **Automatically preview joint alignment on hover** controls the transient secondary-alignment preview, including hole rims. It is on by default, including for profiles saved before this setting existed. Turn it off to keep the confirmed pose while hovering and apply alignment only by explicitly clicking a reference. The setting does not change primary origins, saved joints, reference validation or the command API. Changes take effect in the open dialog on its next preview update; Apply, Cancel and Defaults follow the usual preference transactions.
+In the right-hand **Joint** or **Edit Joint** panel, **Options > Preview alignment on hover**
+controls temporary secondary-alignment previews, including hole rims.
+It starts enabled each time a dialog opens. The checkbox belongs to that dialog
+and is not saved in Preferences or in the design.
+Turn it off to keep the confirmed pose while hovering. Click a reference to apply
+its alignment in either mode. Toggling it does not change primary origins,
+saved joints, reference validation or the command API.
 
 ### Associative construction-axis references
 
