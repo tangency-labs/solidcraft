@@ -21,20 +21,14 @@ use solidcore_record::brep::Surface as BSurface;
 pub(crate) const MAX_EXTENSION: f64 = 0.05;
 
 /// One direction's control lines: each line runs along that direction, one per index across.
-type Lines = Vec<Vec<[f64; 4]>>;
+pub(super) type Lines = Vec<Vec<[f64; 4]>>;
 
 /// `surface` continued along u and v to reach `need` (`[[u_lo, u_hi], [v_lo, v_hi]]`, the box of
 /// the face's pcurves), where that box runs past its knot range; `None` where it does not, where
 /// the surface is no spline, or where a continuation is refused (too long, a direction the patch
 /// closes in to within `tol`, a weight that would not be positive, or knots that do not fit).
 pub(crate) fn extended(surface: &BSurface, need: [[f64; 2]; 2], tol: f64) -> Option<BSurface> {
-    let (rational, u_knots, v_knots, grid) = match surface {
-        BSurface::Spline { u_knots, v_knots, points } => {
-            (false, u_knots, v_knots, points.iter().map(|row| row.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect::<Lines>())
-        }
-        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (true, u_knots, v_knots, homogeneous.clone()),
-        _ => return None,
-    };
+    let (rational, u_knots, v_knots, grid) = grid(surface)?;
     let [need_u, need_v] = need;
     // Along u the lines are the grid's columns (one per v index); along v its rows.
     let mut columns = transpose(&grid)?;
@@ -45,6 +39,24 @@ pub(crate) fn extended(surface: &BSurface, need: [[f64; 2]; 2], tol: f64) -> Opt
         return None;
     }
     let (u_knots, v_knots) = (u.unwrap_or_else(|| u_knots.clone()), v.unwrap_or_else(|| v_knots.clone()));
+    from_grid(rational, u_knots, v_knots, rows)
+}
+
+/// A spline surface's knots and its control grid in homogeneous coordinates (`[i][j]`, i along
+/// u), and whether it is rational; `None` for another surface.
+pub(super) fn grid(surface: &BSurface) -> Option<(bool, &Vec<f64>, &Vec<f64>, Lines)> {
+    Some(match surface {
+        BSurface::Spline { u_knots, v_knots, points } => {
+            (false, u_knots, v_knots, points.iter().map(|row| row.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect::<Lines>())
+        }
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => (true, u_knots, v_knots, homogeneous.clone()),
+        _ => return None,
+    })
+}
+
+/// The spline surface of [`grid`]'s parts; `None` where a weight is not positive or a coordinate
+/// not finite.
+pub(super) fn from_grid(rational: bool, u_knots: Vec<f64>, v_knots: Vec<f64>, rows: Lines) -> Option<BSurface> {
     if rows.iter().flatten().any(|h| !(h[3] > 0.0 && h.iter().all(|x| x.is_finite()))) {
         return None;
     }
@@ -57,7 +69,7 @@ pub(crate) fn extended(surface: &BSurface, need: [[f64; 2]; 2], tol: f64) -> Opt
 }
 
 /// `grid[i][j]` as `[j][i]`; `None` for a ragged or empty grid.
-fn transpose(grid: &Lines) -> Option<Lines> {
+pub(super) fn transpose(grid: &Lines) -> Option<Lines> {
     let width = grid.first()?.len();
     if width == 0 || grid.iter().any(|r| r.len() != width) {
         return None;
@@ -94,7 +106,7 @@ fn extend_direction(knots: &[f64], lines: &mut Lines, [lo, hi]: [f64; 2], tol: f
 }
 
 /// Whether every line's two ends meet to within `tol`: the patch closes in that direction.
-fn closes(lines: &Lines, tol: f64) -> Option<bool> {
+pub(super) fn closes(lines: &Lines, tol: f64) -> Option<bool> {
     let euclid = |h: &[f64; 4]| [h[0] / h[3], h[1] / h[3], h[2] / h[3]];
     let mut all = true;
     for l in lines {
@@ -163,7 +175,7 @@ fn extend_high(knots: &[f64], lines: &mut Lines, to: f64) -> Option<Vec<f64>> {
 
 /// `line` with knot `t` inserted once (Boehm), `k` the last index of `t` in `knots` and `r` its
 /// multiplicity there.
-fn inserted(knots: &[f64], line: &[[f64; 4]], p: usize, k: usize, r: usize, t: f64) -> Option<Vec<[f64; 4]>> {
+pub(super) fn inserted(knots: &[f64], line: &[[f64; 4]], p: usize, k: usize, r: usize, t: f64) -> Option<Vec<[f64; 4]>> {
     let n = line.len();
     let mut out = Vec::new();
     for i in 0..=n {

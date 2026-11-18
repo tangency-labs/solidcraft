@@ -636,6 +636,70 @@ fn a_patch_is_not_continued_far_round_where_it_closes_or_where_its_trims_are_on_
     assert!(extend::extended(&cylinder, [[0.0, 4.0], [0.0, 1.01]], 1e-6).is_some());
 }
 
+/// A unit cylinder of height 1 as one rational patch closed in u: four quarter arcs over u in
+/// [0, 4], its seam at u = 0.
+fn whole_cylinder() -> BSurface {
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let ring = [
+        ([1.0, 0.0], 1.0),
+        ([1.0, 1.0], w),
+        ([0.0, 1.0], 1.0),
+        ([-1.0, 1.0], w),
+        ([-1.0, 0.0], 1.0),
+        ([-1.0, -1.0], w),
+        ([0.0, -1.0], 1.0),
+        ([1.0, -1.0], w),
+        ([1.0, 0.0], 1.0),
+    ];
+    let homogeneous = ring.iter().map(|&([x, y], w)| vec![[x * w, y * w, 0.0, w], [x * w, y * w, w, w]]).collect();
+    BSurface::RationalSpline {
+        u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        homogeneous,
+    }
+}
+
+/// A closed patch started elsewhere is the same surface: from its new start to the old seam at
+/// the same parameters, and past the old seam one period on. Its seam moves inside a span or onto
+/// a knot; a patch that does not close, or a start outside its range, is refused.
+#[test]
+fn a_closed_patch_started_elsewhere_is_the_same_surface_a_period_on() {
+    let s = whole_cylinder();
+    for (d, at) in [(0, 1.5), (0, 2.0), (0, 3.25)] {
+        let moved = reseam::reseamed(&s, d, at, 1e-9).expect("started elsewhere");
+        let range = knot_range(&moved);
+        assert!((range[0][0] - at).abs() < 1e-15 && (range[0][1] - (at + 4.0)).abs() < 1e-15, "{range:?}");
+        assert_eq!(range[1], [0.0, 1.0]);
+        let (old, new) = (SurfaceEval::new(&s).unwrap(), SurfaceEval::new(&moved).unwrap());
+        for i in 0..=40 {
+            let u = at + 4.0 * f64::from(i) / 40.0;
+            for v in [0.0, 0.3, 1.0] {
+                let back = if u > 4.0 { u - 4.0 } else { u };
+                let (p, q) = (new.point([u, v]).unwrap(), old.point([back, v]).unwrap());
+                assert!(crate::vec::Vec3Geom::len(p - q) < 1e-12, "at {at}, ({u}, {v}): {p:?} against {q:?}");
+            }
+        }
+    }
+    // Along v the cylinder does not close; its start, or a parameter past its range, is no seam.
+    assert!(reseam::reseamed(&s, 1, 0.5, 1e-9).is_none());
+    assert!(reseam::reseamed(&s, 0, 0.0, 1e-9).is_none());
+    assert!(reseam::reseamed(&s, 0, 4.5, 1e-9).is_none());
+    assert!(reseam::reseamed(&half_cylinder(), 0, 1.0, 1e-9).is_none());
+}
+
+/// The seam goes in the middle of the widest gap a face's boundary leaves round the closed
+/// direction, the gap across the old seam counted; none where that gap already holds the seam.
+#[test]
+fn a_seam_is_moved_into_the_widest_gap_round_the_face() {
+    // A face across the seam at 0 (of [0, 4]): from 3.6 round to 0.4, the gap 0.4 to 3.6.
+    assert_eq!(reseam::gap_middle(&[3.6, 3.8, 4.0, 0.0, 0.2, 0.4, -0.1], [0.0, 4.0]), Some(2.0));
+    // Values a period off are taken round it.
+    assert_eq!(reseam::gap_middle(&[7.6, 4.4], [0.0, 4.0]), Some(2.0));
+    // A face away from the seam: the widest gap is across it, so the seam stays.
+    assert_eq!(reseam::gap_middle(&[1.0, 2.0, 3.0], [0.0, 4.0]), None);
+    assert_eq!(reseam::gap_middle(&[], [0.0, 4.0]), None);
+}
+
 /// A face on a plane whose pcurves the kernel makes is trimmed within its own boundary's box,
 /// a quarter wider on every side (at least ten times the tolerance): a plane bounds nothing.
 #[test]

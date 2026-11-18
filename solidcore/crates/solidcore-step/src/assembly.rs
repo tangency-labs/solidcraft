@@ -42,6 +42,7 @@ use crate::topology::swept::Extent;
 
 mod extend;
 mod frames;
+mod reseam;
 pub(crate) mod seams;
 mod touching;
 mod wound;
@@ -207,6 +208,8 @@ pub struct Assembly<'t> {
     pub(crate) loops_left_touching: Vec<(u64, P3)>,
     /// Spline patches continued past their knot range to their face's trims ([`extend`]).
     pub(crate) patches_extended: usize,
+    /// Faces on a closed spline patch whose seam was moved off them ([`reseam`]).
+    pub(crate) reseamed: HashSet<usize>,
     /// Edges added with their vertices at the other ends of their intervals, turned round
     /// ([`Assembly::add_edge`]).
     pub(crate) edges_turned: usize,
@@ -240,6 +243,7 @@ impl<'t> Assembly<'t> {
             loops_joined: 0,
             loops_left_touching: Vec::new(),
             patches_extended: 0,
+            reseamed: HashSet::new(),
             edges_turned: 0,
             splines_closed: 0,
             points_unfolded: 0,
@@ -673,6 +677,9 @@ impl<'t> Assembly<'t> {
                 "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
                 self.poles_made_exact, self.tol
             ));
+        }
+        if !self.reseamed.is_empty() {
+            notes.push(format!("{} closed spline patches started elsewhere, off the face across their seam", self.reseamed.len()));
         }
         if self.patches_extended > 0 {
             notes.push(format!("{} spline patches continued past their knot range to their faces' trims", self.patches_extended));
@@ -1434,6 +1441,17 @@ impl<'t> Assembly<'t> {
                             poles.as_ref().and_then(|s| s.point(q))
                         };
                         let closed = matches!((ends_at(*a), ends_at(*b)), (Some(p), Some(q)) if p.dist(q) <= reach);
+                        // The patch started instead inside the widest gap the face's boundary
+                        // leaves round it ([`reseam`]), and the face's pcurves made on that
+                        // (once: a face whose loop still jumps is refused).
+                        if closed && form.is_none() && !self.reseamed.contains(&fi) {
+                            let along: Vec<f64> = pcs.iter().flatten().flat_map(|c| pcurve_samples(c, d)).collect();
+                            if let Some(moved) = reseam::gap_middle(&along, [*a, *b]).and_then(|at| reseam::reseamed(&surface, d, at, reach)) {
+                                self.reseamed.insert(fi);
+                                self.faces.get_mut(fi).ok_or("face reference")?.surface = moved;
+                                return self.face_pcurves(fi);
+                            }
+                        }
                         return Err(unsupported(if closed {
                             "a loop across a closed spline surface's seam without a seam edge".to_string()
                         } else {
@@ -1754,6 +1772,12 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
         uses.push(u);
     }
     Ok(uses)
+}
+
+/// Coordinate `d` of `c` at 33 parameters evenly along it.
+fn pcurve_samples(c: &Curve2, d: usize) -> Vec<f64> {
+    let Some([a, b]) = c.interval() else { return Vec::new() };
+    (0..=32).filter_map(|k| solidcore_ops::pcurve::eval(c, a + (b - a) * f64::from(k) / 32.0)?.get(d).copied()).collect()
 }
 
 /// A spline surface's parameter box: its knot ranges.
