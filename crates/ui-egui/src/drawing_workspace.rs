@@ -39,8 +39,11 @@ pub struct State {
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
-    /// The drawing open when Drawing was last left in this design: entering opens it again.
-    parked: Option<u64>,
+    /// What was selected in the other workspace when Drawing was entered (Design's selection while
+    /// in Drawing, the drawing's while not): each workspace gets its own back when entered again.
+    selection_away: Vec<solidcraft_engine::Sel>,
+    /// The session's selection is Drawing's (else Design's).
+    selection_is_drawings: bool,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
 }
@@ -57,16 +60,20 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         if !active(app) {
             app.drawing_workspace.previous_tab = Some(app.ui.tab.clone());
             app.ui.tab = "DRAWING LAYOUT".into();
+            swap_selection(app);
+            sync_history(app);
             open_a_drawing(app);
         }
     } else if active(app) {
-        // An open drawing locks the model, so leaving closes it. The engine closes no drawing
-        // under a sheet sketch, so the user stays in Drawing until the sketch is finished.
-        if let Some(open) = app.session.open_drawing {
-            app.run("drawing.close", serde_json::json!({}))?;
-            app.drawing_workspace.parked = Some(open);
+        // The drawing stays open, on its sheet and zoom, for when Drawing is entered again: the
+        // model's commands work with it open. A sheet sketch is Drawing's own edit mode, as a
+        // sketch is Design's, so the user finishes it before leaving.
+        if app.session.sheet_sketching() {
+            return Err("Finish or cancel the sheet sketch before leaving Drawing".into());
         }
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
+        swap_selection(app);
+        sync_history(app);
         app.drawing_workspace.options = None;
         app.drawing_workspace.placement = None;
         app.drawing_workspace.note = None;
@@ -85,20 +92,43 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Entering Drawing with no drawing open opens one: the drawing left last in this design, where
-/// its sheet and zoom are kept, else the design's first, fitted on its first sheet. A design
+/// Entering Drawing with no drawing open opens one: the design's first, fitted on its first
+/// sheet. A drawing left open when Drawing was left is still open, on its sheet and zoom. A design
 /// without drawings starts on the page that makes one.
 fn open_a_drawing(app: &mut SolveApp) {
     if app.session.open_drawing.is_some() {
         return;
     }
-    let parked = app.drawing_workspace.parked.take().filter(|id| app.session.doc.drawing(*id).is_some());
-    let Some(id) = parked.or_else(|| app.session.doc.drawings.first().map(|d| d.id)) else { return };
+    let Some(id) = app.session.doc.drawings.first().map(|d| d.id) else { return };
     match app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)})) {
-        Ok(_) if parked.is_none() => crate::drawing_sheet_page::fit(app),
-        Ok(_) => {}
+        Ok(_) => crate::drawing_sheet_page::fit(app),
         Err(error) => app.set_status(error, true),
     }
+}
+
+/// Puts the selection kept for the workspace being entered back, and keeps the one of the
+/// workspace being left: picking on a sheet never changes what Design has selected, and the
+/// reverse. Drawing's own is kept only while its objects are still there.
+pub(crate) fn swap_selection(app: &mut SolveApp) {
+    if app.drawing_workspace.selection_is_drawings == active(app) {
+        return;
+    }
+    app.drawing_workspace.selection_is_drawings = active(app);
+    let mut back = std::mem::take(&mut app.drawing_workspace.selection_away);
+    let session = &app.session;
+    back.retain(|item| match item {
+        solidcraft_engine::Sel::Drawing { drawing, object } => {
+            session.open_drawing == Some(*drawing) && session.doc.drawing(*drawing).is_some_and(|d| d.has_object(*object))
+        }
+        _ => true,
+    });
+    app.drawing_workspace.selection_away = std::mem::replace(&mut app.session.selection, back);
+}
+
+/// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the
+/// model's everywhere else, a drawing open or not.
+pub(crate) fn sync_history(app: &mut SolveApp) {
+    app.session.undo_in_model = !active(app);
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -919,34 +949,94 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Leaving Drawing closes the drawing, so the model can be changed in Design; coming back opens
-    /// the same drawing. Undo works on what is open: the drawing's steps in Drawing, the model's in
-    /// Design.
+    /// Leaving Drawing leaves the drawing open: the model changes in Design with it open, and coming
+    /// back finds the same drawing. Undo takes the steps of the workspace shown: the drawing's in
+    /// Drawing, the model's in Design and Render.
     #[test]
-    fn leaving_drawing_closes_the_drawing_and_coming_back_opens_it() {
+    fn leaving_drawing_keeps_the_drawing_open_and_each_workspace_undoes_its_own() {
         let mut h = Harness::new();
         let drawing = drawing_with_a_view(&mut h);
         crate::workspace::enter(&mut h.app, "design").unwrap();
         assert!(!active(&h.app));
-        assert!(h.app.session.open_drawing.is_none(), "leaving Drawing closes the drawing");
+        assert_eq!(h.app.session.open_drawing, drawing, "leaving Drawing keeps the drawing open");
         h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
         let features = h.app.session.doc.features.len();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
-        assert_eq!(h.app.session.open_drawing, drawing, "the same drawing opens again");
+        assert_eq!(h.app.session.open_drawing, drawing, "the same drawing");
         let views = |h: &Harness| h.app.session.drawing("test").unwrap().views.len();
         assert_eq!(views(&h), 1);
         h.app.run("edit.undo", serde_json::json!({})).unwrap();
         assert_eq!(views(&h), 0, "undo in Drawing takes back the drawing's step");
         assert_eq!(h.app.session.doc.features.len(), features, "and not the model's");
         crate::workspace::enter(&mut h.app, "render").unwrap();
-        assert!(h.app.session.open_drawing.is_none(), "Render leaves Drawing the same way");
+        assert_eq!(h.app.session.open_drawing, drawing, "Render leaves Drawing the same way");
         crate::workspace::enter(&mut h.app, "design").unwrap();
         h.app.run("edit.undo", serde_json::json!({})).unwrap();
         assert_eq!(h.app.session.doc.features.len(), features - 1, "undo in Design takes back the model's step");
+        assert_eq!(views(&h), 0, "and leaves the drawing's alone");
     }
 
-    /// The drawing left last in this design comes back, not the design's first; a design opened
-    /// afresh starts on its first drawing.
+    /// With a drawing open, a model edit in Design (the box's length) works, and the drawing's view
+    /// of it is out of date when Drawing is entered again. Drawing → Design → Drawing keeps the
+    /// drawing on the same sheet and zoom, and Design's tab, selection, camera and history are as
+    /// Design left them.
+    #[test]
+    fn workspaces_keep_their_own_state_and_model_edits_mark_the_views() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.ui.tab = "SURFACE".into();
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        h.app.run("select.set", serde_json::json!({"items":[{"type":"body","name":body}]})).unwrap();
+        let (selected, cam, undo, redo) = (h.app.session.selection.clone(), h.app.cam, h.app.session.undo.len(), h.app.session.redo.len());
+        assert!(!selected.is_empty());
+
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        let first = h.app.session.drawing("test").unwrap().sheets[0].id;
+        solidcraft_engine::drawing_scene::extract(&mut h.app.session, first).unwrap();
+        while solidcraft_engine::drawing_scene::step(&mut h.app.session) {}
+        let current = h.app.run("drawing.status", serde_json::json!({})).unwrap();
+        assert_eq!(current["views"][0]["status"], "current", "{current}");
+        h.app.run("drawing.sheet.add", serde_json::json!({"name":"Second"})).unwrap();
+        h.frames(3);
+        let second = h.app.session.drawing("test").unwrap().sheets[1].id;
+        select_sheet(&mut h.app, second);
+        h.frames(3);
+        let view = h.app.session.drawing("test").unwrap().views[0].id;
+        let picked = serde_json::json!({"type":"drawing","drawing":solidcraft_engine::doc::ids::encode(drawing.unwrap()),"object":solidcraft_engine::doc::ids::encode(view)});
+        h.app.run("select.set", serde_json::json!({"items":[picked]})).unwrap();
+        let sheet_selection = h.app.session.selection.clone();
+        let page = |h: &Harness| {
+            let shown = crate::drawing_sheet_page::inspect(&h.app);
+            (shown["drawing"].clone(), shown["sheet"].clone(), shown["zoom"].clone(), shown["visible_mm"].clone())
+        };
+        let shown = page(&h);
+        assert_eq!(shown.1, serde_json::json!(solidcraft_engine::doc::ids::encode(second)));
+        let drawing_steps = h.app.session.undo.len();
+
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.frames(3);
+        assert_eq!(h.app.ui.tab, "SURFACE", "Design's tab");
+        assert_eq!(h.app.session.selection, selected, "Design's selection");
+        assert_eq!(h.app.cam, cam, "Design's camera");
+        assert_eq!(h.app.session.undo.len(), drawing_steps, "the drawing's new sheet is its own step");
+        assert!(undo < drawing_steps && h.app.session.redo.len() == redo);
+        let block = h.app.session.doc.features[0].id;
+        h.app.run("timeline.edit", serde_json::json!({"feature": block.to_string(), "set": {"length": 60}})).unwrap();
+        assert_eq!(h.app.session.open_drawing, drawing, "the model edit leaves the drawing open");
+        let status = h.app.run("drawing.status", serde_json::json!({})).unwrap();
+        assert_eq!(status["views"][0]["status"], "out_of_date", "the view of the edited box: {status}");
+
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.open_drawing, drawing, "the same drawing");
+        assert_eq!(active_sheet(&h.app), Some(second), "on the same sheet");
+        assert_eq!(page(&h), shown, "at the same zoom and place");
+        assert_eq!(h.app.session.selection, sheet_selection, "with its own selection");
+    }
+
+    /// The drawing open when Drawing was left is still open when it is entered again, not the
+    /// design's first; a design opened afresh starts on its first drawing.
     #[test]
     fn the_drawing_left_last_comes_back_not_the_first() {
         let mut h = Harness::new();
@@ -956,18 +1046,20 @@ mod tests {
         let (first, later) = (ids[0], ids[1]);
         h.app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(later)})).unwrap();
         crate::workspace::enter(&mut h.app, "design").unwrap();
-        assert!(h.app.session.open_drawing.is_none());
+        assert_eq!(h.app.session.open_drawing, Some(later));
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
         assert_eq!(h.app.session.open_drawing, Some(later), "the drawing left last");
         crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.run("drawing.close", serde_json::json!({})).unwrap();
         reset_document(&mut h.app);
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
         assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
     }
 
-    /// A sheet sketch keeps its drawing open: leaving Drawing waits until it is finished.
+    /// A sheet sketch is Drawing's edit mode: leaving Drawing waits until it is finished, and the
+    /// drawing then stays open.
     #[test]
-    fn a_sheet_sketch_keeps_the_drawing_open_until_it_is_finished() {
+    fn a_sheet_sketch_keeps_the_user_in_drawing_until_it_is_finished() {
         let mut h = Harness::new();
         let drawing = drawing_with_a_view(&mut h);
         let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
@@ -975,9 +1067,12 @@ mod tests {
         assert!(crate::workspace::enter(&mut h.app, "design").is_err());
         assert!(active(&h.app));
         assert_eq!(h.app.session.open_drawing, drawing);
+        let refused = h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap_err();
+        assert!(refused.contains("a sheet sketch is being edited"), "{refused}");
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();
         crate::workspace::enter(&mut h.app, "design").unwrap();
-        assert!(h.app.session.open_drawing.is_none());
+        assert_eq!(h.app.session.open_drawing, drawing);
+        h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
     }
 
     #[test]

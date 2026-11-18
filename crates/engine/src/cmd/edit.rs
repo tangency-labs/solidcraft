@@ -291,7 +291,7 @@ fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
 }
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let at = latest(&s.undo, s.open_drawing).ok_or_else(|| nothing(s, "undo"))?;
+    let at = latest(&s.undo, s.history_part()).ok_or_else(|| nothing(s, "undo"))?;
     let prev = s.undo.get(at).cloned().ok_or_else(|| nothing(s, "undo"))?;
     let now = go_to(s, prev, "edit.undo")?;
     s.undo.remove(at);
@@ -301,7 +301,7 @@ fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let at = latest(&s.redo, s.open_drawing).ok_or_else(|| nothing(s, "redo"))?;
+    let at = latest(&s.redo, s.history_part()).ok_or_else(|| nothing(s, "redo"))?;
     let next = s.redo.get(at).cloned().ok_or_else(|| nothing(s, "redo"))?;
     let now = go_to(s, next, "edit.redo")?;
     s.redo.remove(at);
@@ -352,14 +352,14 @@ fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
     ))
 }
 
-/// Takes the latest of `steps` on `part` (the open drawing, else the model): undo and redo go
-/// through one part's steps, and leave the others' where they are.
+/// Takes the latest of `steps` on `part` ([`Session::history_part`]: the open drawing, else the
+/// model): undo and redo go through one part's steps, and leave the others' where they are.
 fn latest(steps: &[Snapshot], part: Option<u64>) -> Option<usize> {
     steps.iter().rposition(|step| step.part == part)
 }
 
 fn nothing(s: &Session, what: &str) -> EngineError {
-    match s.open_drawing {
+    match s.history_part() {
         Some(_) => EngineError::Other(format!("nothing to {what} in this drawing (close it to {what} in the model)")),
         None => EngineError::Other(format!("nothing to {what}")),
     }
@@ -368,8 +368,8 @@ fn nothing(s: &Session, what: &str) -> EngineError {
 /// Put the session at `snap`; returns where it was, under the same label. A drawing's step puts
 /// back only that drawing. The model's step puts back the design as it was, but keeps each
 /// drawing the design had as it is now: each part's steps are undone in that part only. Neither
-/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's while
-/// none is.
+/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's with a
+/// drawing open or not.
 fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     let was = Snapshot { part: snap.part, section: snap.section.as_ref().map(|_| s.section_state()), ..Snapshot::of(s, &snap.label) };
     let mut snap = match snap.part {
