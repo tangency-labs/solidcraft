@@ -291,6 +291,9 @@ pub trait App {
     /// This lets an app ignore pointer motion that cannot change anything it shows, instead of
     /// painting every frame the pointer moves.
     ///
+    /// Only the root viewport's events are put to the app: the event does not say which window
+    /// it came from, so another window's keep eframe's default.
+    ///
     /// Only native windows have winit events; the web backend never calls this.
     #[cfg(not(target_arch = "wasm32"))]
     fn repaint_on_window_event(&mut self, _event: &winit::event::WindowEvent) -> Option<bool> {
@@ -301,7 +304,8 @@ pub trait App {
     /// frame. This is [`Self::repaint_on_window_event`] for events that come from a device
     /// rather than a window; on some platforms pointer motion arrives here
     /// ([`winit::event::DeviceEvent::MouseMotion`]) instead of as a window event, so an app that
-    /// ignores pointer motion must answer both.
+    /// ignores pointer motion must answer both. Only motion delivered to the root viewport is put
+    /// to the app.
     ///
     /// Only native windows have winit events; the web backend never calls this.
     #[cfg(not(target_arch = "wasm32"))]
