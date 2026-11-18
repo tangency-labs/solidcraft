@@ -2593,7 +2593,8 @@ fn shaft_with_coil_pattern(doc: &mut Document, count: Option<usize>) -> (f64, Co
     };
     doc.add_feature(shaft, Some("Shaft")).unwrap();
     // A groove that climbs 120 mm a turn around the shaft's wall: over the shaft's height it
-    // runs a third of a turn, and the copies of it round the shaft are 18° apart.
+    // runs a third of a turn, and the copies of it round the shaft are a twelfth of a turn
+    // apart.
     let groove: FeatureKind = serde_json::from_value(serde_json::json!({
         "type": "coil", "base": [0, 0, 0], "axis": [0, 0, 1], "diameter": "20", "pitch": "120",
         "turns": "1", "section_size": "0.5", "section": "circular", "operation": "cut",
@@ -2609,7 +2610,7 @@ fn shaft_with_coil_pattern(doc: &mut Document, count: Option<usize>) -> (f64, Co
         doc.add_feature(pattern, Some("Grooves")).unwrap();
     }
     let mut model = Model::new();
-    let work = counted(|| model.evaluate(&doc));
+    let work = counted(|| model.evaluate(doc));
     assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
     (disc_volume(&model), work)
 }
@@ -2620,18 +2621,19 @@ fn shaft_with_coil_pattern(doc: &mut Document, count: Option<usize>) -> (f64, Co
 #[test]
 fn a_circular_pattern_of_a_coil_cut_cuts_its_copies_at_once() {
     // The groove wraps round the shaft, so every copy's box is the whole cylinder and the
-    // copies' boxes meet: their exact shapes decide whether they are apart. Telling nineteen
-    // of them apart took a union for each of their 171 pairs, and minutes on the design of
-    // #17632.
+    // copies' boxes meet: their exact shapes decide whether they are apart. Telling the
+    // forty-nine copies of a pattern of fifty apart took a union for each of their 1176 pairs,
+    // and minutes on the design of #17632. The copies are cut in two groups, and each group is
+    // told apart with one union.
     let mut doc = Document::new("grooved shaft");
-    let (volume, work) = shaft_with_coil_pattern(&mut doc, Some(20));
-    assert_eq!((work.cut_tools, work.apart_unions), (1, 1), "{work:?}");
-    // The shaft less twenty grooves: twenty times what one groove takes away.
+    let (volume, work) = shaft_with_coil_pattern(&mut doc, Some(50));
+    assert_eq!((work.cut_tools, work.apart_unions), (2, 2), "{work:?}");
+    // The shaft less fifty grooves: fifty times what one groove takes away.
     let mut doc = Document::new("one groove");
     let (one, _) = shaft_with_coil_pattern(&mut doc, None);
     let shaft = std::f64::consts::PI * 100.0 * 40.0;
     let taken = shaft - volume;
-    assert!((taken - 20.0 * (shaft - one)).abs() < 0.02 * taken, "{taken} against {}", 20.0 * (shaft - one));
+    assert!((taken - 50.0 * (shaft - one)).abs() < 0.02 * taken, "{taken} against {}", 50.0 * (shaft - one));
 }
 
 /// A 100 x 100 x 2 plate with a 3 mm hole at (5, 5) drilled from its top, in a 10 x 9 grid on a
