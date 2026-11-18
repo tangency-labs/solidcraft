@@ -189,11 +189,38 @@ fn a_component_for_another_api_version_is_refused_in_plain_words() {
         matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0")) && reason.contains("update")),
         "{failure}"
     );
-    assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+    // Refused while the component is checked, before any transaction starts: nothing to roll back.
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 0, 0, 0));
     // A component naming two versions the host runs is refused too: it was built against neither.
     let source = format!("{prefix}\n(import \"{package}/storage@0.1.0\" (instance))\n)");
     let failure = run(&mut App::default(), &manifest(), &wat::parse_str(source).unwrap(), "make", &json!({})).unwrap_err();
     assert!(matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains("mixes")), "{failure}");
+    // A version named inside an exported instance counts like one at the top.
+    let source = format!(
+        "{prefix}\n(instance $inner)\n(instance $compat (export \"{package}/storage@0.9.0\" (instance $inner)))\n(export \"compat\" (instance $compat))\n)"
+    );
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0"))),
+        "{failure}"
+    );
+    // Past 4096 exports the scan stops with an error rather than leave the rest unread.
+    let exports: String = (0..4097).map(|i| format!("(export \"e{i}\" (instance $inner))\n")).collect();
+    let source = format!("{prefix}\n(instance $inner)\n{exports})");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert_eq!(failure, HostError::LimitExceeded { limit: "plugin export interface count or depth".into() });
+    // Below our scan budget, Wasmtime's own instance-index limit still becomes a host limit.
+    let exports: String = (0..1001).map(|i| format!("(export \"e{i}\" (instance $inner))\n")).collect();
+    let source = format!("{prefix}\n(instance $inner)\n{exports})");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(matches!(&failure, HostError::LimitExceeded { limit } if limit.contains("instances count exceeds limit")), "{failure}");
+    // An unsupported interface after those aliases is refused before validation hits that limit.
+    let source = format!("{prefix}\n(instance $inner)\n{exports}(export \"{package}/storage@0.9.0\" (instance $inner)))");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0")) && reason.contains("update")),
+        "{failure}"
+    );
 }
 #[test]
 fn a_command_plugin_built_against_wit_0_1_still_runs() {
