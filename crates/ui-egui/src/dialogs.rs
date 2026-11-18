@@ -1908,10 +1908,15 @@ impl Dialog {
             .sketch(id)
             .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
             .unwrap_or_default();
-        let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
             return false;
         }
+        // Selecting a sketch from Browser or History also changes the context for Invert,
+        // even if the user then clears every profile from this input (#18704).
+        if matches!(self.kind, Kind::Extrude { .. }) {
+            self.profile_invert_sketch = Some(id);
+        }
+        let Some(input) = self.inputs.first_mut() else { return false };
         input.items = profiles;
         self.profile_selection_changed = true;
         self.focus = true;
