@@ -1199,10 +1199,30 @@ pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>
     }
     let matched = if all_closed { closed_sections(sections)? } else { open_sections(sections)? };
     let lofted = crate::loft_rails::railed(&matched, all_closed, rails, fit)?;
-    let (r, columns) = imp::lofted(&lofted)?;
-    let numbers =
-        |ks: &[usize]| -> BTreeSet<usize> { ks.iter().flat_map(|k| matched.iter().filter_map(|s| s.numbers.get(*k)).flatten()).copied().collect() };
-    let h = columns.iter().map(|ks| record::profile(numbers(ks).iter())).collect();
+    let curves: usize = lofted.iter().map(Vec::len).sum();
+    if curves > solidcore_ops::sweep::MAX_CURVES {
+        return Err(invalid(format!(
+            "a surface loft takes at most {} curves in all its sections and stations, this one has {curves}",
+            solidcore_ops::sweep::MAX_CURVES
+        )));
+    }
+    let (r, sources) = imp::lofted(&lofted)?;
+    let h = match sources {
+        // each face named by the curves of every section in the columns of its curves (curve k
+        // of a section of n is any s n + k)
+        Some(faces) => {
+            let n = matched.first().map_or(0, |s| s.curves.len());
+            faces
+                .iter()
+                .map(|cs| {
+                    let ks: BTreeSet<usize> = cs.iter().filter_map(|c| c.checked_rem(n)).collect();
+                    record::profile(ks.iter().flat_map(|k| matched.iter().filter_map(|s| s.numbers.get(*k)).flatten()))
+                })
+                .collect()
+        }
+        // a skin the kernel did not trace: its faces are named from their geometry
+        None => vec![record::generated(Vec::new()); r.faces.len()],
+    };
     sheet_of(vec![(r, h)], false, &[])
 }
 
@@ -1625,9 +1645,10 @@ mod imp {
 
     /// A loft's sheet: each section's (and station's) curves in loft order, the k-th of each
     /// making column k, in one skin with no caps (`solidcore_ops::sweep::loft_sheet`), ruled
-    /// between two, cubic through four or more; with each record face's columns. SMLib's own check
+    /// between two, cubic through four or more; with the curves each record face is skinned
+    /// from (curve k of section s as s n + k), when the kernel traced them. SMLib's own check
     /// accepts it.
-    pub(super) fn lofted(sections: &[Vec<solidcraft_geom::bspline::CurveN<4>>]) -> Result<(Brep, Vec<Vec<usize>>)> {
+    pub(super) fn lofted(sections: &[Vec<solidcraft_geom::bspline::CurveN<4>>]) -> Result<(Brep, Option<Vec<Vec<usize>>>)> {
         use solidcore_ops::sweep::Curve as OpsCurve;
         let curves: Vec<Vec<OpsCurve>> = sections
             .iter()
@@ -1642,13 +1663,13 @@ mod imp {
             .collect();
         let degree = u32::try_from(sections.len().saturating_sub(1).clamp(1, 3)).unwrap_or(3);
         let ops = |e: solidcore_ops::Error| failed(format!("surface loft: {e}"));
-        let (body, columns) = solidcore_ops::sweep::loft_sheet(&curves, degree).map_err(ops)?;
+        let (body, sources) = solidcore_ops::sweep::loft_sheet(&curves, degree).map_err(ops)?;
         let (r, _) = body.to_record().map_err(ops)?;
         let check = SmBrep::from_record(&r, true).and_then(|b| b.check(CheckLevel::All)).map_err(sm("surface loft"))?;
         if !check.is_valid() {
             return Err(failed(format!("SMLib surface loft: SMLib's check refuses the result: {check}")));
         }
-        Ok((r, columns))
+        Ok((r, sources))
     }
 }
 
@@ -1866,12 +1887,11 @@ mod tests {
     }
 
     /// A sheet lofted through three open sections of two cubics each, meeting tangent at x = 5
-    /// at a height and with handles that change from one plane to the next, is one smooth sheet:
-    /// its two walls share the seam between them and meet tangent along it (#14048, where each
-    /// column was skinned on its own and the walls ended up to 0.33 mm apart). So Split Body by
-    /// either wall cuts with the whole sheet: a box it crosses comes out as two closed bodies,
-    /// each the box's five faces it reaches and the two walls' pieces, whose volumes add up to
-    /// the box.
+    /// at a height and with handles that change from one plane to the next, is one sheet: its
+    /// two walls share the seam between them (#14048, where each column was skinned on its own
+    /// and the walls ended up to 0.33 mm apart, with an edge of their own each). Split Body by
+    /// either wall then cuts a box it crosses into two closed bodies, each the box's five faces
+    /// it reaches and the two walls' pieces, whose volumes add up to the box.
     #[test]
     fn loft_sheet_walls_through_three_sections_share_their_seam() {
         let at = |z: f64| Plane::XY.offset(z);

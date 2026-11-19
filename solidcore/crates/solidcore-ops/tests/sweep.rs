@@ -1117,26 +1117,27 @@ fn two_lines(y: [f64; 3], z: f64) -> Vec<Curve> {
 }
 
 /// A sheet lofted through three sections of two lines each, whose corners move differently from
-/// one section to the next, is one skin: its two faces share the seam between them
-/// (tangency-labs/solidcraft#14048, where each column skinned on its own took parameters of its
-/// own and the seams parted). Each face is traced to its one column, the face between the first
-/// lines lying over x 0…5 and the other over x 5…10.
+/// one section to the next (the middle one unevenly, so each column's chords differ), is one
+/// skin: its two faces share the seam between them (tangency-labs/solidcraft#14048, where each
+/// column skinned on its own took parameters of its own and the seams parted). Each face is
+/// traced to its one column, the face between the first lines lying over x 0…5 and the other
+/// over x 5…10: curves `k`, `2 + k` and `4 + k`.
 #[test]
 fn a_loft_sheet_s_columns_share_their_seams() {
     let sections = [
         two_lines([0.0, 0.0, 0.0], 0.0),
-        two_lines([1.0, 6.0, 1.0], 5.0),
+        two_lines([1.0, 6.0, 3.0], 5.0),
         two_lines([0.0, 2.0, 0.0], 10.0),
     ];
-    let (b, columns) = loft_sheet(&sections, 2).unwrap();
+    let (b, sources) = loft_sheet(&sections, 2).unwrap();
     assert_eq!(b.counts().unwrap(), [2, 7, 6], "two faces sharing one seam");
     let (record, _) = b.to_record().unwrap();
     assert_eq!(record.edges.iter().filter(|e| e.uses.len() == 1).count(), 6);
-    assert_eq!(columns.len(), 2, "{columns:?}");
-    for (f, ks) in columns.into_iter().enumerate() {
-        let &[k] = &ks[..] else {
-            panic!("face {f}: columns {ks:?}")
-        };
+    let sources = sources.expect("traced");
+    assert_eq!(sources.len(), 2, "{sources:?}");
+    for (f, curves) in sources.into_iter().enumerate() {
+        let k = curves.first().copied().unwrap_or(9) % 2;
+        assert_eq!(curves, [k, 2 + k, 4 + k], "face {f}");
         let want = [5.0 * k as f64, 5.0 * k as f64 + 5.0];
         let got = corners_x(&record, f);
         assert!(
@@ -1146,9 +1147,20 @@ fn a_loft_sheet_s_columns_share_their_seams() {
     }
 }
 
+/// Two sections, each a line drawn as two halves of equal length, lofted as one sheet: each
+/// section's halves continue each other at the same speed, so the skin has no corner there and
+/// the flat strip is one face, traced to all four curves.
+#[test]
+fn a_loft_sheet_face_across_columns_is_traced_to_each() {
+    let sections = [two_lines([0.0; 3], 0.0), two_lines([0.0; 3], 5.0)];
+    let (b, sources) = loft_sheet(&sections, 1).unwrap();
+    assert_eq!(b.counts().unwrap(), [1, 4, 4]);
+    assert_eq!(sources, Some(vec![vec![0, 1, 2, 3]]));
+}
+
 /// Squares of side 10, 8 and 10 at z = 0, 5 and 10 lofted as one sheet: a closed band of four
-/// faces, one for each side and traced to it, joined at the four corner seams; only the two
-/// squares are free.
+/// faces, one for each side and traced to that side in every section, joined at the four corner
+/// seams; only the two squares are free.
 #[test]
 fn a_loft_sheet_through_closed_sections_is_a_band() {
     let sections = [
@@ -1156,13 +1168,45 @@ fn a_loft_sheet_through_closed_sections_is_a_band() {
         square(1.0, 1.0, 8.0, 5.0),
         square(0.0, 0.0, 10.0, 10.0),
     ];
-    let (b, columns) = loft_sheet(&sections, 2).unwrap();
+    let (b, sources) = loft_sheet(&sections, 2).unwrap();
     assert_eq!(b.counts().unwrap(), [4, 12, 8]);
     let (record, _) = b.to_record().unwrap();
     assert_eq!(record.edges.iter().filter(|e| e.uses.len() == 1).count(), 8);
-    let mut seen: Vec<usize> = columns.concat();
-    seen.sort_unstable();
-    assert_eq!(seen, [0, 1, 2, 3], "one side a face: {columns:?}");
+    let sources = sources.expect("traced");
+    let mut sides: Vec<usize> = sources
+        .iter()
+        .map(|curves| {
+            let k = curves.first().copied().unwrap_or(99);
+            assert_eq!(curves, &[k, 4 + k, 8 + k], "one side in every section");
+            k
+        })
+        .collect();
+    sides.sort_unstable();
+    assert_eq!(sides, [0, 1, 2, 3], "one side a face: {sources:?}");
+}
+
+/// A square lofted to the square turned 45° (its corners at the first one's side midpoints) is a
+/// band of four twisted walls, each between one side of each section; every side is used once.
+#[test]
+fn a_loft_sheet_to_a_turned_square_is_a_band() {
+    let diamond = polygon(&[
+        [5.0, 0.0, 5.0],
+        [10.0, 5.0, 5.0],
+        [5.0, 10.0, 5.0],
+        [0.0, 5.0, 5.0],
+    ]);
+    let (b, sources) = loft_sheet(&[square(0.0, 0.0, 10.0, 0.0), diamond], 1).unwrap();
+    assert_eq!(b.counts().unwrap(), [4, 12, 8]);
+    let sources = sources.expect("traced");
+    for curves in &sources {
+        assert!(
+            curves.len() == 2 && curves[0] < 4 && curves[1] >= 4,
+            "one side of each section: {sources:?}"
+        );
+    }
+    let mut all = sources.concat();
+    all.sort_unstable();
+    assert_eq!(all, (0..8).collect::<Vec<_>>());
 }
 
 /// A loft sheet needs two sections or more, of one count of curves, and a degree of 1 to 3.

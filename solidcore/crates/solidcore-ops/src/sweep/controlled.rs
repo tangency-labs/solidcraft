@@ -358,7 +358,7 @@ fn build(
 }
 
 /// The refusal for a skin the kernel did not trace, by its reason.
-pub(super) fn not_traced(why: NotTraced) -> &'static str {
+fn not_traced(why: NotTraced) -> &'static str {
     match why {
         NotTraced::OpenProfiles => "a skin not traced to its profile curves: open profiles",
         NotTraced::SkinMovedKnots => {
