@@ -284,6 +284,20 @@ pub(crate) fn noted(e: &SolidError, r: Error) -> Error {
     noted_as(e.kind().code(), e.operation(), r)
 }
 
+/// What the call running on this thread noted last ([`noted`]), for work that tries something
+/// and gives it up to put back ([`note_back`]): a refusal it returns is the one noted before.
+pub(crate) type Note = Option<(u16, &'static str, &'static str)>;
+
+/// The note of the call running on this thread, to put back with [`note_back`].
+pub(crate) fn note() -> Note {
+    NOTED.try_with(Cell::get).ok().flatten()
+}
+
+/// Puts back a note taken with [`note`], forgetting what was noted since.
+pub(crate) fn note_back(n: Note) {
+    let _ = NOTED.try_with(|c| c.set(n));
+}
+
 /// [`noted`] for a kernel error already taken apart: its kind's code and its operation.
 pub(crate) fn noted_as(kind: u16, operation: &'static str, r: Error) -> Error {
     if in_call() {
@@ -385,8 +399,11 @@ pub fn take_failure_detail() -> Option<String> {
 
 /// What the last call on this thread that failed failed with, as stable data
 /// ([`FailureCode`]): for an application's failure reports, to group them by and to match a
-/// replay against, beside the typed error it words for its users. Every failure gives one, a
-/// refusal its answer carries included; a cancellation is no failure and gives none. Taken, as
+/// replay against, beside the typed error it words for its users. Every failure of a call the
+/// session runs gives one, a refusal its answer carries included; a cancellation is no failure
+/// and gives none. An argument an operation refuses before it starts a call is no call's
+/// failure and leaves none: an application that wants a code for it makes one
+/// ([`FailureCode::of_ops`]). Taken, as
 /// [`take_failure_detail`] is: the next call returns `None` until a call on this thread fails
 /// again, so an application takes it before a call (to drop an older one) and after the call
 /// fails.

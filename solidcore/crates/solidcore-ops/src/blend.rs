@@ -961,7 +961,7 @@ fn pass(
             Ok(Err(refusal)) => Ok(Err(refusal)),
             Err(e) => {
                 if let Some(why) = refused_turn {
-                    Ok(Err(Refused::Error(why)))
+                    Ok(Err(Refused::Error(crate::session::noted(&e, why))))
                 } else {
                     let (error, edge) = blend_failure(&s, e, call);
                     fit_edge = edge;
@@ -1744,8 +1744,10 @@ fn blend_on_body(
     // left them)
     if !stopped.roll_overs.is_empty() && made.is_err() {
         if let Some(input) = fresh.as_ref() {
-            // the faces the sessions log, put back where the passes are given up
+            // the faces the sessions log, and the kernel error the first call's refusal noted,
+            // put back where the passes are given up
             let log = k.blend_face_log.clone();
+            let note = crate::session::note();
             let rolled_input = brep_copy(k, input)?;
             let mut rolled_dropped = dropped.clone();
             let rolled = roll_over(
@@ -1778,7 +1780,10 @@ fn blend_on_body(
                     }));
                 }
                 Err(e) if e.is_cancelled() => return Err(e),
-                Ok(Err(_)) | Err(_) => k.blend_face_log = log,
+                Ok(Err(_)) | Err(_) => {
+                    k.blend_face_log = log;
+                    crate::session::note_back(note);
+                }
             }
         }
     }
@@ -1793,8 +1798,9 @@ fn blend_on_body(
     {
         if let Some(input) = fresh.as_ref() {
             // the faces the sessions log, put back where the copy is given up (its faces
-            // are not the result's)
+            // are not the result's), and the kernel error the first call's refusal noted
             let log = k.blend_face_log.clone();
+            let note = crate::session::note();
             let mut copy = brep_copy(k, input)?;
             let copy_list = copy.edge_list().to_vec();
             let mapped: Option<Vec<EdgeId>> = picked
@@ -1838,6 +1844,7 @@ fn blend_on_body(
                 }
             }
             k.blend_face_log = log;
+            crate::session::note_back(note);
         }
     }
     if stopped.overflow.is_some() {
