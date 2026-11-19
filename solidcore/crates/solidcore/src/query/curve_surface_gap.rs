@@ -250,14 +250,68 @@ fn minus(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
     }
 }
 
-/// The bound of one piece: `(end values, second-order term)`.
+/// A cut that keeps at least this share of its piece's slack has stopped shrinking it: the
+/// slack is the overshoot of the piece's UV box past its net's end, which a shorter piece
+/// halves while the box is wider than the trim's own overshoot, and keeps once it is not
+/// ([`PieceBound::closes`]).
+const SLACK_KEPT: f64 = 0.75;
+
+/// The bound of one piece of a bisection: its end values, its second-order term, the
+/// surface's slack past its net, and the term with the slack added (`h² / 8 sup |g''| +
+/// slack`, rounded up), the piece's bound being the end values plus the last.
+#[derive(Clone, Copy)]
+struct PieceBound {
+    ends: f64,
+    term: f64,
+    slack: f64,
+    with_slack: f64,
+}
+
+impl PieceBound {
+    /// A piece of no slack (`with_slack` the term itself).
+    fn exact(ends: f64, term: f64) -> Self {
+        Self {
+            ends,
+            term,
+            slack: 0.0,
+            with_slack: term,
+        }
+    }
+
+    /// `term` (an enclosure, rounded up here) with `slack` added.
+    fn with(ends: f64, term: Ivl, slack: f64) -> Option<Self> {
+        let b = Self {
+            ends,
+            term: term.hi,
+            slack,
+            with_slack: (term + Ivl::from(slack)).hi,
+        };
+        (b.term.is_finite() && b.with_slack.is_finite()).then_some(b)
+    }
+
+    /// Whether the piece closes: its second term with the slack is at most a `relative` of
+    /// its end values or `floor`; or its second term alone is and the cut that made it kept
+    /// at least [`SLACK_KEPT`] of its parent's slack `parent` (infinite for a first piece):
+    /// cutting it further would leave the slack as it is, so a piece held open by it would be
+    /// cut down to [`MAX_DEPTH`] all along its stretch and spend the [`MAX_PIECES`] the other
+    /// pieces need (#18166, `single_face_fillet1019_8`: a trim running past its surface's
+    /// net, the slack 1.3e-6, held the bound at 0.098 for a gap of 2.2e-4). Closing decides
+    /// only how tight the bound is, never whether it holds.
+    fn closes(&self, parent: f64, relative: f64, floor: f64) -> bool {
+        let at_most = (relative * self.ends).max(floor).max(CLOSE_ABSOLUTE);
+        self.with_slack <= at_most
+            || (self.term <= at_most && self.slack > 0.0 && self.slack >= SLACK_KEPT * parent)
+    }
+}
+
+/// The bound of one piece ([`second_term`]).
 fn piece(
     cn: &NurbsCurve,
     wn: &NurbsCurve,
     s: &NetSurface,
     a: f64,
     b: f64,
-) -> Result<Option<(f64, f64)>> {
+) -> Result<Option<PieceBound>> {
     let mut ends = 0.0_f64;
     for t in [a, b] {
         let at = Ivl::from(t);
@@ -280,7 +334,7 @@ fn piece(
     };
     let h = Ivl::from(b) - Ivl::from(a);
     let term = second_term(s, &wd, *c1, *c2, h)?;
-    Ok(term.map(|term| (ends, term)))
+    Ok(term.and_then(|(term, slack)| PieceBound::with(ends, term, slack)))
 }
 
 /// `ψ`'s value and derivatives up to `ld` over `t`, its value clamped to `range`: `ψ` is a
@@ -326,7 +380,7 @@ fn piece_reparametrised(
     s: &NetSurface,
     a: f64,
     b: f64,
-) -> Result<Option<(f64, f64)>> {
+) -> Result<Option<PieceBound>> {
     let Sides {
         curve: cn,
         trim: wn,
@@ -376,25 +430,26 @@ fn piece_reparametrised(
         let Some(m) = norm_upper(minus(cp, sw)) else {
             return Ok(None);
         };
-        let term = (h * Ivl::from(m) + Ivl::from(slack)).hi;
-        return Ok(term.is_finite().then_some((ends, term)));
+        return Ok(PieceBound::with(ends, h * Ivl::from(m), slack));
     }
     let cpp = plus(scaled(*c2, p1 * p1), scaled(*c1, p2));
     let term = second_term(s, &wd, cp, cpp, h)?;
-    Ok(term.map(|term| (ends, term)))
+    Ok(term.and_then(|(term, slack)| PieceBound::with(ends, term, slack)))
 }
 
 /// The second-order term of a piece of length `h` of `g = C~ - S(W)`, where `wd` are `W`'s
 /// derivatives over the piece and `c1`, `c2` the first two derivatives of the curve side `C~`
 /// there: `h^2 / 8 * sup |g''|`, or `h * sup |g'|` across a knot line the surface is only C^0
-/// across, plus the surface's slack past its net. `None` when it is not enclosed.
+/// across, enclosed; and apart from it the surface's slack past its net (the box's overshoot
+/// past the net's end times the first partials, [`NetSurface::partials`]). `None` when it is
+/// not enclosed.
 fn second_term(
     s: &NetSurface,
     wd: &[V3<Ivl>],
     c1: V3<Ivl>,
     c2: V3<Ivl>,
     h: Ivl,
-) -> Result<Option<f64>> {
+) -> Result<Option<(Ivl, f64)>> {
     let (Some(w1), Some(w2)) = (wd.get(1), wd.get(2)) else {
         return Ok(None);
     };
@@ -415,7 +470,7 @@ fn second_term(
             let Some(m) = norm_upper(gpp) else {
                 return Ok(None);
             };
-            (h * h * Ivl::from(m) * Ivl::from(0.125) + Ivl::from(slack)).hi
+            (h * h * Ivl::from(m) * Ivl::from(0.125), slack)
         }
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         // a knot line the surface is only C^0 across (a patch corner the curve ends on):
@@ -426,10 +481,10 @@ fn second_term(
             let Some(m) = norm_upper(minus(c1, sw)) else {
                 return Ok(None);
             };
-            (h * Ivl::from(m) + Ivl::from(slack)).hi
+            (h * Ivl::from(m), slack)
         }
     };
-    Ok(term.is_finite().then_some(term))
+    Ok(Some(term))
 }
 
 /// A proved upper bound on the distance from the curve `curve` to the surface `surface`
@@ -486,10 +541,11 @@ fn certified_gap(
     )
 }
 
-/// The bisection of `[lo, hi]` that bounds a gap `max |g|` from `piece`'s bound of each piece
-/// (its end values and its second-order term): a piece closes once its second term is at most a
-/// `relative` of its end values or `floor`, and one that cannot be cut further is bounded as it
-/// stands. `None` when some piece has no bound at all. Once a closed piece's bound is above
+/// The bisection of `[lo, hi]` that bounds a gap `max |g|` from `piece`'s [`PieceBound`] of
+/// each piece (the piece's bound its end values plus its second term with the slack): a piece
+/// closes as [`PieceBound::closes`] says (its second term small against its end values or
+/// `floor`, and its slack too unless the cut that made it no longer shrank it), and one that
+/// cannot be cut further is bounded as it stands. `None` when some piece has no bound at all. Once a closed piece's bound is above
 /// `over`, so is the whole bound, and the bisection stops there with an infinite bound (an
 /// `over` of `f64::INFINITY` never stops it): the pieces before it are cut exactly as without
 /// it, so the comparison of the bound with `over` is the same.
@@ -504,7 +560,7 @@ fn bisect(
     relative: f64,
     floor: f64,
     over: f64,
-    piece: impl Fn(f64, f64) -> Result<Option<(f64, f64)>>,
+    piece: impl Fn(f64, f64) -> Result<Option<PieceBound>>,
 ) -> Result<Option<f64>> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
         return Ok(None);
@@ -516,34 +572,37 @@ fn bisect(
             lo + (hi - lo) * (j as f64) / (first_pieces as f64)
         }
     };
-    let mut stack: Vec<(f64, f64, u32)> = Vec::new();
+    // (each piece with its parent's slack, infinite for a first piece)
+    let mut stack: Vec<(f64, f64, u32, f64)> = Vec::new();
     for i in 0..first_pieces {
         let (mut a, b) = (f(i), f(i + 1));
         let start = a;
         for &x in corners.iter().filter(|&&x| start < x && x < b) {
-            stack.push((a, x, 0));
+            stack.push((a, x, 0, f64::INFINITY));
             a = x;
         }
-        stack.push((a, b, 0));
+        stack.push((a, b, 0, f64::INFINITY));
     }
     stack.reverse();
     let mut worst = 0.0_f64;
     let mut made = stack.len();
-    while let Some((a, b, depth)) = stack.pop() {
+    while let Some((a, b, depth, parent)) = stack.pop() {
         let mid = 0.5 * (a + b);
         // (a piece that cannot be cut further is bounded as it is: the bound holds whether or
         // not the second term has shrunk, closing only makes it tight)
         let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
+        let mut slack = f64::INFINITY;
         match piece(a, b) {
-            Ok(Some((ends, term))) => {
-                let bound = (Ivl::from(ends) + Ivl::from(term)).hi;
-                if last || term <= (relative * ends).max(floor).max(CLOSE_ABSOLUTE) {
+            Ok(Some(p)) => {
+                let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
+                if last || p.closes(parent, relative, floor) {
                     if bound > over {
                         return Ok(Some(f64::INFINITY));
                     }
                     worst = worst.max(bound);
                     continue;
                 }
+                slack = p.slack;
             }
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // a box past the net, on a knot line of too low a continuity: a smaller piece may
@@ -555,8 +614,8 @@ fn bisect(
             }
         }
         made += 2;
-        stack.push((mid, b, depth + 1));
-        stack.push((a, mid, depth + 1));
+        stack.push((mid, b, depth + 1, slack));
+        stack.push((a, mid, depth + 1, slack));
     }
     Ok(worst.is_finite().then_some(worst))
 }
@@ -806,9 +865,9 @@ fn clamp_ivl(x: Ivl, a: f64, b: f64) -> Ivl {
     Ivl::new(x.lo.max(lo).min(hi), x.hi.min(hi).max(lo))
 }
 
-/// The bound of one piece `[a, b]` of the curve against the target: `(end values, second
-/// term)`, `None` when some enclosure is not finite (module docs; the same chord bound as
-/// [`piece`] with the straight map in place of the correspondence `W`). A target curve whose
+/// The bound of one piece `[a, b]` of the curve against the target (a surface's with its slack
+/// past its net, as [`second_term`]), `None` when some enclosure is not finite (module docs; the same chord bound as [`piece`] with the straight map in place of the
+/// correspondence `W`). A target curve whose
 /// knot lies inside the piece's image, or a surface only C^0 across a knot line the box
 /// crosses, is bounded by the Lipschitz form, `h sup |g'|`.
 fn target_piece(
@@ -817,7 +876,7 @@ fn target_piece(
     target: &Prepared,
     a: f64,
     b: f64,
-) -> Result<Option<(f64, f64)>> {
+) -> Result<Option<PieceBound>> {
     let mut ends = 0.0_f64;
     for t in [a, b] {
         let at = Ivl::from(t);
@@ -875,7 +934,7 @@ fn target_piece(
                     let Some(m) = norm_upper(minus(c2, swpp)) else {
                         return Ok(None);
                     };
-                    (h * h * Ivl::from(m) * Ivl::from(0.125) + Ivl::from(slack)).hi
+                    (h * h * Ivl::from(m) * Ivl::from(0.125), slack)
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
@@ -884,10 +943,10 @@ fn target_piece(
                     let Some(m) = norm_upper(minus(c1, sw)) else {
                         return Ok(None);
                     };
-                    (h * Ivl::from(m) + Ivl::from(slack)).hi
+                    (h * Ivl::from(m), slack)
                 }
             };
-            return Ok(term.is_finite().then_some((ends, term)));
+            return Ok(PieceBound::with(ends, term.0, term.1));
         }
         Prepared::Curve(dn, [s0, s1]) => {
             let w1 = slope(range, [*s0, *s1]);
@@ -915,7 +974,7 @@ fn target_piece(
         };
         (h * Ivl::from(m)).hi
     };
-    Ok(term.is_finite().then_some((ends, term)))
+    Ok(term.is_finite().then(|| PieceBound::exact(ends, term)))
 }
 
 /// Not upstream (WR-410): a proved upper bound on the distance from every point of `curve`
@@ -985,34 +1044,37 @@ pub(crate) fn curve_piece_gap_bound(
     let mut cuts = vec![lo];
     cuts.extend(interior_knots(&cn, lo, hi));
     cuts.push(hi);
-    let mut stack: Vec<(f64, f64, u32)> = cuts
+    // (each piece with its parent's slack, infinite for a first piece)
+    let mut stack: Vec<(f64, f64, u32, f64)> = cuts
         .windows(2)
         .rev()
         .filter_map(|w| match *w {
-            [a, b] => Some((a, b, 0)),
+            [a, b] => Some((a, b, 0, f64::INFINITY)),
             _ => None,
         })
         .collect();
     let extra = err + target_err;
     let mut worst = 0.0_f64;
     let mut made = stack.len();
-    while let Some((a, b, depth)) = stack.pop() {
+    while let Some((a, b, depth, parent)) = stack.pop() {
         let mid = 0.5 * (a + b);
         let last = depth >= MAX_DEPTH || !(a < mid && mid < b) || made + 2 > MAX_PIECES;
+        let mut slack = f64::INFINITY;
         match target_piece(&cn, range, &prepared, a, b) {
-            Ok(Some((ends, term))) => {
-                let bound = (Ivl::from(ends) + Ivl::from(term) + Ivl::from(extra)).hi;
+            Ok(Some(p)) => {
+                let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack) + Ivl::from(extra)).hi;
                 if !bound.is_finite() {
                     return Ok(None);
                 }
                 // (past the limit at an end: no cut can bring it back)
-                if (Ivl::from(ends) + Ivl::from(extra)).hi > limit {
+                if (Ivl::from(p.ends) + Ivl::from(extra)).hi > limit {
                     return Ok(Some(bound));
                 }
-                if last || term <= (CLOSE_RELATIVE * ends).max(floor).max(CLOSE_ABSOLUTE) {
+                if last || p.closes(parent, CLOSE_RELATIVE, floor) {
                     worst = worst.max(bound);
                     continue;
                 }
+                slack = p.slack;
             }
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Ok(None) | Err(_) => {
@@ -1022,8 +1084,8 @@ pub(crate) fn curve_piece_gap_bound(
             }
         }
         made += 2;
-        stack.push((mid, b, depth + 1));
-        stack.push((a, mid, depth + 1));
+        stack.push((mid, b, depth + 1, slack));
+        stack.push((a, mid, depth + 1, slack));
     }
     Ok(worst.is_finite().then_some(worst))
 }
@@ -1078,11 +1140,19 @@ const NEAREST_STEPS: usize = 6;
 /// ([`reparametrisation`]).
 const PSI_MAX_POINTS: usize = 4097;
 const PSI_MAX_DEPTH: u32 = 16;
+/// The narrowest gap between two points of `ψ` that halving makes: a piece of the bisection
+/// this many halvings above its deepest ([`MAX_DEPTH`]), so a steep stretch of `ψ` spans
+/// pieces the bisection can still split (`ψ` steep over a narrower gap leaves its second-order
+/// term large in the deepest piece that holds it).
+const PSI_MIN_GAP_LEVELS: u32 = 10;
 /// The pieces each knot span of the curve and of the trim is cut into for `ψ`'s first points.
 const PSI_PER_SPAN: usize = 4;
 
 /// The curve parameter near `guess` (within `[lo, hi]`) of the curve point nearest `target`,
 /// by a few Newton steps, with the curve's speed there; the guess itself where a step fails.
+/// The parameter returned is the one of the steps' points (the guess included) nearest
+/// `target`: where the curve is slow, a step can overshoot to a far stretch of it, and a
+/// point of `ψ` there pulls `C(ψ)` off the image (#18166, `brep_mirror` `mat0094`).
 fn nearest_param(
     k: &Kernel,
     curve: &Curve,
@@ -1092,8 +1162,9 @@ fn nearest_param(
 ) -> Result<(f64, f64)> {
     use crate::error::ignored;
     let mut t = guess;
-    let mut speed = 0.0;
-    for _ in 0..NEAREST_STEPS {
+    // (parameter, distance, speed) of the nearest point so far
+    let mut best = (guess, f64::INFINITY, 0.0);
+    for step in 0..=NEAREST_STEPS {
         let Some(d) = ignored(curve.evaluate(k, t, 1, true, false))? else {
             break;
         };
@@ -1101,14 +1172,17 @@ fn nearest_param(
             break;
         };
         let den = c1.dot(c1);
+        let dist = c0.distance(target);
+        if dist < best.1 {
+            best = (t, dist, den.sqrt());
+        }
         let next = t + (target - c0).dot(c1) / den;
-        if !(den > 0.0 && next.is_finite()) {
+        if step == NEAREST_STEPS || !(den > 0.0 && next.is_finite()) {
             break;
         }
-        speed = den.sqrt();
         t = next.max(lo).min(hi);
     }
-    Ok((t, speed))
+    Ok((best.0, best.2))
 }
 
 /// The reparametrisation `ψ` of the curve onto the trim's parameter `s` over `range`: the C^1
@@ -1118,9 +1192,16 @@ fn nearest_param(
 /// [`PSI_PER_SPAN`], and a gap between
 /// two is halved where the nearest parameter at its middle is off their mean by more than
 /// `refine` along the curve (a trim image that runs ahead or behind the curve over a short
-/// stretch), up to [`PSI_MAX_POINTS`] and [`PSI_MAX_DEPTH`]. Any `ψ` gives a bound; this one
-/// keeps `C(ψ(s))` near the image point at `s`, so the bound measures the distance between the
-/// two curves, not how far apart their common parameters slip. `None` when it cannot be built.
+/// stretch), up to [`PSI_MAX_POINTS`] and [`PSI_MAX_DEPTH`]. The built `ψ` is then checked at
+/// each gap's middle and refined where `C(ψ)` there is farther from the image than at both of
+/// the gap's ends by more than `refine`, in at most [`PSI_MAX_DEPTH`] rounds. Neither halves a
+/// gap below twice the piece of [`PSI_MIN_GAP_LEVELS`]: where the nearest parameter jumps (the
+/// trim's image leaves one stretch of the curve for another, #18166 `feature_executive`
+/// `single_face_fillet1019_8`), halving would chase the jump down to a gap a few units in the
+/// last place wide, and `ψ`'s steep step there would hold the bound at 15. Any `ψ` gives a
+/// bound; this one keeps `C(ψ(s))` near the image point at `s`, so the bound measures the
+/// distance between the two curves, not how far apart their common parameters slip. `None`
+/// when it cannot be built.
 fn reparametrisation(
     k: &Kernel,
     surface: &Surface,
@@ -1161,8 +1242,20 @@ fn reparametrisation(
     at.push(hi);
     at.retain(|&x| lo <= x && x <= hi);
     at.sort_by(f64::total_cmp);
-    at.dedup();
+    // (a knot at a uniform point, rounded apart by a few units in the last place: two points
+    // that close, each with its own nearest parameter, would make `ψ` all but vertical there;
+    // the ends stay `lo` and `hi`)
+    at.dedup_by(|x, prev| *x - *prev <= 4.0 * f64::EPSILON * x.abs().max(prev.abs()));
+    if let Some(last) = at.last_mut() {
+        *last = hi;
+    }
+    if at.len() < 2 {
+        at = vec![lo, hi];
+    }
     let n = at.len();
+    // the narrowest gap halving makes: a bisection piece `PSI_MIN_GAP_LEVELS` above its deepest
+    let min_gap =
+        (hi - lo) / (FIRST_PIECES as f64) / f64::from(1_u32 << (MAX_DEPTH - PSI_MIN_GAP_LEVELS));
     let mut first: Vec<(f64, f64)> = Vec::new();
     for (i, &si) in at.iter().enumerate() {
         k.check_cancelled(OP)?;
@@ -1187,7 +1280,12 @@ fn reparametrisation(
         let mut stack = vec![(*a, *b, 0_u32)];
         while let Some((a, b, depth)) = stack.pop() {
             let m = 0.5 * (a.0 + b.0);
-            if depth < PSI_MAX_DEPTH && count < PSI_MAX_POINTS && a.0 < m && m < b.0 {
+            if depth < PSI_MAX_DEPTH
+                && count < PSI_MAX_POINTS
+                && b.0 - a.0 >= 2.0 * min_gap
+                && a.0 < m
+                && m < b.0
+            {
                 k.check_cancelled(OP)?;
                 let guess = 0.5 * (a.1 + b.1);
                 let Some(p) = image(m)? else {
@@ -1204,7 +1302,73 @@ fn reparametrisation(
             points.push(b);
         }
     }
-    Ok(hermite_psi(&points, [lo, hi]))
+    // The halving above compares the nearest parameter at a gap's middle with the mean of its
+    // ends, but `ψ` is a cubic whose slopes come from the neighbouring points: a gap whose ends
+    // are on the correspondence can still bow off it (a slope set to zero where the points turn
+    // back over a sub-micron knot span leaves the next gap lagging by 4/27 of its width, #18166).
+    // So the built `ψ` is checked at each gap's middle: where `C(ψ)` there is farther from the
+    // image than at both of the gap's ends by more than `refine`, it bows the gap's `g` above
+    // what its end values show, and the nearest point found from `ψ` is added. The test is on
+    // the distance, not the parameter: where the parameter is off but the distance is not (the
+    // last gap, where `ψ(hi) = hi` holds `ψ` to the curve's end while the image's nearest point
+    // is short of it), a point would only make `ψ` steeper and its second-order term larger.
+    // `ψ` is rebuilt until no middle bows, in at most [`PSI_MAX_DEPTH`] rounds.
+    let Some(mut psi) = hermite_psi(&points, [lo, hi]) else {
+        return Ok(None);
+    };
+    // |C(ψ(s)) - S(W(s))| in double arithmetic (only steering), with `ψ(s)` and the image point
+    let off = |psi: &NurbsCurve, si: f64| -> Result<Option<(f64, f64, crate::math::Point3)>> {
+        let Some(r) = psi_over(psi, Ivl::from(si), 0, [lo, hi])? else {
+            return Ok(None);
+        };
+        let Some(r0) = r.first() else {
+            return Ok(None);
+        };
+        let at = 0.5 * (r0.lo + r0.hi);
+        let (Some(p), Some(c)) = (image(si)?, ignored(curve.evaluate_point(k, at))?) else {
+            return Ok(None);
+        };
+        Ok(Some((c.distance(p), at, p)))
+    };
+    for _ in 0..PSI_MAX_DEPTH {
+        let mut extra: Vec<(f64, f64)> = Vec::new();
+        for pair in points.windows(2) {
+            let [a, b] = pair else {
+                return Ok(None);
+            };
+            let m = 0.5 * (a.0 + b.0);
+            if !(b.0 - a.0 >= 2.0 * min_gap && a.0 < m && m < b.0) {
+                continue;
+            }
+            if count >= PSI_MAX_POINTS {
+                break;
+            }
+            k.check_cancelled(OP)?;
+            let (Some(da), Some(db), Some((dm, at, p))) =
+                (off(&psi, a.0)?, off(&psi, b.0)?, off(&psi, m)?)
+            else {
+                return Ok(None);
+            };
+            // (refined only where the middle is farther than both ends by `refine`; a NaN
+            // anywhere is no reason to)
+            if dm.partial_cmp(&(da.0.max(db.0) + refine)) != Some(std::cmp::Ordering::Greater) {
+                continue;
+            }
+            let (tm, _) = nearest_param(k, curve, p, at, [lo, hi])?;
+            count += 1;
+            extra.push((m, tm));
+        }
+        if extra.is_empty() {
+            break;
+        }
+        points.extend(extra);
+        points.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let Some(rebuilt) = hermite_psi(&points, [lo, hi]) else {
+            return Ok(None);
+        };
+        psi = rebuilt;
+    }
+    Ok(Some(psi))
 }
 
 /// The C^1 piecewise cubic through `points` (`(s_i, t_i)`, `s` increasing from `lo` to `hi`)
@@ -1603,6 +1767,172 @@ mod tests {
         assert!(seen > 1e-2, "{seen:e}");
         let g = t.bound(&curve, &trim).unwrap();
         assert!(g >= seen && g <= 2.0 * seen, "{g:e} against {seen:e}");
+    }
+
+    /// A trim that first steps back by a nanometre over a sub-micron knot span, then runs along
+    /// its curve, `lift` off it (#18166, fillet1019's face 0): the nearest parameters on that
+    /// span all clamp to the start, so the cubic `ψ` has a zero slope at the span's end, and the
+    /// gap after it, whose middle sits on the chord of its ends, lags the image by up to 4/27 of
+    /// its width along the curve (some 2e-4 here). `ψ` is checked against the image at each
+    /// gap's middle, so the bound stays within the bisection's closing fraction of `lift`.
+    #[test]
+    fn a_trim_that_turns_back_over_a_tiny_span_is_bounded_by_its_distance() {
+        let t = Top::new();
+        let lift = 1.0e-4;
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let eps = 5.0e-7;
+        let back = [a[0] - 1.0e-9 * 0.5, a[1] - 1.0e-9 * 0.3];
+        let trim = Top::curve(
+            &[t.uv(a), t.uv(back), t.uv(b)],
+            1,
+            vec![0.0, 0.0, eps, 1.0, 1.0],
+            true,
+        );
+        let curve = Top::curve(
+            &[t.point(a, lift), t.point(b, lift)],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            false,
+        );
+        let g = t.bound(&curve, &trim).unwrap();
+        assert!(
+            g >= lift && g <= lift * (1.0 + 2.0 * CLOSE_RELATIVE) + 1.0e-8,
+            "{g:e} against {lift:e}"
+        );
+    }
+
+    /// A trim `lift` off its curve whose image stops `short` of the curve's end along it: near
+    /// the end the image's nearest curve point is short of the end, while `ψ(hi) = hi` holds
+    /// `ψ` to it. The two curves are within `sqrt(lift^2 + short^2)` of each other (the image's
+    /// end against the curve's), so the bound is at least that and within the bisection's
+    /// closing fraction of it: `ψ` is refined only where it bows `C(ψ)` off the image, not
+    /// toward the pinned end, which would make it ever steeper there.
+    #[test]
+    fn a_trim_that_stops_short_of_its_curve_end_is_bounded_by_its_distance() {
+        let t = Top::new();
+        let (lift, short) = (1.0e-4, 1.0e-5);
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let (pa, pb) = (t.point(a, 0.0), t.point(b, 0.0));
+        let f = 1.0 - short / (pb - pa).length();
+        let end = [a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])];
+        let trim = Top::curve(&[t.uv(a), t.uv(end)], 1, vec![0.0, 0.0, 1.0, 1.0], true);
+        let curve = Top::curve(
+            &[t.point(a, lift), t.point(b, lift)],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            false,
+        );
+        let d = (lift * lift + short * short).sqrt();
+        let g = t.bound(&curve, &trim).unwrap();
+        assert!(
+            g >= lift && g <= d * (1.0 + 2.0 * CLOSE_RELATIVE) + 1.0e-8,
+            "{g:e} against {d:e}"
+        );
+    }
+
+    /// A trim `h` off its curve where the curve starts with a short drop from near the trim's
+    /// image to `h` below it: the image's nearest curve point jumps from the drop's top to the
+    /// long stretch below, so the nearest parameters step there, however finely the trim is
+    /// cut. `ψ` is not halved past what the bisection can split, so the bound stays near the
+    /// distance between the two curves (at least `h`, at the ends) and is not held up by a step
+    /// of `ψ` a few units in the last place wide (#18166, `single_face_fillet1019_8`).
+    #[test]
+    fn a_trim_whose_nearest_curve_point_jumps_is_bounded_by_its_distance() {
+        let t = Top::new();
+        let h = 2.0e-4;
+        let (x0, x1, y) = (0.2, 0.7, 0.3);
+        let trim = Top::curve(
+            &[t.uv([x0, y + h]), t.uv([x1, y + h])],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            true,
+        );
+        let curve = Top::curve(
+            &[
+                t.point([x0, y + 0.9 * h], 0.0),
+                t.point([x0 + 1.0e-6, y], 0.0),
+                t.point([x1, y], 0.0),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0e-3, 1.0, 1.0],
+            false,
+        );
+        let d = t.point([x1, y + h], 0.0).distance(t.point([x1, y], 0.0));
+        let g = t.bound(&curve, &trim).unwrap();
+        assert!(
+            g >= d * (1.0 - 1.0e-9) && g <= 2.0 * d,
+            "{g:e} against {d:e}"
+        );
+    }
+
+    /// The bisection of `[0, 1]` (32 first pieces, floor `floor`) of pieces whose end values
+    /// are `ends`, whose second term is `0.1 h²` and whose slack is `slack(a, h)`.
+    fn bisect_with_slack(ends: f64, floor: f64, slack: impl Fn(f64, f64) -> f64) -> f64 {
+        bisect(
+            [0.0, 1.0],
+            32,
+            &[],
+            CLOSE_RELATIVE,
+            floor,
+            f64::INFINITY,
+            |a, b| {
+                let h = b - a;
+                Ok(PieceBound::with(ends, Ivl::from(0.1 * h * h), slack(a, h)))
+            },
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    /// A slack no cut shrinks (a trim past its surface's net, #18166) does not hold a piece
+    /// open: over half the range the pieces carry a slack above the closing threshold, and
+    /// cutting them down to the deepest level would spend the pieces the other half needs,
+    /// whose second-order term then stays at its first pieces' size (1e-4, against a bound of
+    /// at most `ends + slack + floor`).
+    #[test]
+    fn a_slack_no_cut_shrinks_does_not_hold_the_bisection_open() {
+        let (ends, slack, floor) = (1.0e-6, 1.0e-6, 1.0e-7);
+        let g = bisect_with_slack(ends, floor, |a, _| if a < 0.5 { slack } else { 0.0 });
+        assert!(g >= ends + slack && g <= ends + slack + floor, "{g:e}");
+    }
+
+    /// A slack that a cut shrinks (a box wider than the trim's own overshoot past the net,
+    /// halved with the piece) is cut down as before: closing on the second term alone would
+    /// stop with the slack still 1e-6 (at a piece of 1e-3), ten times the floor, where cutting
+    /// on brings it below the floor.
+    #[test]
+    fn a_slack_a_cut_shrinks_is_cut_down() {
+        let (ends, floor) = (1.0e-6, 1.0e-7);
+        let g = bisect_with_slack(ends, floor, |a, h| if a < 0.5 { 1.0e-3 * h } else { 0.0 });
+        assert!(g >= ends && g <= ends + floor, "{g:e}");
+    }
+
+    /// Newton's step toward the nearest parameter is `(target - C) . C' / |C'|^2`: on a stretch
+    /// where the curve is slow (here its first three control points 1e-9 apart) it overshoots
+    /// to a far part of the curve, and the steps after need not come back (#18166, `brep_mirror`
+    /// `mat0094`, a `ψ` point 0.011 off along the curve). The parameter returned is never
+    /// farther from the target than the guess.
+    #[test]
+    fn the_nearest_parameter_is_never_farther_than_its_guess() {
+        let k = Kernel::default();
+        let at = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let curve = Top::curve(
+            &[at(0.0, 0.0), at(1.0e-9, 0.0), at(2.0e-9, 0.0), at(1.0, 1.0)],
+            3,
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            false,
+        );
+        let target = at(1.0e-6, 1.0e-3);
+        let near = |t: f64| curve.evaluate_point(&k, t).unwrap().distance(target);
+        for guess in [0.0, 1.0e-4, 1.0e-3] {
+            let (t, _) = nearest_param(&k, &curve, target, guess, [0.0, 1.0]).unwrap();
+            assert!(
+                near(t) <= near(guess),
+                "{guess:e}: {t:e} at {:e}, guess at {:e}",
+                near(t),
+                near(guess)
+            );
+        }
     }
 
     /// The bowed trim of [`a_trim_off_its_curve_is_not_bounded_close`] asked only whether it is
