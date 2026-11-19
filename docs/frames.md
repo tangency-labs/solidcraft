@@ -36,8 +36,8 @@ the selected body (or the last body of the active component).
 - **Section (optional)**: pick the section's region in another sketch (the ring between two
   circles makes a tube). With nothing picked, **Profile** chooses a built-in profile and its
   dimensions follow; optional ones left empty take their defaults.
-- **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
-  the members (default: after the profile).
+- **Anchor**, **Angle**, **Mirror** and **Up Axis** place the section on each line, as below.
+  **Name** names the members (default: after the profile).
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -69,6 +69,9 @@ the selected body (or the last body of the active component).
   about the line, counter-clockwise looking back from the line's end; `mirror` mirrors it across
   its y axis first. A line leaning less than 10⁻⁶ rad from vertical counts as vertical, so
   rounding in a 3D sketch never turns a post a quarter turn.
+- `up`: `X`, `-X`, `Y`, `-Y`, `Z` or `-Z`, the world axis that is up for the profile (default `Z`,
+  saved only when it is not). A part drawn with Y up takes `Y`: its members need no `angle`, and
+  lines along Y are its vertical members, their x along world X (world Y when X is up).
 - Bodies are named after `body_name`, or the standard size (`RSC 203x89`), the profile
   (`Rect Tube 40x40x3`) or the profile sketch, then numbered on past names already taken (`(2)`, `(3)`…). Each member's name is kept
   with its line (the feature's `names`), so deleting or adding a line, or deleting another
