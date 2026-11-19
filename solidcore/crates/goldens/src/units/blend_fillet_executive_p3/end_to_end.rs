@@ -2993,6 +2993,12 @@ mod g5_blend_corner_certificates {
     }
 }
 
+/// WR-613 (#18640): the rows a face-sided corner patch can move, each checked against
+/// main's figures.
+#[cfg(test)]
+#[path = "wr613_certificates.rs"]
+mod wr613_certificates;
+
 #[cfg(test)]
 mod wr664_near_knot_trims {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
