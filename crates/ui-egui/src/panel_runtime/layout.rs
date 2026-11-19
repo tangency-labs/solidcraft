@@ -280,7 +280,7 @@ pub struct HostMetrics {
     pub min_viewport: Size,
 }
 
-pub const DOCKED_GRAB_WIDTH: f32 = 8.0;
+pub(super) const DOCKED_GRAB_WIDTH: f32 = 8.0;
 
 impl Default for HostMetrics {
     fn default() -> Self {

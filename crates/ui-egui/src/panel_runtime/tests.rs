@@ -8626,6 +8626,28 @@ fn with_wide_grab_off_a_docked_sash_grabs_only_what_it_draws() {
 }
 
 #[test]
+fn turning_wide_grab_off_and_on_again_rebuilds_the_docked_sash_grab() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    let mut frame = |raw: &mut RawPanelHost, wide: bool| {
+        raw.host.set_wide_grab(wide);
+        raw.frame(Vec::new(), false);
+        let layout = raw.host.frame().unwrap().layout.clone();
+        let sash = layout.sashes.first().unwrap().clone();
+        let control = layout.control(&HostPointerTarget::Sash { first: sash.first, second: sash.second }).unwrap().clone();
+        (control.bounds, sash.bounds, layout.input.len(), layout.occlusion.len())
+    };
+    let (wide_grab, ink, wide_input, wide_occlusion) = frame(&mut raw, true);
+    let (narrow_grab, _, narrow_input, narrow_occlusion) = frame(&mut raw, false);
+    assert_ne!(wide_grab, ink);
+    assert_eq!(narrow_grab, ink);
+    assert!(narrow_input < wide_input && narrow_occlusion < wide_occlusion);
+    assert_eq!(frame(&mut raw, true), (wide_grab, ink, wide_input, wide_occlusion));
+}
+
+#[test]
 fn a_widened_docked_sash_grab_stays_inside_the_input_area_and_the_cards_content_inset() {
     let mut content = PanelMountHarness::new(false).unwrap();
     open_editor(&mut content);

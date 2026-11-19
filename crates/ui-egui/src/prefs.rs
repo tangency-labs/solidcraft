@@ -13936,7 +13936,7 @@ mod settings_search_tests {
             for (query, native) in [
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
                 ("Preview panel placement while dragging", Some((Role::CheckBox, "prefs:live_panel_drag_preview"))),
-                ("Wide grab on panel dividers", Some((Role::CheckBox, "prefs:wide_panel_grab"))),
+                ("Wide grab on panel dividers and edges", Some((Role::CheckBox, "prefs:wide_panel_grab"))),
                 ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
