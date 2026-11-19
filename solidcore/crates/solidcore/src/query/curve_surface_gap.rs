@@ -44,6 +44,8 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
 use crate::{Result, SolidError};
 
+pub(crate) mod polynomial_pieces;
+
 /// A direction's knot samples (parameter, spacing, span index) and its slack.
 type KnotSamples = (Vec<(f64, f64, usize)>, f64);
 /// A side of a control net: whether it runs across u, whether at the max, and its points'
