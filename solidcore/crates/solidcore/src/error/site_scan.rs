@@ -10,14 +10,19 @@
 //! string contents and every `#[cfg(test)]` item blanked: [`super::bare_scan::library_code`]):
 //! - a construction of a variant the scan names, by any path ending in `<Enum>::<variant>`;
 //!   a pattern is not one (a variant followed by `=>`, `|`, `if` or `=`, binding `_` or `..`,
-//!   or in the pattern of a `matches!`);
+//!   or in the pattern of a `matches!`, with any delimiter, up to its guard: a variant in
+//!   the guard is a value, and counts). A `use` that imports a counted variant, or renames
+//!   or glob-imports its enum, fails the scan: what it brings in would not be seen;
 //! - a call of a helper the scan names (its own definition is not a site, nor is what its
-//!   body builds);
+//!   body builds; a [`Builder::Method`]'s definition is a method of `SolidError`, so a free
+//!   `fn` of the same name is a local wrapper);
 //! - an occurrence of a text the scan names (the bare statuses, counted as text);
 //! - a call of a local *wrapper*: a `let` closure, a private `fn` or a `macro_rules!` that
 //!   builds one of the above in the way the scan's [`Wrappers`] says. The wrapper's body is
 //!   not a site; each call of it in its scope is (the rest of the enclosing block for a
-//!   closure, the file for a `fn` or a macro).
+//!   closure, less the calls after a `let` that binds its name again, in that `let`'s
+//!   block; the file for a `fn` or a macro). A macro is always a wrapper when its body builds one, whatever its body
+//!   holds: each call expands it.
 //!
 //! Under [`Wrappers::Phrase`], a wrapper `fn` visible outside its file fails the scan, since
 //! its calls elsewhere would not be seen: make it private, or list it as a
@@ -52,6 +57,13 @@ pub(in crate::error) enum Builder {
 }
 
 impl Builder {
+    /// Whether a `fn` of the helper's name (at `at` in `code`) is the helper's definition: a
+    /// [`Builder::Method`]'s is a method of `SolidError`, so a free `fn` of the same name is a
+    /// local wrapper.
+    fn defines(self, code: &str, at: usize) -> bool {
+        !matches!(self, Self::Method(..)) || in_solid_error_impl(code, at)
+    }
+
     /// The helper this builder names in `file`, with its phrase argument.
     fn helper_in(self, file: &str) -> Option<(&'static str, Option<usize>)> {
         match self {
@@ -387,9 +399,10 @@ fn definitions(code: &str) -> Vec<Def> {
             .map(|p| p.trim().to_owned())
             .collect();
         let end = statement_end(s, close + 1);
+        let name = &code[i..ne];
         defs.push(Def {
             kind: Kind::Closure,
-            name: code[i..ne].to_owned(),
+            name: name.to_owned(),
             params: param_names(&split),
             thin: is_thin(code, close + 1..end),
             body: close + 1..end,
@@ -440,25 +453,74 @@ fn matches_patterns(code: &str) -> Vec<Range<usize>> {
         .filter_map(|at| {
             let bang = at + "matches".len();
             let open = skip_ws(s, bang + 1);
-            if s.get(bang) != Some(&b'!') || s.get(open) != Some(&b'(') {
+            if s.get(bang) != Some(&b'!') || !matches!(s.get(open), Some(b'(' | b'[' | b'{')) {
                 return None;
             }
             let close = match_close(s, open);
-            let mut depth = 0usize;
-            (open + 1..close).find_map(|k| match s.get(k) {
-                Some(b'(' | b'[' | b'{') => {
-                    depth += 1;
-                    None
-                }
-                Some(b')' | b']' | b'}') => {
-                    depth = depth.saturating_sub(1);
-                    None
-                }
-                Some(b',') if depth == 0 => Some(k..close),
-                _ => None,
-            })
+            let comma = top_level(s, open + 1..close, |k| s.get(k) == Some(&b','))?;
+            // the pattern ends at a guard: a variant in the guard is a value
+            let guard = top_level(s, comma + 1..close, |k| {
+                code[k..].starts_with("if")
+                    && !s.get(k.wrapping_sub(1)).is_some_and(|&b| is_ident(b))
+                    && !s.get(k + 2).is_some_and(|&b| is_ident(b))
+            });
+            Some(comma..guard.unwrap_or(close))
         })
         .collect()
+}
+
+/// Whether a `let` between `from` and `at` binds `name` again in a block that `at` is in:
+/// a call there is of the new binding, not the closure's.
+fn rebound(code: &str, name: &str, from: usize, at: usize) -> bool {
+    let s = code.as_bytes();
+    words(&code[from..at], "let").into_iter().any(|k| {
+        let k = from + k;
+        let mut n = skip_ws(s, k + 3);
+        if words(&code[n..at], "mut").first() == Some(&0) {
+            n = skip_ws(s, n + 3);
+        }
+        code[n..].starts_with(name) && ident_end(s, n) == n + name.len() && block_end(s, k) >= at
+    })
+}
+
+/// Whether `at` lies in a `use` declaration.
+fn in_use(code: &str, at: usize) -> bool {
+    words(&code[..at], "use")
+        .last()
+        .is_some_and(|&u| !code[u..at].contains(';'))
+}
+
+/// The 1-based line of `at`.
+fn line_of(code: &str, at: usize) -> usize {
+    1 + code[..at].matches('\n').count()
+}
+
+/// Whether the `fn` named at `at` is a method in an `impl` of `SolidError`.
+fn in_solid_error_impl(code: &str, at: usize) -> bool {
+    let s = code.as_bytes();
+    words(&code[..at], "impl").into_iter().rev().any(|i| {
+        code[i..at].find('{').is_some_and(|k| {
+            let open = i + k;
+            code[i..open].contains("SolidError") && match_close(s, open) > at
+        })
+    })
+}
+
+/// The first offset in `range` at the top level of its group (no bracket open) where
+/// `hit` holds.
+fn top_level(s: &[u8], range: Range<usize>, hit: impl Fn(usize) -> bool) -> Option<usize> {
+    let mut depth = 0usize;
+    range.into_iter().find(|&k| match s.get(k) {
+        Some(b'(' | b'[' | b'{') => {
+            depth += 1;
+            false
+        }
+        Some(b')' | b']' | b'}') => {
+            depth = depth.saturating_sub(1);
+            false
+        }
+        _ => depth == 0 && hit(k),
+    })
 }
 
 /// Whether what follows the group ending at `end` makes it a pattern.
@@ -501,6 +563,24 @@ fn base_occurrences(scan: &Scan, code: &str, file: &str) -> Vec<Occurrence> {
     for builder in scan.builders {
         match *builder {
             Builder::Variant(enum_name, variant) => {
+                // a construction is matched by its path: one the scan would not see is refused
+                for at in words(code, enum_name) {
+                    let after = skip_ws(s, at + enum_name.len());
+                    let renamed = words(&code[after..], "as").first() == Some(&0);
+                    let glob = code[after..].starts_with("::")
+                        && code[skip_ws(s, after + 2)..].starts_with('*');
+                    assert!(
+                        !(in_use(code, at) && (renamed || glob)),
+                        "{file}:{}: a `use` imports `{enum_name}` {}; the site scan matches \
+                         `{enum_name}::<variant>` paths only, so name it in full",
+                        line_of(code, at),
+                        if renamed {
+                            "under another name"
+                        } else {
+                            "with a glob"
+                        },
+                    );
+                }
                 let needle = format!("{enum_name}::{variant}");
                 for (at, _) in code.match_indices(&needle) {
                     let end = at + needle.len();
@@ -510,6 +590,14 @@ fn base_occurrences(scan: &Scan, code: &str, file: &str) -> Vec<Occurrence> {
                     {
                         continue;
                     }
+                    // an import is no construction, and the short name it brings in would
+                    // not be seen
+                    assert!(
+                        !in_use(code, at),
+                        "{file}:{}: a `use` imports `{needle}`; the site scan matches the full \
+                         path only, so build it as `{needle}`",
+                        line_of(code, at),
+                    );
                     let open = skip_ws(s, end);
                     // the phrase is a tuple variant's field, or a struct variant's `what`
                     let (args, phrase, tail) = match s.get(open) {
@@ -620,7 +708,9 @@ fn wrapper_calls(code: &str, def: &Def, param: Option<usize>, wraps: &str) -> Ve
                     skip_ws(s, after)
                 }
                 Kind::Closure => {
-                    if matches!(s.get(at.wrapping_sub(1)), Some(b'.' | b':')) {
+                    if matches!(s.get(at.wrapping_sub(1)), Some(b'.' | b':'))
+                        || rebound(code, &def.name, def.scope.start, at)
+                    {
                         return None;
                     }
                     skip_ws(s, after)
@@ -677,11 +767,13 @@ fn forwards_to(scan: &Scan, defs: &[Def], occ: &Occurrence) -> Option<(usize, Op
     }
 }
 
-/// The helpers among the scan's builders, in `file`.
-fn helpers<'a>(scan: &'a Scan, file: &'a str) -> impl Iterator<Item = &'static str> + 'a {
-    scan.builders
-        .iter()
-        .filter_map(move |b| b.helper_in(file).map(|(name, _)| name))
+/// Whether the definition `def` (in `file`'s `code`) is one of the scan's helpers.
+fn is_helper_def(scan: &Scan, file: &str, code: &str, def: &Def) -> bool {
+    def.kind == Kind::Fn
+        && scan.builders.iter().any(|b| {
+            b.helper_in(file)
+                .is_some_and(|(name, _)| name == def.name && b.defines(code, def.at))
+        })
 }
 
 /// The sites in a file's library code (from [`library_code`]) that `scan` counts, sorted
@@ -692,8 +784,7 @@ pub(in crate::error) fn sites_in(scan: &Scan, code: &str, file: &str) -> Vec<Sit
     // per definition: not yet a wrapper, or a wrapper with calls, or one never called
     let mut wrapped: Vec<Option<bool>> = vec![None; defs.len()];
     let mut sites = Vec::new();
-    let is_helper =
-        |d: usize| defs[d].kind == Kind::Fn && helpers(scan, file).any(|h| h == defs[d].name);
+    let is_helper = |d: usize| is_helper_def(scan, file, code, &defs[d]);
     while let Some(occ) = queue.pop() {
         let innermost = (0..defs.len())
             .filter(|&d| defs[d].body.contains(&occ.at))
@@ -829,4 +920,137 @@ pub(in crate::error) fn assert_pinned(
         pinned.windows(2).all(|w| w[0].0 < w[1].0),
         "the {what} list is sorted by path, one file per line"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STAGE: Scan = Scan {
+        builders: &[
+            Builder::Variant("CurveFailure", "StageFailed"),
+            Builder::Method("curve_stage_failed", None),
+        ],
+        wrappers: Wrappers::Thin,
+    };
+
+    const GENERIC: Scan = Scan {
+        builders: &[Builder::Variant("Reason", "Failed")],
+        wrappers: Wrappers::Phrase,
+    };
+
+    fn lines(scan: &Scan, code: &str) -> Vec<(usize, String)> {
+        sites_in(scan, &library_code(code), "fixture")
+            .into_iter()
+            .map(|s| (s.line, s.via))
+            .collect()
+    }
+
+    /// A `matches!` pattern is no construction with any delimiter, up to its guard; a variant
+    /// in the guard is a value.
+    #[test]
+    fn a_matches_pattern_is_excluded_with_any_delimiter_up_to_its_guard() {
+        let fixture = "
+fn a(e: &F) -> bool { matches! { e, CurveFailure::StageFailed } }
+fn b(e: &F) -> bool { matches![e, CurveFailure::StageFailed] || matches!(e, CurveFailure::StageFailed) }
+fn c(e: &F) -> bool { matches!(e, Some(_) if accepts(CurveFailure::StageFailed)) }
+";
+        assert_eq!(
+            lines(&STAGE, fixture),
+            vec![(4, "CurveFailure::StageFailed".to_owned())]
+        );
+    }
+
+    /// A closure's calls stop where a `let` binds its name again, within that `let`'s block.
+    #[test]
+    fn a_closure_shadowed_by_a_new_binding_is_not_called_after_it() {
+        let fixture = "
+fn c() {
+    let err = || CurveFailure::StageFailed;
+    let _ = err();
+    {
+        let err = || ();
+        err();
+    }
+    let _ = err();
+    let err = || ();
+    err();
+}
+";
+        assert_eq!(
+            lines(&STAGE, fixture),
+            vec![
+                (4, "err (wraps CurveFailure::StageFailed)".to_owned()),
+                (9, "err (wraps CurveFailure::StageFailed)".to_owned()),
+            ]
+        );
+    }
+
+    /// A free `fn` named as a `SolidError` method is a local wrapper, counted at its calls;
+    /// the method's own body is not a site.
+    #[test]
+    fn a_free_fn_named_as_a_helper_is_a_wrapper() {
+        let fixture = "
+fn curve_stage_failed(op: &'static str) -> E { SolidError::curve(op, CurveFailure::StageFailed) }
+fn g() { let _ = (curve_stage_failed(OP), curve_stage_failed(OP)); }
+impl crate::SolidError {
+    pub(crate) fn curve_stage_failed(op: &'static str, s: i32) -> Self {
+        Failure::new(op, CurveFailure::StageFailed).with_status(s).into_error()
+    }
+}
+fn h() { let _ = SolidError::curve_stage_failed(OP, 1); }
+";
+        let wraps = "curve_stage_failed (wraps CurveFailure::StageFailed)".to_owned();
+        assert_eq!(
+            lines(&STAGE, fixture),
+            vec![
+                (3, wraps.clone()),
+                (3, wraps),
+                (9, "curve_stage_failed".to_owned()),
+            ]
+        );
+    }
+
+    /// A counted enum imported under another name would hide its constructions: the scan
+    /// refuses it.
+    #[test]
+    #[should_panic(expected = "under another name")]
+    fn an_enum_imported_under_another_name_fails_the_scan() {
+        let _ = lines(
+            &GENERIC,
+            "use crate::error::Reason as R;\nfn x() -> E { Failure::new(OP, R::Failed(\"x\")).into_error() }\n",
+        );
+    }
+
+    /// A glob import of a counted enum's variants fails the scan too.
+    #[test]
+    #[should_panic(expected = "with a glob")]
+    fn an_enum_glob_import_fails_the_scan() {
+        let _ = lines(&STAGE, "use crate::error::curve::CurveFailure::*;\n");
+    }
+
+    /// An import of a counted variant is no construction, and the short name it brings in
+    /// would not be seen: the scan refuses it.
+    #[test]
+    #[should_panic(expected = "a `use` imports `CurveFailure::StageFailed`")]
+    fn a_variant_import_fails_the_scan() {
+        let _ = lines(
+            &STAGE,
+            "use crate::error::curve::CurveFailure::StageFailed;\nfn x(e: F) -> bool { e == StageFailed }\n",
+        );
+    }
+
+    /// An enum imported under its own name is neither a site nor refused.
+    #[test]
+    fn a_plain_import_is_neither_a_site_nor_refused() {
+        let fixture = "
+use crate::error::{curve::CurveFailure, Reason};
+fn x() -> E { Failure::new(OP, Reason::Failed(\"x\")).into_error() }
+";
+        assert_eq!(lines(&STAGE, fixture), Vec::new());
+        assert_eq!(
+            lines(&GENERIC, fixture),
+            vec![(3, "Reason::Failed".to_owned())]
+        );
+    }
 }

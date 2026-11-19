@@ -331,6 +331,13 @@ mod tests {
                 Builder::Variant("SurfaceFailure", "OutsideDomain"),
                 Builder::Variant("SurfaceFailure", "OffSurface"),
                 Builder::Method("surface_failed", Some(1)),
+                // the WR-57 replay seam's own constructor of a taped answer (feature
+                // `wr57-replay`), which only the goldens call: not a kernel site
+                Builder::Shared(
+                    "solidcore/src/surface/surface/replay",
+                    "surface_failed",
+                    Some(1),
+                ),
                 Builder::Method("surface_missing", Some(1)),
             ],
             wrappers: Wrappers::Phrase,

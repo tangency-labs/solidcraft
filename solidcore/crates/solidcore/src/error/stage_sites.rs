@@ -15,8 +15,9 @@
 //!   `geom_stage_failed(`, `intersect_stage_failed(`, `offset_stage_failed(` or
 //!   `boolean_stage_failed(`, written `SolidError::<name>(` or `Self::<name>(` (their own
 //!   definitions are not sites; a local `fn` of the same name is a wrapper, not the helper);
-//! - a call of a local wrapper: a `let` closure, a private `fn` or a `macro_rules!` whose
-//!   body is one expression that builds one of the above
+//! - a call of a local wrapper: a `let` closure or a private `fn` whose body is one
+//!   expression that builds one of the above, or a `macro_rules!` whose body builds one
+//!   (a macro is a wrapper whatever its body holds, `let`s included: each call expands it)
 //!   ([`super::site_scan::Wrappers::Thin`]: `let missing = ||
 //!   SolidError::offset_stage_failed(OP, SM_ERR_NULL_POINTER)` counts at each call). Its body
 //!   is not a site.
@@ -62,7 +63,9 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_executive/session/law_corners.rs", 1),
     ("solidcore/src/blend/fillet_executive/session/tangent_rollover.rs", 2),
     ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 4),
+    ("solidcore/src/blend/fillet_geom/p1.rs", 62),
     ("solidcore/src/blend/fillet_geom/p2.rs", 122),
+    ("solidcore/src/blend/fillet_geom/p3.rs", 47),
     ("solidcore/src/blend/fillet_geom/p4.rs", 120),
     ("solidcore/src/blend/fillet_geom/p5.rs", 131),
     ("solidcore/src/blend/fillet_geom/p6.rs", 88),

@@ -66,7 +66,7 @@
 //! distinctions between cases). [`SolidError::is_port_failure`] tells a solidcore defect
 //! or missing port from a failure of the operation on its input (#1452).
 //!
-//! **Converting a site** (#13790). Every failure ends up a named cause, a refusal, or the
+//! **Converting a site.** Every failure ends up a named cause, a refusal, or the
 //! area's `Defect { why }`: a failure reviewed at its site as the kernel's fault, of class
 //! [`ErrorKind::StageFailed`] (127), whose `why` names the step that failed and why that is
 //! the kernel's fault. The sites not there yet (phrase causes, bare statuses, and the

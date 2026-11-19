@@ -91,7 +91,7 @@ A case carries the user's geometry. The application asks before attaching it (RF
 
 ## 6. Converting a failure site
 
-This is the guide for the typed-errors work (#13790). Follow it when you convert the sites that build a failure in a file of `crates/solidcore` or `crates/solidcore-ops`.
+This is the guide for the typed-errors work. Follow it when you convert the sites that build a failure in a file of `crates/solidcore` or `crates/solidcore-ops`.
 
 ### The goal and the counts
 
@@ -126,7 +126,8 @@ A `Missing` site is a defect unless the missing thing came from the caller.
 
 - A solve that stops with its numbers: a named cause that carries them (the residual, the tolerance, the iterations). It is a defect. `BlendFailure::StationDidNotConverge` is the model.
 - A refusal only where a separate check measures the fit. Then the refusal carries the fit.
-- A drop or an intersection that stops with no numbers: `Defect { why }`.
+- A drop or an intersection that stops with no numbers: `Defect { why }` only when the site establishes that the stop is the kernel's fault (the inputs were proved fit, and the step still stopped).
+- Where the area's contract already names a refusal for the situation, the site keeps that refusal, or builds it. The surface-surface intersection's contract is one: a contact it cannot prove is refused by name, as `Tangent` (`docs/ssi.md` §1 and its refusals, `crates/ssi/src/lib.rs`). Such a contact is never a `Defect`.
 
 ### 4. What a `why` is
 
