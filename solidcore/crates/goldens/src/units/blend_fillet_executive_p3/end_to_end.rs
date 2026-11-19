@@ -3193,12 +3193,11 @@ mod wr493_certificates {
     ///   parameter spans and samples (on the closer curves), the round face's domain and
     ///   samples, the sphere face's samples (the same fractions of the same domain of
     ///   the file's NURB here, of upstream's fitted NURB on #18230's tree), and the
-    ///   two round vertices: the one on the sphere is closer to its exact contact circle
-    ///   (proved). The one on the plane is FARTHER (proved): `4.3e-15` from its circle
-    ///   where #18230's was `1.4e-15`, both a few units in the last place of `sqrt(8)`.
-    ///   It is the end of the contact edge on the plane, whose curve is proved closer
-    ///   above; the certified upper bound of its distance, `4.4e-15`, is pinned, and is far
-    ///   inside the vertex's tolerance (`4e-5`), which is asserted.
+    ///   two round vertices, both closer to their exact contact circles (proved). The one
+    ///   on the plane is `2.4e-15` from its circle where the fitted NURB's is `4.3e-15`
+    ///   (main's row has that vertex, bit for bit), both a few units in the last place of
+    ///   `sqrt(8)`; its certified upper bound, below `2.5e-15`, is pinned, and is far inside
+    ///   the vertex's tolerance (`4e-5`), which is asserted.
     #[test]
     fn the_round_is_closer_to_its_torus() {
         let (_, old) = round(true);
@@ -3291,18 +3290,25 @@ mod wr493_certificates {
             assert_eq!(moved(&eo[i], &en[i]), [0_usize; 0], "{NAME}: file edge {i}");
         }
         assert_eq!(moved(&fo[1], &fnn[1]), [0_usize; 0], "{NAME}: the plane face");
-        // the round's edges: tolerance, span and samples (the seam's span is kept)
-        for (i, span) in [(3, true), (4, true), (5, false)] {
+        // the round's edges: tolerance, span and samples (the seam's span is kept; the
+        // entries not listed below have the same bits in both)
+        let mut got = Vec::new();
+        for i in 3..6 {
             assert_eq!((eo[i][0], en[i][0]), (old_tol, new_tol), "{NAME}: edge {i} tolerance");
-            let mut want = vec![0, 5, 6, 7, 9, 10, 11, 13, 14, 15];
-            if span {
-                want.insert(1, 2);
-            }
-            assert_eq!(moved(&eo[i], &en[i]), want, "{NAME}: round edge {i}");
+            got.push(moved(&eo[i], &en[i]));
         }
+        assert_eq!(
+            got,
+            [
+                vec![0, 2, 5, 6, 7, 10, 11, 13, 14, 15],
+                vec![0, 2, 5, 6, 7, 9, 10, 11, 13, 14, 15],
+                vec![0, 6, 7, 9, 10, 11, 13, 14, 15],
+            ],
+            "{NAME}: the round's edges"
+        );
         // the round face: tolerance, domain and samples
         assert_eq!((fo[2][0], fnn[2][0]), (old_tol, new_tol));
-        assert_eq!(moved(&fo[2], &fnn[2]), [0, 3, 8, 9, 12, 13, 15, 16, 17]);
+        assert_eq!(moved(&fo[2], &fnn[2]), [0, 3, 8, 9, 11, 12, 13, 15, 16, 17]);
         // the sphere face: its samples at the same fractions of the same domain, of the
         // file's NURB here and of upstream's fitted NURB on #18230's tree (one sphere, two
         // parametrisations)
@@ -3318,8 +3324,8 @@ mod wr493_certificates {
             off_circle(point(&vn[2]), -4.0, 1.0, 8.0, 1.0),
         );
         eprintln!("{NAME}: plane vertex {now:?} off its circle, #18230 {before:?}");
-        // FARTHER, by rounding: pinned, and within the vertex's tolerance
-        assert!(now.lo > before.hi && now.hi < 4.4e-15, "{NAME}: plane vertex {now:?}, #18230 {before:?}");
+        // CLOSER, by a few units in the last place: pinned, and within the vertex's tolerance
+        assert!(now.hi < before.lo && now.hi < 2.5e-15, "{NAME}: plane vertex {now:?}, #18230 {before:?}");
         assert!(now.hi <= vn[2][3], "{NAME}: plane vertex {now:?} beyond its tolerance");
         let (before, now) = (
             off_circle(point(&vo[3]), -35.0, 9.0, 800.0, 81.0),

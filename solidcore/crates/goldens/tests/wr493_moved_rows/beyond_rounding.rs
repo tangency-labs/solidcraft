@@ -4,11 +4,12 @@
 // true value (`wr493_moved_rows_are_classified`, which checks that every entry here is in
 // its `EXPECTED` as EQUAL and not in its `WIDE`). Shared by that test and
 // `goldens::wr493_rows::sphere_diff_3cylinders_rows_are_their_sums`.
-static BEYOND_ROUNDING: [(&str, usize); 41] = [
+static BEYOND_ROUNDING: [(&str, usize); 43] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 10),
@@ -21,6 +22,7 @@ static BEYOND_ROUNDING: [(&str, usize); 41] = [
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 9),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 10),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", 11),
+    ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 0),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 4),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 5),
     ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 9),

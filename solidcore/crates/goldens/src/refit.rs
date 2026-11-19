@@ -61,6 +61,28 @@ pub(crate) fn active() -> bool {
 #[cfg(test)]
 mod replay;
 
+/// Runs `f` with every found sphere given upstream's fitted NURB ([`state::Refit`]), as
+/// main built it before the WR-493 retirement; returns its result and how many file NURBs
+/// were replaced. The mode is removed even when `f` panics.
+#[cfg(test)]
+pub(crate) fn with_fitted_spheres<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                state::set(None);
+            }
+        }
+    }
+    state::set(Some(state::Refit::default()));
+    let clear = Clear;
+    let out = f();
+    drop(clear);
+    let r = state::take().expect("refit mode lost");
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    (out, r.replaced)
+}
+
 #[cfg(test)]
 pub(crate) mod state {
     use std::cell::RefCell;

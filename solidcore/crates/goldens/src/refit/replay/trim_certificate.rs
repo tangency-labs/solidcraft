@@ -355,9 +355,10 @@ fn gaps(name: &str, refit: bool) -> std::collections::BTreeMap<u32, Gap> {
             .unwrap_or_else(|| panic!("{name} {id:?}: the gap is not enclosed"));
         let bits = encoding(&k, t);
         let lo_k = crate::runner_kernel();
-        // A lower bound: the largest gap at uniform parameters, each less a margin above
-        // its evaluation's rounding (1e-9 of the points' size, against rounding near 1e-15
-        // of it): the supremum is at least every gap at a parameter.
+        // A lower bound: the largest gap at uniform parameters, each less a margin for its
+        // evaluation's rounding: the supremum is at least every gap at a parameter. The
+        // margin (1e-9 of the points' size, against rounding near 1e-15 of it) is ARGUED,
+        // not derived: the points are evaluated in plain floating point.
         let lo = Box::new(move || {
             (0..=SAMPLES)
                 .map(|j| {
@@ -383,20 +384,25 @@ fn gaps(name: &str, refit: bool) -> std::collections::BTreeMap<u32, Gap> {
     out
 }
 
-/// Every trim on a found face of the 9 files, on this branch (the file's NURB) and as main
-/// built it (the fitted NURB, refit seam), by a certified upper bound of how far the face's
+/// Every edge use's trim on a found face of the 9 files, on this branch (the file's NURB)
+/// and as main built it (the fitted NURB, refit seam), by a certified upper bound of how far the face's
 /// surface along the trim strays from the edge's curve at the same parameter
 /// ([`curve_uv_gap_bound`]: interval Taylor models with bisection, every rounding
 /// included). A trim within its edge's tolerance on both sides is PROVEN. The others are
 /// pinned below, each ranked between the sides by the certified upper bound of one against
 /// a lower bound of the other (the largest gap at [`SAMPLES`] parameters less a rounding
-/// margin; a lower bound of a supremum needs no enclosure):
+/// margin, which is ARGUED; a lower bound of a supremum needs no enclosure). So the
+/// CLOSER and FARTHER rankings below rest on that argued margin (it is about six orders of
+/// magnitude above the rounding); the upper bounds are certified:
 /// - the same file trim on both sides, out of tolerance by the same amount (the two
 ///   enclosures `[lo, hi]` overlap): the file's own data, kept by main too;
 /// - CLOSER: within tolerance here, out on main (`hi` here below `lo` on main);
 /// - FARTHER: out here, `lo` here above `hi` on main.
 ///
 /// Every trim out of tolerance on this branch is one of the file's UV curves, bit for bit.
+///
+/// Counts are of edge uses: mated uses share one trim (`uv_trim_curve` returns the owner's),
+/// so each pair below (0/1, 8/9, ...) is one trim seen from both of its uses.
 #[test]
 fn wr493_trims_on_found_faces_are_bounded_on_both_nurbs() {
     // (file, edge use, class)
@@ -473,7 +479,7 @@ fn wr493_trims_on_found_faces_are_bounded_on_both_nurbs() {
         }
     }
     eprintln!(
-        "{proven} trims within tolerance on both sides\n{}",
+        "{proven} edge uses' trims within tolerance on both sides\n{}",
         report.join("\n")
     );
     assert_eq!(got, want);

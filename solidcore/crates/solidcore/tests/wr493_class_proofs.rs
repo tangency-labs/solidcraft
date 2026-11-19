@@ -1020,10 +1020,10 @@ fn sphere_face_shares(
 /// The ranking against that reference is ARGUED, not proved: its line integrals converge
 /// (n = 24 against 32, Stokes against Green) but carry no remainder bound. A certified
 /// bound is out of reach for the ranking: the rows differ by 1.4e-10 of the volume, and
-/// the volume enclosure ([`enclose_volume`]) spends its cell budget near 2e-4 of it wide.
-/// What is PROVEN is EQUAL: both volume rows lie in the certified enclosure asked 1e-5 of
-/// the volume wide (asserted here); the mass rows are held EQUAL to the body's certified
-/// enclosure by `goldens/tests/wr493_moved_rows_are_classified`.
+/// the volume enclosure ([`enclose_volume`]) spends its cell budget at 2.2e-4 of it wide.
+/// What is PROVEN is EQUAL (WIDE): both volume rows lie in that certified enclosure, which
+/// is 2.2e-4 of the volume wide (asserted here); the mass rows are held EQUAL to the body's
+/// certified enclosure by `goldens/tests/wr493_moved_rows_are_classified`.
 #[test]
 fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     use solidcore::mass::integrator::properties::{
@@ -1068,6 +1068,18 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     // EQUAL, certified: both rows in the volume's enclosure
     let mut ev = read(&mut k, name);
     let e = enclose_volume(&k, &mut ev, 1e-5 * row).unwrap();
+    eprintln!(
+        "{name}: volume enclosure [{}, {}], {:e} of the volume wide",
+        e.lo,
+        e.hi,
+        (e.hi - e.lo) / row
+    );
+    // WIDE: the budget stops the enclosure at 2.2146644063900247e-4 of the volume
+    let width = (e.hi - e.lo) / row;
+    assert!(
+        (2.2e-4..2.3e-4).contains(&width),
+        "volume enclosure {width:e} wide"
+    );
     for r in [row, old_row] {
         assert!(
             e.lo <= r && r <= e.hi,

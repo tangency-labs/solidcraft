@@ -18,7 +18,11 @@
 //! [`DATA`] was made by [`record`] from main's expected rows (`REFIT_OLD`, its `expected`
 //! directory): every case whose committed row differs from main's. A row the retirement
 //! moves by less than the goldens' comparator keeps main's committed line, so it is not
-//! listed (its run is not that line to the bit).
+//! listed (its run is not that line to the bit). Of `blend.fillet_executive_p3`'s moved rows
+//! only the ten `sphere_diff_3cylinders` rows are listed (`REFIT_UNITS` that unit alone,
+//! these rows kept): the seam does not rebuild main's `source-file-box_w_slot-all-edges`
+//! or `stubs4-sphere_plane-e3-r0.5`, which are proved on their own (`wr493_class_proofs`,
+//! `wr493_certificates`).
 
 use std::collections::BTreeMap;
 
@@ -130,7 +134,7 @@ replay_tests! {
     brep_p4_rows_move_only_through_the_kept_nurb: "topology.brep_p4", 5;
     edge_rows_move_only_through_the_kept_nurb: "topology.edge", 32;
     edgeuse_p1_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p1", 49;
-    edgeuse_p3_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p3", 29;
+    edgeuse_p3_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p3", 30;
     face_p2_rows_move_only_through_the_kept_nurb: "topology.face_p2", 4;
     face_p3_rows_move_only_through_the_kept_nurb: "topology.face_p3", 24;
     face_p4_rows_move_only_through_the_kept_nurb: "topology.face_p4", 30;
@@ -138,6 +142,7 @@ replay_tests! {
     edgeuse_p2_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p2", 8;
     vertex_rows_move_only_through_the_kept_nurb: "topology.vertex", 1;
     standard_solver_p1_rows_move_only_through_the_kept_nurb: "blend.fillet_standard_solver_p1", 1;
+    fillet_executive_p3_rows_move_only_through_the_kept_nurb: "blend.fillet_executive_p3", 10;
 }
 
 /// `topology.vertex` `surf_sphere150_rebuild_v3_gaps` (`max_up_dim_gap_3d` with its list):

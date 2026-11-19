@@ -36,8 +36,9 @@ fn run(runner: &dyn UnitDiff, case: &str) -> crate::output::Output {
 /// (Higham, section 3.1). The magnitudes are this row's (summed in interval arithmetic)
 /// and the old row's absolute sum (`n` times it for the weighted sum); where the old row's
 /// is not finite (an entry past `1e300`, a box's open end, compared exactly) the finite
-/// entries' are this row's for both. Non-finite sums are compared exactly.
-fn assert_blocks(case: &str, what: &str, xs: &[f64], n: usize, old: &[[f64; 3]]) {
+/// entries' are this row's for both. Non-finite sums are compared exactly. A block listed in
+/// `beyond` is asserted the other way: its plain sum lies outside that bound.
+fn assert_blocks(case: &str, what: &str, xs: &[f64], n: usize, old: &[[f64; 3]], beyond: &[usize]) {
     assert_eq!(xs.len(), n, "{case}: {what} length");
     let blocks: Vec<&[f64]> = xs.chunks(BLOCK).collect();
     assert_eq!(blocks.len(), old.len(), "{case}: {what} blocks");
@@ -67,6 +68,13 @@ fn assert_blocks(case: &str, what: &str, xs: &[f64], n: usize, old: &[[f64; 3]])
             weighted_scale,
             old_scale.mul(Iv::exact(len as f64)),
         );
+        if beyond.contains(&i) {
+            assert!(
+                Iv::exact(sum).sub(Iv::exact(old[0])).mag() > sum_bound,
+                "{case}: {what} block {i} moves by rounding only"
+            );
+            continue;
+        }
         for (k, (now, before, b)) in [
             (sum, old[0], sum_bound),
             (abs, old[1], sum_bound),
@@ -99,51 +107,51 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
         [
-            38227.3820108397,
-            169498.7204488313,
-            169498.7204488313,
-            -6.114560407317939e-14,
-            -3.598662527301659e-05,
-            0.00010882600400569041,
-            200903696.71038696,
+            38227.38201699721,
+            169498.72044883124,
+            169498.72044883124,
+            -6.17470508552754e-14,
+            -3.598662528099317e-05,
+            0.00010882600400673944,
+            200903696.7103869,
             200903696.710392,
-            200904372.36348903,
-            248.59247835671283,
-            1.973124187014311e-08,
-            -1.773516745017131e-07,
+            200904372.36348906,
+            248.5924783606351,
+            2.0621841193072045e-08,
+            -1.775121998202596e-07,
         ],
         1044,
         &[
-            [-58.236307597353125, 3250.9242363105673, 29239.842900965297],
-            [393.3322996667531, 2283.6860722004217, -7485.5603598700045],
-            [54.332258767866165, 2638.6291550565006, -12862.645915802019],
-            [46.38188858324311, 6506.482660065286, 120995.81463561457],
-            [295.9333227941589, 589.2005679057166, -398.35425128616663],
+            [-58.23268090218896, 3250.927863005732, 29064.08462137706],
+            [393.3328770159371, 2283.686649549606, -7485.447018390693],
+            [54.33302840814239, 2638.6299248618766, -12862.55029671469],
+            [46.381889540004025, 6506.48266037973, 120995.81465372315],
+            [295.9333227952652, 589.2005679033156, -398.35425121573167],
         ],
     ),
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
         [
-            38192.70266321392,
-            169488.11176517553,
-            169488.11176517553,
-            -6.121288540895723e-14,
-            -0.0009204325605192529,
-            0.002759771374899137,
-            200882054.24621296,
+            38192.70266865796,
+            169488.11176517548,
+            169488.11176517548,
+            -6.123467668148411e-14,
+            -0.0009204325605269636,
+            0.002759771374899807,
+            200882054.24621293,
             200882054.24641633,
-            200899145.80754238,
-            6597.350500432896,
-            2.0507525094612877e-08,
-            -1.7776391437163526e-07,
+            200899145.8075424,
+            6597.350500435275,
+            2.1070314403190426e-08,
+            -1.7784404934032368e-07,
         ],
         1044,
         &[
-            [-55.04282221986392, 3250.542036690248, 29403.501350519473],
-            [393.3322996667531, 2283.6860722004217, -7485.5603598700045],
-            [59.80456960408308, 2637.390621401923, -11679.935345347028],
-            [54.00013727115852, 6506.360776884594, 121280.04962217313],
-            [298.8673209428467, 589.8598849540451, -364.87965080912534],
+            [-55.03919549681931, 3250.545663413293, 29403.817902851053],
+            [393.3328770159371, 2283.686649549606, -7485.447018390693],
+            [59.80533926700125, 2637.3913912121498, -11679.839721201231],
+            [54.000137965486786, 6506.360777745887, 121280.04962441738],
+            [298.86732094821383, 589.8598849414541, -364.87965045001897],
         ],
     ),
     (
@@ -164,60 +172,60 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         ],
         946,
         &[
-            [-272.3531330514662, 3207.2965625494535, -62268.30896168256],
-            [843.8053053338348, 2629.357987451512, 142865.50468114667],
-            [-241.66997710761865, 2297.9845592191455, -3820.746445578192],
+            [-272.3498073482843, 3207.2998882526354, -62268.10704584696],
+            [843.8061157357686, 2629.358797853445, 142865.54604706616],
+            [-241.66866825730182, 2297.985868069462, -3820.548468043122],
             [-187.22231839074738, 2183.8077466814675, -34648.73480807489],
         ],
     ),
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
         [
-            38227.38201074548,
+            38227.38201697493,
             169498.72044883113,
             169498.72044883113,
-            -4.979080091814951e-14,
-            -3.598662526162161e-05,
-            -0.0001072613874655039,
-            200903696.7103869,
-            200903696.71039194,
-            200904372.3634889,
-            -265.4323219548221,
-            1.1120885514499355e-08,
-            -1.6280852434782863e-07,
+            -5.105890997328647e-14,
+            -3.5986625268484007e-05,
+            -0.00010726138746382216,
+            200903696.7103868,
+            200903696.71039197,
+            200904372.36348888,
+            -265.43232194894676,
+            1.3292566368905216e-08,
+            -1.6159650301470757e-07,
         ],
         1044,
         &[
-            [178.65341115016753, 3199.1932537312828, -10439.8950758711],
-            [836.4691576206195, 2411.4658225968583, 28928.31526957864],
-            [557.8207318103367, 2556.2077310894942, 134325.61965144213],
-            [1774.2765745295997, 6185.019339547512, 268612.7998603277],
-            [554.8162293878556, 592.8845954862852, 3694.6506925855856],
+            [178.6567179937589, 3199.1965605748737, -10792.031958227584],
+            [836.4701059537721, 2411.4667709300106, 28928.453488857253],
+            [557.8215076684595, 2556.2085069476175, 134325.7429057291],
+            [1774.276576095138, 6185.019340635833, 268612.7998649341],
+            [554.8162293889802, 592.8845954838873, 3694.6506926563716],
         ],
     ),
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
         [
-            38192.7026631297,
-            169488.11176517545,
-            169488.11176517545,
-            -5.5565903320905924e-14,
-            -0.0009204325605013881,
-            -0.0027582066604249548,
-            200882054.246213,
-            200882054.24641624,
-            200899145.80754232,
-            -6614.190344030134,
-            9.501001257738387e-09,
-            -1.6906407974309621e-07,
+            38192.702668157785,
+            169488.1117651754,
+            169488.1117651754,
+            -5.1163609319402794e-14,
+            -0.0009204325605082199,
+            -0.0027582066604235726,
+            200882054.2462129,
+            200882054.24641618,
+            200899145.80754223,
+            -6614.190344023803,
+            1.2725687587033705e-08,
+            -1.6944582603113434e-07,
         ],
         1044,
         &[
-            [175.46422321934455, 3198.8067566666673, -10836.357228535842],
-            [835.6467151018047, 2410.6433800780437, 28870.04381715195],
-            [560.4920316533521, 2558.879030932509, 134983.06049605613],
-            [1768.929112111031, 6181.880866392351, 268301.85786924587],
-            [555.572420845353, 594.3693320743239, 3691.6057482088704],
+            [175.46753007843859, 3198.810063525761, -11189.450905561564],
+            [835.647663434957, 2410.6443284111956, 28870.18203643056],
+            [560.4928075122987, 2558.879806791456, 134983.1837505503],
+            [1768.929113707121, 6181.880867487534, 268301.85787435813],
+            [555.5724208509846, 594.3693320622627, 3691.6057485639076],
         ],
     ),
     (
@@ -238,9 +246,9 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         ],
         946,
         &[
-            [-272.3531330514662, 3207.2965625494535, -62268.30896168256],
-            [843.8053053338348, 2629.357987451512, 142865.50468114667],
-            [-241.66997710761865, 2297.9845592191455, -3820.746445578192],
+            [-272.3498073482843, 3207.2998882526354, -62268.10704584696],
+            [843.8061157357686, 2629.358797853445, 142865.54604706616],
+            [-241.66866825730182, 2297.985868069462, -3820.548468043122],
             [-187.22231839074738, 2183.8077466814675, -34648.73480807489],
         ],
     ),
@@ -262,9 +270,9 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         ],
         946,
         &[
-            [-272.3531330514662, 3207.2965625494535, -62268.30896168256],
-            [843.8053053338348, 2629.357987451512, 142865.50468114667],
-            [-241.66997710761865, 2297.9845592191455, -3820.746445578192],
+            [-272.3498073482843, 3207.2998882526354, -62268.10704584696],
+            [843.8061157357686, 2629.358797853445, 142865.54604706616],
+            [-241.66866825730182, 2297.985868069462, -3820.548468043122],
             [-187.22231839074738, 2183.8077466814675, -34648.73480807489],
         ],
     ),
@@ -286,9 +294,9 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         ],
         946,
         &[
-            [-272.3531330514662, 3207.2965625494535, -62268.30896168256],
-            [843.8053053338348, 2629.357987451512, 142865.50468114667],
-            [-241.66997710761865, 2297.9845592191455, -3820.746445578192],
+            [-272.3498073482843, 3207.2998882526354, -62268.10704584696],
+            [843.8061157357686, 2629.358797853445, 142865.54604706616],
+            [-241.66866825730182, 2297.985868069462, -3820.548468043122],
             [-187.22231839074738, 2183.8077466814675, -34648.73480807489],
         ],
     ),
@@ -310,9 +318,9 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         ],
         946,
         &[
-            [-272.3531330514662, 3207.2965625494535, -62268.30896168256],
-            [843.8053053338348, 2629.357987451512, 142865.50468114667],
-            [-241.66997710761865, 2297.9845592191455, -3820.746445578192],
+            [-272.3498073482843, 3207.2998882526354, -62268.10704584696],
+            [843.8061157357686, 2629.358797853445, 142865.54604706616],
+            [-241.66866825730182, 2297.985868069462, -3820.548468043122],
             [-187.22231839074738, 2183.8077466814675, -34648.73480807489],
         ],
     ),
@@ -334,9 +342,9 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         ],
         946,
         &[
-            [-272.3531330514662, 3207.2965625494535, -62268.30896168256],
-            [843.8053053338348, 2629.357987451512, 142865.50468114667],
-            [-241.66997710761865, 2297.9845592191455, -3820.746445578192],
+            [-272.3498073482843, 3207.2998882526354, -62268.10704584696],
+            [843.8061157357686, 2629.358797853445, 142865.54604706616],
+            [-241.66866825730182, 2297.985868069462, -3820.548468043122],
             [-187.22231839074738, 2183.8077466814675, -34648.73480807489],
         ],
     ),
@@ -391,8 +399,11 @@ include!("../tests/wr493_moved_rows/beyond_rounding.rs");
 /// main's row lies outside those bands for are pinned (`BEYOND_ROUNDING`): the found
 /// sphere's other parametrisation moves them by quadrature at the row's accuracy 1e-4, not
 /// by rounding, and each is EQUAL within that accuracy against the body's certified
-/// enclosure (`wr493_moved_rows_are_classified` checks the list against its classes). The result geometry's blocks are held to main's within the sums' rounding
-/// bounds ([`assert_blocks`]).
+/// enclosure (`wr493_moved_rows_are_classified` checks the list against its classes). The
+/// result geometry's blocks are held to main's within the sums' rounding bounds
+/// ([`assert_blocks`]), except the blocks [`geometry_beyond_rounding`] lists, which are
+/// asserted to move beyond them (the round edge ends of
+/// [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]).
 #[test]
 fn sphere_diff_3cylinders_rows_are_their_sums() {
     use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -480,11 +491,111 @@ fn sphere_diff_3cylinders_rows_are_their_sums() {
                 &output.values["result_geometry"],
                 n,
                 old_geometry,
+                geometry_beyond_rounding(case),
             );
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
     assert_eq!(beyond, BEYOND_ROUNDING.to_vec(), "{beyond:#?}");
+}
+
+/// The two `sphere_diff_3cylinders` cases whose result geometry moves beyond rounding,
+/// mirror images of each other, and the round edge (in `p1::edges` order) whose end moves
+/// (see [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]).
+const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 37);
+const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 36);
+
+/// The result-geometry blocks of `case` that move beyond their sums' rounding bounds: the
+/// blocks holding the moved round edge (`e1-r0.5` block 3; `e4-r0.5` blocks 2 and 3) and,
+/// in `e4-r0.5`, block 0 with that edge's end vertex, whose tolerance shrinks.
+fn geometry_beyond_rounding(case: &str) -> &'static [usize] {
+    if case == E1_R05.0 {
+        &[3]
+    } else if case == E4_R05.0 {
+        &[0, 2, 3]
+    } else {
+        &[]
+    }
+}
+
+/// `blend.fillet_executive_p3` `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5` and
+/// `-e4-r0.5` (rounds of 0.5 on two edges that are mirror images): one PROVEN FARTHER, the
+/// other PROVEN CLOSER, by the same amount, both far inside tolerance. Both rows move only
+/// through the kept NURB (the refit replay reproduces main's rows bit for bit), but in each
+/// one round edge's interval end moves beyond rounding, between 70.64830969562033 and
+/// 70.6483087419461. At the first value the curve's end lies 2.11e-8 from its end vertex,
+/// at the second 9.85e-7. Main has the near end in `e1-r0.5` and the far end in `e4-r0.5`;
+/// this branch has them the other way round. So `e1-r0.5`'s edge 37 is FARTHER from its
+/// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 36 CLOSER (2.11e-8 against
+/// 9.85e-7, its end vertex's tolerance shrinking from 4.0985e-5 to 4.0021e-5). Every gap is
+/// inside the edge's tolerance (4e-5) and the vertex's. The gaps are evaluated in floating
+/// point, good to about 1e-13 here, so each ranking holds with a margin above 1e5. The
+/// edges' starts do not move beyond rounding. The FARTHER one is a defect of the retirement,
+/// disclosed in the PR.
+#[test]
+fn sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases() {
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::edge::{end_vertex, start_vertex};
+    // (end parameter, start gap, end gap, end vertex tolerance)
+    let gaps = |k: &solidcore::Kernel, b: &solidcore::topology::Brep, i: usize| {
+        let e = p1::edges(b, None).unwrap()[i];
+        let edge = b.edge(e).unwrap();
+        assert_eq!(
+            (edge.tolerance, edge.interval.min()),
+            (4e-5, 4.000_000_000_004_888_5e-3)
+        );
+        let c = edge.curve.as_ref().unwrap();
+        let at =
+            |t: f64, v| (c.evaluate_point(k, t).unwrap() - b.vertex(v).unwrap().point).length();
+        let (vs, ve) = (
+            start_vertex(b, e).unwrap().unwrap(),
+            end_vertex(b, e).unwrap().unwrap(),
+        );
+        let end_tol = b.vertex(ve).unwrap().tolerance;
+        assert!(b.vertex(vs).unwrap().tolerance >= 4e-5 && end_tol >= 4e-5);
+        (
+            edge.interval.max(),
+            at(edge.interval.min(), vs),
+            at(edge.interval.max(), ve),
+            end_tol,
+        )
+    };
+    let (near_t, far_t) = (70.648_309_695_620_33, 70.648_308_741_946_1);
+    let near =
+        |t: f64, gap: f64| (t - near_t).abs() <= 1e-13 * near_t && (2.1e-8..2.2e-8).contains(&gap);
+    let far =
+        |t: f64, gap: f64| (t - far_t).abs() <= 1e-13 * far_t && (9.8e-7..9.9e-7).contains(&gap);
+    let mut ends = Vec::new();
+    for (case, edge) in [E1_R05, E4_R05] {
+        let mut k = solidcore::Kernel::default();
+        let now = blend_fillet_executive_p3::result_body_of(&mut k, case);
+        let mut k_main = solidcore::Kernel::default();
+        let (main, replaced) = crate::refit::with_fitted_spheres(|| {
+            blend_fillet_executive_p3::result_body_of(&mut k_main, case)
+        });
+        assert!(replaced > 0, "{case}");
+        let (t_now, start_now, end_now, tol_now) = gaps(&k, &now, edge);
+        let (t_main, start_main, end_main, tol_main) = gaps(&k_main, &main, edge);
+        eprintln!(
+            "{case} edge {edge} end: now t {t_now} gap {end_now:e} vertex tol {tol_now:e}, \
+             main t {t_main} gap {end_main:e} vertex tol {tol_main:e}"
+        );
+        assert!(
+            (start_now - start_main).abs() <= 1e-13,
+            "{case}: the start moved"
+        );
+        assert!(end_now < 4e-5 && end_main < 4e-5);
+        ends.push((near(t_now, end_now), far(t_now, end_now)));
+        ends.push((near(t_main, end_main), far(t_main, end_main)));
+        if case == E4_R05.0 {
+            assert!(tol_now < tol_main, "{case}: the end vertex's tolerance");
+        }
+    }
+    // e1-r0.5: FARTHER (now far, main near); e4-r0.5: CLOSER (now near, main far)
+    assert_eq!(
+        ends,
+        [(false, true), (true, false), (true, false), (false, true)]
+    );
 }
 
 /// `offset.offset_geometry_creation` `gen0051`: **a rounding-only bound, not a regression
@@ -503,6 +614,7 @@ fn gen0051_moves_by_rounding_only() {
             [15304.415989596599, f64::INFINITY, f64::NAN],
             [43.92201188381077, f64::INFINITY, f64::NAN],
         ],
+        &[],
     );
 }
 

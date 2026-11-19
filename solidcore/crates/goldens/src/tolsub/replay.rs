@@ -47,6 +47,26 @@
 //! can differ from main's run in the last bits, within the goldens' tolerance): with the
 //! raises put back (at least one) the row is main's row, and as is it is the committed
 //! golden line.
+//!
+//! The WR-493 retirement moves some of those rows as well. [`TRIM_COVER_REFIT`] lists the
+//! ones whose read it moves: they are replayed with the found spheres' fitted NURB put
+//! back too. [`TRIM_COVER_WITHIN_COMPARATOR`] lists the ones where it moves only the cover's
+//! raises (the cover measures the kept trims on the file's NURB here, on the fitted NURB on
+//! main) by less than the goldens' comparator: the committed line stays main's, the run
+//! agrees with it under the comparator, and with the fitted NURB put back the run is that
+//! line to the bit (three `nurb_fillet` mirrors, whose committed line is not main's own run
+//! to the bit, under the comparator: [`TRIM_COVER_MAIN_RUN_NOT_COMMITTED`]). Nine rows are deleted, as above:
+//! - `corpus.parity`'s five part-file reads (`Solids/boolean_trees.smp`,
+//!   `ss_plane_sph1..4.smp`): the part read (`part_file::read_part_from_db`) has no refit
+//!   seam, so main's read cannot be rebuilt. `ss_plane_sph1..4` move beyond the comparator
+//!   and are proved with the WR-493 rows (their area enclosure, `solidcore`'s
+//!   `tests/wr493_class_proofs.rs`); here the retirement leaves the cover nothing to raise.
+//!   `boolean_trees.smp` agrees with its committed line (main's) under the comparator.
+//! - `topology.brep_mirror`'s `gen0050`, `gen0061`, `gen0079` and `gen0111` (mirrors of
+//!   `Solids/nurb_fillet.smb`): with the raises put back, with or without the fitted NURB,
+//!   their geometry blocks' sums are one to three units in the last place off main's run;
+//!   each run agrees with its committed line (main's) under the comparator (`gen0061` to the
+//!   bit).
 
 use std::collections::BTreeMap;
 
@@ -233,13 +253,25 @@ const WITHIN_COMPARATOR: &[(&str, &str)] = &[
 ];
 
 /// Runs every row of `unit_id` in [`TRIM_COVER`] with the reads' kept-trim cover raises put
-/// back (at least one per row) and as is; returns the row count.
+/// back (at least one per row) and as is; returns the row count. A row in
+/// [`TRIM_COVER_REFIT`] has the found spheres' fitted NURB put back as well for the first
+/// run. A row in [`TRIM_COVER_WITHIN_COMPARATOR`] agrees with its committed line under the
+/// goldens' comparator but not to the bit, and with the fitted NURB put back (the cover's
+/// raises kept) it is that line to the bit (under the comparator for a row in
+/// [`TRIM_COVER_MAIN_RUN_NOT_COMMITTED`]).
 fn replay_trim_cover(unit_id: &str) -> usize {
     let u = unit(unit_id);
     let all = cases(u.as_ref());
     let golden = read(&default_dir(), unit_id).unwrap();
     let mut failures = Vec::new();
     let mut n = 0;
+    let refit_run = |case: &Case, failures: &mut Vec<String>| {
+        let (line, replaced) = crate::refit::with_fitted_spheres(|| run(u.as_ref(), case));
+        if replaced == 0 {
+            failures.push(format!("{}: no found sphere refit", case.name));
+        }
+        line
+    };
     for &(_, name, main_hash) in TRIM_COVER.iter().filter(|r| r.0 == unit_id) {
         n += 1;
         assert!(
@@ -257,7 +289,12 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             undone: 0,
             failures: Vec::new(),
         }));
-        let line = run(u.as_ref(), case);
+        // (a row the WR-493 retirement moves too: main had the fitted NURB)
+        let line = if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
+            refit_run(case, &mut failures)
+        } else {
+            run(u.as_ref(), case)
+        };
         let Some(Mode::Substitute {
             reads,
             undone,
@@ -274,13 +311,212 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             failures.push(format!("{name}: the row put back is not main's row"));
         }
         let line = run(u.as_ref(), case);
-        if golden.get(name) != Some(&line) {
+        let committed = golden.get(name);
+        if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
+            // (the committed line is main's: the run agrees with it, not to the bit, and
+            // with the fitted NURB put back it is the line)
+            match committed {
+                Some(g) if g == &line => {
+                    failures.push(format!("{name}: the run is the committed line to the bit"));
+                }
+                Some(g) if diff(g, &line, u.abs_floors()).is_none() => {
+                    let refit = refit_run(case, &mut failures);
+                    if TRIM_COVER_MAIN_RUN_NOT_COMMITTED.contains(&(unit_id, name)) {
+                        // (main's own run is not its committed line to the bit either)
+                        if diff(g, &refit, u.abs_floors()).is_some() {
+                            failures.push(format!(
+                                "{name}: with the fitted NURB the row does not agree with \
+                                 the committed line"
+                            ));
+                        }
+                    } else if &refit != g {
+                        failures.push(format!(
+                            "{name}: with the fitted NURB the row is not the committed line"
+                        ));
+                    }
+                }
+                _ => failures.push(format!(
+                    "{name}: the row does not agree with the committed golden line"
+                )),
+            }
+        } else if committed != Some(&line) {
             failures.push(format!("{name}: the row is not the committed golden line"));
         }
     }
     assert!(failures.is_empty(), "{unit_id}:\n{}", failures.join("\n"));
     n
 }
+
+/// The [`TRIM_COVER`] rows the WR-493 retirement moves too: replayed with the found
+/// spheres' fitted NURB put back as well, as main built them.
+const TRIM_COVER_REFIT: &[(&str, &str)] = &[
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "sweep4-sphere_diff_3cylinders-all-r0.1",
+    ),
+    (
+        "blend.fillet_executive_p3",
+        "sweep5-sphere_diff_3cylinders-e29-r1.0",
+    ),
+    ("corpus.parity", "Fillet__sphere_diff_3cylinders.smb"),
+    ("corpus.parity", "Fillet__sphere_plane.smb"),
+    ("topology.api_files", "write_bytes0085"),
+    ("topology.api_files", "write_bytes0115"),
+    ("topology.api_files", "write_bytes0179"),
+    ("topology.api_files", "write_bytes_file_nurb_fillet_ascii"),
+    ("topology.api_files", "write_bytes_file_nurb_fillet_binary"),
+    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xy_at_z12"),
+    ("topology.brep_mirror", "gen0003"),
+    ("topology.brep_p2", "refine_cci_f6_plane_b_nouv"),
+    ("topology.brep_p2", "refine_cci_f6_plane_b_uv"),
+    ("topology.brep_p2", "refine_cci_f7_plane_b_uv"),
+    ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f0"),
+    ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f10"),
+    ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f2"),
+    ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f4"),
+    ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f6"),
+    ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f8"),
+];
+
+/// The [`TRIM_COVER_WITHIN_COMPARATOR`] rows whose committed line (main's) is not main's own
+/// run of the case to the bit (measured on main: its run agrees with the line under the
+/// goldens' comparator only). For these the run with the fitted NURB put back is held to
+/// the committed line under the comparator, not to the bit.
+const TRIM_COVER_MAIN_RUN_NOT_COMMITTED: &[(&str, &str)] = &[
+    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xz_at_y3"),
+    ("topology.brep_mirror", "gen0003"),
+    ("topology.brep_mirror", "gen0109"),
+];
+
+/// The [`TRIM_COVER`] rows whose cover raises the WR-493 retirement moves by less than the
+/// goldens' comparator (the cover measures the kept trims on the file's NURB here, on the
+/// fitted NURB on main): their committed line stays main's.
+const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
+    ("blend.fillet_removal", "nurb_fillet_face18"),
+    ("corpus.parity", "Fillet__sphere_diff_3cylinders.smb"),
+    ("heal.stitch_p1", "file_boolean_trees_result.smb_advanced"),
+    ("heal.stitch_p1", "file_nurb_fillet.smb_advanced"),
+    (
+        "heal.stitch_p2",
+        "file_boolean_trees_result.smb_stitchfaces_0.001",
+    ),
+    (
+        "heal.stitch_p2",
+        "file_boolean_trees_result.smb_stitchfaces_0.005",
+    ),
+    ("heal.stitch_p2", "file_nurb_fillet.smb_stitchfaces_0.001"),
+    ("heal.stitch_p2", "file_nurb_fillet.smb_stitchfaces_0.005"),
+    ("topology.brep_cutting", "gen0050"),
+    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xy_at_z12"),
+    ("topology.brep_mirror", "Solids_nurb_fillet_smb_xz_at_y3"),
+    ("topology.brep_mirror", "Solids_nurb_fillet_smb_yz_at_0"),
+    ("topology.brep_mirror", "gen0003"),
+    ("topology.brep_mirror", "gen0013"),
+    ("topology.brep_mirror", "gen0109"),
+    ("topology.brep_mirror", "gen0121"),
+    ("topology.brep_mirror", "mat0049"),
+    ("topology.brep_mirror", "mat0058"),
+    ("topology.brep_mirror", "mat0059"),
+    ("topology.brep_p2", "refine_cci_f0_plane_a_nouv"),
+    ("topology.brep_p2", "refine_cci_f0_plane_a_uv"),
+    ("topology.brep_p2", "refine_cci_f0_plane_b_uv"),
+    ("topology.brep_p2", "refine_cci_f4_plane_a_nouv"),
+    ("topology.brep_p2", "refine_cci_f4_plane_a_uv"),
+    ("topology.brep_p2", "refine_cci_f4_plane_b_uv"),
+    ("topology.brep_p2", "refine_cci_f6_plane_b_nouv"),
+    ("topology.brep_p2", "refine_cci_f6_plane_b_uv"),
+    ("topology.brep_p2", "refine_cci_f6_plane_c_uv"),
+    ("topology.brep_p2", "refine_cci_f7_plane_b_uv"),
+    ("topology.brep_p2", "refine_cci_f8_plane_a_uv"),
+    (
+        "topology.edgeuse_p3",
+        "own_reader_sphere_diff_3cylinders_get_or_create_eu13",
+    ),
+    (
+        "topology.edgeuse_p3",
+        "own_reader_sphere_diff_3cylinders_get_or_create_eu19",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f0",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f1",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f10",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f11",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f2",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f3",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f4",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f5",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f6",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f7",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f8",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f9",
+    ),
+];
 
 macro_rules! replay_tests {
     ($($test:ident: $unit:literal, $rows:literal;)*) => {$(
@@ -316,13 +552,13 @@ replay_trim_cover_tests! {
     blend_feature_executive_rows_move_only_through_the_trim_cover: "blend.feature_executive", 3;
     blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 32;
     blend_fillet_removal_rows_move_only_through_the_trim_cover: "blend.fillet_removal", 20;
-    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 8;
+    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 3;
     heal_stitch_p1_rows_move_only_through_the_trim_cover: "heal.stitch_p1", 4;
     heal_stitch_p2_rows_move_only_through_the_trim_cover: "heal.stitch_p2", 8;
     topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;
     topology_brep_cutting_rows_move_only_through_the_trim_cover: "topology.brep_cutting", 2;
     topology_brep_local_operation_rows_move_only_through_the_trim_cover: "topology.brep_local_operation", 28;
-    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 20;
+    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 16;
     topology_brep_p2_rows_move_only_through_the_trim_cover: "topology.brep_p2", 11;
     topology_brep_p9_rows_move_only_through_the_trim_cover: "topology.brep_p9", 4;
     topology_edgeuse_p3_rows_move_only_through_the_trim_cover: "topology.edgeuse_p3", 16;
