@@ -2936,13 +2936,17 @@ pub(crate) fn stitch_and_orient_one_solid(
 }
 
 /// [`stitch_and_orient_with_identity`] of faces whose lamina edges are the body's open
-/// boundary by construction: the first pass only. The second pass is for lamina edges the
-/// first left open, at ten or twenty times its tolerance, and squeezes out every lamina
-/// edge shorter than that (`squeeze_small_edges`). Where the open boundary is meant, as
-/// for the walls an uncapped sweep builds to meet at its profile's shared curve ends, the
-/// first pass's lamina count says nothing about a gap, and the second pass only removes
-/// boundary edges longer than the body's tolerance, leaving their faces' loops open. Not
-/// upstream; the caller answers for the premise.
+/// boundary by construction: the first pass only. Upstream runs a second pass, at ten or
+/// twenty times the first's tolerance, whenever the first leaves more than one lamina
+/// edge, and that pass squeezes out every open edge shorter than its tolerance that is
+/// lamina or wire (`squeeze_small_edges`, with `making_manifold_solid` as the primitives
+/// stitch). For the walls of an uncapped sweep the lamina edges are the profile's copies
+/// at its ends, so the first pass's count says nothing about a gap. There the second pass
+/// squeezed out a profile edge between the two tolerances, and its wall's loop was left
+/// open by the edge's length in 3D and the wall's whole width in UV. Walls whose edges lie
+/// apart by more than the first tolerance stay apart, as an open slit; the second pass
+/// glued them without covering the gap, and the check refused the sheet. Not upstream
+/// (WR-18515); the caller answers for the premise.
 ///
 /// # Errors
 ///

@@ -21,11 +21,24 @@
 - **How found:** a user's traced outline (SolidCraft #18515, Surface Extrude), reduced.
 - **Confirmed:** yes, in the port, which keeps upstream's two passes unchanged:
   `sweep::extrude::tests::an_uncapped_profile_with_a_short_segment_keeps_every_wall` fails
-  without the fix. With the second pass switched off the same sweeps build 15 edges and 10
-  vertices and pass the level-2 check. The pinned C++ was not run.
-- **solidcore:** `create_linear_sweep` without end caps stitches with
-  `stitch_and_orient_open`, the first pass only. A capped sweep keeps both passes: its caps
-  close every profile edge in the first pass, so a lamina edge left after it is a gap.
+  without the fix (13 edges, 8 vertices for a 3e-5 segment). With the second pass switched
+  off the same sweeps build 15 edges and 10 vertices and pass the level-2 check. The pinned
+  C++ was not run.
+- **Same cause:** solidcore's sweep along lines and arcs (`sweep/segments.rs`,
+  `sweep_along_segments`, no upstream counterpart) copies the pieces' walls into one body
+  and ends with `stitch_and_orient`. Uncapped, the profile's copies at both ends stay
+  lamina, and the second pass squeezes their short edges again:
+  `sweep::segments::tests::an_uncapped_profile_with_a_short_segment_keeps_every_wall`
+  fails without the fix.
+- **A gap in the profile:** an uncapped square whose second side starts 3e-5 to 3.9e-4 off
+  the first side's end was glued by the second pass without its tolerances covering the gap;
+  the check refused the sheet (Bad Gap tests 0 to 4, Bad Edge loc 13). With the first pass
+  only, the two walls stay apart along an open slit, and the check accepts the sheet
+  (4 faces, 13 edges, 10 vertices). The capped solid is the same with and without the fix.
+- **solidcore:** `create_linear_sweep` without end caps, and `sweep_along_segments` without
+  caps, stitch with `stitch_and_orient_open`, the first pass only. A capped sweep keeps both
+  passes: its caps close every profile edge in the first pass, so a lamina edge left after
+  it is a gap.
 - **Not fixed here:** a segment shorter than twice the body's tolerance (1e-5 at 1e-5) is
   squeezed by the first pass too; that sheet fails the loop orientation tests (3, 4) and the
   capped extrude is refused, with and without this fix.

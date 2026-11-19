@@ -27,7 +27,9 @@ use crate::sweep::api_brep::{create_linear_sweep, create_rotational_sweep};
 use crate::topology::brep::p1 as brep_p1;
 use crate::topology::brep::p2::ArenaNotifyState;
 use crate::topology::brep::p3::new_brep;
-use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+use crate::topology::brep::p5::{
+    stitch_and_orient, stitch_and_orient_open, StitchAndOrientOptions,
+};
 use crate::topology::brep::p7::copy_faces;
 use crate::topology::brep::p8::{create_planar_faces_with_3d_curves, FaceBuildEnv};
 use crate::topology::topology_traverser::Marks;
@@ -186,7 +188,12 @@ pub fn sweep_along_segments(
             })?;
         }
     }
-    stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
+    if cap {
+        stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
+    } else {
+        // the profile at both ends stays open: the walls are a sheet (WR-18515)
+        stitch_and_orient_open(k, &mut b, &StitchAndOrientOptions::default(), None)?;
+    }
     b.refresh_cached_topology();
     let mut half = 0.5 * total;
     let mut middle = m;
