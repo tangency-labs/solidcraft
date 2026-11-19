@@ -1146,7 +1146,8 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 /// lengths are compared relative to the larger (`SM_EFF_ZERO_SQRT / 10 * (1 + max)`), and
 /// the angle is between the two normals, where both curvatures exceed that gap; a smaller
 /// one is zero at it and has no normal, and then the two curvature vectors must lie within
-/// the gap of each other. Upstream takes the curvatures as the lengths of
+/// the gap of each other. A curvature whose length is not finite (it overflows) grades the
+/// join below G2. Upstream takes the curvatures as the lengths of
 /// the raw second derivatives (which depend on the parameter speed), compares them with
 /// an absolute `SM_EFF_ZERO_SQRT / 10`, and measures the angle of the first normal with
 /// itself (always 0).
@@ -1231,6 +1232,11 @@ pub fn evaluate_curve_continuity(
         .unwrap_or(Vec3::ZERO);
     let curvature1 = k1.length();
     let curvature2 = k2.length();
+    // A length that overflows (or is NaN) has no gap to compare against: an infinite
+    // tolerance would accept any pair (`inf <= inf`), so the join is not G2.
+    if !(curvature1.is_finite() && curvature2.is_finite()) {
+        return Ok(kind);
+    }
     let gap_tol = EFF_ZERO_SQRT / 10.0 * (1.0 + max2(curvature1, curvature2));
     // Two curvatures above the gap compare by length and normal. A curvature within the
     // gap of zero is zero at it and has no normal (upstream compares normals above
