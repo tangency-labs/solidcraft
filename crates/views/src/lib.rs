@@ -1,4 +1,4 @@
-//! The views of a design as plain data. A design keeps several views (Model, Sketch, Sheet,
+//! The views of a design as plain data. A design keeps several views (Model, Sheet,
 //! Render, Animation); this crate holds what they are, which one is shown and the saved form.
 //! It knows no UI toolkit, no document and no app, so the commands, the tab strip, tiles and
 //! windows all read the same [`ViewSet`], and a front end draws it however it likes.

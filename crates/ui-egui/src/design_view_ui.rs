@@ -100,7 +100,6 @@ pub fn plus_menu(dark: bool) -> Vec<TabMenuRow<'static>> {
     vec![
         TabMenuRow::heading("Open as a view"),
         kind("plus.model", "Model", "model"),
-        kind("plus.sketch", "Sketch", "sketch"),
         kind("plus.sheet", "Sheet", "sheet"),
         kind("plus.render", "Render", "render"),
         kind("plus.animation", "Animation", "animation"),
