@@ -51,11 +51,12 @@ The STEP reader reads its own surfaces of linear extrusion and of revolution, an
    - from the trims, otherwise;
    - from the edge's own angle and height, on a face that winds more than one turn about its axis.
 7. Picks the outer loops, and turns over a face whose outer loop runs clockwise about its side.
-8. Raises edge and vertex tolerances to the gaps the geometry measurably has.
-9. Orients an inconsistent closed solid shell by shared-edge parity: the two physical traversals of each shared edge must oppose. This determines relative face sides.
-10. Turns inside out a void that encloses volume of the outer shell's sign when no shell needed parity repair.
-11. Builds the regions and puts everything in the record's canonical order. After parity repair, certifies every shell's signed volume with the kernel's volume enclosure, turns the outer shell outward and the cavities inward, and restores canonical order.
-12. Checks the record's structure (`record_check::validate`) and its geometry against its topology (`record_check::agreement`).
+8. Joins loops of one face that touch at one vertex into one loop through it (`assembly/touching.rs`): a hole whose rim touches the face's outer edge at one point, or two holes that touch. The kernel takes no face whose loops share a vertex ([validity-and-tolerances.md](validity-and-tolerances.md) §4), and the one loop bounds the same region with the same edges and vertices. Loops that touch at two vertices or as a ring (they cut the face in two), or three or more at one vertex, are left as written, and a note names the face and the point.
+9. Raises edge and vertex tolerances to the gaps the geometry measurably has.
+10. Orients an inconsistent closed solid shell by shared-edge parity: the two physical traversals of each shared edge must oppose. This determines relative face sides.
+11. Turns inside out a void that encloses volume of the outer shell's sign when no shell needed parity repair.
+12. Builds the regions and puts everything in the record's canonical order. After parity repair, certifies every shell's signed volume with the kernel's volume enclosure, turns the outer shell outward and the cavities inward, and restores canonical order.
+13. Checks the record's structure (`record_check::validate`) and its geometry against its topology (`record_check::agreement`).
 
 The result is a `Solid`: the record, each face's origin, whether it is a sheet, the notes on what was repaired, and the faces turned over.
 

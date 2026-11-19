@@ -324,9 +324,11 @@ pub fn find_coincident_edge(
 /// the ball of one of the two vertices, which holds both curves' ends
 /// ([`Curve::proved_together`]: an enclosure, where [`find_coincident_edge`] samples). A
 /// vertex's ball is its tolerance about its point, or twice the distance from its point
-/// to the query curve's end at it where that is more: what the vertex has once the curve
-/// is an edge, whichever curve at the vertex is asked first (docs/booleans.md, "What a
-/// vertex stands for"). The edge owning the curve is skipped. A seam of
+/// to the query curve's end at it where that is more and stays clear of its far vertices
+/// ([`vertex_balls`]): what the vertex has once the curve is an edge, whichever curve at
+/// the vertex is asked first (docs/booleans.md, "What a vertex stands for"). A query
+/// curve the proof cannot enclose ([`Curve::can_be_proved`]) is no edge's, decided before
+/// anything is read. The edge owning the curve is skipped. A seam of
 /// `face` (the face on both sides of it, [`crate::topology::edge::face_on_both_sides`])
 /// bounds no material, and its tolerance adds nothing: the curve is the seam only within
 /// the query's own reach (docs/booleans.md, "Seams and poles"), which for the
@@ -346,6 +348,9 @@ pub fn find_edge_proved_along(
     edges: &[EdgeId],
     crossing: Option<&Surface>,
 ) -> Result<Option<usize>> {
+    if !query.curve.can_be_proved() {
+        return Ok(None);
+    }
     let (v1, v2) = (query.start_vertex, query.end_vertex);
     // the curve's reach, read once and only for a seam
     let mut reach: Option<SourceReach> = None;
@@ -423,24 +428,33 @@ pub fn find_edge_proved_along(
 /// (docs/validity-and-tolerances.md, section 5.2), so the vertex's ball is at least that
 /// wide, whichever of the curves that end at the vertex is imprinted first. The end at a
 /// vertex is the nearer of the curve's two (the two vertices differ), its distance taken
-/// with its rounding. A cover that is not finite is not larger: the stored tolerance
-/// stays.
+/// with its rounding. A cover is taken only while its ball stays clear of the vertex's far
+/// vertices (the other end of the query curve and of each of its edges), each at its own
+/// tolerance or cover, the two judged together
+/// ([`covers_staying_clear`](crate::boolean::topology_intersector::p1::covers_staying_clear),
+/// the rule the imprint's covers follow): a vertex cannot stand for both ends of a curve.
+/// A cover that is not finite, or not clear, is not taken: the stored tolerance stays.
 ///
 /// # Errors
 ///
-/// Those of the vertex queries and of the curve's evaluation.
+/// Those of the vertex and edge queries and of the curve's evaluation.
 fn vertex_balls(
     k: &Kernel,
     brep: &Brep,
     query: &CoincidentEdgeQuery<'_>,
 ) -> Result<Vec<(Point3, f64)>> {
+    use crate::boolean::topology_intersector::p1::{covers_staying_clear, Growth};
     let curve_ends = [
         query.curve.evaluate_point(k, query.interval.min())?,
         query.curve.evaluate_point(k, query.interval.max())?,
     ];
-    let mut balls = Vec::new();
-    for v in [query.start_vertex, query.end_vertex] {
+    let ends = [query.start_vertex, query.end_vertex];
+    let mut stored = Vec::new();
+    let mut covers = Vec::new();
+    for v in ends {
         let point = brep.vertex(v)?.point;
+        let tolerance = vertex_tolerance(brep, v)?;
+        stored.push((v, point, tolerance));
         let mut gap = f64::INFINITY;
         for end in curve_ends {
             let d = point.distance(end) + gamma(8) * (point.length() + end.length());
@@ -448,18 +462,42 @@ fn vertex_balls(
                 gap = d;
             }
         }
-        let stored = vertex_tolerance(brep, v)?;
         let cover = 2.0 * gap;
-        balls.push((
-            point,
-            if cover.is_finite() && cover > stored {
-                cover
-            } else {
-                stored
-            },
-        ));
+        if !(cover.is_finite() && cover > tolerance) {
+            continue;
+        }
+        let mut fars: Vec<VertexId> = ends.iter().copied().filter(|&o| o != v).collect();
+        for e in crate::topology::vertex::edges(brep, v, None)? {
+            let start = crate::topology::edge::start_vertex(brep, e)?;
+            let end = crate::topology::edge::end_vertex(brep, e)?;
+            let far = if start == Some(v) { end } else { start };
+            fars.extend(far.filter(|&f| f != v));
+        }
+        let mut reach = Vec::new();
+        for f in fars {
+            let far = brep.vertex(f)?;
+            // the distance less its rounding: a lower bound
+            let apart =
+                point.distance(far.point) - gamma(8) * (point.length() + far.point.length());
+            reach.push((Some(f), apart, far.tolerance));
+        }
+        covers.push(vec![Growth {
+            vertex: v,
+            tolerance: cover,
+            reach,
+        }]);
     }
-    Ok(balls)
+    let taken = covers_staying_clear(&[], &covers);
+    Ok(stored
+        .into_iter()
+        .map(|(v, point, tolerance)| {
+            let ball = taken
+                .iter()
+                .find(|&&(w, _)| w == v)
+                .map_or(tolerance, |&(_, cover)| cover);
+            (point, ball)
+        })
+        .collect())
 }
 
 /// Finds the edge of `brep` nearest to `point` and the curve parameter of the
@@ -796,5 +834,116 @@ mod tests {
             &|_| None,
         );
         assert!(matches!(r, Ok(None)), "{r:?}");
+    }
+
+    /// The unit box's edge from the origin to (1, 0, 0), its vertices and a face of it.
+    fn box_edge(k: &mut Kernel) -> (Brep, EdgeId, VertexId, VertexId, FaceId) {
+        let brep =
+            crate::primitive::api_primitives::create_box(k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let at = |v: VertexId, x: f64| {
+            let q = brep.vertex(v).unwrap().point;
+            q.distance(p(x, 0.0, 0.0)) < 1e-12
+        };
+        let e = crate::topology::brep::p1::edges(&brep, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let s = crate::topology::edge::start_vertex(&brep, e)
+                    .unwrap()
+                    .unwrap();
+                let t = crate::topology::edge::end_vertex(&brep, e)
+                    .unwrap()
+                    .unwrap();
+                (at(s, 0.0) && at(t, 1.0)) || (at(s, 1.0) && at(t, 0.0))
+            })
+            .unwrap();
+        let s = crate::topology::edge::start_vertex(&brep, e)
+            .unwrap()
+            .unwrap();
+        let t = crate::topology::edge::end_vertex(&brep, e)
+            .unwrap()
+            .unwrap();
+        let (a, b) = if at(s, 0.0) { (s, t) } else { (t, s) };
+        let face = crate::topology::vertex::faces(&brep, a).unwrap()[0];
+        (brep, e, a, b, face)
+    }
+
+    /// #19045 review: a query curve the proof cannot enclose (a composite curve, which does
+    /// not even evaluate) is no edge's: the answer is no match, not the error of reading
+    /// its ends for the vertices' balls.
+    #[test]
+    fn a_curve_the_proof_cannot_enclose_matches_no_edge() {
+        let mut k = Kernel::default();
+        let (brep, e, a, b, face) = box_edge(&mut k);
+        let line = Curve::from(crate::curve::line::Line::from_points(
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            3,
+        ));
+        let composite = Curve::from(
+            crate::curve::composite_curve::p1::CompositeCurve::with_curves(
+                3,
+                vec![line],
+                false,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let query = CoincidentEdgeQuery {
+            start_vertex: a,
+            end_vertex: b,
+            curve: &composite,
+            curve_owner: None,
+            interval: Extent1d::from_min_max(0.0, 1.0),
+            tolerance: 1e-6,
+        };
+        assert_eq!(
+            find_edge_proved_along(&k, &brep, face, &query, &[e], None).unwrap(),
+            None
+        );
+    }
+
+    /// #19045 review: a vertex's ball covers the query curve's end only while it stays
+    /// clear of its far vertices. A line 0.3 beside the box's unit edge, asked between the
+    /// edge's two vertices, would give each a ball of 0.6: together they hold the whole
+    /// edge and the whole line, which were then proved one edge though 0.3 apart. The two
+    /// balls reach each other (0.6 + 0.6 > 1), so both keep their stored tolerance and the
+    /// line is no edge's; the edge's own line still is.
+    #[test]
+    fn vertex_balls_that_reach_each_other_prove_no_edge() {
+        let mut k = Kernel::default();
+        let (brep, e, a, b, face) = box_edge(&mut k);
+        let beside = Curve::from(crate::curve::line::Line::from_points(
+            p(0.0, 0.3, 0.0),
+            p(1.0, 0.3, 0.0),
+            3,
+        ));
+        let mut query = CoincidentEdgeQuery {
+            start_vertex: a,
+            end_vertex: b,
+            curve: &beside,
+            curve_owner: None,
+            interval: Extent1d::from_min_max(0.0, 1.0),
+            tolerance: 1e-6,
+        };
+        let balls = vertex_balls(&k, &brep, &query).unwrap();
+        for (ball, v) in balls.iter().zip([a, b]) {
+            assert_eq!(ball.1, vertex_tolerance(&brep, v).unwrap());
+        }
+        assert_eq!(
+            find_edge_proved_along(&k, &brep, face, &query, &[e], None).unwrap(),
+            None
+        );
+        let own = Curve::from(crate::curve::line::Line::from_points(
+            p(0.0, 0.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            3,
+        ));
+        query.curve = &own;
+        assert_eq!(
+            find_edge_proved_along(&k, &brep, face, &query, &[e], None).unwrap(),
+            Some(0)
+        );
     }
 }

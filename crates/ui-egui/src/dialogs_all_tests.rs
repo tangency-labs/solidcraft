@@ -931,6 +931,7 @@ form_case!(fold, "sheet.fold", ["Bend Line Position", "Angle", "Bend Radius"]);
 form_case!(unfold, "sheet.unfold", []);
 form_case!(refold, "sheet.refold", []);
 form_case!(sheet_convert, "sheet.convert", ["Rule"]);
+form_case!(sheet_recognize, "sheet.recognize", ["Rule", "New Rule"]);
 form_case!(boss, "plastic.boss", ["Diameter", "Height", "Hole Diameter", "Hole Depth"]);
 form_case!(lip, "plastic.lip", ["Type", "Rim Edge", "Width", "Height"]);
 form_case!(snap_fit, "plastic.snap_fit", ["Catch Direction", "Length", "Thickness", "Width", "Catch Depth", "Catch Length"]);
@@ -2057,4 +2058,101 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
     }
     let missing = Sel::Profile { sketch: 999, index: 0 };
     assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
+}
+
+/// A pattern of every body of a component placed twice: the dialog sees that the bodies make up
+/// both placements whole, and offers them as Components. Switched, the pattern places each again
+/// (`occurrences`) instead of copying every body. A selection missing one body of a placement
+/// gets no offer.
+#[test]
+fn a_pattern_of_whole_components_bodies_offers_and_places_the_components() {
+    let mut h = Harness::new();
+    let comp = h.app.run("component.create", json!({"name": "Bracket"})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 4, "body_name": "Base"})).unwrap();
+    h.app.run("solid.box", json!({"length": 4, "width": 20, "height": 20, "body_name": "Upright"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let first = h.app.session.doc.occurrence_of(comp).unwrap().id;
+    let second = h.app.run("occurrence.copy", json!({"component": comp, "translate": [50, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let world: Vec<String> = crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(world.len(), 4, "{world:?}");
+    let bodies: Vec<Sel> = world.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+
+    let whole = crate::pattern_components::whole_placements(&h.app.session, &bodies);
+    assert_eq!(whole, vec![vec![first], vec![second]]);
+    assert!(crate::pattern_components::whole_placements(&h.app.session, &bodies[1..]).is_empty(), "a placement missing a body is not whole");
+
+    h.app.session.selection = bodies.clone();
+    h.app.start("solid.pattern.rectangular");
+    h.frames(4);
+    let offered = |h: &Harness| h.app.dialog.as_ref().unwrap().whole_components.as_ref().map(|c| (c.revision, c.placements.clone()));
+    assert_eq!(offered(&h), Some((h.app.session.revision, whole.clone())));
+    // Activating a component changes what a pick takes (the design is the same), so the offer is
+    // worked out again for it.
+    for active in [json!({"component": comp, "occurrence": first}), json!({"component": "root"})] {
+        let doc = h.app.session.doc.clone();
+        h.app.run("component.activate", active).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        h.frames(2);
+        let now = crate::pattern_components::whole_placements(&h.app.session, &bodies);
+        assert_eq!(offered(&h), Some((h.app.session.revision, now)));
+    }
+    // Each Object Type keeps its own objects: Bodies by way of Features to Components gives the
+    // bodies' placements, not the bodies, and Features picked are kept past Bodies and Components.
+    let placements = vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }];
+    let feature = vec![Sel::Feature { id: 1 }];
+    mirror_object_type(&mut h, "Features");
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, placements);
+    mirror_object_type(&mut h, "Features");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&feature);
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, bodies);
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, placements);
+    mirror_object_type(&mut h, "Features");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, feature);
+    // Components picked by hand outlast a trip to Bodies that leaves the bodies as they came
+    // back, or empties them; bodies picked anew there become their placements.
+    let items = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    let narrowed = vec![Sel::Occurrence { path: vec![first] }];
+    mirror_object_type(&mut h, "Components");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&narrowed);
+    mirror_object_type(&mut h, "Bodies");
+    assert_eq!(items(&h), bodies);
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(items(&h), narrowed, "Bodies left as they came back");
+    mirror_object_type(&mut h, "Bodies");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    mirror_object_type(&mut h, "Components");
+    assert_eq!(items(&h), narrowed, "Bodies emptied");
+    mirror_object_type(&mut h, "Bodies");
+    assert!(items(&h).is_empty());
+    let picked = vec![bodies[3].clone()];
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&picked);
+    mirror_object_type(&mut h, "Components");
+    let placed = crate::pattern_components::as_placements(&h.app.session, &picked);
+    assert_eq!(placed.len(), 1);
+    assert_ne!(placed, narrowed, "the body picked is in the other placement");
+    assert_eq!(items(&h), placed, "Bodies picked anew");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clone_from(&placements);
+    mirror_object_type(&mut h, "Features");
+    assert_eq!(items(&h), feature);
+    mirror_object_type(&mut h, "Components");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert_eq!(d.inputs[0].label, "Components");
+        assert_eq!(d.inputs[0].items, vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }]);
+        d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].0, "solid.pattern.rectangular");
+    assert_eq!(commands[0].1["occurrences"], json!([[first], [second]]));
+    let occurrences = h.app.session.doc.occurrences.len();
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    // Two more placements of each (a quantity of 3), and no new bodies.
+    assert_eq!(h.app.session.doc.occurrences.len(), occurrences + 4);
+    assert_eq!(h.app.session.model.state().bodies.len(), 2);
 }

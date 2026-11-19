@@ -12,7 +12,7 @@ use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::sheet::SheetRule;
-use solidcraft_engine::doc::{FeatureKind, ProfileSel};
+use solidcraft_engine::doc::{FeatureKind, FoldSide, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -90,12 +90,19 @@ crate::dialog_descriptor::dialog_descriptors! {
             gap: String = String::new() => gap.as_deref().map(str::to_string).unwrap_or_default(),
             flip: bool = false => *flip,
         } => json!({"length": length, "flip": flip});
-        Fold("sheet.fold", "FOLD", [("Bend Line", AXES, false), ("Stationary Side", PLANAR_FACES, false)],
-            FeatureKind::SheetFold { angle, radius, position, flip, .. }) {
+        Fold("sheet.fold", "FOLD", [("Bend Line", AXES, false), ("Fixed Face", PLANAR_FACES, false)],
+            FeatureKind::SheetFold { angle, radius, position, flip, stays, .. }) {
             angle: String = "90 deg".into() => angle.to_string(),
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
             position: usize = 0 => FOLD_POSITIONS.iter().position(|x| x == position || (*x == "mould" && position == "mold")).unwrap_or(0),
             flip: bool = false => *flip,
+            // The side that stays: 0 decided as the fold is made, 1 left of the line as drawn
+            // (seen from the sheet's surface), 2 right of it.
+            stays: usize = 0 => match stays {
+                Some(FoldSide::Left) => 1,
+                Some(FoldSide::Right) => 2,
+                None => 0,
+            },
         } => json!({"angle": angle, "position": FOLD_POSITIONS.get(*position).copied().unwrap_or("centerline"), "flip": flip});
         Path("sheet.path_flange", "PATH FLANGE", [("Edge", EDGES, false), ("Path", CURVES, true)],
             FeatureKind::SheetPath { radius, .. }) {
@@ -133,8 +140,27 @@ crate::dialog_descriptor::dialog_descriptors! {
             Unfold {
                 refold: bool,
             },
+            /// Convert (#6748): no face is fixed; the sheet is every face of the body but the
+            /// skipped ones, or the faces picked and every face a bend joins to them, each a panel
+            /// however thin the body, and the sharp edges are cut open but the bends. The faces
+            /// picked to engrave are a pocket of the panel round them.
             Convert {
                 rule: usize,
+                /// The side of the faces the material lies on (index into `MATERIAL_SIDES`).
+                side: usize,
+                /// The body last looked at, and its own thickness where it is a solid that is
+                /// sheet metal already (a shell's, a plate's), for the hint to Recognize it.
+                thin: Option<(String, Option<f64>)>,
+            },
+            /// Recognize (#6748): a body that is sheet metal already becomes the rule's sheet;
+            /// with a new rule's name, a rule made from the body first.
+            Recognize {
+                rule: usize,
+                /// The name of a new rule made from the body (empty: the rule chosen).
+                new_rule: String,
+                /// The body last measured with the Surface Face and Skip Faces picks it was read
+                /// with, and what was read of it or why it is no sheet.
+                measured: Option<((String, Option<Vec3>, Vec<Vec3>), Result<String, String>)>,
             },
             /// The rule manager: the rule shown (index into the rules, or past the end for a new one).
             Rules {
@@ -165,6 +191,7 @@ impl Sm {
             Sm::Unfold { refold: false } => "UNFOLD",
             Sm::Unfold { refold: true } => "REFOLD",
             Sm::Convert { .. } => "CONVERT TO SHEET METAL",
+            Sm::Recognize { .. } => "RECOGNIZE SHEET METAL",
             Sm::Rules { .. } => "SHEET METAL RULES",
             Sm::FlatPattern { .. } => "FLAT PATTERN",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
@@ -216,9 +243,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sheet.flange" => (new_flange(app, 0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
         "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
-        "sheet.convert" => {
-            (Sm::Convert { rule: 0 }, vec![SelInput::new("Fixed Face", PLANAR_FACES, false), SelInput::new("Bend Edges", EDGES, true)])
-        }
+        "sheet.convert" => (Sm::Convert { rule: 0, side: 0, thin: None }, convert_inputs()),
+        "sheet.recognize" => (Sm::Recognize { rule: 0, new_rule: String::new(), measured: None }, recognize_inputs()),
         "sheet.manage_rules" => {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
@@ -264,6 +290,62 @@ fn flange_type(inputs: &[SelInput]) -> usize {
     } else {
         0
     }
+}
+
+/// Converting, the sides of the faces the material can lie on, and their labels.
+const MATERIAL_SIDES: [(&str, &str); 2] = [("inside", "Inside"), ("outside", "Outside")];
+
+/// Recognize's inputs (#6748): the body that is sheet metal already, a face whose side is the
+/// sheet's surface (none: its largest face's), the faces left out, and the bend edges.
+pub(crate) fn recognize_inputs() -> Vec<SelInput> {
+    vec![
+        SelInput::new("Body", BODIES, false),
+        SelInput::new("Surface Face", FACES, false),
+        SelInput::new("Skip Faces", FACES, true),
+        SelInput::new("Bend Edges", EDGES, true),
+    ]
+}
+
+/// The body a dialog's picks are on: the body picked, or the one its faces or edges are on.
+fn picked_body(inputs: &[SelInput]) -> Option<String> {
+    inputs.iter().flat_map(|i| &i.items).find_map(|x| match x {
+        Sel::Body { name } | Sel::Edge { body: name, .. } | Sel::Face { body: name, .. } => Some(name.clone()),
+        _ => None,
+    })
+}
+
+/// Body `name`'s own thickness where it is a solid that is sheet metal already (a shell's, a
+/// plate's), as Recognize reads it; none for a surface body, or a solid of no one thickness.
+fn own_thickness(app: &SolveApp, name: &str) -> Option<f64> {
+    let state = app.session.model.state();
+    let mb = state.body(name).filter(|b| !b.is_surface())?;
+    solidcraft_engine::doc::measure_sheet_body(mb, None, &[], &solidcraft_engine::doc::IDENTITY).ok().map(|m| m.thickness)
+}
+
+/// What Recognize reads of body `name` (#6748), as its dialog says it: its thickness and its
+/// modelled bends' radii, or why it is no sheet. Read as the command reads it, from the side of
+/// the Surface Face picked at `face` less the Skip Faces picked at `skip`; the picks are where the
+/// body is shown, so the body is read there too (as placed, a rigid move of the model's).
+fn measure_text(app: &SolveApp, name: &str, face: Option<Vec3>, skip: &[Vec3]) -> Result<String, String> {
+    let state = crate::open_meshing::session_world(&app.session);
+    let mb = state.body(name).ok_or_else(|| format!("no body `{name}`"))?;
+    let m = solidcraft_engine::doc::measure_sheet_body(mb, face, skip, &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
+    let radii: Vec<String> = m.radii.iter().map(|r| format!("R {r:.3}")).collect();
+    let bends = if radii.is_empty() { "-".to_string() } else { radii.join(", ") };
+    Ok(solidcraft_ui_text::tr("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
+}
+
+/// Convert's inputs (#6748): the body (a solid or a surface body), the bend edges, the faces left
+/// out, the faces that make the sheet (none: every face but those left out), and the walls and
+/// floors of recesses kept as engravings (none: a recess's faces are panels too).
+pub(crate) fn convert_inputs() -> Vec<SelInput> {
+    vec![
+        SelInput::new("Body", BODIES, false),
+        SelInput::new("Bend Edges", EDGES, true),
+        SelInput::new("Skip Faces", FACES, true),
+        SelInput::new("Faces", FACES, true),
+        SelInput::new("Engrave Faces", FACES, true),
+    ]
 }
 
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
@@ -428,11 +510,27 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             enter |= hint_row(ui, "ui.sheet_gap", gap, solidcraft_ui_text::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
         }
-        Sm::Fold { angle, radius, position, flip } => {
+        Sm::Fold { angle, radius, position, flip, stays } => {
             choice_row(ui, "Bend Line Position", "sm_fold_pos", position, &FOLD_POSITION_LABELS);
             enter |= expr_row(ui, "Angle", angle);
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
+            // Which side of the line as drawn stays, seen from the sheet's surface. A new fold
+            // decides it as it is made (the side of the face picked, else the side more of the
+            // sheet joins) and keeps it; an edit shows the fold's own side, and swaps it. A face
+            // picked decides it again.
+            let picked = inputs.get(1).is_some_and(|i| !i.items.is_empty());
+            form_row(ui, "Stationary Side", |ui| {
+                ui.label(solidcraft_ui_text::tr_label(match *stays {
+                    _ if picked => "Fixed Face",
+                    1 => "Left",
+                    2 => "Right",
+                    _ => "Automatic",
+                }));
+                if !picked && *stays > 0 && crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Swap"), crate::ui_kit::Button::Normal).clicked() {
+                    *stays = 3 - *stays;
+                }
+            });
         }
         Sm::Path { radius } => {
             path_chain(app, inputs);
@@ -450,7 +548,44 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
         }
         Sm::Unfold { .. } => {}
-        Sm::Convert { rule } => rule_combo(app, ui, "sm_conv_rule", rule),
+        Sm::Convert { rule, side, thin } => {
+            rule_combo(app, ui, "sm_conv_rule", rule);
+            let labels = MATERIAL_SIDES.map(|(_, label)| label);
+            choice_row(ui, "Material", "sm_conv_side", side, &labels);
+            // A solid that is sheet metal already: Recognize keeps its own sides. Never shown
+            // for a surface body, which is surfaces only.
+            if let Some(name) = picked_body(inputs)
+                && thin.as_ref().is_none_or(|(b, _)| *b != name)
+            {
+                let own = own_thickness(app, &name);
+                *thin = Some((name, own));
+            }
+            if let Some((_, Some(t))) = thin.as_ref() {
+                let hint = solidcraft_ui_text::tr("sheet.convert_thin_hint").replace("{thickness}", &format!("{t:.3}"));
+                crate::ui_kit::status_line(ui, &hint, crate::ui_kit::StatusTone::Dim);
+            }
+        }
+        Sm::Recognize { rule, new_rule, measured } => {
+            // Read again when the body, the Surface Face or the Skip Faces change.
+            let key = picked_body(inputs).map(|name| (name, items(inputs, 1).face_points().first().copied(), items(inputs, 2).face_points()));
+            if let Some(key) = key
+                && measured.as_ref().is_none_or(|(k, _)| *k != key)
+            {
+                let read = measure_text(app, &key.0, key.1, &key.2);
+                *measured = Some((key, read));
+            }
+            match measured.as_ref() {
+                Some((_, Ok(text))) => {
+                    crate::ui_kit::status_line(ui, text, crate::ui_kit::StatusTone::Dim);
+                }
+                Some((_, Err(why))) => {
+                    crate::ui_kit::status_line(ui, why, crate::ui_kit::StatusTone::Warning);
+                }
+                None => {}
+            }
+            rule_combo(app, ui, "sm_rec_rule", rule);
+            enter |= hint_row(ui, "New Rule", new_rule, solidcraft_ui_text::tr_label("none: the rule above"));
+        }
         Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
@@ -541,6 +676,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             );
                         });
                     }
+                    // Rolls (#6748), each as a bend has its row: how far it turns, its inside
+                    // radius (a cone's runs along it), and how wide it lies in the flat.
+                    let rolls = v["roll_table"].as_array().cloned().unwrap_or_default();
+                    if !rolls.is_empty() {
+                        form_row(ui, "Rolls", |ui| {
+                            ui.label(format!("{}", rolls.len()));
+                        });
+                    }
+                    for r in rolls.iter().take(50) {
+                        form_row(ui, &format!("  Roll {}", r["roll"].as_u64().unwrap_or(0)), |ui| {
+                            let radius = r["radius"].as_f64().map(|x| format!("  R{}", crate::prefs::show_mm(app, x, 1))).unwrap_or_default();
+                            ui.label(format!(
+                                "{:.1}°{radius}  {} x {}",
+                                r["angle_deg"].as_f64().unwrap_or(0.0),
+                                crate::prefs::show_mm(app, r["width"].as_f64().unwrap_or(0.0), 1),
+                                crate::prefs::show_mm(app, r["length"].as_f64().unwrap_or(0.0), 1)
+                            ));
+                        });
+                    }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
                             *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf"));
@@ -577,7 +731,10 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "sheet.export_bend_table" => "csv",
         _ => return false,
     };
-    if let Some(body) = app.session.model.state().sheets.last().map(|sheet| sheet.body.clone()) {
+    let state = app.session.model.state();
+    let last = state.surface_sheets.last().map(|sheet| sheet.body.clone());
+    drop(state);
+    if let Some(body) = last {
         export_flat(app, &body, extension);
     } else {
         // Let the command report its ordinary "no sheet body" error without opening a picker;
@@ -911,7 +1068,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("gap", gap)]);
             ("sheet.hem", p)
         }
-        Sm::Fold { radius, .. } => {
+        Sm::Fold { radius, stays, .. } => {
             let mut p = json!({});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id, sketch: named }) => {
@@ -929,6 +1086,13 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("radius", radius)]);
             if let Some(Sel::Face { point, .. }) = items(inputs, 1).first() {
                 p["fixed"] = pt(*point);
+            } else {
+                // No face picked: the fold's own side, where it has one.
+                match *stays {
+                    1 => p["stays"] = json!("left"),
+                    2 => p["stays"] = json!("right"),
+                    _ => {}
+                }
             }
             ("sheet.fold", p)
         }
@@ -961,15 +1125,70 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             (if *refold { "sheet.refold" } else { "sheet.unfold" }, p)
         }
-        Sm::Convert { rule } => {
-            let Some(Sel::Face { body, point, .. }) = items(inputs, 0).first() else {
-                return Err("select the fixed face first (a plate's large face)".into());
+        Sm::Recognize { rule, new_rule, .. } => {
+            let Some(body) = picked_body(inputs) else {
+                return Err("select the body to recognize first".into());
             };
-            let mut p = json!({"body": body, "face": pt(*point)});
-            // The sharp edges of a solid or shelled body that become bends (a plate has none).
+            let mut p = json!({"body": body});
+            if let Some(face) = items(inputs, 1).face_points().first() {
+                p["face"] = pt(*face);
+            }
+            let skip: Vec<Value> = items(inputs, 2).face_points().into_iter().map(pt).collect();
+            if !skip.is_empty() {
+                p["skip"] = json!(skip);
+            }
+            let bends: Vec<Value> = items(inputs, 3).edge_points().into_iter().map(pt).collect();
+            if !bends.is_empty() {
+                p["bends"] = json!(bends);
+            }
+            match new_rule.trim() {
+                "" => {
+                    if let Some(r) = rule_value(app, *rule) {
+                        p["rule"] = json!(r);
+                    }
+                }
+                name => p["new_rule"] = json!(name),
+            }
+            ("sheet.recognize", p)
+        }
+        Sm::Convert { rule, side, .. } => {
+            // No face is fixed: the body picked, or the one its bend edges or faces are on.
+            let picks = items(inputs, 0).iter().chain(items(inputs, 1)).chain(items(inputs, 2)).chain(items(inputs, 3)).chain(items(inputs, 4));
+            let Some(body) = picks
+                .filter_map(|x| match x {
+                    Sel::Body { name: body } | Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body.clone()),
+                    _ => None,
+                })
+                .next()
+            else {
+                return Err("select the body to convert first".into());
+            };
+            let mut p = json!({"body": body});
+            // Every sharp edge is cut open but these.
             let bends: Vec<Value> = items(inputs, 1).edge_points().into_iter().map(pt).collect();
             if !bends.is_empty() {
                 p["bends"] = json!(bends);
+            }
+            // The faces picked make the sheet, with every face a bend joins to them; with none,
+            // every face but the skipped ones does (the command refuses both).
+            let skip: Vec<Value> = items(inputs, 2).face_points().into_iter().map(pt).collect();
+            let faces: Vec<Value> = items(inputs, 3).face_points().into_iter().map(pt).collect();
+            if let Some((face, more)) = faces.split_first() {
+                p["face"] = face.clone();
+                if !more.is_empty() {
+                    p["faces"] = json!(more);
+                }
+            }
+            if !skip.is_empty() {
+                p["skip"] = json!(skip);
+            }
+            // A recess is an engraving only where its faces are picked for it.
+            let engrave: Vec<Value> = items(inputs, 4).face_points().into_iter().map(pt).collect();
+            if !engrave.is_empty() {
+                p["engrave"] = json!(engrave);
+            }
+            if let Some((key, _)) = MATERIAL_SIDES.get(*side).filter(|_| *side > 0) {
+                p["direction"] = json!(key);
             }
             if let Some(r) = rule_value(app, *rule) {
                 p["rule"] = json!(r);
@@ -1090,7 +1309,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (Sm::simple_restore(kind)?, edges.iter().filter_map(|p| edge_sel(s, p.0)).collect())
         }
-        FeatureKind::SheetFold { sketch, curve, a, b, fixed, body, .. } => {
+        FeatureKind::SheetFold { sketch, curve, a, b, fixed, stays, body, .. } => {
             if let Some(bd) = body {
                 extra.insert("body".into(), json!(bd));
             }
@@ -1110,7 +1329,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     extra.insert("points".into(), json!([pt(a.0), pt(b.0)]));
                 }
             }
-            if let Some(i) = ins.get_mut(1) {
+            // The face picked as the fold was made decided the side that stays, which the fold
+            // keeps (the Stationary Side row): an edit picks it no more, so the side is never
+            // decided again from where that face lies now.
+            if let Some(i) = ins.get_mut(1)
+                && stays.is_none()
+            {
                 i.items = fixed.and_then(|f| face_sel(s, f.0)).into_iter().collect();
             }
             return Some((Kind::Sheet(k), ins, extra));
@@ -1133,15 +1357,56 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         FeatureKind::SheetUnfold { body, refold } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
-        FeatureKind::SheetConvert { face, rule, bends, .. } => {
-            let (_, mut ins) = start(app, "sheet.convert")?;
+        FeatureKind::SheetConvert { body, face, faces, rule, bends, engrave, direction } => {
+            let mut ins = convert_inputs();
             if let Some(i) = ins.first_mut() {
-                i.items = face_sel(s, face.0).into_iter().collect();
+                i.items = vec![Sel::Body { name: body.to_string() }];
             }
             if let Some(i) = ins.get_mut(1) {
                 i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
             }
-            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule) }), ins, extra));
+            if let Some(i) = ins.get_mut(3) {
+                i.items = std::iter::once(face).chain(faces).filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(4) {
+                i.items = engrave.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            let side = MATERIAL_SIDES.iter().position(|(key, _)| key == direction).unwrap_or(0);
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), side, thin: None }), ins, extra));
+        }
+        FeatureKind::SheetRecognize { body, face, skip, bends, rule } => {
+            let mut ins = recognize_inputs();
+            if let Some(i) = ins.first_mut() {
+                i.items = vec![Sel::Body { name: body.to_string() }];
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = face.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(2) {
+                i.items = skip.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(3) {
+                i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            }
+            let k = Sm::Recognize { rule: rule_index(rule), new_rule: String::new(), measured: None };
+            return Some((Kind::Sheet(k), ins, extra));
+        }
+        FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, engrave, direction } => {
+            let mut ins = convert_inputs();
+            if let Some(i) = ins.first_mut() {
+                i.items = vec![Sel::Body { name: body.to_string() }];
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(2) {
+                i.items = skip.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(4) {
+                i.items = engrave.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            let side = MATERIAL_SIDES.iter().position(|(key, _)| key == direction).unwrap_or(0);
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), side, thin: None }), ins, extra));
         }
         _ => return None,
     };
@@ -1242,8 +1507,8 @@ fn bend_colors() -> (Color32, Color32) {
     (t.bend_up, t.bend_down)
 }
 
-/// The flat pattern view: outline, cut-outs, perforations and bend lines (up and down in
-/// their colours), fitted over the viewport. True when the dialog is a flat pattern.
+/// The flat pattern view: outline, cut-outs, perforations, bend lines (up and down in their
+/// colours) and rolls' lines, fitted over the viewport. True when the dialog is a flat pattern.
 pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dialog) -> bool {
     let Kind::Sheet(Sm::FlatPattern { data, .. }) = &d.kind else { return false };
     let t = Tokens::get();
@@ -1356,6 +1621,14 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         let col = if b["direction"] == "up" { up_col } else { down_col };
         painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, col), 8.0, 5.0));
     }
+    // A roll's lines (#6748): where it starts and ends along its rulings, dotted, and halfway
+    // between, dashed.
+    let rolls: Vec<&serde_json::Value> = v["roll_lines"].as_array().into_iter().flatten().collect();
+    for l in &rolls {
+        let (Some(a), Some(e)) = (read(&l["start"]), read(&l["end"])) else { continue };
+        let (dash, gap) = if l["line"] == "middle" { (8.0, 5.0) } else { (2.0, 3.0) };
+        painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, t.text), dash, gap));
+    }
     // Legend.
     let mut y = rect.top() + 14.0;
     painter.text(
@@ -1372,6 +1645,22 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             pos2(rect.left() + 44.0, y),
             Align2::LEFT_TOP,
             label,
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
+            t.text_dim,
+        );
+    }
+    if !rolls.is_empty() {
+        y += 20.0;
+        painter.extend(egui::Shape::dashed_line(
+            &[pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)],
+            Stroke::new(1.6, t.text),
+            2.0,
+            3.0,
+        ));
+        painter.text(
+            pos2(rect.left() + 44.0, y),
+            Align2::LEFT_TOP,
+            "Roll start and end (middle dashed)",
             FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,
         );
@@ -1426,19 +1715,12 @@ impl FlatView {
         }
         self.perforation_key = Some((state_key, body.to_owned()));
         self.perforations.clear();
-        let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body) else { return };
         // Bound overlay storage and drawing work, including designs with many fields.
         const MAX_HOLES: usize = 1_000_000;
-        for field in &sheet.perforations {
-            if self.perforations.len() >= MAX_HOLES {
-                break;
-            }
-            if !field.diameter.is_finite() || field.diameter <= 0.0 {
-                continue;
-            }
-            let Ok(centres) = sheet.perforation_holes(field) else { continue };
+        let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body).map(|sk| sk.shown()) else { return };
+        for field in sk.perforations.iter().filter(|f| f.diameter.is_finite() && f.diameter > 0.0) {
             let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
-            self.perforations.extend(centres.into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
+            self.perforations.extend(sk.perforation_holes(field).into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
         }
     }
 
