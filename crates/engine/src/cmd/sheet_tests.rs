@@ -696,6 +696,29 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     assert!(tight["notes"].to_string().contains("under Aluminium 6061-T6's published minimum of 2.581 mm"), "{tight}");
     assert_eq!(made["rule"]["thickness"], "0.0625 in", "{made}");
     assert_eq!(made["rule"]["material"], "Stainless steel 304", "{made}");
+    // A rule that unfolds from a chart's 90° bend deduction goes back to its K-factor when a gauge
+    // is picked for it: the chart value was for the thickness it had (#6794). Said in the notes,
+    // with the estimate that is now the rule's K-factor (hard column at R = T, air: 0.45).
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Chart", "thickness": "2 mm", "bend_radius": "Thickness", "unfold_method": "deduction", "unfold_value": "3.5 mm"}),
+    );
+    let picked = run(&mut s, "sheet.manage_rules", json!({"name": "Chart", "material": "Stainless steel 304", "gauge": "16"}));
+    assert_eq!((picked["rule"]["unfold_method"].as_str(), picked["rule"]["unfold_value"].as_str()), (Some("k_factor"), Some("")), "{picked}");
+    assert_eq!(picked["rule"]["k_factor"], "0.45", "{picked}");
+    let notes = picked["notes"].to_string();
+    assert!(notes.contains("now unfolds from its K-factor") && notes.contains("estimate from the generic air chart"), "{picked}");
+    // A pick that says how the rule unfolds keeps the chart method, with no K-factor estimate:
+    // T 0.0625 in = 1.5875 mm, R = T, BD90 2.7 mm gives BA90 = 4·T − 2.7 = 3.65, K = 3.65/(π/2·T) − 1.
+    let kept = run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Chart", "material": "Stainless steel 304", "gauge": "16", "unfold_method": "deduction", "unfold_value": "2.7 mm"}),
+    );
+    assert_eq!((kept["rule"]["unfold_method"].as_str(), kept["rule"]["unfold_value"].as_str()), (Some("deduction"), Some("2.7 mm")), "{kept}");
+    assert!((kept["values"]["k_factor"].as_f64().unwrap_or(0.0) - (3.65 / (FRAC_PI_2 * 1.5875) - 1.0)).abs() < 1e-12, "{kept}");
+    assert!(!kept.to_string().contains("estimate"), "{kept}");
     // A material of one's own is a label.
     let own = run(&mut s, "sheet.manage_rules", json!({"name": "Galv", "material": "Galvanneal", "thickness": "1.6 mm"}));
     assert_eq!(own["rule"]["material"], "Galvanneal", "{own}");
