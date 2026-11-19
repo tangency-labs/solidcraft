@@ -463,6 +463,34 @@ fn a_drawing_dimensions_text_drags_like_a_sketch_dimensions() {
     assert!((back - from).len() < 1e-6, "undo puts it back: {from:?} {back:?}");
 }
 
+/// A note drags by the same drag: it follows the pointer, a sheet's note and a view's alike, and
+/// the whole drag is one undo step.
+#[test]
+fn a_note_drags_like_a_sketch_dimensions_text() {
+    let (mut h, front) = plate_sheet();
+    let encode = solidcraft_engine::doc::ids::encode;
+    let on_sheet = h.app.run("drawing.note.add", json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR"})).unwrap();
+    let on_view = h.app.run("drawing.note.add", json!({"anchor": {"view": front}, "at": [10, 60], "content": "SEE DETAIL"})).unwrap();
+    for note in [on_sheet, on_view] {
+        let id = solidcraft_engine::doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+        settle(&mut h);
+        let at = |h: &Harness| Vec2::from(h.app.session.drawing("drawing.inspect").unwrap().notes.by_id(id).unwrap().at);
+        let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+        let bounds = drawing_scene::extract(&mut h.app.session, sheet).unwrap().objects.iter().find(|object| object.object == id).unwrap().bounds_mm;
+        let grab = (bounds.min + bounds.max) * 0.5;
+        let (from, undo) = (at(&h), h.app.session.undo.len());
+        h.step(&json!({"drag": [on_screen(grab.x, grab.y), on_screen(grab.x + 20.0, grab.y - 15.0)], "steps": 6})).unwrap();
+        h.frames(2);
+        assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+        let to = at(&h);
+        assert!((to - (from + Vec2::new(20.0, -15.0))).len() < 1.0, "note {} followed the pointer: {from:?} -> {to:?}", encode(id));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!((at(&h) - from).len() < 1e-9, "undo puts it back");
+        h.app.run("edit.redo", json!({})).unwrap();
+    }
+}
+
 /// What the pointer is over, and what is selected, is lit in the accent colour as in a sketch,
 /// with no box round it.
 #[test]
