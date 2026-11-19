@@ -343,7 +343,8 @@ fn a_torus_written_as_a_patch_and_the_rest_round_it_imports_whole() {
 /// the cap turned over, both faces on the cap, no mass, and the cap drawn twice. Also with the
 /// loop's senses the other way round (the face named Cap is then the outside), and with the rest
 /// on a sphere of its own about +y. Each reads as the closed ball: two faces; the loop's circle
-/// and a seam from pole to pole as its edges; the circle's vertex and the two poles; one shell.
+/// and the rest's seam from it to the pole the rest covers as its edges; the circle's vertex and
+/// that pole; one shell.
 /// Its area is 4πr² and its volume 4πr³/3, and its display mesh covers the ball once: inscribed
 /// within a chord deviation δ, its area is short of 4πr² by at most a factor (1 − δ/r)².
 #[test]
@@ -351,7 +352,8 @@ fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
     use std::f64::consts::PI;
     let r = 5.0_f64;
     let (area, volume) = (4.0 * PI * r * r, 4.0 / 3.0 * PI * r * r * r);
-    let own = "#24=DIRECTION('',(0.,1.,0.));\n#25=DIRECTION('',(0.,0.,1.));\n#26=AXIS2_PLACEMENT_3D('',#1,#24,#25);\n#27=SPHERICAL_SURFACE('',#26,5.);\n";
+    let own =
+        "#24=DIRECTION('',(0.,1.,0.));\n#25=DIRECTION('',(0.,0.,1.));\n#26=AXIS2_PLACEMENT_3D('',#1,#24,#25);\n#27=SPHERICAL_SURFACE('',#26,5.);\n";
     for (what, cap, rest, rest_on, extra) in [
         ("as the issue writes it", ".T.", ".F.", "#5", ""),
         ("the loop's senses the other way round", ".F.", ".T.", "#5", ""),
@@ -380,7 +382,7 @@ fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
         );
         assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
         let m = measure(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{what}: {e}"));
-        assert_eq!((m.faces, m.edges, m.vertices, m.shells), (2, 2, 3, 1), "{what}");
+        assert_eq!((m.faces, m.edges, m.vertices, m.shells), (2, 2, 2, 1), "{what}");
         assert!(rel(m.area, area) < 1e-6, "{what}: area {} vs {area}", m.area);
         assert!(rel(m.volume, volume) < 1e-6, "{what}: volume {} vs {volume}", m.volume);
         let chord = 0.01;
