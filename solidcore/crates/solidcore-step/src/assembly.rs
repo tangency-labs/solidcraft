@@ -597,14 +597,16 @@ impl<'t> Assembly<'t> {
     /// gap: the pcurves are as made and the record says how far its geometry agrees.
     ///
     /// SMLib's check measures another gap: from the edge's curve to the nearest point of the
-    /// surface, within half the edge's tolerance (its zone). On a surface whose nearest point is
-    /// in closed form `measure_edges` covers it; on any other each sample's nearest point is
-    /// searched from its pcurve's point, and the edge's tolerance covers the nearer of the two
-    /// with [`pcurve::SURFACE_GAP_MARGIN`]. The pcurve's point is a point of the surface, so the
-    /// gap taken is never more than the pcurve's, wherever the search settles.
-    fn raise_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &[Vec<Curve2>]) -> R<()> {
+    /// surface, within half the edge's tolerance (its zone). Where the face's own surface has its
+    /// nearest point in closed form `measure_edges` covers it; on any other (`nearest`) each
+    /// sample's nearest point is searched from its pcurve's point, and the edge's tolerance
+    /// covers the nearer of the two with [`pcurve::SURFACE_GAP_MARGIN`]. The pcurve's point is a
+    /// point of the surface, so the gap taken is never more than the pcurve's: where the search
+    /// settles farther, or finds nothing, the pcurve's is taken. That cover stops at
+    /// [`MAX_TOLERANCE`], whose zone still holds every gap up to half of it; past that the
+    /// pcurve's gap refuses the edge as before.
+    fn raise_edges(&mut self, surface: &BSurface, nearest: bool, edge_loops: &[Vec<(u32, bool)>], pcs: &[Vec<Curve2>]) -> R<()> {
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
-        let nearest = !nearest_in_closed_form(surface);
         let starts = crate::kernel::Starts::default();
         for (l, pc) in edge_loops.iter().zip(pcs) {
             for (&(e, _), c) in l.iter().zip(pc) {
@@ -623,12 +625,12 @@ impl<'t> Assembly<'t> {
                     let along = s.dist(p);
                     gap = gap.max(along);
                     if nearest {
-                        let near = on.project_with(&starts, p, Some(q), f64::INFINITY).and_then(|r| on.point(r)).map_or(along, |n| n.dist(p));
+                        let near = on.project_with(&starts, p, Some(q), along).and_then(|r| on.point(r)).map_or(along, |n| n.dist(p));
                         off = off.max(near.min(along));
                     }
                 }
                 self.cover_edge(e, gap, EDGE_GAP_MARGIN)?;
-                self.cover_edge(e, off, pcurve::SURFACE_GAP_MARGIN)?;
+                self.cover_edge(e, off.min(MAX_TOLERANCE / pcurve::SURFACE_GAP_MARGIN), pcurve::SURFACE_GAP_MARGIN)?;
             }
         }
         Ok(())
@@ -762,7 +764,7 @@ impl<'t> Assembly<'t> {
         if !self.raised_edges.is_empty() {
             let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
             notes.push(format!(
-                "{} edges lie off their faces' surfaces by more than their tolerances held: their tolerances grow to cover the gaps (to at most {most:.3e} mm)",
+                "{} edges lie off their faces' surfaces by more than their tolerances cover with margin: their tolerances grow (to at most {most:.3e} mm)",
                 self.raised_edges.len()
             ));
         }
@@ -1377,7 +1379,7 @@ impl<'t> Assembly<'t> {
                 .collect::<Result<Vec<_>, _>>()?;
             onto_knots(&surface, &tolerances, &mut pcs);
         }
-        self.raise_edges(&surface, &edge_loops, &pcs)?;
+        self.raise_edges(&surface, !nearest_in_closed_form(&label), &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
         // Each use starts near where the one before it ends, along a bounded direction that

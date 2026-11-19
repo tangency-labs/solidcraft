@@ -3488,9 +3488,25 @@ fn edges_off_their_spline_face_by_more_than_half_the_files_tolerance_pass_smlibs
     assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
     let r = imp.bodies[0].body.record();
     assert_eq!((r.faces.len(), r.edges.len(), r.vertices.len()), (1, 4, 4));
-    assert!(r.edges.iter().all(|e| e.tolerance / 2.0 >= g), "{:?}", r.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    // Covered with the import's margin of 1.5 on the zone: 3g, the sample at t = 1/2 the peak.
+    let tolerances: Vec<f64> = r.edges.iter().map(|e| e.tolerance).collect();
+    assert!(tolerances.iter().all(|&t| t / 2.0 >= g && rel(t, 3.0 * g) < 1e-6), "{tolerances:?}");
     let m = measure(&imp.bodies[0].body).unwrap();
     assert!(rel(m.area, 900.0) < 1e-6, "{}", m.area);
+}
+
+#[test]
+fn edges_off_their_spline_face_by_more_than_a_third_of_a_millimetre_grow_to_the_largest_tolerance() {
+    // 0.4 mm off: three times the gap passes the largest tolerance an edge takes (1 mm), whose
+    // zone, 0.5 mm, still holds it. The edges take that tolerance and the sheet imports, as it
+    // did before its nearest-point gap was covered.
+    let g = 0.4;
+    let imp = step_import(&flat_spline_with_edges_bowed(4.0 * g / 3.0)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let r = imp.bodies[0].body.record();
+    assert_eq!((r.faces.len(), r.edges.len(), r.vertices.len()), (1, 4, 4));
+    let tolerances: Vec<f64> = r.edges.iter().map(|e| e.tolerance).collect();
+    assert!(tolerances.iter().all(|&t| rel(t, 1.0) < 1e-9), "{tolerances:?}");
 }
 
 #[test]
