@@ -96,7 +96,7 @@ pub(crate) fn run(
         }),
         _ => None,
     };
-    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r) } else { body };
+    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r, &[b]) } else { body };
     Ok((body, history))
 }
 
