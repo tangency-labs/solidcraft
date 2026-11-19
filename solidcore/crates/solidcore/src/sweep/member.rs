@@ -5,11 +5,14 @@
 //! Frames follow Bishop's parallel transport: constant on a line, Rodrigues rotation on an
 //! arc, carrying the previous span's frame into the next (docs/procedural-sweep.md §3.2).
 //! Section enclosures use the convex-hull property (Piegl and Tiller, The NURBS Book, §4.2).
+//! Circular supports use Cauchy-Schwarz, with outward-rounded interval arithmetic
+//! (docs/definitions-and-certificates.md §4.2).
 //! Not upstream. Deviations: none. No recursion; at most 1000 path pieces.
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::path::Segment;
 use crate::eval::Frame;
-use crate::math::{Point2, Point3, Vec2, Vec3};
+use crate::math::{Point2, Point3, Vec3};
 use crate::prism::profile::{Region2, Seg2};
 use crate::surface::procedural_sweep::path::rodrigues as rotate;
 
@@ -45,7 +48,7 @@ pub enum Refusal {
     /// The section reaches the bend axis; the index names that arc.
     #[error("arc {0}: the bend radius is too small for the anchored profile")]
     Bend(usize),
-    /// The section has no finite control-hull enclosure.
+    /// The section has no finite certified directional enclosure.
     #[error("not supported yet: the profile has no certified bound for bend clearance")]
     Profile,
     /// The path is empty or exceeds the command's bound.
@@ -124,10 +127,13 @@ impl Piece {
             || !angle.is_finite()
             || angle <= MIN_LENGTH
             || angle >= std::f64::consts::TAU - 1e-9
-            || (b.distance(center) - radius).abs() > 1e-6 * radius.max(1.0)
+            || (b.distance(center) - radius).abs() > MIN_LENGTH
             || (a - center).dot(k).abs() > 1e-6
             || (b - center).dot(k).abs() > 1e-6
-            || rotate(a - center, k, angle).distance(b - center) > 1e-6 * radius.max(1.0)
+            // The stored endpoint also drives joins, reversal and terminal planes. Its
+            // distance from the swept endpoint must use the same absolute gap as joins,
+            // regardless of the circle's radius.
+            || (center + rotate(a - center, k, angle)).distance(b) > MIN_LENGTH
         {
             return Err(Refusal::Arc);
         }
@@ -358,59 +364,71 @@ pub fn terminal_planes(path: &[Piece], at: Point2, turn: f64) -> Result<[Frame; 
     Ok([start, end])
 }
 
-fn section_corners(region: &Region2) -> Result<[Point2; 4], Refusal> {
-    let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
-    let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
-    let mut extend = |p: Point2| {
+fn section_inward(region: &Region2, at: Point2, dx: Ivl, dy: Ivl) -> Result<f64, Refusal> {
+    let mut lo = f64::INFINITY;
+    let project = |p: Point2| {
+        (Ivl::from(p.x) - Ivl::from(at.x)) * dx + (Ivl::from(p.y) - Ivl::from(at.y)) * dy
+    };
+    let extend = |p: Point2| {
         if !p.x.is_finite() || !p.y.is_finite() {
             return Err(Refusal::Profile);
         }
-        lo.x = lo.x.min(p.x);
-        lo.y = lo.y.min(p.y);
-        hi.x = hi.x.max(p.x);
-        hi.y = hi.y.max(p.y);
-        Ok(())
+        let bound = project(p);
+        if !bound.is_finite() {
+            return Err(Refusal::Profile);
+        }
+        Ok(bound.lo)
     };
     for seg in &region.outer.segs {
         match *seg {
             Seg2::Line { a, b } => {
-                extend(a)?;
-                extend(b)?;
+                lo = lo.min(extend(a)?).min(extend(b)?);
             }
-            Seg2::Arc { center, radius, .. } => {
-                if !radius.is_finite() {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
+                if !radius.is_finite() || !start.is_finite() || !sweep.is_finite() {
                     return Err(Refusal::Profile);
                 }
-                let d = Vec2::new(radius.abs(), radius.abs());
-                extend(center - d)?;
-                extend(center + d)?;
+                // The supporting circle's directional minimum is c.d - r|d|.
+                // This encloses every angle of an arc, is tight for a full circle,
+                // and does not grow when the section rotates as a box would.
+                extend(center)?;
+                let bound = project(center) - Ivl::from(radius.abs()) * (dx * dx + dy * dy).sqrt();
+                if !bound.is_finite() {
+                    return Err(Refusal::Profile);
+                }
+                lo = lo.min(bound.lo);
             }
             Seg2::Cubic { p0, p1, p2, p3 } => {
                 for p in [p0, p1, p2, p3] {
-                    extend(p)?;
+                    lo = lo.min(extend(p)?);
                 }
             }
             Seg2::Conic { a, apex, b, w } if w.is_finite() && w > 0.0 => {
                 for p in [a, apex, b] {
-                    extend(p)?;
+                    lo = lo.min(extend(p)?);
                 }
             }
             Seg2::Bezier { n, ref p } => {
                 for &p in p.get(..=usize::from(n)).ok_or(Refusal::Profile)? {
-                    extend(p)?;
+                    lo = lo.min(extend(p)?);
                 }
             }
             Seg2::Conic { .. } => return Err(Refusal::Profile),
         }
     }
-    if lo.x > hi.x || lo.y > hi.y {
+    if !lo.is_finite() {
         return Err(Refusal::Profile);
     }
-    Ok([lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])
+    Ok(lo.min(0.0))
 }
 
-/// Prove the section's control-hull enclosure stays clear of every bend axis, transporting
-/// its axes through all preceding arcs. No display samples participate.
+/// Prove the section stays clear of every bend axis using circular support bounds and
+/// projected control hulls, transporting its axes through preceding arcs. No display samples.
 ///
 /// # Errors
 /// [`Refusal::Count`], [`Refusal::Frame`], [`Refusal::Profile`] or [`Refusal::Bend`].
@@ -428,7 +446,8 @@ pub fn check_bend_clearance(
         return Err(Refusal::Frame);
     }
     let (mut x, mut y) = member_axes(first.t0, turn).ok_or(Refusal::Frame)?;
-    let corners = section_corners(region)?;
+    // Validate the section even for a path without bends.
+    section_inward(region, at, Ivl::from(1.0), Ivl::from(0.0))?;
     for (i, p) in path.iter().enumerate() {
         if let Segment::Arc {
             centre,
@@ -438,10 +457,12 @@ pub fn check_bend_clearance(
         } = p.segment
         {
             let radial = unit(p.a - centre).ok_or(Refusal::Arc)?;
-            let inward = corners
-                .iter()
-                .map(|q| (x * (q.x - at.x) + y * (q.y - at.y)).dot(radial))
-                .fold(0.0_f64, f64::min);
+            let dot = |v: Vec3| {
+                Ivl::from(v.x) * Ivl::from(radial.x)
+                    + Ivl::from(v.y) * Ivl::from(radial.y)
+                    + Ivl::from(v.z) * Ivl::from(radial.z)
+            };
+            let inward = section_inward(region, at, dot(x), dot(y))?;
             if p.a.distance(centre) + inward <= MIN_LENGTH + 2e-3 {
                 return Err(Refusal::Bend(i));
             }
@@ -455,6 +476,7 @@ pub fn check_bend_clearance(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Vec2;
     use crate::prism::profile::Loop2;
     use std::f64::consts::FRAC_PI_2;
 
@@ -582,6 +604,75 @@ mod tests {
             check_bend_clearance(&path, &rectangle(10.0), Vec2::new(-91.0, 0.0), 0.0),
             Err(Refusal::Bend(1))
         );
+    }
+
+    #[test]
+    fn arc_endpoint_agreement_uses_the_absolute_join_gap_at_large_radii() {
+        let radius = 1e6;
+        let a = Vec3::X * radius;
+        let b = Vec3::Y * radius;
+        // A relative 1e-6 radius check admits this 0.5 mm gap. The following
+        // tangent line would meet the stored endpoint but not the swept circle.
+        let displaced = b + Vec3::Y * 0.5;
+        assert_eq!(
+            Piece::spatial_arc(a, displaced, Vec3::ZERO, Vec3::Z, radius),
+            Err(Refusal::Arc)
+        );
+        for displaced in [displaced, b + Vec3::X * 0.5] {
+            assert_eq!(
+                Piece::arc(a, displaced, Vec3::ZERO, Vec3::Z, FRAC_PI_2),
+                Err(Refusal::Arc)
+            );
+        }
+
+        // The exact quarter circle still connects to its tangent line. Its
+        // terminal plane and reversed traversal keep the analytic endpoints.
+        let arc = Piece::spatial_arc(a, b, Vec3::ZERO, Vec3::Z, radius).unwrap();
+        let mut path = [arc, Piece::line(b, b - Vec3::X * 100.0).unwrap()];
+        orient(&mut path).unwrap();
+        let [_, end] = terminal_planes(&[arc], Vec2::ZERO, 0.0).unwrap();
+        near(Vec3::from(end.origin), b);
+        near(
+            Vec3::from(end.x_axis).cross(Vec3::from(end.y_axis)),
+            -Vec3::X,
+        );
+        let mut reversed = arc;
+        reversed.reverse();
+        let [_, end] = terminal_planes(&[reversed], Vec2::ZERO, 0.0).unwrap();
+        near(Vec3::from(end.origin), a);
+        near(
+            Vec3::from(end.x_axis).cross(Vec3::from(end.y_axis)),
+            -Vec3::Y,
+        );
+    }
+
+    #[test]
+    fn round_section_clearance_is_independent_of_section_rotation() {
+        let path = [compound_path()[1]];
+        let circle = |radius| Region2 {
+            outer: Loop2 {
+                segs: vec![Seg2::Arc {
+                    center: Vec2::ZERO,
+                    radius,
+                    start: 0.0,
+                    sweep: std::f64::consts::TAU,
+                }],
+            },
+            holes: vec![],
+        };
+        // The true inward reach is 80 for every rotation: the bend clears
+        // its axis by 100 - 80 = 20 mm. A rotated box reaches 80 sqrt(2).
+        for turn in [0.0, std::f64::consts::FRAC_PI_4, FRAC_PI_2] {
+            assert_eq!(
+                check_bend_clearance(&path, &circle(80.0), Vec2::ZERO, turn),
+                Ok(())
+            );
+            // Actual axis contact remains a refusal, including after rotation.
+            assert_eq!(
+                check_bend_clearance(&path, &circle(100.0), Vec2::ZERO, turn),
+                Err(Refusal::Bend(0))
+            );
+        }
     }
 
     #[test]
