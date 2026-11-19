@@ -511,12 +511,9 @@ impl Roles {
             intensity_invalid: at("isIntensityInvalid"),
         };
         // A field the points need must be a number; the others may be anything.
-        let used = roles
-            .position
-            .iter()
-            .chain(roles.color.iter().flatten())
-            .chain([roles.invalid, roles.color_invalid, roles.intensity, roles.intensity_invalid].iter().flatten());
-        if let Some(f) = used.filter_map(|i| fields.get(*i)).find(|f| f.kind == Kind::Other) {
+        let mut used: Vec<usize> = roles.position.into_iter().chain(roles.color.into_iter().flatten()).collect();
+        used.extend([roles.invalid, roles.color_invalid, roles.intensity, roles.intensity_invalid].into_iter().flatten());
+        if let Some(f) = used.iter().filter_map(|i| fields.get(*i)).find(|f| f.kind == Kind::Other) {
             return Err(self::invalid(format!("the field `{}` is not a number", short(&f.name))));
         }
         Ok(roles)
