@@ -124,10 +124,9 @@ fn trim_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> (f64, f64) {
         // the trim's ends go to the interval's ends exactly (the formula's width can round)
         let t_at = |s: f64| {
             if s == s0 || s == s1 {
-                return if (s == s0) != reversed {
-                    i.min()
-                } else {
-                    i.max()
+                return match (s == s0, reversed) {
+                    (true, false) | (false, true) => i.min(),
+                    _ => i.max(),
                 };
             }
             let f = (s - s0) / (s1 - s0);
