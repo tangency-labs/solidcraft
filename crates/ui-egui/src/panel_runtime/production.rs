@@ -169,7 +169,7 @@ impl Product {
             Self::History => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser,
             Self::Assistant => crate::agent_chat::shown(app) && !app.preferences.agent_chat_popped,
             Self::RenderBrowser | Self::RenderLibrary | Self::RenderInspector | Self::RenderShots => render && !crate::render_ui::focused(app),
-            Self::SketchOptions => !render && crate::sketch_palette::editing(app),
+            Self::SketchOptions => !render && (crate::sketch_palette::editing(app) || crate::sketch_palette::image_tool(app)),
             Self::Bom => crate::bom_panel::available(app),
             Self::DrawingSheets => {
                 crate::drawing_workspace::active(app)
@@ -399,6 +399,9 @@ struct ProductionSnapshot {
     document: DocumentId,
     sketch_owner: Option<(DocumentId, u64)>,
     sketch_placement_attempt: Option<(u64, LogicalRect, u64)>,
+    /// Canvas or Decal has shown the Sketch panel since it started in a sketch: the panel opens
+    /// and comes to the front once per run, so the tool's frame mode is in view (#18405).
+    image_tool_shown: bool,
     bom_focus_attempt: Option<(u64, LogicalRect)>,
     panel_addition_attempts: [Option<(u64, LogicalRect)>; Product::ALL.len()],
     visible: [bool; Product::ALL.len()],
@@ -428,6 +431,7 @@ impl ProductionState {
             visible: Product::all_map(|product| product.visible(app)),
             sketch_owner: None,
             sketch_placement_attempt: None,
+            image_tool_shown: false,
             bom_focus_attempt: None,
             visibility: Default::default(),
             panels: Product::all_map(|product| PanelSnapshot {
@@ -923,6 +927,31 @@ fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
     let layout = integration.runtime().layout().layout();
     let instance = InstanceId::new(product.id())?;
     let existing = layout.instance(&instance).ok();
+    // Canvas or Decal started in the sketch: open the panel and bring it to the front once, so the
+    // tool's frame mode is in view even when the panel was closed, folded or behind another tab.
+    let image_tool = crate::sketch_palette::image_tool(app);
+    if !image_tool {
+        snapshot.image_tool_shown = false;
+    } else if !snapshot.image_tool_shown
+        && let Some(panel) = existing
+    {
+        snapshot.image_tool_shown = true;
+        let in_front = panel.requested_open && layout.containing(&instance).is_ok_and(|section| !section.collapsed && section.active == instance);
+        if !in_front {
+            let mutation = if panel.requested_open {
+                Mutation::Focus { instance }
+            } else {
+                Mutation::Open { kind: panel.kind.clone(), instance, destination: None }
+            };
+            let revision = integration.runtime().layout().inspect().revision;
+            drop(snapshot);
+            return match app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: Some(revision), mutations: vec![mutation] }) {
+                Ok(_) => Ok(()),
+                Err(reason) if reason.rule == Rule::NoSpace => Ok(()),
+                Err(reason) => Err(reason),
+            };
+        }
+    }
     if existing.is_some_and(|panel| panel.requested_open) {
         snapshot.sketch_owner = Some(owner);
         snapshot.sketch_placement_attempt = None;
