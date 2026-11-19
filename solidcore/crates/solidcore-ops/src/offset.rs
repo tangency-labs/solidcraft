@@ -61,7 +61,7 @@ pub fn refusal(e: &SolidError) -> Option<Error> {
 /// curves). The first such vertex's point, if any.
 pub fn outline_touch(k: &Kernel, b: &Brep) -> solidcore::Result<Option<[f64; 3]>> {
     use solidcore::topology::edgeuse::p1 as eu1;
-    use solidcore::topology::{edge, vertex};
+    use solidcore::topology::vertex;
     for f in solidcore::topology::brep::p1::faces(b, None)? {
         let Some(fu) = b.face(f)?.faceuse else {
             continue;
@@ -107,15 +107,12 @@ pub fn outline_touch(k: &Kernel, b: &Brep) -> solidcore::Result<Option<[f64; 3]>
                     if others.contains(&v) {
                         return Ok(Some([p.x, p.y, p.z]));
                     }
-                    let reach = vertex::tolerance(b, v)?;
                     for &e in edges {
-                        // an edge the point does not drop onto is not touched
-                        let Ok(near) =
-                            solidcore::query::api_queries::edge_closest_point(k, b, e, p)
-                        else {
-                            continue;
-                        };
-                        if near.closest.distance <= reach + edge::tolerance(b, e)? {
+                        // an edge the kernel cannot measure the point against is not touched
+                        if matches!(
+                            solidcore::query::api_queries::vertex_on_edge(k, b, v, e),
+                            Ok(true)
+                        ) {
                             return Ok(Some([p.x, p.y, p.z]));
                         }
                     }
