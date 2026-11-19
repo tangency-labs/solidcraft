@@ -697,10 +697,24 @@ fn fillet_fitted(
     fit: crate::FilletFit,
     turn: kernel::FilletTurn,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
+        // A refusal the kernel could not size names no radius to try, and the search for the
+        // largest radius that fits cannot be guided by it: it then halves the radius from the
+        // middle down and blends every edge again for each of the sizes it tries. On the design
+        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
+        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
+        // found nothing: the round fails at any radius there. The refusal is reported as the
+        // kernel stated it.
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
+            Err(kernel::KernelError::TooLarge(why))
+        }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
             let hint = kernel::named_fit(&why);
+            #[cfg(test)]
+            cost_tests::count(|c| c.fit_searches += 1);
             with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
         }),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
@@ -6552,6 +6566,60 @@ fn with_propagation_hint(e: DocError) -> DocError {
     }
 }
 
+/// How many points along each edge [`left_sharp_note`] checks.
+const LEFT_SHARP_SAMPLES: usize = 7;
+
+/// Points along each edge that `picks` run on into tangentially beyond the picked edges
+/// themselves ([`kernel::tangent_chain_beyond_points`]), on `body` before the blend: the edges a
+/// blend with tangent propagation would take with them, [`LEFT_SHARP_SAMPLES`] points each.
+/// Empty when the chain cannot be walked; the blend then reports its own failure.
+fn chain_beyond_picks(body: &Body, picks: &[Vec3]) -> Vec<Vec<Vec3>> {
+    kernel::tangent_chain_beyond_points(body, picks, LEFT_SHARP_SAMPLES).unwrap_or_default()
+}
+
+/// The note for a blend that did not follow tangent chains, when its `picked` edges run on
+/// smoothly into edges it left sharp, such as one arc of a rim the body stores as several. An
+/// edge of `beyond` ([`chain_beyond_picks`]) is left sharp when any of its points still lies on
+/// the boundary of the result `blended`, decided exactly. A blended edge's points are no longer
+/// on it (a round or a bevel cut them away or filled them in), so the pieces a seam splits a rim
+/// into, which SMLib blends with any one of them, are not counted. A round that runs on past the
+/// end of its edge takes part of the next edge and leaves the rest sharp, so the middle alone
+/// does not tell. Without the note the result looks right: the volume changes a little and
+/// nothing says the rest of the visible edge stayed sharp. The note does not promise a way to
+/// blend those edges: a separate feature or tangent propagation may fail where they meet.
+fn left_sharp_note(blended: &Body, beyond: &[Vec<Vec3>], picked: usize, kind: &FeatureKind) -> Option<String> {
+    let points: Vec<Vec3> = beyond.iter().flatten().copied().collect();
+    if points.is_empty() {
+        return None;
+    }
+    let classes = blended.classify_points(&points).ok()?;
+    let mut start = 0;
+    let n = beyond
+        .iter()
+        .filter(|edge| {
+            let end = start + edge.len();
+            let points = classes.get(start..end).unwrap_or_default();
+            start = end;
+            points.iter().any(|c| matches!(c, kernel::PointClass::OnBoundary))
+        })
+        .count();
+    if n == 0 {
+        return None;
+    }
+    let (feature, why) = match kind {
+        FeatureKind::Chamfer { .. } => ("chamfer", "tangent_chain: false chamfers only the picked edges"),
+        FeatureKind::Fillet { style: crate::FilletStyle::Variable { .. } | crate::FilletStyle::Spline { .. }, .. } => {
+            ("fillet", "a variable or spline round runs along its picked edge only")
+        }
+        _ => ("fillet", "tangent_chain: false rounds only the picked edges"),
+    };
+    let from = if picked == 1 { "the picked edge runs" } else { "the picked edges run" };
+    let (edges, are, them) = if n == 1 { ("1 edge".to_string(), "is", "it") } else { (format!("{n} edges"), "are", "them") };
+    Some(format!(
+        "{edges} that {from} on into smoothly {are} still sharp because {why} (to blend {them} too, pick {them} in another {feature}, which may fail where the edges meet)"
+    ))
+}
+
 /// Body `mb` with blend `f` applied at `edges` (radius or distance `r`), the radii a fitted fillet
 /// used (when it reduced any) and the edges it tapered.
 fn blend_body(
@@ -7618,6 +7686,54 @@ fn bridge_tools(plane: &Plane, r: f64, rc: f64, dc: f64, bottom: f64, layer: f64
     Ok(tools)
 }
 
+/// The turn a whole turn's tool is turned by about the revolve axis, so that its seam is not in
+/// the profile plane: a body revolved in that plane has its own seam there, and SMLib's boolean
+/// leaves an edge near the seam when it splits the two (#18039). The solid is the same (a whole
+/// turn is the same whatever angle it starts at).
+const SEAM_TURN: f64 = 0.5;
+
+/// Whether `body` holds a seam in the plane `plane`: an edge of its B-rep that is a seam of a
+/// curved surface and lies in the plane. Two solids of revolution about the same axis, revolved
+/// in the same plane, hold their seams in that plane, and SMLib's boolean splits both where the
+/// cut crosses them and leaves an edge near the seam, which its check refuses (#18039).
+///
+/// The seam is read from the exact record, never from a tessellation: the kernel's own seam
+/// flags (which the record's faces and edges decide) and the record's own vertices. The seam of
+/// a surface of revolution is the profile curve in the revolve's plane, so its ends in the plane
+/// mean the seam lies in it.
+fn has_seam_in_plane(body: &Body, plane: &Plane) -> bool {
+    // The kernel's seam flags are read from the record; the mesh it takes with them is unused.
+    let seams = kernel::seam_flags(body, &Mesh::default());
+    let record = body.record();
+    let tolerance = body.size().max(1e-9) * 1e-6;
+    seams.iter().enumerate().any(|(index, seam)| {
+        *seam
+            && record.edges.get(index).is_some_and(|edge| {
+                edge.vertices
+                    .iter()
+                    .all(|vertex| record.vertices.get(*vertex as usize).is_some_and(|v| plane.height(Vec3::from(v.point)).abs() <= tolerance))
+            })
+    })
+}
+
+/// The tool of a whole turn, with the seam of its surface of revolution turned away from the
+/// profile plane: the same solid, with the seam somewhere else, so the two seams are not in one
+/// plane (#18039).
+fn turned_seam(axis: Vec3, origin: Vec3, body: &Body) -> Result<Body> {
+    let m = crate::rigid(Vec3::ZERO, origin, axis, SEAM_TURN);
+    kernel::transform_matrix(body, m).map_err(DocError::Kernel)
+}
+
+/// Whether any of the bodies the feature cuts holds a seam in the plane `plane`.
+fn bodies_hold_a_seam_in_plane(st: &ModelState, f: &Feature, plane: &Plane) -> bool {
+    let FeatureKind::Revolve { targets, .. } = &f.kind else { return false };
+    st.bodies
+        .iter()
+        .filter(|b| b.component == f.component)
+        .filter(|b| targets.is_empty() || targets.iter().any(|t| t == &b.name))
+        .any(|b| has_seam_in_plane(&b.body, plane))
+}
+
 /// The angular interval used by both the solid and its interactive extent handles.
 #[derive(Clone, Copy, Debug)]
 pub struct RevolveExtent {
@@ -8339,24 +8455,51 @@ fn feature_tools_with_constructor(
                         continue;
                     }
                     let bodies = revolve(&ss.plane, std::slice::from_ref(region), o, d, region_extent.sweep)?;
-                    let m = crate::rigid(Vec3::ZERO, origin_w, rotation_axis, region_extent.start);
+                    let turn = region_extent.start;
+                    let m = crate::rigid(Vec3::ZERO, origin_w, rotation_axis, turn);
+                    // A whole turn's tool has the seam of its surface of revolution in the profile
+                    // plane. A body that holds a seam in that plane (a body revolved in it) makes
+                    // SMLib's boolean split both and leave an edge near the seam, which its check
+                    // refuses (#18039): the tool's seam is turned away from the plane then, the
+                    // solid being the same.
+                    let turn_it = operation != Operation::NewBody
+                        && (region_extent.sweep.abs() - std::f64::consts::TAU).abs() <= 1e-9
+                        && bodies_hold_a_seam_in_plane(st, f, &ss.plane);
                     for body in bodies {
-                        out.push(if region_extent.start.abs() < 1e-12 {
-                            tool(region, body, None)
+                        let (body, built) = if turn.abs() < 1e-12 {
+                            (body, None)
                         } else {
-                            tool(region, kernel::transform_matrix(&body, m)?, Some(&body))
-                        });
+                            let moved = kernel::transform_matrix(&body, m)?;
+                            (moved, Some(&body))
+                        };
+                        let body = if turn_it { turned_seam(rotation_axis, origin_w, &body)? } else { body };
+                        out.push(tool(region, body, built));
                     }
                 }
                 return Ok(out);
             }
             let bodies = revolve(&ss.plane, &regions, o, d, ang)?;
-            if start.abs() < 1e-12 {
-                return Ok(regions.iter().zip(bodies).map(|(r, body)| tool(r, body, None)).collect());
-            }
-            // Turned back to start before the profile.
-            let m = crate::rigid(Vec3::ZERO, origin_w, axis_w, -start);
-            regions.iter().zip(bodies).map(|(r, body)| Ok(tool(r, kernel::transform_matrix(&body, m)?, Some(&body)))).collect()
+            let turn = -start;
+            let turn_it =
+                operation != Operation::NewBody && (ang.abs() - std::f64::consts::TAU).abs() <= 1e-9 && bodies_hold_a_seam_in_plane(st, f, &ss.plane);
+            let tools: Vec<Traced> = if turn.abs() < 1e-12 {
+                regions.iter().zip(bodies).map(|(r, body)| tool(r, body, None)).collect()
+            } else {
+                // Turned back to start before the profile.
+                let m = crate::rigid(Vec3::ZERO, origin_w, axis_w, turn);
+                regions
+                    .iter()
+                    .zip(bodies)
+                    .map(|(r, body)| Ok(tool(r, kernel::transform_matrix(&body, m)?, Some(&body))))
+                    .collect::<Result<Vec<_>>>()?
+            };
+            tools
+                .into_iter()
+                .map(|t| {
+                    let body = if turn_it { turned_seam(axis_w, origin_w, &t.body)? } else { t.body.clone() };
+                    Ok(Traced { body, lineage: t.lineage, recipe: t.recipe })
+                })
+                .collect()
         }
         FeatureKind::Loft { sections, rails, .. } if sections.iter().any(|s| s.point.is_some()) => {
             // A profile lofted to a sketch point (an apex).
@@ -9835,6 +9978,21 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                     },
                     _ => *p = hit.pick_point(input, *p),
                 }
+            }
+            // A deleted face is picked by its point as well: when its name is gone (a design saved by
+            // an older version names merged faces differently), the face is the one face of the same
+            // body that holds the point. With none, or with several (the point on an edge they share),
+            // nothing is deleted: the feature asks for the face to be picked again (#14206).
+            None if matches!(f.kind, FeatureKind::DeleteFace { .. }) => {
+                let mut holders = state
+                    .bodies
+                    .iter()
+                    .filter(|b| !b.body.is_mesh() && f.kind.face_body().is_none_or(|name| b.name == name))
+                    .flat_map(|b| crate::appearance::faces_within(b, *p, b.body.size() * 1e-3 + 1e-6));
+                if holders.next().is_none() || holders.next().is_some() {
+                    return Err(DocError::reselect(n.as_str()));
+                }
+                notes.push(format!("face `{n}` is no longer named so: the one face at [{}, {}, {}] is used", p.x, p.y, p.z));
             }
             None => return Err(DocError::reselect(n.as_str())),
         }
@@ -11879,6 +12037,7 @@ fn eval_feature_kind(
             for (ti, edges) in without_smooth(st, picks, &mut notes)? {
                 let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
                 let picked = edges.len();
+                let beyond = if chain { Vec::new() } else { chain_beyond_picks(&mb.body, &edges) };
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
@@ -11888,6 +12047,9 @@ fn eval_feature_kind(
                 let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
                     .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
+                    notes.push(n);
+                }
+                if let Some(n) = left_sharp_note(&nb.body, &beyond, picked, &f.kind) {
                     notes.push(n);
                 }
                 reduced |= used.is_some();
@@ -13793,6 +13955,122 @@ mod chain_tests {
         let (alone, _) = build(&[Vec3::new(40.0, 0.0, 5.0)]);
         let error = alone.and_then(|r| r.error).unwrap_or_default();
         assert!(error.contains("is smooth"), "{error}");
+    }
+
+    /// A 40 × 40 × 10 plate with a ball socket: a sphere of radius 3 cut from its front face
+    /// (y 0), centred on it at (20, 0, 5). The body stores the socket's rim as three arcs, a
+    /// quarter, a half and a quarter. A round or a chamfer of the rim with tangent_chain: false,
+    /// picked halfway along the first quarter, blends that quarter alone and says that the 2 arcs
+    /// it runs on into are still sharp (#18827). A sphere joined on the plate's top face has a rim
+    /// split by the sphere's seam, which SMLib rounds whole from one pick: no note.
+    #[test]
+    fn a_blend_without_tangent_propagation_says_which_smooth_continuations_it_left_sharp() {
+        use std::f64::consts::FRAC_1_SQRT_2;
+        let build = |sphere: (Vec3, Operation), blend: FeatureKind| {
+            let mut doc = Document::new("T");
+            let plate = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "40".into(),
+                width: "40".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            };
+            doc.add_feature(plate, None).unwrap();
+            doc.add_feature(FeatureKind::Sphere { center: crate::point_expr(sphere.0), radius: "3".into(), operation: sphere.1 }, None).unwrap();
+            let before = {
+                let mut m = Model::new();
+                m.evaluate(&doc);
+                kernel::measure(&m.state().bodies[0].body).unwrap().volume
+            };
+            let last = doc.add_feature(blend, None).unwrap();
+            let mut m = Model::new();
+            m.evaluate(&doc);
+            let r = m.result(last).cloned().expect("a result");
+            assert_eq!(r.error, None);
+            (r.warning, kernel::measure(&m.state().bodies[0].body).unwrap().volume - before)
+        };
+        let socket = (Vec3::new(20.0, 0.0, 5.0), Operation::Cut);
+        let quarter = Vec3::new(20.0 + 3.0 * FRAC_1_SQRT_2, 0.0, 5.0 - 3.0 * FRAC_1_SQRT_2);
+        let (warning, removed) = build(socket, fillet(quarter, "0.5", false));
+        assert_eq!(
+            warning.as_deref(),
+            Some(
+                "2 edges that the picked edge runs on into smoothly are still sharp because tangent_chain: false rounds only the \
+                 picked edges (to blend them too, pick them in another fillet, which may fail where the edges meet)"
+            )
+        );
+        // A quarter of the rim rounded: about a quarter of the 1.05 mm³ the whole rim's round takes.
+        assert!(removed < -0.15 && removed > -0.4, "{removed}");
+        let bevel = FeatureKind::Chamfer {
+            edges: vec![crate::Position(quarter)],
+            distance: "0.5".into(),
+            distance2: None,
+            angle: None,
+            flip: false,
+            body: None,
+            tangent_chain: false,
+        };
+        let warning = build(socket, bevel).0.unwrap_or_default();
+        assert!(warning.starts_with("2 edges that the picked edge runs on into smoothly are still sharp"), "{warning}");
+        assert!(warning.contains("tangent_chain: false chamfers only the picked edges") && warning.contains("in another chamfer"), "{warning}");
+        let ball = (Vec3::new(20.0, 20.0, 10.0), Operation::Join);
+        let (warning, added) = build(ball, fillet(Vec3::new(20.0 + 3.0 * FRAC_1_SQRT_2, 20.0 + 3.0 * FRAC_1_SQRT_2, 10.0), "0.5", false));
+        assert_eq!(warning, None);
+        assert!(added > 0.0, "{added}");
+    }
+
+    /// A 40 × 40 × 10 plate with its four upright edges rounded r5: its top outline is one tangent
+    /// chain of 8 edges, 4 lines and 4 arcs. A round of the front top line with tangent_chain:
+    /// false says the other 7 are still sharp at every radius. From r1.6 up the round runs on past
+    /// the line's ends and takes the middle of each neighbouring arc, but most of those arcs stay
+    /// sharp, so they are counted too. A variable round, which runs along its picked edge whatever
+    /// tangent_chain says, is told so rather than told to turn tangent_chain on.
+    #[test]
+    fn a_round_that_runs_past_its_edge_still_counts_the_edges_it_left_partly_sharp() {
+        let build = |round: FeatureKind| {
+            let mut doc = Document::new("T");
+            let plate = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(-20.0, -20.0, 0.0)),
+                length: "40".into(),
+                width: "40".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            };
+            doc.add_feature(plate, None).unwrap();
+            let mut corners = fillet(Vec3::ZERO, "5", true);
+            if let FeatureKind::Fillet { edges, .. } = &mut corners {
+                *edges = [(20.0, 20.0), (-20.0, 20.0), (20.0, -20.0), (-20.0, -20.0)]
+                    .into_iter()
+                    .map(|(x, y)| crate::Position(Vec3::new(x, y, 5.0)))
+                    .collect();
+            }
+            doc.add_feature(corners, None).unwrap();
+            let last = doc.add_feature(round, None).unwrap();
+            let mut m = Model::new();
+            m.evaluate(&doc);
+            let r = m.result(last).cloned().expect("a result");
+            assert_eq!(r.error, None);
+            r.warning.unwrap_or_default()
+        };
+        let front = Vec3::new(0.0, -20.0, 10.0);
+        for radius in ["1.4", "1.6", "2.5", "3.5"] {
+            let warning = build(fillet(front, radius, false));
+            assert!(warning.starts_with("7 edges that the picked edge runs on into smoothly are still sharp"), "r{radius}: {warning}");
+        }
+        let mut variable = fillet(front, "1", false);
+        if let FeatureKind::Fillet { style, .. } = &mut variable {
+            *style = crate::FilletStyle::Variable {
+                radius2: "0.5".into(),
+                start: crate::Position(Vec3::new(-15.0, -20.0, 10.0)),
+                mid: Vec::new(),
+                smooth: false,
+            };
+        }
+        let warning = build(variable);
+        assert!(warning.contains("still sharp because a variable or spline round runs along its picked edge only"), "{warning}");
+        assert!(!warning.contains("tangent_chain"), "{warning}");
     }
 }
 
