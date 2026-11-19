@@ -1260,6 +1260,100 @@ fn a_spindle_torus_band_splits_its_circle_just_short_of_a_vertex_near_the_quarte
     spindle_torus_band(40.0, 60.0, 5e-9);
 }
 
+/// A spike on a disk: the part of a torus whose tube reaches its axis (major radius `major`,
+/// minor radius `minor` no smaller, its centre `c`) from the circle a tube radius below `c` up
+/// to the nearest point where the tube meets the axis, closed by the disk in the circle. Read,
+/// validated, its faces pointing out; returns the solid and that point, the surface's pole.
+fn torus_spike(c: V, major: f64, minor: f64) -> (Solid, V) {
+    let (z, x) = ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let below = [c[0], c[1], c[2] - minor];
+    let pole = [c[0], c[1], c[2] - (minor * minor - major * major).max(0.0).sqrt()];
+    let mut w = W::default();
+    let v = w.vertex([c[0] + major, c[1], c[2] - minor]);
+    let k = w.circle(below, z, x, major);
+    let rim = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
+    let apex = w.vertex(pole);
+    let point = w.add(format!("VERTEX_LOOP('',#{apex})"));
+    let point = w.add(format!("FACE_BOUND('',#{point},.T.)"));
+    let a = w.axis(c, z, x);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(major), real(minor)));
+    // The torus's normal points out of its tube, into the spike: the face is its other side.
+    let o = w.oe(rim, true);
+    let bound = w.bound(&[o], false, true);
+    let side = w.face(&[point, bound], torus, false);
+    let plane = w.plane(below, z, x);
+    let o = w.oe(rim, false);
+    let bound = w.bound(&[o], false, true);
+    let disk = w.face(&[bound], plane, false);
+    let shell = closed_shell(&mut w, &[side, disk]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('spike',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2], "{c:?}");
+    // The spike is thin at its rim: the material lies under a point of its face and over a
+    // point of its disk.
+    let floor = c[2] - minor;
+    faces_away(&s.brep, 0, |p| if p[2] > floor + 1e-8 * minor { [p[0], p[1], floor] } else { [p[0], p[1], floor + 1e-8 * minor] });
+    (s, pole)
+}
+
+/// The end of the form of [`torus_spike`]'s face that lies nearer `pole`: its parameter along
+/// the tube, whether it is the form's own end (its first or last knot), and how far the form
+/// is from `pole` there, at its farthest round the axis.
+fn spike_form_end(s: &Solid, pole: V) -> (f64, bool, f64) {
+    let face = s.brep.faces.iter().find(|f| f.nurbs.is_some()).unwrap();
+    let Some(form @ BSurface::RationalSpline { v_knots, .. }) = &face.nurbs else { panic!("{:?}", face.nurbs) };
+    let eval = SurfaceEval::new(form).unwrap();
+    let [[u0, u1], [v0, v1]] = face.domain;
+    let first = eval.point([u0, v0]).unwrap().dist(v3(pole)) < eval.point([u0, v1]).unwrap().dist(v3(pole));
+    let (end, knot) = if first { (v0, v_knots[0]) } else { (v1, v_knots[v_knots.len() - 1]) };
+    let off = (0..=8).map(|i| eval.point([u0 + (u1 - u0) * f64::from(i) / 8.0, end]).unwrap().dist(v3(pole))).fold(0.0, f64::max);
+    (end, end == knot, off)
+}
+
+/// A horn torus has its major radius equal to its minor radius `r`: its tube touches its axis
+/// in one point, the torus's centre. A face that reaches that point is the tube's circle
+/// revolved about the axis from where the circle touches it, so its form ends on that point,
+/// the surface's pole. Whether the circle touches is the torus's two radii being equal. Worked
+/// out from the circle's centre, with the torus off the origin, it came out a few units in the
+/// last place either side: read as a miss, the face was refused ("a face around an open
+/// surface of revolution with one bound"); read as a crossing, its form ended 5e-8 of a quarter
+/// short of the pole and the kernel's check refused the body. The solid has the volume under
+/// the tube's quarter arc, π r³ (5/3 − π/2).
+#[test]
+fn a_horn_torus_face_to_its_pole_has_a_form_that_ends_on_the_pole() {
+    let r: f64 = 1.3;
+    for c in [[0.0; 3], [137.3, 23.7, 17.9], [44.58, -23.18, 17.91], [3.3, 3.3, 3.3], [1e3, 1e3, 1e3], [0.0, 0.0, 1e6]] {
+        let (s, pole) = torus_spike(c, r, r);
+        assert_eq!(pole, c);
+        let (_, on_end, off) = spike_form_end(&s, pole);
+        assert!(on_end, "{c:?}: the form ends on the pole");
+        assert!(off <= 1e-12 * (1.0 + v3(c).len()), "{c:?}: {off}");
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        assert!(body.is_manifold_solid().unwrap(), "{c:?}");
+        let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{c:?}: {report}");
+        assert_eq!(body.check_solid(), Ok(()), "{c:?}");
+        let volume = PI * r.powi(3) * (5.0 / 3.0 - 0.5 * PI);
+        let mass = body.mass_properties(1e-6).unwrap();
+        assert!((mass.volume - volume).abs() < 1e-5 * volume, "{c:?}: {} vs {volume}", mass.volume);
+    }
+}
+
+/// A spindle torus whose tube crosses its axis by 1e-9 (its minor radius that much over its
+/// major radius) is no horn torus, however far from the origin it sits: its face's form ends
+/// where the tube crosses the axis, 5.1e-5 below the torus's centre, not on the centre.
+#[test]
+fn a_spindle_torus_a_hair_from_a_horn_ends_its_form_where_its_tube_crosses_the_axis() {
+    let (major, minor): (f64, f64) = (1.3, 1.3 + 1e-9);
+    for c in [[0.0; 3], [137.3, 23.7, 17.9], [0.0, 0.0, 1e4]] {
+        let (s, pole) = torus_spike(c, major, minor);
+        assert!((c[2] - pole[2] - 5.1e-5).abs() < 1e-6, "{pole:?}");
+        let (_, on_end, off) = spike_form_end(&s, pole);
+        assert!(on_end, "{c:?}: the form ends on the pole");
+        assert!(off <= 1e-9 * (1.0 + v3(c).len()), "{c:?}: {off}");
+    }
+}
+
 /// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and
 /// u = π/2), closed by the two disks they bound. The tube face gets a seam round the axis at a
 /// vertex's angle round the tube, as a band round the axis gets one round the tube.
@@ -1433,6 +1527,172 @@ fn a_plate_with_a_through_hole() {
             }
         });
     }
+}
+
+/// A plate 10 mm deep and 5 mm thick whose side at x = 10 leans out to x = 15 at its bottom,
+/// with a through hole of radius 2 about (8, 5): the hole's top rim touches the top face's edge
+/// x = 10 at the one point (10, 5, 5), where the rim's vertex is a vertex of that edge too, and
+/// the leaning side runs clear of the hole below it. The top face is written with the hole as a
+/// bound of its own, as a boolean writes it.
+fn plate_with_a_hole_touching_an_edge() -> p21::Exchange {
+    let mut w = W::default();
+    let at = |w: &mut W, p: V| (w.vertex(p), p);
+    let [a0, b0, c0, d0] = [[0.0, 0.0, 0.0], [15.0, 0.0, 0.0], [15.0, 10.0, 0.0], [0.0, 10.0, 0.0]].map(|p| at(&mut w, p));
+    let [a, b, c, d] = [[0.0, 0.0, 5.0], [10.0, 0.0, 5.0], [10.0, 10.0, 5.0], [0.0, 10.0, 5.0]].map(|p| at(&mut w, p));
+    // Where the rim touches the edge, and the bottom rim's vertex under it.
+    let (touch, under) = (at(&mut w, [10.0, 5.0, 5.0]), at(&mut w, [10.0, 5.0, 0.0]));
+    let line = |w: &mut W, p: (u64, V), q: (u64, V)| w.line_edge(p, q, true, 1.0);
+    let bottom = [line(&mut w, a0, b0), line(&mut w, b0, c0), line(&mut w, c0, d0), line(&mut w, d0, a0)];
+    let top = [line(&mut w, a, b), line(&mut w, b, touch), line(&mut w, touch, c), line(&mut w, c, d), line(&mut w, d, a)];
+    let up = [line(&mut w, a0, a), line(&mut w, b0, b), line(&mut w, c0, c), line(&mut w, d0, d)];
+    let rim = |w: &mut W, v: u64, h: f64| {
+        let k = w.circle([8.0, 5.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 2.0);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let rims = [rim(&mut w, under.0, 0.0), rim(&mut w, touch.0, 5.0)];
+    let seam = line(&mut w, under, touch);
+    let axis = w.axis([8.0, 5.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{axis},2.)"));
+    let wall = side(&mut w, &Cyl { circles: rims, seam, surface }, false);
+    // Each face's outer bound counter-clockwise about its outward normal, then its hole.
+    let face = |w: &mut W, uses: &[(u64, bool)], hole: Option<(u64, bool)>, o: V, z: V, x: V| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, forward)| w.oe(e, forward)).collect();
+        let mut bounds = vec![w.bound(&oes, false, true)];
+        if let Some((e, forward)) = hole {
+            let oe = w.oe(e, forward);
+            bounds.push(w.bound(&[oe], false, true));
+        }
+        let plane = w.plane(o, z, x);
+        w.face(&bounds, plane, true)
+    };
+    let lean = 0.5_f64.sqrt();
+    let faces = [
+        face(
+            &mut w,
+            &[(top[0], true), (top[1], true), (top[2], true), (top[3], true), (top[4], true)],
+            Some((rims[1], false)),
+            a.1,
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+        ),
+        face(
+            &mut w,
+            &[(bottom[3], false), (bottom[2], false), (bottom[1], false), (bottom[0], false)],
+            Some((rims[0], true)),
+            a0.1,
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+        ),
+        face(&mut w, &[(bottom[0], true), (up[1], true), (top[0], false), (up[0], false)], None, a0.1, [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        face(&mut w, &[(up[3], true), (top[3], false), (up[2], false), (bottom[2], true)], None, d0.1, [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+        face(&mut w, &[(up[0], true), (top[4], false), (up[3], false), (bottom[3], true)], None, a0.1, [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        face(
+            &mut w,
+            &[(bottom[1], true), (up[2], true), (top[2], false), (top[1], false), (up[1], false)],
+            None,
+            b0.1,
+            [lean, 0.0, lean],
+            [0.0, 1.0, 0.0],
+        ),
+        wall,
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('plate',#{shell})"));
+    w.file(&[solid])
+}
+
+/// A hole whose rim touches its face's outer edge at one vertex (tangency-labs/solidcraft#19165:
+/// a part from OpenCascade's booleans) is no bound of its own: the kernel takes no face whose
+/// loops share a vertex (its face tests 32, 38 and 39 refused the body, and every feature on it
+/// after). The face's one loop runs along the outer edge to the vertex, round the rim and on
+/// along the edge, and bounds the same region: the solid has the faces, edges, vertices and
+/// volume it is written with, and the kernel's check passes it.
+#[test]
+fn a_hole_that_touches_its_faces_outer_edge_at_one_vertex_is_in_the_outer_loop() {
+    let s = one_solid(&plate_with_a_hole_touching_an_edge());
+    assert!(!s.sheet);
+    assert_eq!(counts(&s.brep), [2, 1, 7, 16, 10]);
+    let b = &s.brep;
+    let (body, _) = solidcore_ops::body::Body::from_record(b, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(body.counts().unwrap(), [7, 16, 10]);
+    // The leaning prism less the hole: 10 x (10 + 15) / 2 x 5 - pi 2^2 x 5.
+    let volume = 625.0 - 20.0 * PI;
+    let mass = body.mass_properties(1e-9).unwrap();
+    assert!((mass.volume - volume).abs() < 1e-8 * volume, "{} vs {volume}", mass.volume);
+    let touch = b.vertices.iter().position(|v| v.point == [10.0, 5.0, 5.0]).unwrap() as u32;
+    // The top face: the five edges of its outline and the rim between the two that meet at the
+    // vertex, the rim run clockwise about the face's normal as a hole is.
+    let rim = b.edges.iter().position(|e| matches!(e.curve, BCurve::Circle { .. }) && e.vertices == [touch; 2]).unwrap() as u32;
+    let tops: Vec<&Face> =
+        b.faces.iter().filter(|f| matches!(f.surface, BSurface::Plane { .. }) && f.loops.iter().any(|l| uses_edge(l, rim))).collect();
+    let [top] = tops.as_slice() else { panic!("{} plane faces on the rim", tops.len()) };
+    let [Loop::Edges { edges }] = top.loops.as_slice() else { panic!("{} loops", top.loops.len()) };
+    assert_eq!(edges.len(), 6);
+    let starts: Vec<u32> = edges.iter().map(|u| b.edges[u.edge as usize].vertices[usize::from(!u.forward)]).collect();
+    assert_eq!(starts.iter().filter(|v| **v == touch).count(), 2, "through the vertex twice: {starts:?}");
+    let at = edges.iter().position(|u| u.edge == rim).unwrap();
+    let (before, after) = (&edges[(at + 5) % 6], &edges[(at + 1) % 6]);
+    for u in [before, after] {
+        assert!(matches!(b.edges[u.edge as usize].curve, BCurve::Line { .. }));
+    }
+    assert_eq!(starts[at], touch);
+    assert_eq!(starts[(at + 1) % 6], touch);
+    // The bottom face keeps its hole as a loop of its own: nothing touches there.
+    assert_eq!(b.faces.iter().filter(|f| f.loops.len() == 2).count(), 1);
+    faces_away(b, 0, |p| {
+        let r = (p[0] - 8.0).hypot(p[1] - 5.0);
+        if (r - 2.0).abs() < 1e-6 {
+            [8.0 + (p[0] - 8.0) * 2.0, 5.0 + (p[1] - 5.0) * 2.0, p[2]]
+        } else {
+            [p[0].clamp(0.5, 5.0), p[1].clamp(0.5, 9.5), 2.5]
+        }
+    });
+    assert!(s.notes.iter().any(|n| n.contains("made one loop")), "{:?}", s.notes);
+}
+
+/// Whether loop `l` runs along edge `e`.
+fn uses_edge(l: &Loop, e: u32) -> bool {
+    matches!(l, Loop::Edges { edges } if edges.iter().any(|u| u.edge == e))
+}
+
+/// A hole that touches its face's outer loop at two vertices cuts the face in two, which is no
+/// one loop: a square sheet whose hole reaches from the middle of one side to the middle of the
+/// opposite one keeps its two loops as written, and the reader's notes name the face and where
+/// its loops touch.
+#[test]
+fn a_hole_that_touches_its_faces_outer_loop_at_two_vertices_is_left_and_named() {
+    let mut w = W::default();
+    let at = |w: &mut W, p: V| (w.vertex(p), p);
+    let ring = |w: &mut W, corners: &[(u64, V)]| -> Vec<u64> {
+        let n = corners.len();
+        (0..n)
+            .map(|k| {
+                let e = w.line_edge(corners[k], corners[(k + 1) % n], true, 1.0);
+                w.oe(e, true)
+            })
+            .collect()
+    };
+    let (right, left) = (at(&mut w, [10.0, 5.0, 0.0]), at(&mut w, [0.0, 5.0, 0.0]));
+    let square =
+        [at(&mut w, [0.0, 0.0, 0.0]), at(&mut w, [10.0, 0.0, 0.0]), right, at(&mut w, [10.0, 10.0, 0.0]), at(&mut w, [0.0, 10.0, 0.0]), left];
+    // Clockwise about +z, as a hole runs.
+    let diamond = [right, at(&mut w, [5.0, 3.0, 0.0]), left, at(&mut w, [5.0, 7.0, 0.0])];
+    let (outer, hole) = (ring(&mut w, &square), ring(&mut w, &diamond));
+    let bounds = [w.bound(&outer, true, true), w.bound(&hole, false, true)];
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&bounds, plane, true);
+    let open = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('sheet',(#{open}))"));
+    let s = one_solid(&w.file(&[model]));
+    assert!(s.sheet);
+    assert_eq!(counts(&s.brep), [1, 1, 1, 10, 8]);
+    assert_eq!(s.brep.faces[0].loops.len(), 2);
+    let named = format!("face #{face}: its loops touch at (10, 5, 0) mm and are left as written: ");
+    assert!(s.notes.iter().any(|n| n.starts_with(&named)), "{:?}", s.notes);
+    assert!(!s.notes.iter().any(|n| n.contains("made one loop")), "{:?}", s.notes);
 }
 
 /// [`cylinder`] with each rim circle from its vertex to a second VERTEX_POINT at the same point,

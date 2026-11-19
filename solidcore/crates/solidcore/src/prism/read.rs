@@ -146,46 +146,30 @@ fn segment(run: &Run, work: &mut usize) -> Option<(usize, Vec<f64>, Vec<[f64; 4]
     if !(1..=MAX_DEGREE).contains(&degree) || n > MAX_CONTROLS || nurb.knots().len() > 8192 {
         return None;
     }
-    charge(
-        work,
-        n.checked_mul(nurb.knots().len())?.checked_mul(degree + 1)?,
-    )?;
+    charge(work, n.checked_mul(degree + 1)?.checked_mul(2)?)?;
     let (u0, u1) = nurb.param_bounds();
     let (t0, t1) = (run.interval.min(), run.interval.max());
     if !(t0 < t1 && t0 >= u0 && t1 <= u1) {
         return None;
     }
-    let seg = if t0 == u0 && t1 == u1 {
-        nurb.clone()
-    } else {
-        nurb.extract_seg(t0, t1).ok()?
-    };
-    let pts: Vec<[f64; 4]> = seg.cpts().iter().map(|c| hp(*c)).collect();
-    pts.iter()
-        .all(|p| p.iter().all(|x| x.is_finite()))
-        .then(|| (seg.degree(), seg.knots().to_vec(), pts))
+    let controls: Vec<_> = nurb.cpts().iter().map(|c| hp(*c)).collect();
+    let (knots, pts) =
+        crate::curve::spline_projection::segment(degree, nurb.knots(), &controls, t0, t1).ok()?;
+    Some((degree, knots, pts))
 }
 
 /// The run's Bézier spans, homogeneous, in the direction it runs.
 fn spans_of(run: &Run, work: &mut usize) -> Option<Vec<Vec<[f64; 4]>>> {
     let nurb = net(run.curve)?.nurb.as_ref()?;
-    let (t0, t1) = (run.interval.min(), run.interval.max());
-    let (u0, u1) = nurb.param_bounds();
-    if !(t0 < t1 && t0 >= u0 && t1 <= u1) {
-        return None;
-    }
-    charge(work, nurb.cpts().len().checked_mul(nurb.knots().len())?)?;
-    let seg = if t0 == u0 && t1 == u1 {
-        nurb.clone()
-    } else {
-        nurb.extract_seg(t0, t1).ok()?
-    };
-    let spans: Vec<Vec<[f64; 4]>> = seg
-        .decompose_bez()
-        .ok()?
-        .iter()
-        .map(|b| b.cpts().iter().map(|c| hp(*c)).collect())
-        .collect();
+    charge(
+        work,
+        nurb.cpts()
+            .len()
+            .checked_mul(nurb.knots().len())?
+            .checked_mul(nurb.degree() + 1)?,
+    )?;
+    let (degree, knots, ctrl) = segment(run, work)?;
+    let spans = crate::curve::spline_projection::bezier_spans(degree, &knots, &ctrl).ok()?;
     Some(if run.forward {
         spans
     } else {
@@ -259,7 +243,7 @@ fn line_span(c: &[H2], a: Point2, b: Point2, tol: f64, error: f64) -> Option<()>
     if length <= tol {
         return None;
     }
-    let d = d / length;
+    let d = Vec2::new(d.x / length, d.y / length);
     let mut projected = Vec::new();
     let weights: Vec<f64> = c.iter().map(|p| p[2]).collect();
     for p in c {
@@ -369,6 +353,18 @@ pub fn planar_pieces(
     work: &mut usize,
     each_span: bool,
 ) -> Option<Vec<Seg2>> {
+    read_pieces(k, run, frame, tol, work, each_span, false)
+}
+
+fn read_pieces(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    each_span: bool,
+    whole: bool,
+) -> Option<Vec<Seg2>> {
     if !(tol.is_finite() && tol > 0.0) {
         return None;
     }
@@ -419,7 +415,7 @@ pub fn planar_pieces(
     let proved = |work: &mut usize| {
         label
             .or_else(|| through_three(k, run, (ts, te), frame, a, tol))
-            .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work))
+            .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work, whole))
     };
     if a.distance(b) > tol
         && spans
@@ -487,6 +483,7 @@ fn arc(
     tol: f64,
     error: f64,
     work: &mut usize,
+    whole: bool,
 ) -> Option<Vec<Seg2>> {
     let mut sweep: f64 = 0.0;
     for span in spans {
@@ -510,6 +507,14 @@ fn arc(
     if a.distance(b) < tol {
         if (sweep.abs() - TAU).abs() > angular_tol {
             return None;
+        }
+        if whole {
+            return Some(vec![Seg2::Arc {
+                center,
+                radius,
+                start: principal(start),
+                sweep: sweep.signum() * TAU,
+            }]);
         }
         let h = sweep.signum() * PI;
         return Some(vec![
@@ -689,8 +694,8 @@ fn free_form(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec<Se
 
 /// The run in `frame` exactly, for a sketch to project it: as [`planar_pieces`], and else a
 /// curve of several Bézier spans as the one B-spline it is (its clamped segment over the run's
-/// interval, its knots and weights its own). `None` when it does not lie in a plane parallel to
-/// the frame or is not read exactly.
+/// interval, its knots and weights its own). Spline and ellipse control points project between
+/// nonparallel planes too. `None` when the curve is not read exactly.
 #[must_use]
 pub fn planar_curves(
     k: &Kernel,
@@ -699,24 +704,78 @@ pub fn planar_curves(
     tol: f64,
     work: &mut usize,
 ) -> Option<Vec<PlanarPiece>> {
-    if let Some(segs) = planar_pieces(k, run, frame, tol, work, false) {
-        return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
+    read_curves(k, run, frame, tol, work, false)
+}
+
+/// Read only curves in a plane parallel to `frame`, including their trimmed spline nets.
+/// This keeps the parallel reader's eligibility separate from general projection.
+#[must_use]
+pub fn parallel_curves(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+) -> Option<Vec<PlanarPiece>> {
+    read_curves(k, run, frame, tol, work, true)
+}
+
+fn read_curves(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    parallel_only: bool,
+) -> Option<Vec<PlanarPiece>> {
+    // A failed analytic certificate must leave work for the exact spline form.
+    let allowance = *work / 2;
+    let mut analytic_work = allowance;
+    let analytic = read_pieces(k, run, frame, tol, &mut analytic_work, false, true);
+    *work -= allowance - analytic_work;
+    if let Some(segs) = analytic {
+        let native_spline = matches!(run.curve.kind(), CurveKind::BSpline(_));
+        if !native_spline
+            || segs
+                .iter()
+                .all(|s| matches!(s, Seg2::Line { .. } | Seg2::Arc { .. }))
+        {
+            return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
+        }
     }
-    one_spline(run, frame, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
+    one_spline(k, run, frame, tol, work, parallel_only).map(|s| vec![PlanarPiece::Spline(s)])
 }
 
 /// The run's net over its interval, the way it runs, as one clamped B-spline in `frame`.
-fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<PlanarSpline> {
+fn one_spline(
+    k: &Kernel,
+    run: &Run,
+    frame: &Frame,
+    tol: f64,
+    work: &mut usize,
+    parallel_only: bool,
+) -> Option<PlanarSpline> {
     if !(tol.is_finite() && tol > 0.0) {
         return None;
     }
-    let (degree, knots, ctrl) = segment(run, work)?;
+    let (degree, knots, ctrl) = if matches!(run.curve.kind(), CurveKind::Line(_)) {
+        charge(work, 1)?;
+        let (lo, hi) = (run.interval.min(), run.interval.max());
+        let a = run.curve.evaluate_point(k, lo).ok()?;
+        let b = run.curve.evaluate_point(k, hi).ok()?;
+        (
+            1,
+            vec![lo, lo, hi, hi],
+            vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]],
+        )
+    } else {
+        segment(run, work)?
+    };
     let (knots, ctrl) = if run.forward {
         (knots, ctrl)
     } else {
-        let sum = knots.first()? + knots.last()?;
         (
-            knots.iter().rev().map(|t| sum - t).collect(),
+            knots.iter().rev().map(|t| -t).collect(),
             ctrl.into_iter().rev().collect(),
         )
     };
@@ -724,12 +783,13 @@ fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<Pl
     if !(max_w.is_finite() && max_w > 0.0) {
         return None;
     }
+    let ctrl: Vec<_> = ctrl.into_iter().map(|p| p.map(|v| v / max_w)).collect();
+    let max_w = 1.0;
     let project = |p: &[f64; 4]| Point3::new(p[0] / p[3], p[1] / p[3], p[2] / p[3]);
     let (first, last) = (project(ctrl.first()?), project(ctrl.last()?));
     if first.distance(run.ends[0]) > tol || last.distance(run.ends[1]) > tol {
         return None;
     }
-    let level = height(frame, first);
     let o = Vec3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
     let mut points = Vec::new();
     let mut weights = Vec::new();
@@ -739,7 +799,10 @@ fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<Pl
         }
         let v = project(p);
         let error = (v.x.abs() + v.y.abs() + v.z.abs() + o.length()) * f64::EPSILON * 256.0;
-        if (height(frame, v) - level).abs() + error > tol || error > tol * 0.1 {
+        if error > tol * 0.1 {
+            return None;
+        }
+        if parallel_only && (height(frame, v) - height(frame, first)).abs() + error > tol {
             return None;
         }
         let local = to_local(frame, v);
@@ -749,7 +812,7 @@ fn one_spline(run: &Run, frame: &Frame, tol: f64, work: &mut usize) -> Option<Pl
         points.push(local);
         weights.push(p[3] / max_w);
     }
-    if weights.iter().all(|w| (w - 1.0).abs() <= 1e-12) {
+    if weights.iter().all(|w| *w == 1.0) {
         weights.clear();
     }
     Some(PlanarSpline {
@@ -785,8 +848,8 @@ pub fn planar_edges_tolerance(b: &Brep) -> Option<f64> {
 }
 
 /// Edges `edges` of `b`, each run forward, in `frame`'s coordinates exactly
-/// ([`planar_curves`], to [`planar_edges_tolerance`]): `None` for an edge that does not lie in a
-/// plane parallel to the frame, is not read exactly, or is not there.
+/// ([`planar_curves`], to [`planar_edges_tolerance`]). Splines and ellipses can also project
+/// between nonparallel planes. `None` for an edge that cannot be read exactly or is not there.
 #[must_use]
 pub fn planar_edges(
     k: &Kernel,
