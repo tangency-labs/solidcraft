@@ -1439,6 +1439,46 @@ EOF
         }
     }
 
+    /// A spline with its own knots and weights (as a DXF SPLINE brings it in, #9355) is written
+    /// exactly in AutoCAD 2000, and as chords that follow its knots and weights in release 12.
+    #[test]
+    fn export_dxf_writes_a_knotted_spline_exactly_and_as_chords_in_release_12() {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        // A cubic with a triple knot in the middle (a sharp corner at (20, 0)), and a rational
+        // quadratic quarter circle of radius 10 about the origin.
+        let ctrl = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (10.0, 30.0)];
+        let knots = [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let entities = spline_dxf(8, 3, &ctrl, &knots, &[])
+            + &spline_dxf(8, 2, &[(10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[1.0, w, 1.0]);
+        let mut s = Session::default();
+        let dxf = format!("0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n");
+        let sketch = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap()["sketch"].clone();
+        let shapes = |s: &mut Session, version: &str| -> Vec<solidcraft_io::DxfShape> {
+            let out = s.execute("sketch.export_dxf", &json!({"sketch": sketch, "version": version})).unwrap();
+            let file = solidcraft_io::read_dxf_file(out["dxf"].as_str().unwrap()).unwrap();
+            file.entities().iter().map(|e| e.geometry().clone()).collect()
+        };
+        // AutoCAD 2000: no chords; the cubic is SPLINE pieces.
+        let exact = shapes(&mut s, "ac1015");
+        assert!(!exact.iter().any(|g| matches!(g, solidcraft_io::DxfShape::Line(..))), "{exact:?}");
+        assert!(exact.iter().any(|g| matches!(g, solidcraft_io::DxfShape::Spline { .. })), "{exact:?}");
+        // Release 12: chords only, and the quarter circle's lie on its radius, as its weights
+        // make it (evenly weighted, its middle would bulge 0.6 inside).
+        let chords = shapes(&mut s, "r12");
+        let mut on_quarter = 0;
+        for g in &chords {
+            let solidcraft_io::DxfShape::Line(a, b) = g else { panic!("release 12 writes chords: {g:?}") };
+            // The quarter circle's chord ends, off the axes; the cubic's lie on the x axis or farther out.
+            for p in [a, b] {
+                if p.x > 1e-9 && p.y > 1e-9 && p.len() < 15.0 {
+                    on_quarter += 1;
+                    assert!((p.len() - 10.0).abs() < 1e-6, "{p:?} is {} from the centre", p.len());
+                }
+            }
+        }
+        assert!(on_quarter > 10, "{on_quarter} chord ends on the quarter circle");
+    }
+
     #[test]
     fn export_dxf_layers_present() {
         let mut s = Session::default();
