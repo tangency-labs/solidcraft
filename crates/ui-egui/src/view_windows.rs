@@ -1133,9 +1133,13 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
                 for x in [-4.0, 0.0, 4.0] {
                     ui.painter().circle_filled(menu.center() + egui::vec2(x, 0.0), 1.25, tokens.app_bar_text);
                 }
+                let background = ui.ctx().viewport(|viewport| viewport.hits.click.is_none_or(|hit| hit.id == egui::Id::unique("titlebar-drag")));
                 let context_open = ui.input(|input| {
                     input.pointer.secondary_clicked()
-                        && input.pointer.interact_pos().is_some_and(|at| content.contains(at) && (at.x <= brand_end || menu.contains(at)))
+                        && input
+                            .pointer
+                            .interact_pos()
+                            .is_some_and(|at| content.contains(at) && (background || at.x <= brand_end || menu.contains(at)))
                 });
                 if response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
                     start_window_rename(app, ui.ctx(), id);
