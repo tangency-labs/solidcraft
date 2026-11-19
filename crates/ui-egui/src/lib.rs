@@ -4157,6 +4157,18 @@ impl SolveApp {
         self.apply_look(ctx);
     }
 
+    /// Release pictures whose views no longer belong to any window. Native hosts call this
+    /// after all child scopes restore the root; Web calls it after its single root UI pass.
+    /// Keeping hidden/live slots avoids consuming their pending CPU scenes a second time.
+    pub fn retain_view_pictures(&mut self, state: Option<&egui_wgpu::RenderState>) {
+        let slots = documents::live_view_picture_slots(self);
+        if let Some(state) = state
+            && let Some(renderer) = state.renderer.write().callback_resources.get_mut::<solidcraft_viewport_gpu::view::Renderer>()
+        {
+            renderer.retain_views(&slots);
+        }
+    }
+
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         plugins::tick(self, ui.ctx(), false);
@@ -4320,6 +4332,11 @@ impl SolveApp {
         if view_tiles::focus_pressed(self) {
             ui.ctx().request_repaint();
         }
+    }
+
+    /// Whether the host can close after queued view preferences have reached disk.
+    pub fn ready_to_quit(&self) -> bool {
+        self.quit_requested && !crate::view_memory::pending()
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {

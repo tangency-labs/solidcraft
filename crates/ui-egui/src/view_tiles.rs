@@ -46,8 +46,8 @@ fn from_tile(rect: TileRect) -> Rect {
 }
 
 /// The tile's slot on the GPU: the view's own id.
-fn slot(view: u64) -> u32 {
-    u32::try_from(view).unwrap_or(u32::MAX)
+fn slot(view: u64) -> u64 {
+    view
 }
 
 /// A view's frame: where its camera frames the model, the same whether the view is the ground or a
@@ -463,6 +463,20 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn saved_view_ids_above_32_bits_keep_distinct_gpu_picture_slots() {
+        let ids = [(1_u64 << 31) + 1, (1_u64 << 40) + 1, (1_u64 << 40) + 2, 1_u64 << 53];
+        let saved = json!({
+            "active": ids[0],
+            "views": ids.iter().enumerate().map(|(index, id)| json!({"id": id, "kind": "model", "name": format!("Model {index}")})).collect::<Vec<_>>()
+        });
+        let mut views = solidcraft_views::ViewSet::from_json(&saved).unwrap();
+        assert_eq!(views.set_layout(solidcraft_views::Preset::Grid), 4);
+        let slots: Vec<_> = views.tiles().unwrap().views().into_iter().map(slot).collect();
+        assert_eq!(slots, ids, "picture callbacks keep the complete saved view identity");
+        assert_eq!(slots.iter().copied().collect::<std::collections::HashSet<_>>().len(), 4);
+        assert!(!slots.contains(&0), "the ordinary root viewport has its own slot");
+    }
+    #[test]
     fn tiled_navigation_controls_only_change_their_own_view() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -542,8 +556,14 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
-        h.app.viewport.gpu =
-            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        });
         h.app.ui.visual_style = 1;
         assert_eq!(crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
         h.frames(4);

@@ -1004,6 +1004,9 @@ pub enum CombPick {
 /// while the design stays one. [`Session::inspect`] reads it and [`Session::set_inspect`] shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InspectState {
+    // Retaining the snapshot makes document mutation change its copy-on-write identity.
+    source: Arc<Document>,
+    pub colored_components: Option<()>,
     pub section: SectionState,
     pub analysis: Option<SurfaceAnalysis>,
     pub continuity: Vec<ContinuitySeam>,
@@ -1015,6 +1018,8 @@ impl Session {
     /// What the session shows now: the section and the analyses.
     pub fn inspect(&self) -> InspectState {
         InspectState {
+            source: self.doc.clone(),
+            colored_components: self.colored_components,
             section: self.section_state(),
             analysis: self.analysis,
             continuity: self.continuity.clone(),
@@ -1025,13 +1030,22 @@ impl Session {
 
     /// Show `state` in place of what is shown now.
     pub fn set_inspect(&mut self, state: InspectState) {
-        // Restore a passive view snapshot without publishing another display edit.
+        let current = Arc::ptr_eq(&state.source, &self.doc);
+        self.colored_components = state.colored_components;
+        // Passive view swaps restore the complete cut without publishing a display edit or
+        // changing the shared window's status ordering on every tile paint.
         let SectionState { planes, hidden, hatch, folder } = state.section;
         (self.section, self.section_hidden, self.section_hatch, self.section_folder) = (planes, hidden, hatch, folder);
         self.analysis = state.analysis;
-        self.continuity = state.continuity;
+        // Requested analysis survives an edit; sampled world geometry does not.
+        self.continuity = if current { state.continuity } else { Vec::new() };
         self.isocurves = state.isocurves;
-        self.comb = state.comb;
+        self.comb = state.comb.map(|mut comb| {
+            if !current {
+                comb.teeth.clear();
+            }
+            comb
+        });
     }
 }
 
