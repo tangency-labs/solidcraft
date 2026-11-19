@@ -6053,7 +6053,9 @@ dependencies = [
  "image",
  "log",
  "png",
+ "rustls",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -6074,6 +6076,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tiny-skia",
  "toml_edit",
+ "ureq",
  "wat",
  "web-time",
 ]

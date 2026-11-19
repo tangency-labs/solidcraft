@@ -220,12 +220,19 @@ pub struct ImportedDesign {
     pub param_warnings: Vec<String>,
 }
 
-/// Install a plugin from a `.zip`: `plugin.json` and its component at the top or in one folder.
+/// Install a plugin from a local `.zip` or an HTTPS GitHub release package.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InstallParams {
     /// The `.zip` to install; subject to the caller's file scope.
-    pub path: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    /// HTTPS GitHub repository or release URL. Exactly one of path and url is required.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Preserve the reviewed GitHub owner/repo when installing an update from a local archive.
+    #[serde(default)]
+    pub repository: Option<String>,
     /// Exact manifest-and-component hash from a reviewed dry run; a mismatch refuses installation.
     #[serde(default)]
     pub approval: Option<String>,
@@ -244,6 +251,9 @@ pub struct InstallParams {
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InstallResult {
+    /// Repository recorded for updates when installed from a URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.

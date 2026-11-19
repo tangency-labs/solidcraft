@@ -248,6 +248,12 @@ pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin:
     solidcraft_engine::plugin::HostLimits { max_fuel: p.plugin_max_fuel, max_memory_mib: p.plugin_max_memory_mib }
 }
 pub(crate) fn sync_policy(app: &mut SolveApp) {
+    app.session.plugin_state.http = app
+        .services
+        .http_get
+        .clone()
+        .zip(app.services.http_download.clone())
+        .map(|(get, download)| solidcraft_engine::plugin::github::Client { get, download });
     // A failed write is retried by the next sync; the command that changed the grants reports it.
     if let Err(e) = sync_store(app) {
         log::warn!("plugins: {e}");
@@ -581,12 +587,18 @@ pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Pa
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
-        // Install plugin…: pick a .zip, review what it asks for, install it.
-        let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.menu"), "import", !busy(app), false);
-        crate::scenario::publish_target("prefs:plugins:install", install.rect);
-        if install.clicked() {
-            crate::plugin_install::start(app);
-        }
+        ui.horizontal_wrapped(|ui| {
+            let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.zip_menu"), "import", !busy(app), false);
+            crate::scenario::publish_target("prefs:plugins:install", install.rect);
+            if install.clicked() {
+                crate::plugin_install::start(app);
+            }
+            let url = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.url_menu"), "import", !busy(app), false);
+            crate::scenario::publish_target("prefs:plugins:install_url", url.rect);
+            if url.clicked() {
+                app.plugin_install.url = Some(String::new());
+            }
+        });
         ui.add_space(8.0);
         resource_controls(app, ui);
         crate::ui_kit::checkbox(

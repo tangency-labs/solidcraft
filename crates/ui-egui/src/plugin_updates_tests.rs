@@ -15,10 +15,20 @@ fn release(digest: Option<&str>) -> Vec<u8> {
 }
 
 fn package(id: &str, version: &str) -> Vec<u8> {
-    let manifest = json!({"id":id,"name":"Gears","version":version,"description":"Spur gears","capabilities":["commands@0.1"],
-        "updates":{"github":"maker/gears"},
+    package_with_repository(id, version, Some("maker/gears"))
+}
+
+fn package_without_repository(id: &str, version: &str) -> Vec<u8> {
+    package_with_repository(id, version, None)
+}
+
+fn package_with_repository(id: &str, version: &str, repository: Option<&str>) -> Vec<u8> {
+    let mut manifest = json!({"id":id,"name":"Gears","version":version,"description":"Spur gears","capabilities":["commands@0.1"],
         "runtime":{"module":"gears.wasm","entries":[{"name":"make"}],"commands":["solid.box"],
         "permissions":{"command_groups":["file"],"files":[{"name":"exports","write":true}]}}});
+    if let Some(repository) = repository {
+        manifest["updates"] = json!({"github":repository});
+    }
     let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     for (name, bytes) in
         [(std::format!("{id}/plugin.json"), serde_json::to_vec(&manifest).unwrap()), (std::format!("{id}/gears.wasm"), b"\0asm".to_vec())]
@@ -161,6 +171,93 @@ fn a_rate_limit_ends_the_round_and_a_failure_skips_one_plugin() {
 }
 
 #[test]
+fn a_url_package_uses_the_existing_review_before_installing_with_approved_folders() {
+    crate::i18n::install();
+    let mut h = crate::scenario::Harness::new();
+    let root = plugins_dir(&h);
+    h.app.session.plugin_state.plugins_dir = Some(root.clone());
+    let package = package_without_repository("gears", "1.1.0");
+    let answer = release(Some(&sha256(&package)));
+    let responses = Arc::new(Mutex::new((answer, package, ASSET.to_string())));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let seen = calls.clone();
+    let metadata = responses.clone();
+    h.app.services.http_get = Some(Arc::new(move |url: &str| {
+        seen.lock().unwrap().push(url.to_string());
+        assert_eq!(url, API);
+        Ok(metadata.lock().unwrap().0.clone())
+    }));
+    let archive = responses.clone();
+    h.app.services.http_download = Some(Arc::new(move |url: &str, path: &Path, _: &dyn Fn(u64, Option<u64>) -> bool| {
+        let response = archive.lock().unwrap();
+        assert_eq!(url, response.2);
+        std::fs::write(path, &response.1).map_err(|e| FetchError::Failed(e.to_string()))
+    }));
+    let url = "https://github.com/maker/gears";
+    crate::plugins::start_package(
+        &mut h.app,
+        "plugin.install",
+        json!({"url":url,"dry_run":true}),
+        crate::plugins::PackageAction::Describe { path: url.into() },
+    )
+    .unwrap();
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    let ask = h.app.plugin_install.ask.as_ref().expect("the fetched package is reviewed");
+    assert!(!ask.update);
+    assert_eq!(ask.path, url);
+    assert_eq!(ask.plugin["repository"], "maker/gears");
+    assert!(ask.grants.command_groups.contains("file"));
+    assert_eq!(ask.grants.folders.len(), 1);
+    assert_eq!(ask.grants.folders[0].name, "exports");
+    assert!(!ask.grants.folders[0].read && ask.grants.folders[0].write);
+    assert!(h.app.session.plugin_state.packages.is_empty() && !root.join("gears").exists());
+    assert!(h.app.preferences.plugin_grants.is_empty() && h.app.session.plugin_state.grants.is_empty());
+    let text = review_dialog(&mut h, "plugin-url-review.png");
+    assert!(text.contains("Install plugin") && text.contains("Gears 1.1.0") && text.contains("exports (write)"), "{text}");
+    let mut ask = h.app.plugin_install.ask.take().unwrap();
+    ask.grants.folders[0].folder = h.dir.clone();
+    crate::plugin_install::install_now(&mut h.app, &ask);
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    let manifest: Value = serde_json::from_slice(&std::fs::read(root.join("gears/plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["version"], "1.1.0");
+    assert_eq!(manifest["updates"]["github"], "maker/gears");
+    let grants = &h.app.preferences.plugin_grants["gears"];
+    assert!(grants.command_groups.contains("file"));
+    assert_eq!(grants.folders[0].folder, h.dir);
+    assert!(!grants.folders[0].read && grants.folders[0].write);
+    assert_eq!(*calls.lock().unwrap(), [API, API], "installation fetches the reviewed package again");
+    let package = package_without_repository("gears", "1.2.0");
+    let asset = "https://github.com/maker/gears/releases/download/v1.2.0/gears.zip";
+    let mut answer: Value = serde_json::from_slice(&release(Some(&sha256(&package)))).unwrap();
+    answer["tag_name"] = json!("v1.2.0");
+    answer["assets"][0]["browser_download_url"] = json!(asset);
+    *responses.lock().unwrap() = (serde_json::to_vec(&answer).unwrap(), package, asset.into());
+    settle(&mut h);
+    assert_eq!(h.app.plugin_updates.offers["gears"].version, "1.2.0");
+    let plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &root).into_iter().find(|p| p.id == "gears").unwrap();
+    start(&mut h.app, &plugin);
+    settle(&mut h);
+    let ask = h.app.plugin_install.ask.take().expect("the update without repository metadata is reviewed");
+    assert!(ask.update);
+    assert!(ask.plugin.get("repository").is_none(), "the downloaded update still installs from its local path");
+    assert_eq!(repository(&h.app, &ask.path), Some("maker/gears"));
+    assert_eq!(ask.grants.folders[0].folder, h.dir);
+    let approval = ask.plugin["approval"].as_str().unwrap().to_string();
+    crate::plugin_install::install_now(&mut h.app, &ask);
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    tick(&mut h.app, &h.ctx);
+    let manifest: Value = serde_json::from_slice(&std::fs::read(root.join("gears/plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["version"], "1.2.0");
+    assert_eq!(manifest["updates"]["github"], "maker/gears");
+    let published = solidcraft_engine::plugin::read_package(&root.join("gears").to_string_lossy()).unwrap();
+    assert_eq!(published.approval, approval, "the reviewed approval covers the manifest published with its repository");
+    assert_eq!(h.app.preferences.plugin_grants["gears"].package_hash.as_deref(), Some(approval.as_str()));
+    assert_eq!(h.app.preferences.plugin_grants["gears"].folders[0].folder, h.dir);
+    let inventory = crate::plugin_slots::preferences_inventory(&mut h.app, &root);
+    assert_eq!(subscribed(&inventory), [("gears".into(), "maker/gears".into())], "later updates remain subscribed");
+}
+
+#[test]
 fn a_newer_release_puts_update_beside_the_toggle_and_updates_keeping_the_folders() {
     crate::i18n::install();
     let new = package("gears", "1.1.0");
@@ -230,6 +327,25 @@ fn a_download_that_is_not_the_offered_package_is_refused() {
     assert_eq!(std::fs::read_dir(plugins_dir(&h).join(".updates")).unwrap().count(), 0);
     let manifest: Value = serde_json::from_slice(&std::fs::read(plugins_dir(&h).join("gears/plugin.json")).unwrap()).unwrap();
     assert_eq!(manifest["version"], "1.0.0");
+}
+
+#[test]
+fn an_update_cannot_change_the_recorded_repository() {
+    crate::i18n::install();
+    let new = package_with_repository("gears", "1.1.0", Some("other/gears"));
+    let (mut h, _) = installed(Ok(release(Some(&sha256(&new)))), new);
+    settle(&mut h);
+    let root = plugins_dir(&h);
+    let plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &root).into_iter().find(|p| p.id == "gears").unwrap();
+    let grants = h.app.preferences.plugin_grants.clone();
+    start(&mut h.app, &plugin);
+    settle(&mut h);
+    assert!(h.app.plugin_install.ask.is_none());
+    assert!(h.app.status.as_ref().unwrap().0.contains("different GitHub repository"), "{:?}", h.app.status);
+    let manifest: Value = serde_json::from_slice(&std::fs::read(root.join("gears/plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["version"], "1.0.0");
+    assert_eq!(manifest["updates"]["github"], "maker/gears");
+    assert_eq!(h.app.preferences.plugin_grants, grants);
 }
 
 #[test]

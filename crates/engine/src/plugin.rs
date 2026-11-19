@@ -63,6 +63,8 @@ pub struct Grants {
 /// Trusted host state, never loaded from a design or supplied by guest code.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppState {
+    /// Host fetch service for URL installation; native CLI/MCP use the bounded GitHub client by default.
+    pub http: Option<github::Client>,
     pub packages: BTreeMap<String, String>,
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
@@ -370,6 +372,9 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 }
 
 pub mod check;
+pub mod github;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod github_http;
 pub mod grant_store;
 mod import;
 pub mod install;

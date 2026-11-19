@@ -136,6 +136,30 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
     Ok(Unpacked { manifest, approval, archive, files })
 }
 
+/// Record the reviewed source for subsequent updates, binding approvals to the published manifest.
+/// A package naming another repository is refused instead of silently changing its update source.
+pub fn with_repository(mut plugin: Unpacked, repository: &str) -> Result<Unpacked, InstallError> {
+    if let Some(updates) = &plugin.manifest.updates {
+        if !updates.github.eq_ignore_ascii_case(repository) {
+            return Err(InstallError::Manifest(HostError::InvalidInput {
+                field: "url".into(),
+                reason: "the package names a different GitHub repository for updates".into(),
+            }));
+        }
+        return Ok(plugin);
+    }
+    let file = plugin.files.iter_mut().find(|file| file.path == "plugin.json").ok_or(InstallError::MissingManifest)?;
+    let mut manifest: serde_json::Value = serde_json::from_slice(&file.bytes).map_err(|e| InstallError::Io(e.to_string()))?;
+    let fields = manifest.as_object_mut().ok_or(InstallError::MissingManifest)?;
+    fields.insert("updates".into(), serde_json::json!({"github": repository}));
+    file.bytes = serde_json::to_vec(&manifest).map_err(|e| InstallError::Io(e.to_string()))?;
+    let total = plugin.files.iter().try_fold(0usize, |total, file| total.checked_add(file.bytes.len()));
+    if total.is_none_or(|total| total > MAX_ZIP_BYTES) {
+        return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "the plugin files exceed 80 MiB".into() }));
+    }
+    from_files(plugin.files, plugin.archive)
+}
+
 /// The installed plugin of this id: its name and version, if its folder holds a readable manifest.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn installed(plugins: &Path, id: &str) -> Option<(String, String)> {

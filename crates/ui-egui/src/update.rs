@@ -64,28 +64,7 @@ const TAB_ROOM: f32 = 300.0;
 /// The Linux app ID (Flatpak, desktop files).
 pub const APP_ID: &str = "io.tangencylabs.solidcraft";
 
-/// Why a check failed. Automatic checks never show it; Check now does.
-#[derive(Clone, Debug, PartialEq)]
-pub enum FetchError {
-    /// GitHub answered 403/429 with a rate limit: don't ask again for this many seconds.
-    RateLimited { retry_after_s: u64 },
-    /// Offline, timed out, a bad answer, ...
-    Failed(String),
-}
-
-impl std::fmt::Display for FetchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FetchError::RateLimited { retry_after_s } => {
-                write!(f, "GitHub's rate limit was reached; try again in {} min", retry_after_s.div_ceil(60))
-            }
-            FetchError::Failed(e) => f.write_str(e),
-        }
-    }
-}
-
-/// The host's HTTP GET (HTTPS, short timeout): the body of a 200 answer, or why not.
-pub type HttpGet = Arc<dyn Fn(&str) -> Result<Vec<u8>, FetchError> + Send + Sync>;
+pub use solidcraft_engine::plugin::github::{FetchError, HttpGet};
 
 // ---- versions ---------------------------------------------------------------------------------
 

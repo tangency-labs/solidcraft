@@ -1634,6 +1634,221 @@ mod install_zip {
         path.to_string_lossy().into_owned()
     }
 
+    fn release_metadata(archive: &[u8]) -> Value {
+        use sha2::Digest;
+        json!({
+            "tag_name":"v0.1.0", "draft":false, "prerelease":false,
+            "assets":[{"name":"gears.zip",
+                "browser_download_url":"https://github.com/maker/gears/releases/download/v0.1.0/gears.zip",
+                "digest":format!("sha256:{:x}", sha2::Sha256::digest(archive))}]
+        })
+    }
+
+    fn stub_fetch(s: &mut Session, metadata: Value, archive: Vec<u8>) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        use crate::plugin::github::{Client, FetchError};
+        let downloads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let download_count = downloads.clone();
+        s.plugin_state.http = Some(Client {
+            get: std::sync::Arc::new(move |url| {
+                assert_eq!(url, "https://api.github.com/repos/maker/gears/releases/latest");
+                Ok(serde_json::to_vec(&metadata).unwrap())
+            }),
+            download: std::sync::Arc::new(move |url, to, progress| {
+                download_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                assert_eq!(url, "https://github.com/maker/gears/releases/download/v0.1.0/gears.zip");
+                assert!(progress(archive.len() as u64, Some(archive.len() as u64)));
+                assert!(!progress(crate::plugin::install::MAX_ZIP_BYTES as u64 + 1, None));
+                std::fs::write(to, &archive).map_err(|e| FetchError::Failed(e.to_string()))
+            }),
+        });
+        downloads
+    }
+
+    #[test]
+    fn github_install_sources_accept_only_repository_and_release_urls() {
+        use crate::plugin::github::Source;
+        for (suffix, tag) in [
+            ("", None),
+            ("/", None),
+            (".git", None),
+            ("/releases/latest", None),
+            ("/releases/tag/v0.1.0", Some("v0.1.0")),
+            ("/tree/v0.1.0", Some("v0.1.0")),
+        ] {
+            let source = Source::parse(&format!("https://github.com/maker/gears{suffix}")).unwrap();
+            assert_eq!(source.repository, "maker/gears");
+            assert_eq!(source.tag.as_deref(), tag);
+            assert_eq!(
+                source.release_url(),
+                match tag {
+                    Some(tag) => format!("https://api.github.com/repos/maker/gears/releases/tags/{tag}"),
+                    None => "https://api.github.com/repos/maker/gears/releases/latest".into(),
+                }
+            );
+        }
+        let too_long = format!("https://github.com/maker/gears/tree/{}", "a".repeat(513));
+        for url in [
+            "http://github.com/maker/gears",
+            "https://gitlab.com/maker/gears",
+            "https://codeberg.org/maker/gears",
+            "git@github.com:maker/gears.git",
+            "https://github.com.evil.test/maker/gears",
+            "https://github.com@evil.test/maker/gears",
+            "https://user:secret@github.com/maker/gears",
+            "https://github.com:443/maker/gears",
+            "https://github.com/maker/gears?ref=main",
+            "https://github.com/maker/gears#readme",
+            "https://github.com/maker/gears/releases/tag/v0.1.0?download=1",
+            "https://github.com/maker/gears/tree/v0.1.0#file",
+            "https://github.com/maker/ge%61rs",
+            "https://github.com/maker/gears/tree/%2e%2e",
+            "https://github.com/maker/../gears",
+            "https://github.com/maker/gears/tree/..",
+            "https://github.com/maker/gears/tree/.",
+            "https://github.com/maker/gears/tree/v0.1.0/../../other",
+            "https://github.com/maker/gears\\other",
+            "https://github.com/maker",
+            "https://github.com//gears",
+            "maker/gears",
+            too_long.as_str(),
+        ] {
+            let error = Source::parse(url).unwrap_err();
+            assert!(
+                matches!(error, HostError::InvalidInput { field, reason }
+                if field == "url" && reason.contains("https://github.com/")),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn install_url_refuses_unsupported_hosts_with_a_typed_error() {
+        let (mut s, root) = session("url-refusal");
+        for url in ["http://github.com/maker/gears", "https://gitlab.com/maker/gears", "git@github.com:maker/gears.git"] {
+            let error = s.execute("plugin.install", &json!({"url":url,"dry_run":true})).unwrap_err();
+            assert!(
+                matches!(error.host_error(), Some(HostError::InvalidInput { field, reason })
+                if field == "url" && reason.contains("https://github.com/")),
+                "{error}"
+            );
+        }
+        let error = s.execute("plugin.install", &json!({"path":"ignored.zip","url":"https://github.com/maker/gears","dry_run":true})).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "url"), "{error}");
+        assert!(!root.join("plugins").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_fetched_url_uses_zip_review_and_records_the_repository_before_approval() {
+        let (mut s, root) = session("url-valid");
+        let archive = gears("0.1.0");
+        let original = unpack(&archive).unwrap();
+        assert!(original.manifest.updates.is_none());
+        let _ = stub_fetch(&mut s, release_metadata(&archive), archive);
+        let url = "https://github.com/maker/gears";
+        let dry = s.execute("plugin.install", &json!({"url":url,"dry_run":true})).unwrap();
+        assert_eq!(dry["repository"], "maker/gears");
+        assert_eq!(dry["installed"], false);
+        assert_ne!(dry["approval"], original.approval, "the repository belongs to the reviewed manifest");
+        assert!(!root.join("plugins").exists());
+        assert!(s.plugin_state.grants.is_empty() && s.plugin_state.packages.is_empty());
+        for missing in [json!({"url":url}), json!({"url":url,"approval":dry["approval"]}), json!({"url":url,"archive":dry["archive"]})] {
+            let error = s.execute("plugin.install", &missing).unwrap_err();
+            assert!(
+                matches!(error.host_error(), Some(HostError::InvalidInput { field, .. })
+                if field == "approval" || field == "archive"),
+                "{error}"
+            );
+            assert!(!root.join("plugins").exists() && s.plugin_state.grants.is_empty());
+        }
+        let installed = s.execute("plugin.install", &json!({"url":url,"approval":dry["approval"],"archive":dry["archive"]})).unwrap();
+        assert_eq!(installed["installed"], true);
+        assert_eq!(installed["repository"], "maker/gears");
+        assert_eq!(installed["approval"], dry["approval"]);
+        assert_eq!(installed["archive"], dry["archive"]);
+        let package = read_package(&root.join("plugins/gears").to_string_lossy()).unwrap();
+        assert_eq!(package.manifest.updates.unwrap().github, "maker/gears");
+        assert_eq!(json!(package.approval), dry["approval"]);
+        assert_eq!(s.plugin_state.grants["gears"].package_hash.as_deref(), dry["approval"].as_str());
+        assert!(s.plugin_state.grants["gears"].command_groups.is_empty());
+        assert!(s.plugin_state.grants["gears"].folders.is_empty());
+        assert_eq!(std::fs::read(root.join("plugins/gears/plugin.wasm")).unwrap(), b"\0asm", "installation runs no guest code");
+        assert!(s.doc.features.is_empty());
+        assert_eq!(std::fs::read_dir(root.join("plugins")).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_url_archive_changed_after_review_is_refused_without_publishing_or_grants() {
+        let (mut s, root) = session("url-changed");
+        let original = gears("0.1.0");
+        let _ = stub_fetch(&mut s, release_metadata(&original), original.clone());
+        let url = "https://github.com/maker/gears";
+        let dry = s.execute("plugin.install", &json!({"url":url,"dry_run":true})).unwrap();
+        let original = unpack(&original).unwrap();
+        let mut files: Vec<_> = original.files.iter().map(|file| (file.path.as_str(), file.bytes.as_slice())).collect();
+        files.push(("extra.txt", b"changed after review"));
+        let changed = zip(&files);
+        let _ = stub_fetch(&mut s, release_metadata(&changed), changed);
+        let error = s.execute("plugin.install", &json!({"url":url,"approval":dry["approval"],"archive":dry["archive"]})).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "archive"), "{error}");
+        assert!(!root.join("plugins").exists());
+        assert!(s.plugin_state.grants.is_empty() && s.plugin_state.packages.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fetched_packages_reject_bad_digests_archives_versions_repositories_and_ambiguous_assets() {
+        let archive = gears("0.1.0");
+        let metadata = release_metadata(&archive);
+        let mut bad_digest = metadata.clone();
+        bad_digest["assets"][0]["digest"] = json!(format!("sha256:{}", "0".repeat(64)));
+        let invalid_zip = b"not a zip archive".to_vec();
+        let wrong_version = gears("0.2.0");
+        let invalid_version = gears("vv0.1.0");
+        let mut manifest: Value = serde_json::from_slice(&manifest_bytes("gears", json!(["commands@0.1"]))).unwrap();
+        manifest["updates"] = json!({"github":"someone/else"});
+        let wrong_repository = zip(&[("plugin.json", &serde_json::to_vec(&manifest).unwrap()), ("plugin.wasm", b"\0asm")]);
+        let mut ambiguous = metadata.clone();
+        let mut second = ambiguous["assets"][0].clone();
+        second["name"] = json!("other.zip");
+        second["browser_download_url"] = json!("https://github.com/maker/gears/releases/download/v0.1.0/other.zip");
+        ambiguous["assets"].as_array_mut().unwrap().push(second);
+        let asset_url = |url: &str| {
+            let mut metadata = metadata.clone();
+            metadata["assets"][0]["browser_download_url"] = json!(url);
+            metadata
+        };
+        let mut missing_digest = metadata.clone();
+        missing_digest["assets"][0].as_object_mut().unwrap().remove("digest");
+        let mut malformed_digest = metadata.clone();
+        malformed_digest["assets"][0]["digest"] = json!("sha256:12345");
+        let mut no_assets = metadata.clone();
+        no_assets["assets"] = json!([]);
+        for (name, metadata, archive, expected_downloads) in [
+            ("digest", bad_digest, archive.clone(), 1),
+            ("zip", release_metadata(&invalid_zip), invalid_zip, 1),
+            ("version", release_metadata(&wrong_version), wrong_version, 1),
+            ("invalid-version", release_metadata(&invalid_version), invalid_version, 1),
+            ("repository", release_metadata(&wrong_repository), wrong_repository, 1),
+            ("ambiguous", ambiguous, archive.clone(), 0),
+            ("dot-traversal", asset_url("https://github.com/maker/gears/releases/download/v0.1.0/../../../other/gears.zip"), archive.clone(), 0),
+            ("escaped-traversal", asset_url("https://github.com/maker/gears/releases/download/v0.1.0/%2e%2e/gears.zip"), archive.clone(), 0),
+            ("asset-host", asset_url("https://evil.test/maker/gears/releases/download/v0.1.0/gears.zip"), archive.clone(), 0),
+            ("missing-digest", missing_digest, archive.clone(), 0),
+            ("malformed-digest", malformed_digest, archive.clone(), 0),
+            ("no-assets", no_assets, archive, 0),
+        ] {
+            let (mut s, root) = session(&format!("url-refused-{name}"));
+            let downloads = stub_fetch(&mut s, metadata, archive);
+            s.execute("plugin.install", &json!({"url":"https://github.com/maker/gears","dry_run":true})).unwrap_err();
+            assert_eq!(downloads.load(std::sync::atomic::Ordering::Relaxed), expected_downloads, "{name}");
+            assert!(!root.join("plugins").exists(), "{name}: no package published");
+            assert!(s.plugin_state.grants.is_empty() && s.plugin_state.packages.is_empty(), "{name}");
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
     #[test]
     fn a_valid_zip_installs_and_its_entries_resolve() {
         let (mut s, root) = session("valid");

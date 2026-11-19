@@ -15,25 +15,16 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
+use solidcraft_engine::plugin::github::fetch;
+pub use solidcraft_engine::plugin::github::{Offer, latest_url, parse_release};
 use solidcraft_ui_text::format;
 
 use crate::SolveApp;
 use crate::plugins::Plugin;
-use crate::update::{CHECK_INTERVAL_S, FetchError, is_newer, parse_version, unix_now};
+use crate::update::{CHECK_INTERVAL_S, FetchError, is_newer, unix_now};
 
 /// The most plugins one round asks about: GitHub allows 60 anonymous requests an hour.
 const MAX_CHECKS: usize = 20;
-const MAX_ASSETS: usize = 400;
-
-/// A newer release of one plugin.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Offer {
-    /// The release's version, without the `v`.
-    pub version: String,
-    pub url: String,
-    /// The asset's sha256 from GitHub's `digest`, lowercase hex.
-    pub sha256: String,
-}
 
 /// What one round found, and how long GitHub asked to wait when it hit the rate limit.
 type Round = (BTreeMap<String, Offer>, Option<u64>);
@@ -41,6 +32,7 @@ type Round = (BTreeMap<String, Offer>, Option<u64>);
 struct Download {
     id: String,
     name: String,
+    repository: String,
     version: String,
     done: Receiver<Result<PathBuf, String>>,
 }
@@ -48,6 +40,7 @@ struct Download {
 /// The update under review or being installed: its `.zip` is deleted once nothing uses it.
 pub(crate) struct Pending {
     pub(crate) id: String,
+    pub(crate) repository: String,
     pub(crate) version: String,
     pub(crate) path: PathBuf,
 }
@@ -60,49 +53,6 @@ pub(crate) struct State {
     next_check: f64,
     download: Option<Download>,
     pub(crate) pending: Option<Pending>,
-}
-
-/// The `releases/latest` request for `repo`.
-pub fn latest_url(repo: &str) -> String {
-    std::format!("https://api.github.com/repos/{repo}/releases/latest")
-}
-
-/// A `releases/latest` answer for plugin `id` from `repo`: a stable release whose tag is a version,
-/// with the plugin's `.zip` among its assets, downloaded from that repository's releases only, and
-/// a sha256 digest to check the download against.
-pub fn parse_release(json: &[u8], repo: &str, id: &str) -> Result<Offer, FetchError> {
-    let v: Value = serde_json::from_slice(json).map_err(|e| FetchError::Failed(e.to_string()))?;
-    if v.get("draft").and_then(Value::as_bool).unwrap_or(false) || v.get("prerelease").and_then(Value::as_bool).unwrap_or(false) {
-        return Err(FetchError::Failed("the latest release is a prerelease".into()));
-    }
-    let tag = v.get("tag_name").and_then(Value::as_str).unwrap_or_default();
-    if !parse_version(tag).is_some_and(|version| version.pre.is_empty()) {
-        return Err(FetchError::Failed("the latest release's tag isn't a version".into()));
-    }
-    let version = tag.trim().trim_start_matches('v').to_string();
-    let names = [std::format!("{id}.zip"), std::format!("{id}-{version}.zip")];
-    let prefix = std::format!("https://github.com/{repo}/releases/download/").to_ascii_lowercase();
-    v.get("assets")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .take(MAX_ASSETS)
-        .find_map(|asset| {
-            let name = asset.get("name")?.as_str()?;
-            let url = asset.get("browser_download_url")?.as_str()?;
-            (names.iter().any(|n| n == name) && url.to_ascii_lowercase().starts_with(&prefix)).then_some((asset, url))
-        })
-        .ok_or_else(|| FetchError::Failed(std::format!("the latest release has no {id}.zip")))
-        .and_then(|(asset, url)| {
-            let sha256 = asset
-                .get("digest")
-                .and_then(Value::as_str)
-                .and_then(|digest| digest.strip_prefix("sha256:"))
-                .filter(|hex| hex.len() == 64 && hex.bytes().all(|c| c.is_ascii_hexdigit()))
-                .map(str::to_ascii_lowercase)
-                .ok_or_else(|| FetchError::Failed(std::format!("the latest release lists no sha256 digest for {id}.zip")))?;
-            Ok(Offer { version, url: url.to_string(), sha256 })
-        })
 }
 
 /// One round over `(id, repo)` pairs. A plugin that fails is skipped; a rate limit ends the round.
@@ -188,6 +138,7 @@ fn poll_check(app: &mut SolveApp) {
 /// Update: download the offered `.zip` beside the plugins, off the window thread.
 pub(crate) fn start(app: &mut SolveApp, plugin: &Plugin) {
     let Some(offer) = offered(app, plugin).cloned() else { return };
+    let Some(repository) = plugin.updates.clone() else { return };
     if app.plugin_updates.download.is_some() || app.plugin_updates.pending.is_some() || crate::plugins::busy(app) {
         app.set_status(app.tr("prefs.plugin_busy").to_owned(), true);
         return;
@@ -201,27 +152,7 @@ pub(crate) fn start(app: &mut SolveApp, plugin: &Plugin) {
     });
     if spawned.is_ok() {
         app.set_status(format("plugin_update.downloading", &[("plugin", &plugin.name), ("version", &version)]), false);
-        app.plugin_updates.download = Some(Download { id: plugin.id.clone(), name: plugin.name.clone(), version, done });
-    }
-}
-
-/// Downloads `offer` to `path` and checks its digest; nothing is left behind on failure.
-fn fetch(download: &crate::update::install::HttpDownload, offer: &Offer, path: PathBuf) -> Result<PathBuf, String> {
-    let fetched = path
-        .parent()
-        .map_or(Ok(()), std::fs::create_dir_all)
-        .map_err(|e| e.to_string())
-        .and_then(|()| download(&offer.url, &path, &|_, _| true).map_err(|e| e.to_string()))
-        .and_then(|()| match crate::update::install::sha256_file(&path)? == offer.sha256 {
-            true => Ok(()),
-            false => Err("the download does not match the release's checksum".to_string()),
-        });
-    match fetched {
-        Ok(()) => Ok(path),
-        Err(error) => {
-            let _ = std::fs::remove_file(&path);
-            Err(error)
-        }
+        app.plugin_updates.download = Some(Download { id: plugin.id.clone(), name: plugin.name.clone(), repository, version, done });
     }
 }
 
@@ -235,11 +166,17 @@ fn poll_download(app: &mut SolveApp) {
     let Some(download) = app.plugin_updates.download.take() else { return };
     match result {
         Ok(path) => {
-            app.plugin_updates.pending = Some(Pending { id: download.id, version: download.version, path: path.clone() });
+            app.plugin_updates.pending =
+                Some(Pending { id: download.id, repository: download.repository, version: download.version, path: path.clone() });
             crate::plugin_install::review(app, path.to_string_lossy().into_owned());
         }
         Err(error) => app.set_status(format("plugin_update.failed", &[("plugin", &download.name), ("error", &error)]), true),
     }
+}
+
+/// The reviewed update's origin stays attached to its local archive through installation.
+pub(crate) fn repository<'a>(app: &'a SolveApp, path: &str) -> Option<&'a str> {
+    app.plugin_updates.pending.as_ref().filter(|pending| pending.path.to_string_lossy() == path).map(|pending| pending.repository.as_str())
 }
 
 /// For the review of a downloaded update: the package must be the plugin and version offered, and
@@ -247,7 +184,7 @@ fn poll_download(app: &mut SolveApp) {
 pub(crate) fn prepare(app: &SolveApp, path: &str, plugin: &Value, grants: &mut solidcraft_engine::plugin::Grants) -> Option<Result<(), String>> {
     let pending = app.plugin_updates.pending.as_ref().filter(|pending| pending.path.to_string_lossy() == path)?;
     let (id, version) = (plugin.get("id").and_then(Value::as_str), plugin.get("version").and_then(Value::as_str));
-    if id != Some(pending.id.as_str()) || version.map(|v| v.trim_start_matches('v')) != Some(pending.version.as_str()) {
+    if id != Some(pending.id.as_str()) || version.map(|v| v.strip_prefix('v').unwrap_or(v)) != Some(pending.version.as_str()) {
         let found = std::format!("{} {}", id.unwrap_or_default(), version.unwrap_or_default());
         return Some(Err(std::format!("the download is {found}, not {} {}", pending.id, pending.version)));
     }

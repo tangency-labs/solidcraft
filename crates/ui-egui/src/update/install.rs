@@ -20,8 +20,8 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
 use sha2::{Digest, Sha256};
 
@@ -42,7 +42,7 @@ const MAX_UNZIPPED: u64 = 1 << 30;
 
 /// The host's HTTPS download to a file: calls `progress(done, total)` as it goes and stops when
 /// that returns false.
-pub type HttpDownload = Arc<dyn Fn(&str, &Path, &dyn Fn(u64, Option<u64>) -> bool) -> Result<(), FetchError> + Send + Sync>;
+pub use solidcraft_engine::plugin::github::HttpDownload;
 
 /// How an installation is updated in place.
 #[derive(Clone, Debug, PartialEq, Eq)]

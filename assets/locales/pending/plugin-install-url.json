@@ -1,0 +1,66 @@
+{
+  "en": {
+    "plugin_install.url_fetch": "Review package",
+    "plugin_install.url_hint": "https://github.com/owner/repo (or a release URL)",
+    "plugin_install.url_label": "GitHub repository URL",
+    "plugin_install.url_menu": "Install from URL…",
+    "plugin_install.url_title": "Install from URL",
+    "plugin_install.zip_menu": "Install from .zip…"
+  },
+  "ar": {
+    "plugin_install.url_fetch": "مراجعة الحزمة",
+    "plugin_install.url_hint": "https://github.com/owner/repo (أو رابط إصدار)",
+    "plugin_install.url_label": "رابط مستودع GitHub",
+    "plugin_install.url_menu": "تثبيت من رابط…",
+    "plugin_install.url_title": "تثبيت من رابط",
+    "plugin_install.zip_menu": "تثبيت من .zip…"
+  },
+  "de": {
+    "plugin_install.url_fetch": "Paket prüfen",
+    "plugin_install.url_hint": "https://github.com/owner/repo (oder eine Release-URL)",
+    "plugin_install.url_label": "GitHub-Repository-URL",
+    "plugin_install.url_menu": "Von URL installieren…",
+    "plugin_install.url_title": "Von URL installieren",
+    "plugin_install.zip_menu": "Aus .zip installieren…"
+  },
+  "he": {
+    "plugin_install.url_fetch": "בדיקת החבילה",
+    "plugin_install.url_hint": "https://github.com/owner/repo (או כתובת של מהדורה)",
+    "plugin_install.url_label": "כתובת מאגר GitHub",
+    "plugin_install.url_menu": "התקנה מכתובת…",
+    "plugin_install.url_title": "התקנה מכתובת",
+    "plugin_install.zip_menu": "התקנה מקובץ .zip…"
+  },
+  "ja": {
+    "plugin_install.url_fetch": "パッケージを確認",
+    "plugin_install.url_hint": "https://github.com/owner/repo（またはリリースのURL）",
+    "plugin_install.url_label": "GitHubリポジトリのURL",
+    "plugin_install.url_menu": "URLからインストール…",
+    "plugin_install.url_title": "URLからインストール",
+    "plugin_install.zip_menu": ".zipからインストール…"
+  },
+  "ko": {
+    "plugin_install.url_fetch": "패키지 검토",
+    "plugin_install.url_hint": "https://github.com/owner/repo (또는 릴리스 URL)",
+    "plugin_install.url_label": "GitHub 저장소 URL",
+    "plugin_install.url_menu": "URL에서 설치…",
+    "plugin_install.url_title": "URL에서 설치",
+    "plugin_install.zip_menu": ".zip에서 설치…"
+  },
+  "vi": {
+    "plugin_install.url_fetch": "Xem xét gói",
+    "plugin_install.url_hint": "https://github.com/owner/repo (hoặc URL bản phát hành)",
+    "plugin_install.url_label": "URL kho GitHub",
+    "plugin_install.url_menu": "Cài đặt từ URL…",
+    "plugin_install.url_title": "Cài đặt từ URL",
+    "plugin_install.zip_menu": "Cài đặt từ .zip…"
+  },
+  "zh": {
+    "plugin_install.url_fetch": "审查软件包",
+    "plugin_install.url_hint": "https://github.com/owner/repo（或发行版URL）",
+    "plugin_install.url_label": "GitHub仓库URL",
+    "plugin_install.url_menu": "从URL安装…",
+    "plugin_install.url_title": "从URL安装",
+    "plugin_install.zip_menu": "从.zip安装…"
+  }
+}

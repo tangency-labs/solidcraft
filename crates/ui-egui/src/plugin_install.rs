@@ -11,6 +11,7 @@ use crate::{SolveApp, ui_kit};
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) ask: Option<Ask>,
+    pub(crate) url: Option<String>,
 }
 
 pub(crate) struct Ask {
@@ -39,11 +40,45 @@ pub fn start(app: &mut SolveApp) {
     });
 }
 
+/// The URL form starts the same background command and permission review as a local archive.
+fn show_url(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(mut url) = app.plugin_install.url.take() else { return };
+    let valid = !url.trim().is_empty() && !crate::plugins::busy(app);
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_plugin_install_url"), "import", tr("plugin_install.url_title"))
+        .actions(tr("plugin_install.url_fetch"), tr("plugin_install.cancel"), None)
+        .show(ctx, valid, |ui| {
+            ui_kit::text(ui, tr("plugin_install.url_label"), ui_kit::Text::Report("plugin_url_label", false));
+            let response = ui.scope(|ui| ui_kit::text_field(ui, &mut url, tr("plugin_install.url_hint")));
+            crate::scenario::publish_target("prefs:plugins:url", response.response.rect);
+            ui_kit::text(ui, tr("plugin_install.url_hint"), ui_kit::Text::Hint("plugin_url_hint"));
+        });
+    match action {
+        ui_kit::Action::Ok => {
+            let source = url.trim().to_string();
+            if let Err(error) = crate::plugins::start_package(
+                app,
+                "plugin.install",
+                json!({"url":source,"dry_run":true}),
+                crate::plugins::PackageAction::Describe { path: source },
+            ) {
+                app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
+            }
+        }
+        ui_kit::Action::Cancel => {}
+        _ if closed => {}
+        _ => app.plugin_install.url = Some(url),
+    }
+}
+
 /// Checks the `.zip` and asks; a `.zip` that can't be installed is said at once.
 pub(crate) fn review(app: &mut SolveApp, path: String) {
-    if let Err(error) =
-        crate::plugins::start_package(app, "plugin.install", json!({"path": path, "dry_run": true}), crate::plugins::PackageAction::Describe { path })
+    let mut params = json!({"path": path, "dry_run": true});
+    if let Some(repository) = crate::plugin_updates::repository(app, &path)
+        && let Some(fields) = params.as_object_mut()
     {
+        fields.insert("repository".into(), json!(repository));
+    }
+    if let Err(error) = crate::plugins::start_package(app, "plugin.install", params, crate::plugins::PackageAction::Describe { path }) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
     }
 }
@@ -138,6 +173,7 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
 
 /// The question, while a plugin waits for it.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    show_url(app, ctx);
     let Some(mut ask) = app.plugin_install.ask.take() else { return };
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let plugin = &ask.plugin;
@@ -245,12 +281,16 @@ pub(crate) fn install_now(app: &mut SolveApp, ask: &Ask) {
             })
         })
         .collect();
-    if let Err(error) = crate::plugins::start_package(
-        app,
-        "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
-        crate::plugins::PackageAction::Install,
-    ) {
+    let mut params = json!({"approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}});
+    if let Some(fields) = params.as_object_mut() {
+        fields.insert(if ask.plugin.get("repository").is_some() { "url" } else { "path" }.into(), json!(ask.path));
+    }
+    if let Some(repository) = crate::plugin_updates::repository(app, &ask.path)
+        && let Some(fields) = params.as_object_mut()
+    {
+        fields.insert("repository".into(), json!(repository));
+    }
+    if let Err(error) = crate::plugins::start_package(app, "plugin.install", params, crate::plugins::PackageAction::Install) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
     }
 }
@@ -289,6 +329,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn plugin_install_url_form_shows_repository_field_without_installing() {
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_install.url = Some("https://github.com/maker/gears".into());
+        for (size, filename) in [(egui::vec2(1280.0, 720.0), "plugin-install-url.png"), (egui::vec2(640.0, 480.0), "plugin-install-url-small.png")] {
+            let ctx = crate::fonts::test_context();
+            let mut textures = std::collections::HashMap::new();
+            for frame in 0..6 {
+                let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let mut output =
+                    ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
+                        crate::ui_kit::scope(ui, |ui| show(&mut h.app, ui.ctx()));
+                    });
+                crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                output.textures_delta.clear();
+                if frame == 5 {
+                    let text = crate::test_support::text_shapes(&output).map(|s| s.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
+                    assert!(
+                        text.contains("GitHub repository URL") && text.contains("Review package") && text.contains("https://github.com/maker/gears"),
+                        "{text}"
+                    );
+                    let field = crate::scenario::rect_of("prefs:plugins:url").unwrap();
+                    assert!(bounds.contains_rect(field), "the URL field fits: {field:?}");
+                    if let Ok(directory) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") {
+                        let image = crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+                        std::fs::create_dir_all(&directory).unwrap();
+                        image.save(std::path::Path::new(&directory).join(filename)).unwrap();
+                    }
+                }
+            }
+        }
+        assert!(h.app.plugin_install.ask.is_none() && !crate::plugins::busy(&h.app));
+        assert!(h.app.session.plugin_state.packages.is_empty());
     }
 
     #[test]

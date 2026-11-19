@@ -61,6 +61,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 toml_edit = "0.25"
 schemars = { workspace = true }
+semver = { workspace = true }
 serde_path_to_error = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
@@ -85,6 +86,11 @@ required-features = ["raytrace-cpu"]
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 # Component-model sandbox; no WASI, cache deserialization, network or process imports.
 craft-plugin-wasm = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Shared GitHub fetches for plugin installation and desktop updates.
+ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 wat = "1"
