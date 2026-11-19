@@ -393,6 +393,15 @@ fn frame_canvas(s: &mut Session, i: usize, name: Option<&str>, cmd: &str) -> Res
         Some(open) => {
             let corners = frame_in_sketch(s, &c, open, cmd)?;
             let name = s.doc.feature(open).map(|f| f.name.clone()).unwrap_or_default();
+            // Placed inside a closed outline of four lines in the sketch (a rectangle drawn there,
+            // or a face's edges projected into it): the image fills that outline, its corners tied
+            // to the outline's corners, rather than getting a rectangle of its own.
+            if let Some((bottom_left, bottom_right, top_left)) = fill_outline(s, open, corners) {
+                let anchor =
+                    CanvasAnchor { sketch: open, bottom_left: bottom_left.clone(), bottom_right: bottom_right.clone(), top_left: Some(top_left.clone()) };
+                s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?.anchor = Some(anchor);
+                return Ok(CanvasFrame { sketch: open, name, bottom_left, bottom_right, top_left });
+            }
             (open, name, corners, false)
         }
         None => {
@@ -437,6 +446,83 @@ fn frame_canvas(s: &mut Session, i: usize, name: Option<&str>, cmd: &str) -> Res
     let canvas = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
     canvas.anchor = Some(anchor);
     Ok(CanvasFrame { sketch, name, bottom_left, bottom_right, top_left })
+}
+
+/// The smallest closed outline of four lines in sketch `sketch` that holds the centre of an image
+/// whose frame has corners `bl`, `br`, `tl` (sketch coordinates), as the ids of the outline's
+/// points to tie the image's bottom-left, bottom-right and top-left corners to: the outline's
+/// corner nearest the image's bottom-left, its neighbour along the image's bottom edge, and its
+/// other neighbour. Line ends at one place count as one corner, so a face's projected edges with
+/// points of their own close an outline too. `None` when no convex outline of four lines holds the
+/// centre.
+fn fill_outline(s: &Session, sketch: u64, [bl, br, tl]: [Vec2; 3]) -> Option<(String, String, String)> {
+    const MOST_LINES: usize = 2000;
+    let state = s.model.state();
+    let solved = state.sketch(sketch)?;
+    let sk = &solved.sketch;
+    let dist =|a: Vec2, b: Vec2| ((a.x - b.x).powi(2) + (a.y - b.y).powi(2)).sqrt();
+    let cross = |o: Vec2, a: Vec2, b: Vec2| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    let centre = Vec2::new((br.x + tl.x) / 2.0, (br.y + tl.y) / 2.0);
+    let tolerance = 1e-6 * dist(bl, br).max(dist(bl, tl)).max(1.0);
+    // Corners (a place and the first point there) and the lines between them.
+    let mut corners: Vec<(Vec2, usize)> = Vec::new();
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    for curve in sk.curves.iter().take(MOST_LINES) {
+        let solidcraft_sketch::CurveKind::Line { a, b } = curve.kind else { continue };
+        let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { continue };
+        let mut ends = [0usize; 2];
+        for (slot, (point, at)) in ends.iter_mut().zip([(a, pa), (b, pb)]) {
+            *slot = match corners.iter().position(|(q, _)| dist(*q, at) <= tolerance) {
+                Some(k) => k,
+                None => {
+                    corners.push((at, point));
+                    corners.len() - 1
+                }
+            };
+        }
+        let [a, b] = ends;
+        if a != b && !edges.contains(&(a.min(b), a.max(b))) {
+            edges.push((a.min(b), a.max(b)));
+        }
+    }
+    let mut next: Vec<Vec<usize>> = vec![Vec::new(); corners.len()];
+    for &(a, b) in &edges {
+        next.get_mut(a)?.push(b);
+        next.get_mut(b)?.push(a);
+    }
+    let place = |k: usize| corners.get(k).map(|(at, _)| *at);
+    // Every cycle c0-c1-c2-c3 of four lines that is convex and holds the centre; the smallest wins.
+    let mut best: Option<([usize; 4], f64)> = None;
+    for (c0, around) in next.iter().enumerate() {
+        for (j, &c1) in around.iter().enumerate() {
+            for &c3 in around.iter().skip(j + 1) {
+                for &c2 in next.get(c1)?.iter().filter(|&&c2| c2 != c0 && c2 != c3) {
+                    if !next.get(c3)?.contains(&c2) || c2 == c1 {
+                        continue;
+                    }
+                    let q = [place(c0)?, place(c1)?, place(c2)?, place(c3)?];
+                    let turns: [f64; 4] = std::array::from_fn(|k| cross(q[k], q[(k + 1) % 4], q[(k + 2) % 4]));
+                    let holds: [f64; 4] = std::array::from_fn(|k| cross(q[k], q[(k + 1) % 4], centre));
+                    let one_way = |v: [f64; 4]| v.iter().all(|t| *t > 0.0) || v.iter().all(|t| *t < 0.0);
+                    if !(one_way(turns) && one_way(holds)) {
+                        continue;
+                    }
+                    let area = (cross(q[0], q[1], q[2]) + cross(q[0], q[2], q[3])).abs() / 2.0;
+                    if best.is_none_or(|(_, smallest)| area < smallest) {
+                        best = Some(([c0, c1, c2, c3], area));
+                    }
+                }
+            }
+        }
+    }
+    let (quad, _) = best?;
+    let q = quad.map(|k| place(k).unwrap_or(centre));
+    let k = (0..4).min_by(|&a, &b| dist(q[a], bl).total_cmp(&dist(q[b], bl)))?;
+    let (before, after) = ((k + 3) % 4, (k + 1) % 4);
+    let along = |n: usize| (q[n].x - q[k].x) * (br.x - bl.x) + (q[n].y - q[k].y) * (br.y - bl.y);
+    let (right, up) = if along(after) >= along(before) { (after, before) } else { (before, after) };
+    let id = |n: usize| quad.get(n).and_then(|&c| corners.get(c)).and_then(|&(_, point)| sk.points.get(point)).map(|p| p.id.clone());
+    Some((id(k)?, id(right)?, id(up)?))
 }
 
 /// The bottom-left, bottom-right and top-left corners of canvas `c`'s frame (unmirrored) in the
@@ -976,6 +1062,29 @@ mod tests {
         let framed =
             s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "center": [80, 20], "width": 20, "frame": "auto"})).unwrap();
         assert_eq!(framed["frame"]["sketch"].as_u64(), Some(sketch), "{framed}");
+    }
+
+    /// An image framed inside a closed outline of the open sketch (here a 50 mm square) fills that
+    /// outline: its corners are the square's, whatever size it was placed at, and no rectangle of
+    /// its own is drawn.
+    #[test]
+    fn an_image_framed_inside_an_outline_fills_it() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::prelude::*;
+        let mut s = Session::default();
+        let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [50, 50]})).unwrap();
+        let curves = s.doc.sketch(sketch).unwrap().curves.len();
+        let r = s.execute("canvas.insert", &json!({"data": png(40, 40), "plane": "XY", "center": [20, 30], "width": 100, "frame": true})).unwrap();
+        let id = r["canvas"].as_u64().unwrap();
+        assert_eq!(r["frame"]["sketch"].as_u64(), Some(sketch), "{r}");
+        assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves, "no rectangle of its own");
+        let near = |a: Vec3, b: [f64; 3]| (a - Vec3::new(b[0], b[1], b[2])).len() < 1e-6;
+        let k = world_corners(&s, id);
+        assert!(
+            near(k[0], [0.0, 0.0, 0.0]) && near(k[1], [50.0, 0.0, 0.0]) && near(k[2], [50.0, 50.0, 0.0]) && near(k[3], [0.0, 50.0, 0.0]),
+            "the image fills the square: {k:?}"
+        );
     }
 
     /// An SVG decal is kept as the PNG it draws, at the resolution asked for.
