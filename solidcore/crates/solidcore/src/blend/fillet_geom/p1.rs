@@ -2484,10 +2484,12 @@ impl FilletBrep {
     }
 
     /// (Not upstream; #19502) Where the stitch split rail `e` in the fillet B-rep: the
-    /// intervals of `e`'s curve that edges of `fillet_brep` (of `edges`) cover end to end,
-    /// two or more, in the order of the curve's parameter. `None` when an edge matches `e`
+    /// intervals of `e`'s curve that edges of `fillet_brep` (of `edges`), each proved to
+    /// follow it, cover end to end, two or more, in the order of the curve's parameter.
+    /// `None` when an edge matches `e`
     /// as [`Self::find_fillet_brep_edge`] finds one (by its midpoint), or when the edges
-    /// lying on `e`'s curve do not cover it end to end.
+    /// proved to follow `e`'s curve (`coincidence_bound`, within each edge's tolerance) do
+    /// not cover it end to end.
     ///
     /// Two rounds whose rails meet along part of one of them (a full round whose rails run
     /// unequal lengths) share one edge there in the stitched fillet B-rep, and the longer
@@ -2567,11 +2569,21 @@ impl FilletBrep {
             let (Some(ta), Some(tb)) = (on_rail(a, tol)?, on_rail(b, tol)?) else {
                 continue;
             };
-            let mid = edge_curve.evaluate_point(k, edge.interval.evaluate(0.5))?;
-            if on_rail(mid, tol)?.is_none() {
+            // the edge follows the rail over the piece: a bound over the whole of both,
+            // never samples (`coincidence_bound`, the booleans' test for coincident edges:
+            // exact for lines, certified for B-splines on one parameterisation; any other
+            // pair has none, and is not taken)
+            let piece = Extent1d::from_min_max(ta.min(tb), ta.max(tb));
+            let bound = crate::boolean::api_brep::coincidence_bound(
+                edge_curve,
+                &edge.interval,
+                curve_3d,
+                &piece,
+            );
+            if !bound.is_some_and(|d| d <= tol) {
                 continue;
             }
-            pieces.push((ta.min(tb), ta.max(tb), tol));
+            pieces.push((piece.min(), piece.max(), tol));
         }
         if pieces.len() < 2 {
             return Ok(None);
