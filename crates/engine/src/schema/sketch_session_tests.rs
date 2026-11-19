@@ -702,6 +702,7 @@ fn model_sketch_targets_are_validated_and_returned_at_every_check_level() {
         assert_eq!(s.sketching_view, Some(2));
         assert!(conforms(output_schema_for::<CreateResult>().as_value(), output_schema_for::<CreateResult>().as_value(), &created));
         let sketch = created["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
         run(&mut s, "sketch.finish", json!({}));
         assert_eq!(s.sketching_view, None);
         let edited = run(&mut s, "sketch.edit", json!({"sketch":sketch,"view":1}));
@@ -713,10 +714,10 @@ fn model_sketch_targets_are_validated_and_returned_at_every_check_level() {
             for command in ["sketch.create", "sketch.edit"] {
                 let params = if command == "sketch.create" { json!({"plane":"XY","view":target}) } else { json!({"sketch":sketch,"view":target}) };
                 assert!(s.execute(command, &params).is_err(), "{level:?} {command} {target}");
-                assert_eq!((s.doc.to_json(), s.active_sketch, s.sketching_view, s.undo.len()), before);
+                assert_eq!(s.doc.to_json(), before.0);
+                assert_eq!((s.active_sketch, s.sketching_view), (None, None), "a refused new edit still finishes the previous sketch");
             }
         }
-        run(&mut s, "sketch.finish", json!({}));
         assert_eq!((s.active_sketch, s.sketching_view), (None, None));
         run(&mut s, "sketch.create", json!({"plane":"XZ","view":2}));
         run(&mut s, "sketch.cancel", json!({}));
@@ -816,4 +817,247 @@ fn restoring_a_closed_owner_checkpoint_finalizes_its_temporary_marker() {
     assert_eq!(s.doc.marker, None, "a vanished editor does not leave later features rolled away");
     assert_eq!((s.active_sketch, s.sketching_view), (None, None));
     assert_eq!(s.doc.features.len(), 2);
+}
+
+fn edit_start_line(s: &mut Session, name: &str) -> u64 {
+    let id = run(s, "sketch.create", json!({"plane":"XY","name":name}))["sketch"].as_u64().unwrap();
+    run(s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    id
+}
+
+#[test]
+fn edit_start_metadata_is_semantic_and_mixed_setters_preserve_visibility() {
+    for id in [
+        "solid.extrude",
+        "solid.fillet",
+        "solid.hole",
+        "construct.plane",
+        "surface.patch",
+        "surface.match",
+        "body.repair",
+        "timeline.paste",
+        "sheet.flange",
+        "plastic.boss",
+        "frame.member",
+        "frame.end_cap",
+        "joint.create",
+        "drawing.note.add",
+        "drawing.dimension.add",
+        "sketch.create",
+        "sketch.edit",
+    ] {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.planned.is_none());
+        assert!(spec.starts_edit(&json!({})), "{id}");
+    }
+    for id in [
+        "parameters.change",
+        "sketch.dimension",
+        "sketch.line",
+        "sketch.line3d",
+        "frame.profile.insert",
+        "timeline.edit",
+        "timeline.redefine",
+        "timeline.rename",
+        "browser.visibility",
+        "select.set",
+        "drawing.dimension.edit",
+        "drawing.open",
+        "tab.view.layout",
+        "tab.view.move",
+        "tab.window.move_view",
+    ] {
+        if let Some(spec) = crate::find_command(id) {
+            assert!(!spec.starts_edit(&json!({})), "{id}");
+        }
+    }
+    let note = crate::find_command("note.update").unwrap();
+    assert!(!note.starts_edit(&json!({"note":1,"hidden":true})));
+    assert!(note.starts_edit(&json!({"note":1,"text":"Changed"})));
+    assert!(note.starts_edit(&Value::Null), "opening its editor is a new edit");
+    let view = crate::find_command("drawing.view.edit").unwrap();
+    assert!(!view.starts_edit(&json!({"view":1,"set":{"name":"Renamed","hidden":true}})));
+    let sketching = Session { active_sketch: Some(1), ..Session::default() };
+    assert!(
+        crate::find_command("frame.end_cap").unwrap().allowed(&sketching).is_ok(),
+        "a feature tool remains available to finish the current sketch"
+    );
+}
+
+#[test]
+fn edit_start_failed_live_commands_keep_the_exit_and_event_at_every_check_level() {
+    for level in ParamCheck::ALL {
+        for command in ["surface.match", "body.repair", "timeline.paste"] {
+            let mut s = Session { param_check: level, ..Session::default() };
+            let sketch = edit_start_line(&mut s, "Working");
+            let document = s.doc.to_json();
+            assert!(s.execute(command, &json!({})).is_err(), "{command}: invalid parameters or empty clipboard");
+            assert_eq!(s.doc.to_json(), document, "{command}: the rejected feature adds nothing");
+            assert_eq!((s.active_sketch, s.sketching_view), (None, None), "{command}");
+            let event = s.take_sketch_finish_event().unwrap();
+            assert_eq!(event.sketch, sketch, "{command}");
+            assert_eq!(event.domain, crate::SketchDomain::Model);
+            assert!(s.take_sketch_finish_event().is_none(), "{command}");
+        }
+        let mut s = Session { param_check: level, ..Session::default() };
+        let sketch = edit_start_line(&mut s, "Working");
+        let document = s.doc.to_json();
+        assert!(s.execute("solid.fillet", &json!({"radius":-1})).is_err());
+        assert_eq!(s.doc.to_json(), document, "the rejected feature adds nothing");
+        assert_eq!((s.active_sketch, s.sketching_view), (None, None));
+        let event = s.take_sketch_finish_event().unwrap();
+        assert_eq!((event.sketch, event.name.as_str(), event.view), (sketch, "Working", Some(1)));
+        assert_eq!(event.domain, crate::SketchDomain::Model);
+        assert!(event.sequence > 0);
+        assert!(s.take_sketch_finish_event().is_none());
+        let next = edit_start_line(&mut s, "Authorized");
+        s.set_command_check(Some(std::sync::Arc::new(|id, _, _| if id == "solid.box" { Err("denied".into()) } else { Ok(()) })));
+        assert!(s.execute("solid.box", &json!({})).is_err());
+        assert_eq!(s.active_sketch, Some(next), "host refusal precedes the edit boundary");
+        assert!(s.take_sketch_finish_event().is_none());
+    }
+}
+
+#[test]
+fn edit_start_empty_origin_is_discarded_but_lines_points_and_unsolved_geometry_remain() {
+    let mut s = Session::default();
+    let empty = run(&mut s, "sketch.create", json!({}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.doc.feature(empty).is_none());
+    let line = edit_start_line(&mut s, "Line");
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.doc.feature(line).is_some());
+    let point = run(&mut s, "sketch.create", json!({}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.point", json!({"point":[7,9]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.doc.feature(point).is_some());
+    let unsolved = edit_start_line(&mut s, "Unsolved");
+    let sketch = s.doc_mut().sketch_mut(unsolved).unwrap();
+    for point in &mut sketch.points {
+        point.fixed = true;
+    }
+    sketch.add_constraint(solidcraft_sketch::ConstraintKind::Distance { p: 0, q: 1, value: 999.0 }, None).unwrap();
+    let evaluations = s.evaluations;
+    let event = s.prepare_edit_start("solid.hole", &Value::Null).unwrap().unwrap();
+    assert_eq!(event.sketch, unsolved);
+    assert!(s.active_sketch.is_none());
+    assert!(s.doc.feature(unsolved).is_some());
+    assert_eq!(s.evaluations, evaluations, "leaving an unsolved sketch does not demand a solve");
+}
+
+fn edit_start_two_profiles() -> (Session, u64, u64) {
+    let mut s = Session::default();
+    let a = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Earlier"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let b = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Later"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[5,5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.edit", json!({"sketch":a}));
+    (s, a, b)
+}
+fn edit_start_extruded_source(s: &Session) -> u64 {
+    match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Extrude { sketch, .. } => sketch.0,
+        _ => panic!("expected Extrude"),
+    }
+}
+
+#[test]
+fn edit_start_extrude_uses_the_earlier_finished_sketch_and_undo_stays_after_finish() {
+    for explicit in [false, true] {
+        let (mut s, a, b) = edit_start_two_profiles();
+        let params = if explicit { json!({"sketch":b,"distance":2}) } else { json!({"distance":2}) };
+        let reply = run(&mut s, "solid.extrude", params);
+        assert_eq!(reply["finished_sketch"], "Earlier");
+        assert_eq!(edit_start_extruded_source(&s), if explicit { b } else { a });
+        let schema = output_schema_for::<crate::schema::features::FeatureResult>();
+        assert!(schema.as_value()["properties"]["finished_sketch"].is_object());
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply));
+        assert_eq!(s.doc.marker, None);
+        let completed = s.doc.to_json();
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.active_sketch.is_none());
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.doc.to_json(), completed);
+        assert!(s.active_sketch.is_none());
+    }
+}
+
+#[test]
+fn edit_start_prepared_source_survives_navigation_and_clears_after_success_or_failure() {
+    for fail_first in [false, true] {
+        let (mut s, a, b) = edit_start_two_profiles();
+        let event = s.prepare_edit_start("solid.extrude", &Value::Null).unwrap().unwrap();
+        assert_eq!(event.sketch, a);
+        assert!(s.needs_sketch_finish_evaluation());
+        assert_eq!(s.take_sketch_finish_event().unwrap().sequence, event.sequence);
+        assert!(s.prepare_edit_start("solid.extrude", &Value::Null).unwrap().is_none());
+        run(&mut s, "select.clear", json!({}));
+        if fail_first {
+            assert!(s.execute("solid.extrude", &json!({"distance":"invalid"})).is_err());
+        } else {
+            run(&mut s, "solid.extrude", json!({"distance":2}));
+            assert_eq!(edit_start_extruded_source(&s), a);
+        }
+        assert!(s.take_sketch_finish_event().is_none(), "preparation does not publish its event twice");
+        run(&mut s, "solid.extrude", json!({"distance":2}));
+        assert_eq!(edit_start_extruded_source(&s), b, "the old source cannot leak into the next feature");
+    }
+}
+
+#[test]
+fn edit_start_nested_dispatch_and_dimension_continuations_follow_the_same_policy() {
+    let mut s = Session::default();
+    let id = edit_start_line(&mut s, "Nested");
+    let fillet = crate::find_command("solid.fillet").unwrap();
+    assert!(fillet.run_nested(&mut s, &json!({"radius":-1})).is_err());
+    assert!(s.active_sketch.is_none());
+    assert_eq!(s.take_sketch_finish_event().unwrap().sketch, id);
+    let other = edit_start_line(&mut s, "Continuing");
+    assert!(fillet.run_nested_continuing(&mut s, &json!({"radius":-1})).is_err());
+    assert_eq!(s.active_sketch, Some(other));
+    assert!(s.take_sketch_finish_event().is_none());
+    run(&mut s, "parameters.add", json!({"name":"Width","expression":"10 mm"}));
+    run(&mut s, "parameters.change", json!({"name":"Width","expression":"12 mm"}));
+    run(&mut s, "timeline.rename", json!({"feature":other,"name":"Renamed"}));
+    assert_eq!(s.active_sketch, Some(other));
+    assert!(s.take_sketch_finish_event().is_none());
+}
+
+#[test]
+fn edit_start_in_place_feature_updates_preserve_the_current_sketch() {
+    let mut s = Session::default();
+    let profile = run(&mut s, "sketch.create", json!({}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let feature = run(&mut s, "solid.extrude", json!({"sketch":profile,"distance":2}))["feature"].as_u64().unwrap();
+    let active = edit_start_line(&mut s, "Keep editing");
+    run(&mut s, "timeline.edit", json!({"feature":feature,"set":{"extent.distance":"3"}}));
+    run(&mut s, "timeline.redefine", json!({"feature":feature,"command":"solid.extrude","params":{"sketch":profile,"distance":4}}));
+    assert_eq!(s.active_sketch, Some(active));
+    assert!(s.take_sketch_finish_event().is_none());
+}
+
+#[test]
+fn edit_start_model_and_sheet_receivers_are_explicit_even_after_drawing_focus_changes() {
+    let mut s = Session::default();
+    let model = edit_start_line(&mut s, "Model edit");
+    let drawing = run(&mut s, "drawing.create", json!({}));
+    let owner = s.open_drawing;
+    assert_eq!(s.active_sketch, Some(model), "opening a drawing is focus, not an annotation edit");
+    assert!(s.execute("drawing.note.add", &json!({})).is_err());
+    let event = s.take_sketch_finish_event().unwrap();
+    assert_eq!(event.domain, crate::SketchDomain::Model);
+    assert_eq!(event.sketch, model);
+    assert_eq!(s.open_drawing, owner);
+    assert!(s.active_sheet_sketch.is_none());
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner":drawing["sheets"][0]["id"]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+    assert!(s.execute("drawing.note.add", &json!({})).is_err());
+    let event = s.take_sketch_finish_event().unwrap();
+    assert!(matches!(event.domain, crate::SketchDomain::Sheet { .. }));
+    assert_eq!(Some(event.sketch), solidcraft_doc::ids::decode(made["sketch"].as_str().unwrap()));
+    assert!(s.active_sheet_sketch.is_none());
+    assert_eq!(s.open_drawing, owner);
 }

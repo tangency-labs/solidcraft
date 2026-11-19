@@ -20,7 +20,7 @@ use crate::{EngineError, Result, Sel, Session};
 const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
-    .open_part()
+    .open_part().selection_edit()
     .icon("delete")
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
