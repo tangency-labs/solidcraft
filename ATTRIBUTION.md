@@ -267,8 +267,6 @@ Editable drawing code, native projects and shipped exports are collected under `
 | crates/look/icons/design/svg/flat/spin.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/flat/style.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/flat/undo.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
-| crates/look/icons/design/svg/flat/window_here.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
-| crates/look/icons/design/svg/flat/window_other.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/flat/zoom.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/accessibility.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/activate.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
@@ -544,8 +542,6 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/small/joint.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/small/pattern.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/small/section.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
-| crates/look/icons/design/svg/small/window_here.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
-| crates/look/icons/design/svg/small/window_other.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/workspace/ws_animate.svg | SolidCraft contributors | workspace icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/polygon_circumscribed.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/polygon_edge.svg | SolidCraft contributors | original sketch variant icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
