@@ -963,6 +963,14 @@ mod tests {
         run(&mut s, "surface.extrude", json!({"sketch": "Far", "curves": ["far"], "to": [h, 40, 10.0 - h], "body_name": "ToSlant"}));
         let want = 378.0 - 6.0 * std::f64::consts::SQRT_2;
         assert!((area(&s, "ToSlant") - want).abs() < want * 1e-6, "{} vs {want}", area(&s, "ToSlant"));
+        // Further still, past any fixed number of tries: the wall from x = 7000 to 7006 meets the
+        // plane at z = 7008.6 to 7014.6. Area: 6 (7003 + 10 - sqrt 2) = 42078 - 6 sqrt 2.
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "VeryFar"}));
+        run(&mut s, "sketch.line", json!({"points": [[7000, 0], [7006, 0]], "ids": ["very_far"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "VeryFar", "curves": ["very_far"], "to": [h, 40, 10.0 - h], "body_name": "ToSlantFar"}));
+        let want = 42078.0 - 6.0 * std::f64::consts::SQRT_2;
+        assert!((area(&s, "ToSlantFar") - want).abs() < want * 1e-6, "{} vs {want}", area(&s, "ToSlantFar"));
 
         // The design keeps it: a cold rebuild gives the same walls.
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());

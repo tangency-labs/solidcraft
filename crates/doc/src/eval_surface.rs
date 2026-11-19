@@ -582,9 +582,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     }
 }
 
-/// How many times a surface extrude to a curved or slanted face runs its walls out further, each
-/// time [`SHEET_REACH_GROWTH`] times as far, looking for where they meet the face's surface.
-const SHEET_REACH_TRIES: usize = 4;
+/// A surface extrude to a curved or slanted face runs its walls out further, each time
+/// [`SHEET_REACH_GROWTH`] times as far, looking for where they meet the face's surface, until they
+/// reach the extrusion limit. The count only guards against a reach that doesn't grow.
+const SHEET_REACH_TRIES: usize = 64;
 const SHEET_REACH_GROWTH: f64 = 8.0;
 
 /// A surface extrude that ends at the face, vertex or point at `to` (To Object), starting `start`
@@ -642,16 +643,18 @@ fn sheet_to_object(
     // First past the whole target body. The face's surface runs on past the body, though (a
     // slanted plane), so a wall beside the body can meet it further out: while a wall still
     // runs to the far end, or none crosses the surface, the walls run out further.
+    // The last try runs the walls out to just short of the extrusion limit.
+    let limit = MAX_EXTRUDE_REACH - 1.0 - toward * start;
     let mut reach = through_all_distance(&tst, plane, start, std::slice::from_ref(&target.name))?;
     for tries_left in (0..SHEET_REACH_TRIES).rev() {
         let far = start + toward * reach;
         extrude_within_reach([start, far])?;
         let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
-        let last = tries_left == 0 || extrude_within_reach([start, start + toward * reach * SHEET_REACH_GROWTH]).is_err();
+        let last = tries_left == 0 || reach >= limit;
         let kept = match kernel::trim_keep(&long, &tool, kernel::TrimKeep::Regions(&keep)) {
             Ok(kept) => kept,
             Err(_) if !last => {
-                reach *= SHEET_REACH_GROWTH;
+                reach = (reach * SHEET_REACH_GROWTH).min(limit);
                 continue;
             }
             Err(e) => return Err(DocError::Invalid(format!("the surface extrude never meets the To face's surface ({e})"))),
@@ -666,7 +669,7 @@ fn sheet_to_object(
         if last {
             break;
         }
-        reach *= SHEET_REACH_GROWTH;
+        reach = (reach * SHEET_REACH_GROWTH).min(limit);
     }
     Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()))
 }
