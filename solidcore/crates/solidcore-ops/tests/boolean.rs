@@ -3363,3 +3363,45 @@ fn a_drill_grazing_the_seam_vertex_of_a_cut_balls_rim_cuts_it() {
         assert!((v - want).abs() <= 1e-7 * want, "d {d}: {v} vs {want}");
     }
 }
+
+/// #17527's cut as SolidCraft passed it: a part with a 2.1 mm hole, less a revolved counterbore
+/// (a 4.25 mm bore, a 45° cone down to the hole's radius, a disc closing it). The sketch's revolve
+/// axis is 1.19e-5 off the hole's axis, so the tool's rim (radius 2.1000073) lies 4.6e-6 to
+/// 1.9e-5 from the hole's wall: in it, within the rim's tolerance, but nowhere within the proto
+/// topology's. The cone and the disc each meet the wall along the rim in a curve of their own.
+/// Their overlapping proto edges were replaced by the rim classified within half the zone
+/// tolerance, which found it nowhere in the wall, so the cut failed in `make_faceuse`; with the
+/// rim classified within its own tolerance, a piece of the disc's circle outside the overlap
+/// stayed beside its replacement and was related twice ("another entity is already related").
+/// The cut is one valid solid, the same as the cut by the tool moved onto the hole's axis.
+#[test]
+fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
+    all_fixes();
+    let body = traced_operands("issue_17527_revolve_cut_round_edge");
+    let cut = |dy: f64| {
+        let tool = body("tool");
+        tool.transform(&[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, dy, 0.0, 1.0],
+        ])
+        .unwrap();
+        boolean(body("target"), tool, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    // the tool moved by the offset of its axis from the hole's: no rim off the wall
+    let want = cut(1.1866e-5).volume(1e-9).unwrap();
+    let r = cut(0.0);
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the part's 41 faces (the hole's wall now ends at the rim), the bore and the cone
+    assert_eq!(r.counts().unwrap(), [43, 104, 65]);
+    let v = r.volume(1e-9).unwrap();
+    assert!(
+        (v - want).abs() < 1e-3,
+        "volume {v}, on the hole's axis {want}"
+    );
+}

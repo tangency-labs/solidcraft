@@ -20,11 +20,12 @@ use crate::*;
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
-/// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
+/// that cut nothing, the tools a cut of many tools is made with (one when they are cut in one
 /// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
-/// direction, joins made of bodies that are all apart without running the kernel's union, and the
-/// holes whose tools were built (not moved from another copy's), and the tight boxes the kernel
-/// was asked for.
+/// direction, joins made of bodies that are all apart without running the kernel's union, the
+/// holes whose tools were built (not moved from another copy's), the tight boxes the kernel was
+/// asked for, the flats of sheets made from surfaces laid out (their pieces cut), the blends the
+/// kernel was asked for, and the searches for the radius that fits.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -42,6 +43,7 @@ pub(super) struct Counts {
     pub cut_tools: usize,
     pub apart_unions: usize,
     pub surfaces: usize,
+    pub flats: usize,
     pub joined_apart: usize,
     pub kept_checks: usize,
     pub detached_checks: usize,
@@ -50,6 +52,8 @@ pub(super) struct Counts {
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
     pub tight_boxes: usize,
+    pub blends: usize,
+    pub fit_searches: usize,
 }
 
 thread_local! {
@@ -70,6 +74,7 @@ thread_local! {
             cut_tools: 0,
             apart_unions: 0,
             surfaces: 0,
+            flats: 0,
             joined_apart: 0,
             kept_checks: 0,
             detached_checks: 0,
@@ -78,6 +83,8 @@ thread_local! {
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
             tight_boxes: 0,
+            blends: 0,
+            fit_searches: 0,
         })
     };
 }
@@ -109,6 +116,11 @@ fn written(f: impl FnOnce()) -> usize {
 /// A search on this thread through all of a design's features for one.
 pub(crate) fn count_feature_search() {
     count(|c| c.feature_searches += 1);
+}
+
+/// The flat of a sheet made from surfaces laid out on this thread: its pieces cut.
+pub(crate) fn count_flat() {
+    count(|c| c.flats += 1);
 }
 
 /// The searches `f` makes on this thread through all features or all bodies.
@@ -2329,7 +2341,7 @@ fn hole(position: Vec3, direction: Vec3, diameter: f64) -> FeatureKind {
 
 /// The sheet metal bodies of a model.
 fn sheet_bodies(model: &Model) -> Vec<String> {
-    model.state().sheets.iter().map(|s| s.body.clone()).collect()
+    model.state().surface_sheets.iter().map(|s| s.body.clone()).collect()
 }
 
 /// A cut leaves the sheets it cannot reach as they were, without checking that it would leave
@@ -2399,7 +2411,10 @@ fn a_hole_leaves_sheets_it_cannot_reach_as_they_were() {
     assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is drilled");
 }
 
-/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach.
+/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach. The
+/// sheet takes the drill as a bore of the panel it runs along and builds its body again (see
+/// `surface_hole_cut`), so no body goes through a boolean: on main the flat sheet was cut and read
+/// back, one boolean. The far sheets are left as they were.
 #[test]
 fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let mut doc = Document::new("rim");
@@ -2408,18 +2423,64 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     }
     let mut model = Model::new();
     model.evaluate(&doc);
-    let near = sheet_bodies(&model)[0].clone();
+    // The sheet the drill runs along: the one at the origin, which holds the middle of its run, 30
+    // along it and halfway through the 2.5 mm.
+    let mid = Vec3::new(30.0, 20.0, 1.25);
+    let holds = |m: &Model, name: &str| m.state().body(name).is_some_and(|b| matches!(b.body.classify_point(mid), Ok(kernel::PointClass::Inside)));
+    let near = sheet_bodies(&model).into_iter().find(|b| holds(&model, b.as_str())).expect("the sheet at the origin");
     let whole = volume(&model, &near);
+    // Into its rim at x = 60, along it (-x) through all, 1.5 across, halfway through its thickness.
     let d = 1.5;
     let work = cut_work(&mut doc, hole(Vec3::new(60.0, 20.0, 1.25), Vec3::new(-1.0, 0.0, 0.0), d));
-    assert_eq!(work.cut, 1, "only the sheet the drill meets is bored");
-    assert_eq!(work.kept, sheet_bodies(&work.model)[1..]);
+    assert_eq!(work.cut, 0, "the sheet bores itself: no body goes through a boolean");
+    let mut far: Vec<String> = sheet_bodies(&work.model).into_iter().filter(|b| *b != near).collect();
+    let mut kept = work.kept.clone();
+    far.sort();
+    kept.sort();
+    assert!(far.len() == 3 && kept == far, "the far sheets are left as they were: {kept:?} of {far:?}");
     let state = work.model.state();
-    let sheet = state.sheets.iter().find(|s| s.body == near).unwrap();
-    assert_eq!(sheet.bores.len(), 1, "kept as a bore of the sheet");
+    let sheet = state.surface_sheets.iter().find(|s| s.body == near).expect("the drilled sheet");
+    assert!(sheet.bores.len() == 1 && (sheet.bores[0].radius - d / 2.0).abs() < 1e-12, "kept as a bore of the sheet: {:?}", sheet.bores);
+    // It takes the bore's cylinder through the plate's 60: π (d/2)² 60 = 106.03 mm³ (to 2 %, as on
+    // main).
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
     assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
+}
+
+/// A flange on a sheet made from surfaces lays the sheet's flat out once, however many flanges
+/// the sheet already has: naming its pick (the model's name for the edge), finding the sheet and
+/// the edge again by that name, and keying the panels it makes lay nothing out. Each of them laid
+/// the whole sheet out again, five flats for every flange built (#6748).
+#[test]
+fn a_flange_lays_its_sheet_out_once() {
+    let mut doc = Document::new("flanges");
+    flat_sheet(&mut doc, Vec2::new(0.0, 0.0), 150.0, 100.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let flange = |p: Vec3| FeatureKind::SheetFlange {
+        edges: vec![FlangeEdge::at(p)],
+        height: "20 mm".into(),
+        angle: "90 deg".into(),
+        radius: None,
+        position: "inside".into(),
+        flip: false,
+        body: None,
+        corner_relief_shape: None,
+        corner_relief: None,
+        height_from: None,
+    };
+    for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
+        // The pick is named as the engine names it, on the model as it is.
+        let mut names = Vec::new();
+        let naming = counted(|| names = crate::sheet::sheet_edge_names(&model.state(), &[p])).flats;
+        assert!(names.first().is_some_and(|n| n.contains('|')), "the model's name for the edge: {names:?}");
+        let id = doc.add_feature(flange(p), None).unwrap();
+        doc.feature_mut(id).unwrap().edge_names = names;
+        let built = counted(|| model.evaluate(&doc)).flats;
+        assert_eq!(model.result(id).unwrap().error, None, "the flange at {p:?} builds");
+        assert_eq!((naming, built), (0, 1), "the flange at {p:?}: flats laid out naming its pick, and building it");
+    }
 }
 
 /// A 1.5 mm disc of 50 mm radius with a 3.5 mm through hole at `radius` on X, patterned `count`
@@ -3022,8 +3083,8 @@ fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
     let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
     assert!(err.contains("ambiguous") && err.contains("`Encoder`"), "{err}");
     let st = model.state();
-    let sheet = st.sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
-    assert!(sheet.holes.is_empty(), "the linked sheet is not machined");
+    let sheet = st.surface_sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
+    assert!(sheet.sheet.panels.iter().all(|p| p.region.holes.is_empty()), "the linked sheet is not machined");
 }
 
 /// A hole's look at the material over its entry face (#10695) is best effort: when the kernel
@@ -3367,4 +3428,140 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert_eq!(st.bodies.len(), 1);
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
+}
+
+/// The design of #4282: a cube with a hole through it along each of the three axes, all of
+/// them through the cube's centre, and a round on every edge of the result.
+fn holed_cube(doc: &mut Document, size: f64, hole: f64) {
+    block(doc, "Cube", Vec3::new(-size / 2.0, -size / 2.0, 0.0), [size, size, size]);
+    // The three holes: a hole along each axis, its axis through the cube's centre.
+    for (base, axis) in
+        [(Vec3::new(-size / 2.0, 0.0, size / 2.0), Vec3::X), (Vec3::new(0.0, -size / 2.0, size / 2.0), Vec3::Y), (Vec3::new(0.0, 0.0, 0.0), Vec3::Z)]
+    {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(base),
+            axis: Dir(axis),
+            radius: (hole / 2.0).to_string().into(),
+            height: size.to_string().into(),
+            operation: Operation::Cut,
+            references: Vec::new(),
+        };
+        doc.add_feature(kind, None).unwrap();
+    }
+}
+
+/// The middle of every edge of the body, the points a round of all of them is picked with.
+fn every_edge(body: &kernel::Body) -> Vec<Vec3> {
+    let tol = (body.size() * 1e-3).max(1e-3);
+    body.edges(tol).unwrap().iter().map(|e| e.mid).collect()
+}
+
+/// A round of every edge of the body, with `radius`, and the feature it makes.
+fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) -> u64 {
+    let edges = every_edge(body);
+    let kind = FeatureKind::Fillet {
+        edges: edges.into_iter().map(Position).collect(),
+        radius: radius.into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// A round the kernel refuses without naming a radius that fits does not make the document
+/// search for the largest radius that fits (#4282): the search cannot be guided then, and it
+/// blends every edge again for each of the sizes it tries. On the design of #4282 (a cube with
+/// a hole through each axis, a 2 mm round of every edge) those ten blends of the forty-one edges
+/// took 77 s, fifteen times the blend that failed, and they found nothing: the round fails at
+/// any radius there.
+#[test]
+fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
+    // The design of #4282 at a third of its size (the round and the holes keep their
+    // proportions): a cube with a hole through each axis, a round of every one of its edges.
+    // The kernel refuses the radius and cannot size the refusal.
+    let mut doc = Document::new("holed cube");
+    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let body = model.state().bodies[0].body.clone();
+    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    let work = counted(|| model.evaluate(&doc));
+    let r = model.result(fillet);
+    let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("larger than the faces beside its edges allow"), "{error}");
+    // The blend the kernel refused, and no search for a radius that fits.
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 0, "{work:?}");
+}
+
+/// A round the kernel refuses naming the radius that fits still searches for it: the search is
+/// guided by that radius and settles in two or three blends, and the refusal names the largest
+/// radius that fits.
+#[test]
+fn a_refused_round_that_names_a_radius_to_try_searches_for_it() {
+    // A 10 mm box with a 6 mm round of all its edges: the radius is too large and the kernel
+    // names the largest that fits (4.99 mm).
+    let mut doc = Document::new("a box");
+    block(&mut doc, "A", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let body = model.state().bodies[0].body.clone();
+    let fillet = round_of_every_edge(&mut doc, &body, "6");
+    let work = counted(|| model.evaluate(&doc));
+    let r = model.result(fillet);
+    let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("larger than the faces beside its edges allow"), "{error}");
+    // The blend that was refused, and the search for the radius that fits.
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 1, "{work:?}");
+}
+
+/// A round refused because it would cut through a thin wall into the hollow behind it names
+/// the radius at which it opens, so the document still searches for the largest radius that
+/// fits and names it (the kernel rig's 1668 case). A 104 x 64 x 42 box hollowed 2 mm from the
+/// inside, open at the bottom: an R7 round of the outer top edge at (32, 42) has its centre at
+/// (32 - r, 42 - r), and its arc uncovers the hollow's corner (30, 40) where sqrt2 (r - 2) = r,
+/// r = 4 + 2 sqrt2 = 6.8284; the search builds 6.828.
+#[test]
+fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
+    let mut doc = Document::new("thin wall");
+    block(&mut doc, "Case", Vec3::new(-52.0, -32.0, 0.0), [104.0, 64.0, 42.0]);
+    let hollow = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-50.0, -30.0, -1.0)),
+        length: "100".into(),
+        width: "60".into(),
+        height: "41".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    doc.add_feature(hollow, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(0.0, 32.0, 42.0))],
+        radius: "7".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    let fillet = doc.add_feature(kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    let error = model.result(fillet).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{error}");
+    assert!(error.contains("the largest radius that fits is 6.828 mm"), "{error}");
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 1, "{work:?}");
 }
