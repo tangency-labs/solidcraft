@@ -1856,24 +1856,33 @@ fn seam_is_crossed<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     if domain.min() != native_domain.min() || domain.max() != native_domain.max() {
         return Ok(true);
     }
-    let fixed = if dir == SurfParamType::U {
-        domain.min().x
+    // The face's boundary on its surface is its edge uses' UV trim curves, not the
+    // stored 3D edge curves: a stored curve that misses the 3D seam can still cross
+    // the seam once projected onto the surface. Both edges of the periodic UV
+    // domain are the seam, spanned well beyond the domain in the other direction.
+    let (lo, hi) = (domain.min(), domain.max());
+    let span_lo = lo.x.min(lo.y) - (hi.x - lo.x);
+    let span_hi = hi.x.max(hi.y) + (hi.y - lo.y);
+    if !(span_lo.is_finite() && span_hi.is_finite()) {
+        return Ok(true);
+    }
+    let seam_lines = if dir == SurfParamType::U {
+        [lo.x, hi.x].map(|u| {
+            Curve::from(crate::curve::line::Line::from_points(
+                Point3::new(u, span_lo, 0.0),
+                Point3::new(u, span_hi, 0.0),
+                3,
+            ))
+        })
     } else {
-        domain.min().y
+        [lo.y, hi.y].map(|v| {
+            Curve::from(crate::curve::line::Line::from_points(
+                Point3::new(span_lo, v, 0.0),
+                Point3::new(span_hi, v, 0.0),
+                3,
+            ))
+        })
     };
-    let seam = Curve::from(
-        native
-            .create_iso_parametric_curve(
-                k,
-                dir,
-                fixed,
-                crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
-                    domain: Some(domain),
-                    uv_iso_curve: false,
-                },
-            )?
-            .curve,
-    );
     let mut checked = Vec::new();
     class.is_crossed_by_edge_unless(objects, |edge| {
         if let Some((_, disjoint)) = checked.iter().find(|(e, _)| *e == edge) {
@@ -1883,12 +1892,32 @@ fn seam_is_crossed<O: LoopObject, M: CurveOnClassifyBrep<O>>(
             return Ok(false);
         };
         let target = b.edge(e)?;
-        let disjoint = match target.curve.as_ref() {
-            Some(curve) => {
-                seam.proved_disjoint(k, seam.natural_interval(), curve, target.interval)?
+        // Every use of the edge on this face needs its own UV trim curve proved
+        // clear of both seam lines; a use without one grants no relief.
+        let mut disjoint = false;
+        for &eu in &target.edgeuses {
+            let Some(fu) = eu1::faceuse(b, eu)? else {
+                continue;
+            };
+            if b.faceuse(fu)?.face != Some(f) {
+                continue;
             }
-            None => false,
-        };
+            let Some(trim) = eu1::uv_trim_curve_pointer(b, eu)? else {
+                disjoint = false;
+                break;
+            };
+            disjoint = true;
+            for line in &seam_lines {
+                let seam_ivl = line.natural_interval();
+                if !line.proved_disjoint(k, seam_ivl, trim, trim.natural_interval())? {
+                    disjoint = false;
+                    break;
+                }
+            }
+            if !disjoint {
+                break;
+            }
+        }
         checked.push((edge, disjoint));
         Ok(disjoint)
     })
@@ -2928,5 +2957,164 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.vertexuse, Some(vertexuse));
+    }
+
+    /// A stored edge may miss the 3D meridian while its boundary on the
+    /// cylinder crosses the periodic seam. The normal gap is representation
+    /// error, not evidence that the face's boundary stays on one side.
+    #[test]
+    fn an_offset_boundary_still_crosses_its_cylinders_seam() {
+        use crate::curve::line::Line;
+        use crate::heal::face_props::HealerOpType;
+        use crate::kernel::UpstreamFixes;
+        use crate::primitive::api_primitives::create_cylinder_surface;
+        use crate::topology::brep::p1::HealLoopHandle;
+        use crate::topology::{
+            Edge, Edgeuse, EdgeuseId, EdgeuseOwner, FaceuseId, Loop, LoopId, LoopuseId, Region,
+            Shell, VertexuseId,
+        };
+
+        let k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut b = Brep::new();
+        let region = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        let shell = b
+            .add_shell_record(Shell {
+                region: Some(region),
+                ..Shell::default()
+            })
+            .unwrap();
+        let face = b.add_face(shell).unwrap();
+        let mut surface = Surface::from(
+            create_cylinder_surface(&k, Point3::new(0.0, 0.0, -1.0), 1.0, 3.0).unwrap(),
+        );
+        surface.set_owner(Some(ObjectRef {
+            type_code: crate::topology::face::p2::TYPE,
+            key: ObjectKey(1),
+        }));
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let tolerance = b.tolerance();
+        {
+            let f = b.face_mut(face).unwrap();
+            f.surface = Some(surface);
+            f.uv_domain = domain;
+            f.tolerance = tolerance;
+            f.faceuse = Some(FaceuseId::from_index(0));
+            f.loops.push(LoopId::from_index(0));
+        }
+        for (i, orientation) in [OrientType::Same, OrientType::Opposite]
+            .into_iter()
+            .enumerate()
+        {
+            b.add_faceuse_record(Faceuse {
+                shell: Some(shell),
+                face: Some(face),
+                mate: Some(FaceuseId::from_index((1 - i) as u32)),
+                orientation,
+                loopuses: vec![LoopuseId::from_index(i as u32)],
+                ..Faceuse::default()
+            })
+            .unwrap();
+            b.add_loopuse_record(Loopuse {
+                faceuse: Some(FaceuseId::from_index(i as u32)),
+                loop_: Some(LoopId::from_index(0)),
+                mate: Some(LoopuseId::from_index((1 - i) as u32)),
+                start: LoopuseStart::Edgeuse(Some(EdgeuseId::from_index((4 * i) as u32))),
+                orientation: OrientType::Same,
+            })
+            .unwrap();
+        }
+        b.add_loop_record(Loop {
+            face,
+            edges: Vec::new(),
+            loopuse: Some(LoopuseId::from_index(0)),
+        })
+        .unwrap();
+
+        let x = 1.0 + 1.0 / 1_048_576.0;
+        let half_width = 1.0 / 512.0;
+        let points = [
+            Point3::new(x, -half_width, 0.0),
+            Point3::new(x, half_width, 0.0),
+            Point3::new(x, half_width, 1.0),
+            Point3::new(x, -half_width, 1.0),
+        ];
+        let vertices = points.map(|p| b.add_vertex(p).unwrap());
+        let seam = Curve::from(Line::from_points(
+            Point3::new(1.0, 0.0, -1.0),
+            Point3::new(1.0, 0.0, 2.0),
+            3,
+        ));
+        for i in 0..4 {
+            let curve = Curve::from(Line::from_points(points[i], points[(i + 1) % 4], 3));
+            let interval = curve.natural_interval();
+            assert!(seam
+                .proved_disjoint(&k, seam.natural_interval(), &curve, interval)
+                .unwrap());
+            b.add_edge_record(Edge {
+                vertices: [vertices[i], vertices[(i + 1) % 4]],
+                edgeuses: vec![
+                    EdgeuseId::from_index(i as u32),
+                    EdgeuseId::from_index((4 + i) as u32),
+                ],
+                interval,
+                tolerance,
+                curve: Some(curve),
+            })
+            .unwrap();
+        }
+        for side in 0..2 {
+            for i in 0..4 {
+                let at = 4 * side + i;
+                let vertex = vertices[(i + side) % 4];
+                let vu = b
+                    .add_vertexuse_record(Vertexuse {
+                        vertex: Some(vertex),
+                        owner: VertexuseOwner::Edgeuse(Some(EdgeuseId::from_index(at as u32))),
+                        ..Vertexuse::default()
+                    })
+                    .unwrap();
+                assert_eq!(vu, VertexuseId::from_index(at as u32));
+                b.vertex_mut(vertex).unwrap().vertexuses.push(vu);
+                b.add_edgeuse_record(Edgeuse {
+                    edge: Some(EdgeId::from_index(i as u32)),
+                    owner: EdgeuseOwner::Loopuse(Some(LoopuseId::from_index(side as u32))),
+                    ccw: Some(EdgeuseId::from_index(
+                        (4 * side + (i + 1 + 2 * side) % 4) as u32,
+                    )),
+                    cw: Some(EdgeuseId::from_index(
+                        (4 * side + (i + 3 - 2 * side) % 4) as u32,
+                    )),
+                    vertexuse: Some(vu),
+                    orientation: if side == 0 {
+                        OrientType::Same
+                    } else {
+                        OrientType::Opposite
+                    },
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            }
+        }
+        let mut props: FaceProps<HealLoopHandle> = FaceProps::new();
+        props
+            .set_props_stage2_mut(&k, &mut b, face, 0, HealerOpType::All)
+            .unwrap();
+        let objects = BrepSeamObjects::<HealLoopHandle, _>::new(&k, &b, face).unwrap();
+        assert!(props
+            .crv_class_u
+            .as_ref()
+            .unwrap()
+            .is_crossed_by_edge(&objects)
+            .unwrap());
+        assert!(props.bad_crossed_seam.is_true());
+        assert_eq!(props.bad_crossed_seam_dir, SurfParamType::U);
     }
 }

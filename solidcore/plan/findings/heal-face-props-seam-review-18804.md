@@ -249,6 +249,25 @@ and expected True/U flag are recorded here so that work can proceed with a
 maintainer-approved construction instead of forcing the attempted exclusion.
 
 
+## Boundary exclusion now reads the face's own trim curves
+
+`seam_is_crossed` no longer compares the stored 3D edge curve with the 3D seam.
+For each use of the candidate edge on this face it takes that edge use's own UV
+trim curve (never the mate's, which lies on the other face's surface) and
+requires `Curve::proved_disjoint` to separate it from both seam lines of the
+periodic UV domain (`u = min` and `u = max`, or the `v` pair). An edge use
+without a UV trim curve, or a proof that cannot be completed, grants no relief
+and the crossing stays. The offset-rectangle regression
+`an_offset_boundary_still_crosses_its_cylinders_seam` has no UV trim curves, so
+it keeps its crossing flag (True, U).
+
+## Golden rows
+
+`goldens --unit heal.face_props --goldens` with the boundary-based exclusion:
+1873 cases, changed=0 added=0 removed=0 broken=0. No row differs from the
+committed golden, so nothing is derived or blessed; the earlier CI differences
+came from the stored-curve exclusion and are gone with it.
+
 ## Executed counterexample
 
 The diagnostic ran through buildq against the existing seam filter, together
