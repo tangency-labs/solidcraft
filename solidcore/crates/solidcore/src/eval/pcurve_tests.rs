@@ -22,6 +22,128 @@ fn about_z(origin: [f64; 3], down: bool) -> Frame {
         if down { [0., -1., 0.] } else { [0., 1., 0.] },
     )
 }
+
+/// A face's inward ray is normal × tangent, reversed with the loop. Every
+/// permutation must give the same cyclic order, including an oblique edge.
+#[test]
+fn radial_order_uses_exact_face_directions_in_every_input_order() {
+    for (axis, x) in [
+        (Vec3::new(0., 0., 1.), Vec3::new(1., 0., 0.)),
+        (Vec3::new(1., 0., 0.), Vec3::new(0., 1., 0.)),
+        (Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)),
+        (Vec3::new(1., 2., 3.), Vec3::new(2., -1., 0.)),
+    ] {
+        let point = |v: Vec3| [v.x, v.y, v.z];
+        let y = axis.cross(x);
+        let surfaces: Vec<_> = [x, y, -x, -y]
+            .into_iter()
+            .enumerate()
+            .map(|(i, ray)| Surface::Plane {
+                origin: [0.; 3],
+                u_axis: point(axis),
+                v_axis: point(if i & 1 == 0 { ray } else { -ray }),
+            })
+            .collect();
+        let curve = Curve::Line {
+            start: [0.; 3],
+            end: point(axis),
+        };
+        let pc = Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[0., 0.], [1., 0.]],
+        };
+        for a in 0..4 {
+            for b in 0..4 {
+                for c in 0..4 {
+                    for d in 0..4 {
+                        let input = [a, b, c, d];
+                        let mut distinct = input;
+                        distinct.sort_unstable();
+                        if distinct != [0, 1, 2, 3] {
+                            continue;
+                        }
+                        let faces: Vec<_> = input
+                            .iter()
+                            .map(|&i| RadialFace {
+                                surface: &surfaces[i],
+                                pcurve: &pc,
+                                forward: i & 1 == 0,
+                            })
+                            .collect();
+                        let order = radial_order(&curve, [0., 1.], &faces).unwrap();
+                        let rays: Vec<_> = order.into_iter().map(|i| input[i]).collect();
+                        let expected: Vec<_> = (0..4).map(|i| (a + i) % 4).collect();
+                        assert_eq!(rays, expected, "{axis:?}, {input:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn radial_order_refuses_undefined_and_indistinguishable_directions() {
+    let curve = Curve::Line {
+        start: [0.; 3],
+        end: [0., 0., 1.],
+    };
+    let surface = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [0., 0., 1.],
+        v_axis: [1., 0., 0.],
+    };
+    let pc = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0.], [1., 0.]],
+    };
+    let face = RadialFace {
+        surface: &surface,
+        pcurve: &pc,
+        forward: true,
+    };
+    assert!(
+        matches!(radial_order(&curve, [0., 1.], &[face, face]), Err(Error::Failed(m)) if m.contains("tangent faces"))
+    );
+    for interval in [[0., 0.], [1., 0.], [f64::NAN, 1.], [0., f64::INFINITY]] {
+        assert!(matches!(
+            radial_order(&curve, interval, &[face]),
+            Err(Error::Invalid(_))
+        ));
+    }
+    let collapsed = Curve::Line {
+        start: [0.; 3],
+        end: [0.; 3],
+    };
+    assert!(radial_order(&collapsed, [0., 1.], &[face]).is_err());
+    let singular = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [0., 0., 1.],
+        v_axis: [0., 0., 1.],
+    };
+    assert!(radial_order(
+        &curve,
+        [0., 1.],
+        &[RadialFace {
+            surface: &singular,
+            ..face
+        }]
+    )
+    .is_err());
+    let bad_pc = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[f64::NAN, 0.], [1., 0.]],
+    };
+    assert!(radial_order(
+        &curve,
+        [0., 1.],
+        &[RadialFace {
+            pcurve: &bad_pc,
+            ..face
+        }]
+    )
+    .is_err());
+}
+
 fn one(curve: &Curve, interval: [f64; 2]) -> Vec<Vec<EdgeUse<'_>>> {
     vec![vec![EdgeUse {
         edge: 0,

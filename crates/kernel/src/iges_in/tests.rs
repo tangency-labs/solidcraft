@@ -43,6 +43,44 @@ fn features_round_trip_through_iges() {
     round_trip(&fillet(&plate, &[Vec3::new(20.0, 0.0, 10.0)], 3.0).unwrap());
 }
 
+/// A body colour is written as a Color Definition (314) that IGES 5.3 readers accept: its
+/// directory status is subordinate switch 00 and entity use flag 02, "definition"
+/// (§2.2.4.4.9, §4.76), and its unnamed CNAME is omitted rather than written as `0H` (a
+/// Hollerith count is at least one). Two colours, read back unchanged.
+#[test]
+fn colour_definitions_are_unnamed_independent_definitions() {
+    let a = box_solid(Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let b = box_solid(Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 1.0, 1.0)).unwrap();
+    let text = iges_export_bodies(
+        &[
+            ExportBody { name: "A".into(), body: &a, color: Some([1.0, 0.5, 0.0]) },
+            ExportBody { name: "B".into(), body: &b, color: Some([0.0, 0.25, 1.0]) },
+        ],
+        &StepHeader::default(),
+    )
+    .unwrap();
+    let section = |c: char| text.lines().filter(move |l| l.as_bytes().get(72) == Some(&(c as u8))).collect::<Vec<_>>();
+    let (d, p) = (section('D'), section('P'));
+    let mut defs = 0;
+    for pair in d.chunks(2) {
+        if pair[0][..8].trim() != "314" {
+            continue;
+        }
+        defs += 1;
+        assert_eq!(&pair[0][64..72], "00000200", "{}", pair[0]);
+        // The parameter data: the lines whose back pointer (columns 65-72) is this entry's sequence.
+        let seq = pair[0][73..].trim().to_string();
+        let params: String = p.iter().filter(|l| l[64..72].trim() == seq).map(|l| l[..64].trim_end()).collect();
+        assert!(!params.contains("0H"), "{params}");
+        assert_eq!(params.trim_end_matches(';').split(',').count(), 4, "{params}");
+    }
+    assert_eq!(defs, 2);
+    let imp = iges_import(&text).unwrap();
+    let mut colors: Vec<_> = imp.bodies.iter().map(|b| b.color).collect();
+    colors.sort_by(|x, y| format!("{x:?}").cmp(&format!("{y:?}")));
+    assert_eq!(colors, [Some([0.0, 0.25, 1.0]), Some([1.0, 0.5, 0.0])]);
+}
+
 /// Hostile files fail cleanly: garbage, truncation, missing and circular references, huge
 /// counts.
 #[test]

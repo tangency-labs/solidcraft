@@ -83,6 +83,12 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
+/// [`traced_records`]'s records alone.
+#[cfg(test)]
+pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
+    traced_records(ir, product, system, colours).0
+}
+
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
 /// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
 /// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
@@ -90,9 +96,15 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
 /// file has a product structure (occurrences), the tree is that structure and each body is placed
 /// once for each use of its part ([`assembly`]); otherwise the bodies are one product called
 /// `product`. With `colours`, each body takes the colours the file gives it and its faces
-/// ([`paint_of`]). What could not be read (and what was repaired on the way) is in the warnings,
-/// each naming its body.
-pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
+/// ([`Looks::paint_of`]). What could not be read (and what was repaired on the way) is in the
+/// warnings, each naming its body. Also returns where each record body came from ([`validation::Origin`]), for checking the file's own
+/// figures ([`validation::check`]).
+fn traced_records(
+    ir: &cadmpeg_ir::document::CadIr,
+    product: &str,
+    system: &str,
+    colours: bool,
+) -> (solidcraft_kernel::ImportRecords, Vec<validation::Origin>) {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
     let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
@@ -119,13 +131,63 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
             face_origin: r.solid.face_origin,
             sheet: r.solid.sheet,
             copy_of: None,
+            mesh: None,
         };
         unplaced.push(assembly::Unplaced { body: r.body, record });
     }
     warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
-    let (bodies, tree) = if ir.model.occurrences.is_empty() {
-        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
+    // Parts the file gives as triangles alone (AP242 tessellated parts): a mesh body each, placed
+    // as any other part. A tessellation of a body that has a B-rep is how the file shows that
+    // body, not a part of its own.
+    for t in &ir.model.tessellations {
+        // A tessellation the model ties to no body (cadmpeg reads a part given as triangles alone
+        // so) is a part of its own, where the file defines it, under the root of bodies no
+        // occurrence reaches; in an assembly that is not where the assembly puts it, which the
+        // warning says.
+        let (id, body) = match t.body.as_ref().map(|b| b.as_str()) {
+            Some(id) => match by_id.get(id) {
+                Some(body) if body.regions.is_empty() => (id, Some(*body)),
+                _ => continue,
+            },
+            None => (t.id.as_str(), None),
+        };
+        let name = body.and_then(|b| b.name.clone()).or_else(|| t.source_object.as_ref().and_then(|s| s.name.clone())).unwrap_or_default();
+        if body.is_none() && !ir.model.occurrences.is_empty() {
+            let named = if name.trim().is_empty() { format!("triangles {id}") } else { name.clone() };
+            warnings.push(format!("{named}: a part given as triangles comes in where the file defines it, not placed in the assembly: the file's reader does not say which part it is"));
+        }
+        let placement = match body.and_then(|b| b.transform) {
+            None => None,
+            Some(m) if m.is_proper_rigid() => Some(assembly::column_major(&m)),
+            Some(_) => {
+                warnings.push(format!("{}: not imported: not supported yet: a placement that mirrors or scales", label(id)));
+                continue;
+            }
+        };
+        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, id, &[]));
+        let record = RecordBody {
+            name,
+            path: vec![product.to_string()],
+            instance: None,
+            color,
+            paint,
+            hidden: body.is_some_and(|b| b.visible == Some(false)),
+            placement,
+            brep: None,
+            face_origin: Vec::new(),
+            sheet: false,
+            copy_of: None,
+            mesh: Some(solidcraft_kernel::RecordMesh {
+                positions: t.vertices().iter().map(|p| p.coordinates().map(|c| c.get())).collect(),
+                triangles: t.triangles(),
+            }),
+        };
+        unplaced.push(assembly::Unplaced { body: id.to_string(), record });
+    }
+    let (bodies, tree, origins) = if ir.model.occurrences.is_empty() {
         let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let origins = unplaced.iter().map(|u| validation::Origin { body: u.body.clone(), world: identity }).collect();
+        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
         let tree = vec![StepNode {
             name: product.to_string(),
             transform: identity,
@@ -134,14 +196,15 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
             left_out: Vec::new(),
             children: Vec::new(),
         }];
-        (bodies, tree)
+        (bodies, tree, origins)
     } else {
         assembly::placed(ir, product, unplaced, &mut warnings)
     };
-    ImportRecords { bodies, tree, warnings, system: system.to_string() }
+    (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
 }
 
 mod assembly;
+mod validation;
 
 /// A file's appearances by what they colour: whole bodies and single faces (CADIR ids).
 struct Looks<'a> {
@@ -458,10 +521,22 @@ mod convert {
             "step" => "",
             other => other,
         };
-        let records = super::cadir_records(&ir, &product, system, format == "step");
+        let (mut records, origins) = super::traced_records(&ir, &product, system, format == "step");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
+        }
+        // The file's own figures for its parts, checked against the bodies (built once: the
+        // design's evaluation finds them in the recent imports). A part that differs is a warning
+        // about the file kept with its records, so the import's report (the History tooltip, the
+        // status line, Copy Warning Message) has it, as SolidCraft's reader reports the file.
+        if !ir.model.declared_measures.is_empty()
+            && let Ok(imp) = solidcraft_kernel::records_import_shared(&records)
+        {
+            let notes = super::validation::check(&ir, &records, &origins, &imp);
+            if !notes.is_empty() {
+                records = solidcraft_kernel::records_noted(records, &imp, notes).map_err(|e| e.to_string())?.0;
+            }
         }
         Ok((records, warnings, format == "fcstd"))
     }
