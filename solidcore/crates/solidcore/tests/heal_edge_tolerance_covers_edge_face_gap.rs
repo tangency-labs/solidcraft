@@ -1762,7 +1762,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0x902afd170f1e23a9,
+    0x6c4db4a115acc49e,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
