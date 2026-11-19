@@ -119,18 +119,22 @@ impl PlanarTensor {
 /// side of the parameter rectangle. Require all four sides to be represented.
 pub fn rectangular_trim(curves: &[Curve2], span: [[f64; 2]; 2]) -> bool {
     let epsilon = span.map(|[a, b]| ((b - a) * 1e-6).max(1e-9));
+    let [[u0, u1], [v0, v1]] = span;
+    let [eu, ev] = epsilon;
     let mut used = [false; 4];
     for curve in curves {
         let control = |[x, y, w]: [f64; 3], side: usize| {
             if !w.is_finite() || w <= 0.0 {
                 return false;
             }
-            let point = [x / w, y / w];
-            let axis = side / 2;
-            let other = 1 - axis;
-            (point[axis] - span[axis][side % 2]).abs() <= epsilon[axis]
-                && point[other] >= span[other][0] - epsilon[other]
-                && point[other] <= span[other][1] + epsilon[other]
+            let (u, v) = (x / w, y / w);
+            match side {
+                0 => (u - u0).abs() <= eu && v >= v0 - ev && v <= v1 + ev,
+                1 => (u - u1).abs() <= eu && v >= v0 - ev && v <= v1 + ev,
+                2 => (v - v0).abs() <= ev && u >= u0 - eu && u <= u1 + eu,
+                3 => (v - v1).abs() <= ev && u >= u0 - eu && u <= u1 + eu,
+                _ => false,
+            }
         };
         let side = (0..4).find(|&side| match curve {
             Curve2::Spline { points, .. } => {
@@ -143,7 +147,10 @@ pub fn rectangular_trim(curves: &[Curve2], span: [[f64; 2]; 2]) -> bool {
         let Some(side) = side else {
             return false;
         };
-        used[side] = true;
+        let Some(used) = used.get_mut(side) else {
+            return false;
+        };
+        *used = true;
     }
     used.into_iter().all(|side| side)
 }

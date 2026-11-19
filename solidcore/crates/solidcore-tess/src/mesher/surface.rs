@@ -18,6 +18,7 @@ pub(crate) fn eval_surface(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::eval::vec::VecExt;
 
     /// Every face of `b` evaluates, through [`eval_surface`] and its [`Params`], as the kernel's
     /// evaluator ([`solidcore::eval::SurfaceEval`]) evaluates the record, over the face's parameter box: the same

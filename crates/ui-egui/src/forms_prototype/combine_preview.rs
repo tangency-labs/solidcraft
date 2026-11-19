@@ -18,7 +18,7 @@ mod browser {
 
     /// The browser shell runs the CAD computation in its dedicated Form worker.
     #[cfg(target_arch = "wasm32")]
-    pub trait BrowserPreviewHost {
+    pub trait BrowserPreviewHost: super::super::browser_transform::BrowserTransformHost {
         fn preview_busy(&self) -> bool;
         fn submit_preview(
             &self,
@@ -301,6 +301,7 @@ fn localized_error(error: String) -> String {
 }
 
 pub(super) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    let transforming = transform_job::active(app);
     let desired = key(app);
     let state = &mut app.forms_prototype.combination;
     #[cfg(target_arch = "wasm32")]
@@ -327,6 +328,7 @@ pub(super) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let Some(key) = desired else { return };
     if state.requested == Some(key)
+        || transforming
         || app.forms_prototype.pending.is_some()
         || app.forms_prototype.drag.is_some()
         || app.forms_prototype.gizmo_drag.is_some()

@@ -3,6 +3,60 @@ use solidcore::geom::form_subdivision as kernel;
 use solidcore_convert::{record_vec3, vec3};
 use solidcore_record::Vec3;
 
+pub use kernel::StepEdge;
+
+/// Evaluate the ordered Catmull–Clark coordinate masks in the kernel.
+pub fn step_points(
+    points: &[Vec3],
+    faces: &[Vec<usize>],
+    edges: &[StepEdge],
+    incident: &[Vec<usize>],
+    corners: &[f64],
+) -> solidcore::Result<Vec<Vec3>> {
+    if points
+        .len()
+        .checked_add(edges.len())
+        .and_then(|n| n.checked_add(faces.len()))
+        .is_none_or(|n| n > kernel::MAX_STEP_POINTS)
+        || faces.len() > kernel::MAX_STEP_FACES
+    {
+        return Err(solidcore::SolidError::invalid_input(
+            "Form subdivision",
+            "step point budget exceeded",
+        ));
+    }
+    let points = points.iter().copied().map(vec3).collect::<Vec<_>>();
+    kernel::step_points(&points, faces, edges, incident, corners)
+        .map(|p| p.into_iter().map(record_vec3).collect())
+}
+
+/// Area-weighted preview normals, independent of logical model ownership.
+pub fn vertex_normals(points: &[Vec3], triangles: &[[u32; 3]]) -> solidcore::Result<Vec<Vec3>> {
+    if points.len() > kernel::MAX_STEP_POINTS || triangles.len() > 2 * kernel::MAX_STEP_FACES {
+        return Err(solidcore::SolidError::invalid_input(
+            "Form subdivision",
+            "display normal budget exceeded",
+        ));
+    }
+    let points = points.iter().copied().map(vec3).collect::<Vec<_>>();
+    kernel::vertex_normals(&points, triangles).map(|p| p.into_iter().map(record_vec3).collect())
+}
+
+/// Coordinate centroid in the application's prescribed stable order.
+pub fn centroid(points: impl ExactSizeIterator<Item = Vec3>) -> solidcore::Result<Vec3> {
+    kernel::centroid(points.map(vec3)).map(record_vec3)
+}
+
+/// Whether a nonzero extrusion displacement meets the coordinate contract.
+pub fn extrusion_delta(delta: Vec3) -> bool {
+    kernel::extrusion_delta(vec3(delta))
+}
+
+/// Decay one semi-sharp subdivision constraint.
+pub fn decay_sharpness(sharpness: f64) -> f64 {
+    kernel::decay_sharpness(sharpness)
+}
+
 /// Limit point along a boundary or crease.
 pub fn crease_limit(point: Vec3, neighbors: [Vec3; 2]) -> Vec3 {
     record_vec3(kernel::crease_limit(vec3(point), neighbors.map(vec3)))

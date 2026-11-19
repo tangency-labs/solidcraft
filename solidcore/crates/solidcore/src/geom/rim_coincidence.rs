@@ -1,7 +1,10 @@
 //! Continuous outward-rounded distance bounds between rational rim restrictions.
 //!
-//! Recursion in de Casteljau qualification is bounded by MAX_DEPTH = 12.
+//! Recursion in de Casteljau qualification is bounded by `MAX_DEPTH` = 12.
+use crate::error::nurbs::NurbsFailure;
 use crate::eval::spline::MAX_SPLINE_DEGREE;
+use crate::geom::certified::{next_down, next_up};
+use crate::{Result, SolidError};
 
 /// A bounded spline viewed without copying its knots or controls.
 #[derive(Clone, Copy)]
@@ -14,24 +17,14 @@ pub struct Curve<'a> {
     pub ctrl: &'a [[f64; 4]],
 }
 
-/// Why a continuous rational-rim bound could not be constructed.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum SplineError {
-    /// The rational geometry does not meet the proof's input contract.
-    #[error("invalid spline: {0}")]
-    Invalid(String),
-    /// The proof exceeded its bounded workspace or caller's work budget.
-    #[error("spline too large: {0}")]
-    TooLarge(String),
-}
-type SplineResult<T> = Result<T, SplineError>;
+const OP: &str = "geom::rim_coincidence";
 
-fn invalid<T>(message: &str) -> SplineResult<T> {
-    Err(SplineError::Invalid(message.into()))
+fn invalid<T>() -> Result<T> {
+    Err(SolidError::nurbs(OP, NurbsFailure::Input))
 }
 
-fn missing() -> SplineError {
-    SplineError::Invalid("missing rational rim control or knot".into())
+fn missing() -> SolidError {
+    SolidError::nurbs(OP, NurbsFailure::Input)
 }
 
 const MAX_PIECES: usize = 512;
@@ -58,8 +51,8 @@ impl Interval {
     }
     fn rounded(lo: f64, hi: f64) -> Self {
         let interval = Self {
-            lo: lo.next_down(),
-            hi: hi.next_up(),
+            lo: next_down(lo),
+            hi: next_up(hi),
         };
         if interval.finite() {
             interval
@@ -98,7 +91,7 @@ impl Interval {
         }
         self.mul(Self::rounded(1.0 / b.hi, 1.0 / b.lo))
     }
-    fn unit(self) -> SplineResult<Self> {
+    fn unit(self) -> Result<Self> {
         let clipped = Self {
             lo: self.lo.max(0.0),
             hi: self.hi.min(1.0),
@@ -106,7 +99,7 @@ impl Interval {
         if self.finite() && clipped.finite() {
             Ok(clipped)
         } else {
-            invalid("unresolved rational rim parameter interval")
+            invalid()
         }
     }
     fn square(self) -> Self {
@@ -138,10 +131,10 @@ enum Controls<'a> {
     Native(Vec<Coefficient>),
 }
 
-fn charge(work: &mut usize, debit: usize) -> SplineResult<()> {
-    *work = work.checked_sub(debit).ok_or_else(|| {
-        SplineError::TooLarge("rational rim coincidence work budget exceeded".into())
-    })?;
+fn charge(work: &mut usize, debit: usize) -> Result<()> {
+    *work = work
+        .checked_sub(debit)
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Storage))?;
     Ok(())
 }
 
@@ -149,9 +142,9 @@ fn spans<'a>(
     pieces: &'a [([f64; 2], Curve<'a>)],
     reverse: bool,
     work: &mut usize,
-) -> SplineResult<Vec<Span<'a>>> {
+) -> Result<Vec<Span<'a>>> {
     if pieces.is_empty() || pieces.len() > MAX_PIECES {
-        return invalid("rational rim requires a bounded complete piece sequence");
+        return invalid();
     }
     charge(work, pieces.len() * (1 + pieces.len().ilog2() as usize))?;
     let mut pieces: Vec<_> = pieces.iter().collect();
@@ -166,12 +159,10 @@ fn spans<'a>(
             || !(1..=MAX_SPLINE_DEGREE.min(PROOF_MAX_DEGREE)).contains(&degree)
             || count <= degree
             || count > MAX_PIECES * degree + 1
-            || !(count - 1).is_multiple_of(degree)
+            || (count - 1).checked_rem(degree) != Some(0)
             || curve.knots.len() != count + degree + 1
         {
-            return invalid(
-                "rational rim pieces must partition the unit side with bounded Bezier spans",
-            );
+            return invalid();
         }
         previous = *b;
         charge(work, count + curve.knots.len())?;
@@ -189,11 +180,11 @@ fn spans<'a>(
                 .iter()
                 .any(|p| p.iter().any(|x| !x.is_finite()) || p[3] <= 0.0)
         {
-            return invalid("rational rim needs finite positive-weight clamped controls");
+            return invalid();
         }
         let span_count = (count - 1).checked_div(degree).ok_or_else(missing)?;
         if result.len() + span_count > MAX_PIECES {
-            return Err(SplineError::TooLarge("too many rational rim spans".into()));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Storage));
         }
         let scale = Interval::at(*b).sub(Interval::at(*a));
         let absolute = |t: f64| {
@@ -214,11 +205,11 @@ fn spans<'a>(
             if !(start_knot < end_knot && end_knot <= 1.0)
                 || end_group.iter().any(|&x| x != end_knot)
             {
-                return invalid("rational rim has a non-Bezier knot span");
+                return invalid();
             }
             let width = scale.mul(Interval::at(end_knot).sub(Interval::at(start_knot)));
             if !width.finite() || width.lo <= 0.0 {
-                return invalid("rational rim span width cannot be bounded");
+                return invalid();
             }
             let (start, end) = (absolute(start_knot), absolute(end_knot));
             let (start, end) = if reverse {
@@ -243,16 +234,12 @@ fn spans<'a>(
         }
     }
     if previous != 1.0 {
-        return invalid("rational rim piece sequence is incomplete");
+        return invalid();
     }
     Ok(result)
 }
 
-fn native_spans(
-    curve: &Curve<'_>,
-    reverse: bool,
-    work: &mut usize,
-) -> SplineResult<Vec<Span<'static>>> {
+fn native_spans(curve: &Curve<'_>, reverse: bool, work: &mut usize) -> Result<Vec<Span<'static>>> {
     let p = curve.degree;
     let n = curve.ctrl.len();
     if !(1..=MAX_SPLINE_DEGREE.min(PROOF_MAX_DEGREE)).contains(&p)
@@ -260,7 +247,7 @@ fn native_spans(
         || n > MAX_PIECES
         || curve.knots.len() != n + p + 1
     {
-        return invalid("native rim requires a bounded clamped spline");
+        return invalid();
     }
     charge(work, n + curve.knots.len())?;
     let interior = curve.knots.get(p + 1..n).ok_or_else(missing)?;
@@ -283,9 +270,7 @@ fn native_spans(
             .iter()
             .any(|c| c.iter().any(|x| !x.is_finite()) || c[3] <= 0.0)
     {
-        return invalid(
-            "native rim requires finite positive-weight controls and clamped unit knots",
-        );
+        return invalid();
     }
     let mut knots = curve.knots.to_vec();
     let mut controls: Vec<_> = curve
@@ -297,23 +282,21 @@ fn native_spans(
     for group in interior.chunk_by(|a, b| a == b) {
         let &u = group
             .first()
-            .ok_or_else(|| SplineError::Invalid("empty native rim knot group".into()))?;
+            .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Input))?;
         if group.len() > p {
-            return invalid("native rim is discontinuous");
+            return invalid();
         }
         breaks.push(u);
         for _ in group.len()..p {
             if controls.len() > MAX_PIECES * p {
-                return Err(SplineError::TooLarge(
-                    "native rim spline packing budget exceeded".into(),
-                ));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Storage));
             }
             insert_native_knot(p, u, &mut knots, &mut controls, work)?;
         }
     }
     breaks.push(1.0);
     if controls.len() != (breaks.len() - 1) * p + 1 {
-        return invalid("native rim did not produce complete Bezier spans");
+        return invalid();
     }
     breaks
         .windows(2)
@@ -325,7 +308,7 @@ fn native_spans(
             let [a, b] = [Interval::at(a), Interval::at(b)];
             let width = b.sub(a);
             if !width.finite() || width.lo <= 0.0 {
-                return invalid("native rim span width cannot be bounded");
+                return invalid();
             }
             let (start, end) = if reverse {
                 (Interval::at(1.0).sub(b), Interval::at(1.0).sub(a))
@@ -335,7 +318,7 @@ fn native_spans(
             charge(work, p + 1)?;
             let row = controls
                 .get(i * p..=(i + 1) * p)
-                .ok_or_else(|| SplineError::Invalid("native rim lost a Bezier span".into()))?;
+                .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Input))?;
             Ok(Span {
                 start,
                 end,
@@ -353,13 +336,13 @@ fn insert_native_knot(
     knots: &mut Vec<f64>,
     controls: &mut Vec<Coefficient>,
     work: &mut usize,
-) -> SplineResult<()> {
+) -> Result<()> {
     charge(work, 16 * (controls.len() + 1) + knots.len())?;
     let k = knots
         .partition_point(|&t| t <= u)
         .checked_sub(1)
-        .ok_or_else(|| SplineError::Invalid("missing native rim knot span".into()))?;
-    let invalid_row = || SplineError::Invalid("missing native rim control or knot".into());
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Input))?;
+    let invalid_row = || SolidError::nurbs(OP, NurbsFailure::Input);
     let mut next = Vec::new();
     for i in 0..=controls.len() {
         let point = if i + degree <= k {
@@ -397,7 +380,7 @@ fn split(
     points: &[Coefficient],
     t: Interval,
     work: &mut usize,
-) -> SplineResult<(Vec<Coefficient>, Vec<Coefficient>)> {
+) -> Result<(Vec<Coefficient>, Vec<Coefficient>)> {
     let count = points.len();
     charge(work, 8 * count * count)?;
     let mut row = points.to_vec();
@@ -432,7 +415,7 @@ fn restrict(
     start: Interval,
     end: Interval,
     work: &mut usize,
-) -> SplineResult<Vec<Coefficient>> {
+) -> Result<Vec<Coefficient>> {
     let a = start.sub(span.start).div(span.width).unit()?;
     let b = end.sub(span.start).div(span.width).unit()?;
     let mut points: Vec<_> = match &span.controls {
@@ -459,7 +442,7 @@ fn restrict(
         let t = b.sub(a).div(Interval::at(1.0).sub(a)).unit()?;
         Ok(split(&right, t, work)?.0)
     } else {
-        invalid("rational rim overlap cannot be restricted")
+        invalid()
     }
 }
 
@@ -469,11 +452,7 @@ fn choose(n: usize, k: usize) -> f64 {
     (1..=k).fold(1.0, |a, i| a * (n + 1 - i) as f64 / i as f64)
 }
 
-fn difference(
-    a: &[Coefficient],
-    b: &[Coefficient],
-    work: &mut usize,
-) -> SplineResult<Vec<Coefficient>> {
+fn difference(a: &[Coefficient], b: &[Coefficient], work: &mut usize) -> Result<Vec<Coefficient>> {
     let (p, q) = (a.len() - 1, b.len() - 1);
     charge(work, 16 * (p + 1) * (q + 1) + 4 * (p + q + 1) * (p + q + 1))?;
     let weights: Vec<_> = (0..=p + q)
@@ -508,7 +487,7 @@ fn difference(
     Ok(difference)
 }
 
-fn distance(point: Coefficient) -> SplineResult<Interval> {
+fn distance(point: Coefficient) -> Result<Interval> {
     let [x, y, z, w] = point;
     let square = [x, y, z]
         .into_iter()
@@ -516,7 +495,7 @@ fn distance(point: Coefficient) -> SplineResult<Interval> {
             sum.add(component.div(w).square())
         });
     if !square.finite() {
-        return invalid("rational rim distance overflowed or lost positive weight");
+        return invalid();
     }
     Ok(Interval::rounded(
         square.lo.max(0.0).sqrt(),
@@ -529,7 +508,7 @@ fn qualify(
     tolerance: f64,
     depth: usize,
     work: &mut usize,
-) -> SplineResult<Option<f64>> {
+) -> Result<Option<f64>> {
     charge(work, 16 * points.len())?;
     let mut upper = 0.0_f64;
     for (i, &point) in points.iter().enumerate() {
@@ -563,7 +542,7 @@ pub fn rational_rim_gap(
     reversed: [bool; 2],
     tolerance: f64,
     work: &mut usize,
-) -> SplineResult<Option<f64>> {
+) -> Result<Option<f64>> {
     check_tolerance(tolerance)?;
     let a = spans(first, reversed[0], work)?;
     let b = spans(second, reversed[1], work)?;
@@ -578,16 +557,16 @@ pub fn rational_rim_to_native_gap(
     reversed: [bool; 2],
     tolerance: f64,
     work: &mut usize,
-) -> SplineResult<Option<f64>> {
+) -> Result<Option<f64>> {
     check_tolerance(tolerance)?;
     let a = spans(fitted, reversed[0], work)?;
     let b = native_spans(native, reversed[1], work)?;
     prove_gap(&a, &b, tolerance, work)
 }
 
-fn check_tolerance(tolerance: f64) -> SplineResult<()> {
+fn check_tolerance(tolerance: f64) -> Result<()> {
     if !tolerance.is_finite() || tolerance <= 0.0 || tolerance > 1.0 {
-        return invalid("rational rim tolerance must be finite and in (0,1] mm");
+        return invalid();
     }
     Ok(())
 }
@@ -597,7 +576,7 @@ fn prove_gap(
     second: &[Span<'_>],
     tolerance: f64,
     work: &mut usize,
-) -> SplineResult<Option<f64>> {
+) -> Result<Option<f64>> {
     let mut upper = 0.0_f64;
     let mut overlap = false;
     for a in first {
@@ -630,13 +609,75 @@ fn prove_gap(
     if overlap {
         Ok(Some(upper))
     } else {
-        invalid("rational rim pieces have no common parameter")
+        invalid()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rim_rounding_preserves_ieee_neighbors_and_refuses_nonfinite_enclosures() {
+        let sign = 1_u64 << 63;
+        for zero in [0.0_f64, -0.0] {
+            assert_eq!(next_up(zero).to_bits(), 1);
+            assert_eq!(next_down(zero).to_bits(), sign | 1);
+        }
+        for value in [1.0_f64, f64::MIN_POSITIVE] {
+            assert_eq!(next_up(value).to_bits(), value.to_bits() + 1);
+            assert_eq!(next_down(value).to_bits(), value.to_bits() - 1);
+            assert_eq!(next_up(-value).to_bits(), (-value).to_bits() - 1);
+            assert_eq!(next_down(-value).to_bits(), (-value).to_bits() + 1);
+        }
+        assert_eq!(next_up(f64::NEG_INFINITY), -f64::MAX);
+        assert_eq!(next_down(f64::INFINITY), f64::MAX);
+        assert_eq!(next_up(f64::MAX), f64::INFINITY);
+        assert_eq!(next_down(-f64::MAX), f64::NEG_INFINITY);
+        assert_eq!(next_up(f64::INFINITY), f64::INFINITY);
+        assert_eq!(next_down(f64::NEG_INFINITY), f64::NEG_INFINITY);
+        for bits in [0x7ff8_0123_4567_89ab, 0xfff8_0123_4567_89ab] {
+            let nan = f64::from_bits(bits);
+            assert_eq!(next_up(nan).to_bits(), bits);
+            assert_eq!(next_down(nan).to_bits(), bits);
+            let enclosure = Interval::rounded(nan, 0.0);
+            assert_eq!(
+                [enclosure.lo, enclosure.hi],
+                [f64::NEG_INFINITY, f64::INFINITY]
+            );
+        }
+        let zero = Interval::rounded(0.0, 0.0);
+        assert_eq!([zero.lo.to_bits(), zero.hi.to_bits()], [sign | 1, 1]);
+    }
+
+    #[test]
+    fn rim_span_count_refuses_zero_degree_and_incomplete_bezier_packing() {
+        let controls = [[0.0, 0.0, 0.0, 1.0]; 4];
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let zero = [(
+            [0.0, 1.0],
+            Curve {
+                degree: 0,
+                knots: &knots,
+                ctrl: &controls,
+            },
+        )];
+        let refused = spans(&zero, false, &mut 1_000).err().unwrap();
+        assert_eq!(refused.nurbs_failure(), Some(&NurbsFailure::Input));
+        assert!(!refused.is_defect());
+        let limit = charge(&mut 0, 1).unwrap_err();
+        assert_eq!(limit.nurbs_failure(), Some(&NurbsFailure::Storage));
+        assert!(!limit.is_defect());
+        let incomplete = [(
+            [0.0, 1.0],
+            Curve {
+                degree: 2,
+                knots: &knots,
+                ctrl: &controls,
+            },
+        )];
+        assert!(spans(&incomplete, false, &mut 1000).is_err());
+    }
 
     #[test]
     fn rational_gap_covers_mismatched_breaks_reversal_and_interior_deviation() {

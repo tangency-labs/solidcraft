@@ -100,6 +100,7 @@ pub(super) struct State {
     local_bridge: bool,
     desired: Option<serde_json::Value>,
     applied: Option<serde_json::Value>,
+    failed: Option<(serde_json::Value, String)>,
     deadline: f64,
     pending: Option<Pending>,
     error: Option<String>,
@@ -456,6 +457,7 @@ pub(super) fn start(app: &mut SolveApp, mode: Mode) {
         local_bridge,
         desired: None,
         applied: None,
+        failed: None,
         deadline: 0.0,
         pending: None,
         error: None,
@@ -852,21 +854,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.add(egui::Label::new(app.tr("forms.prototype.bridge_bakes_local")).wrap());
     }
     let now = ui.input(|i| i.time);
-    match params(app, &state) {
-        Ok(given) => {
-            if state.desired.as_ref() != Some(&given) {
-                state.desired = Some(given);
-                state.deadline = now + 0.12;
-                state.error = None;
-            }
-        }
-        Err(error) => {
-            state.desired = None;
-            state.error = Some(error);
-        }
-    }
+    let request = params(app, &state);
+    update_request(&mut state, request, now);
     if state.pending.is_none()
         && state.desired != state.applied
+        && !state.failed.as_ref().is_some_and(|(given, _)| state.desired.as_ref() == Some(given))
         && let Some(given) = state.desired.clone()
     {
         if now >= state.deadline {
@@ -884,12 +876,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(error) = state.error.as_ref().or(app.forms_prototype.live.error.as_ref()).or(app.forms_prototype.context.error.as_ref()) {
         ui.add(egui::Label::new(egui::RichText::new(error).color(Tokens::get().error)).wrap());
     }
-    let ready = state.pending.is_none()
-        && state.desired.is_some()
-        && state.desired == state.applied
-        && state.error.is_none()
-        && context::complete(app)
-        && live_cad::mesh(app).is_some();
+    let ready = can_apply(&state) && context::complete(app) && live_cad::mesh(app).is_some();
     let mut done = false;
     ui.horizontal(|ui| {
         let r = crate::ui_kit::button(ui, app.tr("forms.prototype.apply"), crate::ui_kit::Button::Enabled(ready));
@@ -1034,6 +1021,28 @@ pub(super) fn pointer(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, input: &cr
 fn entry_faces(mesh: &Mesh, edge: usize, face: usize) -> bool {
     mesh.edge_faces.get(edge).is_some_and(|faces| faces.contains(&(face as u32)))
 }
+fn update_request(state: &mut State, request: Result<serde_json::Value, String>, now: f64) {
+    match request {
+        Ok(given) => {
+            if state.desired.as_ref() != Some(&given) {
+                state.error = state.failed.as_ref().filter(|(failed, _)| *failed == given).map(|(_, error)| error.clone());
+                state.desired = Some(given);
+                state.deadline = now + 0.12;
+            }
+        }
+        Err(error) => {
+            state.desired = None;
+            state.error = Some(error);
+        }
+    }
+}
+fn can_apply(state: &State) -> bool {
+    state.pending.is_none() && state.desired.is_some() && state.desired == state.applied && state.error.is_none()
+}
+fn refuse(state: &mut State, given: serde_json::Value, error: String) {
+    state.failed = Some((given, error.clone()));
+    state.error = Some(error);
+}
 fn compute(app: &mut SolveApp, ctx: &egui::Context, state: &mut State, given: serde_json::Value) {
     let Some(form) = &app.session.forms_prototype else { return };
     let refined_erase = state.mode == Mode::EraseFill && matches!(state.fill_choices, FillChoices::Refined { .. });
@@ -1067,39 +1076,43 @@ fn compute(app: &mut SolveApp, ctx: &egui::Context, state: &mut State, given: se
         }) {
             Ok(_) => {
                 state.error = None;
+                state.failed = None;
                 state.pending = Some(Pending { revision, params: given, done: rx });
-                return;
             }
-            Err(error) => state.error = Some(error.to_string()),
+            Err(error) => refuse(state, given, error.to_string()),
         }
     }
-    if needs_native {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let message = if refined_collapse {
-                "forms.collapse.desktop_required"
-            } else if refined_unweld {
-                "forms.unweld.refined_desktop_required"
-            } else if refined_erase {
-                "forms.fill.erase_desktop_required"
-            } else {
-                "forms.fill.desktop_required"
-            };
-            state.error = Some(app.tr(message).to_owned());
+    #[cfg(target_arch = "wasm32")]
+    {
+        if needs_native {
+            #[cfg(target_arch = "wasm32")]
+            {
+                let message = if refined_collapse {
+                    "forms.collapse.desktop_required"
+                } else if refined_unweld {
+                    "forms.unweld.refined_desktop_required"
+                } else if refined_erase {
+                    "forms.fill.erase_desktop_required"
+                } else {
+                    "forms.fill.desktop_required"
+                };
+                refuse(state, given, app.tr(message).to_owned());
+            }
+            return;
         }
-        state.applied = Some(given);
-        return;
+        let _ = (ctx, form);
+        compute_sync(app, state, given);
     }
-    let _ = (ctx, form);
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn compute_sync(app: &mut SolveApp, state: &mut State, given: serde_json::Value) {
     match app.session.execute("form.prototype.tool.preview", &given) {
         Ok(_) => {
             state.applied = Some(given);
+            state.failed = None;
             state.error = None;
         }
-        Err(error) => {
-            state.applied = Some(given);
-            state.error = Some(error.to_string());
-        }
+        Err(error) => refuse(state, given, error.to_string()),
     }
 }
 pub(super) fn tick(app: &mut SolveApp) {
@@ -1124,15 +1137,16 @@ pub(super) fn tick(app: &mut SolveApp) {
     let given = pending.params.clone();
     state.pending = None;
     if current {
-        state.applied = Some(given);
         match result.and_then(|prepared| app.session.accept_commands(prepared).map_err(|e| e.to_string())) {
             Ok(replies) => {
+                state.applied = Some(given);
+                state.failed = None;
                 state.error = None;
                 for (id, reply) in replies {
                     let _ = app.command_completed(&id, Ok(reply));
                 }
             }
-            Err(error) => state.error = Some(error),
+            Err(error) => refuse(&mut state, given, error),
         }
     }
     app.forms_prototype.tool_panel = Some(state);
@@ -1155,6 +1169,67 @@ pub(super) fn cancel(app: &mut SolveApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synchronous_preview_failure_keeps_the_successful_request_and_its_refusal() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", json!({"primitive":"face","segments":[2,2,1],"levels":0})).unwrap();
+        start(&mut app, Mode::Thicken);
+        let mut state = app.forms_prototype.tool_panel.take().unwrap();
+        state.distance = "2 mm".into();
+        let a = params(&app, &state).unwrap();
+        update_request(&mut state, Ok(a.clone()), 0.0);
+        compute_sync(&mut app, &mut state, a.clone());
+        assert!(can_apply(&state));
+        let accepted = app.session.forms_prototype.as_ref().unwrap().definition();
+        let b = json!({"topology":{"tool":"thicken","distance":0.0}});
+        update_request(&mut state, Ok(b.clone()), 1.0);
+        compute_sync(&mut app, &mut state, b.clone());
+        let failure = state.error.clone().unwrap();
+        assert_eq!(state.applied, Some(a.clone()));
+        assert!(!can_apply(&state));
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), accepted);
+        update_request(&mut state, Err("invalid expression".into()), 2.0);
+        assert!(!can_apply(&state));
+        update_request(&mut state, Ok(b.clone()), 3.0);
+        assert_eq!(state.error.as_deref(), Some(failure.as_str()));
+        assert_eq!(state.failed.as_ref().map(|(given, _)| given), Some(&b));
+        assert!(!can_apply(&state));
+        update_request(&mut state, Ok(a), 4.0);
+        assert!(can_apply(&state));
+        update_request(&mut state, Ok(b), 5.0);
+        assert_eq!(state.error.as_deref(), Some(failure.as_str()));
+        assert!(!can_apply(&state));
+    }
+
+    #[test]
+    fn rejected_async_preview_never_marks_the_failed_request_as_applied() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", json!({"primitive":"face","segments":[2,2,1],"levels":0})).unwrap();
+        start(&mut app, Mode::Thicken);
+        let a = json!({"topology":{"tool":"thicken","distance":2.0}});
+        let revision = app.session.forms_prototype.as_ref().unwrap().revision;
+        let prepared = app.session.scratch().compute_commands(&[("form.prototype.tool.preview".into(), a.clone())], None).unwrap();
+        inject(&mut app, revision, a.clone(), prepared);
+        tick(&mut app);
+        assert!(can_apply(app.forms_prototype.tool_panel.as_ref().unwrap()));
+        let accepted = app.session.forms_prototype.as_ref().unwrap().definition();
+        let b = json!({"topology":{"tool":"thicken","distance":3.0}});
+        let revision = app.session.forms_prototype.as_ref().unwrap().revision;
+        let prepared = app.session.scratch().compute_commands(&[("form.prototype.tool.preview".into(), b.clone())], None).unwrap();
+        app.session.doc_mut().name = "Changed during preview".into();
+        inject(&mut app, revision, b.clone(), prepared);
+        tick(&mut app);
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), accepted);
+        let state = app.forms_prototype.tool_panel.as_mut().unwrap();
+        let failure = state.error.clone().unwrap();
+        assert_eq!(state.applied, Some(a));
+        assert!(!can_apply(state));
+        update_request(state, Err("invalid expression".into()), 1.0);
+        update_request(state, Ok(b), 2.0);
+        assert_eq!(state.error.as_deref(), Some(failure.as_str()));
+        assert!(!can_apply(state));
+    }
     use solidcraft_engine::geom::tess::from_kernel;
     #[test]
     fn tool_entry_rechecks_refinement_and_undo_without_mutating_a_refused_edit() {
@@ -1375,7 +1450,7 @@ mod tests {
         accepted.forms_prototype.elements = selected;
         selection::sync(&mut accepted);
         assert!(surface::cap_selected(&accepted));
-        assert!(triad(&accepted).is_none());
+        assert!(triad(&accepted).is_some());
         let before_delete = accepted.session.forms_prototype.as_ref().unwrap().definition();
         accepted.forms_prototype.elements.insert(Element::Edge(edge));
         assert_eq!(topology_unavailable(&accepted, "delete_faces"), Some("forms.fill.select_cap_only"));

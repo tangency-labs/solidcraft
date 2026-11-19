@@ -103,6 +103,11 @@ pub fn build(
     kernel::build(kind, dimensions, segments, radii, &path).map(record_cage)
 }
 
+/// Preserve the legacy radial cube-grid primitive through the canonical Box layout.
+pub fn radial_box(size: f64, spans: usize) -> solidcore::Result<CageGeometry> {
+    kernel::radial_box(size, spans).map(record_cage)
+}
+
 /// Offset existing cage controls along their incident face normals.
 pub fn offset_controls(
     points: &[Vec3],

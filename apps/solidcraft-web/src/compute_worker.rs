@@ -2,6 +2,7 @@
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    use solidcraft_engine::forms_prototype::BrowserTransform;
     use solidcraft_engine::forms_prototype::validation::BrowserCheck;
     use solidcraft_ui_egui::forms_prototype::BrowserPreview;
     use solidcraft_web::{Kind, frame, frame_bytes, read};
@@ -17,6 +18,7 @@ fn main() {
             let (kind, response) = match kind {
                 Kind::Check => (Kind::Checked, BrowserCheck::run(input).map_err(|error| error.to_string())?),
                 Kind::Preview => (Kind::Previewed, BrowserPreview::run(input)?),
+                Kind::Transform => (Kind::Transformed, BrowserTransform::run(input).map_err(|error| error.to_string())?),
                 _ => return Err("unexpected Form CAD worker request".into()),
             };
             frame(kind, id, &response).map_err(str::to_owned)

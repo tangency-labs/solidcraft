@@ -5,7 +5,9 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use solidcraft_engine::forms_prototype::validation::BrowserCheck;
-use solidcraft_ui_egui::forms_prototype::{BrowserCheckHost, BrowserCheckOutcome, BrowserPreview, BrowserPreviewHost, BrowserPreviewOutcome};
+use solidcraft_ui_egui::forms_prototype::{
+    BrowserCheckHost, BrowserCheckOutcome, BrowserPreview, BrowserPreviewHost, BrowserPreviewOutcome, BrowserTransformHost, BrowserTransformOutcome,
+};
 use solidcraft_web::{Kind, frame, frame_bytes, read};
 use wasm_bindgen::{JsCast, closure::Closure};
 use web_sys::{Event, MessageEvent, Worker, WorkerOptions, WorkerType};
@@ -81,6 +83,7 @@ struct Job {
 enum Finished {
     Check(Sender<BrowserCheckOutcome>),
     Preview(Sender<BrowserPreviewOutcome>),
+    Transform(Sender<BrowserTransformOutcome>),
 }
 
 impl Finished {
@@ -88,6 +91,7 @@ impl Finished {
         match self {
             Self::Check(_) => Kind::Checked,
             Self::Preview(_) => Kind::Previewed,
+            Self::Transform(_) => Kind::Transformed,
         }
     }
 
@@ -98,6 +102,9 @@ impl Finished {
             }
             Self::Preview(done) => {
                 let _ = done.send(result.and_then(BrowserPreview::decode_reply));
+            }
+            Self::Transform(done) => {
+                let _ = done.send(result.map(<[u8]>::to_vec));
             }
         }
     }
@@ -138,6 +145,22 @@ impl BrowserPreviewHost for FormCheckWorker {
         ctx: &egui::Context,
     ) -> Result<(), String> {
         self.submit_job(Kind::Preview, request, cancelled, Finished::Preview(done), ctx)
+    }
+}
+
+impl BrowserTransformHost for FormCheckWorker {
+    fn transform_busy(&self) -> bool {
+        self.busy()
+    }
+
+    fn submit_transform(
+        &self,
+        request: Vec<u8>,
+        cancelled: Rc<Cell<bool>>,
+        done: Sender<BrowserTransformOutcome>,
+        ctx: &egui::Context,
+    ) -> Result<(), String> {
+        self.submit_job(Kind::Transform, request, cancelled, Finished::Transform(done), ctx)
     }
 }
 
@@ -191,7 +214,7 @@ impl State {
             let message = message?;
             match read(&message)? {
                 (Kind::Ready, _, _) if !self.ready => self.ready = true,
-                (kind @ (Kind::Checked | Kind::Previewed), id, payload) if self.ready => {
+                (kind @ (Kind::Checked | Kind::Previewed | Kind::Transformed), id, payload) if self.ready => {
                     if !self.job.as_ref().is_some_and(|job| job.id == id && job.request.is_none() && job.done.response() == kind) {
                         return Err("unexpected Form CAD worker job reply".into());
                     }

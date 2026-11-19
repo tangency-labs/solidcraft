@@ -193,3 +193,95 @@ fn hostile_boxes_never_panic() {
     assert!(MeshIndex::new(&m).raycast(&m, Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0)).is_none());
     MeshIndex::new(&m).segments_near(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), f64::NAN, 0.0, |_, _| panic!("no segments"));
 }
+
+#[test]
+fn mesh_index_wire_round_trip_preserves_flat_trees_hits_and_segments() {
+    let mut rng = Lcg(17);
+    let mesh = mesh(8, 40, &mut rng);
+    let original = MeshIndex::new(&mesh);
+    let encoded = serde_json::to_vec(&original.to_wire()).unwrap();
+    let wire: MeshIndexWire = serde_json::from_slice(&encoded).unwrap();
+    let restored = MeshIndex::from_wire(wire, &mesh).unwrap();
+    assert_eq!(serde_json::to_vec(&restored.to_wire()).unwrap(), encoded);
+    for _ in 0..200 {
+        let origin = rng.vec(20.0) + Vec3::Z * 20.0;
+        let direction = (rng.vec(8.0) - origin).normalized().unwrap();
+        let mut a = 1_000_000;
+        let mut b = a;
+        assert_eq!(restored.raycast_bounded(&mesh, origin, direction, &mut a), original.raycast_bounded(&mesh, origin, direction, &mut b));
+        assert_eq!(a, b, "hydration must retain the exact traversal");
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        original.segments_near(origin, direction, 0.3, 0.01, |e, s| before.push((e, s)));
+        restored.segments_near(origin, direction, 0.3, 0.01, |e, s| after.push((e, s)));
+        assert_eq!(before, after);
+    }
+    let empty = Mesh::default();
+    assert!(MeshIndex::from_wire(MeshIndex::new(&empty).to_wire(), &empty).is_some());
+}
+
+#[test]
+fn mesh_index_wire_rejects_malformed_graphs_coverage_bounds_and_dimensions() {
+    let mut rng = Lcg(19);
+    let mesh = mesh(4, 0, &mut rng);
+    let wire = MeshIndex::new(&mesh).to_wire();
+    for defect in 0..9 {
+        let mut altered = wire.clone();
+        match defect {
+            0 => altered.triangles.nodes[0].bounds.min.x = f64::NAN,
+            1 => altered.triangles.nodes[0].first = u32::MAX,
+            2 => altered.triangles.nodes[0].first = 0,
+            3 => altered.triangles.nodes.push(altered.triangles.nodes[0]),
+            4 => altered.triangles.order[0] = altered.triangles.order[1],
+            5 => altered.triangles.nodes[0].count = u32::MAX,
+            6 => altered.segment_of[0] = (u32::MAX, 0),
+            7 => altered.edge_lengths[0] += 1,
+            _ => altered.triangles.nodes[0].bounds.max = altered.triangles.nodes[0].bounds.min,
+        }
+        assert!(MeshIndex::from_wire(altered, &mesh).is_none(), "defect {defect}");
+    }
+    let mut other = mesh.clone();
+    other.positions.push(Vec3::ZERO);
+    assert!(MeshIndex::from_wire(wire.clone(), &other).is_none());
+    other = mesh.clone();
+    other.triangles[0] = [u32::MAX; 3];
+    assert!(MeshIndex::from_wire(wire.clone(), &other).is_none());
+    other = mesh.clone();
+    for point in &mut other.positions {
+        *point += Vec3::X * 1000.0;
+    }
+    assert!(MeshIndex::from_wire(wire, &other).is_none(), "dimensions alone cannot qualify unrelated coordinates");
+}
+
+#[test]
+fn mesh_index_wire_has_bounded_decode_and_depth() {
+    use serde::de::value::{Error, SeqDeserializer};
+    assert!(wire_array::<_, u8>(SeqDeserializer::<_, Error>::new(0u8..4), 3).is_err());
+    assert!(wire_array::<_, u8>(SeqDeserializer::<_, Error>::new((0u8..4).filter(|_| true)), 3).is_err());
+    assert_eq!(wire_array::<_, u8>(SeqDeserializer::<_, Error>::new(0u8..3), 3).unwrap(), [0, 1, 2]);
+    let chain = |depth: usize| {
+        let mut nodes = vec![Node { bounds: Aabb3 { min: Vec3::ZERO, max: Vec3::ZERO }, first: 0, count: 0 }; depth * 2 + 1];
+        for level in 0..depth {
+            nodes[level * 2].first = (level * 2 + 1) as u32;
+            nodes[level * 2 + 1].first = level as u32;
+            nodes[level * 2 + 1].count = 1;
+        }
+        nodes[depth * 2].first = depth as u32;
+        nodes[depth * 2].count = 1;
+        BvhWire { nodes, order: (0..=depth as u32).collect() }
+    };
+    assert!(chain(MAX_WIRE_DEPTH).hydrate(MAX_WIRE_DEPTH + 1, |_, _| true).is_some());
+    assert!(chain(MAX_WIRE_DEPTH + 1).hydrate(MAX_WIRE_DEPTH + 2, |_, _| true).is_none());
+    let bounds = Aabb3 { min: Vec3::ZERO, max: Vec3::ZERO };
+    let shared = BvhWire {
+        nodes: vec![
+            Node { bounds, first: 1, count: 0 },
+            Node { bounds, first: 3, count: 0 },
+            Node { bounds, first: 3, count: 0 },
+            Node { bounds, first: 0, count: 1 },
+            Node { bounds, first: 1, count: 2 },
+        ],
+        order: vec![0, 1, 2],
+    };
+    assert!(shared.hydrate(3, |_, _| true).is_none());
+}

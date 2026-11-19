@@ -1,20 +1,24 @@
-//! Coalesced native Move, Rotate and Scale for hierarchical Forms.
+//! Coalesced Move, Rotate and Scale for Form edits that need background fitting.
 use super::*;
-#[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::forms_prototype::FormTransformJob;
 use solidcraft_engine::forms_prototype::PreparedFormTransform;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Owner {
     Pointer,
     Gizmo,
+    #[cfg(target_arch = "wasm32")]
+    Numeric,
 }
 impl Owner {
     fn drag(self, forms: &super::State) -> Option<&Drag> {
         match self {
             Self::Pointer => forms.drag.as_ref(),
             Self::Gizmo => forms.gizmo_drag.as_ref(),
+            #[cfg(target_arch = "wasm32")]
+            Self::Numeric => None,
         }
     }
 
@@ -22,6 +26,8 @@ impl Owner {
         match self {
             Self::Pointer => forms.drag.as_mut(),
             Self::Gizmo => forms.gizmo_drag.as_mut(),
+            #[cfg(target_arch = "wasm32")]
+            Self::Numeric => None,
         }
     }
 }
@@ -29,7 +35,10 @@ impl Owner {
 type Outcome = Result<PreparedFormTransform, String>;
 struct Pending {
     sequence: u64,
+    #[cfg(not(target_arch = "wasm32"))]
     done: Receiver<Outcome>,
+    #[cfg(target_arch = "wasm32")]
+    browser: browser_transform::Pending,
 }
 struct Gesture {
     owner: Owner,
@@ -52,9 +61,11 @@ pub(super) struct State {
     pub(super) gate: Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// Browser gestures and ordinary base cages keep the existing synchronous path.
+/// Dense native edits and fit-qualified browser edits use the background pipeline.
 pub(super) fn source(app: &SolveApp) -> Option<FormTransformStamp> {
-    if cfg!(target_arch = "wasm32") || app.session.forms_prototype.as_ref().is_none_or(|f| f.hierarchy.is_none()) {
+    let form = app.session.forms_prototype.as_ref()?;
+    let background = if cfg!(target_arch = "wasm32") { form.needs_fitted_transform() } else { form.hierarchy.is_some() };
+    if !background {
         return None;
     }
     FormTransformStamp::capture(&app.session)
@@ -151,6 +162,31 @@ pub(super) fn submit(
     true
 }
 
+/// Numeric derived edits share the browser gesture worker, already released.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn one_shot(app: &mut SolveApp, ctx: &egui::Context, space: FormTargetSpace, mut parameters: serde_json::Value) {
+    if active(app) {
+        app.set_status(app.tr("forms.prototype.command_worker_busy").to_owned(), true);
+        return;
+    }
+    let Some(source) = FormTransformStamp::capture(&app.session) else { return };
+    parameters["checkpoint"] = json!(false);
+    app.forms_prototype.transform_job.gesture = Some(Gesture {
+        owner: Owner::Numeric,
+        source,
+        space,
+        request: transform_feedback::Value::Move(Vec3::ZERO),
+        parameters,
+        sequence: 0,
+        settled: None,
+        authored: false,
+        failed: false,
+        released: true,
+        pending: None,
+    });
+    tick(app, ctx);
+}
+
 pub(super) fn release(app: &mut SolveApp) {
     let Some(gesture) = &mut app.forms_prototype.transform_job.gesture else { return };
     gesture.released = true;
@@ -163,7 +199,16 @@ pub(super) fn cancel(app: &mut SolveApp) -> bool {
     let Some(gesture) = app.forms_prototype.transform_job.gesture.take() else { return false };
     transform_feedback::clear(app);
     if gesture.authored && gesture.source.is_current(&app.session) {
+        // Cancel rolls back one gesture without applying the selection reset
+        // used for explicit history navigation. Transforms retain logical IDs.
+        let elements = app.forms_prototype.elements.clone();
+        let pivot = app.forms_prototype.pivot;
+        let selection_state = std::mem::take(&mut app.forms_prototype.selection);
         run(app, "form.prototype.undo", json!({}));
+        app.forms_prototype.elements = elements;
+        app.forms_prototype.pivot = pivot;
+        app.forms_prototype.selection = selection_state;
+        selection::sync(app);
     }
     true
 }
@@ -201,17 +246,25 @@ pub(super) fn discard_stale(app: &mut SolveApp) {
 pub(super) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     discard_stale(app);
     poll(app);
-    #[cfg(not(target_arch = "wasm32"))]
     dispatch(app, ctx);
-    #[cfg(target_arch = "wasm32")]
-    let _ = ctx;
 }
 fn poll(app: &mut SolveApp) {
     let Some(mut gesture) = app.forms_prototype.transform_job.gesture.take() else { return };
-    let result = gesture.pending.as_ref().and_then(|pending| match pending.done.try_recv() {
-        Ok(result) => Some(result),
-        Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => Some(Err("Form transform computation stopped".into())),
+    let sequence = gesture.sequence;
+    let result: Option<Outcome> = gesture.pending.as_mut().and_then(|pending| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = sequence;
+            match pending.done.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err("Form transform computation stopped".into())),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            pending.browser.poll(pending.sequence == sequence)
+        }
     });
     if let Some(result) = result
         && let Some(pending) = gesture.pending.take()
@@ -246,11 +299,42 @@ fn poll(app: &mut SolveApp) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn prepare(app: &SolveApp, gesture: &Gesture) -> Result<FormTransformJob, String> {
     let mut params = gesture.parameters.clone();
     params["checkpoint"] = json!(!gesture.authored);
     app.session.prepare_form_transform(gesture.space, params).map_err(|error| error.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn dispatch(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(gesture) = app.forms_prototype.transform_job.gesture.as_ref() else { return };
+    if gesture.pending.is_some() || gesture.settled == Some(gesture.sequence) {
+        return;
+    }
+    if app.browser_form_check.as_ref().is_some_and(|host| host.transform_busy()) {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        return;
+    }
+    let sequence = gesture.sequence;
+    let launched = app
+        .browser_form_check
+        .as_ref()
+        .ok_or_else(|| app.tr("forms.prototype.browser_transform_unavailable").to_owned())
+        .and_then(|host| browser_transform::Pending::submit(prepare(app, gesture)?, host.as_ref(), ctx));
+    if let Some(gesture) = &mut app.forms_prototype.transform_job.gesture {
+        match launched {
+            Ok(browser) => gesture.pending = Some(Pending { sequence, browser }),
+            Err(error) => {
+                gesture.settled = Some(sequence);
+                gesture.failed = true;
+                transform_feedback::clear(app);
+                app.set_status(error, true);
+                if released(app) {
+                    app.forms_prototype.transform_job.gesture = None;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -330,4 +414,99 @@ pub(super) fn hold_for_test(app: &mut SolveApp) -> Result<(FormTransformJob, std
         gesture.pending = Some(Pending { sequence, done });
     }
     Ok((job, tx))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::forms_prototype::browser_transform::{BrowserTransformHost, BrowserTransformOutcome};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use std::sync::mpsc::Sender;
+
+    struct Hosted {
+        request: Vec<u8>,
+        cancelled: Rc<Cell<bool>>,
+        done: Sender<BrowserTransformOutcome>,
+    }
+    #[derive(Default)]
+    struct Host(RefCell<Option<Hosted>>);
+
+    impl BrowserTransformHost for Host {
+        fn transform_busy(&self) -> bool {
+            self.0.borrow().is_some()
+        }
+        fn submit_transform(
+            &self,
+            request: Vec<u8>,
+            cancelled: Rc<Cell<bool>>,
+            done: Sender<BrowserTransformOutcome>,
+            _: &egui::Context,
+        ) -> Result<(), String> {
+            assert!(!self.transform_busy());
+            *self.0.borrow_mut() = Some(Hosted { request, cancelled, done });
+            Ok(())
+        }
+    }
+
+    #[allow(clippy::unwrap_used)]
+    fn target(app: &SolveApp) -> FormTransformJob {
+        let form = app.session.forms_prototype.as_ref().unwrap();
+        let vertices: Vec<_> = app.forms_prototype.selected.iter().copied().collect();
+        let positions: Vec<_> = vertices
+            .iter()
+            .map(|&id| {
+                let point = form.surface.vertices[id] + Vec3::Z * 0.1;
+                [point.x, point.y, point.z]
+            })
+            .collect();
+        app.session.prepare_form_transform(FormTargetSpace::Surface, json!({"vertices":vertices,"positions":positions,"checkpoint":true})).unwrap()
+    }
+
+    #[test]
+    fn browser_transform_cancellation_retains_the_shared_slot_and_one_checkpoint() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        super::super::tests::create_capped_form(&mut app);
+        let before = app.session.forms_prototype.as_ref().unwrap().definition();
+        let undo = app.session.forms_prototype.as_ref().unwrap().inspect()["undo"].as_u64().unwrap();
+        let host = Host::default();
+        let ctx = egui::Context::default();
+        let pending = browser_transform::Pending::submit(target(&app), &host, &ctx).unwrap();
+        let cancelled = host.0.borrow().as_ref().unwrap().cancelled.clone();
+        drop(pending);
+        assert!(cancelled.get());
+        assert!(host.transform_busy());
+        assert!(browser_transform::Pending::submit(target(&app), &host, &ctx).is_err());
+        let abandoned = host.0.borrow_mut().take().unwrap();
+        assert!(abandoned.done.send(Err("discarded computation".into())).is_err());
+        let mut pending = browser_transform::Pending::submit(target(&app), &host, &ctx).unwrap();
+        let work = host.0.borrow_mut().take().unwrap();
+        let reply = solidcraft_engine::forms_prototype::BrowserTransform::run(&work.request).unwrap();
+        work.done.send(Ok(reply)).unwrap();
+        let prepared = pending.poll(true).unwrap().unwrap();
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), before);
+        app.session.accept_form_transform(prepared).unwrap();
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect()["undo"], undo + 1);
+        app.run("form.prototype.undo", json!({})).unwrap();
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), before);
+    }
+
+    #[test]
+    fn browser_transform_superseded_malformed_and_disconnected_replies_keep_the_source() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        super::super::tests::create_capped_form(&mut app);
+        let before = app.session.forms_prototype.as_ref().unwrap().inspect();
+        let host = Host::default();
+        let ctx = egui::Context::default();
+        for current in [false, true] {
+            let mut pending = browser_transform::Pending::submit(target(&app), &host, &ctx).unwrap();
+            host.0.borrow_mut().take().unwrap().done.send(Ok(vec![0])).unwrap();
+            assert!(pending.poll(current).unwrap().is_err());
+            assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect(), before);
+        }
+        let mut pending = browser_transform::Pending::submit(target(&app), &host, &ctx).unwrap();
+        drop(host.0.borrow_mut().take());
+        assert!(pending.poll(true).unwrap().is_err());
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect(), before);
+    }
 }

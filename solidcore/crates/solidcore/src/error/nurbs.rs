@@ -49,6 +49,51 @@
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
+/// A bounded ordered linear solve refusal, preserving its numerical stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinearSolveFailure {
+    /// Buffer or ownership dimensions disagree.
+    InvalidShape,
+    /// The banded fit has no positive Cholesky pivot.
+    FitSingular,
+    /// The banded fit does not produce finite values.
+    FitNonFinite,
+    /// The dense patch has no positive finite Cholesky pivot.
+    PatchSingular,
+    /// The dense patch does not produce finite values.
+    PatchNonFinite,
+    /// The block reconstruction does not produce finite values.
+    BlocksNonFinite,
+    /// More coordinates are shared than the bounded Schur solve permits.
+    SharedLimit {
+        /// Shared coordinate count.
+        given: usize,
+    },
+    /// A declared dimension exceeds the solver bound.
+    TooLarge,
+    /// The bounded storage allocation failed.
+    Allocation,
+}
+
+impl core::fmt::Display for LinearSolveFailure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::InvalidShape => f.write_str("the fit's equations are out of shape"),
+            Self::FitSingular => f.write_str("the fit's equations are singular"),
+            Self::FitNonFinite => f.write_str("the fit is not finite"),
+            Self::PatchSingular => f.write_str("the patch's equations are singular"),
+            Self::PatchNonFinite => f.write_str("the patch's equations have no finite solution"),
+            Self::BlocksNonFinite => f.write_str("the patches' equations have no finite solution"),
+            Self::SharedLimit { given } => write!(
+                f,
+                "{given} unknowns shared by the patches about the centre (at most 4000)"
+            ),
+            Self::TooLarge => f.write_str("the ordered solve dimension exceeds its limit"),
+            Self::Allocation => f.write_str("the ordered solve storage cannot be allocated"),
+        }
+    }
+}
+
 /// Why a NURBS routine fails.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
@@ -139,6 +184,8 @@ pub enum NurbsFailure {
     },
     /// A B-spline curve or surface method failed (not an NLib routine itself).
     BSpline(BSplineFailure),
+    /// An ordered spline fitting solve failed.
+    LinearSolve(LinearSolveFailure),
 }
 
 /// Why a B-spline curve or surface method fails.
@@ -274,7 +321,7 @@ impl NurbsFailure {
             Self::Singular => 16,
             Self::Geometry => 17,
             Self::DerivativeOrder { .. } | Self::NoDerivativeRows => 20,
-            Self::BSpline(_) => return None,
+            Self::BSpline(_) | Self::LinearSolve(_) => return None,
         })
     }
 
@@ -347,6 +394,7 @@ impl core::fmt::Display for NurbsFailure {
                 )
             }
             Self::BSpline(b) => b.fmt(f),
+            Self::LinearSolve(reason) => reason.fmt(f),
         }
     }
 }

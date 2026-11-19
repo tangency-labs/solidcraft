@@ -443,7 +443,7 @@ fn script(app: &mut SolveApp, p: &Value) -> Outcome {
         Ok(steps) => steps,
         Err(e) => return err(e),
     };
-    if let Some(reason) = form_validation_refusal(app, &steps) {
+    if let Some(reason) = form_validation_refusal(app, steps) {
         return err(format!("engine.script unavailable: {reason}"));
     }
     if let Some(c) = steps.iter().find_map(switches_design) {

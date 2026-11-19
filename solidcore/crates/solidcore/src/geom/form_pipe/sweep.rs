@@ -193,7 +193,7 @@ fn add_cap(
     Ok(())
 }
 
-fn transport(u: Vec3, a: Vec3, b: Vec3) -> Result<Vec3> {
+pub(crate) fn transport(u: Vec3, a: Vec3, b: Vec3) -> Result<Vec3> {
     let dot = a.dot(b).clamp(-1.0, 1.0);
     if dot < -1.0 + 1e-10 {
         return Err(bad("pipe path reverses direction"));

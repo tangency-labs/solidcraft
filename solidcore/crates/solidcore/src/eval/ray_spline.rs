@@ -69,20 +69,29 @@ impl Axis {
             .ok_or(SplineError::InvalidSpline)?;
         if count <= degree
             || knots.iter().any(|k| !k.is_finite())
-            || knots.windows(2).any(|k| k[0] > k[1])
+            || knots.windows(2).any(|k| matches!(k, [a, b] if a > b))
         {
             return Err(SplineError::InvalidSpline);
         }
-        let lo = knots[degree];
-        let hi = knots[count];
+        let lo = *knots.get(degree).ok_or(SplineError::InvalidSpline)?;
+        let hi = *knots.get(count).ok_or(SplineError::InvalidSpline)?;
         if lo >= hi
-            || knots[..=degree].iter().any(|&k| k != lo)
-            || knots[count..].iter().any(|&k| k != hi)
+            || knots
+                .get(..=degree)
+                .ok_or(SplineError::InvalidSpline)?
+                .iter()
+                .any(|&k| k != lo)
+            || knots
+                .get(count..)
+                .ok_or(SplineError::InvalidSpline)?
+                .iter()
+                .any(|&k| k != hi)
         {
             return Err(SplineError::InvalidSpline);
         }
         for run in knots.chunk_by(|a, b| a == b) {
-            let limit = degree + usize::from(run[0] == lo || run[0] == hi);
+            let first = *run.first().ok_or(SplineError::InvalidSpline)?;
+            let limit = degree + usize::from(first == lo || first == hi);
             if run.len() > limit {
                 return Err(SplineError::InvalidSpline);
             }
@@ -140,21 +149,26 @@ impl Axis {
             .windows(2)
             .enumerate()
             .skip(self.degree)
-            .take(grid.size[axis] - self.degree)
+            .take(*grid.size.get(axis).ok_or(SplineError::InvalidSpline)? - self.degree)
         {
-            if domain[0] <= w[0] && w[0] < w[1] && w[1] <= domain[1] {
+            let &[a, b] = w else {
+                return Err(SplineError::InvalidSpline);
+            };
+            if domain[0] <= a && a < b && b <= domain[1] {
                 if spans.len() >= MAX_SPANS {
                     return Err(SplineError::Budget);
                 }
                 spans.push(Span {
                     start: i - self.degree,
-                    range: [w[0], w[1]],
+                    range: [a, b],
                 });
             }
         }
         if spans.first().is_none_or(|span| span.range[0] != domain[0])
             || spans.last().is_none_or(|span| span.range[1] != domain[1])
-            || spans.windows(2).any(|p| p[0].range[1] != p[1].range[0])
+            || spans
+                .windows(2)
+                .any(|p| matches!(p, [a, b] if a.range[1] != b.range[0]))
         {
             return Err(SplineError::InvalidSpline);
         }
@@ -194,11 +208,13 @@ impl Grid {
     ) -> Result<()> {
         if size.contains(&0)
             || size[0].checked_mul(size[1]) != Some(target.len())
-            || (0..2).any(|i| {
-                start[i]
-                    .checked_add(size[i])
-                    .is_none_or(|end| end > self.size[i])
-            })
+            || start
+                .into_iter()
+                .zip(size)
+                .zip(self.size)
+                .any(|((start, count), limit)| {
+                    start.checked_add(count).is_none_or(|end| end > limit)
+                })
         {
             return Err(SplineError::InvalidSpline);
         }
@@ -216,7 +232,8 @@ impl Grid {
         work: &mut usize,
     ) -> Result<()> {
         let mut size = self.size;
-        size[direction] += 1;
+        let size_axis = size.get_mut(direction).ok_or(SplineError::InvalidSpline)?;
+        *size_axis = size_axis.checked_add(1).ok_or(SplineError::Budget)?;
         let count = size[0] * size[1];
         if count > MAX_CONTROLS || axis.knots.len() >= MAX_KNOTS {
             return Err(SplineError::Budget);
@@ -252,13 +269,16 @@ impl Grid {
         }
         for (index, target) in controls.iter_mut().enumerate() {
             let at = [index % size[0], index / size[0]];
-            let i = at[direction];
+            let i = *at.get(direction).ok_or(SplineError::InvalidSpline)?;
             if i + degree <= span {
                 *target = self.get(at)?;
                 continue;
             }
             let mut previous = at;
-            previous[direction] = i - 1;
+            *previous
+                .get_mut(direction)
+                .ok_or(SplineError::InvalidSpline)? =
+                i.checked_sub(1).ok_or(SplineError::InvalidSpline)?;
             let before = self.get(previous)?;
             *target = if i > span {
                 before
@@ -266,16 +286,19 @@ impl Grid {
                 let after = self.get(at)?;
                 let alpha = *alphas.get(i - first).ok_or(SplineError::InvalidSpline)?;
                 let beta = I::point(1.0).sub(alpha);
-                std::array::from_fn(|j| {
+                let mut blended = [I::ZERO; 4];
+                for (out, (before, after)) in blended.iter_mut().zip(before.into_iter().zip(after))
+                {
                     // Unit weights and equal coordinates are fixed by this
                     // convex blend, even if the knot ratio is unrepresentable.
-                    let hull = before[j].hull(after[j]);
-                    before[j]
+                    let hull = before.hull(after);
+                    *out = before
                         .mul(beta)
-                        .add(after[j].mul(alpha))
+                        .add(after.mul(alpha))
                         .intersect(hull)
-                        .unwrap_or(hull)
-                })
+                        .unwrap_or(hull);
+                }
+                blended
             };
         }
         axis.knots
@@ -296,16 +319,17 @@ pub fn trim_parity(
     depth: usize,
     work: &mut usize,
 ) -> Result<Option<bool>> {
+    if x > 1 {
+        return Err(SplineError::InvalidSpline);
+    }
     super::ray_tensor::spend(work, 8 * controls.len())?;
     let (Some(first), Some(last)) = (controls.first(), controls.last()) else {
         return Err(SplineError::InvalidSpline);
     };
-    let bounds = [0, 1].map(|i| {
-        controls
-            .iter()
-            .map(|p| p[i].div(p[3]))
-            .fold(first[i].div(first[3]), I::hull)
-    });
+    let bounds = controls.iter().fold(
+        [first[0].div(first[3]), first[1].div(first[3])],
+        |[u, v], &[x, y, _, w]| [u.hull(x.div(w)), v.hull(y.div(w))],
+    );
     if bounds.iter().any(|b| !b.is_finite()) {
         return Ok(None);
     }
@@ -314,19 +338,25 @@ pub fn trim_parity(
         .zip(query)
         .any(|(a, b)| a.intersect(b).is_none())
     {
-        let y = 1 - x;
-        if bounds[x].hi < at[x] || bounds[y].hi <= at[y] || bounds[y].lo > at[y] {
+        let y = 1usize.checked_sub(x).ok_or(SplineError::InvalidSpline)?;
+        let (bx, by, ax, ay) = (
+            *bounds.get(x).ok_or(SplineError::InvalidSpline)?,
+            *bounds.get(y).ok_or(SplineError::InvalidSpline)?,
+            *at.get(x).ok_or(SplineError::InvalidSpline)?,
+            *at.get(y).ok_or(SplineError::InvalidSpline)?,
+        );
+        if bx.hi < ax || by.hi <= ay || by.lo > ay {
             return Ok(Some(false));
         }
-        if bounds[x].lo > at[x] {
+        if bx.lo > ax {
             // The complete positive-weight path is in the right half-plane.
             // There it can be deformed into its endpoint chord without crossing
             // the probe, so its parity is the chord's half-open crossing parity.
             let above = |p: &Control| {
-                let t = p[y].div(p[3]);
-                if t.lo > at[y] {
+                let t = p.get(y)?.div(p[3]);
+                if t.lo > ay {
                     Some(true)
-                } else if t.hi <= at[y] {
+                } else if t.hi <= ay {
                     Some(false)
                 } else {
                     None
@@ -345,4 +375,28 @@ pub fn trim_parity(
         return Ok(None);
     };
     Ok(trim_parity(&b, query, at, x, depth + 1, work)?.map(|right| left ^ right))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostile_trim_axes_and_grid_directions_are_checked() {
+        let controls = vec![[I::point(1.0); 4]; 4];
+        assert!(matches!(
+            trim_parity(&controls, [I::UNIT; 2], [0.; 2], usize::MAX, 0, &mut 1000),
+            Err(SplineError::InvalidSpline)
+        ));
+        let mut grid = Grid::new([2, 2], controls).unwrap();
+        let mut axis = Axis::new(&[0., 0., 1., 1.], 2, &mut 1000).unwrap();
+        assert!(matches!(
+            axis.spans(&mut grid, usize::MAX, [0., 1.], &mut 1000),
+            Err(SplineError::InvalidSpline)
+        ));
+        assert!(matches!(
+            grid.copy_span([usize::MAX, 0], [1, 1], &mut [[I::ZERO; 4]]),
+            Err(SplineError::InvalidSpline)
+        ));
+    }
 }

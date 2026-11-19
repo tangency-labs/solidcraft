@@ -47,8 +47,9 @@
 //! hostile: sizes are capped and every evaluation checked; nothing here panics.
 
 use crate::bspline::{SplineError, SplineResult, invalid};
-use crate::fill::{Band, Grid, LoopFill, LoopFrame, MAX_LOOP_POINTS, SMOOTHNESS, check_projectable, loop_frame};
+use crate::fill::{Grid, LoopFill, LoopFrame, MAX_LOOP_POINTS, SMOOTHNESS, check_projectable, loop_frame};
 use crate::fill_general::Station;
+use crate::fill_solve::Band;
 use crate::prelude::*;
 use solidcore_record::Vec3;
 
@@ -316,7 +317,7 @@ fn derivatives(grid: &Grid, heights: &[f64], q: [f64; 2]) -> Option<[f64; 6]> {
 fn solve(grid: &Grid, rows: &[Row], cell: f64) -> SplineResult<Vec<f64>> {
     let [cu, cv] = grid.count;
     let n = cu * cv;
-    let mut band = Band::new(n, 3 * cu + 3);
+    let mut band = Band::new(n, 3 * cu + 3)?;
     let mut rhs = vec![0.0; n];
     let add = |terms: &[(usize, f64)], value: f64, weight: f64, band: &mut Band, rhs: &mut Vec<f64>| {
         let w2 = weight * weight;

@@ -281,7 +281,7 @@ fn parameter_rows(kind: &str) -> (ParameterRows, ParameterRows, ParameterRows) {
     }
 }
 pub(super) fn numeric(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if surface::cap_selected(app) {
+    if cfg!(target_arch = "wasm32") && surface::cap_selected(app) {
         ui.add(egui::Label::new(app.tr("forms.fill.cap_rim_editing")).wrap());
         return;
     }
@@ -295,8 +295,10 @@ pub(super) fn numeric(app: &mut SolveApp, ui: &mut egui::Ui) {
     inputs(ui, &labels, &mut fields.rotation);
     ui.label(&titles[2]);
     inputs(ui, &labels, &mut fields.scale);
-    if crate::ui_kit::button(ui, apply, crate::ui_kit::Button::Normal).clicked() {
-        transform(app);
+    let response = crate::ui_kit::button(ui, apply, crate::ui_kit::Button::Normal);
+    crate::scenario::publish_handle("forms_apply_transform", response.rect.center());
+    if response.clicked() {
+        transform(app, ui.ctx());
     }
 }
 pub(super) fn output(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -499,7 +501,7 @@ pub(super) fn finish_params(app: &mut SolveApp) -> Result<serde_json::Value, Str
     }
     Ok(params)
 }
-fn transform(app: &mut SolveApp) {
+fn transform(app: &mut SolveApp, ctx: &egui::Context) {
     let fields = &app.forms_prototype.controls;
     let (Some(t), Some(r), Some(s)) =
         (array(app, &fields.translation, Kind::Length), array(app, &fields.rotation, Kind::Angle), array(app, &fields.scale, Kind::Unitless))
@@ -539,16 +541,86 @@ fn transform(app: &mut SolveApp) {
         app.set_status(app.tr("forms.prototype.invalid_number").to_owned(), true);
         return;
     };
-    run(
-        app,
-        if targets.control { "form.prototype.set_vertices" } else { "form.prototype.set_surface_vertices" },
-        json!({"vertices":targets.indices,"positions":positions}),
-    );
+    let command = if targets.control { "form.prototype.set_vertices" } else { "form.prototype.set_surface_vertices" };
+    let params = json!({"vertices":targets.indices,"positions":positions});
+    if app.session.forms_prototype.as_ref().is_some_and(|form| form.needs_fitted_transform()) {
+        #[cfg(not(target_arch = "wasm32"))]
+        finish::command(app, ctx, command, params);
+        #[cfg(target_arch = "wasm32")]
+        transform_job::one_shot(app, ctx, if targets.control { FormTargetSpace::Control } else { FormTargetSpace::Surface }, params);
+    } else {
+        run(app, command, params);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn desktop_cap_numeric_transforms_use_the_command_worker_and_preserve_selection() {
+        for mode in ["move", "rotate", "axis", "plane", "uniform"] {
+            let mut app = SolveApp::new(Default::default(), Default::default());
+            let cap = super::super::tests::create_capped_form(&mut app);
+            let source = app.session.forms_prototype.as_ref().unwrap().definition();
+            let undo = app.session.forms_prototype.as_ref().unwrap().inspect()["undo"].as_u64().unwrap();
+            let center = triad(&app).unwrap().center;
+            let targets = soft_selection::targets(&app, false).unwrap();
+            match mode {
+                "move" => app.forms_prototype.controls.translation[2] = "0.15 mm".into(),
+                "rotate" => app.forms_prototype.controls.rotation[2] = "5 deg".into(),
+                "axis" => app.forms_prototype.controls.scale[0] = "1.05".into(),
+                "plane" => app.forms_prototype.controls.scale = ["1.05".into(), "0.95".into(), "1".into()],
+                _ => app.forms_prototype.controls.scale = ["1.05".into(), "1.05".into(), "1.05".into()],
+            }
+            let expected: Vec<_> = targets
+                .points
+                .iter()
+                .map(|&point| {
+                    let delta = point - center;
+                    match mode {
+                        "move" => point + Vec3::Z * 0.15,
+                        "rotate" => {
+                            let (sin, cos) = 5.0f64.to_radians().sin_cos();
+                            center + Vec3::new(delta.x * cos - delta.y * sin, delta.x * sin + delta.y * cos, delta.z)
+                        }
+                        "axis" => center + Vec3::new(delta.x * 1.05, delta.y, delta.z),
+                        "plane" => center + Vec3::new(delta.x * 1.05, delta.y * 0.95, delta.z),
+                        _ => center + delta * 1.05,
+                    }
+                })
+                .collect();
+            let ctx = egui::Context::default();
+            let mut draw = |events| {
+                let _ = crate::test_support::frame(
+                    &ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| numeric(&mut app, ui),
+                );
+            };
+            draw(Vec::new());
+            let at = crate::scenario::handle_at("forms_apply_transform").unwrap();
+            draw(crate::test_support::pointer(at, true));
+            draw(crate::test_support::pointer(at, false));
+            assert!(app.forms_prototype.pending.is_some(), "{mode}: {:?}", app.status);
+            assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), source);
+            finish::flush_for_test(&mut app).unwrap();
+            let form = app.session.forms_prototype.as_ref().unwrap();
+            for (&id, point) in targets.indices.iter().zip(expected) {
+                assert!(form.surface.vertices[id].dist(point) < 1e-5, "{mode}, {id}: {:?}", app.status);
+            }
+            assert_eq!(form.inspect()["undo"], undo + 1, "{mode}");
+            assert!(form.hierarchy.as_ref().unwrap().is_quad_cap_face(cap));
+            assert_eq!(app.forms_prototype.elements, BTreeSet::from([Element::Face(cap)]));
+            app.run("form.prototype.undo", json!({})).unwrap();
+            assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), source);
+        }
+    }
 
     fn click_topology(app: &mut SolveApp, ctx: &egui::Context, tool: &str) {
         let mut draw = |events| {
@@ -959,7 +1031,7 @@ mod soft_transform_tests {
         let targets = soft_selection::targets(&app, false).unwrap();
         assert!(targets.weights.iter().any(|&w| w > 0.0 && w < 1.0));
         assert!(targets.weights.contains(&1.0));
-        transform(&mut app);
+        transform(&mut app, &egui::Context::default());
         let form = app.session.forms_prototype.as_ref().unwrap();
         for ((&id, &p), &weight) in targets.indices.iter().zip(&targets.points).zip(&targets.weights) {
             assert!(form.surface.vertices[id].dist(p + Vec3::Z * (2.0 * weight)) < 1e-6);
@@ -984,13 +1056,13 @@ mod soft_transform_tests {
         app.forms_prototype.soft.radius = "-1 mm".into();
         let before = app.session.forms_prototype.as_ref().unwrap().definition();
         let undo = app.session.forms_prototype.as_ref().unwrap().inspect()["undo"].clone();
-        transform(&mut app);
+        transform(&mut app, &egui::Context::default());
         assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), before);
         assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect()["undo"], undo);
         app.forms_prototype.soft.enabled = false;
         let seed = *app.forms_prototype.selected.first().unwrap();
         let p = app.session.forms_prototype.as_ref().unwrap().surface.vertices[seed];
-        transform(&mut app);
+        transform(&mut app, &egui::Context::default());
         assert!(app.session.forms_prototype.as_ref().unwrap().surface.vertices[seed].dist(p + Vec3::Z * 2.0) < 1e-6);
     }
 
@@ -1024,7 +1096,7 @@ mod soft_transform_tests {
                     center + Vec3::new(a * cos - b * sin, a * sin + b * cos, z) + Vec3::new(1.0, 2.0, 3.0) * w
                 })
                 .collect();
-            transform(&mut app);
+            transform(&mut app, &egui::Context::default());
             let form = app.session.forms_prototype.as_ref().unwrap();
             let positions = if targets.control { form.control_positions() } else { form.surface.vertices.clone() };
             for (&id, expected) in targets.indices.iter().zip(expected) {

@@ -100,7 +100,7 @@
 //!   halved (both ways where a point is missed, a patch folds, or the patches share one space),
 //!   up to [`MAX_ISO_SPANS`] and the free points one solve takes ([`MAX_BANDED_POINTS`] for one
 //!   patch, whose system is banded, and about a centre, whose patches' banded interiors are
-//!   eliminated onto the unknowns they share, at most [`MAX_SHARED_UNKNOWNS`]). A
+//!   eliminated onto the unknowns they share, at most 4000 shared scalar coordinates). A
 //!   fill that then still misses the angle tolerance or a point, or folds, is refused; one that
 //!   misses only an order above G1 is the closest the finest space holds, its jumps reported
 //!   ([`Achieved::jumps`]).
@@ -112,6 +112,7 @@
 
 use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, NurbsSurface, SplineError, SplineResult, check_knots, invalid, segment};
 use crate::fill_general::Across;
+use crate::fill_solve::Normal;
 use crate::linkage::MAX_CONTINUITY;
 use crate::prelude::*;
 use crate::spline_space::{Cond, Interpolant, Space};
@@ -123,12 +124,8 @@ pub const MAX_ISO_SPANS: usize = 64;
 pub const MAX_ISO_EDGES: usize = 16;
 /// Most free control points of one solve: of one patch (its system is banded: see
 /// [`Quilt::new`]), or of the patches about a centre (each patch's interior banded, eliminated
-/// onto the unknowns the patches share: [`BlockNormal`]).
+/// onto the unknowns the patches share: the block solver).
 const MAX_BANDED_POINTS: usize = 6000;
-/// Most unknowns (coordinates) the patches about a centre share once their interiors are
-/// eliminated: the spokes, the centre and the points beside the spokes that rows across them
-/// couple. Their system is dense: 4000² values, 128 MB.
-const MAX_SHARED_UNKNOWNS: usize = 4000;
 /// Stations per span of a side where conditions are asked and checked.
 const STATIONS_PER_SPAN: usize = 6;
 /// Stations per control point of a row.
@@ -168,134 +165,33 @@ const GAUSS6: [(f64, f64); 6] = [
 /// The curve itself runs on [0, 1].
 pub type QuadCapPiece = ([f64; 2], crate::bspline::CurveN<4>);
 
-const CAP_MAX_PIECES: usize = 64;
-const CAP_MAX_AXIS_CONTROLS: usize = 256;
-const CAP_JOIN_MM: f64 = 1e-9;
+const CAP_MAX_PIECES: usize = solidcore_ops::form_fill::quad_cap::MAX_PIECES;
 
-/// A single G0 tensor cap for four explicit, ordered source sides. The cap
-/// walks the sides around its unit square. Its boundary rows are exact
-/// embeddings of the supplied curves. No rim curve is fitted or sampled
-/// to determine its identity, shape or parameterization.
+/// A single G0 tensor cap for four explicit, ordered source sides. Its directed
+/// ranges and homogeneous source coefficients are transferred to the kernel;
+/// normalization, exact embedding and regularity qualification happen there.
 pub fn quad_cap(sides: [&[QuadCapPiece]; 4]) -> SplineResult<NurbsSurface> {
+    // Bound the data-only view allocation before constructing borrowed piece rows.
     if sides.iter().any(|side| side.is_empty() || side.len() > CAP_MAX_PIECES) || sides.iter().map(|side| side.len()).sum::<usize>() > CAP_MAX_PIECES
     {
         return invalid("quad cap needs four complete bounded sides");
     }
-    let mut curves = Vec::with_capacity(4);
-    let mut first = None;
-    let mut previous = None;
-    for (index, side) in sides.into_iter().enumerate() {
-        let degree = side.iter().map(|(_, curve)| curve.degree).max().unwrap_or(0);
-        if !(1..=MAX_SPLINE_DEGREE).contains(&degree) {
-            return invalid("invalid quad cap curve degree");
-        }
-        let mut knots = vec![0.0; degree + 1];
-        let mut points = Vec::new();
-        let mut end = 0.0;
-        for (piece, ([a, b], curve)) in side.iter().enumerate() {
-            if *a != end
-                || !(a < b && *b <= 1.0)
-                || curve.degree > degree
-                || curve.ctrl.len() > CAP_MAX_AXIS_CONTROLS
-                || curve.knots.len() != curve.ctrl.len() + curve.degree + 1
-            {
-                return invalid("quad cap curve pieces must partition a bounded unit side");
-            }
-            let space = Space::new(curve.degree, curve.knots.clone())?;
-            if space.domain() != [0.0, 1.0] {
-                return invalid("quad cap piece has a non-unit curve domain");
-            }
-            let mut row: Vec<_> = curve.ctrl.iter().map(|&[x, y, z, w]| HPoint { x, y, z, w }).collect();
-            if row.iter().any(|p| !p.is_finite() || p.w <= 0.0 || p.project().is_none()) {
-                return invalid("quad cap curve needs positive finite homogeneous controls");
-            }
-            let start = *row.first().ok_or_else(|| SplineError::Invalid("empty quad cap curve".into()))?;
-            if previous.is_some_and(|old: HPoint| !cap_join(old, start, false)) {
-                return invalid("quad cap boundary pieces do not meet");
-            }
-            let scale = previous.map_or(1.0, |old: HPoint| old.w) / start.w;
-            for p in &mut row {
-                *p = *p * scale;
-            }
-            if row.iter().any(|p| !p.is_finite() || p.w <= 0.0 || p.project().is_none()) {
-                return invalid("quad cap weights cannot be normalized");
-            }
-            first = first.or_else(|| row.first().copied());
-            previous = row.last().copied();
-            let space = if curve.degree == degree {
-                space
-            } else {
-                let raised = Space::polynomial(degree, 0.0, 1.0)?;
-                row = crate::spline_space::embed(&space, &row, &raised)?;
-                raised
-            };
-            if points.len().saturating_add(row.len()) > CAP_MAX_AXIS_CONTROLS + usize::from(piece > 0) {
-                return Err(SplineError::TooLarge("quad cap side exceeds the control budget".into()));
-            }
-            knots.extend(space.knots()[degree + 1..space.count()].iter().map(|&k| a + (b - a) * k));
-            knots.extend(std::iter::repeat_n(*b, degree + usize::from(piece + 1 == side.len())));
-            points.extend(row.into_iter().skip(usize::from(piece > 0)));
-            end = *b;
-        }
-        if end != 1.0 {
-            return invalid("quad cap boundary side is incomplete");
-        }
-        if index >= 2 {
-            knots = knots.into_iter().rev().map(|k| 1.0 - k).collect();
-            points.reverse();
-        }
-        curves.push(Curve { space: Space::new(degree, knots)?, points });
-    }
-    if !first.zip(previous).is_some_and(|(a, b)| cap_join(a, b, true)) {
-        return invalid("quad cap boundary positions or weights do not close");
-    }
-    let [bottom, right, top, left]: [Curve; 4] = curves.try_into().map_err(|_| SplineError::Invalid("quad cap side count".into()))?;
-    let (u, [bottom, top]) = cap_rows(bottom, top)?;
-    let (v, [left, right]) = cap_rows(left, right)?;
-    let patch = coons([u, v], &bottom, &top, &left, &right, false)?;
-    if folds(&patch) {
-        return invalid("quad cap has a folded or singular chart");
-    }
-    patch.surface()
+    let sides = sides.map(|side| {
+        side.iter()
+            .map(|(range, curve)| solidcore_ops::form_fill::quad_cap::Piece {
+                range: *range,
+                degree: curve.degree,
+                knots: &curve.knots,
+                controls: &curve.ctrl,
+            })
+            .collect::<Vec<_>>()
+    });
+    let [bottom, right, top, left] = &sides;
+    let tensor =
+        solidcore_ops::form_fill::quad_cap::construct([bottom, right, top, left]).map_err(|error| SplineError::Invalid(error.to_string()))?;
+    let controls = tensor.controls.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect();
+    NurbsSurface::from_homogeneous(tensor.degree, tensor.knots, controls)
 }
-
-fn cap_join(a: HPoint, b: HPoint, compare_weights: bool) -> bool {
-    a.project().zip(b.project()).is_some_and(|(a, b)| a.dist(b) <= CAP_JOIN_MM)
-        && (!compare_weights || (a.w - b.w).abs() <= 256.0 * f64::EPSILON * a.w.max(b.w))
-}
-
-fn cap_rows(a: Curve, b: Curve) -> SplineResult<(Space, [Vec<HPoint>; 2])> {
-    let degree = a.space.degree().max(b.space.degree());
-    let mut breaks: Vec<(f64, usize)> = Vec::new();
-    for row in [&a, &b] {
-        // embed raises only a single Bezier piece. Keep the exact refusal for
-        // an opposite side that would require general spline degree elevation.
-        if row.space.degree() != degree && row.space.count() != row.space.degree() + 1 {
-            return invalid("quad cap opposite sides have incompatible spline degrees");
-        }
-        for (knot, multiplicity) in interior_knots(&row.space) {
-            if let Some((_, count)) = breaks.iter_mut().find(|(k, _)| *k == knot) {
-                *count = (*count).max(multiplicity);
-            } else {
-                breaks.push((knot, multiplicity));
-            }
-        }
-    }
-    if degree + 1 + breaks.iter().map(|(_, count)| *count).sum::<usize>() > CAP_MAX_AXIS_CONTROLS {
-        return Err(SplineError::TooLarge("quad cap tensor axis exceeds the control budget".into()));
-    }
-    breaks.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut knots = vec![0.0; degree + 1];
-    for (knot, count) in breaks {
-        knots.extend(std::iter::repeat_n(knot, count));
-    }
-    knots.extend(std::iter::repeat_n(1.0, degree + 1));
-    let space = Space::new(degree, knots)?;
-    let a = crate::spline_space::embed(&a.space, &a.points, &space)?;
-    let b = crate::spline_space::embed(&b.space, &b.points, &space)?;
-    Ok((space, [a, b]))
-}
-
 /// One edge of the loop: a B-spline from the loop's corner before it to the one after (the
 /// loop's direction), rational when it has weights.
 #[derive(Clone, Debug, PartialEq)]
@@ -689,8 +585,7 @@ fn on_side(side: &[SidePiece], g: f64) -> Option<(usize, f64)> {
 struct Patch {
     spaces: [Space; 2],
     net: Vec<Vec3>,
-    weights: Vec<f64>,
-    /// Whether any weight differs from one (else the polynomial basis is used as it is).
+    basis: solidcore_ops::form_fill::TensorBasis,
     rational: bool,
     /// The patch collapses along `u = 0` (a three-sided patch).
     pole: bool,
@@ -711,7 +606,7 @@ impl Patch {
     }
 
     fn weight(&self, i: usize, j: usize) -> f64 {
-        self.weights.get(self.flat(i, j)).copied().unwrap_or(1.0)
+        self.basis.weight(i, j).unwrap_or(1.0)
     }
 
     /// The coefficients of `∂^(du+dv) S / ∂u^du ∂v^dv` at (u, v) on each control point it
@@ -722,100 +617,17 @@ impl Patch {
         self.row_sided(u, v, du, dv, [false; 2])
     }
 
-    /// The basis of the space along `d` at `t`, from the left of a knot when `left`.
-    fn basis(&self, d: usize, t: f64, r: usize, left: bool) -> SplineResult<(usize, Vec<f64>)> {
-        let space = self.spaces.get(d).ok_or_else(|| SplineError::Invalid("a patch has two directions".into()))?;
-        if left { space.basis_left(t, r) } else { space.basis(t, r) }
-    }
-
-    /// [`Patch::row`] with each direction's basis taken from the left of a knot where `left`
-    /// says so: the derivative of the piece ending there.
+    /// One-sided coefficients from the kernel's fixed rational basis.
     fn row_sided(&self, u: f64, v: f64, du: usize, dv: usize, left: [bool; 2]) -> SplineResult<Vec<(usize, usize, f64)>> {
-        if !self.rational {
-            let (iu, bu) = self.basis(0, u, du, left[0])?;
-            let (iv, bv) = self.basis(1, v, dv, left[1])?;
-            let mut out = Vec::with_capacity(bu.len() * bv.len());
-            for (b, nv) in bv.iter().enumerate() {
-                for (a, nu) in bu.iter().enumerate() {
-                    out.push((iu + a, iv + b, nu * nv));
-                }
-            }
-            return Ok(out);
-        }
-        // The basis and its derivatives up to the orders asked, each way.
-        let ders = |d: usize, t: f64, top: usize| -> SplineResult<(usize, Vec<Vec<f64>>)> {
-            let mut first = 0;
-            let mut out = Vec::with_capacity(top + 1);
-            for r in 0..=top {
-                let (f, b) = self.basis(d, t, r, left.get(d).copied().unwrap_or(false))?;
-                first = f;
-                out.push(b);
-            }
-            Ok((first, out))
-        };
-        let (iu, bu) = ders(0, u, du)?;
-        let (iv, bv) = ders(1, v, dv)?;
-        let width = (bu.first().map_or(0, Vec::len), bv.first().map_or(0, Vec::len));
-        let basis = |d: &[Vec<f64>], r: usize, a: usize| d.get(r).and_then(|x| x.get(a)).copied().unwrap_or(0.0);
-        // W^(k,l) at the point.
-        let mut wd = vec![vec![0.0; dv + 1]; du + 1];
-        for b in 0..width.1 {
-            for a in 0..width.0 {
-                let w = self.weight(iu + a, iv + b);
-                for (k, row) in wd.iter_mut().enumerate() {
-                    for (l, x) in row.iter_mut().enumerate() {
-                        *x += w * basis(&bu, k, a) * basis(&bv, l, b);
-                    }
-                }
-            }
-        }
-        let w0 = wd.first().and_then(|r| r.first()).copied().unwrap_or(0.0);
-        if !(w0 > 0.0) {
-            return invalid("a patch's weights vanish");
-        }
-        let binom = |n: usize, k: usize| (0..k).fold(1.0, |c, i| c * (n - i) as f64 / (i + 1) as f64);
-        let mut out = Vec::with_capacity(width.0 * width.1);
-        let mut r = vec![vec![0.0; dv + 1]; du + 1];
-        for b in 0..width.1 {
-            for a in 0..width.0 {
-                let w = self.weight(iu + a, iv + b);
-                for total in 0..=du + dv {
-                    for k in 0..=du.min(total) {
-                        let l = total - k;
-                        if l > dv {
-                            continue;
-                        }
-                        let mut x = w * basis(&bu, k, a) * basis(&bv, l, b);
-                        for i in 0..=k {
-                            for j in 0..=l {
-                                if i == 0 && j == 0 {
-                                    continue;
-                                }
-                                let wij = wd.get(i).and_then(|x| x.get(j)).copied().unwrap_or(0.0);
-                                let rr = r.get(k - i).and_then(|x| x.get(l - j)).copied().unwrap_or(0.0);
-                                x -= binom(k, i) * binom(l, j) * wij * rr;
-                            }
-                        }
-                        if let Some(slot) = r.get_mut(k).and_then(|x| x.get_mut(l)) {
-                            *slot = x / w0;
-                        }
-                    }
-                }
-                out.push((iu + a, iv + b, r.get(du).and_then(|x| x.get(dv)).copied().unwrap_or(0.0)));
-            }
-        }
-        Ok(out)
+        self.basis.row([u, v], [du, dv], left).map_err(|e| SplineError::Invalid(e.to_string()))
     }
-
     fn eval(&self, u: f64, v: f64, du: usize, dv: usize) -> SplineResult<Vec3> {
-        Ok(self.row(u, v, du, dv)?.iter().fold(Vec3::ZERO, |s, (i, j, c)| s + self.at(*i, *j) * *c))
+        self.basis.apply(&self.net, &self.row(u, v, du, dv)?).map_err(|e| SplineError::Invalid(e.to_string()))
     }
 
     fn normal(&self, u: f64, v: f64) -> Option<Vec3> {
-        let (su, sv) = (self.eval(u, v, 1, 0).ok()?, self.eval(u, v, 0, 1).ok()?);
-        su.cross(sv).normalized()
+        self.basis.normal(&self.net, [u, v])
     }
-
     fn surface(&self) -> SplineResult<NurbsSurface> {
         let [cu, cv] = self.counts();
         let ctrl: Vec<HPoint> =
@@ -1314,39 +1126,18 @@ impl Quilt {
 /// blended alike, so the boundary rows are the sides' own and the weights inside are the blend
 /// of theirs (refused where one is not positive).
 fn coons(spaces: [Space; 2], c0: &[HPoint], c1: &[HPoint], d0: &[HPoint], d1: &[HPoint], pole: bool) -> SplineResult<Patch> {
-    let (gu, gv) = (greville(&spaces[0]), greville(&spaces[1]));
-    let (cu, cv) = (gu.len(), gv.len());
-    let (Some(p00), Some(p10), Some(p01), Some(p11)) = (c0.first().copied(), c0.last().copied(), c1.first().copied(), c1.last().copied()) else {
-        return invalid("a side has no points");
-    };
-    let get = |a: &[HPoint], k: usize| a.get(k).copied().unwrap_or(HPoint::ZERO);
-    let mut net = Vec::with_capacity(cu * cv);
-    let mut weights = Vec::with_capacity(cu * cv);
-    for (j, &y) in gv.iter().enumerate() {
-        for (i, &x) in gu.iter().enumerate() {
-            let ruled_v = get(c0, i) * (1.0 - y) + get(c1, i) * y;
-            let ruled_u = get(d0, j) * (1.0 - x) + get(d1, j) * x;
-            let bilinear = (p00 * (1.0 - x) + p10 * x) * (1.0 - y) + (p01 * (1.0 - x) + p11 * x) * y;
-            // The boundary rows exactly the sides' own points.
-            let h = match (i, j) {
-                (_, 0) => get(c0, i),
-                (_, j) if j + 1 == cv => get(c1, i),
-                (0, _) => get(d0, j),
-                (i, _) if i + 1 == cu => get(d1, j),
-                _ => ruled_v + ruled_u - bilinear,
-            };
-            let p = h
-                .project()
-                .filter(|_| h.w > 0.0)
-                .ok_or_else(|| SplineError::Unsupported("a rational patch whose blended weights are not positive".into()))?;
-            net.push(p);
-            weights.push(h.w);
-        }
-    }
-    let rational = weights.iter().any(|w| *w != 1.0);
-    Ok(Patch { spaces, net, weights, rational, pole })
+    let sides = [c0, c1, d0, d1].map(|row| row.iter().map(|p| [p.x, p.y, p.z, p.w]).collect::<Vec<_>>());
+    let [c0, c1, d0, d1] = &sides;
+    let net = solidcore_ops::form_fill::coons([spaces[0].degree(), spaces[1].degree()], [spaces[0].knots(), spaces[1].knots()], [c0, c1, d0, d1])
+        .map_err(|e| SplineError::Unsupported(e.to_string()))?;
+    let basis = solidcore_ops::form_fill::TensorBasis::new(
+        [spaces[0].degree(), spaces[1].degree()],
+        [spaces[0].knots().to_vec(), spaces[1].knots().to_vec()],
+        net.weights,
+    )
+    .map_err(|e| SplineError::Invalid(e.to_string()))?;
+    Ok(Patch { spaces, net: net.points, basis, rational: net.rational, pole })
 }
-
 /// One condition row: `Σ along·P = value` over its terms' control points, and its weight.
 #[derive(Clone)]
 struct Row {
@@ -2090,7 +1881,7 @@ fn gram(s: &Space, m: usize) -> SplineResult<Vec<Vec<Vec<f64>>>> {
 fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>], regularization: f64) -> SplineResult<Vec<Vec3>> {
     let dim = 3 * quilt.unknowns;
     let slot = |p: usize, flat: usize| quilt.slots.get(p).and_then(|s| s.get(flat)).copied().flatten();
-    let mut a = if quilt.spokes.is_empty() { Normal::new(dim, bandwidth(quilt, rows, energy)) } else { Normal::Blocks(BlockNormal::new(quilt)) };
+    let mut a = if quilt.spokes.is_empty() { Normal::new(dim, bandwidth(quilt, rows, energy))? } else { Normal::blocks(block_owners(quilt))? };
     let mut b = vec![0.0; dim];
     let value = |p: usize, flat: usize| quilt.patches.get(p).and_then(|x| x.net.get(flat)).copied().unwrap_or(Vec3::ZERO);
     let mut condition_trace = 0.0;
@@ -2175,267 +1966,22 @@ fn bandwidth(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>]) -
     bw
 }
 
-/// The normal equations' matrix: banded where the band is narrow against the size, else dense.
-enum Normal {
-    Band(crate::fill::Band),
-    Dense(Vec<f64>, usize),
-    Blocks(BlockNormal),
-}
-
-impl Normal {
-    fn new(n: usize, bw: usize) -> Normal {
-        if 4 * bw < n { Normal::Band(crate::fill::Band::new(n, bw)) } else { Normal::Dense(vec![0.0; n * n], n) }
-    }
-
-    /// Add `v` at `(r, s)` (callers add both halves of a symmetric matrix).
-    fn add(&mut self, r: usize, s: usize, v: f64) {
-        match self {
-            Normal::Band(b) => b.add(r, s, v),
-            Normal::Dense(a, n) => {
-                if let Some(x) = a.get_mut(r * *n + s) {
-                    *x += v;
-                }
-            }
-            Normal::Blocks(m) => m.add(r, s, v),
-        }
-    }
-
-    fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
-        match self {
-            Normal::Band(m) => m.factor_rows()?.substitute(b),
-            Normal::Dense(a, n) => cholesky(a, b, n),
-            Normal::Blocks(m) => m.solve(b),
-        }
-    }
-}
-
-/// The normal equations of patches about a centre, solved by blocks: each patch's interior
-/// unknowns (coordinates of control points only that patch holds, coupled to no other patch's)
-/// form a banded block, eliminated exactly onto the shared unknowns (the spokes', the centre's,
-/// and any a row couples across patches) by their Schur complement, which is solved dense; the
-/// interiors then follow by back substitution. Entries are kept sparse until the blocks are
-/// known (callers add both halves of the symmetric matrix), in ordered maps: the eliminations
-/// sum them in their order, so a hashed map's order (another each run) would make the fill
-/// differ in its last bits from one run to the next, and a design read back another surface.
-struct BlockNormal {
-    /// Each coordinate's patch when only one patch holds its point, else `None`.
-    owner: Vec<Option<usize>>,
-    entries: std::collections::BTreeMap<(usize, usize), f64>,
-}
-
-impl BlockNormal {
-    fn new(quilt: &Quilt) -> BlockNormal {
-        let mut holders: Vec<Vec<usize>> = vec![Vec::new(); quilt.unknowns];
-        for (p, slots) in quilt.slots.iter().enumerate() {
-            for id in slots.iter().flatten() {
-                if let Some(h) = holders.get_mut(*id)
-                    && !h.contains(&p)
-                {
-                    h.push(p);
-                }
-            }
-        }
-        let owner = holders.iter().flat_map(|h| {
-            let o = if let [p] = h.as_slice() { Some(*p) } else { None };
-            [o; 3]
-        });
-        BlockNormal { owner: owner.collect(), entries: std::collections::BTreeMap::new() }
-    }
-
-    fn add(&mut self, r: usize, s: usize, v: f64) {
-        if v != 0.0 {
-            *self.entries.entry((r, s)).or_insert(0.0) += v;
-        }
-    }
-
-    fn solve(mut self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
-        let n = b.len();
-        // A coordinate coupled to another patch's interior is shared too.
-        let coupled: Vec<usize> = self
-            .entries
-            .keys()
-            .filter(|(r, c)| matches!((self.owner.get(*r).copied().flatten(), self.owner.get(*c).copied().flatten()), (Some(a), Some(b)) if a != b))
-            .flat_map(|(r, c)| [*r, *c])
-            .collect();
-        for x in coupled {
-            if let Some(o) = self.owner.get_mut(x) {
-                *o = None;
-            }
-        }
-        let shared: Vec<usize> = (0..n).filter(|x| self.owner.get(*x).copied().flatten().is_none()).collect();
-        if shared.len() > MAX_SHARED_UNKNOWNS {
-            return Err(SplineError::TooLarge(format!(
-                "{} unknowns shared by the patches about the centre (at most {MAX_SHARED_UNKNOWNS})",
-                shared.len()
-            )));
-        }
-        let mut place = vec![usize::MAX; n];
-        for (i, x) in shared.iter().enumerate() {
-            if let Some(slot) = place.get_mut(*x) {
-                *slot = i;
-            }
-        }
-        let patches = self.owner.iter().flatten().copied().max().map_or(0, |m| m + 1);
-        let mut interior: Vec<Vec<usize>> = vec![Vec::new(); patches];
-        for (x, o) in self.owner.iter().enumerate() {
-            if let Some(p) = o
-                && let Some(list) = interior.get_mut(*p)
+fn block_owners(quilt: &Quilt) -> Vec<Option<usize>> {
+    let mut holders: Vec<Vec<usize>> = vec![Vec::new(); quilt.unknowns];
+    for (p, slots) in quilt.slots.iter().enumerate() {
+        for id in slots.iter().flatten() {
+            if let Some(h) = holders.get_mut(*id)
+                && !h.contains(&p)
             {
-                if let Some(slot) = place.get_mut(x) {
-                    *slot = list.len();
-                }
-                list.push(x);
-            }
-        }
-        let m = shared.len();
-        // The shared block, and per patch its block, its coupling to the shared unknowns.
-        let mut s_mat = vec![0.0; m * m];
-        let mut blocks: Vec<std::collections::BTreeMap<(usize, usize), f64>> = vec![std::collections::BTreeMap::new(); patches];
-        let mut couple: Vec<std::collections::BTreeMap<(usize, usize), f64>> = vec![std::collections::BTreeMap::new(); patches];
-        for ((r, c), v) in std::mem::take(&mut self.entries) {
-            let (or, oc) = (self.owner.get(r).copied().flatten(), self.owner.get(c).copied().flatten());
-            let (pr, pc) = (place.get(r).copied().unwrap_or(0), place.get(c).copied().unwrap_or(0));
-            match (or, oc) {
-                (None, None) => {
-                    if let Some(x) = s_mat.get_mut(pr * m + pc) {
-                        *x += v;
-                    }
-                }
-                (Some(p), Some(_)) => {
-                    if let Some(blk) = blocks.get_mut(p) {
-                        *blk.entry((pr, pc)).or_insert(0.0) += v;
-                    }
-                }
-                // Interior row, shared column (the transposed entry is its mirror).
-                (Some(p), None) => {
-                    if let Some(cp) = couple.get_mut(p) {
-                        *cp.entry((pr, pc)).or_insert(0.0) += v;
-                    }
-                }
-                (None, Some(_)) => {}
-            }
-        }
-        let mut rhs: Vec<f64> = shared.iter().map(|x| b.get(*x).copied().unwrap_or(0.0)).collect();
-        let mut solved_parts: Vec<(crate::fill::Band, Vec<f64>, Vec<(usize, Vec<f64>)>)> = Vec::with_capacity(patches);
-        for p in 0..patches {
-            let ids = interior.get(p).map(Vec::as_slice).unwrap_or(&[]);
-            let k = ids.len();
-            let blk = blocks.get(p).cloned().unwrap_or_default();
-            let bw = blk.keys().map(|(r, c)| r.abs_diff(*c)).max().unwrap_or(0);
-            let mut band = crate::fill::Band::new(k.max(1), bw);
-            for (&(r, c), &v) in &blk {
-                band.add(r, c, v);
-            }
-            if k == 0 {
-                solved_parts.push((band, Vec::new(), Vec::new()));
-                continue;
-            }
-            let band = band.factor_rows()?;
-            // g = A_kk⁻¹ b_k; per shared column j coupled to this patch, z_j = A_kk⁻¹ A_k,j.
-            let bk: Vec<f64> = ids.iter().map(|x| b.get(*x).copied().unwrap_or(0.0)).collect();
-            let g = band.substitute(bk)?;
-            let mut columns: std::collections::BTreeMap<usize, Vec<f64>> = std::collections::BTreeMap::new();
-            for (&(r, j), &v) in couple.get(p).into_iter().flatten() {
-                if let Some(cell) = columns.entry(j).or_insert_with(|| vec![0.0; k]).get_mut(r) {
-                    *cell += v;
-                }
-            }
-            let mut z: Vec<(usize, Vec<f64>)> = Vec::with_capacity(columns.len());
-            for (j, col) in columns {
-                z.push((j, band.substitute(col)?));
-            }
-            // S −= A_Bk·Z, rhs −= A_Bk·g, A_Bk the transpose of the coupling.
-            let coupling = couple.get(p).cloned().unwrap_or_default();
-            let mut by_column: std::collections::BTreeMap<usize, Vec<(usize, f64)>> = std::collections::BTreeMap::new();
-            for (&(r, j), &v) in &coupling {
-                by_column.entry(j).or_default().push((r, v));
-            }
-            for (i, entries) in &by_column {
-                let dot = |w: &[f64]| entries.iter().map(|(r, v)| v * w.get(*r).copied().unwrap_or(0.0)).sum::<f64>();
-                if let Some(x) = rhs.get_mut(*i) {
-                    *x -= dot(&g);
-                }
-                for (j, zj) in &z {
-                    if let Some(x) = s_mat.get_mut(i * m + j) {
-                        *x -= dot(zj);
-                    }
-                }
-            }
-            solved_parts.push((band, g, z));
-        }
-        let xs = if m > 0 { cholesky(s_mat, rhs, m)? } else { Vec::new() };
-        let mut x = vec![0.0; n];
-        for (i, id) in shared.iter().enumerate() {
-            if let Some(slot) = x.get_mut(*id) {
-                *slot = xs.get(i).copied().unwrap_or(0.0);
-            }
-        }
-        for (p, (_, g, z)) in solved_parts.iter().enumerate() {
-            let ids = interior.get(p).map(Vec::as_slice).unwrap_or(&[]);
-            for (r, id) in ids.iter().enumerate() {
-                let mut v = g.get(r).copied().unwrap_or(0.0);
-                for (j, zj) in z {
-                    v -= zj.get(r).copied().unwrap_or(0.0) * xs.get(*j).copied().unwrap_or(0.0);
-                }
-                if let Some(slot) = x.get_mut(*id) {
-                    *slot = v;
-                }
-            }
-        }
-        if x.iter().any(|v| !v.is_finite()) {
-            return invalid("the patches' equations have no finite solution");
-        }
-        Ok(x)
-    }
-}
-
-/// Solve the symmetric positive definite `a·x = b` (dense, `n × n`).
-fn cholesky(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> SplineResult<Vec<f64>> {
-    let at = |a: &[f64], r: usize, c: usize| a.get(r * n + c).copied().unwrap_or(0.0);
-    for c in 0..n {
-        let mut d = at(&a, c, c);
-        for k in 0..c {
-            d -= at(&a, c, k).powi(2);
-        }
-        if !(d > 0.0) || !d.is_finite() {
-            return invalid("the patch's equations are singular");
-        }
-        let d = d.sqrt();
-        if let Some(x) = a.get_mut(c * n + c) {
-            *x = d;
-        }
-        for r in c + 1..n {
-            let mut v = at(&a, r, c);
-            for k in 0..c {
-                v -= at(&a, r, k) * at(&a, c, k);
-            }
-            if let Some(x) = a.get_mut(r * n + c) {
-                *x = v / d;
+                h.push(p);
             }
         }
     }
-    for r in 0..n {
-        let mut v = b.get(r).copied().unwrap_or(0.0);
-        for k in 0..r {
-            v -= at(&a, r, k) * b.get(k).copied().unwrap_or(0.0);
-        }
-        if let Some(x) = b.get_mut(r) {
-            *x = v / at(&a, r, r);
-        }
-    }
-    for r in (0..n).rev() {
-        let mut v = b.get(r).copied().unwrap_or(0.0);
-        for k in r + 1..n {
-            v -= at(&a, k, r) * b.get(k).copied().unwrap_or(0.0);
-        }
-        if let Some(x) = b.get_mut(r) {
-            *x = v / at(&a, r, r);
-        }
-    }
-    if b.iter().any(|x| !x.is_finite()) {
-        return invalid("the patch's equations have no finite solution");
-    }
-    Ok(b)
+    let owner = holders.iter().flat_map(|h| {
+        let o = if let [p] = h.as_slice() { Some(*p) } else { None };
+        [o; 3]
+    });
+    owner.collect()
 }
 
 /// What the fill achieves at the stations, across the spokes and at the points.

@@ -243,23 +243,25 @@ impl ClipDepth {
         {
             return None;
         }
-        let project = |row: usize| {
+        let project = |row: usize| -> Option<[I; 2]> {
+            let [x, y, z, w] = matrix;
+            let column = [*x.get(row)?, *y.get(row)?, *z.get(row)?, *w.get(row)?];
             let c = origin
                 .into_iter()
-                .enumerate()
-                .fold(I::point(matrix[3][row]), |sum, (i, p)| {
-                    sum.add(I::point(matrix[i][row]).scale(p))
+                .zip(column)
+                .fold(I::point(column[3]), |sum, (p, coefficient)| {
+                    sum.add(I::point(coefficient).scale(p))
                 });
             let d = direction
                 .into_iter()
-                .enumerate()
-                .fold(I::ZERO, |sum, (i, d)| {
-                    sum.add(I::point(matrix[i][row]).scale(d))
+                .zip(column)
+                .fold(I::ZERO, |sum, (d, coefficient)| {
+                    sum.add(I::point(coefficient).scale(d))
                 });
-            [c, d]
+            Some([c, d])
         };
-        let [z, dz] = project(2);
-        let [w, dw] = project(3);
+        let [z, dz] = project(2)?;
+        let [w, dw] = project(3)?;
         let mut outer = [0.0_f64, f64::MAX];
         let mut inner = outer;
         // The renderer uses 0 <= z <= w. Also keep the positive homogeneous
@@ -294,7 +296,7 @@ impl ClipDepth {
             lo: inner[0],
             hi: inner[1],
         };
-        for [side, slope] in [project(0), project(1)] {
+        for [side, slope] in [project(0)?, project(1)?] {
             if w.sub(side).add(dw.sub(slope).mul(t)).lo <= 0.0
                 || w.add(side).add(dw.add(slope).mul(t)).lo <= 0.0
             {
@@ -341,9 +343,9 @@ pub fn ray_meets_triangle_bounds(
     origin: [f64; 3],
     direction: [f64; 3],
 ) -> bool {
-    let bounds = std::array::from_fn(|i| I {
-        lo: a[i].min(b[i]).min(c[i]),
-        hi: a[i].max(b[i]).max(c[i]),
+    let bounds = zip(zip(a, b, |a, b| [a, b]), c, |[a, b], c| I {
+        lo: a.min(b).min(c),
+        hi: a.max(b).max(c),
     });
     ray_bounds(
         bounds,

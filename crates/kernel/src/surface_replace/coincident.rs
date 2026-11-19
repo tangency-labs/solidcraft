@@ -55,7 +55,7 @@ pub(super) fn cut(base: &Body, opening: usize, skin: &Body, contacts: &BTreeMap<
         if result.is_surface() || result.shell_count() != 1 || !result.validity().is_empty() {
             return Ok(None);
         }
-        Ok(Some(result))
+        Ok(Some(result.inherit_regularization_protection(base).inherit_regularization_protection(skin).inherit_split_lines(&[base, skin])))
     })
 }
 

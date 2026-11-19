@@ -71,6 +71,12 @@ fn overlap(chart: &EdgeChart, patch: &PatchChart) -> Option<[f64; 2]> {
     Some(range.map(|t| a + (b - a) * t))
 }
 impl EdgeCurve {
+    /// Number of immutable chart references copied when this guide is cloned.
+    /// The surface control nets themselves remain shared.
+    pub fn piece_count(&self) -> usize {
+        self.pieces.len()
+    }
+
     /// Exact local differentials at one logical parameter. A join can have
     /// multiple sided restrictions, which the caller must qualify together.
     pub(super) fn frame_samples(&self, fraction: f64, remaining: &mut usize) -> Result<Vec<super::selection_frame::EdgeSample>> {

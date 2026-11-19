@@ -10976,6 +10976,7 @@ fn eval_feature_kind(
             if matches!(operation, Operation::Join | Operation::Cut)
                 && let Some((skin, source, index, tolerance)) = replacement
             {
+                refuse_ambiguous_targets(doc, st, f, &targets)?;
                 let participants = if targets.is_empty() { &f.participants } else { &targets };
                 let all = participants.as_slice() == ["*"];
                 let eligible: Vec<_> = st

@@ -141,6 +141,18 @@ pub fn extrude(
         }
     };
     let rim: BTreeSet<_> = boundary.iter().flatten().copied().collect();
+    if !selected_faces.is_empty() {
+        let mut incidence = BTreeMap::<usize, usize>::new();
+        for &vertex in boundary.iter().flatten() {
+            let degree = incidence.entry(vertex).or_default();
+            *degree += 1;
+            if *degree > 2 {
+                return Err(bad(
+                    "extrusion selection has disconnected fans at a control",
+                ));
+            }
+        }
+    }
     if points.len() + rim.len() > MAX_POINTS || faces.len() + boundary.len() > MAX_FACES {
         return Err(bad("editable cage budget exceeded"));
     }
@@ -204,4 +216,46 @@ pub fn extrude(
         });
     }
     Ok(Extrusion { cage, cap, walls })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::form_cage::{build, Primitive};
+
+    #[test]
+    fn face_extrusion_refuses_disconnected_selected_fans_and_keeps_adjacent_strips() {
+        let source = build(Primitive::Plane, [2.0; 3], [2, 2, 1], [0.0; 2], &[]).unwrap();
+        let points = source.points.clone();
+        let faces = source.faces.clone();
+        for selection in [&[0, 3][..], &[1, 2][..]] {
+            let result = extrude(
+                &source.points,
+                &source.faces,
+                Selection::Faces(selection),
+                Vec3::Z,
+                false,
+            );
+            assert!(matches!(
+                result,
+                Err(crate::SolidError::InvalidInput {
+                    reason: "extrusion selection has disconnected fans at a control",
+                    ..
+                })
+            ));
+            assert_eq!(source.points, points);
+            assert_eq!(source.faces, faces);
+        }
+        let valid = extrude(
+            &source.points,
+            &source.faces,
+            Selection::Faces(&[0, 1]),
+            Vec3::Z,
+            false,
+        )
+        .unwrap();
+        assert_eq!(valid.walls.len(), 6);
+        assert_eq!(valid.cage.faces.len(), source.faces.len() + 6);
+        assert_eq!(&valid.cage.points[..source.points.len()], &source.points);
+    }
 }

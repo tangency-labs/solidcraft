@@ -147,9 +147,9 @@ impl Span<'_> {
                         let inverse = Interval::point(1.0).sub(alpha).intersect(Interval::UNIT)?;
                         let x = *values.get(i - 1)?;
                         let y = values.get_mut(i)?;
-                        *y = std::array::from_fn(|axis| {
-                            x[axis].mul(inverse).add(y[axis].mul(alpha))
-                        });
+                        for (x, y) in x.into_iter().zip(y.iter_mut()) {
+                            *y = x.mul(inverse).add(y.mul(alpha));
+                        }
                     }
                 }
                 values.last().copied()

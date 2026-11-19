@@ -28,22 +28,13 @@ pub(super) fn spend(remaining: &mut usize, work: usize) -> Option<()> {
     Some(())
 }
 fn unit(v: Vec3) -> Option<Vec3> {
-    let scale = v.x.abs().max(v.y.abs()).max(v.z.abs());
-    (scale > 0.0 && scale.is_finite()).then_some(())?;
-    (v / scale).normalized().filter(|v| v.is_finite())
+    solidcore_ops::form_curves::selection_unit(v)
 }
 pub(super) fn normal(du: Vec3, dv: Vec3) -> Option<Vec3> {
-    let cross = unit(du)?.cross(unit(dv)?);
-    (cross.len2() > 1e-16).then_some(())?;
-    unit(cross)
+    solidcore_ops::form_curves::selection_normal(du, dv)
 }
 fn axes(x: Vec3, z: Vec3) -> Option<[Vec3; 3]> {
-    let x = unit(x)?;
-    let z = unit(z)?;
-    let tangent = x - z * x.dot(z);
-    (tangent.len2() > 1e-16).then_some(())?;
-    let x = unit(tangent)?;
-    Some([x, unit(z.cross(x))?, z])
+    solidcore_ops::form_curves::selection_axes(x, z)
 }
 fn bisector(normals: &BTreeMap<usize, Vec3>) -> Option<Vec3> {
     let z = unit(normals.values().copied().fold(Vec3::ZERO, |sum, n| sum + n))?;
@@ -144,6 +135,11 @@ impl SelectionFrames {
         {
             out.faces.insert(hierarchy.leaves.len(), frame);
         }
+        for cap in &source.quad_caps {
+            if let Some(frame) = face_axes(&PatchChart::whole(cap.face), &cap.surface, [0.5, 0.5], [1.0, 0.0], &mut remaining) {
+                out.faces.insert(cap.face, frame);
+            }
+        }
         out
     }
 
@@ -201,5 +197,5 @@ fn face_axes(
         direction[d] = along_u[d] * (hi - lo) / width;
     }
     let (_, du, dv) = surface.derivs(at)?;
-    axes(du * direction[0] + dv * direction[1], normal(du, dv)?)
+    solidcore_ops::form_curves::selection_frame(du, dv, direction)
 }

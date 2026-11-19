@@ -966,7 +966,7 @@ const MAX_KNOTS: usize = 1 << 14;
 
 /// The knot span of `u` for degree `p` and `n` control points: the last non-empty span in
 /// `[p, n − 1]` that starts at or before `u` (`None` outside the domain, past rounding).
-fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
+pub(crate) fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
     if n <= p || knots.len() != n + p + 1 || !u.is_finite() {
         return None;
     }
@@ -1036,7 +1036,7 @@ fn insert_knot(
 
 /// Boehm insertion with separate knot differences for both blend factors.
 /// This retains the small factor beside a large homogeneous weight.
-pub(super) fn insert_guide_knot(
+pub(crate) fn insert_guide_knot(
     p: usize,
     knots: &[f64],
     ctrl: &[[f64; 4]],

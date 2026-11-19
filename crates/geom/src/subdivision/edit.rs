@@ -1,5 +1,6 @@
 //! Transactional topology edits. Invalid, nonmanifold results never replace the source cage.
 use super::{Cage, Result, bad, key};
+#[cfg(test)]
 use crate::prelude::*;
 use solidcore_record::Vec3;
 use std::collections::{BTreeMap, BTreeSet};
@@ -66,7 +67,7 @@ impl Cage {
     pub fn extrude_faces(&self, selected: &[usize], delta: Vec3) -> Result<Self> {
         self.validate()?;
         let selected = self.selected_faces(selected)?;
-        if !delta.is_finite() || delta.len() < 1e-9 {
+        if !solidcore_ops::form_subdivision::extrusion_delta(delta) {
             return Err(bad("extrusion needs a finite nonzero displacement"));
         }
         let mut out = self.clone();
@@ -77,7 +78,7 @@ impl Cage {
             for &v in face {
                 if let std::collections::btree_map::Entry::Vacant(entry) = duplicates.entry(v) {
                     entry.insert(out.points.len());
-                    out.points.push(self.point(v)? + delta);
+                    out.points.push(solidcore_ops::form_cage::displaced(self.point(v)?, delta).map_err(|e| bad(&e.to_string()))?);
                 }
             }
             for (&a, &b) in face.iter().zip(face.iter().cycle().skip(1)).take(face.len()) {
@@ -95,7 +96,7 @@ impl Cage {
     }
     pub fn extrude_edges(&self, selected: &[[usize; 2]], delta: Vec3) -> Result<Self> {
         let topology = self.topology()?;
-        if selected.is_empty() || selected.len() > self.points.len() || !delta.is_finite() || delta.len() < 1e-9 {
+        if selected.is_empty() || selected.len() > self.points.len() || !solidcore_ops::form_subdivision::extrusion_delta(delta) {
             return Err(bad("select boundary edges and a nonzero extrusion"));
         }
         let mut out = self.clone();
@@ -113,7 +114,7 @@ impl Cage {
             for v in [a, b] {
                 if let std::collections::btree_map::Entry::Vacant(entry) = duplicates.entry(v) {
                     entry.insert(out.points.len());
-                    out.points.push(self.point(v)? + delta);
+                    out.points.push(solidcore_ops::form_cage::displaced(self.point(v)?, delta).map_err(|e| bad(&e.to_string()))?);
                 }
             }
             let face = &self.faces[edge.faces[0]];
@@ -223,11 +224,8 @@ impl Cage {
             return Err(bad("weld requires at least two distinct vertices"));
         }
         let first = *set.first().ok_or_else(|| bad("empty weld"))?;
-        let mut center = Vec3::ZERO;
-        for &v in &set {
-            center += self.point(v)?;
-        }
-        center = center / set.len() as f64;
+        let controls = set.iter().map(|&id| self.point(id)).collect::<Result<Vec<_>>>()?;
+        let center = solidcore_ops::form_subdivision::centroid(controls.into_iter()).map_err(|e| bad(&e.to_string()))?;
         let mut out = self.clone();
         out.points[first] = center;
         for f in &mut out.faces {

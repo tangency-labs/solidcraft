@@ -1,86 +1,27 @@
 //! Shared-face replacement qualified by exact positive-weight support bounds.
-use solidcore_record::{Plane, Vec3};
-use solidcraft_geom::prelude::*;
-use solidcraft_geom::tess::{EvalSurface, from_kernel};
+use solidcore_record::Plane;
+use solidcraft_geom::tess::EvalSurface;
 
 use crate::{Body, FaceGeometry, Result, eval_geometry::face_geometry};
 
 mod coincident;
 
-fn points(homogeneous: &[[f64; 4]]) -> Option<Vec<Vec3>> {
-    if homogeneous.is_empty() || homogeneous.len() > 262_144 {
-        return None;
-    }
-    homogeneous
+use solidcore_ops::form_surface_replace::{coplanar, epsilon, inside, points, strictly_inside};
+
+fn boundary(geometry: &FaceGeometry) -> Option<Vec<[f64; 4]>> {
+    geometry
+        .loops
         .iter()
-        .map(|h| {
-            if h.iter().any(|v| !v.is_finite()) || h[3] <= 1e-12 {
-                return None;
-            }
-            let p = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
-            p.is_finite().then_some(p)
-        })
-        .collect()
+        .flatten()
+        .map(|edge| edge.control_points().map(<[_]>::to_vec))
+        .collect::<Option<Vec<_>>>()
+        .map(|rows| rows.into_iter().flatten().collect())
 }
 
-// Exact support-height bounds from the positive-weight NURBS convex hull
-// (Piegl and Tiller, The NURBS Book, §4.4) and the full orbit of each
-// revolved profile control. Untrimmed surfaces give conservative bounds.
 fn maximum_height(geometry: &FaceGeometry, plane: &Plane) -> Option<f64> {
-    let values = match &geometry.surface {
-        EvalSurface::Plane { .. } => geometry
-            .loops
-            .iter()
-            .flatten()
-            .map(|edge| edge.control_points().and_then(points))
-            .collect::<Option<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .map(|p| plane.height(p))
-            .collect::<Vec<_>>(),
-        EvalSurface::Nurbs { ctrl, .. } => points(ctrl)?.into_iter().map(|p| plane.height(p)).collect(),
-        EvalSurface::Revolved { profile, origin, axis, transform, .. } => {
-            let (origin, axis) = (from_kernel(*origin), from_kernel(*axis));
-            let n = plane.normal();
-            let [x, y, z] = *transform;
-            let pullback = Vec3::new(n.dot(Vec3::new(x[0], y[0], z[0])), n.dot(Vec3::new(x[1], y[1], z[1])), n.dot(Vec3::new(x[2], y[2], z[2])));
-            let parallel = pullback.dot(axis);
-            let radial = (pullback - axis * parallel).len();
-            let offset = (Vec3::new(x[3], y[3], z[3]) - plane.origin).dot(n) + origin.dot(pullback);
-            points(&profile.ctrl)?
-                .into_iter()
-                .map(|p| {
-                    let d = p - origin;
-                    let axial = d.dot(axis);
-                    offset + axial * parallel + (d - axis * axial).len() * radial
-                })
-                .collect()
-        }
-    };
-    if values.is_empty() || values.iter().any(|h| !h.is_finite()) { None } else { values.into_iter().reduce(f64::max) }
+    let boundary = if matches!(geometry.surface, EvalSurface::Plane { .. }) { boundary(geometry)? } else { Vec::new() };
+    solidcore_ops::form_surface_replace::maximum_height(&geometry.surface, &boundary, plane)
 }
-
-// Positive basis weights make each nonempty span leave the plane in its
-// interior if any of its supporting controls is strictly inside.
-fn strictly_inside(surface: &EvalSurface, hull: &[Vec3], planes: &[Plane], epsilon: f64) -> bool {
-    let EvalSurface::Nurbs { degree, knots, count, .. } = surface else {
-        return planes.iter().all(|plane| hull.iter().any(|p| plane.height(*p) < -epsilon));
-    };
-    let spans: [Vec<usize>; 2] =
-        std::array::from_fn(|d| (degree[d]..count[d]).filter(|&i| knots[d].get(i).zip(knots[d].get(i + 1)).is_some_and(|(a, b)| b > a)).collect());
-    let work = spans[0].len().saturating_mul(spans[1].len()).saturating_mul(planes.len()).saturating_mul(degree[0] + 1).saturating_mul(degree[1] + 1);
-    if work > 5_000_000 || spans.iter().any(Vec::is_empty) {
-        return false;
-    }
-    spans[1].iter().all(|&v| {
-        spans[0].iter().all(|&u| {
-            planes.iter().all(|plane| {
-                (v - degree[1]..=v).any(|j| (u - degree[0]..=u).any(|i| hull.get(j * count[0] + i).is_some_and(|p| plane.height(*p) < -epsilon)))
-            })
-        })
-    })
-}
-
 /// Replace a complete planar face by a matched open skin.
 /// Returns `None` unless positive-weight control hulls prove that the skin lies
 /// on the opposite side of a separating plane (union), or inside every half-space of a convex polyhedron (cut).
@@ -100,7 +41,7 @@ pub fn replace_matched_face(base: &Body, face: usize, skin: &Body, cut: bool, to
         return Ok(None);
     }
     let Some(selected) = base.planar_face(face) else { return Ok(None) };
-    let planar_epsilon = (base.size() * 1e-9).max(1e-9);
+    let planar_epsilon = epsilon(base.size(), 1e-9);
     let planes = if cut {
         let mut planes = Vec::new();
         let mut corners = Vec::new();
@@ -119,7 +60,7 @@ pub fn replace_matched_face(base: &Body, face: usize, skin: &Body, cut: bool, to
             }
             planes.push(plane);
         }
-        if corners.len() > 8192 || corners.iter().any(|p| planes.iter().any(|plane| plane.height(*p) > tolerance)) {
+        if corners.len() > 8192 || !inside(&corners, &planes, tolerance) {
             return Ok(None);
         }
         planes
@@ -134,35 +75,25 @@ pub fn replace_matched_face(base: &Body, face: usize, skin: &Body, cut: bool, to
         }
         Vec::new()
     };
-    let opposite = Plane { y: -selected.y, ..selected };
+    let opposite = solidcore_ops::form_surface_replace::opposite(selected);
     let mut rim_count = 0usize;
     let mut coincident = std::collections::BTreeMap::<usize, Vec<usize>>::new();
     for i in 0..skin.face_count() {
         let geometry = face_geometry(skin, i)?;
         if cut {
-            let hull = match &geometry.surface {
-                EvalSurface::Nurbs { ctrl, closed, .. } if !closed.iter().any(|x| *x) => points(ctrl),
-                EvalSurface::Plane { .. } => {
-                    let mut hull = Vec::new();
-                    for edge in geometry.loops.iter().flatten() {
-                        let Some(p) = edge.control_points().and_then(points) else { return Ok(None) };
-                        hull.extend(p);
-                    }
-                    Some(hull)
-                }
-                _ => None,
-            };
+            let boundary = if matches!(geometry.surface, EvalSurface::Plane { .. }) { boundary(&geometry) } else { Some(Vec::new()) };
+            let hull = boundary.and_then(|boundary| solidcore_ops::form_surface_replace::hull(&geometry.surface, &boundary));
             let Some(hull) = hull else { return Ok(None) };
-            if hull.iter().any(|p| planes.iter().any(|plane| plane.height(*p) > tolerance)) {
+            if !inside(&hull, &planes, tolerance) {
                 return Ok(None);
             }
-            let mut contacts = planes.iter().enumerate().filter(|(_, plane)| hull.iter().all(|p| plane.height(*p).abs() <= planar_epsilon));
+            let mut contacts = planes.iter().enumerate().filter(|(_, plane)| coplanar(&hull, plane, planar_epsilon));
             if let Some((wall, _)) = contacts.next() {
                 if wall == face || contacts.next().is_some() {
                     return Ok(None);
                 }
                 coincident.entry(wall).or_default().push(i);
-            } else if !strictly_inside(&geometry.surface, &hull, &planes, (base.size() * 1e-10).max(1e-10)) {
+            } else if !strictly_inside(&geometry.surface, &hull, &planes, epsilon(base.size(), 1e-10)) {
                 return Ok(None);
             }
         } else {
@@ -193,5 +124,11 @@ pub fn replace_matched_face(base: &Body, face: usize, skin: &Body, cut: bool, to
         return Ok(None);
     }
     let history = crate::boolean_record::through(&result, 0, open.history());
-    Ok(Some(result.with_checked_history(history, &[(base.face_count(), base.edge_count()), (skin.face_count(), skin.edge_count())])))
+    Ok(Some(
+        result
+            .with_checked_history(history, &[(base.face_count(), base.edge_count()), (skin.face_count(), skin.edge_count())])
+            .inherit_regularization_protection(base)
+            .inherit_regularization_protection(skin)
+            .inherit_split_lines(&[base, skin]),
+    ))
 }

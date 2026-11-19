@@ -183,7 +183,8 @@ pub(super) fn apply(object: View<'_, '_>, modifier: View<'_, '_>, mut cage: Cage
             continue;
         }
         if flags & (256 << axis) != 0 {
-            cage = clip(cage, axis, flags & (2048 << axis) != 0, threshold)?;
+            let snap_limit = mesh_edit::plane_snap_limit(&frame, axis, threshold).ok_or_else(|| bad("invalid Mirror bisect frame scale"))?;
+            cage = clip(cage, axis, flags & (2048 << axis) != 0, snap_limit)?;
         }
         // A reflected pair differs by twice its signed plane coordinate. Map
         // that axis into object space, where the merge threshold is measured.
@@ -277,5 +278,25 @@ mod tests {
         let reflected = reflect(clipped, 0, 0.0001).unwrap();
         assert_eq!(reflected.points.len(), 6);
         reflected.validate().unwrap();
+    }
+
+    #[test]
+    fn scaled_mirror_bisect_does_not_snap_points_beyond_the_object_distance() {
+        let mut frame = identity();
+        frame[0][0] = 0.5;
+        let back = affine::inverse(&frame).unwrap();
+        let mut cage = half_quad();
+        cage.points[0].x = 0.0015;
+        cage.points[3].x = 0.0008;
+        for p in &mut cage.points {
+            *p = point(&frame, *p).unwrap();
+        }
+        let limit = mesh_edit::plane_snap_limit(&frame, 0, 0.001).unwrap();
+        let mut clipped = clip(cage, 0, false, limit).unwrap();
+        for p in &mut clipped.points {
+            *p = point(&back, *p).unwrap();
+        }
+        assert!((clipped.points[0].x - 0.0015).abs() < 1e-15);
+        assert_eq!(clipped.points[3].x, 0.0);
     }
 }

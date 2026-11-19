@@ -57,3 +57,52 @@
 //! the unchanged accepted Match or Surface source, including undo/redo history.
 //! Missing repair data means ordinary editing. Staged replacement previews and
 //! derived qualification certificates are never persisted as accepted repairs.
+//!
+//! A refined Form can save one exact triangular trim of a planar boundary leaf.
+//! The retained rectangular evaluator still carries sculpt details and stable
+//! identities. Earlier designs have no collapse trim. An older reader warns and
+//! preserves the trim it cannot read.
+//!
+//! A refined Form can save additional disjoint quad cap records. Each record
+//! retains its face slot and directed rim. Older designs still open with their
+//! original single cap or no cap. An older reader warns and preserves the cap
+//! records it cannot read.
+//!
+//! A Form support edge with two distinct vertices may name both vertices when
+//! their incident edge names coincide. Older bindings retain their intrinsic
+//! parameter checks. An older reader warns and preserves the additional names.
+//!
+//! Thicken stores which Form sources use an exact wall swept from planar spline
+//! boundaries. Older designs have no saved planar construction and keep their
+//! existing evaluation. An older reader warns and preserves the construction
+//! choice it cannot read.
+//!
+//! A refined Form may save a derived quad cap with its reserved logical face
+//! slot and four directed rim sides and retained owners. Earlier designs
+//! without a cap record keep their original editable skin. An older reader warns
+//! and preserves the cap record it cannot read.
+//!
+//! Refined Unweld can save detached logical leaf IDs while retaining the original
+//! evaluator. Detached slots stay empty and retain shared boundary stations.
+//! Earlier designs have no detached leaves. An older reader warns and preserves
+//! the detached leaf records it cannot read.
+//!
+//! A Stitch can save one qualified seam between two independently editable refined Forms.
+//! The record stores typed source feature IDs and directed logical rim owners.
+//! Older designs contain ordinary Stitch features with no seam. An older reader
+//! warns and preserves the seam record it cannot read.
+//!
+//! Match can retain the earlier tensor interpolation basis, evaluator depth,
+//! and continuation order when aligned subdivision changes only topology.
+//! Older Match definitions omit the optional continued_surface record and
+//! retain their ordinary current-evaluator fit. An older reader warns and
+//! preserves the continuation record it cannot read.
+//!
+//! Refined Forms can save retired quad cap face slots after removing a cap.
+//! The saved IDs keep those slots empty when the rim is capped again or the
+//! skin is refined. Earlier designs have no retired cap slots. An older reader
+//! warns and preserves the retired slots it cannot read.
+//!
+//! Symmetric Thicken on a saved refined Form retains the chosen construction.
+//! Older files have no recorded construction and keep their existing evaluation.
+//! An older reader warns and preserves the construction choice it cannot read.

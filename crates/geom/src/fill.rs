@@ -11,6 +11,7 @@
 //! A2.1 (span search).
 
 use crate::bspline::{Dir, HPoint, NurbsSurface, Side, SplineError, SplineResult, find_span, invalid, local_basis_array};
+use crate::fill_solve::Band;
 use crate::prelude::*;
 use solidcore_record::Vec3;
 
@@ -658,7 +659,7 @@ impl Grid {
     fn fit(&self, uv: &[[f64; 2]], h: &[f64]) -> SplineResult<Vec<f64>> {
         let [cu, cv] = self.count;
         let n = cu * cv;
-        let mut band = Band::new(n, 3 * cu + 3);
+        let mut band = Band::new(n, 3 * cu + 3)?;
         let mut rhs = vec![0.0; n];
         let mut fitted = 0usize;
         for (q, hk) in uv.iter().zip(h) {
@@ -753,136 +754,6 @@ impl Grid {
             }
         }
         NurbsSurface::from_homogeneous([3, 3], self.knots.clone(), ctrl)
-    }
-}
-
-/// A symmetric banded matrix: the upper band, row `r` holding columns `r ..= r + bw`.
-#[derive(Clone)]
-pub(crate) struct Band {
-    n: usize,
-    bw: usize,
-    a: Vec<f64>,
-}
-
-impl Band {
-    pub(crate) fn new(n: usize, bw: usize) -> Band {
-        Band { n, bw, a: vec![0.0; n * (bw + 1)] }
-    }
-    fn index(&self, r: usize, s: usize) -> Option<usize> {
-        let (r, s) = if r <= s { (r, s) } else { (s, r) };
-        (s - r <= self.bw && s < self.n).then_some(r * (self.bw + 1) + (s - r))
-    }
-    fn get(&self, r: usize, s: usize) -> f64 {
-        self.index(r, s).and_then(|i| self.a.get(i)).copied().unwrap_or(0.0)
-    }
-    fn set(&mut self, r: usize, s: usize, v: f64) {
-        if let Some(x) = self.index(r, s).and_then(|i| self.a.get_mut(i)) {
-            *x = v;
-        }
-    }
-    /// Add `v` at `(r, s)` with `r ≤ s` (the lower half is the same by symmetry: callers adding
-    /// a full outer product reach each stored entry once through `r ≤ s`).
-    pub(crate) fn add(&mut self, r: usize, s: usize, v: f64) {
-        if r <= s
-            && let Some(x) = self.index(r, s).and_then(|i| self.a.get_mut(i))
-        {
-            *x += v;
-        }
-    }
-    /// Solve `A·x = b` by banded Cholesky factorisation `A = Uᵀ·U`; an error when `A` is not
-    /// positive definite.
-    pub(crate) fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
-        self.factor()?.substitute(b)
-    }
-
-    /// The Cholesky factor `U` of `A = Uᵀ·U`, in place; an error when `A` is not positive
-    /// definite.
-    pub(crate) fn factor(mut self) -> SplineResult<Band> {
-        let (n, bw) = (self.n, self.bw);
-        for r in 0..n {
-            let mut d = self.get(r, r);
-            for k in r.saturating_sub(bw)..r {
-                let u = self.get(k, r);
-                d -= u * u;
-            }
-            if !(d > 0.0) {
-                return invalid("the fit's equations are singular");
-            }
-            let d = d.sqrt();
-            self.set(r, r, d);
-            for s in r + 1..(r + bw + 1).min(n) {
-                let mut v = self.get(r, s);
-                for k in s.saturating_sub(bw)..r {
-                    v -= self.get(k, r) * self.get(k, s);
-                }
-                self.set(r, s, v / d);
-            }
-        }
-        Ok(self)
-    }
-
-    /// [`Band::factor`] by rows: once row `r` of `U` is known, the rows below it within the band
-    /// are updated from it at once (right-looking), which walks memory row by row instead of down
-    /// columns. The same factor, to rounding; what the general fill, whose bands are wide, uses.
-    pub(crate) fn factor_rows(mut self) -> SplineResult<Band> {
-        let (n, bw) = (self.n, self.bw);
-        let w = bw + 1;
-        let mut row = vec![0.0; w];
-        for r in 0..n {
-            let Some(here) = self.a.get_mut(r * w..r * w + w) else { return invalid("the fit's equations are out of shape") };
-            let d = here.first().copied().unwrap_or(0.0);
-            if !(d > 0.0) {
-                return invalid("the fit's equations are singular");
-            }
-            let d = d.sqrt();
-            for (k, x) in here.iter_mut().enumerate() {
-                *x = if k == 0 { d } else { *x / d };
-            }
-            row.copy_from_slice(here);
-            let end = (r + bw + 1).min(n);
-            for s in r + 1..end {
-                let us = row.get(s - r).copied().unwrap_or(0.0);
-                if us == 0.0 {
-                    continue;
-                }
-                let len = end - s;
-                let (Some(dst), Some(src)) = (self.a.get_mut(s * w..s * w + len), row.get(s - r..s - r + len)) else {
-                    return invalid("the fit's equations are out of shape");
-                };
-                for (x, y) in dst.iter_mut().zip(src) {
-                    *x -= us * y;
-                }
-            }
-        }
-        Ok(self)
-    }
-
-    /// Solve `Uᵀ·U·x = b` with a factor from [`Band::factor`].
-    pub(crate) fn substitute(&self, mut b: Vec<f64>) -> SplineResult<Vec<f64>> {
-        let (n, bw) = (self.n, self.bw);
-        // Uᵀ·y = b, then U·x = y.
-        for r in 0..n {
-            let mut v = b.get(r).copied().unwrap_or(0.0);
-            for k in r.saturating_sub(bw)..r {
-                v -= self.get(k, r) * b.get(k).copied().unwrap_or(0.0);
-            }
-            if let Some(x) = b.get_mut(r) {
-                *x = v / self.get(r, r);
-            }
-        }
-        for r in (0..n).rev() {
-            let mut v = b.get(r).copied().unwrap_or(0.0);
-            for s in r + 1..(r + bw + 1).min(n) {
-                v -= self.get(r, s) * b.get(s).copied().unwrap_or(0.0);
-            }
-            if let Some(x) = b.get_mut(r) {
-                *x = v / self.get(r, r);
-            }
-        }
-        if b.iter().any(|x| !x.is_finite()) {
-            return invalid("the fit is not finite");
-        }
-        Ok(b)
     }
 }
 

@@ -554,3 +554,32 @@ fn exact_quad_cap_reproduces_a_rational_quarter_cylinder_with_split_directed_sid
     bottom[1].1.ctrl[1][3] = f64::INFINITY;
     assert!(quad_cap([&bottom, &right, &top, &left]).is_err(), "hostile homogeneous data is refused");
 }
+
+#[test]
+fn quad_cap_adapter_keeps_source_pieces_intact_on_success_and_refusal() {
+    use crate::bspline::CurveN;
+    let corners = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]];
+    let sides = std::array::from_fn::<_, 4, _>(|i| {
+        let [a, b] = [corners[i], corners[(i + 1) % 4]];
+        vec![([0., 1.], CurveN { degree: 1, knots: vec![0., 0., 1., 1.], ctrl: vec![[a[0], a[1], 0., 1.], [b[0], b[1], 0., 1.]] })]
+    });
+    let saved = sides.clone();
+    let surface = quad_cap(sides.each_ref().map(Vec::as_slice)).unwrap();
+    assert!(surface.eval(0.3, 0.7).unwrap().dist(Vec3::new(0.3, 0.7, 0.)) < 1e-13);
+    assert_eq!(sides, saved);
+    let mut gap = sides.clone();
+    gap[0][0].0[0] = 0.125;
+    let saved = gap.clone();
+    assert!(quad_cap(gap.each_ref().map(Vec::as_slice)).is_err());
+    assert_eq!(gap, saved);
+    let mut negative = sides.clone();
+    negative[2][0].1.ctrl[0][3] = -1.;
+    let saved = negative.clone();
+    assert!(quad_cap(negative.each_ref().map(Vec::as_slice)).is_err());
+    assert_eq!(negative, saved);
+    let mut over = sides.clone();
+    over[0] = vec![sides[0][0].clone(); CAP_MAX_PIECES + 1];
+    let saved = over.clone();
+    assert!(quad_cap(over.each_ref().map(Vec::as_slice)).is_err());
+    assert_eq!(over, saved);
+}

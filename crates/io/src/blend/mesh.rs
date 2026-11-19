@@ -357,11 +357,20 @@ fn modifiers(object: View<'_, '_>, mut cage: Cage) -> Result<(Cage, usize)> {
             if s.uint("subdivType", 2)? != 0 {
                 return Err(bad("subdivision must be Catmull-Clark"));
             }
+            // Forms smooths open corners. Another saved boundary rule changes
+            // the surface even when all cage coordinates agree.
+            if s.has("boundary_smooth") && s.uint("boundary_smooth", 2)? != 0 {
+                return Err(bad("subdivision boundary_smooth is not ALL; corner-preserving boundaries are not supported"));
+            }
             if s.has("flags") && s.uint("flags", 2)? & super::SUBSURF_USE_CREASE == 0 {
                 cage.edge_creases.clear();
                 cage.vertex_creases.clear();
             }
-            level = Some((s.uint("levels", 2)? as usize).min(4));
+            let saved_level = s.uint("levels", 2)?;
+            if saved_level > 4 {
+                return Err(bad(format!("saved subdivision level {saved_level} exceeds the supported maximum 4; object was not imported")));
+            }
+            level = Some(saved_level as usize);
         }
         next = base.ptr("next")?;
     }

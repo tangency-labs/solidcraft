@@ -87,13 +87,19 @@ Single quad restores one four-edge leaf. In the desktop app, choose **New cap**
 to create a new surface on one four-sided opening. Apply keeps one Undo step,
 and Cancel restores the previous Form and selection. An independent Form can
 hold up to eight caps on disjoint rims. Each cap follows its rim and keeps one
-selectable face ID when saved. Use box or lasso selection to select faces
-on a capped Form. To click a cap face, enable **Use exact CAD face picking**
-in Design preferences. Edges and points can also be clicked.
-Shape the cap by editing its rim. To remove it, select only the cap face and
+selectable face ID when saved. In the desktop app, click a cap face or use box
+or lasso selection. Capped Forms use exact CAD face picking automatically.
+Edges and points can also be clicked. Move, rotate or scale a selected cap
+with the dragger or numeric fields. Selection orientation follows the cap's
+surface normal and parameter direction. Each edit drives the cap's rim and
+rebuilds the cap; the whole cap is not constrained to move rigidly. Edits whose
+CAD seams cannot be rebuilt are refused without changing the Form or its Undo
+history. Dragging uses a background worker and keeps one Undo step.
+To remove a cap, select only the cap face and
 choose **Delete Faces** or press Delete. Undo restores the cap. Capping the
-same rim again creates a new face ID. Direct cap face transforms remain
-unavailable. Extrusion, Match and symmetry require a Form without a derived
+same rim again creates a new face ID. Browser cap-face transforms remain
+unavailable; edits to their rim use a background worker when CAD validation
+is required. Extrusion, Match and symmetry require a Form without a derived
 cap. Bridge also requires a Form without retired cap faces. Scripts can use
 `fill_mode: "new_cap"` or `tool: "delete_faces"` with the cap face ID in
 `form.prototype.topology`.

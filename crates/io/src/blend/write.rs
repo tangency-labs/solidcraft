@@ -80,7 +80,8 @@ impl Schema {
                     ("short", "renderLevels"),
                     ("short", "flags"),
                     ("short", "quality"),
-                    ("char", "_pad[6]"),
+                    ("short", "boundary_smooth"),
+                    ("char", "_pad[4]"),
                 ],
             ),
             (
@@ -344,6 +345,9 @@ impl Writer {
         let start = self.bytes.len();
         if object.levels.is_some() {
             object.cage.validate().map_err(|e| bad(e.to_string()))?;
+            if object.levels.is_some_and(|level| level > 4) {
+                return Err(bad("editable Form export requires subdivision levels 0 through 4"));
+            }
         } else {
             validate_surface(object.cage)?;
         }
@@ -434,8 +438,8 @@ impl Writer {
             base.int("mode", 3)?;
             base.text("name", "Form subdivision")?;
             modifier.set("modifier", &base.bytes)?;
-            modifier.short("levels", levels.min(4) as u16)?;
-            modifier.short("renderLevels", levels.min(4) as u16)?;
+            modifier.short("levels", levels as u16)?;
+            modifier.short("renderLevels", levels as u16)?;
             modifier.short("flags", super::SUBSURF_USE_CREASE as u16)?;
             modifier.short("quality", 3)?;
             self.record(b"DATA", "SubsurfModifierData", address, 1, modifier.bytes)?;
@@ -588,6 +592,49 @@ mod tests {
     use crate::blend::dna::File;
     use solidcore_record::Vec3;
     use solidcraft_geom::{Mesh, Vec3Geom};
+
+    #[test]
+    fn import_reports_unsupported_boundary_smoothing_and_saved_levels_without_changing_the_object() {
+        let object = Object {
+            name: "Open quad".into(),
+            cage: Cage { points: vec![Vec3::ZERO, Vec3::X, Vec3::X + Vec3::Y, Vec3::Y], faces: vec![vec![0, 1, 2, 3]], ..Default::default() },
+            levels: 2,
+        };
+        let bytes = write(std::slice::from_ref(&object)).unwrap();
+        let file = File::read(&bytes).unwrap();
+        let block = file.blocks.iter().find(|block| file.structs[block.sdna].name == "SubsurfModifierData").unwrap();
+        let modifier = file.view(block, "SubsurfModifierData").unwrap();
+        let offset = block.bytes.as_ptr() as usize - bytes.as_ptr() as usize;
+        let field = |name: &str| offset + modifier.structure.fields[name].offset;
+        let imported = crate::blend::read(&bytes).unwrap();
+        assert!(imported.rejected.is_empty());
+        assert_eq!(imported.objects[0].levels, 2);
+        // The stored scene scale is a float32 number of metres per unit.
+        // The integer vertex coordinates are exact; their millimetre scale is
+        // exactly the decoded binary32 value multiplied by 1000.
+        let mut decoded_cage = object.cage.clone();
+        decoded_cage.points = object.cage.points.iter().map(|point| *point * (f64::from(0.001_f32) * 1000.0)).collect();
+        assert_eq!(imported.objects[0].cage, decoded_cage);
+        let mut preserve_corners = bytes.clone();
+        let at = field("boundary_smooth");
+        preserve_corners[at..at + 2].copy_from_slice(&1_u16.to_le_bytes());
+        let imported = crate::blend::read(&preserve_corners).unwrap();
+        assert!(imported.objects.is_empty());
+        assert_eq!(imported.rejected.len(), 1);
+        assert!(imported.rejected[0].contains("boundary_smooth"));
+        for level in [5_u16, 11, u16::MAX] {
+            let mut unsupported = bytes.clone();
+            let at = field("levels");
+            unsupported[at..at + 2].copy_from_slice(&level.to_le_bytes());
+            let imported = crate::blend::read(&unsupported).unwrap();
+            assert!(imported.objects.is_empty());
+            assert_eq!(imported.rejected.len(), 1);
+            assert!(imported.rejected[0].contains(&format!("level {level}")));
+        }
+        let mut unsupported_export = object;
+        unsupported_export.levels = 5;
+        assert!(write(&[unsupported_export]).is_err());
+    }
 
     #[test]
     fn import_uses_the_active_scenes_units_and_refuses_a_broken_scene_pointer() {

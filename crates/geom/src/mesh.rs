@@ -109,7 +109,7 @@ impl Extend<Vec3> for Aabb3 {
 
 /// The display mesh is solidcore-tess's: one type from the kernel's tessellation to the viewport,
 /// with nothing converted on the way. Its geometry here is [`MeshGeom`].
-pub use solidcore_tess::Mesh;
+pub use solidcore_tess::{Mesh, MeshBufferLimits};
 
 /// A triangle with its bounding box, as [`find_close_pair`] takes them.
 pub type BoxedTriangle = ([Vec3; 3], Aabb3);

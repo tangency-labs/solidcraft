@@ -19,8 +19,8 @@ pub mod validation;
 
 pub use extrusion_preview::{ExtrusionPreview, ExtrusionResponse};
 pub use objects::Part;
-pub use transform_job::{FormTargetSpace, FormTransformJob, FormTransformStamp, PreparedFormTransform};
-pub(crate) use transform_job::{collapse_tolerance, qualify_collapse_edit};
+pub use transform_job::{BrowserTransform, FormTargetSpace, FormTransformJob, FormTransformStamp, PreparedFormTransform};
+pub(crate) use transform_job::{derived_edit_tolerance, qualify_derived_edit};
 
 type InsertRecord = ([usize; 2], f64);
 

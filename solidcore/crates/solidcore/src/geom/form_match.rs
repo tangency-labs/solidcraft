@@ -405,7 +405,7 @@ pub fn step(
             (transverse, transverse),
         ]
         .into_iter()
-        .map(|(a, b)| target.support.curvature(a, b).map(f64::abs).unwrap_or(0.0))
+        .map(|(a, b)| target.support.curvature(a, b).map_or(0.0, f64::abs))
         .fold(1.0 / diagonal.max(1e-6), f64::max);
         for (field, a, b, actual) in [
             (3, jet.du, jet.du, jet.duu),

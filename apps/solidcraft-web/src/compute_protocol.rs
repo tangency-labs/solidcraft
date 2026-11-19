@@ -1,6 +1,7 @@
 //! Private wire for the browser Form CAD worker.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use solidcraft_engine::forms_prototype::BrowserTransform;
 use solidcraft_engine::forms_prototype::validation::BrowserCheck;
 #[cfg(target_arch = "wasm32")]
 use solidcraft_ui_egui::forms_prototype::BrowserPreview;
@@ -15,6 +16,8 @@ pub enum Kind {
     Failed,
     Preview,
     Previewed,
+    Transform,
+    Transformed,
 }
 impl Kind {
     fn byte(self) -> u8 {
@@ -25,6 +28,8 @@ impl Kind {
             Self::Failed => 3,
             Self::Preview => 4,
             Self::Previewed => 5,
+            Self::Transform => 6,
+            Self::Transformed => 7,
         }
     }
 
@@ -32,6 +37,8 @@ impl Kind {
         match self {
             Self::Ready | Self::Failed => 0,
             Self::Check | Self::Checked => BrowserCheck::MAX_PAYLOAD,
+            Self::Transform => BrowserTransform::MAX_REQUEST,
+            Self::Transformed => BrowserTransform::MAX_REPLY,
             #[cfg(target_arch = "wasm32")]
             Self::Preview => BrowserPreview::MAX_REQUEST,
             #[cfg(target_arch = "wasm32")]
@@ -65,6 +72,8 @@ pub fn read(bytes: &[u8]) -> Result<(Kind, u64, &[u8]), &'static str> {
         (Some(3), 0, true) => Kind::Failed,
         (Some(4), 1.., false) => Kind::Preview,
         (Some(5), 1.., false) => Kind::Previewed,
+        (Some(6), 1.., false) => Kind::Transform,
+        (Some(7), 1.., false) => Kind::Transformed,
         _ => return Err("invalid Form CAD worker frame"),
     };
     if payload.len() > kind.max_payload() {
@@ -77,7 +86,8 @@ pub fn read(bytes: &[u8]) -> Result<(Kind, u64, &[u8]), &'static str> {
 pub fn frame_bytes(value: wasm_bindgen::JsValue) -> Result<Vec<u8>, &'static str> {
     use wasm_bindgen::JsCast;
     let bytes: js_sys::Uint8Array = value.dyn_into().map_err(|_| "Form CAD worker frame must be bytes")?;
-    if bytes.length() as usize > HEADER + BrowserPreview::MAX_REPLY {
+    let maximum = BrowserPreview::MAX_REPLY.max(BrowserTransform::MAX_REQUEST).max(BrowserTransform::MAX_REPLY).max(BrowserCheck::MAX_PAYLOAD);
+    if bytes.length() as usize > HEADER + maximum {
         return Err("Form CAD worker frame exceeds its transfer limit");
     }
     Ok(bytes.to_vec())
@@ -100,5 +110,19 @@ mod tests {
         assert!(read(&oversized).is_err());
         let request = frame(Kind::Preview, 1, b"preview").unwrap();
         assert_eq!(read(&request), Ok((Kind::Preview, 1, b"preview".as_slice())));
+    }
+
+    #[test]
+    fn transform_request_and_reply_have_bounded_distinct_wire_kinds() {
+        for (kind, limit) in [(Kind::Transform, BrowserTransform::MAX_REQUEST), (Kind::Transformed, BrowserTransform::MAX_REPLY)] {
+            let bytes = frame(kind, 27, b"qualified transform").unwrap();
+            assert_eq!(read(&bytes), Ok((kind, 27, b"qualified transform".as_slice())));
+            assert!(read(&frame(kind, 0, b"missing job identity").unwrap()).is_err());
+            assert!(read(&frame(kind, 27, &[]).unwrap()).is_err());
+            assert!(frame(kind, 27, &vec![0; limit + 1]).is_err());
+            let mut oversized = bytes;
+            oversized.resize(HEADER + limit + 1, 0);
+            assert!(read(&oversized).is_err());
+        }
     }
 }

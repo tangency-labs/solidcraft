@@ -6,6 +6,26 @@ use solidcore_record::{Plane, Vec3};
 
 pub use kernel::RimPhase;
 
+/// Normalize a finite editing direction without an absolute length threshold.
+pub fn selection_unit(vector: Vec3) -> Option<Vec3> {
+    kernel::selection_unit(vec3(vector)).map(record_vec3)
+}
+
+/// Oriented normal of a regular surface differential.
+pub fn selection_normal(du: Vec3, dv: Vec3) -> Option<Vec3> {
+    kernel::selection_normal(vec3(du), vec3(dv)).map(record_vec3)
+}
+
+/// Proper editing axes from a directed tangent and an oriented normal.
+pub fn selection_axes(tangent: Vec3, normal: Vec3) -> Option<[Vec3; 3]> {
+    kernel::selection_axes(vec3(tangent), vec3(normal)).map(|axes| axes.map(record_vec3))
+}
+
+/// Proper editing axes at an exact surface differential and directed UV reference.
+pub fn selection_frame(du: Vec3, dv: Vec3, direction: [f64; 2]) -> Option<[Vec3; 3]> {
+    kernel::selection_frame(vec3(du), vec3(dv), direction).map(|axes| axes.map(record_vec3))
+}
+
 /// Transfer a coefficient between ordinary and continued stencils.
 pub fn continued_control(point: Vec3, ordinary: Vec3, continued: Vec3) -> Vec3 {
     record_vec3(kernel::continued_control(

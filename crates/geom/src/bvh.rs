@@ -5,12 +5,14 @@
 
 use crate::prelude::*;
 use crate::{Aabb3, Mesh};
+use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 
 /// Most items in a leaf.
 const LEAF: usize = 4;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct Node {
     bounds: Aabb3,
     /// A leaf: the first of its `count` items in [`Bvh::order`]. Otherwise its children are
@@ -297,9 +299,151 @@ fn farthest_along(o: Vec3, d: Vec3, b: &Aabb3) -> f64 {
 pub struct MeshIndex {
     triangles: Bvh,
     triangle_count: usize,
+    position_count: usize,
+    edge_lengths: Vec<usize>,
     segments: Bvh,
     /// Per segment item: its edge, and its first point in that edge's polyline.
     segment_of: Vec<(u32, u32)>,
+}
+
+const MAX_WIRE_ITEMS: usize = 2_000_000;
+const MAX_WIRE_NODES: usize = MAX_WIRE_ITEMS * 2;
+const MAX_WIRE_DEPTH: usize = 64;
+
+/// Opaque, bounded flat display-index data transferred from a preparation worker.
+/// Hydration validates it against the supplied mesh before it can be queried.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeshIndexWire {
+    triangles: BvhWire,
+    triangle_count: usize,
+    position_count: usize,
+    #[serde(deserialize_with = "wire_items")]
+    edge_lengths: Vec<usize>,
+    segments: BvhWire,
+    #[serde(deserialize_with = "wire_items")]
+    segment_of: Vec<(u32, u32)>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BvhWire {
+    #[serde(deserialize_with = "wire_nodes")]
+    nodes: Vec<Node>,
+    #[serde(deserialize_with = "wire_items")]
+    order: Vec<u32>,
+}
+
+fn wire_array<'de, D, T>(deserializer: D, limit: usize) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct Bounded<T> {
+        limit: usize,
+        item: std::marker::PhantomData<T>,
+    }
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Bounded<T> {
+        type Value = Vec<T>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "at most {} flat display-index entries", self.limit)
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+            use serde::de::Error;
+            if sequence.size_hint().is_some_and(|length| length > self.limit) {
+                return Err(A::Error::custom("display-index array exceeds its entry limit"));
+            }
+            let mut items = Vec::new();
+            while let Some(item) = sequence.next_element()? {
+                if items.len() >= self.limit {
+                    return Err(A::Error::custom("display-index array exceeds its entry limit"));
+                }
+                items.try_reserve(1).map_err(|_| A::Error::custom("display-index allocation refused"))?;
+                items.push(item);
+            }
+            Ok(items)
+        }
+    }
+    deserializer.deserialize_seq(Bounded { limit, item: std::marker::PhantomData })
+}
+
+fn wire_nodes<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Node>, D::Error> {
+    wire_array(deserializer, MAX_WIRE_NODES)
+}
+
+fn wire_items<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    wire_array(deserializer, MAX_WIRE_ITEMS)
+}
+
+fn in_box(bounds: &Aabb3, point: Vec3) -> bool {
+    point.is_finite()
+        && bounds.min.x <= point.x
+        && point.x <= bounds.max.x
+        && bounds.min.y <= point.y
+        && point.y <= bounds.max.y
+        && bounds.min.z <= point.z
+        && point.z <= bounds.max.z
+}
+
+impl BvhWire {
+    fn of(bvh: &Bvh) -> Self {
+        Self { nodes: bvh.nodes.clone(), order: bvh.order.clone() }
+    }
+
+    fn hydrate(self, items: usize, mut enclosed: impl FnMut(u32, &Aabb3) -> bool) -> Option<Bvh> {
+        if items > MAX_WIRE_ITEMS || self.order.len() != items || self.nodes.len() > MAX_WIRE_NODES {
+            return None;
+        }
+        if items == 0 {
+            return self.nodes.is_empty().then_some(Bvh::default());
+        }
+        if self.nodes.is_empty() || self.nodes.len() > items.checked_mul(2)?.checked_sub(1)? {
+            return None;
+        }
+        let mut visited = Vec::new();
+        visited.try_reserve_exact(self.nodes.len()).ok()?;
+        visited.resize(self.nodes.len(), false);
+        let mut covered = Vec::new();
+        covered.try_reserve_exact(items).ok()?;
+        covered.resize(items, false);
+        let mut pending = vec![(0usize, 0usize)];
+        while let Some((index, depth)) = pending.pop() {
+            let seen = visited.get_mut(index)?;
+            if *seen || depth > MAX_WIRE_DEPTH {
+                return None;
+            }
+            *seen = true;
+            let node = self.nodes.get(index)?;
+            if !finite(&node.bounds) || node.bounds.is_empty() {
+                return None;
+            }
+            let start = node.first as usize;
+            if node.count > 0 {
+                let end = start.checked_add(node.count as usize)?;
+                for &item in self.order.get(start..end)? {
+                    let seen = covered.get_mut(item as usize)?;
+                    if *seen || !enclosed(item, &node.bounds) {
+                        return None;
+                    }
+                    *seen = true;
+                }
+            } else {
+                let right = start.checked_add(1)?;
+                for child in [start, right] {
+                    let bounds = &self.nodes.get(child)?.bounds;
+                    if !in_box(&node.bounds, bounds.min) || !in_box(&node.bounds, bounds.max) {
+                        return None;
+                    }
+                    pending.push((child, depth + 1));
+                }
+            }
+        }
+        (visited.into_iter().all(|seen| seen) && covered.into_iter().all(|seen| seen)).then_some(Bvh { nodes: self.nodes, order: self.order })
+    }
 }
 
 impl MeshIndex {
@@ -339,7 +483,81 @@ impl MeshIndex {
                 segment_of.push((ei as u32, si as u32));
             }
         }
-        MeshIndex { triangles: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), segments: Bvh::new(&seg_boxes), segment_of }
+        MeshIndex {
+            triangles: Bvh::new(&boxes),
+            triangle_count: mesh.triangles.len(),
+            position_count: mesh.positions.len(),
+            edge_lengths: mesh.edges.iter().map(Vec::len).collect(),
+            segments: Bvh::new(&seg_boxes),
+            segment_of,
+        }
+    }
+
+    /// Copy the prepared flat index for transfer to another runtime.
+    pub fn to_wire(&self) -> MeshIndexWire {
+        MeshIndexWire {
+            triangles: BvhWire::of(&self.triangles),
+            triangle_count: self.triangle_count,
+            position_count: self.position_count,
+            edge_lengths: self.edge_lengths.clone(),
+            segments: BvhWire::of(&self.segments),
+            segment_of: self.segment_of.clone(),
+        }
+    }
+
+    /// Restore a prepared display index using bounded validation only. Every
+    /// stored item must occur exactly once, its mesh coordinates must lie in its
+    /// leaf, and child boxes must lie in their parents. No hierarchy is built.
+    pub fn from_wire(wire: MeshIndexWire, mesh: &Mesh) -> Option<Self> {
+        if wire.triangle_count != mesh.triangles.len()
+            || wire.position_count != mesh.positions.len()
+            || wire.triangle_count > MAX_WIRE_ITEMS
+            || wire.position_count > MAX_WIRE_ITEMS * 3
+            || mesh.positions.iter().any(|point| !point.is_finite())
+            || wire.edge_lengths.len() != mesh.edges.len()
+            || wire.edge_lengths.len() > MAX_WIRE_ITEMS
+            || wire.edge_lengths.iter().zip(&mesh.edges).any(|(&length, edge)| length != edge.len())
+        {
+            return None;
+        }
+        let mut segments = 0usize;
+        for (edge, path) in mesh.edges.iter().enumerate() {
+            let count = if path.len() == 1 { 1 } else { path.len().saturating_sub(1) };
+            segments = segments.checked_add(count)?;
+            if segments > MAX_WIRE_ITEMS || path.iter().any(|point| !point.is_finite()) {
+                return None;
+            }
+            let start = segments.checked_sub(count)?;
+            for station in 0..count {
+                if wire.segment_of.get(start + station).copied() != Some((u32::try_from(edge).ok()?, u32::try_from(station).ok()?)) {
+                    return None;
+                }
+            }
+        }
+        if wire.segment_of.len() != segments {
+            return None;
+        }
+        let triangles = wire.triangles.hydrate(mesh.triangles.len(), |item, bounds| {
+            mesh.triangles
+                .get(item as usize)
+                .and_then(|triangle| mesh.tri(triangle))
+                .is_some_and(|points| points.into_iter().all(|point| in_box(bounds, point)))
+        })?;
+        let edges = wire.segments.hydrate(segments, |item, bounds| {
+            let Some(&(edge, station)) = wire.segment_of.get(item as usize) else { return false };
+            let Some(path) = mesh.edges.get(edge as usize) else { return false };
+            let Some(&a) = path.get(station as usize) else { return false };
+            let b = path.get(station as usize + 1).copied().unwrap_or(a);
+            in_box(bounds, a) && in_box(bounds, b)
+        })?;
+        Some(Self {
+            triangles,
+            triangle_count: wire.triangle_count,
+            position_count: wire.position_count,
+            edge_lengths: wire.edge_lengths,
+            segments: edges,
+            segment_of: wire.segment_of,
+        })
     }
 
     /// [`Mesh::raycast`] through the index: the same answer, including which triangle wins a tie.

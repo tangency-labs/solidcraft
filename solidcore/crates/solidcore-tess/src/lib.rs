@@ -46,7 +46,7 @@ mod vec;
 
 pub use curve::curve_points;
 pub use iso::{MAX_ISOPARMS, isoparms};
-pub use mesh::Mesh;
+pub use mesh::{Mesh, MeshBufferLimits};
 pub use mesher::guided::{DisplayGuide, DisplayGuidePoint, GuidedMesh, mesh_with_guides};
 pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;

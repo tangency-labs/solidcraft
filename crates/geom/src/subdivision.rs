@@ -1,6 +1,5 @@
 //! Bounded Catmull-Clark mesh previews for the local Forms experiment.
 //! The control cage stays authoritative; subdivision creates a new quad mesh.
-use crate::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::Mesh;
@@ -218,103 +217,20 @@ impl Cage {
         let t = self.topology()?;
         let sharp: BTreeMap<_, _> = self.edge_creases.iter().map(|c| (key(c.edge[0], c.edge[1]), c.sharpness)).collect();
         let vertex_sharp: BTreeMap<_, _> = self.vertex_creases.iter().map(|c| (c.vertex, c.sharpness)).collect();
-        let centers: Vec<Vec3> = self
-            .faces
+        let edges: Vec<_> = t
+            .edges
             .iter()
-            .map(|f| {
-                let mut sum = Vec3::ZERO;
-                for &i in f {
-                    sum += self.point(i)?;
-                }
-                Ok(sum / f.len() as f64)
+            .map(|edge| solidcore_ops::form_subdivision::StepEdge {
+                vertices: [edge.a, edge.b],
+                faces: [edge.faces.first().copied(), edge.faces.get(1).copied()],
+                sharpness: sharp.get(&key(edge.a, edge.b)).copied().unwrap_or(0.0),
             })
-            .collect::<Result<_>>()?;
-        let mut points = Vec::with_capacity(self.points.len() + t.edges.len() + centers.len());
-        for (v, &p) in self.points.iter().enumerate() {
-            let es = t.incident.get(v).ok_or_else(|| bad("invalid vertex"))?;
-            let mut boundary = Vec::new();
-            let mut fs = BTreeSet::new();
-            let mut midpoint = Vec3::ZERO;
-            for &ei in es {
-                let e = t.edges.get(ei).ok_or_else(|| bad("invalid edge"))?;
-                let q = self.point(if e.a == v { e.b } else { e.a })?;
-                midpoint += (p + q) / 2.0;
-                fs.extend(e.faces.iter().copied());
-                if e.faces.len() == 1 {
-                    boundary.push(q);
-                }
-            }
-            let smooth = if boundary.len() == 2 {
-                (p * 6.0 + boundary[0] + boundary[1]) / 8.0
-            } else {
-                let mut average = Vec3::ZERO;
-                for &f in &fs {
-                    average += *centers.get(f).ok_or_else(|| bad("invalid face"))?;
-                }
-                let n = es.len() as f64;
-                (average / fs.len() as f64 + midpoint * (2.0 / n) + p * (n - 3.0)) / n
-            };
-            let mut creases: Vec<_> = es
-                .iter()
-                .map(|&i| {
-                    let e = &t.edges[i];
-                    let s = if e.faces.len() == 1 { 10.0 } else { sharp.get(&key(e.a, e.b)).copied().unwrap_or(0.0) };
-                    (s, if e.a == v { e.b } else { e.a })
-                })
-                .filter(|(s, _)| *s > 0.0)
-                .collect();
-            creases.sort_by(|a, b| b.0.total_cmp(&a.0));
-            let corner = vertex_sharp.get(&v).copied().unwrap_or(0.0);
-            let surviving: Vec<_> = creases.iter().copied().filter(|(s, _)| *s > 1.0).collect();
-            let rule = |corner: bool, count: usize| if corner { 3 } else { count.min(3) };
-            let parent = rule(corner > 0.0, creases.len());
-            let child = rule(corner > 1.0, surviving.len());
-            let mask = |rule, edges: &[(f64, usize)]| -> Result<Vec3> {
-                match rule {
-                    0 | 1 => Ok(smooth),
-                    2 => Ok((p * 6.0 + self.point(edges[0].1)? + self.point(edges[1].1)?) / 8.0),
-                    _ => Ok(p),
-                }
-            };
-            let point = if parent < 2 {
-                smooth
-            } else if parent == child {
-                mask(parent, &creases)?
-            } else {
-                // Uniform semi-sharp subdivision interpolates the two discrete masks by
-                // the mean sharpness of the constraints that disappear at this step.
-                let mut transitions: Vec<_> = creases.iter().filter(|(s, _)| *s <= 1.0).map(|(s, _)| *s).collect();
-                if corner > 0.0 && corner <= 1.0 {
-                    transitions.push(corner);
-                }
-                if transitions.is_empty() {
-                    return Err(bad("missing crease rule transition"));
-                }
-                let weight = transitions.iter().sum::<f64>() / transitions.len() as f64;
-                mask(parent, &creases)? * weight + mask(child, &surviving)? * (1.0 - weight)
-            };
-            points.push(point);
-        }
-        let edge_start = points.len();
-        for e in &t.edges {
-            let mut p = self.point(e.a)? + self.point(e.b)?;
-            if e.faces.len() == 2 {
-                for &f in &e.faces {
-                    p += *centers.get(f).ok_or_else(|| bad("invalid face"))?;
-                }
-                p = p / 4.0;
-            } else {
-                p = p / 2.0;
-            }
-            let s = sharp.get(&key(e.a, e.b)).copied().unwrap_or(0.0).min(1.0);
-            p = p * (1.0 - s) + (self.point(e.a)? + self.point(e.b)?) * (s / 2.0);
-            points.push(p);
-        }
-        let face_start = points.len();
-        points.extend(centers);
-        if points.len() > MAX_EVAL_POINTS {
-            return Err(bad("vertex budget exceeded"));
-        }
+            .collect();
+        let corners: Vec<_> = (0..self.points.len()).map(|vertex| vertex_sharp.get(&vertex).copied().unwrap_or(0.0)).collect();
+        let points = solidcore_ops::form_subdivision::step_points(&self.points, &self.faces, &edges, &t.incident, &corners)
+            .map_err(|e| bad(&e.to_string()))?;
+        let edge_start = self.points.len();
+        let face_start = edge_start + t.edges.len();
         let mut faces = Vec::with_capacity(self.faces.len() * 4);
         for (fi, f) in self.faces.iter().enumerate() {
             for i in 0..f.len() {
@@ -326,7 +242,7 @@ impl Cage {
                 faces.push(vec![v, edge_start + a, face_start + fi, edge_start + b]);
             }
         }
-        let decay = |s: f64| if s >= 10.0 { 10.0 } else { (s - 1.0).max(0.0) };
+        let decay = solidcore_ops::form_subdivision::decay_sharpness;
         let mut edge_creases = Vec::new();
         for c in &self.edge_creases {
             let s = decay(c.sharpness);
@@ -390,23 +306,15 @@ impl Cage {
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut mesh = Mesh { normals: vec![Vec3::ZERO; limit.len()], positions: limit, ..Default::default() };
+        let mut mesh = Mesh { positions: limit, ..Default::default() };
         for (fi, f) in smooth.faces.iter().enumerate() {
             for corner in 1..f.len() - 1 {
                 let tri = [f[0], f[corner], f[corner + 1]];
-                let [a, b, c] = tri.map(|i| mesh.positions.get(i).copied().unwrap_or(Vec3::ZERO));
-                let normal = (b - a).cross(c - a);
-                for i in tri {
-                    let n = mesh.normals.get_mut(i).ok_or_else(|| bad("invalid normal"))?;
-                    *n += normal;
-                }
                 mesh.triangles.push(tri.map(|v| v as u32));
                 mesh.tri_face.push(roots.get(fi).copied().ok_or_else(|| bad("missing logical face"))? as u32);
             }
         }
-        for n in &mut mesh.normals {
-            *n = n.normalized().unwrap_or(Vec3::Z);
-        }
+        mesh.normals = solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, &mesh.triangles).map_err(|e| bad(&e.to_string()))?;
         let index = crate::MeshIndex::new(&mesh);
         Ok(SurfacePreview { mesh, vertices, boundaries, index })
     }
@@ -442,52 +350,13 @@ pub fn primitive(kind: &str, size: f64, spans: usize) -> Result<Cage> {
     if !matches!(kind, "box" | "plane" | "sphere") {
         return Err(bad("unknown primitive"));
     }
-    let n = spans as i32;
-    let mut lookup = BTreeMap::new();
-    let mut points = Vec::new();
-    let mut faces = Vec::new();
-    // Each frame has u cross v pointing outwards.
-    let frames = if kind == "plane" {
-        vec![([0, 0, 0], [1, 0, 0], [0, 1, 0])]
+    use solidcore_ops::form_cage::{CageGeometry, Primitive};
+    let CageGeometry { points, faces } = if kind == "sphere" {
+        solidcore_ops::form_cage::radial_box(size, spans)
     } else {
-        vec![
-            ([0, 0, n], [1, 0, 0], [0, 1, 0]),
-            ([0, n, 0], [1, 0, 0], [0, 0, -1]),
-            ([n, 0, 0], [0, 1, 0], [0, 0, 1]),
-            ([0, 0, 0], [0, 1, 0], [1, 0, 0]),
-            ([0, 0, 0], [1, 0, 0], [0, 0, 1]),
-            ([0, 0, 0], [0, 0, 1], [0, 1, 0]),
-        ]
-    };
-    for (origin, u, v) in frames {
-        for j in 0..n {
-            for i in 0..n {
-                let mut face = [0; 4];
-                for (slot, (s, t)) in [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)].into_iter().enumerate() {
-                    // The +Y face is parameterised from its upper Z corner.
-                    let mut o = origin;
-                    if v[2] < 0 {
-                        o[2] = n;
-                    }
-                    let k = [o[0] + s * u[0] + t * v[0], o[1] + s * u[1] + t * v[1], o[2] + s * u[2] + t * v[2]];
-                    let id = *lookup.entry(k).or_insert_with(|| {
-                        let mut p = Vec3::new(k[0] as f64 / n as f64 - 0.5, k[1] as f64 / n as f64 - 0.5, k[2] as f64 / n as f64 - 0.5) * size;
-                        if kind == "plane" {
-                            p.z = 0.0;
-                        }
-                        if kind == "sphere" {
-                            p = p.normalized().unwrap_or(Vec3::Z) * (size * 0.5);
-                        }
-                        let id = points.len();
-                        points.push(p);
-                        id
-                    });
-                    face[slot] = id;
-                }
-                faces.push(face.to_vec());
-            }
-        }
+        solidcore_ops::form_cage::build(if kind == "plane" { Primitive::Plane } else { Primitive::Box }, [size; 3], [spans; 3], [0.0; 2], &[])
     }
+    .map_err(|e| bad(&e.to_string()))?;
     let cage = Cage { points, faces, ..Default::default() };
     cage.validate()?;
     Ok(cage)
@@ -496,6 +365,7 @@ pub fn primitive(kind: &str, size: f64, spans: usize) -> Result<Cage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Vec3Geom;
     #[test]
     fn hierarchy_replay_bound_covers_early_walls_and_later_subdivision() {
         use hierarchy::Hierarchy;

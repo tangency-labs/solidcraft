@@ -29,3 +29,12 @@ pub fn mirror_seam_limit(
 ) -> Option<f64> {
     mesh_edit::mirror_seam_limit(&Transform { m: *matrix }, axis, tolerance)
 }
+
+/// Map an object-space snap distance into a placed coordinate plane.
+pub fn plane_snap_limit(
+    matrix: &crate::affine::Matrix,
+    axis: usize,
+    tolerance: f64,
+) -> Option<f64> {
+    mesh_edit::plane_snap_limit(&Transform { m: *matrix }, axis, tolerance)
+}

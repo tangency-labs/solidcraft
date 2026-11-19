@@ -12,10 +12,7 @@ pub fn deform(point: Vec3, shape: Vec3, reference: Vec3, weight: f64) -> Option<
 /// Determine whether a mesh placement reverses winding. The determinant
 /// threshold retains the importer's minimum scale policy.
 pub fn reverses_winding(frame: &Transform, minimum: f64) -> Option<bool> {
-    let [x, y, z] = std::array::from_fn(|i| {
-        let [a, b, c, _] = frame.m[i];
-        Vec3::new(a, b, c)
-    });
+    let [x, y, z, _] = frame.m.map(|[a, b, c, _]| Vec3::new(a, b, c));
     let det = x.dot(y.cross(z));
     (det.is_finite() && det.abs() >= minimum).then_some(det < 0.0)
 }
@@ -38,7 +35,9 @@ pub fn snap_to_plane(mut point: [f64; 3], axis: usize, tolerance: f64) -> [f64; 
 pub fn crossing(a: [f64; 3], b: [f64; 3], axis: usize) -> Option<[f64; 3]> {
     let (&da, &db) = a.get(axis).zip(b.get(axis))?;
     let t = (da / (da - db)).clamp(0.0, 1.0);
-    let mut point = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);
+    let [ax, ay, az] = a;
+    let [bx, by, bz] = b;
+    let mut point = [ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t];
     *point.get_mut(axis)? = 0.0;
     point.iter().all(|p| p.is_finite()).then_some(point)
 }
@@ -60,9 +59,41 @@ pub fn mirror_seam_limit(frame: &Transform, axis: usize, tolerance: f64) -> Opti
     (length.is_finite() && length > 0.0).then(|| tolerance / (2.0 * length))
 }
 
+/// Map an object-space distance to a coordinate-plane threshold in `frame`.
+/// The axis coordinate is a plane equation in object space, so its normal's
+/// length converts signed Euclidean distance even under a sheared placement.
+pub fn plane_snap_limit(frame: &Transform, axis: usize, tolerance: f64) -> Option<f64> {
+    if axis >= 3 || !tolerance.is_finite() || tolerance < 0.0 {
+        return None;
+    }
+    let x = *frame.m.first()?.get(axis)?;
+    let y = *frame.m.get(1)?.get(axis)?;
+    let z = *frame.m.get(2)?.get(axis)?;
+    let length = Vec3::new(x, y, z).len();
+    let limit = tolerance * length;
+    (length.is_finite() && length > 0.0 && limit.is_finite()).then_some(limit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plane_snap_distance_is_measured_in_object_space() {
+        let mut frame = Transform::IDENTITY;
+        assert_eq!(plane_snap_limit(&frame, 0, 0.001), Some(0.001));
+        frame.m[0][0] = 0.5;
+        assert_eq!(plane_snap_limit(&frame, 0, 0.001), Some(0.0005));
+        frame.m[1][0] = 1.0;
+        let limit = plane_snap_limit(&frame, 0, 0.001).unwrap();
+        assert!((limit - 0.001 * 1.25_f64.sqrt()).abs() < 1e-15);
+        assert_eq!(plane_snap_limit(&frame, 3, 0.001), None);
+        assert_eq!(plane_snap_limit(&frame, 0, f64::NAN), None);
+        assert_eq!(plane_snap_limit(&frame, 0, -1.0), None);
+        frame.m[0][0] = 0.0;
+        frame.m[1][0] = 0.0;
+        assert_eq!(plane_snap_limit(&frame, 0, 0.001), None);
+    }
 
     #[test]
     fn bisect_snaps_both_sides_of_the_plane_and_pins_crossings() {

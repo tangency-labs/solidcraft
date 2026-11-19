@@ -100,7 +100,7 @@ pub(super) fn inspect(app: &SolveApp) -> serde_json::Value {
         "edges":edges})
 }
 pub(super) fn show_status(app: &SolveApp, ui: &mut egui::Ui) {
-    if exact_picking(app) && !current(app) {
+    if source(app).is_some() && !current(app) {
         ui.horizontal(|ui| {
             ui.spinner();
             ui.label(app.tr("forms.prototype.previewing"));
@@ -118,6 +118,7 @@ pub(super) fn get(app: &SolveApp, edge: [usize; 2]) -> Option<&Curve> {
     let key = [edge[0].min(edge[1]), edge[0].max(edge[1])];
     prepared.edges.get(&key).and_then(|&index| prepared.curves.get(index))
 }
+#[cfg(not(target_arch = "wasm32"))]
 fn compute(session: &solidcraft_engine::Session, tolerance: f64) -> Result<Prepared, String> {
     Prepared::new(solidcraft_engine::forms_prototype::insertion_curves(session, tolerance, &[]).map_err(|error| error.to_string())?)
 }
@@ -178,13 +179,32 @@ pub(super) fn prepare_explicit(app: &mut SolveApp, ctx: &egui::Context) {
     if !current(app)
         && let Some(key) = source(app)
     {
-        let result = compute(&app.session.scratch(), f64::from_bits(key.tolerance));
-        app.forms_prototype.curves.ready = Some((key, result));
-        ctx.request_repaint();
+        if let Some(result) = prepare_accepted(app) {
+            app.forms_prototype.curves.ready = Some((key, result));
+            ctx.request_repaint();
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
     }
 }
-/// Native source picking waits for its shared worker. Browsers may reuse a cache
-/// explicitly prepared by Insert Point until a browser worker host is available.
+
+/// Reuse only guide curves belonging to the currently accepted CAD source.
+/// Bounds are already stored on those curves; no fitting or matching runs here.
+#[cfg(any(target_arch = "wasm32", test))]
+fn prepare_accepted(app: &SolveApp) -> Option<Result<Prepared, String>> {
+    let exact = live_cad::selection_geometry(app)?;
+    let solidcraft_engine::doc::forms::SelectionGuides::Subdivision(curves) = &exact.guides else {
+        return Some(Err(app.tr("forms.face_pick.context_missing_cad").to_owned()));
+    };
+    // Keep page-side copies and the projected bounds index small. Large exact
+    // guide sets remain editable through their existing desktop worker path.
+    if curves.len() > 2048 || curves.iter().try_fold(0usize, |count, curve| count.checked_add(curve.piece_count())).is_none_or(|count| count > 8192) {
+        return Some(Err(app.tr("forms.face_pick.limit").to_owned()));
+    }
+    Some(Prepared::new(curves.clone()))
+}
+/// Native source picking waits for its shared worker. Browsers reuse only the
+/// exact guides of the currently accepted CAD preview.
 pub(super) fn exact_picking(app: &SolveApp) -> bool {
     source(app).is_some() && (cfg!(not(target_arch = "wasm32")) || current(app)) && live_cad::mesh(app).is_some()
 }
@@ -236,4 +256,28 @@ pub(super) fn pending_for_test(app: &mut SolveApp) -> std::sync::mpsc::Sender<Re
 #[cfg(test)]
 pub(super) fn poll_for_test(app: &mut SolveApp) {
     poll(app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_source_curve_preparation_reuses_only_current_accepted_guides() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.session.execute("form.prototype.create", &json!({"primitive":"face","dimensions":[8,8,1],"segments":[1,1,1],"levels":0})).unwrap();
+        super::super::opened(&mut app);
+        assert!(prepare_accepted(&app).is_none(), "preparation cannot start a fit when no CAD preview has been accepted");
+        live_cad::install_for_test(&mut app);
+        let accepted = live_cad::selection_geometry(&app).unwrap().clone();
+        let revision = solidcraft_engine::recovery::form_revision(&app.session);
+        let source = solidcraft_engine::recovery::capture_bytes(&app.session).unwrap();
+        let prepared = prepare_accepted(&app).unwrap().unwrap();
+        assert!(!prepared.curves.is_empty());
+        assert!(Arc::ptr_eq(&accepted, live_cad::selection_geometry(&app).unwrap()));
+        assert_eq!(solidcraft_engine::recovery::form_revision(&app.session), revision);
+        assert_eq!(solidcraft_engine::recovery::capture_bytes(&app.session).unwrap(), source);
+        app.session.execute("form.prototype.set_vertices", &json!({"vertices":[0],"positions":[[-4,-4,1]]})).unwrap();
+        assert!(prepare_accepted(&app).is_none(), "old accepted guides cannot be reused for a changed cage");
+    }
 }

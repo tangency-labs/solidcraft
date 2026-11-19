@@ -504,7 +504,42 @@ pub enum RecoveredCopy {
     /// A plain design enters the normal staged Open path with progress and Cancel.
     Design(String),
     /// Keep the editor and its base document together when restoring a draft.
-    Form(Box<solidcraft_engine::Session>),
+    Form(Box<FormOpening>),
+}
+
+/// A draft and its base stay isolated until the timeline and editor both restore.
+pub struct FormOpening {
+    opening: Option<solidcraft_engine::OpenSteps>,
+    session: Option<solidcraft_engine::Session>,
+    document: solidcraft_engine::doc::Document,
+    draft: Vec<u8>,
+    original_path: Option<String>,
+    staged_path: String,
+}
+impl FormOpening {
+    pub fn progress(&self) -> (usize, usize) {
+        self.opening.as_ref().map_or((0, 0), solidcraft_engine::OpenSteps::progress)
+    }
+
+    /// Evaluate at most one base feature per page frame, then attach the draft.
+    pub fn step(&mut self) -> Result<Option<Box<solidcraft_engine::Session>>, String> {
+        let opening = self.opening.as_mut().ok_or("Form recovery opening is missing")?;
+        if !opening.done() {
+            opening.step();
+            return Ok(None);
+        }
+        let opening = self.opening.take().ok_or("Form recovery opening is missing")?;
+        let mut session = self.session.take().ok_or("Form recovery session is missing")?;
+        opening.finish(&mut session).map_err(|error| error.to_string())?;
+        solidcraft_engine::recovery::attach_draft(&mut session, &self.document, &self.draft).map_err(|error| error.to_string())?;
+        session.path.clone_from(&self.original_path);
+        Ok(Some(Box::new(session)))
+    }
+}
+impl Drop for FormOpening {
+    fn drop(&mut self) {
+        let _ = vfs::remove(&self.staged_path);
+    }
 }
 
 pub fn recovered_kept(id: &str, original_path: Option<&str>) -> Result<RecoveredCopy, String> {
@@ -516,11 +551,36 @@ pub fn recovered_session(original_path: Option<&str>) -> Result<RecoveredCopy, S
 }
 
 fn recovered_copy(path: String, original_path: Option<&str>) -> Result<RecoveredCopy, String> {
-    use solidcraft_engine::{io, recovery};
+    use solidcraft_engine::io;
     let bytes = vfs::read(&path, io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
     if io::has_form_recovery_draft(&bytes).map_err(|e| e.to_string())? {
-        let session = recovery::restore_bytes(&bytes, original_path).map_err(|e| e.to_string())?;
-        return Ok(RecoveredCopy::Form(Box::new(session)));
+        let (mut document, draft) = io::read_recovery_container(&bytes).map_err(|error| error.to_string())?;
+        solidcraft_engine::resolve_design_links(&mut document, original_path);
+        let draft = draft.ok_or("Form recovery draft is missing")?;
+        let staged_path = format!("{path}.base.sc");
+        vfs::insert(&staged_path, io::write_design_container(&document).map_err(|error| error.to_string())?);
+        // Recovery restores the base exactly; ordinary Open may omit legacy
+        // print-face metadata according to a preference after opening.
+        let mut session = solidcraft_engine::Session::default();
+        session.keep_print_faces = true;
+        let opening = match solidcraft_engine::OpenSteps::start(&serde_json::json!({"path":staged_path}), session.validation()) {
+            Ok(Some(opening)) => opening,
+            result => {
+                let _ = vfs::remove(&staged_path);
+                return Err(match result {
+                    Err(error) => error.to_string(),
+                    _ => "Form recovery base could not enter staged opening".into(),
+                });
+            }
+        };
+        return Ok(RecoveredCopy::Form(Box::new(FormOpening {
+            opening: Some(opening),
+            session: Some(session),
+            document,
+            draft,
+            original_path: original_path.map(str::to_owned),
+            staged_path,
+        })));
     }
 
     // Relative links belong to the original design's folder, including remembered disk designs.

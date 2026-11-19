@@ -370,6 +370,14 @@ mod web {
 
     type FontLoadResult = Rc<std::cell::RefCell<Option<Result<(String, Vec<u8>), String>>>>;
 
+    enum FormRestoreAfter {
+        Kept { id: String, drop: bool },
+        Recovery,
+    }
+    struct FormRestoring {
+        opening: Box<files::FormOpening>,
+        after: FormRestoreAfter,
+    }
     struct Shell {
         app: SolveApp,
         launch: crate::Launch,
@@ -422,6 +430,7 @@ mod web {
         /// A kept copy or recovered work being opened, in stages with progress and Cancel
         /// (#10198): the answer to come and what follows it ([`Shell::restored`]).
         restoring: Option<(std::sync::mpsc::Receiver<serde_json::Value>, keep::AfterOpen)>,
+        form_restoring: Option<FormRestoring>,
     }
 
     impl Shell {
@@ -696,7 +705,7 @@ mod web {
         /// (when it has a file) and Discard.
         fn keep_prompt(&mut self, ctx: &egui::Context) {
             let offered = self.files.keep_offered.borrow().clone();
-            if offered.is_empty() || !self.files.ready.get() || self.restoring.is_some() {
+            if offered.is_empty() || !self.files.ready.get() || self.restoring.is_some() || self.form_restoring.is_some() {
                 return;
             }
             let now = (js_sys::Date::now() / 1000.0) as u64;
@@ -748,12 +757,10 @@ mod web {
                         self.restore(&copy, after);
                         return;
                     }
-                    Ok(files::RecoveredCopy::Form(session)) => {
-                        // Restoring the editor preserves the original path and the base's saved state.
-                        if !solidcraft_ui_egui::documents::adopt(&mut self.app, *session) {
-                            return;
-                        }
-                        self.app.home.open = false;
+                    Ok(files::RecoveredCopy::Form(opening)) => {
+                        self.form_restoring =
+                            Some(FormRestoring { opening, after: FormRestoreAfter::Kept { id: entry.id.clone(), drop: plan.drop_copy } });
+                        return;
                     }
                     Err(error) => {
                         self.app.set_status(error, true);
@@ -1049,7 +1056,7 @@ mod web {
 
         /// Offer the autosave an earlier session left.
         fn recovery_prompt(&mut self, ctx: &egui::Context) {
-            if self.restoring.is_some() {
+            if self.restoring.is_some() || self.form_restoring.is_some() {
                 return;
             }
             let Some((name, path)) = self.files.recovery.borrow().clone() else { return };
@@ -1087,14 +1094,9 @@ mod web {
                         self.restore(&recovery, after);
                         return;
                     }
-                    Ok(files::RecoveredCopy::Form(session)) => {
-                        if !solidcraft_ui_egui::documents::adopt(&mut self.app, *session) {
-                            return;
-                        }
-                        let s = &self.app.session;
-                        self.autosaved = Some(autosave_revision(s));
-                        self.autosave_exists = true;
-                        self.app.home.open = false;
+                    Ok(files::RecoveredCopy::Form(opening)) => {
+                        self.form_restoring = Some(FormRestoring { opening, after: FormRestoreAfter::Recovery });
+                        return;
                     }
                     Err(error) => {
                         self.app.set_status(error, true);
@@ -1105,6 +1107,46 @@ mod web {
                 self.autosave_discard = true;
             }
             *self.files.recovery.borrow_mut() = None;
+            ctx.request_repaint();
+        }
+
+        fn restore_form(&mut self, ctx: &egui::Context) {
+            let Some(pending) = self.form_restoring.as_ref() else { return };
+            let (done, total) = pending.opening.progress();
+            let mut cancel = false;
+            let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_form_recovery"), "restore", self.app.tr("file_load.opening"))
+                .required()
+                .show_body(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(format!("{done} / {total}"));
+                    });
+                    cancel = ui_kit::button(ui, self.app.tr("ui.cancel"), ui_kit::Button::Normal).clicked();
+                });
+            let Some(mut pending) = self.form_restoring.take() else { return };
+            if cancel {
+                return;
+            }
+            match pending.opening.step() {
+                Ok(None) => self.form_restoring = Some(pending),
+                Ok(Some(session)) => {
+                    // Neither the recovery copy nor the open design is changed until
+                    // both the timeline and its draft have restored successfully.
+                    if solidcraft_ui_egui::documents::adopt(&mut self.app, *session) {
+                        self.app.home.open = false;
+                        match pending.after {
+                            FormRestoreAfter::Kept { id, drop: true } => self.drop_kept(&id),
+                            FormRestoreAfter::Kept { .. } => {}
+                            FormRestoreAfter::Recovery => {
+                                self.autosaved = Some(autosave_revision(&self.app.session));
+                                self.autosave_exists = true;
+                                *self.files.recovery.borrow_mut() = None;
+                            }
+                        }
+                    }
+                }
+                Err(error) => self.app.set_status(error, true),
+            }
             ctx.request_repaint();
         }
 
@@ -1276,6 +1318,7 @@ mod web {
             }
             self.app.ui(ui);
             let ctx = ui.ctx().clone();
+            self.restore_form(&ctx);
             if self.launch.persists() {
                 self.file_panel(&ctx);
                 self.recovery_prompt(&ctx);
@@ -1523,6 +1566,7 @@ mod web {
                             keep_track: Default::default(),
                             all_kept: false,
                             restoring: None,
+                            form_restoring: None,
                         }))
                     }),
                 )

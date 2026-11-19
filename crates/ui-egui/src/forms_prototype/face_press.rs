@@ -4,8 +4,7 @@ use crate::navigation::CameraInput;
 
 pub(super) fn enabled(app: &SolveApp) -> bool {
     cfg!(not(target_arch = "wasm32"))
-        && (app.preferences.forms_exact_face_picking
-            || app.session.forms_prototype.as_ref().and_then(|form| form.hierarchy.as_ref()).is_some_and(|h| h.has_boundary_collapse()))
+        && (app.preferences.forms_exact_face_picking || app.session.forms_prototype.as_ref().is_some_and(|form| form.needs_fitted_transform()))
 }
 
 pub(super) fn owns_pointer(app: &SolveApp) -> bool {

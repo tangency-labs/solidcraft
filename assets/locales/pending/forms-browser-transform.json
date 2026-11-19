@@ -1,0 +1,26 @@
+{
+  "en": {
+    "forms.prototype.browser_transform_unavailable": "Form transformations that require CAD fitting are unavailable in this browser. Open the design in the desktop app."
+  },
+  "ar": {
+    "forms.prototype.browser_transform_unavailable": "تحويلات الأشكال الحرة التي تتطلب ملاءمة أسطح CAD غير متاحة في هذا المتصفح. افتح التصميم في تطبيق سطح المكتب."
+  },
+  "de": {
+    "forms.prototype.browser_transform_unavailable": "Formtransformationen, die eine CAD-Anpassung erfordern, sind in diesem Browser nicht verfügbar. Öffnen Sie den Entwurf in der Desktop-App."
+  },
+  "he": {
+    "forms.prototype.browser_transform_unavailable": "שינויי צורה הדורשים התאמת משטחי CAD אינם זמינים בדפדפן הזה. יש לפתוח את העיצוב ביישום שולחן העבודה."
+  },
+  "ja": {
+    "forms.prototype.browser_transform_unavailable": "CAD フィッティングが必要なフォーム変換は、このブラウザーでは利用できません。デスクトップアプリでデザインを開いてください。"
+  },
+  "ko": {
+    "forms.prototype.browser_transform_unavailable": "CAD 피팅이 필요한 자유형 형상 변환은 이 브라우저에서 사용할 수 없습니다. 데스크톱 앱에서 설계를 여세요."
+  },
+  "vi": {
+    "forms.prototype.browser_transform_unavailable": "Trình duyệt này không hỗ trợ các phép biến đổi hình tự do cần khớp bề mặt CAD. Hãy mở thiết kế trong ứng dụng máy tính."
+  },
+  "zh": {
+    "forms.prototype.browser_transform_unavailable": "此浏览器不支持需要 CAD 拟合的造型变换。请在桌面应用中打开设计。"
+  }
+}

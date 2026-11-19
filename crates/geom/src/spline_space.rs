@@ -17,11 +17,11 @@
 //! Input is hostile: constructors check sizes and finiteness and return [`SplineError`]; no
 //! function here panics.
 
-use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, Side, SplineError, SplineResult, check_knots, find_span, insert_knot, invalid, local_basis};
+use crate::bspline::{HPoint, SplineError, SplineResult, invalid};
 use solidcore_record::Vec3;
 
 /// Most basis functions a space used for interpolation may have (its systems are solved densely).
-pub const MAX_SPACE_DIMENSION: usize = 2048;
+pub const MAX_SPACE_DIMENSION: usize = solidcore_ops::spline_space::MAX_SPACE_DIMENSION;
 
 /// Values a spline can carry: numbers and points (vectors).
 pub trait Linear: Copy {
@@ -31,10 +31,18 @@ pub trait Linear: Copy {
     /// The value as a homogeneous point of weight one (knot insertion works on those).
     fn to_h(self) -> HPoint;
     fn from_h(h: HPoint) -> Self;
+    /// Raw linear components for the kernel; unused scalar/vector slots are zero.
+    fn raw_components(self) -> [f64; 4] {
+        let h = self.to_h();
+        [h.x, h.y, h.z, h.w]
+    }
     fn is_finite(self) -> bool;
 }
 
 impl Linear for f64 {
+    fn raw_components(self) -> [f64; 4] {
+        [self, 0.0, 0.0, 0.0]
+    }
     fn zero() -> Self {
         0.0
     }
@@ -56,6 +64,9 @@ impl Linear for f64 {
 }
 
 impl Linear for Vec3 {
+    fn raw_components(self) -> [f64; 4] {
+        [self.x, self.y, self.z, 0.0]
+    }
     fn zero() -> Self {
         Vec3::ZERO
     }
@@ -100,372 +111,101 @@ impl Linear for HPoint {
     }
 }
 
-/// A clamped B-spline space: a degree and a knot vector whose first and last `degree + 1` knots
-/// are the domain's ends, interior knots repeated at most `degree` times (the space's splines
-/// are continuous).
+pub(crate) fn failure(error: solidcore_ops::spline_space::SplineFailure) -> SplineError {
+    use solidcore_ops::spline_space::SplineFailure;
+    match error {
+        SplineFailure::InvalidInput => SplineError::Invalid("spline-space arguments are invalid".into()),
+        SplineFailure::InvalidKnots => SplineError::Invalid("the knot spaces are invalid or incompatible".into()),
+        SplineFailure::InvalidCount => SplineError::Invalid("control, condition, or matrix dimensions do not match".into()),
+        SplineFailure::InvalidParameter => SplineError::Invalid("an interpolation parameter is invalid".into()),
+        SplineFailure::Singular => SplineError::Invalid("the interpolation conditions do not determine a spline".into()),
+        SplineFailure::NonFinite => SplineError::Invalid("spline-space calculation did not give finite values".into()),
+        SplineFailure::UnsupportedDegree => SplineError::Unsupported("degree is unsupported for the requested spline-space operation".into()),
+        SplineFailure::TooLarge => SplineError::TooLarge("spline-space operation exceeds its dimension bound".into()),
+        SplineFailure::Allocation => SplineError::TooLarge("spline-space storage could not be allocated".into()),
+    }
+}
+fn raw<T: Linear>(values: &[T]) -> Vec<[f64; 4]> {
+    values.iter().map(|v| v.raw_components()).collect()
+}
+fn value<T: Linear>([x, y, z, w]: [f64; 4]) -> T {
+    T::from_h(HPoint { x, y, z, w })
+}
+
+/// Opaque clamped space; numerical operators are owned by SolidCore.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Space {
-    degree: usize,
-    knots: Vec<f64>,
-}
-
+pub struct Space(solidcore_ops::spline_space::Space);
 impl Space {
-    pub fn new(degree: usize, knots: Vec<f64>) -> SplineResult<Space> {
-        if degree == 0 || degree > MAX_SPLINE_DEGREE {
-            return Err(SplineError::Unsupported(format!("degree {degree} (1 to {MAX_SPLINE_DEGREE})")));
-        }
-        check_knots(&knots)?;
-        let n = knots.len().checked_sub(degree + 1).filter(|n| *n > degree).ok_or_else(|| SplineError::Invalid("too few knots".into()))?;
-        if n > MAX_SPACE_DIMENSION {
-            return Err(SplineError::TooLarge(format!("{n} basis functions (at most {MAX_SPACE_DIMENSION})")));
-        }
-        let (a, b) = (knots[0], knots[knots.len() - 1]);
-        if !(a < b) || knots[..=degree].iter().any(|k| *k != a) || knots[n..].iter().any(|k| *k != b) {
-            return invalid("the knot vector must be clamped on a non-empty domain");
-        }
-        let inner = &knots[degree + 1..n];
-        let mut run = 0;
-        for w in inner.windows(2) {
-            run = if w[0] == w[1] { run + 1 } else { 0 };
-            if run + 1 > degree {
-                return invalid("an interior knot is repeated more often than the degree");
-            }
-        }
-        if inner.first().is_some_and(|k| *k == a) || inner.last().is_some_and(|k| *k == b) {
-            return invalid("an interior knot lies on a domain end");
-        }
-        Ok(Space { degree, knots })
+    pub fn new(degree: usize, knots: Vec<f64>) -> SplineResult<Self> {
+        solidcore_ops::spline_space::Space::new(degree, knots).map(Self).map_err(failure)
     }
-
-    /// Polynomials of `degree` on `[a, b]` (one Bézier piece).
-    pub fn polynomial(degree: usize, a: f64, b: f64) -> SplineResult<Space> {
-        let mut knots = vec![a; degree + 1];
-        knots.extend(std::iter::repeat_n(b, degree + 1));
-        Space::new(degree, knots)
+    pub fn polynomial(degree: usize, a: f64, b: f64) -> SplineResult<Self> {
+        solidcore_ops::spline_space::Space::polynomial(degree, a, b).map(Self).map_err(failure)
     }
-
-    /// Splines of `degree` with a simple knot at every interior break: `breaks` increase
-    /// strictly, the first and last are the domain's ends.
-    pub fn with_breaks(degree: usize, breaks: &[f64]) -> SplineResult<Space> {
-        let (Some(&a), Some(&b)) = (breaks.first(), breaks.last()) else { return invalid("no breaks") };
-        if breaks.len() > MAX_SPACE_DIMENSION || breaks.windows(2).any(|w| !(w[0] < w[1])) {
-            return invalid("the breaks must increase");
-        }
-        let mut knots = vec![a; degree + 1];
-        knots.extend(breaks.iter().skip(1).take(breaks.len().saturating_sub(2)).copied());
-        knots.extend(std::iter::repeat_n(b, degree + 1));
-        Space::new(degree, knots)
+    pub fn with_breaks(degree: usize, breaks: &[f64]) -> SplineResult<Self> {
+        solidcore_ops::spline_space::Space::with_breaks(degree, breaks).map(Self).map_err(failure)
     }
-
     pub fn degree(&self) -> usize {
-        self.degree
+        self.0.degree()
     }
-
     pub fn knots(&self) -> &[f64] {
-        &self.knots
+        self.0.knots()
     }
-
-    /// The number of basis functions (control points of a spline in the space).
     pub fn count(&self) -> usize {
-        self.knots.len() - self.degree - 1
+        self.0.count()
     }
-
-    /// The domain `[a, b]`.
     pub fn domain(&self) -> [f64; 2] {
-        [self.knots[0], self.knots[self.knots.len() - 1]]
+        self.0.domain()
     }
-
-    /// The `der`-th derivatives at `t` (clamped to the domain) of the basis functions that do not
-    /// vanish there: the index of the first one and their values.
     pub fn basis(&self, t: f64, der: usize) -> SplineResult<(usize, Vec<f64>)> {
-        let [a, b] = self.domain();
-        if !t.is_finite() {
-            return invalid("a parameter is not a finite number");
-        }
-        let t = t.clamp(a, b);
-        let (p, n) = (self.degree, self.count());
-        let span = find_span(&self.knots, p, n, t).ok_or_else(|| SplineError::Invalid(format!("{t} is outside the domain")))?;
-        let side = if t >= b { Side::Left } else { Side::Right };
-        let first = span - p;
-        let values =
-            (first..=span).map(|i| self.knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, t, side, der).get(der).copied().unwrap_or(0.0)));
-        Ok((first, values.collect()))
+        self.0.basis(t, der).map_err(failure)
     }
-
-    /// [`Space::basis`] from the left of `t`: at an interior knot, the derivatives of the
-    /// polynomial piece that ends there (elsewhere the same as from the right).
     pub fn basis_left(&self, t: f64, der: usize) -> SplineResult<(usize, Vec<f64>)> {
-        let [a, b] = self.domain();
-        if !t.is_finite() {
-            return invalid("a parameter is not a finite number");
-        }
-        let t = t.clamp(a, b);
-        if t <= a {
-            return self.basis(t, der);
-        }
-        let p = self.degree;
-        // The span [k_s, k_{s+1}) with k_s < t ≤ k_{s+1}.
-        let below = self.knots.partition_point(|&x| x < t);
-        let span = below.checked_sub(1).filter(|s| *s >= p).ok_or_else(|| SplineError::Invalid(format!("{t} is outside the domain")))?;
-        let first = span - p;
-        let values =
-            (first..=span).map(|i| self.knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, t, Side::Left, der).get(der).copied().unwrap_or(0.0)));
-        Ok((first, values.collect()))
+        self.0.basis_left(t, der).map_err(failure)
     }
-
-    /// The `der`-th derivative at `t` of the spline with control values `ctrl`.
     pub fn eval<T: Linear>(&self, ctrl: &[T], t: f64, der: usize) -> SplineResult<T> {
-        if ctrl.len() != self.count() {
-            return invalid(format!("{} control values for {} basis functions", ctrl.len(), self.count()));
-        }
-        let (first, values) = self.basis(t, der)?;
-        Ok(values.iter().zip(ctrl.iter().skip(first)).fold(T::zero(), |acc, (n, c)| acc.plus(c.times(*n))))
+        self.0.eval(ctrl, t, der, |p| p.raw_components()).map(value).map_err(failure)
     }
-
-    /// The splines of this space with `breaks` added as simple knots (those already knots are
-    /// left as they are). The result contains this space.
-    pub fn refined(&self, breaks: &[f64]) -> SplineResult<Space> {
-        let [a, b] = self.domain();
-        let mut knots = self.knots.clone();
-        for &x in breaks {
-            if x > a && x < b && !knots.contains(&x) {
-                knots.push(x);
-            }
-        }
-        knots.sort_by(f64::total_cmp);
-        Space::new(self.degree, knots)
+    pub fn refined(&self, breaks: &[f64]) -> SplineResult<Self> {
+        self.0.refined(breaks).map(Self).map_err(failure)
     }
 }
-
-/// A condition on a spline: the value (`der` = 0) or a derivative at `t`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Cond {
-    pub t: f64,
-    pub der: usize,
-}
-
-/// Interpolation in a space: the spline whose values and derivatives at the conditions are given
-/// (as many conditions as the space has basis functions). The system is factored once; each
-/// [`Interpolant::fit`] solves it for new data, so one interpolant serves many curves and the
-/// rows of a surface alike (the operator is linear).
+pub use solidcore_ops::spline_space::Cond;
+/// A factored interpolation operator retaining the application's borrowed-space interface.
 #[derive(Clone, Debug)]
 pub struct Interpolant {
     space: Space,
-    conds: Vec<Cond>,
-    lu: Lu,
+    operator: solidcore_ops::spline_space::Interpolant,
 }
-
 impl Interpolant {
-    pub fn new(space: Space, conds: Vec<Cond>) -> SplineResult<Interpolant> {
-        let n = space.count();
-        if conds.len() != n {
-            return invalid(format!("{} conditions for {n} basis functions", conds.len()));
-        }
-        let mut a = vec![0.0; n * n];
-        for (r, c) in conds.iter().enumerate() {
-            let (first, values) = space.basis(c.t, c.der)?;
-            for (k, v) in values.iter().enumerate() {
-                if let Some(x) = a.get_mut(r * n + first + k) {
-                    *x = *v;
-                }
-            }
-        }
-        let lu = Lu::new(n, a).map_err(|_| SplineError::Invalid("the interpolation conditions do not determine a spline".into()))?;
-        Ok(Interpolant { space, conds, lu })
+    pub fn new(space: Space, conds: Vec<Cond>) -> SplineResult<Self> {
+        let operator = solidcore_ops::spline_space::Interpolant::new(space.0.clone(), conds).map_err(failure)?;
+        Ok(Self { space, operator })
     }
-
-    /// Interpolation by a single polynomial piece of the lowest degree that meets `conds` (degree
-    /// one less than their number, at least one: a lone value is held constant), on `[a, b]`;
-    /// with more than four conditions, a cubic spline whose interior knots average the
-    /// conditions' parameters (taken as a sequence with one entry per condition, NURBS Book eq.
-    /// 9.8 applied to that confluent sequence, which keeps every basis function's support over
-    /// the condition it is matched with).
-    pub fn lowest(conds: Vec<Cond>, a: f64, b: f64) -> SplineResult<Interpolant> {
-        let mut conds = conds;
-        if conds.iter().any(|c| !c.t.is_finite() || c.t < a || c.t > b) {
-            return invalid("an interpolation parameter is outside the domain");
-        }
-        if conds.len() == 1
-            && let Some(c) = conds.first().copied()
-        {
-            // A constant: the value and a zero slope (the caller supplies zero data for it).
-            conds.push(Cond { t: c.t, der: 1 });
-        }
-        let k = conds.len();
-        if k <= 4 {
-            return Interpolant::new(Space::polynomial(k.saturating_sub(1).max(1), a, b)?, conds);
-        }
-        let mut tau: Vec<f64> = conds.iter().map(|c| c.t).collect();
-        tau.sort_by(f64::total_cmp);
-        let mut breaks = vec![a];
-        for j in 1..k - 3 {
-            breaks.push((tau[j] + tau[j + 1] + tau[j + 2]) / 3.0);
-        }
-        breaks.push(b);
-        if breaks.windows(2).any(|w| !(w[0] < w[1])) {
-            return invalid("the interpolation parameters repeat too often");
-        }
-        Interpolant::new(Space::with_breaks(3, &breaks)?, conds)
+    pub fn lowest(conds: Vec<Cond>, a: f64, b: f64) -> SplineResult<Self> {
+        let operator = solidcore_ops::spline_space::Interpolant::lowest(conds, a, b).map_err(failure)?;
+        let space = Space(operator.space());
+        Ok(Self { space, operator })
     }
-
     pub fn space(&self) -> &Space {
         &self.space
     }
-
     pub fn conds(&self) -> &[Cond] {
-        &self.conds
+        self.operator.conds()
     }
-
-    /// The control values of the spline meeting the conditions with `data` (one per condition).
     pub fn fit<T: Linear>(&self, data: &[T]) -> SplineResult<Vec<T>> {
-        if data.len() != self.conds.len() {
-            return invalid(format!("{} values for {} conditions", data.len(), self.conds.len()));
+        if data.len() != self.conds().len() {
+            return Err(failure(solidcore_ops::spline_space::SplineFailure::InvalidCount));
         }
-        let out = self.lu.solve(data);
-        if out.iter().any(|x| !x.is_finite()) {
-            return invalid("interpolation did not give finite control values");
-        }
-        Ok(out)
+        self.operator.fit(&raw(data)).map(|v| v.into_iter().map(value).collect()).map_err(failure)
     }
 }
-
-/// An LU factorisation with partial pivoting of a dense square matrix (row-major).
-#[derive(Clone, Debug)]
-struct Lu {
-    n: usize,
-    a: Vec<f64>,
-    piv: Vec<usize>,
-}
-
-impl Lu {
-    fn new(n: usize, mut a: Vec<f64>) -> SplineResult<Lu> {
-        if a.len() != n * n {
-            return invalid("matrix size");
-        }
-        let scale = a.iter().fold(0.0f64, |m, x| m.max(x.abs()));
-        if !(scale > 0.0 && scale.is_finite()) {
-            return invalid("singular system");
-        }
-        let mut piv = vec![0; n];
-        for k in 0..n {
-            let (mut best, mut big) = (k, 0.0);
-            for r in k..n {
-                let x = a[r * n + k].abs();
-                if x > big {
-                    (best, big) = (r, x);
-                }
-            }
-            if !(big > scale * 1e-13) {
-                return invalid("singular system");
-            }
-            piv[k] = best;
-            if best != k {
-                for c in 0..n {
-                    a.swap(k * n + c, best * n + c);
-                }
-            }
-            let d = a[k * n + k];
-            for r in k + 1..n {
-                let f = a[r * n + k] / d;
-                a[r * n + k] = f;
-                if f != 0.0 {
-                    for c in k + 1..n {
-                        a[r * n + c] -= f * a[k * n + c];
-                    }
-                }
-            }
-        }
-        Ok(Lu { n, a, piv })
-    }
-
-    fn solve<T: Linear>(&self, b: &[T]) -> Vec<T> {
-        let n = self.n;
-        let mut x = b.to_vec();
-        if x.len() != n {
-            return x;
-        }
-        for (k, &p) in self.piv.iter().enumerate() {
-            x.swap(k, p);
-        }
-        for r in 0..n {
-            let row = &self.a[r * n..r * n + r];
-            let acc = row.iter().zip(&x[..r]).fold(x[r], |acc, (l, xc)| acc.plus(xc.times(-l)));
-            x[r] = acc;
-        }
-        for r in (0..n).rev() {
-            let row = &self.a[r * n + r + 1..(r + 1) * n];
-            let acc = row.iter().zip(&x[r + 1..]).fold(x[r], |acc, (u, xc)| acc.plus(xc.times(-u)));
-            x[r] = acc.times(1.0 / self.a[r * n + r]);
-        }
-        x
-    }
-}
-
-/// The control values in `to` of the spline with control values `ctrl` in `from`, which `to`
-/// contains: the same domain, a degree at least as high, and every knot of `from` among those of
-/// `to` (with a polynomial `from` when the degree rises). Exact: Bézier degree elevation (NURBS
-/// Book §5.5) to the target degree, then Boehm knot insertion (§5.2) of the knots `to` adds.
+/// Carry values into an exactly containing spline space through the kernel.
 pub fn embed<T: Linear>(from: &Space, ctrl: &[T], to: &Space) -> SplineResult<Vec<T>> {
     if ctrl.len() != from.count() {
-        return invalid("control values do not match the space");
+        return Err(failure(solidcore_ops::spline_space::SplineFailure::InvalidCount));
     }
-    let ([a0, b0], [a1, b1]) = (from.domain(), to.domain());
-    if a0 != a1 || b0 != b1 {
-        return invalid("the spaces' domains differ");
-    }
-    let mut p = from.degree();
-    let mut knots = from.knots().to_vec();
-    let mut pts: Vec<T> = ctrl.to_vec();
-    if p > to.degree() {
-        return invalid("the target space's degree is lower");
-    }
-    if p < to.degree() {
-        if from.count() != p + 1 {
-            return Err(SplineError::Unsupported("raising the degree of a spline with interior knots".into()));
-        }
-        while p < to.degree() {
-            pts = elevate_bezier(&pts);
-            p += 1;
-        }
-        knots = vec![a0; p + 1];
-        knots.extend(std::iter::repeat_n(b0, p + 1));
-    }
-    // The knots `to` adds: a merge of the two sorted vectors.
-    let target = to.knots();
-    let mut missing = Vec::new();
-    let mut j = 0;
-    for &x in target {
-        match knots.get(j) {
-            Some(&k) if k == x => j += 1,
-            Some(&k) if k < x => return invalid("a knot of the spline is not in the target space"),
-            _ => missing.push(x),
-        }
-    }
-    if j != knots.len() {
-        return invalid("a knot of the spline is not in the target space");
-    }
-    let mut h: Vec<HPoint> = pts.iter().map(|x| x.to_h()).collect();
-    for x in missing {
-        (knots, h) = insert_knot(p, &knots, &h, x)?;
-    }
-    if knots.as_slice() != target {
-        return invalid("knot insertion did not reach the target space");
-    }
-    Ok(h.into_iter().map(T::from_h).collect())
-}
-
-/// A Bézier piece's control values one degree higher, the same polynomial (NURBS Book eq. 5.36):
-/// `Qᵢ = (i/(p+1))·Pᵢ₋₁ + (1 − i/(p+1))·Pᵢ`.
-fn elevate_bezier<T: Linear>(pts: &[T]) -> Vec<T> {
-    let p = pts.len().saturating_sub(1);
-    let at = |i: usize| pts.get(i).copied().unwrap_or_else(T::zero);
-    (0..=p + 1)
-        .map(|i| {
-            let a = i as f64 / (p + 1) as f64;
-            let prev = if i == 0 { T::zero() } else { at(i - 1).times(a) };
-            prev.plus(at(i).times(1.0 - a))
-        })
-        .collect()
+    solidcore_ops::spline_space::embed(&from.0, &raw(ctrl), &to.0).map(|v| v.into_iter().map(value).collect()).map_err(failure)
 }
 
 /// A monotone piecewise cubic Hermite function through `(xₖ, yₖ)`, both strictly increasing
@@ -626,5 +366,47 @@ mod tests {
         // Repeated conditions do not determine a spline.
         assert!(Interpolant::new(s.clone(), vec![Cond { t: 0.5, der: 0 }; 4]).is_err());
         assert!(Interpolant::lowest(vec![Cond { t: 2.0, der: 0 }], 0.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn kernel_space_failures_keep_existing_public_error_variants() {
+        assert!(matches!(Space::polynomial(usize::MAX, 0.0, 1.0), Err(SplineError::Unsupported(_))));
+        assert!(matches!(Space::with_breaks(1, &vec![0.0; MAX_SPACE_DIMENSION + 1]), Err(SplineError::TooLarge(_))));
+        assert!(matches!(Space::new(1, vec![0.0, 0.0, f64::NAN, 1.0]), Err(SplineError::Invalid(_))));
+    }
+
+    #[test]
+    fn malformed_fit_and_embed_counts_refuse_before_converting_any_values() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
+        #[derive(Clone, Copy)]
+        struct Counted(f64);
+        impl Linear for Counted {
+            fn zero() -> Self {
+                Self(0.0)
+            }
+            fn plus(self, other: Self) -> Self {
+                Self(self.0 + other.0)
+            }
+            fn times(self, scalar: f64) -> Self {
+                Self(self.0 * scalar)
+            }
+            fn to_h(self) -> HPoint {
+                CONVERSIONS.fetch_add(1, Ordering::Relaxed);
+                HPoint { x: self.0, y: 0.0, z: 0.0, w: 1.0 }
+            }
+            fn from_h(h: HPoint) -> Self {
+                Self(h.x)
+            }
+            fn is_finite(self) -> bool {
+                self.0.is_finite()
+            }
+        }
+        let space = Space::polynomial(1, 0.0, 1.0).unwrap();
+        let operator = Interpolant::new(space.clone(), vec![Cond { t: 0.0, der: 0 }, Cond { t: 1.0, der: 0 }]).unwrap();
+        let wrong = vec![Counted(1.0); 3];
+        assert!(matches!(operator.fit(&wrong), Err(SplineError::Invalid(_))));
+        assert!(matches!(embed(&space, &wrong, &space), Err(SplineError::Invalid(_))));
+        assert_eq!(CONVERSIONS.load(Ordering::Relaxed), 0, "shape refusals must precede raw conversion and allocation");
     }
 }

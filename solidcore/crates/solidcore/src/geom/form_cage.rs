@@ -128,6 +128,19 @@ pub fn build(
     }
 }
 
+/// Legacy radially projected cube grid. It shares Box's stable vertex/face
+/// order; this is distinct from the latitude-longitude Sphere primitive.
+pub fn radial_box(size: f64, spans: usize) -> Result<CageGeometry> {
+    if !size.is_finite() || !(0.1..=10_000.0).contains(&size) || !(1..=4).contains(&spans) {
+        return Err(bad("size must be 0.1..10000 mm and spans 1..4"));
+    }
+    let mut cage = box_grid([size; 3], [spans; 3], false);
+    for point in &mut cage.points {
+        *point = unit(*point).unwrap_or(Vec3::Z) * (size * 0.5);
+    }
+    Ok(cage)
+}
+
 fn pipe_section([u0, v0]: [Vec3; 2], [u1, v1]: [Vec3; 2], t: f64) -> Result<[Vec3; 3]> {
     let u = u0 * (1.0 - t) + u1 * t;
     let v = v0 * (1.0 - t) + v1 * t;
@@ -396,7 +409,8 @@ fn pipe(
         return Err(bad("pipe cage exceeds the editable face budget"));
     }
     let mut frames = Vec::new();
-    let mut u = perpendicular(*directions.first().ok_or_else(|| bad("empty pipe path"))?)?;
+    let mut previous = *directions.first().ok_or_else(|| bad("empty pipe path"))?;
+    let mut u = perpendicular(previous)?;
     for i in 0..path.len() {
         let tangent = match (
             i.checked_sub(1).and_then(|j| directions.get(j)),
@@ -409,7 +423,10 @@ fn pipe(
             (None, Some(b)) => *b,
             _ => return Err(bad("pipe frame")),
         };
-        u = unit(u - tangent * u.dot(tangent)).map_or_else(|| perpendicular(tangent), Ok)?;
+        // Projection loses the transported direction when u meets the next
+        // tangent; the existing minimal rotation stays continuous there.
+        u = crate::geom::form_pipe::sweep::transport(u, previous, tangent)?;
+        previous = tangent;
         frames.push((u, tangent.cross(u)));
     }
     let mut cage = cylinder(radius, total, sides, layers);
@@ -533,6 +550,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn radial_box_reuses_canonical_cube_ids_and_preserves_its_radius() {
+        for spans in 1..=4 {
+            let radial = radial_box(2.0, spans).unwrap();
+            let cube = build(Primitive::Box, [2.0; 3], [spans; 3], [0.0; 2], &[]).unwrap();
+            assert_eq!(radial.faces, cube.faces);
+            assert_eq!(radial.points.len(), cube.points.len());
+            for (point, source) in radial.points.iter().zip(&cube.points) {
+                assert!((point.length() - 1.0).abs() < 1e-14);
+                assert!(point.cross(*source).length() < 1e-14);
+                assert!(point.dot(*source) > 0.0);
+            }
+        }
+        assert!(radial_box(f64::NAN, 1).is_err());
+        assert!(radial_box(2.0, usize::MAX).is_err());
+    }
+
+    #[test]
     fn pipe_sections_have_perpendicular_axes_through_nonplanar_turns() {
         let a = [Vec3::X, Vec3::Y];
         let b = [Vec3::Y, Vec3::Z];
@@ -592,5 +626,102 @@ mod tests {
             [seam[0], seam[1], [0.0, 0.0, 1.0, 1.0], [4.0, 0.0, 2.0, 2.0]]
         );
         assert!(ruled_strip(&seam, Vec3::X).is_err());
+    }
+    #[test]
+    fn primitive_pipe_transport_is_continuous_near_the_z_y_negative_z_projection_singularity() {
+        let path = |offset| {
+            [
+                Vec3::ZERO,
+                Vec3::Z * 10.,
+                (Vec3::Z + Vec3::Y) * 10.,
+                Vec3::Y * 10. + Vec3::X * offset,
+            ]
+        };
+        let original = path(0.);
+        let saved = original;
+        let baseline = build(
+            Primitive::Pipe,
+            [0.4, 0.4, 30.],
+            [1, 3, 1],
+            [0.; 2],
+            &original,
+        )
+        .unwrap();
+        assert_eq!(original, saved);
+        for epsilon in [1e-2, 1e-4, 1e-6] {
+            let mut pair = Vec::new();
+            for sign in [-1., 1.] {
+                let points = path(sign * epsilon);
+                let saved = points;
+                let cage = build(
+                    Primitive::Pipe,
+                    [0.4, 0.4, 30.],
+                    [1, 3, 1],
+                    [0.; 2],
+                    &points,
+                )
+                .unwrap();
+                assert_eq!(points, saved);
+                assert_eq!(
+                    cage.faces, baseline.faces,
+                    "source control/face ordering stays fixed"
+                );
+                assert_eq!(cage.points.len(), baseline.points.len());
+                let moved = cage
+                    .points
+                    .iter()
+                    .zip(&baseline.points)
+                    .map(|(&p, &q)| p.distance(q))
+                    .fold(0.0_f64, f64::max);
+                assert!(
+                    moved < 4. * epsilon,
+                    "epsilon={epsilon}, sign={sign}, displacement={moved}"
+                );
+                pair.push(cage);
+            }
+            let crossed = pair[0]
+                .points
+                .iter()
+                .zip(&pair[1].points)
+                .map(|(&p, &q)| p.distance(q))
+                .fold(0.0_f64, f64::max);
+            assert!(
+                crossed < 8. * epsilon,
+                "nearby opposite perturbations must not roll a section by pi"
+            );
+        }
+    }
+
+    #[test]
+    fn pipe_transport_keeps_the_planar_limit_proper_without_changing_its_initial_seed() {
+        use crate::geom::form_pipe::sweep::transport;
+        assert_eq!(perpendicular(Vec3::Z).unwrap(), Vec3::Y);
+        assert_eq!(perpendicular(Vec3::Y).unwrap(), -Vec3::Z);
+        assert_eq!(perpendicular(-Vec3::Z).unwrap(), -Vec3::Y);
+        let a = unit(Vec3::Y + Vec3::Z).unwrap();
+        let b = unit(Vec3::Y - Vec3::Z).unwrap();
+        let first = transport(Vec3::Y, Vec3::Z, a).unwrap();
+        assert!(first.distance(b) < 1e-14);
+        let second = transport(first, a, b).unwrap();
+        assert!(second.distance(-a) < 1e-14);
+        assert!(transport(second, b, -Vec3::Z).unwrap().distance(-Vec3::Y) < 1e-14);
+        for epsilon in [-1e-3, -1e-5, -1e-7, 0., 1e-7, 1e-5, 1e-3] {
+            let tangent = unit(Vec3::Y - Vec3::Z + Vec3::X * epsilon).unwrap();
+            let up = transport(first, a, tangent).unwrap();
+            assert!(affine_fit::proper_axes(
+                [up, tangent.cross(up), tangent],
+                1e-12
+            ));
+            assert!(up.distance(-a) < 2. * epsilon.abs() + 1e-14);
+        }
+        assert!(transport(Vec3::Y, Vec3::Z, -Vec3::Z).is_err());
+        assert!(build(
+            Primitive::Pipe,
+            [0.4, 0.4, 30.],
+            [1, 3, 1],
+            [0.; 2],
+            &[Vec3::ZERO, Vec3::Z, Vec3::ZERO]
+        )
+        .is_err());
     }
 }

@@ -231,6 +231,25 @@ pub fn restore_form_preview(doc: Document, draft: &[u8], validation: crate::kern
     restore_validating(doc, Some(draft), None, validation)
 }
 
+/// Attach recovery authoring data after its base timeline has finished opening.
+/// The caller keeps the isolated session until both parts have been accepted.
+pub fn attach_draft(session: &mut Session, expected: &Document, bytes: &[u8]) -> Result<()> {
+    let mut expected = expected.clone();
+    // Opening moves saved visibility from the document into Session.
+    expected.visibility = Default::default();
+    if session.doc.as_ref() != &expected || session.active_sketch.is_some() || session.forms_prototype.is_some() {
+        return Err(EngineError::Other("the recovered Form's base document changed while opening".into()));
+    }
+    let (form, base_dirty) = Draft::restore(session, bytes)?;
+    session.active_component = form.authoring_component;
+    session.active_occurrence_path = form.authoring_path.clone();
+    session.forms_prototype = Some(form);
+    if base_dirty {
+        session.mark_unsaved();
+    }
+    Ok(())
+}
+
 pub(crate) fn restore(doc: Document, draft: Option<&[u8]>, path: Option<&str>) -> Result<Session> {
     restore_validating(doc, draft, path, crate::kernel::Validation::default())
 }
@@ -693,6 +712,34 @@ mod tests {
         assert!(!recovered.is_dirty(), "cancelling a new draft restores its clean base");
         remove(&d, &id).unwrap();
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn staged_form_recovery_attaches_atomically_without_replacing_the_evaluated_model() {
+        let mut source = Session::default();
+        source.execute("solid.box", &json!({"length":4,"width":5,"height":6})).unwrap();
+        source.mark_saved();
+        source.execute("form.prototype.create", &json!({"size":8,"levels":0})).unwrap();
+        let source_inspect = source.execute("form.prototype.inspect", &json!({})).unwrap();
+        let (document, draft) = solidcraft_io::read_recovery_container(&capture_bytes(&source).unwrap()).unwrap();
+        let draft = draft.unwrap();
+        let mut staged = Session::opened(document.clone(), None);
+        let state = staged.model.state();
+        let document_id = staged.document_id.clone();
+        let mut wrong = document.clone();
+        wrong.name = "Different base".into();
+        assert!(attach_draft(&mut staged, &wrong, &draft).is_err());
+        assert!(attach_draft(&mut staged, &document, b"invalid draft").is_err());
+        assert!(staged.forms_prototype.is_none());
+        assert!(Arc::ptr_eq(&state, &staged.model.state()));
+        assert!(!staged.is_dirty());
+        attach_draft(&mut staged, &document, &draft).unwrap();
+        assert!(Arc::ptr_eq(&state, &staged.model.state()), "draft attachment must not re-evaluate the base timeline");
+        assert_eq!(staged.document_id, document_id);
+        assert_eq!(staged.execute("form.prototype.inspect", &json!({})).unwrap()["points"], source_inspect["points"]);
+        assert!(attach_draft(&mut staged, &document, &draft).is_err(), "an active editor cannot be replaced by a late attachment");
+        staged.execute("form.prototype.close", &json!({})).unwrap();
+        assert!(!staged.is_dirty(), "Cancel preserves the saved base state");
     }
 
     #[test]

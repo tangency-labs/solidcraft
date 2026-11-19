@@ -13,6 +13,8 @@ use solidcraft_viewport_egui::ViewportCallback;
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
+#[cfg(any(target_arch = "wasm32", test))]
+mod browser_transform;
 mod combine_preview;
 mod context;
 mod controls;
@@ -35,6 +37,8 @@ mod tools;
 mod transform_feedback;
 mod transform_job;
 mod translation_snap;
+#[cfg(target_arch = "wasm32")]
+pub use browser_transform::{BrowserTransformHost, BrowserTransformOutcome};
 #[cfg(target_arch = "wasm32")]
 pub use combine_preview::{BrowserPreview, BrowserPreviewHost, BrowserPreviewOutcome};
 #[cfg(target_arch = "wasm32")]
@@ -845,7 +849,7 @@ fn begin_drag_hit(app: &mut SolveApp, proj: &Proj, pos: Pos2, mods: egui::Modifi
     let anchor = skin.iter().copied().fold(Vec3::ZERO, |a, p| a + p) / skin.len().max(1) as f64;
     let extrude = form.profile.is_none() && mods.shift && matches!(hit, Element::Face(_) | Element::Edge(_));
     selection::activate(app, hit);
-    if surface::cap_selected(app) {
+    if surface::cap_selected(app) && (cfg!(target_arch = "wasm32") || extrude) {
         app.forms_prototype.drag = None;
         selection::pressed(app, hit, mods.shift);
         selection::blocked_drag(app, toggle);
@@ -923,7 +927,9 @@ fn constraint_axes(app: &SolveApp, dirs: [Vec3; 3]) -> [Vec3; 3] {
     if app.forms_prototype.orientation == 2 { dirs } else { WORLD_AXES }
 }
 fn triad(app: &SolveApp) -> Option<crate::gizmo::Triad> {
-    if surface::cap_selected(app) || app.forms_prototype.selected.iter().any(|&id| !live_cad::handle_available(app, id)) {
+    if cfg!(target_arch = "wasm32") && surface::cap_selected(app)
+        || app.forms_prototype.selected.iter().any(|&id| !live_cad::handle_available(app, id))
+    {
         return None;
     }
     let form = app.session.forms_prototype.as_ref()?;
@@ -972,6 +978,11 @@ fn show_gizmo(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, pr
     let Some(event) = crate::gizmo::show_mode(ui, painter, proj, id, &t, 0.0, (dirs, scale)) else {
         return app.forms_prototype.gizmo_drag.is_some();
     };
+    if shift_extrude && surface::cap_selected(app) {
+        crate::gizmo::cancel(ui.ctx(), id);
+        app.set_status(app.tr("forms.fill.cap_rim_editing").to_owned(), false);
+        return true;
+    }
     if event.started || app.forms_prototype.gizmo_drag.is_none() {
         let Some(source) = TransformSource::current(app) else { return false };
         transform_feedback::clear(app);
@@ -1178,6 +1189,7 @@ fn pull(app: &mut SolveApp, pos: Pos2) {
 }
 fn enable_shift_extrusion(app: &mut SolveApp, shift: bool) {
     if shift
+        && !surface::cap_selected(app)
         && app.session.forms_prototype.as_ref().is_some_and(|f| f.profile.is_none())
         && app.forms_prototype.elements.iter().any(|e| matches!(e, Element::Face(_) | Element::Edge(_)))
         && let Some(drag) = app.forms_prototype.drag.as_mut()
@@ -1455,6 +1467,146 @@ fn fallback(ui: &egui::Ui, proj: &Proj, mesh: &Mesh, color: egui::Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn create_capped_form(app: &mut SolveApp) -> usize {
+        app.run("form.prototype.create", json!({"primitive":"face","dimensions":[8,8,1],"segments":[4,4,1],"levels":0})).unwrap();
+        let edge: [usize; 2] = app.session.forms_prototype.as_ref().unwrap().logical.faces[10][..2].try_into().unwrap();
+        app.run("form.prototype.topology", json!({"tool":"delete_faces","faces":[10]})).unwrap();
+        app.run("form.prototype.refine", json!({"faces":[0],"counts":[2,2]})).unwrap();
+        app.run("form.prototype.topology", json!({"tool":"fill_hole","edges":[edge],"fill_mode":"new_cap","tolerance":0.05})).unwrap();
+        app.run("form.prototype.finish_options", json!({"tolerance":"0.05 mm"})).unwrap();
+        app.forms_prototype.controls.tolerance = "0.05 mm".into();
+        let cap = app.session.forms_prototype.as_ref().unwrap().hierarchy.as_ref().unwrap().quad_cap_face().unwrap();
+        app.forms_prototype.elements = BTreeSet::from([Element::Face(cap)]);
+        selection::sync(app);
+        live_cad::install_for_test(app);
+        cap
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn desktop_cap_face_can_be_clicked_with_native_ownership_and_selection_axes() {
+        let mut h = crate::scenario::Harness::new();
+        let cap = create_capped_form(&mut h.app);
+        assert!(!h.app.preferences.forms_exact_face_picking);
+        assert!(face_press::enabled(&h.app));
+        h.app.forms_prototype.elements.clear();
+        selection::sync(&mut h.app);
+        h.app.forms_prototype.pick = Pick::Face;
+        h.app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        h.app.cam.yaw = 0.0;
+        h.frames(3);
+        live_cad::install_for_test(&mut h.app);
+        let exact = live_cad::selection_geometry(&h.app).unwrap();
+        let native = exact.faces.iter().position(|owner| *owner == live_cad::ExactFaceOwner::Face(cap)).unwrap();
+        let face = &exact.body.record().faces[native];
+        let [[a, b], [c, d]] = face.domain;
+        let chart = solidcraft_engine::geom::brep::eval::SurfaceEval::new(face.parameters()).unwrap();
+        let point = chart.point([(a + b) * 0.5, (c + d) * 0.5]).unwrap();
+        let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let at = projection.to_screen(point).unwrap();
+        let _permit = face_press::hold_for_test(&h.app).unwrap();
+        h.frame_with(crate::test_support::pointer(at, true));
+        let answer = face_press::solve_for_test(&h.app).unwrap().unwrap();
+        assert!(matches!(answer, face_pick::Answer::Hit { owner: face_pick::Owner::Face(id), .. } if id == cap));
+        let done = face_press::response_for_test(&mut h.app).unwrap();
+        h.frame_with(crate::test_support::pointer(at, false));
+        done.send(Ok(answer)).unwrap();
+        h.frames(1);
+        assert_eq!(h.app.forms_prototype.elements, BTreeSet::from([Element::Face(cap)]));
+        assert!(triad(&h.app).is_some());
+        h.app.forms_prototype.orientation = 2;
+        assert!(basis(&h.app).is_ok());
+        assert!(oriented_triad(&h.app).is_some());
+        assert!(tool_panel::topology_unavailable(&h.app, "extrude_faces").is_some());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn desktop_cap_gizmo_move_rotate_and_scale_use_one_qualified_worker_checkpoint() {
+        for (handle, scale) in [("z", false), ("rz", false), ("x", true), ("xy", true), ("ball", true)] {
+            let mut h = crate::scenario::Harness::new();
+            let cap = create_capped_form(&mut h.app);
+            h.app.forms_prototype.scale = scale;
+            h.app.forms_prototype.pick = Pick::Face;
+            h.frames(3);
+            live_cad::install_for_test(&mut h.app);
+            let form = h.app.session.forms_prototype.as_ref().unwrap();
+            let before = form.definition();
+            let undo = form.inspect()["undo"].as_u64().unwrap();
+            let triad = triad(&h.app).unwrap();
+            let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let (right, _, _) = h.app.cam.basis();
+            let pixels = projection.to_screen(triad.center).unwrap().distance(projection.to_screen(triad.center + right).unwrap());
+            let length = crate::gizmo::LEN_PX / f64::from(pixels);
+            let delta = match handle {
+                "z" => Vec3::Z * 0.3,
+                "x" => Vec3::X * (length * 0.12),
+                "xy" => (Vec3::X + Vec3::Y) * (length * 0.12),
+                "ball" => right * (length * 0.12),
+                _ => Vec3::ZERO,
+            };
+            let from = if handle == "rz" { json!({"gizmo":handle,"turn":35}) } else { json!({"gizmo":handle}) };
+            let to = if handle == "rz" { json!({"gizmo":handle,"turn":47}) } else { json!({"gizmo":handle,"by":[delta.x,delta.y,delta.z]}) };
+            let [x0, y0] = h.at(&from).unwrap();
+            let [x1, y1] = h.at(&to).unwrap();
+            let from = egui::pos2(x0 as f32, y0 as f32);
+            let to = egui::pos2(x1 as f32, y1 as f32);
+            let gate = h.app.forms_prototype.transform_job.gate.clone();
+            let permit = extrusion::WorkerPermit::acquire(gate).unwrap();
+            h.frame_with(vec![egui::Event::PointerMoved(from)]);
+            h.frame_with(crate::test_support::pointer(from, true));
+            h.frame_with(vec![egui::Event::PointerMoved(to)]);
+            assert!(transform_job::active(&h.app), "{handle}: {:?}", h.app.status);
+            assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().definition(), before);
+            drop(permit);
+            transform_job::flush_for_test(&mut h.app, &h.ctx).unwrap();
+            let form = h.app.session.forms_prototype.as_ref().unwrap();
+            assert_ne!(form.definition(), before, "{handle}: {:?}", h.app.status);
+            assert_eq!(form.inspect()["undo"], undo + 1, "{handle}");
+            assert!(form.hierarchy.as_ref().unwrap().is_quad_cap_face(cap));
+            assert_eq!(h.app.forms_prototype.elements, BTreeSet::from([Element::Face(cap)]));
+            h.frame_with(crate::test_support::pointer(to, false));
+            transform_job::flush_for_test(&mut h.app, &h.ctx).unwrap();
+            assert!(!transform_job::active(&h.app));
+            assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().inspect()["undo"], undo + 1);
+            h.app.run("form.prototype.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().definition(), before);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn desktop_cap_direct_drag_cancels_accepted_and_pending_samples_together() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let cap = create_capped_form(&mut app);
+        let before = app.session.forms_prototype.as_ref().unwrap().definition();
+        let undo = app.session.forms_prototype.as_ref().unwrap().inspect()["undo"].clone();
+        let ctx = egui::Context::default();
+        let projection = crate::viewport::projection(&app, Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0)));
+        let center = triad(&app).unwrap().center;
+        let at = projection.to_screen(center).unwrap();
+        let pivot = Some(center + Vec3::X);
+        app.forms_prototype.pivot = pivot;
+        app.forms_prototype.axis = Axis::Z;
+        begin_drag_hit(&mut app, &projection, at, egui::Modifiers::NONE, Element::Face(cap));
+        assert!(app.forms_prototype.drag.is_some());
+        assert_eq!(selection::active(&app), Some(Element::Face(cap)));
+        pull(&mut app, projection.to_screen(center + Vec3::Z * 0.15).unwrap());
+        transform_job::flush_for_test(&mut app, &ctx).unwrap();
+        assert_ne!(app.session.forms_prototype.as_ref().unwrap().definition(), before, "{:?}", app.status);
+        pull(&mut app, projection.to_screen(center + Vec3::Z * 0.3).unwrap());
+        let (job, done) = transform_job::hold_for_test(&mut app).unwrap();
+        cancel_transform_gesture(&mut app, &ctx, egui::Id::unique("cap_cancel"));
+        assert!(done.send(job.compute().map_err(|error| error.to_string())).is_err());
+        assert!(!transform_job::active(&app));
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), before);
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().inspect()["undo"], undo);
+        assert_eq!(app.forms_prototype.elements, BTreeSet::from([Element::Face(cap)]));
+        assert_eq!(app.forms_prototype.pivot, pivot);
+        assert_eq!(selection::active(&app), Some(Element::Face(cap)));
+    }
 
     #[test]
     fn form_fit_keeps_orbit_and_home_resets_it() {

@@ -69,9 +69,8 @@ fn pole_triangle(source: &NurbsSurface, corners: [usize; 3]) -> Result<crate::Bo
     use crate::surfaces::{Parts, spline_curve, spline_surface, surface_body, uv_line};
     use solidcore_record::brep as b;
     let surface = pole::triangle(source, corners)?;
-    let unit = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let domain = source.domain();
-    let parameters = corners.map(|corner| std::array::from_fn(|d| domain[d][0] + (domain[d][1] - domain[d][0]) * unit[corner][d]));
+    let parameters = solidcore_ops::form_fill::triangle_parameters(domain, corners).map_err(failed)?;
     let mut parts = Parts { tolerance: 1e-5, ..Default::default() };
     for uv in parameters {
         let point = source.eval(uv[0], uv[1]).map_err(failed)?;

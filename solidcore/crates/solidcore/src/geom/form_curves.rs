@@ -40,6 +40,49 @@ pub fn fitted_station<C>(
         .then_some(point)
 }
 
+/// Normalize a finite editing direction without squaring its original scale.
+pub fn selection_unit(vector: Vec3) -> Option<Vec3> {
+    let scale = vector.x.abs().max(vector.y.abs()).max(vector.z.abs());
+    if !vector.to_array().into_iter().all(f64::is_finite) || !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let scaled = vector / scale;
+    let length = scaled.length();
+    (length.is_finite() && length > 0.0).then(|| scaled / length)
+}
+
+/// Oriented surface normal from its differential, refusing a singular chart.
+pub fn selection_normal(du: Vec3, dv: Vec3) -> Option<Vec3> {
+    let cross = selection_unit(du)?.cross(selection_unit(dv)?);
+    if cross.length_squared() <= 1e-16 {
+        return None;
+    }
+    selection_unit(cross)
+}
+
+/// Proper editing axes with X along the directed tangent projected into the
+/// tangent plane, and Z along the oriented surface normal.
+pub fn selection_axes(tangent: Vec3, normal: Vec3) -> Option<[Vec3; 3]> {
+    let x = selection_unit(tangent)?;
+    let z = selection_unit(normal)?;
+    let tangent = x - z * x.dot(z);
+    if tangent.length_squared() <= 1e-16 {
+        return None;
+    }
+    let x = selection_unit(tangent)?;
+    Some([x, selection_unit(z.cross(x))?, z])
+}
+
+/// Editing frame at an exact surface differential. The supplied two-dimensional
+/// direction follows the logical chart's directed reference in its UV metric.
+pub fn selection_frame(du: Vec3, dv: Vec3, direction: [f64; 2]) -> Option<[Vec3; 3]> {
+    let [u, v] = direction;
+    if !u.is_finite() || !v.is_finite() {
+        return None;
+    }
+    selection_axes(du * u + dv * v, selection_normal(du, dv)?)
+}
+
 /// Return the first plane's normal if the remaining oriented planes coincide to roundoff.
 pub fn coplanar_normal(mut planes: impl Iterator<Item = (Vec3, Vec3, Vec3)>) -> Option<Vec3> {
     let (origin, x, y) = planes.next()?;
@@ -168,8 +211,8 @@ pub fn rational_controls_in_frame(
 /// Check whether an ordered net follows the original after translation and
 /// uniform positive scaling. Preserving the order retains the curve's seam and direction.
 pub fn controls_follow(
-    saved: impl Iterator<Item = Vec3> + Clone + ExactSizeIterator,
-    current: impl Iterator<Item = Vec3> + Clone + ExactSizeIterator,
+    saved: impl Clone + ExactSizeIterator<Item = Vec3>,
+    current: impl Clone + ExactSizeIterator<Item = Vec3>,
 ) -> bool {
     if saved.len() != current.len() || !(2..=256).contains(&saved.len()) {
         return false;
@@ -192,7 +235,7 @@ pub fn controls_follow(
     let extent = (new_size / n).sqrt();
     let position = current
         .clone()
-        .flat_map(|p| p.to_array())
+        .flat_map(Vec3::to_array)
         .map(f64::abs)
         .fold(0.0_f64, f64::max);
     let tolerance = extent * 1e-8 + position * 64.0 * f64::EPSILON;
@@ -220,6 +263,47 @@ pub fn continued_control_within_roundoff(actual: Vec3, expected: Vec3, levels: u
 mod tests {
     use super::*;
 
+    #[test]
+    fn selection_frames_preserve_differential_orientation_across_scales() {
+        // S(u,v) = (2u, 3v, uv) at (1/2,1/2).
+        let du = Vec3::new(2.0, 0.0, 0.5);
+        let dv = Vec3::new(0.0, 3.0, 0.5);
+        let frame = selection_frame(du, dv, [1.0, 0.0]).unwrap();
+        assert!(affine_fit::proper_axes(frame, 1e-12));
+        assert!(frame[0].distance(du / du.length()) < 1e-12);
+        let normal = du.cross(dv);
+        assert!(frame[2].distance(normal / normal.length()) < 1e-12);
+        for (u_scale, v_scale) in [(1e-240, 1e-240), (1e240, 1e240), (1e-240, 1e240)] {
+            let actual = selection_frame(du * u_scale, dv * v_scale, [1.0, 0.0]).unwrap();
+            assert!(actual
+                .into_iter()
+                .zip(frame)
+                .all(|(a, b)| a.distance(b) < 1e-12));
+        }
+        let reversed = selection_frame(du, dv, [-1.0, 0.0]).unwrap();
+        assert!(reversed[0].distance(-frame[0]) < 1e-12);
+        assert!(reversed[1].distance(-frame[1]) < 1e-12);
+        assert!(reversed[2].distance(frame[2]) < 1e-12);
+        let swapped = selection_frame(dv, du, [0.0, 1.0]).unwrap();
+        assert!(swapped[0].distance(frame[0]) < 1e-12);
+        assert!(swapped[2].distance(-frame[2]) < 1e-12);
+    }
+
+    #[test]
+    fn selection_frames_refuse_singular_and_nonfinite_directions() {
+        for (du, dv) in [
+            (Vec3::ZERO, Vec3::Y),
+            (Vec3::X, Vec3::X),
+            (Vec3::X, Vec3::new(1.0, 1e-10, 0.0)),
+            (Vec3::new(f64::NAN, 0.0, 0.0), Vec3::Y),
+            (Vec3::X, Vec3::new(0.0, f64::INFINITY, 0.0)),
+        ] {
+            assert!(selection_frame(du, dv, [1.0, 0.0]).is_none());
+        }
+        assert!(selection_frame(Vec3::X, Vec3::Y, [0.0, 0.0]).is_none());
+        assert!(selection_frame(Vec3::X, Vec3::Y, [f64::NAN, 1.0]).is_none());
+        assert!(selection_axes(Vec3::Z, Vec3::Z).is_none());
+    }
     #[test]
     fn evaluates_a_weighted_corner_in_its_rigid_placement() {
         let knots = [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]];

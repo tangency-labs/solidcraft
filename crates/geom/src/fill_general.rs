@@ -53,7 +53,8 @@
 //!   the loop, so it moves neither the loop nor the conditions across it.
 
 use crate::bspline::{HPoint, NurbsSurface, SplineError, SplineResult, invalid};
-use crate::fill::{Band, Grid, MAX_LOOP_POINTS, SMOOTHNESS, inside_loop, segments_meet};
+use crate::fill::{Grid, MAX_LOOP_POINTS, SMOOTHNESS, inside_loop, segments_meet};
+use crate::fill_solve::Band;
 use crate::prelude::*;
 use solidcore_record::Vec3;
 
@@ -535,8 +536,8 @@ struct System {
 }
 
 impl System {
-    fn new(n: usize, bw: usize) -> System {
-        System { band: Band::new(n, bw), rhs: [vec![0.0; n], vec![0.0; n], vec![0.0; n]], rows: 0 }
+    fn new(n: usize, bw: usize) -> SplineResult<System> {
+        Ok(System { band: Band::new(n, bw)?, rhs: [vec![0.0; n], vec![0.0; n], vec![0.0; n]], rows: 0 })
     }
 
     /// One least-squares row: `Σ coefficient · control = target`.
@@ -825,7 +826,7 @@ fn fit_grid<'a>(
 fn fit_positions<'a>(grid: &'a Grid, data: &[([f64; 2], Vec3)]) -> SplineResult<Net<'a>> {
     let [cu, cv] = grid.count;
     let n = cu * cv;
-    let mut sys = System::new(n, 3 * cu + 3);
+    let mut sys = System::new(n, 3 * cu + 3)?;
     for (q, p) in data {
         let b = Basis::at(grid, *q).ok_or_else(|| SplineError::Invalid("a station is off the grid".into()))?;
         sys.row(&b.terms(cu, &[(0, 0, 1.0)]), *p);
@@ -892,7 +893,7 @@ fn fit_coupled<'a>(grid: &'a Grid, data: &[([f64; 2], Vec3)], rows: &mut [Hermit
     let u_fast = cu <= cv;
     let fast = if u_fast { cu } else { cv };
     let index = |i: usize, j: usize, c: usize| if u_fast { (j * cu + i) * 3 + c } else { (i * cv + j) * 3 + c };
-    let mut band = Band::new(3 * n, 3 * (3 * fast + 3) + 2);
+    let mut band = Band::new(3 * n, 3 * (3 * fast + 3) + 2)?;
     let mut rhs = vec![0.0; 3 * n];
     let mut count = 0usize;
     // A row on the three coordinates: `Σ_c Σ_t coefficient_t · weight_c · control_{t,c} = target`.

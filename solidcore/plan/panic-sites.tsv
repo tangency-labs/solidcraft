@@ -483,6 +483,17 @@ crates/solidcore/src/eval/form.rs	face_arcs	f64::clamp	2	proven	clamp(0.0, phi)	
 crates/solidcore/src/eval/form.rs	param	f64::clamp	1	proven	clamp(0.0, FRAC_PI_2)	bounds are constants 0 and FRAC_PI_2
 crates/solidcore/src/eval/form.rs	params	f64::clamp	1	proven	clamp(q0, end)	quarters validates finite angles and returns nonnegative n, so q0 <= end
 crates/solidcore/src/eval/form.rs	params	f64::clamp	2	proven	clamp(q0, end)	quarters validates finite angles and returns nonnegative n, so q0 <= end
+crates/solidcore/src/eval/forms_view_queries.rs	Node::build	split_at	1	proven	split_at_mut(middle)	The len<=8 leaf returns first; sorting preserves len>=9, and middle=len/2 satisfies 0<middle<len
+crates/solidcore/src/eval/ray_spline.rs	Grid::copy_span	int-div	1	proven	i / size[0]	The entry guard rejects any zero size before this loop, so size[0] is nonzero
+crates/solidcore/src/eval/ray_spline.rs	Grid::copy_span	int-rem	1	proven	i % size[0]	The entry guard rejects any zero size before this loop, so size[0] is nonzero
+crates/solidcore/src/eval/ray_spline.rs	Grid::insert	Vec::insert	1	proven	insert(span + 1, knot)	span+1 equals knots.partition_point(...), which is <=knots.len(); len<MAX_KNOTS and try_reserve(1) succeeds immediately before insertion
+crates/solidcore/src/eval/ray_spline.rs	Grid::insert	int-div	1	proven	index / size[0]	Grid::new requires both private sizes positive and product<=16384; insert increments one checked dimension, so the size[0] divisor remains positive
+crates/solidcore/src/eval/ray_spline.rs	Grid::insert	int-rem	1	proven	index % size[0]	Grid::new requires both private sizes positive and product<=16384; insert increments one checked dimension, so the size[0] divisor remains positive
+crates/solidcore/src/eval/ray_tensor.rs	Search::derivative_bounds	int-div	1	proven	i / nu	Only prove_with reaches these private methods; it validates degree in 1..=16 and sets immutable size=degree+1, so nu is in 2..=17 through every subdivision
+crates/solidcore/src/eval/ray_tensor.rs	Search::derivative_bounds	int-rem	1	proven	i % nu	Only prove_with reaches these private methods; it validates degree in 1..=16 and sets immutable size=degree+1, so nu is in 2..=17 through every subdivision
+crates/solidcore/src/eval/ray_tensor.rs	Search::evaluate	chunks	1	proven	chunks_exact(nu)	Only prove_with reaches these private methods; it validates degree in 1..=16 and sets immutable size=degree+1, so nu is in 2..=17 through every subdivision
+crates/solidcore/src/eval/ray_tensor.rs	Search::root	f64::clamp	1	proven	clamp(i.lo, i.hi)	The first enclosure is an ordered interval strictly inside (0,1); refinements only keep nonempty interval intersections, so clamp bounds stay finite and ordered
+crates/solidcore/src/eval/ray_tensor.rs	curve_value	copy_from_slice	1	proven	copy_from_slice(controls)	row is the checked mutable prefix ..controls.len() of the fixed buffer; source and destination lengths are exactly controls.len()
 crates/solidcore/src/eval/sphere.rs	curve_on_sphere	int-div	1	proven	b / p	degree calls basis_check, which requires 1 <= p <= 16
 crates/solidcore/src/eval/sphere.rs	curve_on_sphere	int-rem	1	proven	(n - 1) % p	degree calls basis_check, which requires 1 <= p <= 16
 crates/solidcore/src/eval/sphere.rs	cuts	windows	1	proven	windows(2)	constant non-zero size
@@ -503,6 +514,24 @@ crates/solidcore/src/geom/a_object.rs	reverse_knots	int-div	1	proven	m / 2	const
 crates/solidcore/src/geom/assert_array.rs	AssertArray::remove_at	Vec::remove	1	proven	remove(index)	returns None when index >= reports.len()
 crates/solidcore/src/geom/attribute.rs	AttributeStore::remove_attribute	Vec::remove	1	proven	remove(pos)	pos is position() in the same Vec
 crates/solidcore/src/geom/attribute.rs	AttributeStore::remove_user	Vec::remove	1	proven	remove(pos)	pos is position() in the same users Vec
+crates/solidcore/src/geom/form_cage.rs	torus	with_capacity	1	proven	Vec::with_capacity(n * m)	Private torus is only called by build after validate bounds both segments to 1..=16; n,m<=64, n*m<=4096 and either element type occupies <=24 bytes on supported targets
+crates/solidcore/src/geom/form_cage.rs	torus	with_capacity	2	proven	Vec::with_capacity(n * m)	Private torus is only called by build after validate bounds both segments to 1..=16; n,m<=64, n*m<=4096 and either element type occupies <=24 bytes on supported targets
+crates/solidcore/src/geom/form_cage.rs	tube	with_capacity	1	proven	Vec::with_capacity(2 * wall)	Private tube is only called by build after validate bounds sides,layers to 1..=16; n<=64, wall=(layers+1)*n<=1088 and 2*wall<=2176 Vec3 entries
+crates/solidcore/src/geom/form_fill/regularity.rs	Poly::derivative	int-div	1	proven	k / (degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_fill/regularity.rs	Poly::derivative	int-rem	1	proven	k % (degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_fill/regularity.rs	Poly::product	int-div	1	proven	a / (self.degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_fill/regularity.rs	Poly::product	int-div	2	proven	b / (other.degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_fill/regularity.rs	Poly::product	int-rem	1	proven	a % (self.degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_fill/regularity.rs	Poly::product	int-rem	2	proven	b % (other.degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_fill/regularity.rs	split_axis	int-div	1	proven	k / (poly.degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_fill/regularity.rs	split_axis	int-rem	1	proven	k % (poly.degree[0] + 1)	Poly::new validates both private degrees <=96; differentiation only lowers a degree, so each degree+1 divisor is in 1..=97 and cannot overflow
+crates/solidcore/src/geom/form_match.rs	step	with_capacity	1	proven	Vec::with_capacity(columns)	The actual response width is checked in 1..=256 before columns=count*3; columns<=768 f64 entries, at most 6144 bytes on native and wasm32
+crates/solidcore/src/geom/form_match.rs	step	with_capacity	2	proven	Vec::with_capacity(columns)	The actual response width is checked in 1..=256 before columns=count*3; columns<=768 f64 entries, at most 6144 bytes on native and wasm32
+crates/solidcore/src/geom/form_pipe.rs	prepare_network	with_capacity	1	proven	Vec::with_capacity(paths.len())	The entry guard rejects empty paths or paths.len()>MAX_PATHS=128 before allocating endpoint pairs; capacity<=128 [usize;2] entries
+crates/solidcore/src/geom/form_pipe/sweep.rs	add_cap	with_capacity	1	proven	Vec::with_capacity((n + 1).pow(2))	Private add_cap is only called by tube after density is checked in 1..=12; n=2*density<=24 and (n+1)^2<=625 usize entries
+crates/solidcore/src/geom/form_pipe/sweep.rs	frames	with_capacity	1	proven	Vec::with_capacity(points.len())	Private frames is only called by tube after input.len() is checked in 2..=4096; removing a closed endpoint only reduces len, so capacity<=4096 Vec3 or three-Vec3 Frame entries
+crates/solidcore/src/geom/form_pipe/sweep.rs	frames	with_capacity	2	proven	Vec::with_capacity(points.len())	Private frames is only called by tube after input.len() is checked in 2..=4096; removing a closed endpoint only reduces len, so capacity<=4096 Vec3 or three-Vec3 Frame entries
+crates/solidcore/src/geom/form_subdivision.rs	step_points	with_capacity	1	proven	Vec::with_capacity(size)	size is the checked sum of three existing bounded input collections and is rejected above MAX_STEP_POINTS (600000) before allocation
 crates/solidcore/src/geom/geom_utility/p1.rs	add_sorted	Vec::insert	1	proven	insert(found_idx, value)	found_idx is position() or len() of sorted_values; indices insertion guarded by found_idx < indices.len()
 crates/solidcore/src/geom/geom_utility/p1.rs	add_sorted	Vec::insert	2	proven	insert(found_idx, idx)	found_idx is position() or len() of sorted_values; indices insertion guarded by found_idx < indices.len()
 crates/solidcore/src/geom/geom_utility/p1.rs	segment_point_distance	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
@@ -534,6 +563,10 @@ crates/solidcore/src/geom/polar_box.rs	PolarBox::are_disjoint	f64::clamp	1	prove
 crates/solidcore/src/geom/pseudo_box.rs	PseudoBox::distance_to_point	with_capacity	1	proven	Vec::with_capacity(6)	constant capacity
 crates/solidcore/src/geom/solution_array.rs	SolutionArray::insert_at	Vec::split_off	1	proven	split_off(index)	inside index < data.len() branch
 crates/solidcore/src/geom/solution_array.rs	SolutionArray::swap	swap	1	proven	swap(index1, index2)	returns Err if either index >= data.len()
+crates/solidcore/src/geom/spline_interpolation.rs	System::new	windows	2	proven	windows(degree)	The preceding entry guard requires 1<=degree<=MAX_SPLINE_DEGREE=16, so the window size is nonzero
+crates/solidcore/src/geom/spline_interpolation.rs	System::solve	swap	1	proven	swap(col, pivot)	a is a length-n clone and q has checked points.len()==n; col is in 0..n and pivot enumerates a from col, hence both indices are <n; neither vector changes length
+crates/solidcore/src/geom/spline_interpolation.rs	System::solve	swap	2	proven	swap(col, pivot)	a is a length-n clone and q has checked points.len()==n; col is in 0..n and pivot enumerates a from col, hence both indices are <n; neither vector changes length
+crates/solidcore/src/geom/spline_interpolation.rs	cubic_tensor	chunks	1	proven	chunks_exact(n)	The entry guard requires n in 4..=65 before allocation or chunking, so chunk size n is nonzero
 crates/solidcore/src/heal/face_props.rs	FaceProps::set_props_stage3_inner	int-rem	1	proven	total % 2	constant non-zero divisor
 crates/solidcore/src/heal/face_props.rs	LoopProps::set_props	int-div	1	proven	(this_touches.len() as u64) / 2	constant non-zero divisor
 crates/solidcore/src/heal/face_props.rs	LoopProps::set_props	int-div	2	proven	(this_touches.len() as u64) / 2	constant non-zero divisor

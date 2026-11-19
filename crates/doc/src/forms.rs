@@ -2723,6 +2723,37 @@ mod tests {
         assert_eq!(definition, before);
     }
     #[test]
+    fn quad_cap_selection_frames_keep_logical_identity_local_axes_and_refuse_singular_charts() {
+        use solidcore_record::Vec3;
+        let (source, seed, _) = quad_cap_opening_fixture();
+        let authored = author_quad_cap(&source, 0.05, &[seed], &[]).unwrap();
+        let before = authored.clone();
+        let face = authored.hierarchy.as_ref().unwrap().quad_cap_face().unwrap();
+        let (_, report, _, frames) = convert_with_selection(&authored, 0.05).unwrap();
+        assert!(report.patch_roots.contains(&face));
+        let frame = frames.faces[&face];
+        assert!(crate::kernel::affine::proper_axes(frame, 1e-12));
+        assert!(frame[2].dist(Vec3::Z) < 1e-10, "{frame:?}");
+
+        let placed =
+            Definition { placement: Placement { origin: Vec3::new(20.0, -30.0, 40.0), axes: [-Vec3::Y, -Vec3::Z, Vec3::X] }, ..authored.clone() };
+        let (_, _, _, moved) = convert_with_selection(&placed, 0.05).unwrap();
+        for (a, b) in moved.faces[&face].into_iter().zip(frame) {
+            assert!(a.dist(b) < 1e-12);
+        }
+        let world = moved.faces[&face].map(|axis| placed.placement.vector(axis));
+        assert!(crate::kernel::affine::proper_axes(world, 1e-12));
+        assert!(world[2].dist(Vec3::X) < 1e-10);
+        assert_eq!(authored, before);
+
+        let (_, _, mut fitted) = convert_source(&authored, 0.05).unwrap();
+        let cap = fitted.quad_caps.iter_mut().find(|cap| cap.face == face).unwrap();
+        let points = [Vec3::ZERO, Vec3::X, Vec3::X * 2.0, Vec3::X * 3.0];
+        cap.surface =
+            solidcraft_geom::bspline::NurbsSurface::new([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], &points, &[1.0; 4]).unwrap();
+        assert!(!SelectionFrames::from_faces(&authored, &fitted).faces.contains_key(&face));
+    }
+    #[test]
     fn nonplanar_cap_on_original_rounded_rim_keeps_one_logical_owner() {
         use solidcore_record::Vec3;
         use solidcraft_geom::subdivision::hierarchy::Hierarchy;
@@ -2757,8 +2788,21 @@ mod tests {
         assert_eq!(hierarchy.validated_quad_cap().unwrap(), Some((face, rim)));
         assert_eq!(authored.cage, definition.cage);
         let saved: Definition = serde_json::from_value(serde_json::to_value(&authored).unwrap()).unwrap();
-        let (_, report) = convert(&saved, 0.05).unwrap();
+        let (_, report, fitted) = convert_source(&saved, 0.05).unwrap();
         assert_eq!(report.patch_roots, prepared.face_owners);
+        let frame = SelectionFrames::from_faces(&saved, &fitted).faces[&face];
+        let (point, du, dv) = prepared.surface.derivs([0.5, 0.5]).unwrap();
+        assert!(point.is_finite() && crate::kernel::affine::proper_axes(frame, 1e-12));
+        let normal = du.cross(dv).normalized().unwrap();
+        assert!(frame[0].dist(du.normalized().unwrap()) < 1e-12);
+        assert!(frame[2].dist(normal) < 1e-12);
+        assert!(normal.x.abs() + normal.y.abs() > 1e-7, "the cap fixture must have a tilted analytic tangent");
+        // Independent centered differences verify the derivatives behind the
+        // frame on the full cap chart, across its native atlas partition.
+        let step = 1e-5;
+        let finite_u = (prepared.surface.eval(0.5 + step, 0.5).unwrap() - prepared.surface.eval(0.5 - step, 0.5).unwrap()) / (2.0 * step);
+        let finite_v = (prepared.surface.eval(0.5, 0.5 + step).unwrap() - prepared.surface.eval(0.5, 0.5 - step).unwrap()) / (2.0 * step);
+        assert!(du.dist(finite_u) < 1e-7 && dv.dist(finite_v) < 1e-7);
 
         // The preview for a second cap still groups every atlas chart of
         // the existing cap under the earlier reserved face ID.
@@ -2936,6 +2980,14 @@ mod tests {
 
         let (body, report, fitted) = convert_source(&both, 0.05).unwrap();
         assert!(crate::kernel::validity(&body).ok());
+        let frames = SelectionFrames::from_faces(&both, &fitted);
+        for cap in &fitted.quad_caps {
+            let frame = frames.faces[&cap.face];
+            let (_, du, dv) = cap.surface.derivs([0.5, 0.5]).unwrap();
+            assert!(crate::kernel::affine::proper_axes(frame, 1e-12));
+            assert!(frame[0].dist(du.normalized().unwrap()) < 1e-12);
+            assert!(frame[2].dist(du.cross(dv).normalized().unwrap()) < 1e-12);
+        }
         assert!(!report.patch_roots.iter().any(|id| [18, 45].contains(id)));
         let center = |cap: &quad_cap::FittedQuadCap| cap.surface.eval(0.5, 0.5).unwrap();
         let mut sculpted = both.clone();

@@ -522,8 +522,8 @@ fn refine_form(s: &mut Session, edit: impl FnOnce(&mut crate::forms_prototype::F
         let state = match_state(s)?;
         form(s)?.refine_with_match(&state, edit)?;
     } else {
-        let tolerance = crate::forms_prototype::collapse_tolerance(s)?;
-        edit_with_collapse_fit(form(s)?, tolerance, edit)?;
+        let tolerance = crate::forms_prototype::derived_edit_tolerance(s)?;
+        edit_with_derived_fit(form(s)?, tolerance, edit)?;
     }
     Ok(form(s)?.inspect())
 }
@@ -540,7 +540,7 @@ fn insert_points(s: &mut Session, p: &Value) -> Result<Value> {
     let tolerance = active_tolerance(s, args.tolerance)?;
     let state = if s.forms_prototype.as_ref().is_some_and(|f| f.matching.is_some()) { Some(match_state(s)?) } else { None };
     let current = form(s)?;
-    edit_with_collapse_fit(current, Some(tolerance), |f| f.insert_points(&points, state.as_ref(), tolerance))?;
+    edit_with_derived_fit(current, Some(tolerance), |f| f.insert_points(&points, state.as_ref(), tolerance))?;
     Ok(current.inspect())
 }
 fn insert_loop(s: &mut Session, p: &Value) -> Result<Value> {
@@ -553,7 +553,7 @@ fn insert_loop(s: &mut Session, p: &Value) -> Result<Value> {
         let tolerance = active_tolerance(s, requested)?;
         let state = if s.forms_prototype.as_ref().is_some_and(|f| f.matching.is_some()) { Some(match_state(s)?) } else { None };
         let f = form(s)?;
-        edit_with_collapse_fit(f, Some(tolerance), |f| match args {
+        edit_with_derived_fit(f, Some(tolerance), |f| match args {
             params::InsertLoop::Edge(args) => f.insert_hierarchical_loop(args.edge, args.fraction, state.as_ref(), tolerance),
             params::InsertLoop::Face(args) => f.insert_hierarchical_loop_from_leaf(args.face, args.axis, state.as_ref(), tolerance),
         })?;
@@ -607,7 +607,7 @@ fn extrude_drag(s: &mut Session, p: &Value) -> Result<Value> {
 fn project(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::geom::subdivision::projection::{Projection, project};
     let args: params::Project = parse(p)?;
-    let tolerance = crate::forms_prototype::collapse_tolerance(s)?;
+    let tolerance = crate::forms_prototype::derived_edit_tolerance(s)?;
     let form = form(s)?;
     let controls;
     let source = match args.points {
@@ -639,7 +639,7 @@ fn project(s: &mut Session, p: &Value) -> Result<Value> {
         .into_iter()
         .map(|p| [p.x, p.y, p.z])
         .collect();
-    edit_with_collapse_fit(form, tolerance, |form| match args.points {
+    edit_with_derived_fit(form, tolerance, |form| match args.points {
         params::ProjectionPoints::Control => form.set(&args.vertices, &positions, true),
         params::ProjectionPoints::Surface => form.set_surface(&args.vertices, &positions, true),
     })?;
@@ -727,15 +727,11 @@ fn commit_in_author(s: &mut Session, p: &Value) -> Result<Value> {
     if form.repair.is_some() {
         return Err(EngineError::Other("reattach the retained Form support and Apply before Finish".into()));
     }
-    let tolerance = if args.tolerance.is_some() {
-        args.tolerance
-    } else {
-        form.finish_options.tolerance.as_deref().map(|text| crate::forms_prototype::finish_tolerance(s, text)).transpose()?
-    };
+    let tolerance = active_tolerance(s, args.tolerance)?;
     let mut definition = form.definition();
     pipe::recompute(s, &mut definition, form.authoring_component, form.editing_feature)?;
     if let Some(matching) = &definition.matching {
-        definition = matching.recompute(&definition, &match_state(s)?, tolerance.unwrap_or(0.01))?.0;
+        definition = matching.recompute(&definition, &match_state(s)?, tolerance)?.0;
     }
     if let Some(profile) = &definition.profile {
         let (profile, cage) = profile.recompute(&definition, &match_state(s)?)?;
@@ -845,11 +841,7 @@ fn commit_in_author(s: &mut Session, p: &Value) -> Result<Value> {
     for part in parts.values() {
         let kind = crate::doc::FeatureKind::Form {
             definition: Box::new(part.definition.as_ref().clone()),
-            tolerance: if part.definition.hierarchy.as_ref().is_some_and(|h| h.has_detached_material()) {
-                fit_tolerance.clone()
-            } else {
-                args.tolerance.map_or_else(|| "0.01 mm".into(), |v| format!("{v} mm").into())
-            },
+            tolerance: fit_tolerance.clone(),
             operation: crate::doc::Operation::NewBody,
             targets: Vec::new(),
         };
@@ -911,7 +903,7 @@ fn topology(s: &mut Session, p: &Value) -> Result<Value> {
     let qualified_tolerance = (deleting_cap.is_some() || refined_erase || refined_collapse || (args.tool == "fill_hole" && hierarchy.is_some()))
         .then(|| active_tolerance(s, args.tolerance))
         .transpose()?;
-    let collapse_tolerance = crate::forms_prototype::collapse_tolerance(s)?;
+    let derived_edit_tolerance = crate::forms_prototype::derived_edit_tolerance(s)?;
     let form = form(s)?;
     if form.profile.is_some() {
         return Err(EngineError::Other("Form Surface keeps its fixed source boundary and guide grid".into()));
@@ -999,21 +991,21 @@ fn topology(s: &mut Session, p: &Value) -> Result<Value> {
     }
     args.faces = form.mirror_face_selection(&args.faces)?;
     if args.tool == "subdivide" {
-        edit_with_collapse_fit(form, collapse_tolerance, |form| form.refine(&args.faces, [2, 2]))?;
+        edit_with_derived_fit(form, derived_edit_tolerance, |form| form.refine(&args.faces, [2, 2]))?;
         return Ok(form.inspect());
     }
     if form.hierarchy.is_some() && matches!(args.tool.as_str(), "crease" | "uncrease") {
-        edit_with_collapse_fit(form, collapse_tolerance, |form| {
+        edit_with_derived_fit(form, derived_edit_tolerance, |form| {
             form.hierarchical_creases(&args.edges, &args.vertices, if args.tool == "crease" { args.distance } else { 0.0 })
         })?;
         return Ok(form.inspect());
     }
     if args.tool == "delete_faces" && form.hierarchy.is_some() {
-        edit_with_collapse_fit(form, collapse_tolerance, |form| form.delete_logical_faces(&args.faces))?;
+        edit_with_derived_fit(form, derived_edit_tolerance, |form| form.delete_logical_faces(&args.faces))?;
         return Ok(form.inspect());
     }
     if args.tool == "dissolve" {
-        edit_with_collapse_fit(form, collapse_tolerance, |form| form.dissolve_logical_edges(&args.edges))?;
+        edit_with_derived_fit(form, derived_edit_tolerance, |form| form.dissolve_logical_edges(&args.edges))?;
         return Ok(form.inspect());
     }
     if let Some(tolerance) = qualified_tolerance {
@@ -1104,7 +1096,10 @@ fn edit_with_mode(s: &mut Session, p: &Value, retained: bool) -> Result<Value> {
         return Err(EngineError::Other("finish or cancel the active Form before editing another feature".into()));
     }
     let feature = s.doc.features.iter().find(|f| f.id == args.feature).ok_or_else(|| EngineError::Other("no such feature".into()))?;
-    let crate::doc::FeatureKind::Form { definition, .. } = &feature.kind else { return Err(EngineError::Other("select a Form feature".into())) };
+    let crate::doc::FeatureKind::Form { definition, tolerance, .. } = &feature.kind else {
+        return Err(EngineError::Other("select a Form feature".into()));
+    };
+    let tolerance = crate::forms_prototype::finish_tolerance(s, tolerance)?;
     if retained && (definition.pipe.is_some() || (definition.profile.is_none() && definition.matching.is_none())) {
         return Err(EngineError::Other("retained support repair requires a saved Match or Surface".into()));
     }
@@ -1127,7 +1122,7 @@ fn edit_with_mode(s: &mut Session, p: &Value, retained: bool) -> Result<Value> {
         if let Some(matching) = &definition.matching {
             let before = s.model.state_before(feature.id);
             let state = crate::doc::state_in_frame(&s.doc, &before, feature.component)?;
-            definition = matching.recompute(&definition, &state, 0.01)?.0;
+            definition = matching.recompute(&definition, &state, tolerance)?.0;
         }
         if let Some(profile) = &definition.profile {
             let before = s.model.state_before(feature.id);
@@ -1175,21 +1170,21 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn set_targets(s: &mut Session, p: &Value, space: crate::forms_prototype::FormTargetSpace) -> Result<Value> {
     let p: params::SetVertices = parse(p)?;
-    let tolerance = crate::forms_prototype::collapse_tolerance(s)?;
+    let tolerance = crate::forms_prototype::derived_edit_tolerance(s)?;
     let f = form(s)?;
-    edit_with_collapse_fit(f, tolerance, |form| form.apply_transform_targets(&p, space))?;
+    edit_with_derived_fit(f, tolerance, |form| form.apply_transform_targets(&p, space))?;
     Ok(f.inspect())
 }
-fn edit_with_collapse_fit(
+fn edit_with_derived_fit(
     form: &mut crate::forms_prototype::Form,
     tolerance: Option<f64>,
     edit: impl FnOnce(&mut crate::forms_prototype::Form) -> Result<()>,
 ) -> Result<()> {
-    if let Some(tolerance) = tolerance.filter(|_| form.hierarchy.as_ref().is_some_and(|h| h.has_boundary_collapse())) {
+    if let Some(tolerance) = tolerance.filter(|_| form.needs_fitted_transform()) {
         let mut candidate = form.clone();
         edit(&mut candidate)?;
         if candidate.source_revision() != form.source_revision() {
-            crate::forms_prototype::qualify_collapse_edit(&candidate, tolerance)?;
+            crate::forms_prototype::qualify_derived_edit(&candidate, tolerance)?;
             *form = candidate;
         }
         Ok(())
@@ -1199,8 +1194,9 @@ fn edit_with_collapse_fit(
 }
 fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     let p: params::Transform = parse(p)?;
+    let tolerance = crate::forms_prototype::derived_edit_tolerance(s)?;
     let f = form(s)?;
-    f.transform(&p.matrix, p.checkpoint)?;
+    edit_with_derived_fit(f, tolerance, |f| f.transform(&p.matrix, p.checkpoint))?;
     Ok(f.inspect())
 }
 fn set_surface(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1803,13 +1799,16 @@ mod tests {
         assert_eq!(export["objects"][0]["levels"], 2);
         assert_eq!(export["objects"][1]["levels"], 1);
         assert_eq!(round.objects[0].cage.faces, cage.faces);
-        let finish = s.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap();
+        s.execute("form.prototype.finish_options", &json!({"tolerance":"0.05 mm"})).unwrap();
+        let finish = s.execute("form.prototype.commit", &json!({})).unwrap();
         assert_eq!(finish["parts"].as_array().unwrap().len(), 1);
         assert_eq!(s.doc.features.len(), 2);
         assert_eq!(s.doc.features[0].name, "Imported first");
         assert_eq!(s.doc.features[1].name, "Imported second");
         for f in &s.doc.features {
             assert!(s.model.result(f.id).unwrap().error.is_none());
+            let crate::doc::FeatureKind::Form { tolerance, .. } = &f.kind else { panic!("imported Form") };
+            assert_eq!(tolerance.as_str(), "0.05 mm", "every imported part uses the staged Finish tolerance");
         }
         let encoded = serde_json::to_vec(s.doc.as_ref()).unwrap();
         let saved: crate::doc::Document = serde_json::from_slice(&encoded).unwrap();
@@ -2586,6 +2585,37 @@ mod tests {
             let reply = s.execute("form.prototype.commit", &commit).unwrap();
             let feature = reply["feature"].as_u64().unwrap();
             assert!(s.model.result(feature).unwrap().warning.is_none(), "{operation}: {:?}", s.model.result(feature).unwrap().warning);
+            if operation == "join" {
+                let mut document = s.doc.as_ref().clone();
+                let linked = document.add_component(Some("Linked support"), 0).unwrap();
+                let local = document.add_component(Some("Local part"), 0).unwrap();
+                document.features[0].component = linked;
+                document.feature_mut(feature).unwrap().component = local;
+                let own = document
+                    .add_feature(
+                        crate::doc::FeatureKind::Box {
+                            corner: crate::doc::point_expr(Vec3::new(20.0, 0.0, 0.0)),
+                            length: "2".into(),
+                            width: "2".into(),
+                            height: "2".into(),
+                            operation: crate::doc::Operation::NewBody,
+                            centred: false,
+                        },
+                        None,
+                    )
+                    .unwrap();
+                let own = document.feature_mut(own).unwrap();
+                own.component = local;
+                own.body_names = vec!["Support".into()];
+                let own = document.features.pop().unwrap();
+                document.features.insert(1, own);
+                let mut model = crate::doc::Model::new();
+                model.evaluate(&document);
+                let error = model.result(feature).unwrap().error.as_ref().unwrap();
+                assert!(error.contains("ambiguous") && error.contains("Linked support"), "{error}");
+                assert_eq!(model.state().bodies.len(), 2);
+                assert!((crate::kernel::measure(&model.state().body("Support").unwrap().body).unwrap().volume - 8.0).abs() < 1e-8);
+            }
             let state = s.model.state();
             assert_eq!(state.bodies.len(), 1);
             let result = &state.bodies[0].body;
@@ -2991,6 +3021,28 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn matched_form_reopen_and_finish_resolve_saved_and_staged_fit_tolerances() {
+        let (mut session, _, _) = matched_extrusion_case(0, false);
+        let id = session.execute("form.prototype.commit", &json!({"tolerance":0.05})).unwrap()["feature"].as_u64().unwrap();
+        session.execute("form.edit", &json!({"feature":id})).unwrap();
+        assert_eq!(active_tolerance(&session, None).unwrap(), 0.05);
+        session.forms_prototype.as_mut().unwrap().finish_options.tolerance = Some("0.075 mm".into());
+        assert_eq!(active_tolerance(&session, None).unwrap(), 0.075);
+        assert_eq!(active_tolerance(&session, Some(0.1)).unwrap(), 0.1);
+        session.execute("form.prototype.commit", &json!({})).unwrap();
+        let crate::doc::FeatureKind::Form { tolerance, .. } = &session.doc.feature(id).unwrap().kind else { panic!("saved Form") };
+        assert_eq!(tolerance.as_str(), "0.075 mm");
+        let crate::doc::FeatureKind::Form { tolerance, .. } = &mut std::sync::Arc::make_mut(&mut session.doc).feature_mut(id).unwrap().kind else {
+            panic!("saved Form")
+        };
+        *tolerance = "missing_fit_budget".into();
+        let document = session.doc.clone();
+        assert!(session.execute("form.edit", &json!({"feature":id})).is_err(), "reopening must resolve the saved fit expression");
+        assert!(session.forms_prototype.is_none());
+        assert_eq!(session.doc, document);
+    }
+
     fn matched_extrusion_case(order: usize, refined: bool) -> (Session, usize, usize) {
         use solidcore_record::Vec3;
         let mut s = Session::default();
