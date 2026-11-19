@@ -1076,3 +1076,23 @@ fn bodies_of_different_colours_with_one_image_keep_their_colours() {
     assert_eq!(textured.len(), 2, "{textured:?}");
     assert_ne!(textured[0], textured[1], "{textured:?}");
 }
+
+/// The pictures shown on the model are written with the whole design only: a picture belongs to
+/// no body, so an export of chosen bodies cannot tell its own from another body's, and leaves them
+/// out with a warning.
+#[test]
+fn chosen_bodies_leave_the_pictures_out() {
+    let (doc, model) = one_box();
+    let body = model.state().bodies[0].name.clone();
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let corners = [[0.0, 0.0, 30.0], [10.0, 0.0, 30.0], [10.0, 5.0, 30.0], [0.0, 5.0, 30.0]];
+    let image = crate::SurfaceMap { sha256: "f00d".into(), bytes: std::sync::Arc::from(tiny_png()) };
+    let decals = vec![crate::DecalPlan { name: "Logo".into(), component: 0, local: corners, world: corners, image }];
+    let options = crate::CadmpegOptions { decals, ..Default::default() };
+    let logo = |built: &super::super::cadir_out::Built| built.ir.model.bodies.iter().any(|b| b.name.as_deref() == Some("Logo"));
+    let all = super::super::cadir_out::design(&doc, &model.state(), &world, &[], &options, "design", crate::MeshQuality::Standard).unwrap();
+    assert!(logo(&all), "{:?}", all.warnings);
+    let chosen = super::super::cadir_out::design(&doc, &model.state(), &world, &[body], &options, "design", crate::MeshQuality::Standard).unwrap();
+    assert!(!logo(&chosen));
+    assert!(chosen.warnings.iter().any(|w| w.contains("pictures shown on the model are not written")), "{:?}", chosen.warnings);
+}

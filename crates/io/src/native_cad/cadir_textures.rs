@@ -140,6 +140,73 @@ pub(super) fn references(
     out
 }
 
+/// How far a decal's quad is lifted off the face it lies on, each side, mm: as URDF export's.
+const DECAL_LIFT_MM: f64 = 0.2;
+
+/// A decal's quad lifted clear of its face on both sides: its points (the front four, then the
+/// back four), their normals, its triangles (the back wound the other way, so one side faces out
+/// whichever way the face does) and its texture coordinates (the image's bottom-left at (0, 0),
+/// its top-right at (1, 1)). `None` when the corners give no plane.
+pub(super) fn decal_quad(corners: [[f64; 3]; 4]) -> Option<(Vec<[f64; 3]>, Vec<[f64; 3]>, Vec<[u32; 3]>, TextureCoordinates)> {
+    let (normal, front, back) = solidcore_ops::affine::lifted_quad(corners, DECAL_LIFT_MM)?;
+    let points: Vec<[f64; 3]> = front.into_iter().chain(back).collect();
+    let flipped = normal.map(|x| -x);
+    let normals: Vec<[f64; 3]> = std::iter::repeat_n(normal, 4).chain(std::iter::repeat_n(flipped, 4)).collect();
+    let triangles = vec![[0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6]];
+    let corner_uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let values = corner_uv
+        .iter()
+        .chain(corner_uv.iter())
+        .map(|[u, v]| FinitePoint2::new(cadmpeg_ir::math::Point2::new(*u, *v)))
+        .collect::<Option<Vec<_>>>()?;
+    let coordinates = TextureCoordinates { name: NonBlankString::new(COORDINATES)?, addressing: TextureCoordinateAddressing::Vertex, values };
+    Some((points, normals, triangles, coordinates))
+}
+
+/// The texture references of a decal's image: its colour, and its alpha as the opacity when the
+/// image has one (a PNG of an alpha colour type, or with a transparency chunk).
+pub(super) fn decal_references(image: &crate::SurfaceMap, registry: &mut Assets, assets: &mut Vec<Asset>) -> Option<Vec<TextureRef>> {
+    let asset = registry.asset(assets, image)?;
+    let reference = |slot: &str| TextureRef {
+        asset_guid: asset.to_string(),
+        slot: slot.to_string(),
+        schema: "UsdPreviewSurface".into(),
+        paths: Vec::new(),
+        urn: None,
+        mapping: mapping(),
+        bump: None,
+    };
+    let mut out = vec![reference("diffuseColor")];
+    if png_has_alpha(&image.bytes) {
+        out.push(reference("opacity.a"));
+    }
+    Some(out)
+}
+
+/// Whether `bytes` are a PNG with an alpha channel: a colour type with alpha (grey or RGB with
+/// alpha, IHDR's) or a transparency chunk (`tRNS`, which comes before the image data). Only the
+/// chunks before the first `IDAT` are walked, by their lengths, so the work is bounded by the
+/// header chunks and not the image; anything else (a JPEG, a damaged PNG) has none.
+fn png_has_alpha(bytes: &[u8]) -> bool {
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    let Some(mut rest) = bytes.strip_prefix(SIGNATURE) else { return false };
+    // Each chunk: its data's length (4 bytes, big-endian), its type (4), the data, a CRC (4).
+    // IHDR's data: width and height (8), bit depth (1), colour type (1).
+    while let Some((head, after)) = rest.split_first_chunk::<8>() {
+        let length = u32::from_be_bytes([head[0], head[1], head[2], head[3]]) as usize;
+        let Some(data) = after.get(..length) else { return false };
+        match &head[4..] {
+            b"IHDR" if matches!(data.get(9), Some(4 | 6)) => return true,
+            b"tRNS" => return true,
+            b"IDAT" | b"IEND" => return false,
+            _ => {}
+        }
+        let Some(next) = length.checked_add(4).and_then(|n| after.get(n..)) else { return false };
+        rest = next;
+    }
+    false
+}
+
 /// The normal map `plan` writes: only one the file shows as the renderer does (full strength,
 /// the image's v flipped as the built-in surfaces have it).
 fn written_normal(plan: &SurfacePlan) -> Option<&crate::SurfaceMap> {
@@ -202,6 +269,63 @@ mod tests {
         let got = coordinates(&points, &plan(true), &moved).unwrap();
         let p = got.values[0].get();
         assert_eq!([p.u, p.v], [1.0, 0.5]);
+    }
+
+    /// A decal's quad: eight points, two lifted 0.2 mm each side of the corners' plane, with the
+    /// image's corners at its corners.
+    #[test]
+    fn a_decal_is_a_two_sided_quad_with_its_image_corners() {
+        let corners = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 5.0, 0.0], [0.0, 5.0, 0.0]];
+        let (points, normals, triangles, st) = decal_quad(corners).unwrap();
+        assert_eq!(points.len(), 8);
+        assert!(points[..4].iter().all(|p| (p[2] - 0.2).abs() < 1e-12) && points[4..].iter().all(|p| (p[2] + 0.2).abs() < 1e-12), "{points:?}");
+        assert_eq!(normals[0], [0.0, 0.0, 1.0]);
+        assert_eq!(triangles.len(), 4);
+        let uv: Vec<[f64; 2]> = st.values.iter().map(|p| [p.get().u, p.get().v]).collect();
+        assert_eq!(uv[2], [1.0, 1.0]);
+        assert_eq!(uv[6], [1.0, 1.0]);
+        assert!(decal_quad([[0.0; 3]; 4]).is_none());
+    }
+
+    /// A PNG of `colour` type, with a transparency chunk for RGB when `trns`.
+    fn png(colour: png::ColorType, trns: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut out, 1, 1);
+            encoder.set_color(colour);
+            encoder.set_depth(png::BitDepth::Eight);
+            if trns {
+                // One transparent colour as PNG writes it for RGB: two bytes for each channel,
+                // whatever the bit depth.
+                encoder.set_trns(vec![0u8; 6]);
+            }
+            let mut writer = encoder.write_header().unwrap();
+            let size = match colour {
+                png::ColorType::Rgba => 4,
+                png::ColorType::Rgb => 3,
+                png::ColorType::GrayscaleAlpha => 2,
+                _ => 1,
+            };
+            writer.write_image_data(&vec![255u8; size]).unwrap();
+        }
+        out
+    }
+
+    /// Alpha is read from the PNG's header chunks: an RGBA or grey-and-alpha PNG has it, and an
+    /// RGB one has it only with a transparency chunk. A JPEG whose 26th byte (a quantization value)
+    /// reads as an alpha colour type, and a PNG cut off in its header, have none.
+    #[test]
+    fn png_alpha_is_read_from_its_header_chunks() {
+        assert!(png_has_alpha(&png(png::ColorType::Rgba, false)));
+        assert!(png_has_alpha(&png(png::ColorType::GrayscaleAlpha, false)));
+        assert!(!png_has_alpha(&png(png::ColorType::Rgb, false)));
+        assert!(png_has_alpha(&png(png::ColorType::Rgb, true)));
+        let mut jpeg = vec![0u8; 64];
+        jpeg[..4].copy_from_slice(&[0xFF, 0xD8, 0xFF, 0xDB]);
+        jpeg[25] = 6;
+        assert!(!png_has_alpha(&jpeg));
+        let rgba = png(png::ColorType::Rgba, false);
+        assert!(!png_has_alpha(&rgba[..20]));
     }
 
     /// A normal map at less than full strength, or with v as stored, is left out with a warning.

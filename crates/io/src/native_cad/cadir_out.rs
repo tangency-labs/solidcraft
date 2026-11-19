@@ -170,6 +170,16 @@ pub(crate) fn design_for(
     let unplaced = doc.occurrences.iter().find(|o| !solidcraft_doc::is_placement(&o.transform));
     b.physics = options.physics && writes.products && CadmpegOptions::physics_fits(doc, bodies);
     b.surfaces = &options.surfaces;
+    // A picture is not attached to a body, so a part of the design cannot say which pictures are
+    // its own: they are written with the whole design only.
+    if bodies.is_empty() {
+        b.decals = &options.decals;
+    } else if !options.decals.is_empty() {
+        b.warnings.push(format!(
+            "the {} pictures shown on the model are not written: they are written only with the whole design, as a picture belongs to no body",
+            options.decals.len()
+        ));
+    }
     if options.physics && !b.physics {
         b.warnings
             .push("joints and mass are written only for the whole design with its components and rigid placements: no physics is written".into());
@@ -236,6 +246,10 @@ struct Builder<'a> {
     masses: HashMap<u64, Vec<crate::urdf::BodyMass>>,
     /// The image textures a render setup gives bodies ([`super::cadir_textures`]).
     surfaces: &'a [crate::SurfacePlan],
+    /// The pictures shown on the model, each written as a body of its own.
+    decals: &'a [crate::DecalPlan],
+    /// The decal bodies written so far.
+    decal_count: usize,
     /// The texture images written.
     texture_assets: super::cadir_textures::Assets,
     /// The textured appearances made, by plain appearance (`None`: a body's colour, which the
@@ -262,6 +276,8 @@ impl<'a> Builder<'a> {
             physics: false,
             masses: HashMap::new(),
             surfaces: &[],
+            decals: &[],
+            decal_count: 0,
             texture_assets: super::cadir_textures::Assets::default(),
             textured: HashMap::new(),
             ir: CadIr::empty(),
@@ -387,6 +403,68 @@ impl<'a> Builder<'a> {
         Some((first, to_mesh))
     }
 
+    /// Decal `d` with its corners at `corners` (in the frame of the definition that holds it): a
+    /// body of its own named after it, its two-sided quad as its mesh and its image as its look.
+    /// `None`, with a warning, when it cannot be written.
+    fn decal(&mut self, d: &crate::DecalPlan, corners: [[f64; 3]; 4]) -> Result<Option<BodyId>, String> {
+        let shown = clean(&d.name).unwrap_or_else(|| "a decal".into());
+        let Some((points, normals, triangles, coordinates)) = super::cadir_textures::decal_quad(corners) else {
+            self.warnings.push(format!("decal `{shown}`: its corners give no plane: left out"));
+            return Ok(None);
+        };
+        let Some(textures) = super::cadir_textures::decal_references(&d.image, &mut self.texture_assets, &mut self.ir.model.assets) else {
+            self.warnings.push(format!("decal `{shown}`: its image is neither PNG nor JPEG: left out"));
+            return Ok(None);
+        };
+        // Its quad counts towards the file's size, as a body's mesh does.
+        if self.charge(points.len(), triangles.len()).is_none() {
+            return Err(format!(
+                "decal `{shown}`: the meshes are too large for the file (at most {} MiB); export fewer bodies or pictures, or use standard quality",
+                MAX_BYTES >> 20
+            ));
+        }
+        let n = self.decal_count;
+        self.decal_count += 1;
+        let prefix = format!("solidcraft:decal-{n:09}");
+        let body: BodyId = BodyId::try_from(format!("{prefix}:body#0")).map_err(|_| format!("{prefix}: not a CADIR identity"))?;
+        let tessellation = cadmpeg_ir::tessellation::TessellationId::try_from(format!("{prefix}:tessellation#0"))
+            .map_err(|_| format!("{prefix}: not a CADIR identity"))?;
+        let positions = points.iter().map(|p| Point3::new(p[0], p[1], p[2])).collect();
+        let normals = normals.iter().map(|v| Vector3::new(v[0], v[1], v[2])).collect();
+        let lanes = TessellationMesh::from_list_lanes(positions, triangles, Some(normals)).map_err(|e| e.to_string())?;
+        let mesh = Tessellation::new(tessellation.clone(), lanes, Vec::new())
+            .map_err(|e| e.to_string())?
+            .with_body(Some(body.clone()))
+            .with_texture_coordinates(vec![coordinates])
+            .map_err(|e| e.to_string())?;
+        self.ir.model.bodies.push(Body {
+            id: body.clone(),
+            kind: BodyKind::General,
+            regions: Vec::new(),
+            transform: None,
+            name: Some(shown.clone()),
+            color: None,
+            visible: None,
+        });
+        self.ir.model.tessellations.push(mesh);
+        let appearance: AppearanceId = id("decal-appearance", n)?;
+        self.ir.model.appearances.push(Appearance {
+            id: appearance.clone(),
+            name: Some(shown),
+            asset_guid: None,
+            library_id: None,
+            visual_guid: None,
+            physical_token: None,
+            schema: None,
+            category: None,
+            base_color: Color::new(1.0, 1.0, 1.0, 1.0),
+            properties: BTreeMap::new(),
+            textures,
+        });
+        self.bind(AppearanceTarget::Tessellation(tessellation.to_string()), appearance)?;
+        Ok(Some(body))
+    }
+
     /// The appearance `plain` (else one of colour `colour`) with `plan`'s images, made once.
     fn textured(
         &mut self,
@@ -507,6 +585,11 @@ impl<'a> Builder<'a> {
                 None => {}
             }
         }
+        for d in self.decals {
+            if let Some(id) = self.decal(d, d.world)? {
+                ids.push(id);
+            }
+        }
         if self.writes.products {
             let definition = self.definition(0, root, ids)?;
             self.occurrence(0, &definition, OccurrenceParent::Root {}, 0, Transform::identity(), Some(root.to_string()))?;
@@ -572,6 +655,14 @@ impl<'a> Builder<'a> {
                 if self.physics {
                     self.add_mass(b, framed.as_ref().unwrap_or(&b.body), owner);
                 }
+            }
+        }
+        for d in self.decals {
+            let Some(&key) = keys.get(&d.component) else { continue };
+            if let Some(id) = self.decal(d, d.local)?
+                && let Some(list) = owned.get_mut(key)
+            {
+                list.push(id);
             }
         }
         let mut definitions = Vec::with_capacity(names.len());
@@ -818,7 +909,12 @@ impl<'a> Builder<'a> {
             }
         }
         let (coordinates, textured_look) = textures.unzip();
-        match self.tessellation(&prefix, id.as_ref(), &mesh, &face_looks, coordinates) {
+        let written = self.tessellation(&prefix, id.as_ref(), &mesh, &face_looks, coordinates);
+        if written.is_err() {
+            // Not written, so its size is not the file's.
+            self.refund(mesh.positions.len(), mesh.triangles.len());
+        }
+        match written {
             Ok(()) => {
                 if let Some(a) = textured_look {
                     self.bind(AppearanceTarget::Tessellation(format!("{prefix}:tessellation#0")), a)?;
@@ -876,22 +972,33 @@ impl<'a> Builder<'a> {
     /// `geometry`'s mesh at the export's quality, within the file's size cap.
     fn mesh(&mut self, geometry: &solidcraft_kernel::Body, shown: &str) -> Result<solidcraft_geom::Mesh, Unmeshed> {
         let mesh = crate::display_mesh_at(geometry, self.quality).map_err(|e| Unmeshed::Failed(format!("could not be meshed: {e}")))?;
-        let size = mesh
-            .positions
-            .len()
+        self.charge(mesh.positions.len(), mesh.triangles.len()).ok_or_else(|| {
+            Unmeshed::TooLarge(format!(
+                "{shown}: the meshes are too large for the file (at most {} MiB); export fewer bodies or use standard quality",
+                MAX_BYTES >> 20
+            ))
+        })?;
+        Ok(mesh)
+    }
+
+    /// `points` points and `triangles` triangles added to the meshes written; `None`, adding
+    /// nothing, when they would take the meshes past [`MAX_BYTES`].
+    fn charge(&mut self, points: usize, triangles: usize) -> Option<()> {
+        let size = points
             .checked_mul(BYTES_PER_POINT)
-            .zip(mesh.triangles.len().checked_mul(BYTES_PER_TRIANGLE))
+            .zip(triangles.checked_mul(BYTES_PER_TRIANGLE))
             .and_then(|(p, t)| p.checked_add(t))
             .and_then(|n| n.checked_add(self.bytes))
-            .filter(|n| *n <= MAX_BYTES)
-            .ok_or_else(|| {
-                Unmeshed::TooLarge(format!(
-                    "{shown}: the meshes are too large for the file (at most {} MiB); export fewer bodies or use standard quality",
-                    MAX_BYTES >> 20
-                ))
-            })?;
+            .filter(|n| *n <= MAX_BYTES)?;
         self.bytes = size;
-        Ok(mesh)
+        Some(())
+    }
+
+    /// Take back what [`Self::charge`] added for `points` points and `triangles` triangles, for
+    /// a mesh it charged that is not written after all.
+    fn refund(&mut self, points: usize, triangles: usize) {
+        let size = points.saturating_mul(BYTES_PER_POINT).saturating_add(triangles.saturating_mul(BYTES_PER_TRIANGLE));
+        self.bytes = self.bytes.saturating_sub(size);
     }
 
     /// `mesh` as the tessellation of body `body` (a mesh of its own when `None`), the triangles of
@@ -990,5 +1097,45 @@ pub(crate) fn kept_without_mesh(
         }
         Err(Unmeshed::Failed(e)) => Err(format!("{shown}: {e}")),
         Err(Unmeshed::TooLarge(e)) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A decal's quad (eight points, four triangles) counts towards the file's size: near the cap
+    /// it is refused, adding nothing; with room it is written and charged.
+    #[test]
+    fn a_decal_is_charged_to_the_size_cap() {
+        let doc = Document::new("Decal");
+        let hidden = crate::Hidden::default();
+        let corners = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 5.0, 0.0], [0.0, 5.0, 0.0]];
+        let image = crate::SurfaceMap { sha256: "f00d".into(), bytes: std::sync::Arc::from(&b"\x89PNG\r\n\x1a\n"[..]) };
+        let plan = crate::DecalPlan { name: "Logo".into(), component: 0, local: corners, world: corners, image };
+        let quad = 8 * BYTES_PER_POINT + 4 * BYTES_PER_TRIANGLE;
+        let mut b = Builder::new(&doc, MeshQuality::Standard, Writes::USD, &hidden);
+        b.bytes = MAX_BYTES - quad + 1;
+        assert!(b.decal(&plan, corners).is_err());
+        assert_eq!(b.bytes, MAX_BYTES - quad + 1);
+        assert!(b.ir.model.tessellations.is_empty());
+        b.bytes = MAX_BYTES - quad;
+        assert!(b.decal(&plan, corners).unwrap().is_some());
+        assert_eq!(b.bytes, MAX_BYTES);
+    }
+
+    /// A body whose mesh is charged but not written (its mesh has no triangles, which its
+    /// tessellation refuses) takes its charge back: the cap counts only the meshes written.
+    #[test]
+    fn a_mesh_not_written_is_not_charged() {
+        let doc = Document::new("Unwritten");
+        let hidden = crate::Hidden::default();
+        let mut b = Builder::new(&doc, MeshQuality::Standard, Writes::USD, &hidden);
+        let mesh = solidcraft_geom::Mesh { positions: vec![solidcore_record::Vec3::new(0.0, 0.0, 0.0); 3], ..Default::default() };
+        assert!(b.charge(mesh.positions.len(), mesh.triangles.len()).is_some());
+        assert_eq!(b.bytes, 3 * BYTES_PER_POINT);
+        assert!(b.tessellation("solidcraft:body-000000000", None, &mesh, &BTreeMap::new(), None).is_err());
+        b.refund(mesh.positions.len(), mesh.triangles.len());
+        assert_eq!(b.bytes, 0);
     }
 }

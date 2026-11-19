@@ -349,7 +349,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
                     "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
-                    "images": {"type": "boolean", "description": "urdf: also write each picture shown on the model as a textured visual (default false)"},
+                    "images": {"type": "boolean", "description": "urdf and usd: also write each picture shown on the model as a textured visual; usd writes it only in a .usdz package (default false)"},
                     "physics": {"type": "boolean", "description": "usd: also write the joints, grounded parts and each component's mass as OpenUSD physics, for a simulator (default false)"},
                     "render_setup": string("usd: the saved render setup whose image textures a .usdz package holds (default: none)"),
                     "name": string("sdf: the model's name (default: the folder's name)"),

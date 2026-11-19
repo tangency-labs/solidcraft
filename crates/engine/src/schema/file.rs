@@ -221,7 +221,8 @@ pub struct ExportParams {
     /// URDF only: each joint's velocity limit, a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
-    /// URDF only: also write each picture shown on the model as a textured visual. Default: false.
+    /// URDF and OpenUSD only: also write each picture shown on the model as a textured visual
+    /// (OpenUSD: in a `.usdz` package). Default: false.
     #[serde(default)]
     pub images: Option<bool>,
     /// STL and 3MF only: true writes each body with a print face laid on it, as
@@ -422,6 +423,12 @@ impl<'de> Deserialize<'de> for ExportParams {
                 _ => return Err(refuse(format!("`objects` must be body or component, not {v}"))),
             },
         };
+        if format == Format::Usd {
+            out.images = match m.get("images") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(v.as_bool().ok_or_else(|| refuse::<D::Error>("`images` must be true or false"))?),
+            };
+        }
         out.lay_on_print_faces = match m.get("lay_on_print_faces") {
             None | Some(Value::Null) => None,
             Some(Value::Bool(false)) => Some(false),

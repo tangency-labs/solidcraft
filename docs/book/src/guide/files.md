@@ -56,6 +56,10 @@ out with a warning. With bodies chosen, or a placement that is not rigid, no phy
 warning says why. With `render_setup: <name>` and a `.usdz` path, the images that render setup gives the
 bodies (base colour, roughness, metallic, and a normal map the file can show as the renderer does) go
 into the package, on each body's mesh; a `.usda` or `.usdc` file is written without them, with a warning.
+With `images: true` and a `.usdz` path, each picture shown on the model (a decal or a placed image) goes
+into the package as a body of its own in its component, named after it: a quad lifted 0.2 mm off each
+side, its image as its colour and, for a PNG with transparency, its opacity. A hidden picture is not
+written; a `.usda` or `.usdc` file, or an export of chosen bodies, leaves the pictures out with a warning.
 Collision shapes are not written yet.
 
 **File → Export Rhino…** (`file.export` with a `.3dm` path) writes a Rhino 8 file through cadmpeg, from

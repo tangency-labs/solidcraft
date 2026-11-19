@@ -15,6 +15,15 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
     dir
 }
 
+/// Image `bytes` in a file of their own, as `canvas.decal` and `canvas.insert` take an image.
+fn picture_file(bytes: &[u8]) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = temp_dir(&format!("picture-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let path = dir.join("picture.png");
+    std::fs::write(&path, bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
 /// World bounding boxes of every shown body, rounded to 0.01 mm (USD mesh points are single
 /// precision), sorted.
 fn shown_boxes(s: &Session) -> Vec<[i64; 6]> {
@@ -576,5 +585,74 @@ fn a_render_setup_without_its_images_warns_and_a_missing_setup_is_refused() {
     assert!(refused.unwrap_err().to_string().contains("no render setup named `Nowhere`"));
     let refused = s.execute("file.export", &json!({"path": dir.join("c.stl").to_string_lossy(), "render_setup": "Maps"}));
     assert!(refused.unwrap_err().to_string().contains("`render_setup` is for OpenUSD"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The `points` of mesh prim `prim` in `text`, in millimetres.
+fn decal_points(text: &str, prim: &str) -> Vec<[f64; 3]> {
+    // The decal's material has its name too: the mesh prim is the one to read.
+    let at = text.find(&format!("def Mesh \"{prim}\"")).unwrap_or_else(|| panic!("no {prim} mesh:\n{text}"));
+    let rest = &text[at..];
+    let start = rest.find("point3f[] points = [").unwrap() + "point3f[] points = [".len();
+    let body = &rest[start..start + rest[start..].find(']').unwrap()];
+    let values: Vec<f64> = body.split(['(', ')', ',']).filter_map(|v| v.trim().parse().ok()).collect();
+    values.chunks(3).map(|p| [p[0] * 1e3, p[1] * 1e3, p[2] * 1e3]).collect()
+}
+
+/// With `images`, an OpenUSD package holds each shown picture as a two-sided quad with its image,
+/// in its component, 0.2 mm off the face on each side; the image is a member of the package. A
+/// hidden picture is not written, nor any picture without `images`, and a text layer warns.
+#[test]
+fn images_write_the_shown_pictures_into_a_package() {
+    use image::ImageEncoder;
+    let dir = temp_dir("decals");
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
+    let file = picture_file(&png);
+    run(&mut s, "canvas.decal", json!({"path": file, "face": [25, 5, 10], "width": 8, "name": "Logo"}));
+    run(&mut s, "canvas.insert", json!({"path": file, "plane": "XY", "width": 8, "name": "Hidden"}));
+    run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
+
+    let path = dir.join("decals.usdz");
+    let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "images": true}));
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    // A package stores its members uncompressed, so its layer and member names read as bytes.
+    let bytes = std::fs::read(&path).unwrap();
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let image = format!("textures/{}.png", solidcraft_doc::render_resources::HdrId::of(&png));
+    assert!(text.contains(&image), "no {image} member");
+    assert!(!text.contains("\"Hidden\""), "the hidden picture is written");
+    // Worked out by hand: B is placed where it was built. The decal is 8 x 4 mm (the image is 2:1)
+    // about (25, 5) on B's top face at z = 10, along the face's axes either way round; the front
+    // quad 0.2 mm above the face, the back quad 0.2 mm below.
+    let corners = decal_points(&text, "Logo");
+    assert_eq!(corners.len(), 8, "{corners:?}");
+    let plan = |c: &[[f64; 3]]| {
+        let mut xy: Vec<(i64, i64)> = c.iter().map(|p| ((p[0] * 1e3).round() as i64, (p[1] * 1e3).round() as i64)).collect();
+        xy.sort();
+        xy
+    };
+    let along_x = [(21000, 3000), (21000, 7000), (29000, 3000), (29000, 7000)];
+    let along_y = [(23000, 1000), (23000, 9000), (27000, 1000), (27000, 9000)];
+    let front = plan(&corners[..4]);
+    assert!(front == along_x || front == along_y, "{corners:?}");
+    assert_eq!(plan(&corners[4..]), front);
+    assert!(corners[..4].iter().all(|p| (p[2] - 10.2).abs() < 1e-3) && corners[4..].iter().all(|p| (p[2] - 9.8).abs() < 1e-3), "{corners:?}");
+
+    let plain = dir.join("plain.usdz");
+    run(&mut s, "file.export", json!({"path": plain.to_string_lossy()}));
+    assert!(!String::from_utf8_lossy(&std::fs::read(&plain).unwrap()).contains("\"Logo\""));
+    let layer = dir.join("decals.usda");
+    let reply = run(&mut s, "file.export", json!({"path": layer.to_string_lossy(), "images": true}));
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
+    assert!(warnings.iter().any(|w| w.contains("written only in a .usdz package")), "{warnings:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
