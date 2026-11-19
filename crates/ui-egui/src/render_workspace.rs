@@ -3354,6 +3354,7 @@ pub fn gpu_scene_cached(
                 look,
                 levels: Vec::new(),
                 closed: true,
+                edges: None,
             });
             gpu.instanced.len() - 1
         });
