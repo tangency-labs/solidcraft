@@ -14,6 +14,11 @@
   at 4e-4, and squeezes out every lamina edge shorter than that. For a wall swept from a curve
   between 2e-5 and 4e-4 long, both of its profile edges go: its loop keeps its two side edges
   only, with a gap of the curve's length in 3D and of the wall's whole u range in UV.
+
+  ![The walls of an uncapped extrude unrolled side by side: wall A, the short wall S (drawn wide) and wall B. Left, on main: the second pass's reach covers S's bottom edge, and S's bottom and top edges are squeezed out, so S keeps only its two side edges. Right, with the first pass only: every wall keeps its bottom, top and side edges.](WR-18515--squeezed-short-wall.svg)
+
+  The second pass removes the short wall's profile edges; the first pass alone keeps them.
+
 - **Trigger:** a 10 x 10 loop whose top side ends in a segment 0.00017 long, extruded 1.2 with
   no caps: 5 faces, 13 edges, 8 vertices; the check fails `SmTrimmingTools` tests 0 (Edge/Edge
   Gap, offset 0.00017, tolerance 2e-5) and 1 (UVEdge/UVEdge Gap, offset 1). Segments of 3e-5,
