@@ -1109,6 +1109,53 @@ impl KeptSeparate {
 }
 
 impl ModelState {
+    /// This state with `bodies` in place of its own, the rest copied: a picture of some of a
+    /// model's bodies (the bodies of a design being opened that are meshed so far) without
+    /// copying every body of the model first and then dropping them.
+    pub fn with_bodies(&self, bodies: Vec<ModelBody>) -> ModelState {
+        // Every field named, so a new one is not left out.
+        let ModelState {
+            frame_bodies,
+            origin_frames,
+            threads,
+            bodies: _,
+            sketches,
+            body_counter,
+            reserved_body_names,
+            surface_sheets,
+            construct,
+            sketch_keys,
+            blend_edges,
+            named_faces,
+            fitted,
+            tapered,
+            kept_separate,
+            pattern_left_out,
+            legacy_picks,
+            cut_extents,
+        } = self;
+        ModelState {
+            frame_bodies: frame_bodies.clone(),
+            origin_frames: origin_frames.clone(),
+            threads: threads.clone(),
+            bodies,
+            sketches: sketches.clone(),
+            body_counter: *body_counter,
+            reserved_body_names: reserved_body_names.clone(),
+            surface_sheets: surface_sheets.clone(),
+            construct: construct.clone(),
+            sketch_keys: sketch_keys.clone(),
+            blend_edges: blend_edges.clone(),
+            named_faces: named_faces.clone(),
+            fitted: fitted.clone(),
+            tapered: tapered.clone(),
+            kept_separate: kept_separate.clone(),
+            pattern_left_out: pattern_left_out.clone(),
+            legacy_picks: legacy_picks.clone(),
+            cut_extents: cut_extents.clone(),
+        }
+    }
+
     /// How many joint origins have been resolved from the bodies of this model (and its copies),
     /// not taken from the frames kept ([`OriginFrames`]).
     pub fn origin_resolutions(&self) -> usize {
@@ -2563,7 +2610,16 @@ struct EvalKey {
 }
 
 impl EvalKey {
-    fn new(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, fp: u64, ctx: u64, st: &ModelState, steps: &ImportDigests) -> EvalKey {
+    fn new(
+        doc: &Document,
+        vals: &BTreeMap<String, Value>,
+        f: &Feature,
+        fp: u64,
+        ctx: u64,
+        st: &ModelState,
+        steps: &ImportDigests,
+        geo: u64,
+    ) -> EvalKey {
         let local = fingerprint(doc, 0, f, vals, false, steps) ^ placement_digest(doc, f, Some(st)) ^ construct_digest(doc, vals, f, Some(st));
         let whole = cache_key(f, fp, local, ctx, st);
         let reads = f.reads(doc, st).map(|read| {
@@ -2572,6 +2628,13 @@ impl EvalKey {
             local.hash(&mut h);
             ctx.hash(&mut h);
             f.id.hash(&mut h);
+            // An import reads the file it names and nothing of the model, so it keeps its result
+            // while the features before it are the same: a part that moves leaves the file
+            // unread (#17310). The features' own inputs, without where they are placed, are in
+            // the key: a change to them (a new length) reads the file again.
+            if matches!(f.kind, FeatureKind::Import { .. }) {
+                geo.hash(&mut h);
+            }
             // A pattern replays its features' definitions.
             if let FeatureKind::Pattern { features, .. } = &f.kind {
                 for id in features {
@@ -2731,7 +2794,8 @@ impl Feature {
     /// numbers or a construction plane (its projections reading the bodies and sketches they
     /// name), an extrude or revolve from a sketch of its component on the bodies it names or its
     /// component's bodies (no To / From Object, through all or taper), a fillet or chamfer of
-    /// the body its edges lie on (#6183). Construction geometry it names is in its key already
+    /// the body its edges lie on (#6183), an import (the file it names, and nothing of the
+    /// model). Construction geometry it names is in its key already
     /// ([`construct_digest`]). Never with a face picked by name, or an edge picked by name outside
     /// a fillet or chamfer; everything else may read anything (faces, To Object, `*` for every
     /// body).
@@ -2771,6 +2835,11 @@ impl Feature {
         match &self.kind {
             // A cylinder placed by reference edges reads the faces they lie on.
             k if numeric_tool(k) && hole_references(self).is_empty() => bodies(operated(feature_op(self))?),
+            // An import reads the file it names (in its own fingerprint) and nothing of the
+            // model: its bodies are its own, and their names follow the names the model
+            // already has (in the key of what it reads). A part that moves elsewhere in the
+            // timeline leaves it as it was, and the file is not read again (#17310).
+            FeatureKind::Import { .. } => Some(Reads::default()),
             FeatureKind::Pattern { bodies: copied, pattern, .. } if !copied.is_empty() && fixed_pattern(pattern) => {
                 bodies(named(&crate::plain::<String, _>(copied))?)
             }
@@ -3834,6 +3903,11 @@ impl Model {
         // read once: the context, the fingerprints and the model's record agree
         let heal = kernel::heals_tolerance_defects();
         self.heal_off = !heal;
+        // The features' own inputs, without where they are placed: a part that moves leaves them
+        // as they were. An import keeps its result while they are the same, so a move of a part
+        // does not read the file again (#17310). Only a design with an import needs the digest.
+        let with_import = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Import { .. }));
+        let mut geo = 0u64;
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
@@ -3869,6 +3943,7 @@ impl Model {
                 out.truncate(s.out_len);
                 reuse = s.reuse;
                 prev_fp = s.prev_fp;
+                geo = s.geo;
                 recomputed = s.recomputed;
                 restored = s.restored;
                 poses = s.poses;
@@ -3883,6 +3958,8 @@ impl Model {
                     continue 'pass;
                 }
                 let (reuse_in, prev_fp_in) = (reuse, prev_fp);
+                // The digest of the features before this one, for an import's key (#17310).
+                let geo_in = geo;
                 if let Some(r) = out.last()
                     && let Some(e) = &r.error
                 {
@@ -3908,6 +3985,11 @@ impl Model {
                 let cancelled = watched.step(i);
                 let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
                 prev_fp = fp;
+                if with_import {
+                    // This feature's own inputs, without where it is placed: the digest of the
+                    // features before an import says whether the model around it changed (#17310).
+                    geo ^= fingerprint(doc, 0, f, &vals, rolled_back, &self.import_digests);
+                }
                 let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
                 if let Some(pose) = pose {
                     poses.insert(f.id, pose);
@@ -4002,7 +4084,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests);
+                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests, geo_in);
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
                 if !self.no_cache
                     && let Some(c) = self
@@ -4175,6 +4257,7 @@ impl Model {
                         out_len: out.len(),
                         reuse: reuse_in,
                         prev_fp: prev_fp_in,
+                        geo: geo_in,
                         recomputed: recomputed - 1,
                         restored,
                         poses: poses.clone(),
@@ -12427,6 +12510,8 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Import { step, skip, records, .. } => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.imports_read += 1);
             let (imp, digest) = match records {
                 Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),

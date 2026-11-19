@@ -1143,6 +1143,10 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+    /// While an orbit turns about the origin or the model point under the cursor (Orbit around),
+    /// a faint ball marks that point, as it does for the 3D mouse (#17474); false draws nothing,
+    /// as before.
+    mark_orbit_point: bool = true, PAGE_NAVIGATION => check_tr("nav.mark_orbit_point.label");
     /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
     /// Off: it does nothing there, as before (#6159).
     right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
@@ -11412,6 +11416,24 @@ mod tests {
         assert!(h.app.preferences.orbit_cursor_wrap);
         h.call("ui.prefs", json!({"orbit_cursor_wrap":false,"button":"apply"}));
         assert!(!h.app.preferences.orbit_cursor_wrap);
+    }
+
+    #[test]
+    fn mark_orbit_point_defaults_on_and_can_be_turned_off() {
+        let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
+        assert!(old.mark_orbit_point, "saved preferences from before the option mark the point");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.step(&json!({"click":{"handle":"prefs:mark_orbit_point"}})).unwrap();
+        assert!(!h.app.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"mark_orbit_point":false,"button":"apply"}));
+        assert!(!h.app.preferences.mark_orbit_point);
     }
 
     /// An agent's slow commands compute off the window thread unless a person turned that off:
