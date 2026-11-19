@@ -25,7 +25,9 @@ fn background_uv(image: egui::Vec2, rect: egui::Rect, window: egui::Rect) -> egu
 
 /// A picture's pixels, at most `limit` on a side (what the GPU takes).
 fn decode_background(bytes: &[u8], limit: u32) -> Result<egui::ColorImage, String> {
-    let mut image = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    // Upright, as every viewer shows it: a photo stored turned by its EXIF orientation (#19138).
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
+    let (mut image, _) = solidcraft_engine::upright_image::decode_upright(reader).map_err(|e| e.to_string())?;
     if image.width().max(image.height()) > limit {
         image = image.resize(limit, limit, image::imageops::FilterType::Triangle);
     }
@@ -1949,5 +1951,14 @@ mod background_picture_tests {
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::new(40, 20).write_to(&mut png, image::ImageFormat::Png).unwrap();
         assert_eq!(super::decode_background(png.get_ref(), 10).unwrap().size, [10, 5]);
+    }
+
+    /// #19138: a photo stored turned (EXIF orientation 6) is the background picture upright: a
+    /// 60 x 40 file is shown 40 x 60, as it is when it carries no tag.
+    #[test]
+    fn a_background_photo_with_an_exif_orientation_stands_upright() {
+        let plain = super::decode_background(&crate::test_pictures::jpeg(40, 60, None), 8192).unwrap();
+        let turned = super::decode_background(&crate::test_pictures::jpeg(60, 40, Some(6)), 8192).unwrap();
+        assert_eq!((plain.size, turned.size), ([40, 60], [40, 60]));
     }
 }
