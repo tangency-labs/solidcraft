@@ -2,8 +2,8 @@
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
-//! (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
+//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY, PCD and XYZ files as point
+//! clouds (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
 //! component models.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -38,11 +38,12 @@ pub mod limits;
 mod mutate;
 mod native_cad;
 pub use native_cad::{
-    NATIVE_CAD_EXTS, NativeDesign, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_records,
-    native_cad_to_step,
+    NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path,
+    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step,
 };
 pub mod paper;
 mod pat;
+mod pcd;
 mod ply;
 mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
@@ -50,6 +51,7 @@ mod point_cloud;
 pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
 pub mod safe_write;
 pub mod safe_zip;
+pub mod sdf;
 mod sketch2d;
 mod svg;
 /// Explicit development-test seams; absent from ordinary production builds.
@@ -88,6 +90,7 @@ pub use kicad_in::{
 };
 mod obj;
 pub use obj::read_obj;
+pub use sdf::{SdfDecal, SdfOptions, SdfPackage, sdf_model};
 pub use threemf::{
     MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
 };
@@ -456,15 +459,17 @@ fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, 
     })
 }
 
-/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, any case)?
+/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, or OpenUSD's `.usd`,
+/// `.usda`, `.usdc` and `.usdz`, any case)?
 pub fn is_mesh_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| ["3mf", "stl", "obj", "glb", "gltf"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+        || is_usd_path(path)
 }
 
-/// A 3MF, STL, OBJ or glTF file read as a mesh import feature.
+/// A 3MF, STL, OBJ, glTF or OpenUSD file read as a mesh import feature.
 pub struct MeshFeature {
     /// Timeline name: the only mesh's name, else the file name.
     pub name: String,
@@ -500,6 +505,12 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
         own_units("glTF")?;
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
+        g.flatten();
+        return Ok(g.feature);
+    }
+    if is_usd_path(file) {
+        own_units("OpenUSD")?;
+        let (mut g, _) = read_usd(bytes, file)?;
         g.flatten();
         return Ok(g.feature);
     }
@@ -583,6 +594,12 @@ pub enum Format {
     /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
     /// holds the looks.
     Glb,
+    /// A Gazebo model folder of the design ([`sdf_model`]): `model.config`, `model.sdf`, meshes
+    /// and decal images; written by the engine, since it is several files.
+    Sdf,
+    /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
+    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    Usd,
 }
 
 impl Format {
@@ -599,6 +616,8 @@ impl Format {
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
             "glb" => Format::Glb,
+            "sdf" => Format::Sdf,
+            "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -1339,6 +1358,8 @@ pub fn export_with_parts_noted(
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
+        Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
+        Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
     };
     Ok((bytes, notes))
 }

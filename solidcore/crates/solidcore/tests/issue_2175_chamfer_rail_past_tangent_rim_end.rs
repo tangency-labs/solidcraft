@@ -146,20 +146,18 @@ fn chamfer(k: &mut Kernel) -> Result<(usize, bool), i32> {
     Ok((b.face_list().len(), is_manifold_solid(&b).unwrap()))
 }
 
-/// SolidCraft's fixes: every `UpstreamFixes` field on except `geometric_g2_continuity`.
+/// SolidCraft's fixes: every `UpstreamFixes` field on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
 }
 
-/// Every fix but `geometric_g2_continuity`: refused. Before
+/// Every fix: refused. Before
 /// smlib#124 the trace ran on to the edge's ends before it was extended (from smlib#82,
 /// `c2_trace_to_edge_ends`), the rails no longer left their faces, and the chamfer built a
 /// manifold solid of 12 faces, as the fork does at b785227 (smlib#82 merged, before

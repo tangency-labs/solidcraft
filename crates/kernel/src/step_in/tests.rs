@@ -336,6 +336,73 @@ fn a_torus_written_as_a_patch_and_the_rest_round_it_imports_whole() {
     }
 }
 
+/// A 5 mm ball written as two faces on its sphere that share one loop off the sphere's axis
+/// (#15046): a cap beyond the circle x = 3 (radius 4 about +x) and the rest of the sphere round
+/// it, as some exporters write a ball (SolidCraft 0.30.1 re-exporting an inserted one among
+/// them). The rest runs clockwise round the cap: it is the outside of its loop, and was read as
+/// the cap turned over, both faces on the cap, no mass, and the cap drawn twice. Also with the
+/// loop's senses the other way round (the face named Cap is then the outside), and with the rest
+/// on a sphere of its own about +y. Each reads as the closed ball: two faces; the loop's circle
+/// and the rest's seam from it to the pole the rest covers as its edges; the circle's vertex and
+/// that pole; one shell.
+/// Its area is 4πr² and its volume 4πr³/3, and each face's display mesh covers its own zone of
+/// the ball: inscribed within a chord deviation δ, a zone's mesh area is short of its exact
+/// area by at most a factor (1 − δ/r)².
+#[test]
+fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
+    use std::f64::consts::PI;
+    let r = 5.0_f64;
+    let (area, volume) = (4.0 * PI * r * r, 4.0 / 3.0 * PI * r * r * r);
+    let own =
+        "#24=DIRECTION('',(0.,1.,0.));\n#25=DIRECTION('',(0.,0.,1.));\n#26=AXIS2_PLACEMENT_3D('',#1,#24,#25);\n#27=SPHERICAL_SURFACE('',#26,5.);\n";
+    for (what, cap, rest, rest_on, extra) in [
+        ("as the issue writes it", ".T.", ".F.", "#5", ""),
+        ("the loop's senses the other way round", ".F.", ".T.", "#5", ""),
+        ("the rest on its own sphere about +y", ".T.", ".F.", "#27", own),
+    ] {
+        let mut t = String::from(HEAD);
+        t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#5=SPHERICAL_SURFACE('',#4,5.);\n";
+        t += "#6=CARTESIAN_POINT('',(3.,0.,0.));\n#7=DIRECTION('',(0.,1.,0.));\n#8=AXIS2_PLACEMENT_3D('',#6,#3,#7);\n#9=CIRCLE('',#8,4.);\n";
+        t += "#10=CARTESIAN_POINT('',(3.,4.,0.));\n#11=VERTEX_POINT('',#10);\n#12=EDGE_CURVE('',#11,#11,#9,.T.);\n";
+        t += &format!(
+            "#13=ORIENTED_EDGE('',*,*,#12,{cap});\n#14=EDGE_LOOP('',(#13));\n#15=FACE_OUTER_BOUND('',#14,.T.);\n#16=ADVANCED_FACE('Cap',(#15),#5,.T.);\n"
+        );
+        t += &format!(
+            "#17=ORIENTED_EDGE('',*,*,#12,{rest});\n#18=EDGE_LOOP('',(#17));\n#19=FACE_OUTER_BOUND('',#18,.T.);\n#20=ADVANCED_FACE('Rest',(#19),{rest_on},.T.);\n"
+        );
+        t += extra;
+        t += "#21=CLOSED_SHELL('',(#16,#20));\n#22=MANIFOLD_SOLID_BREP('Ball',#21);\n#23=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#22),#70);\n";
+        t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        let imp = step_import(&t).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("turned over") || w.contains("left out") || w.contains("surfaces")),
+            "{what}: {:?}",
+            imp.warnings
+        );
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!((m.faces, m.edges, m.vertices, m.shells), (2, 2, 2, 1), "{what}");
+        assert!(rel(m.area, area) < 1e-6, "{what}: area {} vs {area}", m.area);
+        assert!(rel(m.volume, volume) < 1e-6, "{what}: volume {} vs {volume}", m.volume);
+        // Each face's own triangles: the cap's zone of height r − 3 has area 2πr·2, the rest the
+        // other 2πr·8 (whichever face the file names Cap).
+        let chord = 0.01;
+        let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(chord)).unwrap();
+        let mut shown = [0.0_f64; 2];
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+            shown[*f as usize] += 0.5 * (b - a).cross(c - a).len();
+        }
+        shown.sort_by(f64::total_cmp);
+        for (s, exact) in shown.into_iter().zip([2.0 * PI * r * 2.0, 2.0 * PI * r * 8.0]) {
+            let floor = exact * (1.0 - chord / r).powi(2);
+            assert!(s >= floor && s <= exact * (1.0 + 1e-9), "{what}: a face's display mesh area {s}, its zone's {exact}");
+        }
+    }
+}
+
 /// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
 /// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
 /// a rational circle, which got no pcurves, so the block came in open. The round reads as a
@@ -597,6 +664,32 @@ fn round_trip_features() {
     let ring = Region2 { outer: Loop2::circle(Vec2::new(10.0, 0.0), 3.0), holes: vec![] };
     let donut = revolve(&Plane::XZ, &[ring], Vec2::ZERO, Vec2::Y, 1.5).unwrap();
     round_trip(&donut[0]);
+}
+
+/// A sphere whose face has other faces cut or joined into it keeps that face through a STEP
+/// round trip (#16872): its seam loop, a meridian up to the pole and back down, is no sliver of
+/// no area, and a bore across the seam does not turn the face over. Each came back an open sheet,
+/// or no body at all, or short of volume.
+#[test]
+fn round_trip_spheres_with_faces_cut_or_joined_into_them() {
+    let ball = || sphere(Vec3::ZERO, 5.0).unwrap();
+    // A bore beside the seam, from the centre's plane out.
+    let off = cylinder(Vec3::new(0.0, 2.0, 0.0), Vec3::X, 1.0, 10.0).unwrap();
+    let bored = boolean(&ball(), &off, BoolOp::Cut).unwrap().unwrap();
+    assert!(rel(measure(&bored).unwrap().volume, 509.392) < 1e-4);
+    round_trip(&bored);
+    // A bore through the centre, across the seam.
+    let through = cylinder(Vec3::ZERO, Vec3::X, 3.0, 10.0).unwrap();
+    round_trip(&boolean(&ball(), &through, BoolOp::Cut).unwrap().unwrap());
+    // A rod with a ball on its end.
+    let rod = cylinder(Vec3::new(-20.0, 0.0, 0.0), Vec3::X, 3.0, 20.0).unwrap();
+    round_trip(&boolean(&rod, &ball(), BoolOp::Union).unwrap().unwrap());
+    // A ring with a ball on it.
+    let ring = torus(Vec3::ZERO, 20.0, 3.0).unwrap();
+    let knob = sphere(Vec3::new(20.0, 0.0, 0.0), 5.0).unwrap();
+    let joined = boolean(&ring, &knob, BoolOp::Union).unwrap().unwrap();
+    assert!(rel(measure(&joined).unwrap().volume, 3820.759) < 1e-4);
+    round_trip(&joined);
 }
 
 /// Robustness seed 17: a thin three-quarter tube shelled with its bottom open reads back whole
@@ -933,6 +1026,29 @@ pub(super) fn lifted_bezier_block(lift: f64) -> String {
             _ => format!("{l}\n"),
         })
         .collect()
+}
+
+/// A tetrahedron whose spline face's control net steps back 0.5 µm along each of its sides
+/// (tests/step-regressions/net_steps_back_within_tolerance.step): the steps are taken out when it
+/// is read, so SMLib's check takes the part. As written the check failed it on "Bad NonMonotonic
+/// CPts", and every cut, join or fillet on it was refused (a Fusion 360 export's surface and edge
+/// curve did the same, by 0.4 to 0.9 µm).
+#[test]
+fn a_spline_face_whose_control_net_steps_back_within_the_tolerance_imports_checked() {
+    let text = include_str!("../../../../tests/step-regressions/net_steps_back_within_tolerance.step");
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(
+        imp.warnings.iter().any(|w| w.contains("2 control points of spline curves and surfaces whose polygon turned back")),
+        "{:?}",
+        imp.warnings
+    );
+    assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(imp.bodies[0].closed);
+    assert_eq!(crate::validation::failing_check(body).unwrap().map(|c| c.to_string()), None);
+    let m = measure(body).unwrap();
+    assert!(rel(m.volume, 1000.0 / 6.0) < 1e-6, "volume {}", m.volume);
 }
 
 #[test]
@@ -3077,6 +3193,109 @@ fn a_cylinder_whose_rim_lies_a_little_off_its_wall_keeps_its_wall() {
     // Between the cylinder's volume and that of one as wide as the upper rim.
     let (low, high) = (std::f64::consts::PI * 10.0 * 10.0 * 5.0, std::f64::consts::PI * 10.0002 * 10.0002 * 5.0);
     assert!(m.volume > low * (1.0 - 1e-6) && m.volume < high * (1.0 + 1e-6), "volume {} outside {low}..{high}", m.volume);
+}
+
+/// A cylinder of radius 5 and height 4 as a general placement writes one (#18779): its wall an
+/// exact rational spline closed round u whose knots start at angle `start`, bounded by the
+/// file's own seam (a line at angle 0) and by rims that are rational spline circles starting at
+/// their vertex there.
+fn spline_band_step(start: f64) -> String {
+    use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, SQRT_2, TAU};
+    let (r, h) = (5.0, 4.0);
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |s: String| {
+        out.push(format!("#{}={s};", out.len() + 1));
+        out.len()
+    };
+    let point = |p: [f64; 3]| format!("CARTESIAN_POINT('',({:.16},{:.16},{:.16}))", p[0], p[1], p[2]);
+    // Four quarter arcs from angle `a0` at height `z`: on the circle at the quarters, at the
+    // corners of their square between, weighted 1/√2 there.
+    let quarters = |a0: f64, z: f64| -> Vec<([f64; 3], f64)> {
+        (0..9)
+            .map(|k| {
+                let a = a0 + f64::from(k) * FRAC_PI_4;
+                let (d, w) = if k % 2 == 0 { (r, 1.0) } else { (r * SQRT_2, FRAC_1_SQRT_2) };
+                ([d * a.cos(), d * a.sin(), z], w)
+            })
+            .collect()
+    };
+    let quarter_knots = format!("(0.,{FRAC_PI_2:.16},{:.16},{:.16},{TAU:.16})", 2.0 * FRAC_PI_2, 3.0 * FRAC_PI_2);
+    let knots = format!("(3,2,2,2,3),{quarter_knots}");
+    let ids = |v: &[usize]| v.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(",");
+    let mut rim = |z: f64| {
+        let pts = quarters(0.0, z);
+        let p: Vec<usize> = pts.iter().map(|(p, _)| add(point(*p))).collect();
+        let w: Vec<String> = pts.iter().map(|(_, w)| format!("{w:.16}")).collect();
+        let curve = add(format!(
+            "( BOUNDED_CURVE() B_SPLINE_CURVE(2,({}),.UNSPECIFIED.,.T.,.F.) B_SPLINE_CURVE_WITH_KNOTS({knots},.UNSPECIFIED.) CURVE() GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_CURVE(({})) REPRESENTATION_ITEM('') )",
+            ids(&p),
+            w.join(",")
+        ));
+        let v = add(point([r, 0.0, z]));
+        let v = add(format!("VERTEX_POINT('',#{v})"));
+        (add(format!("EDGE_CURVE('',#{v},#{v},#{curve},.T.)")), v)
+    };
+    let ((bottom, v0), (top, v1)) = (rim(0.0), rim(h));
+    let o = add(point([r, 0.0, 0.0]));
+    let d = add("DIRECTION('',(0.,0.,1.))".into());
+    let d = add(format!("VECTOR('',#{d},{h:.16})"));
+    let line = add(format!("LINE('',#{o},#{d})"));
+    let seam = add(format!("EDGE_CURVE('',#{v0},#{v1},#{line},.T.)"));
+    let (lo, hi) = (quarters(start, 0.0), quarters(start, h));
+    let rows: Vec<String> = lo.iter().zip(&hi).map(|((a, _), (b, _))| format!("(#{},#{})", add(point(*a)), add(point(*b)))).collect();
+    let weights: Vec<String> = lo.iter().map(|(_, w)| format!("({w:.16},{w:.16})")).collect();
+    let wall = add(format!(
+        "( BOUNDED_SURFACE() B_SPLINE_SURFACE(2,1,({}),.UNSPECIFIED.,.T.,.F.,.F.) B_SPLINE_SURFACE_WITH_KNOTS((3,2,2,2,3),(2,2),{quarter_knots},(0.,{h:.16}),.UNSPECIFIED.) GEOMETRIC_REPRESENTATION_ITEM() RATIONAL_B_SPLINE_SURFACE(({})) REPRESENTATION_ITEM('') SURFACE() )",
+        rows.join(","),
+        weights.join(",")
+    ));
+    let mut plane = |z: f64| {
+        let (o, n, x) = (add(point([0.0, 0.0, z])), add("DIRECTION('',(0.,0.,1.))".into()), add("DIRECTION('',(1.,0.,0.))".into()));
+        let a = add(format!("AXIS2_PLACEMENT_3D('',#{o},#{n},#{x})"));
+        add(format!("PLANE('',#{a})"))
+    };
+    let (pb, pt) = (plane(0.0), plane(h));
+    let mut face = |uses: &[(usize, bool)], surface: usize, sense: bool| {
+        let oes: Vec<usize> = uses.iter().map(|(e, o)| add(format!("ORIENTED_EDGE('',*,*,#{e},{})", if *o { ".T." } else { ".F." }))).collect();
+        let l = add(format!("EDGE_LOOP('',({}))", ids(&oes)));
+        let b = add(format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        add(format!("ADVANCED_FACE('',(#{b}),#{surface},{})", if sense { ".T." } else { ".F." }))
+    };
+    // Round the bottom counter-clockwise about +z, up the seam, back round the top and down the
+    // seam: the wall's normal points out.
+    let side = face(&[(bottom, true), (seam, true), (top, false), (seam, false)], wall, true);
+    let cap_b = face(&[(bottom, false)], pb, false);
+    let cap_t = face(&[(top, true)], pt, true);
+    let shell = add(format!("CLOSED_SHELL('',(#{side},#{cap_b},#{cap_t}))"));
+    let solid = add(format!("MANIFOLD_SOLID_BREP('Band',#{shell})"));
+    add(format!("SHAPE_REPRESENTATION('',(#{solid}),$)"));
+    format!("{HEAD}{}\n{TAIL}", out.join("\n"))
+}
+
+/// A cylinder whose wall is a spline closed round u with the file's own seam a little off the
+/// knots' start, as a general (non-rigid) placement writes every round face. Both of the seam's
+/// uses were given its one u inside the knots, a turn short: the wall enclosed no (u, v) area, was
+/// left out, and the part read as surfaces. A vendor's motor plate came in as 229 loose faces for
+/// one such band (#18779). The wall is started at its seam, and the part reads whole.
+#[test]
+fn a_band_round_a_closed_spline_with_its_seam_off_the_knots_start_reads_whole() {
+    use std::f64::consts::{PI, TAU};
+    // On the knots' start, the issue's 0.0376 rad off it, well inside, half a turn, just short of
+    // the end.
+    for start in [0.0, 0.037_592_7, 0.3, 1.0, 3.0, TAU - 0.05] {
+        let imp = step_import(&spline_band_step(start)).unwrap_or_else(|e| panic!("start {start}: {e}"));
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")),
+            "start {start}: {:?}",
+            imp.warnings
+        );
+        assert_eq!(imp.bodies.len(), 1, "start {start}");
+        assert!(imp.bodies[0].closed, "start {start}");
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert_eq!(m.faces, 3, "start {start}");
+        assert!(rel(m.volume, 100.0 * PI) < 1e-6, "start {start}: volume {}", m.volume);
+        assert!(rel(m.area, 90.0 * PI) < 1e-6, "start {start}: area {}", m.area);
+    }
 }
 
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,

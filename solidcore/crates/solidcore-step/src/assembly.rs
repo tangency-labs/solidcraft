@@ -6,7 +6,8 @@
 //! wind around a periodic surface, frames turned so a round face's form covers it once, each
 //! edge's label and NURBS form, every use's pcurve (closed forms where the geometry has them, the
 //! kernel's [`Trims`] for the rest), outer loops and face sides checked against the pcurves,
-//! tolerances raised to the gaps the geometry has, regions, and the canonical order.
+//! loops of a face that touch at one vertex made one loop, tolerances raised to the gaps the
+//! geometry has, regions, and the canonical order.
 //!
 //! A face on a surface whose record form depends on the face (a linear sweep or a revolution of
 //! a record curve, a cone that may be the plane it nearly is) gets that surface from
@@ -24,7 +25,7 @@
 //! outer loop runs counter-clockwise), and whether the face's side is that normal.
 
 use crate::vec::Vec3Geom as _;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f64::consts::TAU;
 
 use crate::kernel::{CurveEval, SurfaceEval, face_flux};
@@ -41,6 +42,7 @@ use crate::topology::swept::Extent;
 
 mod frames;
 pub(crate) mod seams;
+mod touching;
 mod wound;
 
 /// Most control points in one direction of a schema spline.
@@ -107,6 +109,9 @@ pub enum Kind {
     Open {
         /// The solid's shells after the first are its voids.
         voids: bool,
+        /// The first shell is the solid's outer one. False where every face of the outer shell
+        /// was left out: then each shell is one of its voids, a cavity still.
+        outer: bool,
     },
 }
 
@@ -193,11 +198,24 @@ pub struct Assembly<'t> {
     pub(crate) lines_between_vertices: usize,
     /// Inner loops written running the way the outer loop runs, run the other way.
     pub(crate) inner_loops_turned: usize,
+    /// Loops that touched another loop of their face at one vertex, made one loop with it
+    /// (`touching::join`).
+    pub(crate) loops_joined: usize,
+    /// The faces whose loops touch and are left as written: each one's origin and the first
+    /// vertex they touch at.
+    pub(crate) loops_left_touching: Vec<(u64, P3)>,
     /// Edges added with their vertices at the other ends of their intervals, turned round
     /// ([`Assembly::add_edge`]).
     pub(crate) edges_turned: usize,
     /// Spline surfaces whose first and last control lines met within the tolerance, closed.
     pub(crate) splines_closed: usize,
+    /// Control points of spline curves and surfaces whose polygon turned back on itself within
+    /// the tolerance, moved onto their neighbours ([`crate::topology::unfolded_curve`],
+    /// [`crate::topology::unfolded_surface`]).
+    pub(crate) points_unfolded: usize,
+    /// Sides of spline surfaces that collapsed to within the tolerance of a point, made exact
+    /// poles ([`crate::topology::poles_within`]).
+    pub(crate) poles_made_exact: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     pub(crate) raised_edges: HashSet<u32>,
 }
@@ -216,8 +234,12 @@ impl<'t> Assembly<'t> {
             sense_mismatches: 0,
             lines_between_vertices: 0,
             inner_loops_turned: 0,
+            loops_joined: 0,
+            loops_left_touching: Vec::new(),
             edges_turned: 0,
             splines_closed: 0,
+            points_unfolded: 0,
+            poles_made_exact: 0,
             raised_edges: HashSet::new(),
         }
     }
@@ -246,6 +268,15 @@ impl<'t> Assembly<'t> {
     /// gap (with margin) as its tolerance, and one too far off refuses the edge, named
     /// `edge #origin`.
     pub fn add_edge(&mut self, origin: u64, curve: BCurve, interval: [f64; 2], ends: [u32; 2]) -> R<(u32, bool)> {
+        // A control polygon that turns back on itself within the tolerance is a wiggle of the
+        // file's, taken out before anything is measured on the curve.
+        let curve = match crate::topology::unfolded_curve(&curve, self.tol) {
+            Some((unfolded, moved)) => {
+                self.points_unfolded += moved;
+                unfolded
+            }
+            None => curve,
+        };
         let eval = CurveEval::new(&curve).map_err(|m| format!("edge #{origin}: {m}"))?;
         let mut at = [Vec3::new(0.0, 0.0, 0.0); 2];
         for (slot, t) in at.iter_mut().zip(interval) {
@@ -320,7 +351,9 @@ impl<'t> Assembly<'t> {
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's
     /// side is the natural normal. A spline surface whose first and last control lines meet
-    /// within the tolerance is closed on itself (noted). `origin` names the face.
+    /// within the tolerance is closed on itself (noted), a side that closes to a point within it is
+    /// made an exact pole (noted), and a control net that turns back on itself within it is
+    /// unfolded (noted). `origin` names the face.
     pub fn add_face(&mut self, origin: u64, surface: BSurface, bounds: Vec<Bound>, outer: Option<usize>, forward: bool) -> R<u32> {
         // A sphere bounded by its poles alone is the whole sphere, with a meridian for its seam.
         let bounds = match &surface {
@@ -338,6 +371,24 @@ impl<'t> Assembly<'t> {
             }
             None => surface,
         };
+        // A side only close to a point is an exact pole before anything is measured on it.
+        let corners: Vec<Vec3> = bounds
+            .iter()
+            .flat_map(|b| match b {
+                Bound::Edges(es) => es.iter().filter_map(|(e, _)| self.edges.get(*e as usize)).flat_map(|e| e.vertices).collect::<Vec<u32>>(),
+                Bound::Vertex(v) => vec![*v],
+            })
+            .filter_map(|v| self.vertices.get(v as usize).map(|p| v3(p.point)))
+            .collect();
+        if let Some((poled, sides)) = crate::topology::poles_within(&surface, self.tol, &corners) {
+            self.poles_made_exact += sides;
+            surface = poled;
+        }
+        // A control net that turns back on itself within the tolerance is unfolded.
+        if let Some((unfolded, moved)) = crate::topology::unfolded_surface(&surface, self.tol) {
+            self.points_unfolded += moved;
+            surface = unfolded;
+        }
         if bounds.len() == 2
             && let BSurface::Sphere { frame, .. } = &mut surface
         {
@@ -576,11 +627,11 @@ impl<'t> Assembly<'t> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
-        // A face on a torus that is the rest of it round a patch its loop bounds gets the
-        // torus's seams, its loop a hole in it.
+        // A face on a sphere or torus that is the rest of it round a patch its loop bounds gets
+        // the surface's seams, its loop a hole in it.
         let outsides = self.complete_outsides()?;
         if outsides > 0 {
-            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+            notes.push(format!("{outsides} faces on a sphere or torus that are the outside of their loops given the surface's seams"));
         }
         // A torus face's seams where its torus starts, so its (u, v) box is read whole.
         self.seat_torus_seams()?;
@@ -605,6 +656,18 @@ impl<'t> Assembly<'t> {
             notes.push(format!(
                 "{} spline surfaces whose ends meet within {} mm closed on themselves (their end control lines made one)",
                 self.splines_closed, self.tol
+            ));
+        }
+        if self.points_unfolded > 0 {
+            notes.push(format!(
+                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved onto their neighbours",
+                self.points_unfolded, self.tol
+            ));
+        }
+        if self.poles_made_exact > 0 {
+            notes.push(format!(
+                "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
+                self.poles_made_exact, self.tol
             ));
         }
         if self.inner_loops_turned > 0 {
@@ -684,24 +747,49 @@ impl<'t> Assembly<'t> {
                 self.tol
             ));
         }
+        if self.loops_joined > 0 {
+            notes.push(format!(
+                "{} loops that touch another loop of their face at one vertex (a hole that touches its face's edge) made one loop with it",
+                self.loops_joined
+            ));
+        }
+        if let Some((origin, [x, y, z])) = self.loops_left_touching.first() {
+            let more = match self.loops_left_touching.len() {
+                0 | 1 => String::new(),
+                n => format!(", and {} more faces", n - 1),
+            };
+            notes.push(format!(
+                "face #{origin}: its loops touch at ({x}, {y}, {z}) mm and are left as written{more}: they make no single loop through that point (three or more of their edges' ends meet there, or the loops touch at another point as well). A face whose loops share a vertex fails the body's check, so features on the body are refused until the loops are moved apart in the source model"
+            ));
+        }
         let flipped = turned.iter().filter(|t| **t).count();
         if flipped > 0 {
             notes.push(format!("{flipped} faces turned over: their loops disagree with their same_sense"));
         }
-        let shells: Vec<Vec<(u32, bool)>> = shells
+        let mut shells: Vec<Vec<(u32, bool)>> = shells
             .into_iter()
             .map(|s| s.into_iter().map(|(f, fwd)| (f, if turned.get(f as usize).copied().unwrap_or(false) { !fwd } else { fwd })).collect())
             .collect();
 
         // Regions: which shells are closed (every edge used at least twice among its faces).
         let closed: Vec<bool> = shells.iter().map(|s| self.closed(s)).collect();
+        // A closed solid's edge sides must cancel. Local loop normalization alone can
+        // preserve an exporter's inconsistent shell sides (#17149).
+        let mut reoriented = false;
+        if matches!(kind, Kind::Solid | Kind::Voids) {
+            for (shell, closed) in shells.iter_mut().zip(&closed) {
+                if *closed {
+                    reoriented |= self.orient_shell(shell)?;
+                }
+            }
+        }
         // A void's faces face into the cavity, out of the material: it encloses volume of the
         // opposite sign to the outer shell's. The ORIENTED_CLOSED_SHELL flag alone doesn't say
         // so: some exporters write .F. over a shell already facing into the cavity (#3730),
         // SolidCraft .T.; read by the flag, such a void added its cavity's volume to the solid's.
         // A void enclosing volume of the outer shell's sign is turned inside out, the signs the
         // faces' own surfaces and pcurves give (`face_flux` of p / 3, the divergence theorem).
-        let shells = if kind == Kind::Voids && closed.iter().all(|c| *c) {
+        let shells = if !reoriented && kind == Kind::Voids && closed.iter().all(|c| *c) {
             let volume = |s: &[(u32, bool)]| -> Option<f64> {
                 let mut sum = 0.0;
                 for &(f, forward) in s {
@@ -745,7 +833,7 @@ impl<'t> Assembly<'t> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open { voids } => {
+            Kind::Open { voids, outer } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
                 }
@@ -753,7 +841,7 @@ impl<'t> Assembly<'t> {
                 // the inside of an outer shell or a model's shell still whole.
                 for (k, c) in closed.iter().enumerate() {
                     if *c {
-                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                        regions.push(Region { shells: vec![index(k)?], void: voids && (k > 0 || !outer) });
                     }
                 }
             }
@@ -937,7 +1025,45 @@ impl<'t> Assembly<'t> {
             }
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
         }
-        let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        // The file lists faces, not their radial order. At an edge more than two
+        // faces use, order their inward directions on the actual shared segment.
+        // Keep two-use edges in their existing order, including periodic seams.
+        for edge in &mut edges {
+            if edge.uses.len() <= 2 {
+                continue;
+            }
+            let radial_faces = edge
+                .uses
+                .iter()
+                .map(|u| {
+                    let face = faces.get(u.face as usize).ok_or("radial face reference")?;
+                    let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {
+                        return Err("radial loop reference");
+                    };
+                    let oriented = edges.get(u.position as usize).ok_or("radial edge use reference")?;
+                    Ok((face.parameters(), &oriented.pcurve, oriented.forward))
+                })
+                .collect::<Result<Vec<_>, &str>>()?;
+            let order = crate::kernel::radial_order(edge.parameters(), edge.interval, &radial_faces)?;
+            edge.uses = order.into_iter().map(|i| edge.uses.get(i).copied().ok_or("radial edge use reference")).collect::<Result<Vec<_>, &str>>()?;
+        }
+        let mut brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        if reoriented {
+            // Parity fixes relative sides only. Certify every shell's absolute side,
+            // including cavities: the traversal's starting face may itself be reversed.
+            for shell in 0..brep.shells.len() {
+                let positive = crate::kernel::shell_volume_positive(&brep, shell)?;
+                let cavity = kind == Kind::Voids && shell > 0;
+                if positive == cavity {
+                    let Some(Shell::Faces { faces, .. }) = brep.shells.get_mut(shell) else { return Err("shell reference".into()) };
+                    for side in faces {
+                        side.forward = !side.forward;
+                    }
+                }
+            }
+            // Face order is unchanged; shell sides also determine the edge/vertex walk.
+            brep = brep.canonical().map_err(|e| e.to_string())?.brep;
+        }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
@@ -993,6 +1119,68 @@ impl<'t> Assembly<'t> {
             }
         }
         Ok(redirect.len())
+    }
+
+    /// Orient a closed manifold shell by exact shared-edge parity. Across an edge,
+    /// the two physical traversals oppose: equal directions require opposite flips.
+    /// An already coherent shell keeps its sides, including a nonmanifold shell;
+    /// an inconsistent nonmanifold or disconnected shell has no supported repair.
+    fn orient_shell(&self, shell: &mut [(u32, bool)]) -> R<bool> {
+        let mut uses: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
+        for (side, &(f, forward)) in shell.iter().enumerate() {
+            let face = self.faces.get(f as usize).ok_or("face reference")?;
+            for bound in &face.loops {
+                if let Bound::Edges(edges) = bound {
+                    for &(edge, along) in edges {
+                        uses.entry(edge).or_default().push((side, along == forward));
+                    }
+                }
+            }
+        }
+        if uses.values().all(|sides| {
+            let along = sides.iter().filter(|(_, forward)| *forward).count();
+            sides.len().checked_sub(along) == Some(along)
+        }) {
+            return Ok(false);
+        }
+        let mut adjacent: BTreeMap<usize, Vec<(usize, bool)>> = BTreeMap::new();
+        for sides in uses.values() {
+            let [(a, along_a), (b, along_b)] = sides.as_slice() else {
+                return Err(unsupported("orienting an inconsistent shell with a nonmanifold edge"));
+            };
+            let opposite = along_a == along_b;
+            adjacent.entry(*a).or_default().push((*b, opposite));
+            adjacent.entry(*b).or_default().push((*a, opposite));
+        }
+        let mut flips = BTreeMap::new();
+        let mut started = false;
+        for seed in 0..shell.len() {
+            if flips.contains_key(&seed) {
+                continue;
+            }
+            if started {
+                return Err(unsupported("orienting an inconsistent shell with disconnected faces"));
+            }
+            started = true;
+            let mut pending = vec![(seed, false)];
+            while let Some((side, flip)) = pending.pop() {
+                if let Some(&known) = flips.get(&side) {
+                    if known != flip {
+                        return Err(unsupported("a shell with contradictory edge orientations"));
+                    }
+                    continue;
+                }
+                flips.insert(side, flip);
+                for &(next, opposite) in adjacent.get(&side).into_iter().flatten() {
+                    pending.push((next, flip != opposite));
+                }
+            }
+        }
+        for (side, (_, forward)) in shell.iter_mut().enumerate() {
+            let flip = flips.get(&side).ok_or("face side reference")?;
+            *forward ^= *flip;
+        }
+        Ok(true)
     }
 
     /// Every edge of the shell's faces used at least twice among them.
@@ -1060,6 +1248,7 @@ impl<'t> Assembly<'t> {
     /// marks none (or marks one that another loop encloses), and turns the face over when its
     /// outer loop runs clockwise about the natural normal on a surface where that cannot be a
     /// face's outer boundary.
+    /// Loops that touch at one vertex are then one loop through it ([`touching::join`]).
     fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, Option<BSurface>)> {
         let face = self.faces.get(fi).ok_or("face reference")?;
         let label = face.surface.clone();
@@ -1271,6 +1460,8 @@ impl<'t> Assembly<'t> {
             face.forward = !face.forward;
         }
         let mut pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        // Each loop's area as it now runs.
+        let mut areas: Vec<Option<f64>> = shapes.iter().map(|a| a.map(|a| if rerun { -a } else { a })).collect();
         // An inner bound written the way the outer one runs (its FACE_BOUND orientation wrong):
         // on a face whose loops all close in (u, v), each loop but the outer runs clockwise, so
         // such a loop is run the other way. Its uses and their pcurves are the same.
@@ -1287,8 +1478,97 @@ impl<'t> Assembly<'t> {
                 if let Some(l) = pcs.get_mut(i) {
                     l.reverse();
                 }
+                if let Some(slot) = areas.get_mut(i) {
+                    *slot = Some(-a);
+                }
                 self.inner_loops_turned += 1;
             }
+        }
+        // Loops that touch at one vertex are one loop through it, where they bound one region
+        // that way ([`touching::join`]); the others are noted, with where they touch.
+        let mut starts: Vec<Vec<u32>> = Vec::new();
+        let mut places: Vec<Vec<Option<[f64; 2]>>> = Vec::new();
+        for (&p, pc) in positions.iter().zip(&pcs) {
+            let Some(Bound::Edges(es)) = face.loops.get(p) else { return Err("loop reference".into()) };
+            let mut vs = Vec::new();
+            for &(e, forward) in es {
+                let [a, z] = self.edges.get(e as usize).ok_or("edge reference")?.vertices;
+                vs.push(if forward { a } else { z });
+            }
+            starts.push(vs);
+            places.push(
+                es.iter()
+                    .zip(pc)
+                    .map(|(&(_, forward), c)| {
+                        let [a, b] = c.interval()?;
+                        solidcore_ops::pcurve::eval(c, if forward { a } else { b })
+                    })
+                    .collect(),
+            );
+        }
+        // The outer loop runs counter-clockwise and every other loop clockwise.
+        let sound: Vec<bool> = areas.iter().enumerate().map(|(i, a)| a.is_some_and(|a| if i == outer { a > 0.0 } else { a < 0.0 })).collect();
+        // Two uses that start at one vertex start at one place of (u, v), not a period apart.
+        let place = |(l, k): (usize, usize)| places.get(l).and_then(|ps| ps.get(k)).copied().flatten();
+        let same_place = |a: (usize, usize), b: (usize, usize)| {
+            let (Some(p), Some(q)) = (place(a), place(b)) else { return false };
+            natural.iter().zip(p.iter().zip(&q)).all(|(n, (x, y))| {
+                let half = match n {
+                    Natural::Periodic => 0.5 * TAU,
+                    Natural::Range(lo, hi) => 0.5 * (hi - lo),
+                };
+                (x - y).abs() < half
+            })
+        };
+        let joins = touching::join(&starts, Some(outer), &sound, &same_place);
+        if let Some(&v) = joins.left.first() {
+            let at = self.vertices.get(v as usize).ok_or("vertex reference")?.point;
+            self.loops_left_touching.push((face.origin, at));
+        }
+        if !joins.walks.is_empty() {
+            let written: Vec<Vec<(u32, bool)>> = positions
+                .iter()
+                .map(|&p| match face.loops.get(p) {
+                    Some(Bound::Edges(es)) => es.clone(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            for (stay, walk) in &joins.walks {
+                let (mut uses, mut curves) = (Vec::new(), Vec::new());
+                for &(l, k) in walk {
+                    uses.push(*written.get(l).and_then(|es| es.get(k)).ok_or("edge use")?);
+                    curves.push(pcs.get(l).and_then(|pc| pc.get(k)).cloned().ok_or("pcurve")?);
+                }
+                if let Some(Bound::Edges(es)) = positions.get(*stay).and_then(|&p| face.loops.get_mut(p)) {
+                    *es = uses;
+                }
+                if let Some(pc) = pcs.get_mut(*stay) {
+                    *pc = curves;
+                }
+            }
+            // The loops now part of another leave the face, and the outer loop's index follows.
+            let gone = |i: usize| joins.gone.get(i).copied().unwrap_or(false);
+            let mut leaves = vec![false; face.loops.len()];
+            for (i, &p) in positions.iter().enumerate() {
+                if gone(i)
+                    && let Some(slot) = leaves.get_mut(p)
+                {
+                    *slot = true;
+                }
+            }
+            let outer_at = positions.get(outer).copied();
+            face.outer = outer_at.map(|o| o - leaves.iter().take(o).filter(|g| **g).count());
+            let mut at = 0;
+            face.loops.retain(|_| {
+                at += 1;
+                !leaves.get(at - 1).copied().unwrap_or(false)
+            });
+            let mut at = 0;
+            pcs.retain(|_| {
+                at += 1;
+                !gone(at - 1)
+            });
+            self.loops_joined += joins.gone.iter().filter(|g| **g).count();
         }
         let domain = face_domain(&surface, &pcs)?;
         Ok((pcs, domain, flip, if wound { None } else { form }))

@@ -55,6 +55,7 @@ pub mod status_details;
 pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
+pub mod upright_image;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
@@ -268,7 +269,7 @@ impl Sel {
     pub(crate) fn body_name(&self) -> Option<&str> {
         match self {
             Sel::Body { name } => Some(name),
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(body),
+            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } if !body.is_empty() => Some(body),
             _ => None,
         }
     }
@@ -488,6 +489,23 @@ pub struct Preview {
     pub after: Arc<ModelState>,
     /// What each command replied (as `execute` returns it).
     pub replies: Vec<Value>,
+    /// The joints the commands posed, with their effective values now: the ones they drove and
+    /// the ones they moved (a motion link's follower, a joint a closed loop moved). Their values
+    /// are as the solver placed them, after motion links and limits, as `joint.inspect` and
+    /// `joint.drive` give them. Empty when the commands posed no joint.
+    pub joints: Vec<crate::schema::joints::ReachedJoint>,
+}
+
+impl Preview {
+    fn visible_world(before: &Session, after: &Session, replies: Vec<Value>) -> Result<Self> {
+        let visible = |session: &Session| -> Result<Arc<ModelState>> {
+            let world = session.world_state()?;
+            let mut shown = (*world).clone();
+            shown.bodies.retain(|body| session.body_visible(&body.name));
+            Ok(Arc::new(shown))
+        };
+        Ok(Self { before: visible(before)?, after: visible(after)?, joints: cmd::joints::posed_joints(before, after, &replies), replies })
+    }
 }
 
 /// Prepared world geometry depends on design/model identity and placement context, not
@@ -554,6 +572,17 @@ impl ComputedCommands {
             }) || (session.plugin_limits == source.plugin_limits
                 && session.disabled_plugins == source.disabled_plugins
                 && session.plugin_state == source.plugin_state))
+    }
+
+    /// Whether the resulting document differs in content from its source.
+    pub fn changes_document(&self) -> bool {
+        self.source.doc != self.computed.doc
+    }
+
+    /// Show the prepared model in occurrence coordinates, with visibility applied, and return
+    /// the replies from its evaluation.
+    pub fn preview_visible_world(&self) -> Result<Preview> {
+        Preview::visible_world(&self.source, &self.computed, self.steps.iter().map(|step| step.reply.clone()).collect())
     }
 
     /// Prepare display tessellation before returning the transaction to the window; a model that
@@ -3096,29 +3125,23 @@ impl Session {
     /// A `timeline.redefine` is shown even while the timeline is rolled back to the feature
     /// being edited.
     pub fn preview(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview {
-            before: self.model.state(),
-            after: after.model.state(),
-            replies,
+        self.scratch().preview_in_place(commands, None).map(|(after, replies)| {
+            let joints = cmd::joints::posed_joints(self, &after, &replies);
+            Preview { before: self.model.state(), after: after.model.state(), replies, joints }
         })
     }
 
     /// The same evaluated preview in occurrence coordinates, including uncaptured moves.
     pub fn preview_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies })
+        let joints = cmd::joints::posed_joints(self, &after, &replies);
+        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies, joints })
     }
 
     /// World preview with each session's visibility applied, including new body placements.
     pub fn preview_visible_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        let visible = |session: &Session| -> Result<Arc<solidcraft_doc::ModelState>> {
-            let world = session.world_state()?;
-            let mut shown = (*world).clone();
-            shown.bodies.retain(|body| session.body_visible(&body.name));
-            Ok(Arc::new(shown))
-        };
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies })
+        Preview::visible_world(self, &after, replies)
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what

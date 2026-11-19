@@ -2902,6 +2902,43 @@ fn loft_joins_a_corner_to_the_middle_of_a_rounded_corner() {
     }
 }
 
+/// A 112.24 x 148.34 rectangle lofted 100 up to a circle of radius 55.76, the circle's arcs split
+/// at the directions of the rectangle's corners (#19478). The rule `solid.loft` uses between
+/// paired vertices, pinned here: each wall is ruled (degree 1 across the two sections), and each
+/// span runs on its own parameter (a line's linear one, an arc's rational Bezier one), so a point
+/// at share t of a rectangle side is paired with the arc point at share t of the arc's Bezier
+/// parameter, not its share of the arc length. The two 105.8 degree arcs are two conic spans each
+/// (`conic_data`, solidcore/crates/solidcore/src/nurbs/crv_basic.rs, the quarter-turn bound), so
+/// the x-sides are each two walls, meeting at their middle with the circle's 0 and 180 degree
+/// points; the 74.2 degree arcs are one span, so the y-sides are one wall each. The volume is that
+/// surface's integral (Gauss-Legendre, 40 points a span): 1 312 579.22 mm3.
+/// The expected volume for the same sections is 1 310 514.00 mm3, with four corner-to-corner walls. The
+/// same rule with each 105.8 degree arc as one span gives 1 310 501.28 mm3, so the two-span arcs
+/// account for the 2065 mm3. The remaining 12.72 mm3 is not the pairing points, which are exact
+/// (radius 55.76, and the corner directions to the last digit); the arc-length spans give
+/// 1 313 109.39 mm3 and the chord-length spans 1 313 370.97 mm3 on the kernel's walls.
+#[test]
+fn loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter() {
+    let rect = Loop2::polygon(&[Vec2::new(56.12, -74.17), Vec2::new(56.12, 74.17), Vec2::new(-56.12, 74.17), Vec2::new(-56.12, -74.17)]);
+    let r = 55.76;
+    let secs = [(Plane::XY, rect), (Plane::XY.offset(100.0), Loop2::circle(Vec2::ZERO, r))];
+    let body = loft(&secs).unwrap();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // Six side walls and two caps.
+    assert_eq!(body.face_count(), 8);
+    let m = measure(&body).unwrap();
+    // The rule's integral, computed independently: 1 312 579.2213408777 mm3.
+    assert!(rel(m.volume, 1_312_579.221_340_877) < 1e-9, "{}", m.volume);
+    // The four corners' side edges run straight to their paired circle points, and the x-sides'
+    // middles to the circle's 0 and 180 degree points.
+    let (cx, cy) = (33.644_666_293_548_83, 44.465_874_892_952_9);
+    for (x, y, px, py) in [(56.12, -74.17, cx, -cy), (56.12, 74.17, cx, cy), (-56.12, 74.17, -cx, cy), (-56.12, -74.17, -cx, -cy)] {
+        assert!(joins(&body, Vec3::new(x, y, 0.0), Vec3::new(px, py, 100.0)), "({x}, {y}) joins its paired point");
+    }
+    assert!(joins(&body, Vec3::new(56.12, 0.0, 0.0), Vec3::new(r, 0.0, 100.0)), "the x-side's middle joins the circle's 0 degree point");
+    assert!(joins(&body, Vec3::new(-56.12, 0.0, 0.0), Vec3::new(-r, 0.0, 100.0)), "the x-side's middle joins the circle's 180 degree point");
+}
+
 /// Three sections, the first hood profile, the second, then the first again ([`HOOD_A`]): the
 /// middle one gains the vertex only the outer ones have, and that vertex pairs with theirs, so all
 /// three get the same 19 vertices and the outer two are cut alike.

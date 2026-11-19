@@ -40,7 +40,7 @@ use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::rollover::{
-    concave_chain, concave_chain_ends, is_concave_chain, RollOver,
+    concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, RollOver,
 };
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
@@ -336,7 +336,7 @@ pub struct SessionCall {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Refusal {
     /// [`Error::TooLarge`]: the largest size that builds, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room.
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room.
     TooLarge {
         /// The largest size that builds it.
         size: f64,
@@ -344,6 +344,8 @@ pub enum Refusal {
         kind: FitKind,
         /// A point at the middle of the edge it was found for.
         at: Option<[f64; 3]>,
+        /// An exact point on the face that limits the size, when the kernel names it.
+        face: Option<[f64; 3]>,
         /// Why there is no room.
         why: Option<RoomReason>,
     },
@@ -371,11 +373,13 @@ impl From<Refusal> for Error {
                 size,
                 kind,
                 at,
+                face,
                 why,
             } => Error::TooLarge {
                 size,
                 kind,
                 at,
+                face,
                 why,
             },
             Refusal::SetbackTooShort {
@@ -414,13 +418,18 @@ impl SessionRefusal {
         Ok(match (self.refusal, self.edge) {
             (
                 Refusal::TooLarge {
-                    size, kind, why, ..
+                    size,
+                    kind,
+                    face,
+                    why,
+                    ..
                 },
                 Some(edge),
             ) => Refusal::TooLarge {
                 size,
                 kind,
                 at: edge_point(k, b, edge)?,
+                face,
                 why,
             },
             (r, _) => r,
@@ -504,10 +513,13 @@ pub fn session_refusal(
                 KernelFit::Chord => FitKind::Chord,
             };
             let why = reason.and_then(room_reason);
+            let site = s.error_site();
+            let face = site.face.and(site.at).map(|p| [p.x, p.y, p.z]);
             let refusal = Refusal::TooLarge {
                 size: fit.size,
                 kind,
                 at: None,
+                face,
                 why,
             };
             return Ok(SessionRefusal {
@@ -534,14 +546,16 @@ fn blend_failure(
 ) -> (Error, Option<EdgeId>) {
     if let SolidError::BlendRefused { refusal, .. } = &e {
         if let Some(error) = refused(s, refusal) {
-            return (error, None);
+            return (crate::session::noted(&e, error), None);
         }
     }
-    match session_refusal(s, e, call) {
+    let (kind, operation) = (e.kind().code(), e.operation());
+    let (error, edge) = match session_refusal(s, e, call) {
         Ok(r) => (r.refusal.into(), r.edge),
         // a failure the kernel states in words says what the session noted of the step too
         Err(e) => (session_failure(s, &e).unwrap_or_else(|| status(e)), None),
-    }
+    };
+    (crate::session::noted_as(kind, operation, error), edge)
 }
 
 /// The refusal of a swept turn the corners step noted at its vertex (the blend corner's
@@ -656,6 +670,7 @@ fn chamfer_sized(
             size,
             kind: FitKind::Radius,
             at,
+            face,
             why,
         } if chamfer => {
             let fit = KernelFitSize {
@@ -668,6 +683,7 @@ fn chamfer_sized(
                     size,
                     kind: FitKind::Distance,
                     at,
+                    face,
                     why,
                 },
                 None => Refusal::NoRoom,
@@ -681,7 +697,11 @@ fn chamfer_sized(
 /// found for. An edge or point that cannot be read leaves the size without a point.
 fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::Result<Error> {
     let Error::TooLarge {
-        size, kind, why, ..
+        size,
+        kind,
+        face,
+        why,
+        ..
     } = e
     else {
         return Ok(e);
@@ -693,6 +713,7 @@ fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::
         size,
         kind,
         at: edge_point(k, b, edge)?,
+        face,
         why,
     })
 }
@@ -940,7 +961,7 @@ fn pass(
             Ok(Err(refusal)) => Ok(Err(refusal)),
             Err(e) => {
                 if let Some(why) = refused_turn {
-                    Ok(Err(Refused::Error(why)))
+                    Ok(Err(Refused::Error(crate::session::noted(&e, why))))
                 } else {
                     let (error, edge) = blend_failure(&s, e, call);
                     fit_edge = edge;
@@ -1683,8 +1704,15 @@ fn blend_on_body(
         && back.is_empty()
         && corners == Corners::Filled
         && picked.len() > 1;
-    // the untouched input, for the overflowing rounds to go first on
-    let fresh = if may_go_first {
+    // a round that may be the Roll-over's concave chain asked on its own (#10876), of one edge
+    // too (#19476: the foot of a cylinder that stands through a face)
+    let asked_alone = kind == Blend::Round
+        && turn == Turn::Mitre
+        && back.is_empty()
+        && corners == Corners::Filled;
+    let may_be_chain = asked_alone && has_end_arc(k, b, &picked)?;
+    // the untouched input, for the overflowing rounds to go first on, or the chain to be built on
+    let fresh = if may_go_first || may_be_chain {
         Some(brep_copy(k, b)?)
     } else {
         None
@@ -1723,8 +1751,10 @@ fn blend_on_body(
     // left them)
     if !stopped.roll_overs.is_empty() && made.is_err() {
         if let Some(input) = fresh.as_ref() {
-            // the faces the sessions log, put back where the passes are given up
+            // the faces the sessions log, and the kernel error the first call's refusal noted,
+            // put back where the passes are given up
             let log = k.blend_face_log.clone();
+            let note = crate::session::note();
             let rolled_input = brep_copy(k, input)?;
             let mut rolled_dropped = dropped.clone();
             let rolled = roll_over(
@@ -1757,7 +1787,10 @@ fn blend_on_body(
                     }));
                 }
                 Err(e) if e.is_cancelled() => return Err(e),
-                Ok(Err(_)) | Err(_) => k.blend_face_log = log,
+                Ok(Err(_)) | Err(_) => {
+                    k.blend_face_log = log;
+                    crate::session::note_back(note);
+                }
             }
         }
     }
@@ -1765,15 +1798,12 @@ fn blend_on_body(
     // overflow left to go first): built as the event's second pass on a copy of the
     // untouched input (the asked edges at their places in the copy's order); where it is
     // not the chain, does not build or does not finish, the first call's refusal stands
-    if step == RollOverStep::Classify
-        && stopped.roll_overs.is_empty()
-        && stopped.overflow.is_none()
-        && made.is_err()
-    {
+    if asked_alone && stopped.roll_overs.is_empty() && stopped.overflow.is_none() && made.is_err() {
         if let Some(input) = fresh.as_ref() {
             // the faces the sessions log, put back where the copy is given up (its faces
-            // are not the result's)
+            // are not the result's), and the kernel error the first call's refusal noted
             let log = k.blend_face_log.clone();
+            let note = crate::session::note();
             let mut copy = brep_copy(k, input)?;
             let copy_list = copy.edge_list().to_vec();
             let mapped: Option<Vec<EdgeId>> = picked
@@ -1817,6 +1847,7 @@ fn blend_on_body(
                 }
             }
             k.blend_face_log = log;
+            crate::session::note_back(note);
         }
     }
     if stopped.overflow.is_some() {
@@ -2356,8 +2387,15 @@ pub struct CarriedFace {
     /// The unit direction in the face's plane square to the edge; `along` × `across` is the
     /// face's outward normal.
     pub across: [f64; 3],
-    /// The slab's rectangle in (`along`, `across`) from `origin`.
+    /// The slab's outline in (`along`, `across`) from `origin`: the edge from its first side
+    /// to its second, each end along the trace of the face that ends the round there. A
+    /// rectangle between ends square to the edge.
     pub outline: [[f64; 2]; 4],
+    /// The edge's length.
+    pub length: f64,
+    /// How far along the edge the slab's start and its end run for each unit across it: 0
+    /// for an end square to the edge.
+    pub ends: [f64; 2],
     /// The slab's extent along the outward normal, up to the face's plane.
     pub depth: [f64; 2],
     /// How far to either side of its plane the face's outline is to be carried.
@@ -2367,13 +2405,36 @@ pub struct CarriedFace {
     pub other_side: f64,
 }
 
+impl CarriedFace {
+    /// The outline of the region past the edge's line on the other face's side of it, in
+    /// (`along`, `across`) from `origin` (the kernel's
+    /// [`solidcore::blend::carried_face::past_edge_outline`]): between the slab's two ends,
+    /// from the edge's line out to `room`, or to where the slab stops if that is nearer. What
+    /// a blend adds over the other face lies here, not over the carried face's outline.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a `room` that is not finite and positive.
+    pub fn past_edge(&self, room: f64) -> Result<[[f64; 2]; 4]> {
+        solidcore::blend::carried_face::past_edge_outline(
+            self.length,
+            self.ends,
+            &self.outline,
+            self.other_side,
+            room,
+        )
+        .map_err(|_| Error::Argument)
+    }
+}
+
 /// The flat faces of `body`'s edge at index `edge` that a round of radius `radius` can be
 /// carried on past (the kernel's [`solidcore::blend::carried_face::carried_faces`]): for an
 /// application building a round wider than the flat face beside its edge, by rounding the
 /// edge on the body with that face carried on as a slab and keeping what the round adds
 /// within the face's outline. None where that does not give the round of an unbounded face:
 /// the edge is not straight and concave, no face of it is flat, or an end of it has no flat
-/// face square to it.
+/// face that ends the round there (one whose plane holds the carried face's normal: a face
+/// square to the edge, or one leaning up to 60 degrees from that, which then carries on only
+/// the face of the edge whose normal its plane holds).
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past the edges or a radius not finite, positive and at
@@ -2443,6 +2504,8 @@ fn carried_face_indices(
             along: [c.along.x, c.along.y, c.along.z],
             across: [c.across.x, c.across.y, c.across.z],
             outline: c.outline,
+            length: c.length,
+            ends: c.ends,
             depth: c.depth,
             reach: c.reach,
             other_side: c.other_side,
@@ -2711,6 +2774,27 @@ fn chamfer_sides_impl(
             contract,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
+            // A fixed angle scales both setbacks with the first distance. Explicit
+            // two-distance input keeps its common scale, since neither distance is primary.
+            let e = match (second, e) {
+                (
+                    ChamferSecond::Angle(_),
+                    Error::TooLarge {
+                        size,
+                        kind: FitKind::Scale,
+                        at,
+                        face,
+                        why,
+                    },
+                ) => Error::TooLarge {
+                    size: crate::import_geometry::scale_value(distance, size),
+                    kind: FitKind::Distance,
+                    at,
+                    face,
+                    why,
+                },
+                (_, e) => e,
+            };
             return Ok(Err(e));
         }
         done(k, b, expect, contract)

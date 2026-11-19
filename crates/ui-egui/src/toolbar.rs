@@ -566,7 +566,9 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
+    rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
@@ -624,6 +626,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_view_dxf" => FileAction::Command("file.export_view_dxf").run(app),
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
+        "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
@@ -637,6 +640,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
             }
         }
         "export_glb" => FileAction::Export("glb").run(app),
+        "export_usd" => FileAction::Export("usd").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {
@@ -648,6 +652,16 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "quit" => FileAction::Quit.run(app),
         _ => {}
     }
+}
+
+/// The Drawing tool `key` starts on a drawing's sheet (`on_sheet`): the one that does there what
+/// the sketch tool bound to the key does in a sketch. None while a sheet sketch is being edited,
+/// where the key is the sketch's own.
+fn sheet_tool(app: &SolveApp, on_sheet: bool, key: &str) -> Option<&'static str> {
+    if !on_sheet || app.session.active_sketch.is_some() {
+        return None;
+    }
+    crate::keymap::commands_for(app, key).into_iter().find_map(crate::drawing_workspace::counterpart)
 }
 
 /// Whether the design is on screen: viewport/menu editing stays disabled behind File.
@@ -761,6 +775,7 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
         "file.export_urdf" => ("urdf", false),
+        "file.export_sdf" => ("sdf", false),
         "file.export_stl" => ("stl", true),
         "file.export_3mf" => ("3mf", true),
         _ => return false,
@@ -782,7 +797,10 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
     let body = crate::export_name::first_body(app);
     let name = format!("{}.{ext}", crate::export_name::offered(app, body.as_deref(), &app.session.doc.name));
     let format = format.map(str::to_string);
-    app.pick_save(&name, &[ext], move |app, path| {
+    // OpenUSD: the extension chosen picks binary (`.usd`, `.usdc`), text (`.usda`) or a package
+    // (`.usdz`).
+    let exts: &[&str] = if solidcraft_engine::io::is_usd_path(&name) { &solidcraft_engine::io::USD_EXTS } else { std::slice::from_ref(&ext) };
+    app.pick_save(&name, exts, move |app, path| {
         let Some(path) = path else { return };
         let mut params = json!({"path": path});
         if let Some(format) = format {
@@ -2677,7 +2695,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             // As in a sketch: the first Esc drops the Dimension tool's picks, the next leaves it.
             if cancel_unfinished(app)
                 || crate::drawing_workspace::dimension::clear_picks(app)
-                || crate::drawing_workspace::close_panel(app)
+                || crate::drawing_workspace::escape_panel(app)
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
@@ -2728,6 +2746,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     let key = crate::keymap::key_name(k, mods);
                     if drawing_history && crate::keymap::command_for(app, &key) == Some("select.all") {
                         crate::keymap::press(app, &key, repeat);
+                    } else if let Some(tool) = sheet_tool(app, drawing_history, &key) {
+                        app.start(tool);
                     }
                 }
                 // Ctrl+W closes the view shown, and the design with it when that is its only view;
@@ -2754,6 +2774,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::S => save(app),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
+            continue;
+        }
+        // On a drawing's sheet, a sketch tool's key starts the tool that does its job there: the
+        // Dimension key (D by default, or the key it was rebound to) starts Dimension.
+        if let Some(tool) = sheet_tool(app, drawing_history, &crate::keymap::key_name(k, mods)) {
+            app.start(tool);
             continue;
         }
         if !shown {
@@ -4797,6 +4823,9 @@ mod app_bar_tests {
             }
         }
         h.app.ui.tab = "MODEL".into();
+        // Tall enough for the whole File menu (Export SDF Model made it a row longer), so the
+        // plugin's row at its foot is on screen without scrolling the menu.
+        h.call("ui.resize", json!({"width":1600,"height":1600}));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
