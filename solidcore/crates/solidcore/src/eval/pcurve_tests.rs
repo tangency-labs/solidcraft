@@ -1231,6 +1231,16 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
 /// range) would hold only that rounding of it.
 #[test]
 fn a_loop_round_a_closed_spline_given_a_period_on_and_a_rounding_short_lands_in_its_range() {
+    fn use_of(edge: u32, curve: &Curve, interval: [f64; 2], forward: bool) -> EdgeUse<'_> {
+        EdgeUse {
+            edge,
+            curve,
+            interval,
+            forward,
+            tolerance: 0.0,
+            given: None,
+        }
+    }
     let full = [0., TAU];
     let on = |c: &Curve, iv: [f64; 2]| form::curve(c, iv).unwrap();
     let (cylinder, _) = form::surface(
@@ -1259,16 +1269,6 @@ fn a_loop_round_a_closed_spline_given_a_period_on_and_a_rounding_short_lands_in_
         start: [3., 0., 0.],
         end: [3., 0., 4.],
     };
-    fn use_of(edge: u32, curve: &Curve, interval: [f64; 2], forward: bool) -> EdgeUse<'_> {
-        EdgeUse {
-            edge,
-            curve,
-            interval,
-            forward,
-            tolerance: 0.0,
-            given: None,
-        }
-    }
     let l = vec![
         use_of(0, &low.0, low.1, true),
         use_of(1, &line, [0., 1.], true),
