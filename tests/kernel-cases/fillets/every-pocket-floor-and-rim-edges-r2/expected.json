@@ -1,11 +1,11 @@
 {
  "sources": [],
- "what": "a rectangular pocket's floor edges and rim edges rounded r2 in one fillet (5 mm walls: 1 mm of flat wall left between them)",
+ "what": "a rectangular pocket's floor edges and rim edges rounded r2 in one fillet with the default turn, Auto: the rim rounds' corners swept, the floor rounds' corners mitred (5 mm walls: 1 mm of flat wall left between them)",
  "source": "analytic",
- "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. The floor rounds and the rim rounds touch different parts of the walls (2 + 2 < 5), so they add up: + (100 A - 4 r^3 (5/3-pi/2)) = 82.7729 - (100 A + 4 r^3 (5/3-pi/2)) = 88.9086. V = 20993.8643. Faces 19.",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 21000. The floor rounds and the rim rounds touch different parts of the walls (2 + 2 < 5), so they add up. A = r^2 (1 - pi/4), M = r^3 (5/6 - pi/4) = 0.383481. Floor rounds: concave rounds at concave corner edges, where the swept turn is not built, so Auto mitres them: + (100 A - 4 r^3 (5/3 - pi/2)) = + (100 A - 8 M). Rim rounds: convex rounds at concave corner edges, swept as in every-pocket-rim-edges-r2: - (100 A + 2 pi M). V = 21000 - (8 + 2 pi) M = 20994.5227. Faces 19 with every corner mitred, + 4 rim torus pieces = 23. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.6584 mm^3 at the rim's four corners, 3.1e-05 of the volume, inside the default 1e-3.",
  "body_count": 1,
- "volume_mm3": 20993.864298248205,
- "faces": 19,
+ "volume_mm3": 20994.522664680597,
+ "faces": 23,
  "bbox": {
   "min": [
    0,
@@ -20,5 +20,8 @@
  },
  "continuity": {
   "order": "g1"
+ },
+ "tolerance": {
+  "rel": 1e-07
  }
 }
