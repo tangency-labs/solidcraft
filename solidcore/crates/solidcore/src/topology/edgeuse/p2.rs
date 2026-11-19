@@ -69,6 +69,11 @@
 //!   polygon, as the fork (tangency-labs/smlib 666242b); upstream reads the unset
 //!   values. A control point whose angles cannot be measured (a zero polygon segment)
 //!   is skipped and the scan goes on, where the fork ends it with no dog-leg.
+//! - **Narrow domains (WR-18540).** `IsEdgeuseSideInSurface` does not count a pair of
+//!   opposite sides of the face's domain for a sample within the side band of both: the
+//!   domain is narrower there than the band (a sliver triangle's plane, fitted to the
+//!   face), and upstream then reads one of the face's correctly turned edges as running
+//!   the wrong way along a side.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -962,7 +967,8 @@ pub struct EdgeuseSide {
 /// pOptOnNaturalBoundary)`: drops `smp_count` points of the edge curve (in edge use
 /// order) onto the face's surface and classifies them against the natural UV domain's
 /// sides (to twice the surface zone tolerance mapped to UV in U and in V; not upstream: a
-/// periodic side, a seam, to the edge's own tolerance, docs/booleans.md "Seams and poles").
+/// periodic side, a seam, to the edge's own tolerance, docs/booleans.md "Seams and poles";
+/// nor upstream: two opposite sides both that close to a sample do not count for it, WR-18540).
 /// A sample off every side answers `true` at once. Otherwise the edge use runs along a
 /// side: a degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
 /// the UV steps must run the way that side's inside requires (all but one of them;
@@ -1118,7 +1124,11 @@ pub fn is_edgeuse_side_in_surface(
         // and V directions)
         let uv_loc_u = uv_domain.point_boundaries(uv_drop_point, tol_2d_u) & (SS_UMIN | SS_UMAX);
         let uv_loc_v = uv_domain.point_boundaries(uv_drop_point, tol_2d_v) & (SS_VMIN | SS_VMAX);
-        let uv_loc = uv_loc_u | uv_loc_v;
+        // (not upstream, WR-18540: a sample within the band of both opposite sides lies on a
+        // domain narrower than the band, and those sides tell nothing of the side the edge's
+        // inside is on, so neither counts for it)
+        let neither = |loc: u32, both: u32| if loc == both { 0 } else { loc };
+        let uv_loc = neither(uv_loc_u, SS_UMIN | SS_UMAX) | neither(uv_loc_v, SS_VMIN | SS_VMAX);
 
         // save the drop and classify data per sample point
         edge_box_3d.add_point(edge_point);
