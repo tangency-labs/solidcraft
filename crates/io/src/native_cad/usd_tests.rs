@@ -277,6 +277,26 @@ fn a_hand_written_layer_reads_as_components_in_millimetres() {
     assert_box(&got[2], [[100.0, 0.0, 0.0], [120.0, 20.0, 20.0]]);
 }
 
+/// A mesh's authored normals turn with its prim's rotation when the import is flattened, as
+/// its points do: a face normal along the file's +X, under a quarter turn about Z, points along
+/// +Y.
+#[test]
+fn authored_normals_turn_with_their_prim_when_flattened() {
+    let layer = "#usda 1.0\n(\n    metersPerUnit = 0.001\n    upAxis = \"Z\"\n)\ndef Xform \"Turned\"\n{\n    \
+        float xformOp:rotateZ = 90\n    uniform token[] xformOpOrder = [\"xformOp:rotateZ\"]\n    def Mesh \"Tet\"\n    {\n        \
+        int[] faceVertexCounts = [3, 3, 3, 3]\n        int[] faceVertexIndices = [0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3]\n        \
+        point3f[] points = [(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]\n        \
+        normal3f[] normals = [(1, 0, 0), (1, 0, 0), (1, 0, 0), (1, 0, 0)] (\n            interpolation = \"vertex\"\n        )\n    }\n}\n";
+    let (mut g, _) = crate::read_usd(layer.as_bytes(), "turned.usda").unwrap();
+    let FeatureKind::MeshImport { meshes, .. } = &g.feature.kind else { panic!() };
+    assert!(!meshes[0].corner_normals.is_empty(), "the file's normals are read");
+    g.flatten();
+    let FeatureKind::MeshImport { meshes, .. } = &g.feature.kind else { panic!() };
+    for n in meshes[0].corner_normals.as_chunks::<3>().0 {
+        assert!(n[0].abs() < 1e-6 && (n[1] - 1.0).abs() < 1e-6 && n[2].abs() < 1e-6, "{n:?}");
+    }
+}
+
 /// What cannot be read is refused or left out with a message, never a panic.
 #[test]
 fn other_contents_and_empty_layers_are_refused() {

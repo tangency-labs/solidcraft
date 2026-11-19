@@ -39,6 +39,7 @@ canvas.calibrate                  reference images, and sketches traced from the
 canvas.decal                      reference images, and sketches traced from them (sketch only)
 canvas.delete                     reference images, and sketches traced from them (sketch only)
 canvas.edit                       reference images, and sketches traced from them (sketch only)
+canvas.frame_sketch               reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.insert                     reference images, and sketches traced from them (sketch only)
 canvas.straighten                 reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
@@ -358,6 +359,7 @@ settings.profile.rename           settings profiles: preferences saved, applied 
 settings.profile.save             settings profiles: preferences saved, applied and shared
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
+sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
 sheet.rules                       a listing of sheet metal rules
 sketch.arc.tangent                2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain             2D sketch only (the sketch solver and engine tests); no kernel operation

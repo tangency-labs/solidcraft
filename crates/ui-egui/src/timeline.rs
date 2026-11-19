@@ -1626,8 +1626,15 @@ mod tests {
         crate::i18n::install();
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
         let _english = solidcraft_ui_text::scope("en");
-        let issue =
-            |kind, item: Option<u64>, faces, detail: &str| ImportIssue { kind, item, part: String::new(), faces, times: 1, detail: detail.into() };
+        let issue = |kind, item: Option<u64>, faces, detail: &str| ImportIssue {
+            kind,
+            item,
+            part: String::new(),
+            paths: Vec::new(),
+            faces,
+            times: 1,
+            detail: detail.into(),
+        };
         let report = ImportReport {
             parts: 43,
             solids: 40,
@@ -1652,6 +1659,7 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            single_root: true,
             ..Default::default()
         };
         let summary = super::import_summary(&report);
@@ -1664,8 +1672,13 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired =
-            ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")], ..Default::default() };
+        let repaired = ImportReport {
+            parts: 1,
+            solids: 1,
+            issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")],
+            single_root: true,
+            ..Default::default()
+        };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -4005,8 +4018,18 @@ mod tests {
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
         let h = two_boxes(false);
         let plain = h.app.session.model.results[0].clone();
-        let issue = ImportIssue { kind: IssueKind::Repaired, item: Some(3), part: String::new(), faces: 0, times: 1, detail: "solid #3: …".into() };
-        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, ..Default::default() }));
+        let issue = ImportIssue {
+            kind: IssueKind::Repaired,
+            item: Some(3),
+            part: String::new(),
+            paths: Vec::new(),
+            faces: 0,
+            times: 1,
+            detail: "solid #3: …".into(),
+        };
+        let report = |issues: Vec<ImportIssue>| {
+            Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, single_root: true, ..Default::default() }))
+        };
         let with = |warning: Option<&str>, import_report| {
             let mut result = plain.clone();
             result.warning = warning.map(str::to_string);

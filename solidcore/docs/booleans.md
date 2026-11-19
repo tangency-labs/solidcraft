@@ -710,9 +710,13 @@ volume, the same edges on the round, and every such edge on S within its own tol
 - A traced SSI curve's UV curves are cubic Hermite interpolants, checked at samples and not certified
   ([ssi.md](ssi.md) §6.1); the imprint passes a copy of them to `MakeEdgeInFace`
   (`topology_intersector/p1.rs`, "Intersection trims").
-- A face B gives to A is built without B's own trims and gets new ones, unless
-  `keep_operand_uv_trims` copies them where the new edge runs on a copy of B's edge curve
-  (`merge/p2.rs`).
+- A face B gives to A is built without B's own trims; they are copied over where the new edge
+  runs on a copy of B's edge curve over the same interval (`merge/p2.rs`), and the other edge
+  uses get new ones. The copy is made only onto an edge `MergeEdge` copied from B's own edge
+  (an edge the intersection made keeps its dropped trim, unless B's trim ends at a
+  singularity of the surface, where the drop finds no parameter), only when the new edge's
+  tolerance is at least B's, never for a line edge on a plane (`Plane::drop_curve` is exact
+  there), and only when the surface copy keeps B's parameterisation.
 
 ## 8. Failure modes and refusals
 
@@ -779,8 +783,8 @@ A reviewer can check each of these on a change to the boolean.
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
-- Opt-in fix for the cases in §5, §6 and §8: `keep_operand_uv_trims`
-  (`solidcore/src/kernel.rs`). Always on: the union's solid-leak refusal (WR-619), a boolean
+- No opt-in fixes are left for the cases in §5, §6 and §8. Always on: the operand's exact trims on
+  a face B gives to A (WR-361), the union's solid-leak refusal (WR-619), a boolean
   vertex placed again by a later edge crossing with a smaller misplacement bound (gap over sine) only
   where a certificate proves the move stays one point (WR-410, §5), the outer shell first, the clean-up of slits and the split of a coincident
   definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
