@@ -273,6 +273,22 @@ fn zero_gap_keeps_a_degenerate_leading_box_in_place_on_repeat() {
     assert!(again[0].len() <= 1e-12, "{again:?}");
 }
 
+/// A gap far below what a double can add to the edge must not let the next box start level with
+/// a point: a repeat would then keep the box and move the point across it.
+#[test]
+fn a_gap_too_small_to_show_keeps_the_stack_order_on_repeat() {
+    for (axis, boxes) in
+        [(Axis::X, [bx(10.0, 0.0, 20.0, 1.0), bx(1.0, 0.0, 1.0, 1.0)]), (Axis::Y, [bx(0.0, -20.0, 1.0, -10.0), bx(0.0, -1.0, 1.0, -1.0)])]
+    {
+        let moves = space(&boxes, axis, 1e-20).unwrap();
+        assert_eq!(moves[1], Vec2::ZERO, "the leading point stays");
+        let once = apply(&boxes, &moves);
+        let again = space(&once, axis, 1e-20).unwrap();
+        assert_eq!(again[1], Vec2::ZERO, "{axis:?}: the point still leads");
+        assert!(again[0].len() <= 1e-12, "{axis:?}: {again:?}");
+    }
+}
+
 #[test]
 fn bad_boxes_are_refused() {
     let bad = |b: Aabb2| {

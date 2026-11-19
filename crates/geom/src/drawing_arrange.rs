@@ -253,7 +253,11 @@ pub fn space(boxes: &[Aabb2], axis: Axis, gap_mm: f64) -> Result<Vec<Vec2>> {
             if start + by < at { by.next_up() } else { by }
         });
         *m = shift(b, axis, sign * by)?;
-        next = Some(end + by + gap_mm);
+        let edge = end + by;
+        let after = edge + gap_mm;
+        // A gap above 0 that is too small to show at this edge still puts the next box after it,
+        // so a repeat reads the same order.
+        next = Some(if gap_mm > 0.0 && after <= edge { edge.next_up() } else { after });
     }
     Ok(moves)
 }
