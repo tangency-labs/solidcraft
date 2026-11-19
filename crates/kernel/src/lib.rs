@@ -230,7 +230,7 @@ pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
-pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
+pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use solidcore_tess::{DisplayGuide, DisplayGuidePoint, GuidedMesh};
 pub use solidcraft_smlib::hold_a_kernel;
@@ -242,7 +242,7 @@ pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
 pub use step_in::{
-    ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
+    ImportChecks, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
     step_import_shared, step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
@@ -265,7 +265,7 @@ pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::{
     fitted_nurbs_region_sheet, fitted_nurbs_sheet, nurbs_region_sheet, nurbs_region_sheet_with_planar_support, nurbs_sheet, tspline_sheet,
 };
-pub use validation::{KeptCheck, Validation, check_kept, detach_kept, validating};
+pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};
 pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -284,6 +284,10 @@ pub enum KernelError {
     /// A lip's band that leaves no sound face beside it.
     #[error("the operation failed: raising a band: {0}")]
     Lip(#[from] LipRefusal),
+    /// A repair that has nothing it can do: the part needs none, or SMLib's check fails it for
+    /// what the repair does not fix.
+    #[error("the operation failed: {0}")]
+    Repair(#[from] RepairRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

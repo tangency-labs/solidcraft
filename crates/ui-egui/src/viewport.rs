@@ -994,22 +994,20 @@ fn drawn_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, opaque: boo
         .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
 }
 
-/// Whether `b` is a copy of a body the shown world places more than once (a component placed
+/// Whether `b` is a copy of a body the session's world places more than once (a component placed
 /// several times, a pattern's copies): drawn as an instance of its definition rather than from a
-/// plan of its own ([`drawn_plan`]). Counted once per world state.
+/// plan of its own ([`drawn_plan`]). Counted once per world state, over the whole world as opening
+/// counts it ([`crate::open_meshing::warm`]): while a design opens the shown world holds only the
+/// copies meshed so far, and a copy shown before its part's other copies was planned here, on the
+/// window's thread.
 fn repeated_copy(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool {
     let Some(definition) = b.placed_definition() else { return false };
-    let world = crate::open_meshing::shown_world(app);
+    let world = crate::open_meshing::session_world(&app.session);
     let Ok(mut cached) = app.viewport.repeated.lock() else { return false };
     let repeated = match cached.as_ref().filter(|(st, _)| std::sync::Arc::ptr_eq(st, &world)) {
         Some((_, set)) => set.clone(),
         None => {
-            let mut seen = std::collections::HashMap::<usize, usize>::new();
-            for id in world.bodies.iter().filter_map(solidcraft_engine::doc::ModelBody::placed_definition) {
-                *seen.entry(id).or_default() += 1;
-            }
-            let set: std::sync::Arc<std::collections::HashSet<usize>> =
-                std::sync::Arc::new(seen.into_iter().filter(|(_, n)| *n > 1).map(|(id, _)| id).collect());
+            let set = std::sync::Arc::new(crate::open_meshing::repeated_parts(&world));
             *cached = Some((world, set.clone()));
             set
         }

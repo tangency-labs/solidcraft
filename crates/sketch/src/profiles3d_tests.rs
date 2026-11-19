@@ -213,6 +213,41 @@ fn a_closed_wire_whose_quarter_points_line_up_is_a_profile() {
 }
 
 #[test]
+fn every_tooth_of_a_zigzag_wire_is_a_profile() {
+    // One 3D polyline zigzags from base points on the x axis to apexes leaning out to both sides,
+    // and in-plane lines join the base points. Each tooth is a triangle in a plane of its own,
+    // which holds an apex that is none of the wire's key points (ends, quarters, farthest), so a
+    // sketch this small spans planes by all its points.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let lean = [5.0, -5.0, 8.0, -8.0];
+    let mut pts = Vec::new();
+    let mut base = Vec::new();
+    for k in 0..=4 {
+        let x = 10.0 * k as f64;
+        base.push(sk.add_point(Vec2 { x, y: 0.0 }, None).unwrap());
+        pts.push(Vec3 { x, y: 0.0, z: 0.0 });
+        if let Some(&y) = lean.get(k) {
+            pts.push(Vec3 { x: x + 5.0, y, z: 10.0 });
+        }
+    }
+    for k in 0..4 {
+        sk.add_curve(CurveKind::Line { a: base[k], b: base[k + 1] }, None).unwrap();
+    }
+    sk.wires.push(wire("w", &pts));
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 4, "one triangle per tooth: {:?}", ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>());
+    // Base 10; the apex is sqrt(lean² + 10²) from the base line.
+    let mut want: Vec<f64> = lean.iter().map(|y: &f64| 5.0 * (y * y + 100.0).sqrt()).collect();
+    let mut got: Vec<f64> = ps.iter().map(|p| p.area).collect();
+    want.sort_by(f64::total_cmp);
+    got.sort_by(f64::total_cmp);
+    for (g, w) in got.iter().zip(&want) {
+        assert!((g - w).abs() < 1e-6, "areas {got:?} vs {want:?}");
+    }
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();
