@@ -199,7 +199,7 @@ impl JsonSchema for GeometryParam {
         json_schema!({
             "description": "For an OpenUSD file: meshes (the default) reads its meshes as mesh bodies; exact reads its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies. Matching ignores case and surrounding spaces.",
             "type": "string",
-            "enum": ["meshes", "exact"]
+            "pattern": words_pattern(&["meshes", "exact"], true)
         })
     }
 }
