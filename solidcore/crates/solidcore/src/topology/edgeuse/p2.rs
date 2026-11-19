@@ -69,11 +69,11 @@
 //!   polygon, as the fork (tangency-labs/smlib 666242b); upstream reads the unset
 //!   values. A control point whose angles cannot be measured (a zero polygon segment)
 //!   is skipped and the scan goes on, where the fork ends it with no dog-leg.
-//! - **Narrow domains (WR-18540).** `IsEdgeuseSideInSurface` does not count a pair of
-//!   opposite sides of the face's domain for a sample within the side band of both: the
-//!   domain is narrower there than the band (a sliver triangle's plane, fitted to the
-//!   face), and upstream then reads one of the face's correctly turned edges as running
-//!   the wrong way along a side.
+//! - **Narrow domains (WR-18540).** `IsEdgeuseSideInSurface` takes a sample within the
+//!   side band of two opposite sides of the face's domain to lie on the nearer of them (on
+//!   neither when midway). Upstream keeps both, and its direction test then holds every
+//!   edge of a domain narrower than twice the band (a sliver triangle's plane, fitted to
+//!   the face) to U-min or V-min, failing a correctly turned edge along the other side.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -968,7 +968,7 @@ pub struct EdgeuseSide {
 /// order) onto the face's surface and classifies them against the natural UV domain's
 /// sides (to twice the surface zone tolerance mapped to UV in U and in V; not upstream: a
 /// periodic side, a seam, to the edge's own tolerance, docs/booleans.md "Seams and poles";
-/// nor upstream: two opposite sides both that close to a sample do not count for it, WR-18540).
+/// nor upstream: a sample that close to two opposite sides lies on the nearer, WR-18540).
 /// A sample off every side answers `true` at once. Otherwise the edge use runs along a
 /// side: a degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
 /// the UV steps must run the way that side's inside requires (all but one of them;
@@ -1124,11 +1124,37 @@ pub fn is_edgeuse_side_in_surface(
         // and V directions)
         let uv_loc_u = uv_domain.point_boundaries(uv_drop_point, tol_2d_u) & (SS_UMIN | SS_UMAX);
         let uv_loc_v = uv_domain.point_boundaries(uv_drop_point, tol_2d_v) & (SS_VMIN | SS_VMAX);
-        // (not upstream, WR-18540: a sample within the band of both opposite sides lies on a
-        // domain narrower than the band, and those sides tell nothing of the side the edge's
-        // inside is on, so neither counts for it)
-        let neither = |loc: u32, both: u32| if loc == both { 0 } else { loc };
-        let uv_loc = neither(uv_loc_u, SS_UMIN | SS_UMAX) | neither(uv_loc_v, SS_VMIN | SS_VMAX);
+        // (not upstream, WR-18540: a sample within the band of both opposite sides, where the
+        // domain is narrower than twice the band, lies on the nearer of the two, and on neither
+        // when it is midway; upstream keeps both, and its direction test then holds the edge to
+        // the side it tests first, U-min before U-max, V-min before V-max)
+        let nearer = |loc: u32, lo: u32, hi: u32, to_lo: f64, to_hi: f64| {
+            if loc != lo | hi {
+                loc
+            } else if to_lo < to_hi {
+                lo
+            } else if to_hi < to_lo {
+                hi
+            } else {
+                0
+            }
+        };
+        let (p, d) = (uv_drop_point, &uv_domain);
+        let uv_loc_u = nearer(
+            uv_loc_u,
+            SS_UMIN,
+            SS_UMAX,
+            (p.x - d.u_min()).abs(),
+            (d.u_max() - p.x).abs(),
+        );
+        let uv_loc_v = nearer(
+            uv_loc_v,
+            SS_VMIN,
+            SS_VMAX,
+            (p.y - d.v_min()).abs(),
+            (d.v_max() - p.y).abs(),
+        );
+        let uv_loc = uv_loc_u | uv_loc_v;
 
         // save the drop and classify data per sample point
         edge_box_3d.add_point(edge_point);
