@@ -171,7 +171,7 @@ fn invalid_parameter_name_stays_editable_after_leaving_it() {
 
 #[test]
 fn parameter_add_resets_expression_for_next_row() {
-    for (units, selected) in [("mm", 0), ("cm", 1), ("m", 2), ("in", 3), ("ft", 4)] {
+    for (units, selected) in [("mm", 0), ("cm", 1), ("m", 2), ("in", 5), ("ft", 7)] {
         let mut h = open_in_units(units);
         let d = h.app.params.as_ref().unwrap();
         assert!(d.new_expr.is_empty(), "{units}: the initial draft is blank");
