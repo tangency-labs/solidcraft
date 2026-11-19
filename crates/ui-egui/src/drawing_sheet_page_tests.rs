@@ -534,6 +534,53 @@ fn hover_lights_a_drawing_dimension_as_a_sketch_does() {
     assert_eq!(hover["lit"], true, "{hover}");
 }
 
+/// The group the sheet draws for object `object` now.
+fn drawn_group(h: &mut Harness, object: u64) -> Group {
+    settle(h);
+    let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+    let view = drawing_scene::extract(&mut h.app.session, sheet).unwrap();
+    view.scene.groups.iter().find(|group| group.object == object).unwrap().clone()
+}
+
+/// What a group draws, whatever its object's id: the preview's object is a draft's.
+fn drawn_items(group: &Group) -> String {
+    serde_json::to_string(&group.items).unwrap()
+}
+
+/// Placing a dimension previews it as it will be: the preview is the placed dimension's own group,
+/// item for item (its lines, arrowheads and text, their sizes, weights and places), not a smaller
+/// stand-in.
+#[test]
+fn a_dimension_previews_exactly_as_it_is_placed() {
+    let (mut h, front) = plate_sheet();
+    for (kind, drag) in [
+        (json!({"length": {"edge": [50, 0, 0], "direction": "aligned"}}), json!({"line_through_mm": [140, 160]})),
+        (json!({"length": {"edge": [0, 0, 10], "direction": "aligned"}}), json!({"line_through_mm": [100, 180]})),
+    ] {
+        let mut params = json!({"view": front, "kind": kind});
+        for (key, value) in drag.as_object().unwrap() {
+            params[key] = value.clone();
+        }
+        let preview = solidcraft_engine::cmd::drawing_dimension_preview(&h.app.session, &params).unwrap();
+        let [shown] = &preview.groups[..] else { panic!("one group: {:?}", preview.groups.len()) };
+        let added = h.app.run("drawing.dimension.add", params).unwrap();
+        let id = solidcraft_engine::doc::ids::decode(added["dimension"].as_str().unwrap()).unwrap();
+        assert_eq!(drawn_items(shown), drawn_items(&drawn_group(&mut h, id)), "the preview is what was placed");
+    }
+}
+
+/// A note previews as it will be placed: in the drawing's lettering at its paper size, item for item.
+#[test]
+fn a_note_previews_exactly_as_it_is_placed() {
+    let (mut h, _) = plate_sheet();
+    let params = json!({"anchor": {"sheet": "Sheet 1"}, "at": [300, 230], "content": "DEBURR ALL EDGES"});
+    let preview = solidcraft_engine::drawing_scene::note_preview_scene(&h.app.session, &params).unwrap();
+    let [shown] = &preview.groups[..] else { panic!("one group: {:?}", preview.groups.len()) };
+    let added = h.app.run("drawing.note.add", params).unwrap();
+    let id = solidcraft_engine::doc::ids::decode(added["note"].as_str().unwrap()).unwrap();
+    assert_eq!(drawn_items(shown), drawn_items(&drawn_group(&mut h, id)), "the preview is what was placed");
+}
+
 /// Frames until no view or dimension is waiting to be drawn.
 fn settle(h: &mut Harness) {
     for _ in 0..5_000 {
