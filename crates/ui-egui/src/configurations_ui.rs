@@ -249,6 +249,10 @@ pub(super) fn configurations_rows(
                                     if let Some(on) = toggled {
                                         rule_editor.new_values.insert(column.clone(), on.to_string());
                                     }
+                                    // Enter in the box adds the row, as it does from the draft's value cells.
+                                    let focused = response.has_focus() || response.lost_focus();
+                                    left |= response.lost_focus();
+                                    commit |= focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                                     return;
                                 }
                                 let (response, choice) = value_control(ui, ui.scope_id().with(column), &mut value, kind, &material_names);
