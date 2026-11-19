@@ -933,6 +933,7 @@ fn rust_with_fixes(
         fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
         fit_setback: -1.0,
         rollover_adjusting: false,
+        rolled_beside_band: false,
     };
     // The executive constructor sets this after constructing its SmMerge base.
     executive.intersector.ignore_tangency = true;
