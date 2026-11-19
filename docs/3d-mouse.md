@@ -93,3 +93,4 @@ know, is ignored:
 
 Values that aren't finite numbers count as none, and each is limited to ±10 000 per message and per
 frame. The protocol is the one the MAKMOUSE driver app uses for its add-ins.
+
