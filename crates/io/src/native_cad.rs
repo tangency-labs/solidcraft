@@ -34,10 +34,69 @@ pub fn detects_freecad(bytes: &[u8]) -> bool {
     matches!(solidcraft_kernel::guard("cadmpeg detect", || Ok(convert::contents_are_freecad(bytes))), Ok(true))
 }
 
+/// A file read by cadmpeg into an import kept as B-rep records.
+#[derive(Clone, Debug)]
+pub struct RecordsRead {
+    /// The records; their `system` is the program that wrote the file, named as SolidCraft's own
+    /// reader names it: a STEP header's originating system, an IGES file's native system ID.
+    pub records: solidcraft_kernel::ImportRecords,
+    /// What cadmpeg could not bring over.
+    pub warnings: Vec<String>,
+    /// Whether the contents are a FreeCAD design.
+    pub freecad: bool,
+    /// A STEP file's FILE_NAME preprocessor version and FILE_DESCRIPTION text, as SolidCraft's
+    /// own reader reads them (with the program, they say whether the file has Y up); empty for
+    /// other files.
+    pub preprocessor: String,
+    pub description: String,
+}
+
+/// The program that wrote a file, as its header names it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Producer {
+    system: String,
+    preprocessor: String,
+    description: String,
+}
+
+/// Bytes at the start of a STEP file read for its header, at most.
+const STEP_HEADER_BYTES: usize = 256 << 10;
+/// `ENDSEC` keywords tried as the end of a STEP file's header, at most.
+const STEP_HEADER_ENDS: usize = 64;
+
+/// A STEP file's FILE_NAME originating system and preprocessor version and its FILE_DESCRIPTION,
+/// read by SolidCraft's own STEP parser from the file's HEADER section alone, so they are exactly
+/// what a read of the whole file with SolidCraft's reader gives. cadmpeg's STEP decoder (0.6.12)
+/// checks the header and keeps none of it. The header ends at an `ENDSEC`; one inside a string or
+/// comment is not it, so each is tried in turn until the header parses. Empty when the start of
+/// the file holds no header that parses.
+fn step_producer(bytes: &[u8]) -> Producer {
+    let head = match bytes.get(..STEP_HEADER_BYTES) {
+        // The whole prefix, a header followed by a long line included; only a UTF-8 character
+        // the limit splits is left out, so the prefix decodes as the whole file does.
+        Some(head) => match std::str::from_utf8(head) {
+            Err(e) if e.error_len().is_none() => head.get(..e.valid_up_to()).unwrap_or(head),
+            _ => head,
+        },
+        None => bytes,
+    };
+    let text = crate::step_text(head);
+    let mut from = 0;
+    for _ in 0..STEP_HEADER_ENDS {
+        let Some(end) = text.get(from..).and_then(|rest| rest.find("ENDSEC")).map(|at| from + at + "ENDSEC".len()) else { break };
+        let header = format!("{};\nEND-ISO-10303-21;\n", text.get(..end).unwrap_or_default());
+        if let Ok(ex) = solidcore_record::step::p21::parse(&header) {
+            return Producer { system: ex.originating_system, preprocessor: ex.preprocessor, description: ex.description };
+        }
+        from = end;
+    }
+    Producer::default()
+}
+
 /// Read a FreeCAD or Rhino file (`file` is its name) into an import kept as B-rep records,
 /// with what cadmpeg could not bring over, and whether its contents are a FreeCAD design. Panics
 /// inside cadmpeg or the reader become errors.
-pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<RecordsRead, String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     solidcraft_kernel::guard("cadmpeg import", || convert::records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
         |e| match e {
@@ -51,7 +110,7 @@ pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel
 /// B-rep records, as FreeCAD and Rhino files are read: an alternative to SolidCraft's own STEP
 /// reader, chosen by the caller ([`crate::StepReader`]), to compare the two. Panics inside cadmpeg
 /// or the reader become errors.
-pub fn cadmpeg_step_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+pub fn cadmpeg_step_records(bytes: &[u8], file: &str) -> Result<RecordsRead, String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     solidcraft_kernel::guard("cadmpeg STEP import", || convert::step_records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
         |e| match e {
@@ -65,7 +124,7 @@ pub fn cadmpeg_step_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kern
 /// B-rep records, as a STEP file is read with [`cadmpeg_step_records`]: the alternative to
 /// SolidCraft's own IGES reader, chosen by the caller ([`crate::StepReader`]). Panics inside
 /// cadmpeg or the reader become errors.
-pub fn cadmpeg_iges_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+pub fn cadmpeg_iges_records(bytes: &[u8], file: &str) -> Result<RecordsRead, String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     solidcraft_kernel::guard("cadmpeg IGES import", || convert::iges_records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
         |e| match e {
@@ -646,7 +705,7 @@ mod convert {
 
     /// A FreeCAD or Rhino file (`name`) read into an import kept as records, with what cadmpeg
     /// could not bring over, and whether the contents are a FreeCAD design.
-    pub(super) fn records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    pub(super) fn records(name: &str, bytes: &[u8]) -> Result<super::RecordsRead, String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
             return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
@@ -655,7 +714,7 @@ mod convert {
     }
 
     /// A STEP file (`name`) read by cadmpeg's STEP decoder into an import kept as records.
-    pub(super) fn step_records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    pub(super) fn step_records(name: &str, bytes: &[u8]) -> Result<super::RecordsRead, String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !matches!(ext.as_str(), "step" | "stp") {
             return Err(format!("{name}: not a STEP file (.step or .stp)"));
@@ -664,7 +723,7 @@ mod convert {
     }
 
     /// An IGES file (`name`) read by cadmpeg's IGES decoder into an import kept as records.
-    pub(super) fn iges_records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    pub(super) fn iges_records(name: &str, bytes: &[u8]) -> Result<super::RecordsRead, String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !matches!(ext.as_str(), "igs" | "iges") {
             return Err(format!("{name}: not an IGES file (.igs or .iges)"));
@@ -674,10 +733,10 @@ mod convert {
 
     /// `bytes` decoded by the cadmpeg codec they are, if it is one of `accepted`, and read into
     /// records.
-    fn records_of(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    fn records_of(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<super::RecordsRead, String> {
         let (format, decoded) = decode_at(name, ext, bytes, accepted, DecodeDepth::Full)?;
         let (ir, report, _) = decoded.into_parts();
-        records_decoded(name, &format, ir, &report, bytes.len())
+        records_decoded(name, &format, ir, &report, bytes)
     }
 
     /// An OpenUSD file (`name`) read by cadmpeg's USD codec into an import kept as records: each
@@ -695,18 +754,18 @@ mod convert {
         let (mut ir, report, _) = decoded.into_parts();
         let y_up = super::usd::says_y_up(&ir);
         super::usd::colours_to_srgb(&mut ir);
-        let (records, warnings, _) = records_decoded(name, &format, ir, &report, bytes.len())?;
-        Ok((records, warnings, y_up))
+        let read = records_decoded(name, &format, ir, &report, bytes)?;
+        Ok((read.records, read.warnings, y_up))
     }
 
-    /// A model cadmpeg decoded (`format`, from `len` bytes of file `name`) read into records.
+    /// A model cadmpeg decoded (`format`, from `bytes`, the contents of file `name`) read into records.
     fn records_decoded(
         name: &str,
         format: &str,
         mut ir: CadIr,
         report: &cadmpeg_ir::report::decode::DecodeReport,
-        len: usize,
-    ) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        bytes: &[u8],
+    ) -> Result<super::RecordsRead, String> {
         let policy = policy();
         hide_body_members(&mut ir);
         if !report.geometry_transferred() {
@@ -716,7 +775,7 @@ mod convert {
 
         // Validate the neutral model, as cadmpeg's own conversion does.
         let arena = DecodeArena::new();
-        let ctx = DecodeContext::for_loaded_input(&arena, &policy, len as u64).map_err(|e| e.to_string())?;
+        let ctx = DecodeContext::for_loaded_input(&arena, &policy, bytes.len() as u64).map_err(|e| e.to_string())?;
         let validation = validate_neutral_for_decode(&ctx, &ir, Vec::new()).map_err(|e| e.to_string())?;
         ctx.finish_session().map_err(|e| e.to_string())?;
         warnings.extend(validation.findings.iter().map(|f| format!("{}: {}", f.severity, f.message)));
@@ -725,16 +784,19 @@ mod convert {
         }
 
         let product = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
-        let system = match format {
-            "fcstd" => "FreeCAD",
-            "rhino" => "Rhino",
-            "usd" => "OpenUSD",
-            "step" | "iges" => "",
-            other => other,
+        // The program that wrote the file, named as SolidCraft's own reader names it.
+        let producer = match format {
+            "step" => super::step_producer(bytes),
+            "iges" => super::Producer { system: iges_system(&ir), ..Default::default() },
+            "fcstd" => super::Producer { system: "FreeCAD".into(), ..Default::default() },
+            "rhino" => super::Producer { system: "Rhino".into(), ..Default::default() },
+            "usd" => super::Producer { system: "OpenUSD".into(), ..Default::default() },
+            other => super::Producer { system: other.into(), ..Default::default() },
         };
         // A Rhino object's colour is often its layer's default (black), which is not how Rhino
         // shades it; STEP's, IGES's and OpenUSD's colours are how the part looks.
-        let (mut records, origins) = super::traced_records(&ir, &product, system, matches!(format, "step" | "iges" | "usd"), format == "usd");
+        let (mut records, origins) =
+            super::traced_records(&ir, &product, &producer.system, matches!(format, "step" | "iges" | "usd"), format == "usd");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
@@ -754,7 +816,55 @@ mod convert {
                 records = solidcraft_kernel::records_noted(records, &imp, notes).map_err(|e| e.to_string())?.0;
             }
         }
-        Ok((records, warnings, format == "fcstd"))
+        Ok(super::RecordsRead {
+            records,
+            warnings,
+            freecad: format == "fcstd",
+            preprocessor: producer.preprocessor,
+            description: producer.description,
+        })
+    }
+
+    /// The program that wrote an IGES file cadmpeg decoded into `ir`, as SolidCraft's own reader
+    /// names it ([`solidcraft_kernel::iges_native_system`]): the global section's native system
+    /// ID. cadmpeg (0.6.12) checks that field but keeps it nowhere in its model; it does keep every
+    /// physical card of the file in its `iges` namespace (`cards`: each card's section, byte
+    /// offset and bytes), so the global section's cards are read from there. Empty when they are
+    /// not there.
+    fn iges_system(ir: &CadIr) -> String {
+        let cards = ir.native.namespace("iges").and_then(|n| n.arenas().get("cards"));
+        // The arena is in the order of the cards' ids, not the file's: each global card is put
+        // back at its place in the file (its byte offset).
+        let mut lines: Vec<(u64, Vec<u8>)> = Vec::new();
+        for card in cards.into_iter().flatten() {
+            if card.field("section").as_ref().and_then(serde_json::Value::as_str) != Some("global") {
+                continue;
+            }
+            let offset = card.field("offset").as_ref().and_then(serde_json::Value::as_u64);
+            let payload = card.field("payload").as_ref().and_then(serde_json::Value::as_str).and_then(unhex);
+            if let (Some(offset), Some(payload)) = (offset, payload) {
+                lines.push((offset, payload));
+            }
+        }
+        lines.sort_by_key(|(offset, _)| *offset);
+        let mut global = Vec::new();
+        for (_, line) in lines {
+            global.extend_from_slice(&line);
+            global.push(b'\n');
+        }
+        solidcraft_kernel::iges_native_system(&crate::step_text(&global))
+    }
+
+    /// Bytes written as two hexadecimal digits each (cadmpeg's native byte payloads).
+    fn unhex(text: &str) -> Option<Vec<u8>> {
+        let digit = |b: u8| (b as char).to_digit(16);
+        text.as_bytes()
+            .chunks(2)
+            .map(|pair| match pair {
+                [hi, lo] => Some((digit(*hi)? * 16 + digit(*lo)?) as u8),
+                _ => None,
+            })
+            .collect()
     }
 }
 
