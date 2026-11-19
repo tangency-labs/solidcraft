@@ -191,6 +191,24 @@ fn stl_export_is_closed_where_faces_meet() {
 }
 
 #[test]
+fn fine_stl_of_crossed_pointed_screw_keeps_its_closed_edges() {
+    use solidcraft_io::{Format, MeshQuality, export_with_quality, read_stl};
+
+    let mut s = Session::default();
+    let mut recipe: Value = serde_json::from_str(include_str!("../../../../examples/pointed-screw.json")).unwrap();
+    let commands = recipe["commands"].as_array_mut().unwrap();
+    let thread = commands.iter_mut().find(|c| c["command"] == "solid.thread").unwrap();
+    thread["params"]["hand"] = json!("both");
+    for command in commands {
+        run(&mut s, command["command"].as_str().unwrap(), command["params"].clone());
+    }
+    let bytes = export_with_quality(&s.model.state(), &[], Format::StlBinary, "Crossed M8 screw", &s.doc.metadata, MeshQuality::Fine).unwrap();
+    let triangles = read_stl(&bytes).unwrap();
+    assert!(!triangles.is_empty());
+    assert!(solidcraft_kernel::triangle_edges_closed(triangles.into_iter().map(|t| Some(t.map(|p| p.map(|x| (x + 0.0).to_bits()))))));
+}
+
+#[test]
 fn save_mesh_rejects_unknown_format_and_slicer_without_writing() {
     let mut s = imported_box();
     // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solidcraft-save-mesh-<pid>.stl`, and

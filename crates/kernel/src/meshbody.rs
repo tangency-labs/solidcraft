@@ -203,15 +203,31 @@ pub(crate) fn mesh_ray(m: &TriMesh, o: Vec3, d: Vec3) -> Option<(f64, Vec3)> {
     Some((t, if !is_closed(m) && n.dot(d) > 0.0 { n * -1.0 } else { n }))
 }
 
-/// Every triangle side is shared by exactly two triangles in opposite directions.
-pub(crate) fn is_closed(m: &TriMesh) -> bool {
-    let mut count: HashMap<(u32, u32), i32> = HashMap::new();
-    for t in &m.triangles {
-        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-            *count.entry((a, b)).or_default() += 1;
+/// Whether each side is used by exactly two triangles in opposite directions.
+/// The caller supplies the vertex keys. A missing triangle or a repeated corner
+/// prevents the sides from forming a closed surface.
+pub fn triangle_edges_closed<V: Copy + Ord + std::hash::Hash>(triangles: impl IntoIterator<Item = Option<[V; 3]>>) -> bool {
+    let mut sides = HashMap::new();
+    for triangle in triangles {
+        let Some([a, b, c]) = triangle else { return false };
+        for (a, b) in [(a, b), (b, c), (c, a)] {
+            let (edge, direction) = match a.cmp(&b) {
+                std::cmp::Ordering::Less => ((a, b), 1),
+                std::cmp::Ordering::Greater => ((b, a), 2),
+                std::cmp::Ordering::Equal => return false,
+            };
+            let seen = sides.entry(edge).or_insert(0);
+            if *seen & direction != 0 {
+                return false;
+            }
+            *seen |= direction;
         }
     }
-    count.iter().all(|(&(a, b), &n)| n == 1 && count.get(&(b, a)) == Some(&1))
+    sides.values().all(|&seen| seen == 3)
+}
+
+pub(crate) fn is_closed(m: &TriMesh) -> bool {
+    triangle_edges_closed(m.triangles.iter().copied().map(Some))
 }
 
 impl Body {
