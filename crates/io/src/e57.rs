@@ -517,7 +517,7 @@ impl Roles {
             .chain(roles.color.iter().flatten())
             .chain([roles.invalid, roles.color_invalid, roles.intensity, roles.intensity_invalid].iter().flatten());
         if let Some(f) = used.filter_map(|i| fields.get(*i)).find(|f| f.kind == Kind::Other) {
-            return Err(invalid(format!("the field `{}` is not a number", short(&f.name))));
+            return Err(self::invalid(format!("the field `{}` is not a number", short(&f.name))));
         }
         Ok(roles)
     }
