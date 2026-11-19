@@ -342,6 +342,7 @@ mod sketch_text_handles;
 mod sketch_text_move;
 pub mod sketch_tools;
 mod sketch_transform_ui;
+mod sketch_view;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
@@ -597,6 +598,7 @@ pub struct Services {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PreSketchView {
     pub sketch: u64,
+    pub view: u64,
     pub before: Camera,
     pub facing: Camera,
 }
@@ -663,6 +665,7 @@ pub struct SolveApp {
     pub cam: Camera,
     /// A view change in progress (axis view, Home, Fit); any mouse navigation cancels it.
     pub cam_anim: Option<CameraAnim>,
+    pub(crate) sketch_camera_target: Option<Camera>,
     /// The custom view navigator's body (kept with the preferences).
     pub view_gizmo: view_gizmo::State,
     /// Seconds since start, as of this frame.
@@ -1065,6 +1068,7 @@ impl SolveApp {
             shell: Default::default(),
             cam: Camera::default(),
             cam_anim: None,
+            sketch_camera_target: None,
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
@@ -1600,6 +1604,17 @@ impl SolveApp {
         // The rules below name registered ids; a command spelled in another case is the same
         // command (the engine runs it), so it meets the same rules.
         let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+        crate::sketch_view::sync(self)?;
+        if matches!(id, "sketch.create" | "sketch.edit") {
+            let explicit = match params.get("view") {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(value.as_u64().ok_or_else(|| "view must be an unsigned integer identifying an open Model view".to_string())?),
+            };
+            let target = crate::sketch_view::prepare_start(self, explicit)?;
+            if let Some(params) = params.as_object_mut() {
+                params.insert("view".into(), json!(target));
+            }
+        }
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(self.tr("prefs.plugin_busy").into());
@@ -1764,6 +1779,10 @@ impl SolveApp {
             }
             match id {
                 "ui.appBarReset" => self.toolbar_custom.reset_app_bar(),
+                "sketch.create" | "sketch.edit" => {
+                    let before = self.settled_cam();
+                    self.look_at_opened_sketch(before);
+                }
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
@@ -1966,6 +1985,11 @@ impl SolveApp {
             Ok(v) if id == "view.navigator" => view_gizmo::command(self, &v),
             r => r,
         };
+        let r = r.and_then(|value| {
+            crate::sketch_view::sync(self)?;
+            Ok(value)
+        });
+        crate::sketch_view::project(self);
         self.finish_command(id, &r);
         plugin_events::command_completed(self, id, r.is_ok());
         if matches!(id, "select.mode" | "select.filter") {
@@ -3184,11 +3208,21 @@ impl SolveApp {
     /// opens" preference is off, and remember the view from `before` it and the one facing it for
     /// when the sketch ends (#7038). Returns whether the view turned.
     pub(crate) fn look_at_opened_sketch(&mut self, before: Camera) -> bool {
-        let turn = self.preferences.sketch_open_look_at;
-        if turn {
-            dialogs::look_at_sketch(self);
+        let Some((view, sketch)) = self.session.sketching_view.zip(self.session.active_sketch) else { return false };
+        if self.pre_sketch_cam.is_some_and(|pre| pre.sketch == sketch && pre.view == view) {
+            return false;
         }
-        self.pre_sketch_cam = self.session.active_sketch.map(|sketch| PreSketchView { sketch, before, facing: self.settled_cam() });
+        let painted = self.viewport.compass_view.unwrap_or_else(|| self.docs.views.active().id);
+        let turn = self.preferences.sketch_open_look_at;
+        let _ = documents::with_sketch_camera(self, view, |app| {
+            let before = if painted == view { before } else { app.settled_cam() };
+            if turn {
+                dialogs::look_at_sketch(app);
+            }
+            let facing = app.settled_cam();
+            app.sketch_camera_target = Some(facing);
+            app.pre_sketch_cam = Some(PreSketchView { sketch, view, before, facing });
+        });
         turn
     }
 
@@ -3280,10 +3314,13 @@ impl SolveApp {
             self.restore_component(pre.component, pre.path);
         }
         // Only the views saved when this sketch opened: one opened another way saved none.
-        if let Some(view) = self.pre_sketch_cam.take().filter(|v| Some(v.sketch) == open)
-            && let Some(to) = self.preferences.sketch_exit_view.view_after(view.before, view.facing, self.settled_cam())
-        {
-            self.animate_to(to);
+        if let Some(view) = self.pre_sketch_cam.take().filter(|v| Some(v.sketch) == open) {
+            let _ = documents::with_sketch_camera(self, view.view, |app| {
+                if let Some(to) = app.preferences.sketch_exit_view.view_after(view.before, view.facing, app.settled_cam()) {
+                    app.sketch_camera_target = Some(to);
+                    app.animate_to(to);
+                }
+            });
         }
     }
 

@@ -13,6 +13,7 @@ pub(crate) struct Windows {
     render_open: bool,
     embedded: bool,
     painting: Option<WindowId>,
+    scoped_focus: Option<u64>,
     painting_options: Option<WindowOptions>,
     pub(crate) painting_panels: bool,
     closing: Option<Option<u64>>,
@@ -204,8 +205,46 @@ pub(crate) fn remember_local_reorder(app: &mut SolveApp, window: WindowId) {
     }
 }
 
+/// The command's window or the last native window that gained focus, never a passive paint.
+pub(crate) fn focused_view(app: &SolveApp) -> u64 {
+    if let Some(view) = app.view_windows.scoped_focus {
+        return view;
+    }
+    if app.view_windows.is_child() {
+        return app.docs.views.active().id;
+    }
+    app.view_windows
+        .last_focus
+        .filter(|(tab, _)| *tab == app.docs.current_tab())
+        .and_then(|(_, window)| app.docs.views.views_of(window))
+        .map_or(app.docs.views.active().id, |views| views.active().id)
+}
+
 pub(crate) fn layout_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
     available_strip_views(app).collect()
+}
+
+pub(crate) fn sync_sketch_editing(app: &mut SolveApp, editing: Option<(u64, solidcraft_views::SketchSession)>) {
+    for (_, view) in &mut app.view_windows.foreign_views {
+        view.editing = editing.filter(|(id, _)| *id == view.id).map(|(_, editing)| editing);
+    }
+}
+
+fn set_camera_in(views: &mut ViewSet, id: u64, camera: solidcraft_viewport::Camera) -> bool {
+    if views.set_spec(id, solidcraft_viewport::ViewSpec::new(camera)) {
+        return true;
+    }
+    let windows: Vec<_> = views.windows().iter().map(|window| window.id).collect();
+    windows.into_iter().any(|window| views.window_mut(window).is_some_and(|window| set_camera_in(&mut window.views, id, camera)))
+}
+
+pub(crate) fn set_sketch_camera(app: &mut SolveApp, id: u64, camera: solidcraft_viewport::Camera) {
+    if set_camera_in(&mut app.docs.views, id, camera) {
+        return;
+    }
+    if let Some((_, view)) = app.view_windows.foreign_views.iter_mut().find(|(_, view)| view.id == id) {
+        view.spec = Some(solidcraft_viewport::ViewSpec::new(camera));
+    }
 }
 
 pub(crate) fn strip_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
@@ -649,9 +688,13 @@ pub(crate) fn with_strip<T>(
     if local != 0 {
         return Err("no_such_window".into());
     }
+    let scope_focus = focused_view(app);
     let mut window = app.docs.views.take_window(target).ok_or("no_such_window")?;
     let host_index = app.view_windows.hosts.iter().position(|host| host.tab == tab && host.id == target);
     let mut host = host_index.map_or_else(|| Host::new(tab, target), |index| app.view_windows.hosts.remove(index));
+    let previous_focus = app.view_windows.scoped_focus.replace(scope_focus);
+    let foreign: Vec<_> = available_strip_views(app).map(|(owner, view)| (owner, view.clone())).collect();
+    let previous_foreign = std::mem::replace(&mut app.view_windows.foreign_views, foreign);
     documents::park_active_look(app);
     app.view_windows.parked = Some((tab, app.docs.views.ids().collect()));
     std::mem::swap(&mut app.docs.views, &mut window.views);
@@ -668,9 +711,17 @@ pub(crate) fn with_strip<T>(
     app.ui.tab = ribbon;
     app.view_windows.painting = None;
     app.view_windows.parked = None;
+    for (_, view) in &app.view_windows.foreign_views {
+        if let Some(spec) = view.spec {
+            set_camera_in(&mut window.views, view.id, spec.camera);
+        }
+    }
+    app.view_windows.foreign_views = previous_foreign;
+    app.view_windows.scoped_focus = previous_focus;
     host.swap(app);
     std::mem::swap(&mut app.docs.views, &mut window.views);
     app.docs.views.put_window(window);
+    crate::sketch_view::project(app);
     documents::show_active_look(app);
     if let Some(index) = host_index {
         app.view_windows.hosts.insert(index, host);
@@ -695,6 +746,10 @@ fn close(app: &mut SolveApp, id: WindowId, toast: bool) -> Result<Vec<u64>, Stri
         return Err("cannot_close_main_window".into());
     }
     let window = app.docs.views.window(id).cloned().ok_or("no_such_window")?;
+    let closing: Vec<_> = window.views.ids().collect();
+    if !crate::sketch_view::before_close(app, &closing) {
+        return Err("sketch could not be finished".into());
+    }
     let ids = app.docs.views.close_window(id).ok_or("no_such_window")?;
     if toast {
         let tab = app.docs.active_tab();
@@ -1868,6 +1923,11 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 window.options = options;
             }
             app.view_windows.parked = None;
+            for (_, view) in &app.view_windows.foreign_views {
+                if let Some(spec) = view.spec {
+                    set_camera_in(&mut window.views, view.id, spec.camera);
+                }
+            }
             app.view_windows.foreign_views.clear();
             app.view_windows.setup_snapshot = None;
             window.level = if app.view_windows.clean.contains(&(tab, id)) {
@@ -1879,6 +1939,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             };
             host.swap(app);
             documents::exchange_window_views(app, tab, &mut window.views);
+            crate::sketch_view::project(app);
             if on_child_design {
                 documents::show_active_look(app);
             }

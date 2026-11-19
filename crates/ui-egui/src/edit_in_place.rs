@@ -396,7 +396,10 @@ fn take_refresh(app: &mut SolveApp) {
     let occurrences = &computed.doc.occurrences;
     computed.pending_moves =
         session.pending_moves.iter().filter(|(id, _)| occurrences.iter().any(|o| o.id == **id)).map(|(id, m)| (*id, *m)).collect();
-    session.accept_computed(computed);
+    if let Err(error) = session.accept_computed(computed) {
+        app.set_status(error.to_string(), true);
+        return;
+    }
     // Every link was read as its file was when the run started: one saved since is read again
     // when the assembly's tab comes back.
     crate::documents::record_stamps_at(app, &r.assembly, &r.stamps);

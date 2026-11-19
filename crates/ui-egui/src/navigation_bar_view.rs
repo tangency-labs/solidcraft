@@ -142,7 +142,7 @@ fn selected(app: &SolveApp, id: &str) -> bool {
 
 /// A sketch is always drawn orthographic, so the projection controls stay inert until it ends (#2144).
 fn projection_locked(app: &SolveApp) -> bool {
-    app.session.active_sketch.is_some()
+    crate::sketch_view::active_sketch(app).is_some()
 }
 
 /// #6143 will replace this single compatibility path with a registered command.
@@ -628,6 +628,23 @@ mod tests {
             assert_eq!(view.hidden, render);
             assert_eq!(view.tip, if render { app.tr("navbar.custom.hidden_render") } else { "Selection mode · Faces & edges" }, "{render}");
         }
+    }
+
+    #[test]
+    fn projection_lock_belongs_only_to_the_sketching_view() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let owner = app.session.sketching_view.unwrap();
+        let sketch = app.session.active_sketch;
+        let other = app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+        assert!(projection_locked(&app));
+        app.viewport.compass_view = Some(other);
+        assert!(!projection_locked(&app), "another view keeps its own projection control");
+        set_projection(&mut app, true);
+        assert!(app.ui.perspective);
+        assert_eq!(app.session.active_sketch, sketch);
+        app.viewport.compass_view = Some(owner);
+        assert!(projection_locked(&app), "the owning card retains sketch projection");
     }
 
     #[test]

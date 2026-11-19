@@ -686,15 +686,12 @@ pub fn cycle(app: &mut SolveApp, forward: bool) {
 }
 
 /// Make the app show `view` of the shown design: the one place a view change reaches the app, so
-/// a new kind plugs in here. Model leaves a sketch and the render workspace; Render enters the
+/// a new kind plugs in here. Model leaves the render workspace; Render enters the
 /// render workspace. Sheet and Animation have no workspace yet and change nothing: enter theirs
 /// here when they exist.
 pub fn apply_view(app: &mut SolveApp, view: &DesignView) {
     match view.kind {
         ViewKind::Model => {
-            if app.session.active_sketch.is_some() {
-                app.finish_sketch();
-            }
             if crate::render_workspace::active(app) {
                 enter_workspace(app, false);
             }
@@ -757,6 +754,9 @@ pub(crate) fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewS
             app.ui.perspective = perspective;
         }
         show_look(app, &active);
+    }
+    if let Err(error) = crate::sketch_view::sync(app) {
+        app.set_status(error, true);
     }
     result
 }
@@ -836,6 +836,7 @@ impl ViewLook {
 /// The gesture state used by the one navigation path while this view is in the app.
 #[derive(Default)]
 struct ViewMotion {
+    sketch_camera_target: Option<Camera>,
     cam_anim: Option<solidcraft_viewport::CameraAnim>,
     pending_fit: Option<(Camera, solidcraft_engine::geom::Aabb3, bool, bool)>,
     fit_waits: u32,
@@ -871,6 +872,7 @@ struct ViewMotion {
 
 impl ViewMotion {
     fn swap(&mut self, app: &mut SolveApp) {
+        std::mem::swap(&mut self.sketch_camera_target, &mut app.sketch_camera_target);
         std::mem::swap(&mut self.cam_anim, &mut app.cam_anim);
         std::mem::swap(&mut self.pending_fit, &mut app.pending_fit);
         std::mem::swap(&mut self.fit_waits, &mut app.fit_waits);
@@ -1103,6 +1105,27 @@ pub(crate) fn with_view_look<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&
     out
 }
 
+/// Run a sketch camera transition in its owner, even when another native window is drawing.
+pub(crate) fn with_sketch_camera<T>(app: &mut SolveApp, id: u64, change: impl FnOnce(&mut SolveApp) -> T) -> Option<T> {
+    let view = crate::view_windows::layout_views(app).into_iter().find(|(_, view)| view.id == id).map(|(_, view)| view.clone())?;
+    let painted = app.viewport.compass_view.unwrap_or_else(|| app.docs.views.active().id);
+    if painted == id {
+        return Some(change(app));
+    }
+    let shown = app.cam;
+    let mut look = app.docs.navigation.remove(&id).unwrap_or_else(|| ViewLook::from_ui(&app.ui));
+    look.swap(app);
+    app.cam = view.spec.map_or(shown, |spec| spec.camera);
+    let compass = app.viewport.compass_view.replace(id);
+    let result = change(app);
+    app.viewport.compass_view = compass;
+    crate::view_windows::set_sketch_camera(app, id, app.cam);
+    look.swap(app);
+    app.docs.navigation.insert(id, look);
+    app.cam = shown;
+    Some(result)
+}
+
 /// Make the view `id` the shown one, keeping the look of the one it replaces.
 pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
     change_views(app, |views| views.activate(id))
@@ -1115,7 +1138,7 @@ pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
 pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
     let prefs = DesignTabPrefs::from(&app.preferences);
     if !prefs.opens_sub_tab(kind) {
-        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None, compass: true });
+        apply_view(app, &DesignView { editing: None, id: 0, kind, name: String::new(), subject, spec: None, compass: true });
         return app.docs.views.active().id;
     }
     change_views(app, |views| views.open(kind, subject, reuse && prefs.reuse_views))
@@ -1236,6 +1259,12 @@ pub(crate) fn design_opened(app: &mut SolveApp, path: &str) {
 
 /// Close the view `id` of the shown design (never the last one; Reopen brings it back).
 pub fn view_close(app: &mut SolveApp, id: u64) -> bool {
+    if !app.view_windows.is_child() && app.docs.views.len() == 1 && app.docs.views.get(id).is_some() {
+        return false;
+    }
+    if !crate::sketch_view::before_close(app, &[id]) {
+        return false;
+    }
     if let Some(closed) = crate::view_windows::close_view(app, id) {
         return closed;
     }
@@ -1249,11 +1278,19 @@ pub fn view_unshow(app: &mut SolveApp, id: u64) -> bool {
 
 /// Close the other views of the shown design, keeping `id`.
 pub fn view_close_others(app: &mut SolveApp, id: u64) {
+    let closing: Vec<_> = app.docs.views.views().iter().map(|view| view.id).filter(|other| *other != id).collect();
+    if !crate::sketch_view::before_close(app, &closing) {
+        return;
+    }
     change_views(app, |views| views.close_others(id));
 }
 
 /// Close the views after `id` in the shown design.
 pub fn view_close_right_of(app: &mut SolveApp, id: u64) {
+    let closing: Vec<_> = app.docs.views.views().iter().map(|view| view.id).skip_while(|other| *other != id).skip(1).collect();
+    if !crate::sketch_view::before_close(app, &closing) {
+        return;
+    }
     change_views(app, |views| views.close_right_of(id));
 }
 
@@ -1419,6 +1456,9 @@ pub(crate) fn visible_view_ids(app: &SolveApp) -> Vec<u64> {
 /// Copy only the linked components to other visible Model cameras in this window.
 pub(crate) fn link_visible_cameras(app: &mut SolveApp, source: u64, camera: Camera, before: Option<Camera>) {
     use solidcraft_views::CameraLinkMode::{Both, Orientation, Zoom};
+    if crate::sketch_view::camera_transition(app, source, camera) {
+        return;
+    }
     let mode = app.docs.views.camera_link();
     let orientation = matches!(mode, Both | Orientation)
         && before.is_none_or(|before| (before.yaw, before.pitch, before.roll) != (camera.yaw, camera.pitch, camera.roll));
@@ -2656,8 +2696,13 @@ fn view_tab<'a>(
     to_window: Option<u32>,
     window: Option<&'a crate::view_windows::WindowChoice>,
 ) -> crate::app_bar::ViewTab<'a> {
-    let colour = crate::workspace::view_icon_colour(kind_word(view.kind), true);
+    let colour = if view.editing.is_some() {
+        solidcraft_theme::Tokens::get().sketch_accent
+    } else {
+        crate::workspace::view_icon_colour(kind_word(view.kind), true)
+    };
     crate::app_bar::ViewTab {
+        sketch_mode: view.editing.is_some(),
         compass: view.kind.can_tile().then_some(view.compass),
         name: &view.name,
         icon: view.kind.key(),
@@ -2687,6 +2732,7 @@ pub(crate) fn strip_view_id(app: &SolveApp, index: usize) -> Option<u64> {
 /// The document tabs in the application bar, from `x0` to `x1` ([`crate::app_bar::tabs`]): click
 /// to switch, × to close, drag to reorder, + for the start page.
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
+    crate::sketch_view::project(app);
     let owner_key = tab_strip_id(ui.ctx().viewport_id()).with("view_popup_owner");
     let changed = ui.ctx().data_mut(|data| {
         let previous = data.get_temp::<u64>(owner_key);
@@ -2728,7 +2774,20 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                         let elsewhere = (window != current_window).then_some(window);
                         let active = elsewhere.is_none() && view.id == set.active().id;
                         let on_screen = elsewhere.is_none() && tiles.is_some_and(|tiles| tiles.contains(view.id));
-                        (view.clone(), active, on_screen, elsewhere)
+                        (
+                            {
+                                let mut view = view.clone();
+                                if let Some(editing) = view.editing
+                                    && let Some(sketch) = app.session.doc.feature(editing.sketch)
+                                {
+                                    view.name = sketch.name.clone();
+                                }
+                                view
+                            },
+                            active,
+                            on_screen,
+                            elsewhere,
+                        )
                     })
                     .collect()
             } else {

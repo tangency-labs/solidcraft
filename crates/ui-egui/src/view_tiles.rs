@@ -35,8 +35,6 @@ const CARD_RADIUS: u8 = 8;
 /// The window shows more than one view of the design.
 pub(crate) fn shown(app: &SolveApp) -> bool {
     app.docs.views.is_tiled()
-        && app.session.active_sketch.is_none()
-        && (app.docs.views.active().kind == ViewKind::Render) == crate::render_workspace::active(app)
 }
 
 /// Scope workspace-specific canvas and navigation behaviour to an unfocused tile.
@@ -248,7 +246,7 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
         if is_ground {
             app.viewport.bleed = (!render_ground).then_some(area);
             app.viewport.window = Some(free);
-            draw_canvas(app, &mut tile, kind);
+            with_card_kind(app, id, |app| draw_canvas(app, &mut tile, kind));
             crate::documents::sync_linked_active(app);
             if let Some(range) = app.viewport.backdrop.take() {
                 lay_under(ui.ctx(), layer, &slots, range);
@@ -795,6 +793,13 @@ fn card_header_visible(ui: &egui::Ui, card: Rect, id: u64, headers: solidcraft_v
     }
 }
 
+fn sketch_header_name(app: &SolveApp, id: u64) -> Option<String> {
+    let view = app.docs.views.get(id)?;
+    let sketch = view.editing.as_ref()?.sketch;
+    let name = &app.session.doc.feature(sketch)?.name;
+    Some(solidcraft_ui_text::format("sketch_mode.view_name", &[("view", &view.name), ("sketch", name)]))
+}
+
 /// A card lifted off the focused view: its soft shadow, frame, and optional header.
 fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, headers: solidcraft_views::CardHeaders) -> Option<CardAction> {
     let visible = card_header_visible(ui, cell, id, headers);
@@ -818,12 +823,24 @@ fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, heade
         let top = Rect::from_min_size(cell.min, vec2(cell.width(), HEADER));
         let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
         let label = clear_of_panels(app, Rect::from_min_size(top.left_top() + vec2(10.0, 0.0), vec2(120.0, HEADER)));
-        paint_card_header(&painter, top, CARD_RADIUS, name, label.left());
+        if let Some(name) = sketch_header_name(app, id) {
+            painter.rect_filled(top, CornerRadius { nw: CARD_RADIUS, ne: CARD_RADIUS, sw: 0, se: 0 }, t.sketch_soft);
+            let title = Rect::from_min_max(pos2(label.left(), top.top()), pos2(button_rect(cell, 3.0).left(), top.bottom()));
+            crate::app_bar::paint_sketch_header(&painter, title, &name, app.tr("sketch_mode.editing"));
+        } else {
+            paint_card_header(&painter, top, CARD_RADIUS, name, label.left());
+        }
         if view_title_drag(app, ui, id, card_title_rect(cell)) {
             app.viewport.pending_tile_focus = Some(id);
         }
     }
-    painter.rect_stroke(card.shrink(0.5), radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
+    let sketching = sketch_header_name(app, id).is_some();
+    painter.rect_stroke(
+        card.shrink(0.5),
+        radius,
+        Stroke::new(if sketching { 2.0 } else { 1.0 }, if sketching { t.sketch_accent } else { t.border }),
+        StrokeKind::Inside,
+    );
     if headers == solidcraft_views::CardHeaders::Hidden {
         return None;
     }
@@ -889,20 +906,36 @@ fn card_chrome(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, heade
 
 /// The focused view has no frame and no header: it is the ground the others lie on. Its name sits
 /// in a pill with the accent in the band above its frame, clear of the ribbon and the panels.
+pub(crate) fn single_sketch_chrome(app: &mut SolveApp, ui: &egui::Ui) {
+    if app.viewport.card || crate::sketch_view::active_sketch(app).is_none() || app.docs.views.is_tiled() {
+        return;
+    }
+    let (free, _) = layout_bounds(app, ui.max_rect());
+    let id = app.docs.views.active().id;
+    ground_chip(app, ui, id, frame_of(free));
+}
+
 fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
     let t = Tokens::get();
-    let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
+    let sketch_name = sketch_header_name(app, id);
+    let name = sketch_name.as_deref().unwrap_or_else(|| app.docs.views.get(id).map_or("", |view| view.name.as_str()));
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(name.to_owned(), egui::FontId::proportional(t.font_body), t.text);
-    let size = vec2(galley.size().x + 34.0, 26.0);
+    let editing = painter.layout_no_wrap(app.tr("sketch_mode.editing").to_owned(), crate::ui_kit::type_face::semibold(11.0), t.text);
+    let size = vec2(galley.size().x + if sketch_name.is_some() { editing.size().x + 56.0 } else { 34.0 }, 26.0);
     let at = pos2(ground.left() + MARGIN, ground.top() - HEADER + (HEADER - size.y) / 2.0);
     let chip = clear_of_panels(app, Rect::from_min_size(at, size));
     let radius = CornerRadius::same(13);
     painter.add(egui::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(60) }.as_shape(chip, radius));
-    painter.rect_filled(chip, radius, t.panel_header);
+    painter.rect_filled(chip, radius, if sketch_name.is_some() { t.sketch_soft } else { t.panel_header });
     painter.rect_stroke(chip, radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
-    painter.circle_filled(chip.left_center() + vec2(13.0, 0.0), 3.5, t.accent);
-    painter.galley(chip.left_center() + vec2(24.0, -galley.size().y / 2.0), galley, t.text);
+    if sketch_name.is_some() {
+        painter.rect_stroke(ground, CARD_RADIUS, Stroke::new(2.0, t.sketch_accent), StrokeKind::Inside);
+        crate::app_bar::paint_sketch_header(painter, chip.shrink2(vec2(8.0, 0.0)), name, app.tr("sketch_mode.editing"));
+    } else {
+        painter.circle_filled(chip.left_center() + vec2(13.0, 0.0), 3.5, t.accent);
+        painter.galley(chip.left_center() + vec2(24.0, -galley.size().y / 2.0), galley, t.text);
+    }
     view_title_drag(app, ui, id, chip);
 }
 
@@ -916,6 +949,10 @@ fn view_title_drag(app: &mut SolveApp, ui: &egui::Ui, id: u64, title: Rect) -> b
     if response.drag_started_by(egui::PointerButton::Primary) {
         let origin = Rect::from_min_size(title.min, vec2(title.width().min(140.0), title.height()));
         crate::view_window_drag::start_header(app, ui.ctx(), id, origin);
+    }
+    if let Some(name) = sketch_header_name(app, id) {
+        let name = solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &name)]);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name.as_str()));
     }
     response.clicked()
 }
@@ -1230,6 +1267,28 @@ mod tests {
             assert_ne!(app.cam, before_card);
             assert!(app.viewport.axis_drag.is_none());
         });
+    }
+
+    #[test]
+    fn render_ground_keeps_its_canvas_beside_a_new_sketch_card() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let model = h.app.docs.views.active().id;
+        let render = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+        assert!(crate::documents::view_close(&mut h.app, model));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let owner = h.app.session.sketching_view.unwrap();
+        assert_ne!(owner, render);
+        assert_eq!(h.app.docs.views.active().id, render);
+        h.app.ui.tab = "SKETCH".into();
+        assert!(shown(&h.app));
+        h.frame();
+        assert_eq!(h.app.docs.views.active().id, render);
+        assert_eq!(h.app.docs.views.get(render).unwrap().kind, ViewKind::Render);
+        assert_eq!(h.app.ui.tab, "SKETCH", "painting scopes the Render context without changing the ribbon");
+        let card = h.app.viewport.cards.iter().find(|(id, _)| *id == owner).unwrap().1;
+        let render_frame = crate::scenario::rect_of("render:product:frame").expect("the ground painted the Render canvas");
+        assert!(!card.contains(render_frame.center()), "the Render canvas remains the ground, not the Model card");
     }
 
     #[test]
