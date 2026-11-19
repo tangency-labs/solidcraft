@@ -7,5 +7,50 @@
     "prefs.glass_tint": "Glass tint",
     "prefs.glass_tint_clear": "Clear",
     "prefs.glass_tint_accent": "Accent"
+  },
+  "ar": {
+    "prefs.glass_blur": "تمويه الزجاج",
+    "prefs.glass_see_through": "الشفافية",
+    "prefs.glass_refraction": "انحناء الحافة",
+    "prefs.glass_reach": "امتداد الحافة",
+    "prefs.glass_tint": "صبغة الزجاج",
+    "prefs.glass_tint_clear": "شفاف",
+    "prefs.glass_tint_accent": "لون التمييز"
+  },
+  "he": {
+    "prefs.glass_blur": "טשטוש זכוכית",
+    "prefs.glass_see_through": "שקיפות",
+    "prefs.glass_refraction": "כיפוף הקצה",
+    "prefs.glass_reach": "טווח הקצה",
+    "prefs.glass_tint": "גוון זכוכית",
+    "prefs.glass_tint_clear": "שקוף",
+    "prefs.glass_tint_accent": "צבע הדגשה"
+  },
+  "ja": {
+    "prefs.glass_blur": "ガラスのぼかし",
+    "prefs.glass_see_through": "透け具合",
+    "prefs.glass_refraction": "縁の屈折",
+    "prefs.glass_reach": "縁の幅",
+    "prefs.glass_tint": "ガラスの色合い",
+    "prefs.glass_tint_clear": "透明",
+    "prefs.glass_tint_accent": "アクセント"
+  },
+  "vi": {
+    "prefs.glass_blur": "Làm mờ kính",
+    "prefs.glass_see_through": "Độ trong suốt",
+    "prefs.glass_refraction": "Độ cong mép",
+    "prefs.glass_reach": "Độ rộng mép",
+    "prefs.glass_tint": "Sắc kính",
+    "prefs.glass_tint_clear": "Trong",
+    "prefs.glass_tint_accent": "Màu nhấn"
+  },
+  "zh": {
+    "prefs.glass_blur": "玻璃模糊",
+    "prefs.glass_see_through": "透明度",
+    "prefs.glass_refraction": "边缘弯折",
+    "prefs.glass_reach": "边缘范围",
+    "prefs.glass_tint": "玻璃色调",
+    "prefs.glass_tint_clear": "透明",
+    "prefs.glass_tint_accent": "强调色"
   }
 }
