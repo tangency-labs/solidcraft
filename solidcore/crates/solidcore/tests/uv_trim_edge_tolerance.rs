@@ -20,10 +20,11 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, edgeuse};
 use solidcore::{Brep, EdgeId, Kernel};
 
-fn fillet1019(k: &mut Kernel) -> Option<Brep> {
+fn fillet1019(k: &mut Kernel) -> Brep {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles/Fillet/fillet1019.smb");
-    let bytes = std::fs::read(&path).ok()?;
+    // (an unreadable fixture fails: the test must never pass without running)
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
@@ -37,7 +38,7 @@ fn fillet1019(k: &mut Kernel) -> Option<Brep> {
     };
     read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
     b.use_arena_naming().unwrap();
-    Some(b)
+    b
 }
 
 /// The largest proved distance between `e`'s curve and the image of any of its UV trims
@@ -107,9 +108,7 @@ fn edge_between(b: &Brep, ends: [[f64; 3]; 2]) -> EdgeId {
 #[test]
 fn a_lazy_trim_raises_its_edge_by_its_proved_distance() {
     let mut k = Kernel::default();
-    let Some(mut b) = fillet1019(&mut k) else {
-        return;
-    };
+    let mut b = fillet1019(&mut k);
     let face = bp1::faces(&b, None).unwrap()[6];
     {
         let mut ex = FeatureExecutive::new(&mut k, &mut b).unwrap();

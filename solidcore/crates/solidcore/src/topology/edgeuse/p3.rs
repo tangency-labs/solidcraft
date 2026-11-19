@@ -1773,7 +1773,9 @@ pub(crate) fn trim_raise_distance(
         return Ok(upstream);
     }
     // (a bound not below `upstream` is not taken)
-    let raise_by = match trim_deviation_bound(k, b, eu, trim, upstream)? {
+    // (a bound at most half the tolerance raises nothing, whatever its value: the bisection
+    // stops tightening it there)
+    let raise_by = match trim_deviation_bound(k, b, eu, trim, [0.5 * tol, upstream])? {
         Some(bound) if bound < upstream => bound,
         _ => return Ok(upstream),
     };
@@ -1810,7 +1812,7 @@ fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId, lowered: f64) -> Resul
         let Some(other) = b.edgeuse(x)?.uv_trim_curve.as_ref() else {
             continue;
         };
-        match trim_deviation_bound(k, b, x, other, lowered)? {
+        match trim_deviation_bound(k, b, x, other, [lowered, lowered])? {
             Some(bound) if bound.is_finite() => worst = worst.max(bound),
             _ => return Ok(None),
         }
@@ -1831,16 +1833,20 @@ fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId, lowered: f64) -> Resul
 /// A bound above `over` is `Some(f64::INFINITY)`, found without bounding the rest of the trim
 /// ([`trim_image_gap_bound_up_to`]): every caller only compares such a bound with `over`, and
 /// on a surface with a dense net the full bound of a trim far off its edge costs many times
-/// more (a union in the `crashes/2992` rig case took 153 s instead of 43 s).
+/// more (a union in the `crashes/2992` rig case took 153 s instead of 43 s). A bound at most
+/// `enough` is any proved bound up to `enough` ([`trim_image_gap_bound_within`]): every caller
+/// treats all such bounds alike, and tightening a trim that lies well within its tolerance on
+/// a dense net is what made the same union take 274 s instead of 3.5 s.
 ///
 /// [`trim_image_gap_bound`]: crate::query::curve_surface_gap::trim_image_gap_bound
 /// [`trim_image_gap_bound_up_to`]: crate::query::curve_surface_gap::trim_image_gap_bound_up_to
+/// [`trim_image_gap_bound_within`]: crate::query::curve_surface_gap::trim_image_gap_bound_within
 pub(crate) fn trim_deviation_bound(
     k: &Kernel,
     b: &Brep,
     eu: EdgeuseId,
     trim: &Curve,
-    over: f64,
+    [enough, over]: [f64; 2],
 ) -> Result<Option<f64>> {
     let (Some(e), Some(fu)) = (edge(b, eu)?, faceuse(b, eu)?) else {
         return Ok(None);
@@ -1859,14 +1865,14 @@ pub(crate) fn trim_deviation_bound(
     let ivl = edge_rec.interval;
     // (below a thousandth of the edge's tolerance a tighter bound changes nothing)
     let floor = TRIM_BOUND_FLOOR * edge_rec.tolerance;
-    crate::query::curve_surface_gap::trim_image_gap_bound_up_to(
+    crate::query::curve_surface_gap::trim_image_gap_bound_within(
         k,
         &surface,
         curve,
         trim,
         [ivl.min(), ivl.max()],
         floor,
-        over,
+        [enough, over],
     )
 }
 

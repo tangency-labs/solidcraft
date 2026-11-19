@@ -67,12 +67,17 @@ fn inner_edges(k: &Kernel, b: &Brep, on: impl Fn(Point3) -> f64) -> (usize, usiz
     (count, exact, worst)
 }
 
-/// The largest edge tolerance of `b`.
+/// The largest edge tolerance of `b`; each must be finite and nonnegative (`f64::max`
+/// would skip a NaN).
 fn largest_tolerance(b: &Brep) -> f64 {
     p1::edges(b, None)
         .unwrap()
         .into_iter()
-        .map(|e| b.edge(e).unwrap().tolerance)
+        .map(|e| {
+            let t = b.edge(e).unwrap().tolerance;
+            assert!(t.is_finite() && t >= 0.0, "edge {e:?}: tolerance {t:e}");
+            t
+        })
         .fold(0.0, f64::max)
 }
 

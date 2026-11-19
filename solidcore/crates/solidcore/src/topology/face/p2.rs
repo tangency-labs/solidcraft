@@ -3513,7 +3513,7 @@ fn covered_trim(k: &Kernel, b: &Brep, eu: EdgeuseId, holder: EdgeuseId) -> Resul
     let tolerance = b.edge(e)?.tolerance;
     let trim = held_curve(b, holder)?;
     Ok(matches!(
-        crate::topology::edgeuse::p3::trim_deviation_bound(k, b, eu, trim, tolerance)?,
+        crate::topology::edgeuse::p3::trim_deviation_bound(k, b, eu, trim, [tolerance; 2])?,
         Some(bound) if bound <= tolerance
     ))
 }
@@ -3543,9 +3543,15 @@ fn keep_trim_covered(
     };
     let bound = {
         let trim = held_curve(b, holder)?;
-        // (a bound past twice the tolerance is not taken)
-        let over = 2.0 * b.edge(e)?.tolerance;
-        crate::topology::edgeuse::p3::trim_deviation_bound(k, b, eu, trim, over)?
+        // (a bound past twice the tolerance is not taken; one within it raises nothing)
+        let tolerance = b.edge(e)?.tolerance;
+        crate::topology::edgeuse::p3::trim_deviation_bound(
+            k,
+            b,
+            eu,
+            trim,
+            [tolerance, 2.0 * tolerance],
+        )?
     };
     let tolerance = b.edge(e)?.tolerance;
     if let Some(bound) = bound {

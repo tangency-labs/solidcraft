@@ -845,9 +845,12 @@ pub fn radial_sector_classify_between(
         // step. A sliver face cut off by an intersection curve along the tangent line of a
         // blend (#18166) is left within a few tolerances of the edge, long before the faces
         // part, and read alone it makes the classified face coincide with the blend face.
-        // Only faces tangent at the edge are followed: an angle under `EFF_ZERO_SQRT`, the
+        // Only faces still tangent at the last step are followed: their angle there (`ang2`
+        // or `ang3`, computed at the end of the previous round) under `EFF_ZERO_SQRT`, the
         // bound this classifier takes for faces parallel at the edge (the zero sector test
-        // below). Faces that cross at a small angle part linearly from the edge, and their
+        // below). A pair whose angle has grown past it by the step reached (faces tangent at
+        // the edge with other curvatures, whose angle grows as `d / R`) is not followed and
+        // keeps upstream's classification. Faces that cross at a small angle part linearly from the edge, and their
         // angle is the classifier's own coincidence test: two fillets of one radius a 1e-4
         // translate apart cross at 5e-5 rad and stay within 1e-4 of each other over their
         // whole width (issue_3012's sliver), where following one to its far end read a

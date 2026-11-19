@@ -534,7 +534,7 @@ fn certified_gap(
         &corners,
         CLOSE_RELATIVE,
         floor,
-        f64::INFINITY,
+        [f64::NEG_INFINITY, f64::INFINITY],
         |a, b| {
             k.check_cancelled(OP)?;
             piece(&cn, &wn, surface, a, b)
@@ -551,6 +551,10 @@ fn certified_gap(
 /// `over` of `f64::INFINITY` never stops it): the pieces before it are cut exactly as without
 /// it, so the comparison of the bound with `over` is the same.
 ///
+/// A piece whose bound is at most `enough` closes as it stands (an `enough` of
+/// `f64::NEG_INFINITY` never closes one): for a caller that only asks whether the bound is at
+/// most `enough`, the pieces cut further would only tighten what already answers it.
+///
 /// The first pieces are also cut at every point of `corners` (sorted, distinct) inside
 /// `(lo, hi)`, so no first piece has one inside it ([`certified_gap`] passes the curves'
 /// [`kinks`]).
@@ -560,7 +564,7 @@ fn bisect(
     corners: &[f64],
     relative: f64,
     floor: f64,
-    over: f64,
+    [enough, over]: [f64; 2],
     piece: impl Fn(f64, f64) -> Result<Option<PieceBound>>,
 ) -> Result<Option<f64>> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
@@ -596,7 +600,7 @@ fn bisect(
         match piece(a, b) {
             Ok(Some(p)) => {
                 let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
-                if last || p.closes(parent, relative, floor) {
+                if last || bound <= enough || p.closes(parent, relative, floor) {
                     if bound > over {
                         return Ok(Some(f64::INFINITY));
                     }
@@ -1537,6 +1541,29 @@ pub fn trim_image_gap_bound_up_to(
     floor: f64,
     over: f64,
 ) -> Result<Option<f64>> {
+    trim_image_gap_bound_within(k, surface, curve, uv, range, floor, [f64::NEG_INFINITY, over])
+}
+
+/// [`trim_image_gap_bound_up_to`] for a caller that also takes any bound at most `enough` as
+/// it comes: a piece whose bound (with the curve's slack) is at most `enough` is not cut
+/// further. The bound is still a proved bound, but where it is at most `enough` it may be any
+/// value up to `enough` rather than the tightest the bisection reaches; whether it is at most
+/// `enough` is answered as by [`trim_image_gap_bound_up_to`] wherever that one stays within its
+/// piece budget (pruned pieces leave the budget to the others, which can only tighten it).
+/// An `enough` of `f64::NEG_INFINITY` is [`trim_image_gap_bound_up_to`].
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn trim_image_gap_bound_within(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+) -> Result<Option<f64>> {
     use crate::error::ignored;
     use crate::surface::surface::exact_pieces::exact_nurbs_surface;
 
@@ -1599,13 +1626,16 @@ pub fn trim_image_gap_bound_up_to(
     // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is enough;
     // a piece across a corner is bounded to first order by `piece_reparametrised`, so the
     // first pieces need no cut there)
+    // (a gap at most `enough` less the curve's slack, rounded down, has a bound at most
+    // `enough`: the sum's exact value is at most `enough`, so rounding it up stays there)
+    let enough_gap = (Ivl::from(enough) - Ivl::from(c_slack)).lo;
     let Some(gap) = bisect(
         range,
         FIRST_PIECES,
         &[],
         CLOSE_RELATIVE,
         floor,
-        over,
+        [enough_gap, over],
         |a, b| {
             k.check_cancelled(OP)?;
             piece_reparametrised(&sides, &net, a, b)
@@ -1618,7 +1648,12 @@ pub fn trim_image_gap_bound_up_to(
         return Ok(Some(gap));
     }
     let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
-    Ok(bound.is_finite().then_some(bound))
+    if !bound.is_finite() {
+        return Ok(None);
+    }
+    // (the cutoff applies to the bound returned, the curve's slack included: a gap at most
+    // `over` whose slack takes it past `over` is above it too)
+    Ok(Some(if bound > over { f64::INFINITY } else { bound }))
 }
 
 #[cfg(test)]
@@ -1868,8 +1903,11 @@ mod tests {
         );
         let d = (lift * lift + short * short).sqrt();
         let g = t.bound(&curve, &trim).unwrap();
+        // (the curve's end is `d` from the image, which `d` holds up to the rounding of the
+        // construction, well inside a part in 1e9; a bound missing the shortfall along the
+        // curve would sit near `lift`, half a per cent below)
         assert!(
-            g >= lift && g <= d * (1.0 + 2.0 * CLOSE_RELATIVE) + 1.0e-8,
+            g >= d * (1.0 - 1e-9) && g <= d * (1.0 + 2.0 * CLOSE_RELATIVE) + 1.0e-8,
             "{g:e} against {d:e}"
         );
     }
@@ -1918,7 +1956,7 @@ mod tests {
             &[],
             CLOSE_RELATIVE,
             floor,
-            f64::INFINITY,
+            [f64::NEG_INFINITY, f64::INFINITY],
             |a, b| {
                 let h = b - a;
                 Ok(PieceBound::with(ends, Ivl::from(0.1 * h * h), slack(a, h)))
@@ -2008,6 +2046,47 @@ mod tests {
         assert_eq!(up_to(g).to_bits(), g.to_bits());
         assert_eq!(up_to(2.0 * g).to_bits(), g.to_bits());
         assert_eq!(up_to(0.5 * g), f64::INFINITY);
+    }
+
+    /// A line edge whose point `P` is far from the piece, so its evaluation carries a slack
+    /// (`line_evaluation_slack`), over a straight trim `lift` below it: asked whether the bound
+    /// is above a cutoff between the bisected gap and the gap plus the slack, the answer is
+    /// that it is (infinity), as the full bound says; at the full bound it is that bound.
+    #[test]
+    fn a_cutoff_counts_a_line_edges_slack() {
+        use crate::curve::line::BoundedLineOptions;
+        use crate::geom::extent1d::Extent1d;
+        let t = Top::new();
+        let lift = 2.0e-4;
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let (pa, pb) = (t.point(a, lift), t.point(b, lift));
+        let len = (pb - pa).length();
+        let unit = (pb - pa) * (1.0 / len);
+        let far = 1e6;
+        let mut line = Line::bounded(
+            pa - unit * far,
+            unit,
+            &Extent1d::from_min_max(far, far + len),
+            &BoundedLineOptions::default(),
+        );
+        line.edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))
+            .unwrap();
+        let slack = line_evaluation_slack(&line, false).unwrap();
+        assert!(slack > 0.0, "{slack:e}");
+        let curve = Curve::from(line);
+        let trim = Top::curve(&[t.uv(a), t.uv(b)], 1, vec![0.0, 0.0, 1.0, 1.0], true);
+        let up_to = |over: f64| {
+            trim_image_gap_bound_up_to(&t.k, &t.surface, &curve, &trim, [0.0, 1.0], 1e-9, over)
+                .unwrap()
+                .unwrap()
+        };
+        let g = up_to(f64::INFINITY);
+        assert_eq!(g, t.bound(&curve, &trim).unwrap());
+        assert!(g >= lift && slack > g - g.next_down(), "{g:e}, slack {slack:e}");
+        assert_eq!(up_to(g).to_bits(), g.to_bits());
+        // (at most the gap plus a part of the slack: the bisection's gap is below it)
+        assert_eq!(up_to(g - 0.5 * slack), f64::INFINITY);
+        assert_eq!(up_to(g.next_down()), f64::INFINITY);
     }
 
     /// A curve with a corner (a degree-1 polyline with an interior knot of full multiplicity)

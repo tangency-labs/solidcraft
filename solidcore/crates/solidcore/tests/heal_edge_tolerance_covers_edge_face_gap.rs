@@ -2064,9 +2064,18 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
     let before = BOTTLE_E8_BEFORE.map(f64::from_bits);
     for (i, (&now, &before)) in now.iter().zip(&before).enumerate() {
         let (band, scale) = band(i);
+        // (`f64::max` skips a NaN, and an infinite value makes `accuracy` infinite: every
+        // input of the comparison must be finite first)
+        assert!(
+            band.lo.is_finite() && band.hi.is_finite() && scale.is_finite(),
+            "{i}: enclosure [{:e}, {:e}] at scale {scale:e} is not finite",
+            band.lo,
+            band.hi
+        );
         for (what, value) in [("now", now), ("before", before)] {
+            assert!(value.is_finite(), "{i} {what}: {value:e} is not finite");
             let accuracy = ACCURACY * scale.max(value.abs());
-            // (the farthest the exact value can be; written so a NaN fails)
+            // (the farthest the exact value can be)
             let far = (value - band.lo).max(band.hi - value);
             assert!(
                 far <= accuracy,
