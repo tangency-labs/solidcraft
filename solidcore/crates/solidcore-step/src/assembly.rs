@@ -64,6 +64,9 @@ pub(crate) const EDGE_GAP_SAMPLES: usize = 16;
 /// within which SMLib takes two of a surface's sides for one (#12757: a planar sliver face
 /// 1e-5 mm wide).
 pub(crate) const OPEN_DOMAIN_SPAN: f64 = 1e-3;
+/// Most faces a refusal of failed pcurves names (`face #origin` each), so a reader can leave
+/// them out of one read again together; the rest are named by the next read's refusal.
+pub(crate) const MAX_NAMED_FAILURES: usize = 64;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
 /// record check measures it: with margin, as a vertex's.
 pub(crate) const EDGE_GAP_MARGIN: f64 = 1.5;
@@ -730,7 +733,7 @@ impl<'t> Assembly<'t> {
         let mut face_forms: Vec<Option<BSurface>> = Vec::with_capacity(self.faces.len());
         let mut domains = Vec::with_capacity(self.faces.len());
         let mut turned = vec![false; self.faces.len()];
-        let (mut failed, mut first_failure) = (0usize, None);
+        let (mut failed, mut first_failure, mut failed_faces) = (0usize, None, Vec::new());
         for fi in 0..self.faces.len() {
             match self.face_pcurves(fi) {
                 Ok((pc, domain, flipped, form)) => {
@@ -743,7 +746,11 @@ impl<'t> Assembly<'t> {
                 }
                 Err(m) => {
                     failed += 1;
-                    first_failure.get_or_insert_with(|| format!("face #{}: {m}", self.faces.get(fi).map_or(0, |f| f.origin)));
+                    let origin = self.faces.get(fi).map_or(0, |f| f.origin);
+                    if failed_faces.len() < MAX_NAMED_FAILURES {
+                        failed_faces.push(format!("face #{origin}"));
+                    }
+                    first_failure.get_or_insert_with(|| format!("face #{origin}: {m}"));
                     pcs.push(Vec::new());
                     domains.push([[0.0; 2]; 2]);
                     face_forms.push(None);
@@ -751,7 +758,9 @@ impl<'t> Assembly<'t> {
             }
         }
         if let Some(first) = first_failure {
-            return Err(format!("pcurves failed on {failed} of {} faces; first: {first}", self.faces.len()));
+            // Every face that failed is named (up to `MAX_NAMED_FAILURES`), the first first.
+            let named = if failed > 1 { format!(" ({})", failed_faces.join(", ")) } else { String::new() };
+            return Err(format!("pcurves failed on {failed} of {} faces{named}; first: {first}", self.faces.len()));
         }
         if !self.raised_edges.is_empty() {
             let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
@@ -1079,7 +1088,8 @@ impl<'t> Assembly<'t> {
             brep = brep.canonical().map_err(|e| e.to_string())?.brep;
         }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
-        solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+        // A disagreement on a face names the file's face too, so a reader can leave it out.
+        solidcore_ops::record_check::agreement(&brep).map_err(|e| disagreement(&e, &face_origin))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
     }
 
@@ -1801,6 +1811,21 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
 }
 
 /// Coordinate `d` of `c` at 33 parameters evenly along it.
+/// The refusal of a record whose geometry disagrees with its topology: on a face (not an edge
+/// alone), naming the file's face too (`face #origin`, of `face_origin`), so a reader can leave it
+/// out.
+pub(crate) fn disagreement(e: &solidcore_ops::record_check::Mismatch, face_origin: &[u64]) -> String {
+    use solidcore_ops::record_check::Record;
+    let face = match e.record {
+        Record::Face(f) | Record::Use { face: f, .. } | Record::VertexLoop { face: f, .. } | Record::Loop { face: f, .. } => Some(f),
+        Record::Edge(_) => None,
+    };
+    match face.and_then(|f| face_origin.get(f as usize)) {
+        Some(o) => format!("the record's geometry disagrees: {e}: face #{o}"),
+        None => format!("the record's geometry disagrees: {e}"),
+    }
+}
+
 fn pcurve_samples(c: &Curve2, d: usize) -> Vec<f64> {
     let Some([a, b]) = c.interval() else { return Vec::new() };
     (0..=32).filter_map(|k| solidcore_ops::pcurve::eval(c, a + (b - a) * f64::from(k) / 32.0)?.get(d).copied()).collect()

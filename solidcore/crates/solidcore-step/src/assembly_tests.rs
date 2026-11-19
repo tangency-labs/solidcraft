@@ -766,3 +766,21 @@ fn a_plane_faces_trims_are_made_within_its_boundarys_box() {
     assert_eq!(bounded_by(&plane, [[0.0, f64::INFINITY], [0.0, 1.0]], 1e-3), None);
     assert_eq!(bounded_by(&plane, [[1.0, 0.0], [0.0, 1.0]], 1e-3), None);
 }
+
+/// A record whose geometry disagrees on a face names the file's face too, so a reader can read
+/// the solid again without it; one that disagrees on an edge alone names no face.
+#[test]
+fn a_disagreement_on_a_face_names_the_files_face() {
+    use solidcore_ops::record_check::{Mismatch, Problem, Record};
+    let origins = [7, 41, 9];
+    let on = |record: Record| Mismatch { record, problem: Problem::Unevaluable("a test".into()) };
+    let m = disagreement(&on(Record::Loop { face: 1, r#loop: 0 }), &origins);
+    assert!(m.ends_with(": face #41"), "{m}");
+    assert_eq!(crate::topology::named_face(&m), Some(41));
+    let m = disagreement(&on(Record::Use { face: 2, r#loop: 0, position: 3 }), &origins);
+    assert_eq!(crate::topology::named_face(&m), Some(9), "{m}");
+    let m = disagreement(&on(Record::Edge(1)), &origins);
+    assert_eq!(crate::topology::named_face(&m), None, "{m}");
+    // A face past the origins (no file face known) names none.
+    assert_eq!(crate::topology::named_face(&disagreement(&on(Record::Face(5)), &origins)), None);
+}

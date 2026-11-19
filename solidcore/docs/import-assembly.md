@@ -78,7 +78,9 @@ A body is refused when (face-local refusals name the face):
 - a repaired shell's absolute orientation cannot be certified by its volume enclosure;
 - the finished record fails its checks.
 
-What a reader does with a refusal is up to it. Both readers read a refused solid again without the face the refusal names, as an open surface of the faces that remain (`Kind::Open`; a void whose outer shell lost every face stays a void, `outer: false`), up to eight times, so a solid that cannot be closed still comes in as the faces that read; the STEP reader also reads each face alone and has SMLib stitch them where a refusal names no face. A refusal the readers cannot work around leaves out that body region and keeps the others.
+A refusal names the file's face it is about (`face #` and the face's `origin`): a refusal of pcurves names every face whose pcurves failed (up to 64, the first first), and a finished record whose geometry disagrees on a face names that face.
+
+What a reader does with a refusal is up to it. Both readers read a refused solid again without the faces the refusal names, as an open surface of the faces that remain (`Kind::Open`; a void whose outer shell lost every face stays a void, `outer: false`), up to eight times, so a solid that cannot be closed still comes in as the faces that read. The STEP reader leaves out the first face named each time, after the faces that do not read alone; the CADIR reader leaves out every face named. The STEP reader also has SMLib stitch the faces that read alone where a refusal names no face. A refusal the readers cannot work around leaves out that body region and keeps the others.
 
 ## Where it is
 
