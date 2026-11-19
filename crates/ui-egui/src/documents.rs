@@ -129,6 +129,8 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
         }
     }
     crate::workspace::sync_context(app);
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
@@ -4436,26 +4438,28 @@ mod tests {
         assert_eq!(drawings(&mut a), [Value::Null, expected]);
     }
 
-    /// K10 (#3890): a tab with its drawing open refuses model commands only in that tab. A sheet
-    /// sketch entered there is still active after a round trip.
+    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does, with a
+    /// sheet sketch being edited there too; the sheet sketch stays in its own tab and is still
+    /// active after a round trip.
     #[test]
-    fn a_tabs_model_commands_wait_only_in_that_tab() {
-        let gate = "a drawing is open: close it to change the model (drawing.close)";
+    fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
         let mut a = app();
         let [sheet, _] = two_sheet_drawing(&mut a);
-        let refused = |a: &mut SolveApp| a.run("solid.sphere", json!({"diameter": 4})).unwrap_err();
-        assert!(refused(&mut a).contains(gate), "{}", refused(&mut a));
+        // A sheet sketch is made, and finished, in Drawing.
+        crate::workspace::enter(&mut a, "drawing").unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.open_drawing.is_some(), "with the drawing still open");
+        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_some(), "a model command leaves the sheet sketch open");
         new_design(&mut a);
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
-        switch(&mut a, 0);
-        assert!(refused(&mut a).contains(gate));
-        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        switch(&mut a, 1);
         assert!(a.session.active_sheet_sketch.is_none());
         switch(&mut a, 0);
         assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
+        crate::workspace::enter(&mut a, "drawing").unwrap();
         a.run("sketch.finish", json!({})).unwrap();
-        a.run("drawing.close", json!({})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
     }
 
@@ -4468,7 +4472,6 @@ mod tests {
             let mut a = app();
             a.preferences.keep_work_on_tab_switch = keep;
             two_sheet_drawing(&mut a);
-            a.preferences.drawings_preview = true;
             crate::drawing_workspace::enter(&mut a, true).unwrap();
             a.drawing_workspace.settings_open = true;
             new_design(&mut a);

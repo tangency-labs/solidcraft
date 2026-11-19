@@ -176,13 +176,19 @@ pub struct SharpEdgesParams {
     pub add: Option<bool>,
 }
 
-/// `select.all` takes no parameters. In an open sketch it selects every curve of that sketch,
-/// construction curves too, and every point of it that is on no curve; projected geometry and the
-/// sketch's origin are left out. Outside a sketch it selects every shown body. It replaces the
-/// selection; refused when that would be more than 10,000 items. Not an undo step. Ctrl+A (Cmd+A).
+/// `select.all`: in an open sketch it selects every curve of that sketch, construction curves
+/// too, and every point of it that is on no curve; projected geometry and the sketch's origin are
+/// left out. With a drawing open and the model not focused it selects the views, dimensions,
+/// balloons and notes on one of its sheets. Otherwise it selects every shown body. It replaces the selection; refused when that
+/// would be more than 10,000 items. Not an undo step. Ctrl+A (Cmd+A).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct SelectAllParams {}
+pub struct SelectAllParams {
+    /// With a drawing open and the model not focused: the sheet, by its id or its one name.
+    /// Default: the drawing's first sheet. Refused otherwise.
+    #[serde(default)]
+    pub sheet: Option<String>,
+}
 
 /// `select.clear` takes no parameters: it deselects everything. Not an undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
