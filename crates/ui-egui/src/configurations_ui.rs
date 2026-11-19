@@ -544,6 +544,11 @@ fn suppress_box(ui: &mut egui::Ui, column: &str, value: &str) -> (egui::Response
     let mut on = cell_value(column, value) == json!(true);
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     let response = ui_kit::checkbox(ui, "", &mut on);
+    // A clicked box keeps the keyboard, as a clicked value cell does, so Space, Tab and Enter
+    // carry on from it.
+    if response.clicked() {
+        response.request_focus();
+    }
     let toggled = response.changed() && !enter;
     (response, toggled.then_some(on))
 }
