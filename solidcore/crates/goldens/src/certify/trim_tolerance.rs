@@ -576,6 +576,19 @@ fn faces_with_surface_value(k: &Kernel, b: &Brep, value: f64) -> Vec<FaceId> {
         .collect()
 }
 
+/// The values a `record` holds for curve `c` (as `brep_mirror`'s `curve_samples`): its
+/// natural interval's ends and the coordinates of its five samples.
+fn curve_record_values(k: &Kernel, c: &Curve) -> Vec<f64> {
+    let d = c.natural_interval();
+    let mut vals = vec![d.min(), d.max()];
+    for i in 0..5 {
+        if let Ok(p) = c.evaluate_point(k, d.evaluate(f64::from(i) / 4.0)) {
+            vals.extend([p.x, p.y, p.z]);
+        }
+    }
+    vals
+}
+
 /// `B` of every UV trim on face `f` against its edge's tolerance: `Ok(worst B / tol)`, or the
 /// first trim that is not covered.
 fn face_trims_covered(k: &Kernel, b: &Brep, f: FaceId) -> Result<f64, String> {
@@ -806,6 +819,14 @@ fn certify(unit: &str) -> Tally {
                         let Some(Owner::Trim(e, eu)) = owner else {
                             panic!("{at}: not a UV trim's value");
                         };
+                        // (and the trim's record holds the value: the layout is right)
+                        let trim = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref();
+                        assert!(
+                            trim.is_some_and(|c| curve_record_values(&k, c)
+                                .iter()
+                                .any(|v| v.to_bits() == new.to_bits())),
+                            "{at}: not in its trim's record"
+                        );
                         vec![(e, eu)]
                     } else {
                         // the graph's `geometry` by its layout: an end of an edge's interval,
