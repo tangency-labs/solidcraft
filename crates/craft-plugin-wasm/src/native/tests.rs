@@ -918,16 +918,23 @@ fn a_damaged_truncated_extra_or_foreign_cache_file_is_a_miss_that_compiles_again
     let original = std::fs::read(&code).unwrap();
     let mut flipped = original.clone();
     *flipped.last_mut().unwrap() ^= 1;
-    let damage: [&dyn Fn(); 5] = [
-        &|| std::fs::write(&code, &original[..original.len() / 2]).unwrap(),
+    let damage: [&dyn Fn(&Path); 6] = [
+        &|code| std::fs::write(code, &original[..original.len() / 2]).unwrap(),
         // Same size, one bit changed: only the recorded SHA-256 tells.
-        &|| std::fs::write(&code, &flipped).unwrap(),
-        &|| std::fs::write(code.with_file_name("extra"), b"x").unwrap(),
-        &|| std::fs::write(entry.join(cache::RECORD), b"{").unwrap(),
-        &|| std::fs::remove_file(entry.join(cache::RECORD)).unwrap(),
+        &|code| std::fs::write(code, &flipped).unwrap(),
+        // Keep the extra file outside the worker's tree so cleanup cannot erase the damage.
+        &|_| std::fs::write(entry.join("extra"), b"x").unwrap(),
+        &|_| std::fs::write(entry.join(cache::RECORD), b"{").unwrap(),
+        &|_| std::fs::remove_file(entry.join(cache::RECORD)).unwrap(),
+        &|_| {
+            let mut record: Value = serde_json::from_slice(&std::fs::read(entry.join(cache::RECORD)).unwrap()).unwrap();
+            record["store"] = json!("wasmtime-old/../wasmtime-other");
+            std::fs::write(entry.join(cache::RECORD), serde_json::to_vec(&record).unwrap()).unwrap();
+        },
     ];
     for (case, damage) in damage.iter().enumerate() {
-        damage();
+        // Replacements have a fresh path, so damage the code belonging to this generation.
+        damage(&cached_code(&entry));
         assert_eq!(source(&bytes, STACK, &disk), Compiled, "case {case}");
         assert_eq!(source(&bytes, STACK, &disk), Disk, "case {case}");
     }
@@ -938,6 +945,29 @@ fn a_damaged_truncated_extra_or_foreign_cache_file_is_a_miss_that_compiles_again
     std::fs::copy(other_entry.join(cache::RECORD), entry.join(cache::RECORD)).unwrap();
     assert_eq!(source(&bytes, STACK, &disk), Compiled);
     assert_eq!(source(&bytes, STACK, &disk), Disk);
+    std::fs::remove_dir_all(&disk.dir).unwrap();
+}
+
+#[test]
+fn a_delayed_cache_worker_cannot_remove_a_replacement_entry() {
+    let disk = compile_cache(1 << 30);
+    let bytes = importer_component();
+    // Keep the old cache alive: its detached worker may still be handling the first write
+    // when a later load rejects the entry. No worker path may be reused by the replacement.
+    let (old_engine, old_component, from) = compile_uncached(&bytes, STACK, Some(&disk)).unwrap();
+    assert_eq!(from, cache::Source::Compiled);
+    let entry = cache_entries(&disk).into_iter().next().unwrap();
+    let old_code = cached_code(&entry);
+    let old_store = entry.join(old_code.strip_prefix(&entry).unwrap().components().next().unwrap().as_os_str());
+    std::fs::remove_file(entry.join(cache::RECORD)).unwrap();
+    assert_eq!(source(&bytes, STACK, &disk), cache::Source::Compiled);
+    // A worker that could not read its directory during removal marks that directory for
+    // deletion. Reproduce its delayed cleanup after the replacement has been written.
+    if let Err(error) = std::fs::remove_dir_all(old_store) {
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
+    assert_eq!(source(&bytes, STACK, &disk), cache::Source::Disk);
+    drop((old_engine, old_component));
     std::fs::remove_dir_all(&disk.dir).unwrap();
 }
 

@@ -7,7 +7,9 @@
 //! (a damaged, truncated or replaced file, an extra file, a link, a missing or unreadable record)
 //! is a miss, not an error: the folder is removed and the component compiled again, which writes
 //! the entry anew. When the folder can't be removed, the component is compiled without the cache,
-//! so what was rejected is never loaded. The record's modification time is the entry's last use, and the least recently
+//! so what was rejected is never loaded. Each replacement gets a fresh Wasmtime subfolder: its
+//! detached worker can outlive the engine and must never clean up the replacement's files.
+//! The record's modification time is the entry's last use, and the least recently
 //! used entries go first when the cache is over its size.
 
 use super::trap;
@@ -18,19 +20,21 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component as PathComponent, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 use wasmtime::component::Component;
 use wasmtime::{Cache, CacheConfig, Config, Engine};
 
 /// Changes when an entry's layout does; entries of another layout are then never read.
-pub(super) const LAYOUT: &str = "v1";
+pub(super) const LAYOUT: &str = "v2";
 pub(super) const RECORD: &str = "entry.json";
 const RECORD_TEMP: &str = "entry.json.new";
 const MAX_RECORD_BYTES: u64 = 64 * 1024;
 /// Wasmtime writes one file per component; a folder with more was not written by it.
 const MAX_FILES: usize = 16;
 const MAX_DEPTH: usize = 4;
+static NEXT_STORE: AtomicU64 = AtomicU64::new(0);
 
 /// Where a compiled component came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,13 +92,13 @@ pub(super) fn compile(config: &Config, bytes: &[u8], stack_bytes: usize, cache: 
     let root = cache.dir.join(LAYOUT);
     let entry = root.join(key.folder());
     let verified = verify(&entry, &key);
-    if !verified && !remove(&entry) {
+    if verified.is_none() && !remove(&entry) {
         // The rejected files are still there, and Wasmtime's cache reads whatever it finds: compile
         // without the cache, so they are never loaded.
         let component = from_binary(&plain, bytes)?;
         return Ok((plain, component, Source::Compiled));
     }
-    let Some(store) = open(&cache.dir, &entry) else {
+    let Some((store, store_name)) = open(&cache.dir, &entry, verified.as_deref()) else {
         // The folder can't be written: compile as if there were no cache.
         let component = from_binary(&plain, bytes)?;
         return Ok((plain, component, Source::Compiled));
@@ -103,12 +107,12 @@ pub(super) fn compile(config: &Config, bytes: &[u8], stack_bytes: usize, cache: 
     config.cache(Some(store.clone()));
     let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
     let component = from_binary(&engine, bytes)?;
-    if verified && store.cache_hits() > 0 && store.cache_misses() == 0 {
+    if verified.is_some() && store.cache_hits() > 0 && store.cache_misses() == 0 {
         touch(&entry);
         return Ok((engine, component, Source::Disk));
     }
     if store.cache_misses() > 0 {
-        if write_record(&entry, &key).is_none() {
+        if write_record(&entry, &key, &store_name).is_none() {
             // A failed removal leaves an entry without a record, which the next load rejects.
             let _ = remove(&entry);
         }
@@ -127,9 +131,21 @@ pub(super) fn from_binary(engine: &Engine, bytes: &[u8]) -> Result<Component> {
     })
 }
 
-/// Wasmtime's cache for one entry. Its own clean-up and recompression are off: they would change
-/// the files the record vouches for, and the size limit is kept here, across entries.
-fn open(dir: &Path, entry: &Path) -> Option<Cache> {
+fn next_store_name() -> Option<String> {
+    let mut generation = NEXT_STORE.load(Ordering::Relaxed);
+    loop {
+        let next = generation.checked_add(1)?;
+        match NEXT_STORE.compare_exchange_weak(generation, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return Some(format!("wasmtime-{}-{generation}", std::process::id())),
+            Err(current) => generation = current,
+        }
+    }
+}
+
+/// Wasmtime's cache for one entry. Recompression is off and its quotas leave size eviction here,
+/// across entries. Its detached worker still cleans up unrecognized files: a replacement must
+/// never reuse an earlier worker's directory, even after that worker's engine has been dropped.
+fn open(dir: &Path, entry: &Path, existing: Option<&str>) -> Option<(Cache, String)> {
     fs::create_dir_all(entry).map_err(|e| log::warn!("plugin compile cache: {}: {e}", entry.display())).ok()?;
     #[cfg(unix)]
     {
@@ -138,13 +154,22 @@ fn open(dir: &Path, entry: &Path) -> Option<Cache> {
     }
     #[cfg(not(unix))]
     let _ = dir;
+    let store_name = match existing {
+        Some(name) => name.to_owned(),
+        None => {
+            let name = next_store_name()?;
+            let path = entry.join(&name);
+            fs::create_dir(&path).map_err(|e| log::warn!("plugin compile cache: {}: {e}", path.display())).ok()?;
+            name
+        }
+    };
     let mut config = CacheConfig::new();
     config
-        .with_directory(entry.join("wasmtime"))
+        .with_directory(entry.join(&store_name))
         .with_file_count_soft_limit(1 << 20)
         .with_files_total_size_soft_limit(1 << 50)
         .with_optimized_compression_usage_counter_threshold(u64::MAX);
-    Cache::new(config).map_err(|e| log::warn!("plugin compile cache: {e:#}")).ok()
+    Cache::new(config).map(|cache| (cache, store_name)).map_err(|e| log::warn!("plugin compile cache: {e:#}")).ok()
 }
 
 /// The files under `dir` that Wasmtime reads back, as (path relative to `dir`, path, size), or
@@ -194,12 +219,8 @@ fn sha256_file(path: &Path) -> Option<String> {
     }
 }
 
-/// Whether `entry` holds exactly what its record says, for this key.
-fn verify(entry: &Path, key: &Key) -> bool {
-    matches_record(entry, key).is_some()
-}
-
-fn matches_record(entry: &Path, key: &Key) -> Option<()> {
+/// The Wasmtime subfolder when `entry` holds exactly what its record says, for this key.
+fn verify(entry: &Path, key: &Key) -> Option<String> {
     let record_path = entry.join(RECORD);
     let metadata = fs::symlink_metadata(&record_path).ok()?;
     if !metadata.is_file() || metadata.len() > MAX_RECORD_BYTES {
@@ -212,6 +233,11 @@ fn matches_record(entry: &Path, key: &Key) -> Option<()> {
     {
         return None;
     }
+    let store = record.get("store")?.as_str()?;
+    let mut parts = Path::new(store).components();
+    if !store.starts_with("wasmtime-") || !matches!(parts.next(), Some(PathComponent::Normal(_))) || parts.next().is_some() {
+        return None;
+    }
     let mut expected = BTreeMap::new();
     for file in record.get("files")?.as_array()? {
         expected.insert(file.get("path")?.as_str()?, (file.get("size")?.as_u64()?, file.get("sha256")?.as_str()?));
@@ -221,16 +247,19 @@ fn matches_record(entry: &Path, key: &Key) -> Option<()> {
         return None;
     }
     for (relative, path, size) in found {
+        if !Path::new(&relative).starts_with(store) {
+            return None;
+        }
         let (want_size, want_sha) = expected.get(relative.as_str())?;
         if *want_size != size || sha256_file(&path)?.as_str() != *want_sha {
             return None;
         }
     }
-    Some(())
+    Some(store.to_owned())
 }
 
 /// Records what Wasmtime just wrote in `entry`, replacing the record in one step.
-fn write_record(entry: &Path, key: &Key) -> Option<()> {
+fn write_record(entry: &Path, key: &Key, store: &str) -> Option<()> {
     let mut listed = Vec::new();
     for (relative, path, size) in files(entry)? {
         listed.push(json!({"path": relative, "size": size, "sha256": sha256_file(&path)?}));
@@ -238,7 +267,7 @@ fn write_record(entry: &Path, key: &Key) -> Option<()> {
     if listed.is_empty() {
         return None;
     }
-    let record = json!({"layout": LAYOUT, "component": key.component, "engine": key.engine, "files": listed});
+    let record = json!({"layout": LAYOUT, "component": key.component, "engine": key.engine, "store": store, "files": listed});
     let temp = entry.join(RECORD_TEMP);
     fs::write(&temp, serde_json::to_vec(&record).ok()?).ok()?;
     fs::rename(&temp, entry.join(RECORD)).ok()
