@@ -1590,6 +1590,14 @@ mod tests {
         let fast_down = ev(v(2e77, 0.0, 0.0), v(0.0, -2.5e153, 0.0));
         assert_eq!(c(&fast_up, &fast_down), ContinuityType::C1);
 
+        // a short tangent (|P'| 2e-6) with P'' near f64::MAX whose products cancel: the
+        // curvature (0, 0, 1 / (2 a^2)) is finite, so the same evaluation on both sides is
+        // C2 (scaling P' up alone would overflow the cross product to NaN)
+        let a = 1.5 * 2f64.powi(-20);
+        let big = 1.5 * 2f64.powi(1023);
+        let cancel = ev(v(a, a, 0.0), v(big, big, 1.0));
+        assert_eq!(c(&cancel, &cancel), ContinuityType::C1C2);
+
         // perpendicular tangents whose squared lengths overflow (|P'| 1e160): not G1
         // (both unit tangents read as zero when the length overflows)
         let along_x = ev(v(1e160, 0.0, 0.0), Vec3::ZERO);
