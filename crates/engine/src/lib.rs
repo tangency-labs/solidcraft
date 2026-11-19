@@ -1194,7 +1194,13 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
-        let plugin_state = self.plugin_state.clone();
+        let mut plugin_state = self.plugin_state.clone();
+        for package in plugin_state.panels.values_mut() {
+            for data in package.data.values_mut() {
+                *data = Default::default();
+            }
+        }
+        plugin_state.ui_caller = None;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -2948,6 +2954,11 @@ impl Session {
         prepared.computed.visibility.hidden_joints.retain(|joint| !prepared.source.visibility.hidden_joints.contains(joint));
         for step in &prepared.steps {
             crash::accepted_command(self, &step.before, &step.after, &step.id, &step.params, step.changed);
+        }
+        // A model worker that did not update panels must keep newer view state on
+        // the window (including data merged into a frame or a panel the user closed).
+        if prepared.computed.plugin_state.panels != prepared.source.plugin_state.panels {
+            self.plugin_state.panels.clone_from(&prepared.computed.plugin_state.panels);
         }
         let replies = prepared.steps.into_iter().map(|step| (step.id, step.reply)).collect();
         self.accept_computed(prepared.computed);

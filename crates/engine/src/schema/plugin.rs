@@ -244,6 +244,9 @@ pub struct InstallParams {
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InstallResult {
+    /// Host-drawn panels declared by the plugin, shown during permission review.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panels: Vec<crate::plugin::ui::PanelSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.

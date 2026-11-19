@@ -1,6 +1,7 @@
 //! SolidCraft policy and transactions for the shared Craft plugin host.
 
 use crate::{EngineError, Result, Session};
+pub use craft_plugin::ui;
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
     MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, valid_id,
@@ -64,6 +65,10 @@ pub struct Grants {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppState {
     pub packages: BTreeMap<String, String>,
+    /// Transient, host-drawn panel state. Never serialised into a design.
+    pub panels: BTreeMap<String, PanelPackage>,
+    /// Namespace of the component currently updating panel data.
+    pub ui_caller: Option<String>,
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
     pub file_grants: Vec<FileGrant>,
@@ -340,6 +345,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
+        panels::register_package(&mut scratch, &package)?;
+        scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
         scratch.plugin_state.storage_caller =
             rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
@@ -363,9 +370,14 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let approved = host.granted_folders();
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
         let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
-        let (host, result) =
-            craft_plugin_wasm::run(SolidCraftHost { file_folders, file_read_folders, ..host }, &package.manifest, &package.component, entry, params);
+        let host = SolidCraftHost { file_folders, file_read_folders, ..host };
+        let event = panels::event_for(&package.manifest, entry, params)?;
+        let (host, result) = match event {
+            Some(event) => craft_plugin_wasm::run_ui_event(host, &package.manifest, &package.component, entry, params, &event),
+            None => craft_plugin_wasm::run(host, &package.manifest, &package.component, entry, params),
+        };
         let value = result?;
+        session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
             || session.pending_moves != host.session.pending_moves
@@ -392,6 +404,8 @@ pub mod install;
 pub mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
+mod panels;
+pub use panels::{PanelPackage, PanelSnapshot, sync_panels};
 pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
@@ -527,6 +541,7 @@ impl PluginHost for SolidCraftHost {
             self.transaction.take().ok_or_else(|| HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() })?;
         computed.undo.clear();
         computed.redo.clear();
+        self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);
         // Session::execute(plugin.run) owns the one outer undo step.
         if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
             || self.session.active_sketch != computed.active_sketch
@@ -545,6 +560,15 @@ impl PluginHost for SolidCraftHost {
         self.sketch_exits.clear();
         self.view = None;
         Ok(())
+    }
+    fn ui_set_data(&mut self, panel: &str, updates: &[ui::Datum]) -> craft_plugin::Result<()> {
+        panels::set_data(self.transaction.as_mut(), panel, updates)
+    }
+    fn ui_clear_data(&mut self, panel: &str) -> craft_plugin::Result<()> {
+        panels::clear_data(self.transaction.as_mut(), panel)
+    }
+    fn ui_show_panel(&mut self, panel: &str, visible: bool) -> craft_plugin::Result<()> {
+        panels::show_panel(self.transaction.as_mut(), panel, visible)
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {
         self.groups.clone()

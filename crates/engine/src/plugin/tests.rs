@@ -91,6 +91,91 @@ fn plugin_entries_cannot_shadow_host_commands() {
     assert!(error.to_string().contains("solid.box"));
 }
 
+fn panel_manifest() -> Value {
+    let mut m = manifest();
+    m["capabilities"] = json!(["commands@0.2", "ui@0.1"]);
+    m["runtime"]["ui"] = json!({"ui_version":1,"panels":[{
+        "id":"jobs","title":"Jobs","zones":["right"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+            "bind":"/jobs","row_id":"id","columns":[{"key":"name","label":"Operation","unit":null}],
+            "select":"single","on_select":null,"on_edit":"make"
+        }}}]}
+    }],"workspaces":[]});
+    m
+}
+
+#[test]
+fn panel_updates_are_namespaced_transactional_and_merged_once_per_frame() {
+    let package = Package {
+        manifest: parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap(),
+        approval: "approved".into(),
+        component: Vec::new(),
+    };
+    let mut session = Session::default();
+    panels::register_package(&mut session, &package).unwrap();
+    session.plugin_state.ui_caller = Some("sample".into());
+    let mut host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+    };
+    let updates = [
+        ui::Datum { path: "/jobs/0/id".into(), value: ui::UiValue::Text("op1".into()) },
+        ui::Datum { path: "/jobs/0/name".into(), value: ui::UiValue::Text("Pocket".into()) },
+    ];
+    assert!(host.ui_set_data("jobs", &updates).is_err(), "updates need an active command transaction");
+    host.begin_transaction().unwrap();
+    assert!(host.ui_set_data("another-plugins-panel", &updates).is_err());
+    host.ui_set_data("jobs", &updates).unwrap();
+    host.commit_transaction().unwrap();
+    assert!(host.session.plugin_panels()[0].data.rows("/jobs").is_empty());
+    host.session.merge_plugin_panel_data();
+    assert_eq!(host.session.plugin_panels()[0].data.rows("/jobs").len(), 1);
+    assert_eq!(host.session.plugin_panels()[0].data.get("/jobs/0/name"), Some(&ui::UiValue::Text("Pocket".into())));
+    host.begin_transaction().unwrap();
+    host.ui_clear_data("jobs").unwrap();
+    host.ui_show_panel("jobs", false).unwrap();
+    host.rollback_transaction().unwrap();
+    host.session.merge_plugin_panel_data();
+    assert_eq!(host.session.plugin_panels()[0].data.rows("/jobs").len(), 1);
+    assert!(host.session.plugin_panels()[0].visible);
+    assert_eq!(host.session.plugin_panels()[0].visibility_revision, 0, "failed commands discard visibility requests");
+    host.begin_transaction().unwrap();
+    host.ui_show_panel("jobs", true).unwrap();
+    host.ui_show_panel("jobs", true).unwrap();
+    host.commit_transaction().unwrap();
+    assert_eq!(host.session.plugin_panels()[0].visibility_revision, 2, "repeated show calls are distinct requests");
+    let mut live = host.session;
+    let prepared = live.scratch().compute_commands(&[("inspect.measure".into(), json!({}))], None).unwrap();
+    panels::show_panel(Some(&mut live), "jobs", false).unwrap();
+    live.accept_commands(prepared).unwrap();
+    assert!(!live.plugin_panels()[0].visible, "a model worker must keep a panel closed meanwhile");
+    live.replace_design(Session::default());
+    assert!(live.plugin_panels()[0].data.rows("/jobs").is_empty(), "panel data belongs to the design that closed");
+    live.disabled_plugins.insert("sample".into());
+    assert!(live.plugin_panels().is_empty());
+}
+
+#[test]
+fn panel_actions_resolve_only_the_declared_entry_and_binding() {
+    let manifest = parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap();
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    assert!(panels::event_for(&manifest, "make", &event).unwrap().is_some());
+    assert!(panels::event_for(&manifest, "delete", &event).is_err());
+    for change in [json!({"panel":"other"}), json!({"path":"/tools"}), json!({"event":"press"})] {
+        let mut bad = event.clone();
+        for (key, value) in change.as_object().unwrap() {
+            bad[key] = value.clone();
+        }
+        assert!(panels::event_for(&manifest, "make", &bad).is_err(), "{bad}");
+    }
+    assert!(panels::event_for(&manifest, "make", &json!({})).unwrap().is_none());
+}
+
 #[test]
 fn capability_refusals_are_plain_and_name_solidcraft() {
     let refusal = |capabilities: Value| {

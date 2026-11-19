@@ -18,8 +18,9 @@ pub trait AppPanelServices {
 }
 
 pub struct AppPanelRuntime {
+    pub(super) plugins: super::plugin::PluginState,
     pub(super) production: Option<super::production::ProductionState>,
-    runtime: PanelRuntime,
+    pub(super) runtime: PanelRuntime,
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -38,6 +39,7 @@ impl AppPanelRuntime {
             return Err(error(Rule::Lifecycle, "install the app adapter before creating or restoring native placement"));
         }
         Ok(Self {
+            plugins: Default::default(),
             production: None,
             runtime,
             services,
@@ -1209,6 +1211,14 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         if let Some(integration) = &mut app.panel_runtime {
             integration.last_error = Some(reason);
         }
+    }
+    if app.panel_runtime.as_ref().is_some_and(|integration| integration.last_tick_frame == Some(ctx.cumulative_frame_nr())) {
+        return;
+    }
+    if let Err(reason) = super::plugin::sync(app)
+        && let Some(integration) = &mut app.panel_runtime
+    {
+        integration.last_error = Some(reason);
     }
     if let Err(reason) = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))

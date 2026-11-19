@@ -21,3 +21,6 @@ serde_json = { workspace = true }
 solidcraft-gpu = { workspace = true }
 # Synthetic reference pictures for the compare_picture test.
 image = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wat = "1"

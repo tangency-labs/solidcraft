@@ -6339,6 +6339,7 @@ dependencies = [
  "solidcraft-mcp-server",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
+ "wat",
 ]
 
 [[package]]

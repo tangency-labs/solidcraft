@@ -138,6 +138,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let runtime = manifest.runtime.as_ref();
     serde_json::to_value(InstallResult {
+        panels: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.panels.clone()).unwrap_or_default(),
         approval: plugin.approval.clone(),
         archive: plugin.archive.clone(),
         id: manifest.id.clone(),

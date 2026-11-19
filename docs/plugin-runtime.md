@@ -289,7 +289,10 @@ model data or package paths.
 
 Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)).
 There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
-network integration, persistent guest store, signed index, custom panels or plugin-supplied icons.
+network integration, persistent guest store, signed index or plugin-supplied icons.
+The optional `ui@0.1` capability provides host-drawn panels, with declarations in `runtime.ui`
+and the matching `ui-provider.describe` export. Panel updates use the command transaction and
+are merged by the window once per frame; see [Docked panels](plugins.md#docked-panels).
 A plugin keeps data in a design through the `storage.*` commands, not a WIT interface of its own.
 `manifest()` is not used.
 

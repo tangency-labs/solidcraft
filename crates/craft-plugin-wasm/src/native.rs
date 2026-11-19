@@ -24,6 +24,7 @@ mod bindings {
 }
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
+include!(concat!(env!("OUT_DIR"), "/panels.rs"));
 
 const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
@@ -109,6 +110,7 @@ struct State<H> {
     deadline: Instant,
     /// The file an importer reads and the design it writes; `None` for a command.
     import: Option<ImportState>,
+    panels: Option<craft_plugin::ui::Declarations>,
 }
 struct ImportState {
     /// The folder of the file being imported, opened by the app's authority.
@@ -650,11 +652,24 @@ fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
 }
 
 pub(super) fn run<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    entry: &str,
+    params: &Value,
+    options: RuntimeOptions,
+) -> (H, Result<Value>) {
+    run_call(host, manifest, bytes, entry, params, None, options)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_call<H: PluginHost + 'static>(
     mut host: H,
     manifest: &Manifest,
     bytes: &[u8],
     entry: &str,
     params: &Value,
+    event: Option<&craft_plugin::ui::UiEvent>,
     options: RuntimeOptions,
 ) -> (H, Result<Value>) {
     let prepared = (|| {
@@ -663,6 +678,13 @@ pub(super) fn run<H: PluginHost + 'static>(
             .as_ref()
             .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
         runtime.validate()?;
+        ui::validate_manifest(manifest, runtime)?;
+        if let Some(event) = event {
+            event.validate()?;
+            if !ui::enabled(runtime) {
+                return Err(HostError::PermissionDenied { permission: "ui capability is not declared".into() });
+            }
+        }
         if runtime.is_importer() {
             return Err(HostError::InvalidInput { field: "entry".into(), reason: "an importer converts a file; open the file instead".into() });
         }
@@ -703,7 +725,7 @@ pub(super) fn run<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, event, compiled, commands, folders);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -727,6 +749,7 @@ fn execute<H: PluginHost + 'static>(
     runtime: &craft_plugin::RuntimeManifest,
     entry: &craft_plugin::Entry,
     params: String,
+    event: Option<&craft_plugin::ui::UiEvent>,
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
     folders: BTreeMap<String, Folder>,
@@ -747,13 +770,19 @@ fn execute<H: PluginHost + 'static>(
         deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
+        panels: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
         let wit = check_imports(&engine, &component)?;
+        ui::check_imports(&engine, &component, runtime)?;
+        if wit == Wit::V0_1 && ui::enabled(runtime) {
+            return Err(component_error("ui requires the current WIT version"));
+        }
         let response = with_interrupts(&engine, || match wit {
             Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
+            Wit::Current if ui::enabled(runtime) => ui::call_entry(&engine, &mut store, &component, runtime, &entry.name, &params, event),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
@@ -895,6 +924,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     let runtime =
         manifest.runtime.as_ref().ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
     runtime.validate()?;
+    ui::validate_manifest(manifest, runtime)?;
     if bytes.len() > runtime.max_component_bytes() {
         return Err(limit(&format!("component size: {} bytes is over {} MiB", bytes.len(), runtime.max_component_bytes() >> 20)));
     }
@@ -904,14 +934,22 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     let importer = runtime.is_importer();
     let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer)?)?;
     let wit = check_imports(&engine, &component)?;
+    ui::check_imports(&engine, &component, runtime)?;
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
     if wit == Wit::V0_1 {
+        if ui::enabled(runtime) {
+            return Err(component_error("ui requires the current WIT version"));
+        }
         return v0_1::check_link::<Inert>(&engine, &component, importer).map_err(link);
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
+    } else if ui::enabled(runtime) || manifest.capabilities.iter().any(|capability| capability.split_once('@').is_some_and(|(name, _)| name == "ui"))
+    {
+        panel_bindings::PanelPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        panel_bindings::PanelPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else {
         bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         bindings::CommandPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -1022,6 +1060,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             .as_ref()
             .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
         runtime.validate()?;
+        ui::validate_manifest(manifest, runtime)?;
         if !runtime.is_importer() {
             return Err(HostError::InvalidInput { field: "entry".into(), reason: "this plugin is not an importer".into() });
         }
@@ -1091,11 +1130,13 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         // A large converter has a large indirect-call table.
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
+        panels: None,
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
         let wit = check_imports(&engine, &component)?;
+        ui::check_imports(&engine, &component, runtime)?;
         let response = with_interrupts(&engine, || match wit {
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
             Wit::Current => {
@@ -1136,4 +1177,5 @@ pub(super) fn run_import<H: PluginHost + 'static>(
 
 #[cfg(test)]
 mod tests;
+pub(crate) mod ui;
 mod v0_1;

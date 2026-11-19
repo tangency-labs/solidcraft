@@ -324,9 +324,9 @@ reports progress and cancellation, reads named files and a clock, and exports th
 `plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
 an unknown or newer capability when it reads the manifest, with a plain message such as "needs
 commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers, `evaluate@0.2`
-lets an importer check its result, and `storage@0.1` keeps data in a design (below). `ui` and
-`viewport` arrive later as their own
-versioned interfaces. While a version is 0.x, a minor version may break the one before it.
+lets an importer check its result, `storage@0.1` keeps data in a design (below), and `ui@0.1`
+adds host-drawn docked panels. `viewport` arrives later as its own versioned interface.
+While a version is 0.x, a minor version may break the one before it.
 
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
@@ -336,6 +336,55 @@ bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`comm
 component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
+
+## Docked panels
+
+Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
+`crates/craft-plugin/wit/plugin.wit`. The `ui` and `ui-provider` records follow
+[RFC 0015 section 1](rfcs/0015-plugin-ui-workspaces.md#1-panels). The manifest declarations are
+listed during installation. The component's `ui-provider.describe` must return those declarations.
+The host owns the controls, theme, docking and plugin badge; plugins ship data and layouts.
+Panels belong to command plugins; the importer world remains separate.
+
+For example, `runtime.ui` can declare a job table whose row action runs the entry `edit`:
+
+```json
+{
+  "ui_version": 1,
+  "panels": [{
+    "id": "jobs", "title": "Jobs", "zones": ["right", "bottom"],
+    "layout": {"root": 0, "nodes": [{"widget": {"table": {
+      "bind": "/jobs", "row_id": "id",
+      "columns": [{"key": "name", "label": "Operation", "unit": null}],
+      "select": "single", "on_select": null, "on_edit": "edit"
+    }}}]}
+  }],
+  "workspaces": []
+}
+```
+
+Every action names an entry in `runtime.entries`. Buttons, toolbar items, list selection,
+table selection or editing, and form changes invoke ordinary `<plugin>.<entry>` commands.
+The entry receives a `ui-event` as its JSON arguments, and `ui-provider.on-event` receives the
+typed event in the same transaction. For the table above, the event is
+`{"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null}`.
+An MCP caller can pass the same arguments to the same entry. Programmatic calls open no forms.
+
+The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
+`/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
+degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. Successful calls
+merge into the panel once per frame. A failing entry discards its updates. `clear-data` replaces
+the panel data with an empty set; `show-panel` requests visibility in the current workspace.
+Calling `show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the
+other workspaces' placements and does not cancel a command already running.
+
+The phase 2 host draws groups, tabs, splits, forms, buttons, toolbars, lists, tables, text,
+progress and empty states. Trees, charts and newer widget versions show a placeholder.
+Panels are transient view state, cleared when a design closes or the plugin is disabled.
+The host remembers placement by plugin id, panel id and dock zones. Code and data updates keep
+that placement. Changing the allowed zones or initial zone opens a new section in a legal dock.
+Limits are eight panels per plugin, 512 nodes per layout, 1 MiB of data per panel and 100,000
+rows. Lists and tables scroll virtually.
 
 ## Commands and permissions
 

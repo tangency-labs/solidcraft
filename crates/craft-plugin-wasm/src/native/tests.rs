@@ -18,6 +18,9 @@ struct App {
     /// The sensitive group `app.write` is in, and the groups the user granted.
     write_group: Option<String>,
     groups: BTreeSet<String>,
+    panel_data: craft_plugin::ui::PanelData,
+    saved_panel_data: Option<craft_plugin::ui::PanelData>,
+    panel_visible: bool,
 }
 impl PluginHost for App {
     fn command_catalog(&self) -> Vec<CommandSchema> {
@@ -35,6 +38,7 @@ impl PluginHost for App {
     }
     fn begin_transaction(&mut self) -> Result<()> {
         self.saved = Some(self.value);
+        self.saved_panel_data = Some(self.panel_data.clone());
         self.begins += 1;
         Ok(())
     }
@@ -51,6 +55,7 @@ impl PluginHost for App {
     }
     fn rollback_transaction(&mut self) -> Result<()> {
         self.value = self.saved.take().unwrap();
+        self.panel_data = self.saved_panel_data.take().unwrap();
         self.rollbacks += 1;
         Ok(())
     }
@@ -59,6 +64,20 @@ impl PluginHost for App {
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {
         self.groups.clone()
+    }
+    fn ui_set_data(&mut self, panel: &str, updates: &[craft_plugin::ui::Datum]) -> Result<()> {
+        assert_eq!(panel, "jobs");
+        self.panel_data.set_data(updates)
+    }
+    fn ui_clear_data(&mut self, panel: &str) -> Result<()> {
+        assert_eq!(panel, "jobs");
+        self.panel_data.clear_data();
+        Ok(())
+    }
+    fn ui_show_panel(&mut self, panel: &str, visible: bool) -> Result<()> {
+        assert_eq!(panel, "jobs");
+        self.panel_visible = visible;
+        Ok(())
     }
     fn log(&mut self, _: &str) {}
     fn progress(&mut self, _: f32, _: &str) {}
@@ -91,6 +110,143 @@ fn component_for(version: &str, code: &str) -> Vec<u8> {
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
 }
+fn panel_manifest() -> Manifest {
+    let mut manifest = manifest();
+    manifest.capabilities.push("ui@0.1".into());
+    manifest.runtime.as_mut().unwrap().ui = Some(
+        serde_json::from_value(json!({
+            "ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+                "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],
+                "select":"single","on_select":"make","on_edit":"make"
+            }}}]}}],"workspaces":[]
+        }))
+        .unwrap(),
+    );
+    manifest
+}
+fn panel_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "app.write")
+            .replace("__COMMAND_LEN__", "9")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2"),
+    )
+    .unwrap()
+}
+#[test]
+fn panel_table_updates_and_actions_share_the_ordinary_entry_transaction() {
+    let manifest = panel_manifest();
+    let component = panel_component();
+    check_component(&manifest, &component, RuntimeOptions::default()).unwrap();
+    let (app, declarations) = crate::describe_ui(App::default(), &manifest, &component);
+    assert_eq!(declarations.unwrap(), manifest.runtime.as_ref().unwrap().ui.clone().unwrap());
+    assert_eq!(app.begins, 0);
+    let (mut app, result) = crate::run(app, &manifest, &component, "make", &json!({}));
+    result.unwrap();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), None);
+    app.panel_data.merge_frame();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("ready".into())));
+    let event = craft_plugin::ui::UiEvent {
+        panel: "jobs".into(),
+        event: craft_plugin::ui::EventKind::Select,
+        path: "/jobs".into(),
+        row: Some("op1".into()),
+        value: None,
+    };
+    let (mut app, result) = crate::run_ui_event(app, &manifest, &component, "make", &json!({}), &event);
+    result.unwrap();
+    app.panel_data.merge_frame();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("posted".into())));
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (2, 2, 2, 0));
+}
+#[test]
+fn panel_imports_require_the_declared_ui_capability() {
+    let (app, result) = crate::run(App::default(), &manifest(), &panel_component(), "make", &json!({}));
+    assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("ui")));
+    assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+
+    let mut undeclared = panel_manifest();
+    undeclared.capabilities.retain(|capability| !capability.starts_with("ui@"));
+    let (app, result) = crate::run(App::default(), &undeclared, &panel_component(), "make", &json!({}));
+    assert!(matches!(result, Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    assert_eq!((app.value, app.begins), (0, 0));
+    assert!(check_component(&undeclared, &panel_component(), RuntimeOptions::default()).is_err());
+    let (_, result) = crate::describe_ui(App::default(), &undeclared, &panel_component());
+    assert!(matches!(result, Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+
+    let mut patch = panel_manifest();
+    patch.capabilities.retain(|capability| !capability.starts_with("ui@"));
+    patch.capabilities.push("ui@0.1.7".into());
+    check_component(&patch, &panel_component(), RuntimeOptions::default()).unwrap();
+}
+
+#[test]
+fn panel_provider_declarations_must_match_approved_manifest() {
+    let (package, version) = API.split_once('@').unwrap();
+    let component = wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "app.write")
+            .replace("__COMMAND_LEN__", "9")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2")
+            .replace("\"Jobs\"", "\"Evil\""),
+    )
+    .unwrap();
+    let (app, error) = crate::run(App::default(), &panel_manifest(), &component, "make", &json!({}));
+    assert!(matches!(error,Err(HostError::InvalidManifest {field,..}) if field=="runtime.ui"));
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 1, 0, 1));
+}
+#[test]
+fn reading_panel_declarations_has_no_command_authority_and_obeys_fuel() {
+    let (package, version) = API.split_once('@').unwrap();
+    let source = include_str!("../ui_fixture.wat")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version)
+        .replace("__COMMAND__", "app.write")
+        .replace("__COMMAND_LEN__", "9")
+        .replace("__ARGS__", "{}")
+        .replace("__ARGS_LEN__", "2");
+    let hostile = wat::parse_str(source.replace("(result i32) i32.const 3000)", "(result i32) call $box i32.const 3000)")).unwrap();
+    let (app, result) = crate::describe_ui(App::default(), &panel_manifest(), &hostile);
+    assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
+    assert_eq!((app.value, app.begins), (0, 0));
+    let looping = wat::parse_str(source.replace("(result i32) i32.const 3000)", "(result i32) (loop $forever br $forever) i32.const 3000)")).unwrap();
+    let (app, result) = crate::describe_ui(App::default(), &panel_manifest(), &looping);
+    assert!(matches!(result, Err(HostError::Exhausted { limit, .. }) if limit == "fuel"));
+    assert_eq!((app.value, app.begins), (0, 0));
+}
+
+#[test]
+fn panel_invalid_updates_are_fatal_even_when_guest_ignores_the_host_error() {
+    let (package, version) = API.split_once('@').unwrap();
+    let component = wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "app.write")
+            .replace("__COMMAND_LEN__", "9")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2")
+            .replace("/jobs/0/state", "!jobs/0/state"),
+    )
+    .unwrap();
+    let (app, result) = crate::run(App::default(), &panel_manifest(), &component, "make", &json!({}));
+    assert!(matches!(result, Err(HostError::InvalidInput { .. })));
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 1, 0, 1));
+    assert!(app.panel_data.values().is_empty());
+}
+
+#[test]
+fn ui_capability_requires_provider_exports() {
+    assert!(check_component(&panel_manifest(), &component("call $box"), RuntimeOptions::default()).is_err());
+}
+
 #[test]
 fn edit_commands_commit_as_one_transaction_and_instances_are_fresh() {
     let mut app = App::default();
@@ -285,8 +441,33 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         log_bytes: 0,
         deadline: Instant::now() + Duration::from_secs(5),
         import: None,
+        panels: None,
     }
 }
+#[test]
+fn panel_imports_validate_typed_data_and_allow_read_entries_to_update_their_panels() {
+    use panel_ui::Host;
+    let mut state = state(App::default());
+    state.effect = Effect::Read;
+    state.panels = panel_manifest().runtime.unwrap().ui;
+    state.set_data("jobs".into(), vec![types::Datum { path: "/jobs/0/state".into(), value: types::Value::Text("ready".into()) }]).unwrap();
+    state.show_panel("jobs".into(), true).unwrap();
+    assert!(state.host.panel_visible);
+    state.host.panel_data.merge_frame();
+    assert_eq!(state.host.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("ready".into())));
+    state.clear_data("jobs".into()).unwrap();
+    state.host.panel_data.merge_frame();
+    assert!(state.host.panel_data.values().is_empty());
+    assert!(state.show_panel("unknown".into(), true).is_err());
+    assert!(state.failed.is_some());
+
+    let mut state = super::tests::state(App::default());
+    state.panels = panel_manifest().runtime.unwrap().ui;
+    assert!(state.set_data("jobs".into(), vec![types::Datum { path: "/number".into(), value: types::Value::Number(f64::NAN) }]).is_err());
+    assert!(state.failed.is_some());
+    assert!(state.host.panel_data.values().is_empty());
+}
+
 #[test]
 fn files_are_denied_without_an_explicit_folder_grant() {
     use files::Host;
