@@ -172,6 +172,14 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
 
 /// Toolbar clicks inspect options. Engine execution still uses command parameters directly.
 pub fn start(app: &mut SolveApp, id: &str) -> bool {
+    // Select All selects what is on the sheet shown.
+    if id == "select.all" && active(app) && app.session.open_drawing.is_some() {
+        let sheet = active_sheet(app).map(solidcraft_engine::doc::ids::encode);
+        if let Err(error) = app.run("select.all", serde_json::json!({"sheet": sheet})) {
+            app.set_status(error, true);
+        }
+        return true;
+    }
     if !active(app) || !can_open_options(id) {
         return false;
     }
@@ -1153,6 +1161,72 @@ mod tests {
             assert!(crate::toolbar::coming_soon(&h.app, spec), "{id} opens nothing yet: faded, coming soon");
         }
         assert_eq!(h.app.tr("ui.drawing_ribbon.planned"), "Coming soon");
+    }
+
+    /// A drawing's views and notes are picked, selected all, cleared and deleted with the model's
+    /// own controls: click, Shift-click, Ctrl+A, Escape and Delete on the session's selection.
+    #[test]
+    fn drawing_objects_take_the_shared_selection_keys() {
+        use serde_json::json;
+        use solidcraft_engine::Sel;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[120,150]})).unwrap();
+        h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[260,150],"view":"top"})).unwrap();
+        h.frames(8);
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+        let [a, b] = [drawing.views[0].id, drawing.views[1].id];
+        let size = drawing.sheets[0].sheet.size_mm().unwrap();
+        let screen = |h: &Harness, view: u64| {
+            let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+            let c = h.app.session.drawing("drawing.inspect").unwrap().view_centre(view).unwrap();
+            [paper.left() + (c.x / size.x) as f32 * paper.width(), paper.bottom() - (c.y / size.y) as f32 * paper.height()]
+        };
+        let picked = |h: &Harness| -> Vec<u64> {
+            h.app.session.selection.iter().filter_map(|s| if let Sel::Drawing { object, .. } = s { Some(*object) } else { None }).collect()
+        };
+
+        h.step(&json!({"click": screen(&h, a)})).unwrap();
+        h.frames(2);
+        assert_eq!(picked(&h), [a], "a click selects the view under it");
+        h.step(&json!({"click": screen(&h, b), "shift": true})).unwrap();
+        h.frames(2);
+        assert_eq!(picked(&h), [a, b], "Shift-click adds, as in the model");
+
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.selection.is_empty(), "Escape clears the selection");
+
+        h.step(&json!({"key":"A", "cmd": true})).unwrap();
+        h.frames(2);
+        assert_eq!(picked(&h), [a, b], "Ctrl+A selects everything on the sheet");
+
+        assert!(start(&mut h.app, "drawing.note"));
+        h.frames(2);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.drawing_workspace.options, None, "Escape puts the tool down first");
+        assert_eq!(picked(&h), [a, b], "and keeps the selection for the next press");
+
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"click": screen(&h, a)})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(4);
+        let left = h.app.session.drawing("drawing.inspect").unwrap();
+        assert!(left.view(a).is_none() && left.view(b).is_some(), "Delete removes only the selected view");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+        assert!(h.app.session.selection.is_empty());
+
+        h.step(&json!({"key":"Z", "cmd": true})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(a).is_some(), "Ctrl+Z brings it back");
+        h.step(&json!({"key":"Y", "cmd": true})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().view(a).is_none(), "and Ctrl+Y deletes it again");
     }
 
     #[test]

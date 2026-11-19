@@ -282,6 +282,10 @@ pub struct ViewportState {
     /// The point the orbit under way turns around (Preferences: orbit around the cursor, or the
     /// view's centre (`navigation::view_middle`)), chosen when it begins.
     pub orbit_pivot: Option<Vec3>,
+    /// The point to mark while an orbit or a continuous orbit turns about the origin or the model
+    /// point under the cursor (Preferences: Mark the orbit point); drawn as a small screen-sized
+    /// dot, like a sketch point, and let go with the orbit's other points (#17474).
+    pub orbit_mark: Option<Vec3>,
     /// Where the view-centre orbit pivot (the camera's target while that is `None`) was on screen
     /// when the orbit chose it; the pivot is kept while it stays there (#16091).
     pub orbit_pivot_at: Option<egui::Pos2>,
@@ -7756,7 +7760,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::sketch_cursor_readout::show(app, &painter, &proj, badge_at);
 }
 
-fn paint_box_selection(painter: &egui::Painter, bx: &BoxSel, sketch: bool) {
+pub(crate) fn paint_box_selection(painter: &egui::Painter, bx: &BoxSel, sketch: bool) {
     let t = Tokens::get();
     let col = if sketch {
         t.sketch_accent
@@ -9045,12 +9049,17 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
 /// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
 /// The point the 3D mouse is turning the view around, as a faint ball, so the user sees what the
 /// turn holds still (#7435). Lighter, smaller discs stacked toward the top left give it its shading.
+/// An orbit about the origin or the cursor's point (#17474) marks its point as a small dot instead,
+/// the size of a sketch point whatever the zoom.
 fn paint_device_pivot(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    let Some(p) = app.viewport.device_pivot.and_then(|p| proj.to_screen(p)) else { return };
     let t = Tokens::get();
-    painter.circle(p, 8.0, t.accent.gamma_multiply(0.18), Stroke::new(1.0, t.accent.gamma_multiply(0.5)));
-    painter.circle_filled(p + vec2(-1.5, -1.5), 5.0, t.accent.gamma_multiply(0.2));
-    painter.circle_filled(p + vec2(-2.5, -2.5), 2.5, t.accent.gamma_multiply(0.3));
+    if let Some(p) = app.viewport.device_pivot.and_then(|p| proj.to_screen(p)) {
+        painter.circle(p, 8.0, t.accent.gamma_multiply(0.18), Stroke::new(1.0, t.accent.gamma_multiply(0.5)));
+        painter.circle_filled(p + vec2(-1.5, -1.5), 5.0, t.accent.gamma_multiply(0.2));
+        painter.circle_filled(p + vec2(-2.5, -2.5), 2.5, t.accent.gamma_multiply(0.3));
+    } else if let Some(p) = app.viewport.orbit_mark.and_then(|p| proj.to_screen(p)) {
+        painter.circle(p, 3.5, t.sketch, Stroke::new(1.0, Color32::WHITE.gamma_multiply(0.8)));
+    }
 }
 
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
@@ -17330,6 +17339,56 @@ mod tests {
             assert!((back.target - start.target).len() < 1e-4, "back where it began: {start:?} -> {back:?}");
             send(&mut h, egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: false, modifiers: shift });
         }
+    }
+
+    /// An orbit about the origin or the model point under the cursor marks that point while it
+    /// turns (#17474); about the view's centre, or with Mark the orbit point off, it marks nothing;
+    /// and the mark goes when the drag ends.
+    #[test]
+    fn an_orbit_marks_the_point_it_turns_about_until_the_drag_ends() {
+        use crate::prefs::OrbitAround;
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":80,"width":50,"height":20})).unwrap();
+        h.app.fit_view();
+        h.frames(2);
+        let rect = h.app.viewport.rect.unwrap();
+        let at = rect.center() + vec2(30.0, 20.0);
+        let under = crate::prefs::pivot_under(&h.app, &projection(&h.app, rect), at);
+        assert!(h.app.preferences.mark_orbit_point, "the mark is on by default");
+        for (around, mark, want) in [
+            (OrbitAround::Cursor, true, Some(under)),
+            (OrbitAround::Origin, true, Some(solidcore_record::Vec3::ZERO)),
+            (OrbitAround::ViewCentre, true, None),
+            (OrbitAround::Cursor, false, None),
+            (OrbitAround::Origin, false, None),
+        ] {
+            h.app.preferences.orbit_around = around;
+            h.app.preferences.mark_orbit_point = mark;
+            h.app.viewport.orbit_pivot = None;
+            h.app.viewport.orbit_pivot_at = None;
+            h.app.viewport.orbit_mark = None;
+            orbit_drag(&mut h.app, rect, 4.0, 2.0, Some(at), false, true);
+            assert_eq!(h.app.viewport.orbit_mark, want, "{around:?}, mark {mark}");
+        }
+        // A real drag: the mark is there while the button is down and gone after it is released.
+        h.app.preferences.orbit_around = OrbitAround::Origin;
+        h.app.preferences.mark_orbit_point = true;
+        h.app.viewport.orbit_mark = None;
+        let shift = egui::Modifiers { shift: true, ..Default::default() };
+        let send = |h: &mut crate::scenario::Harness, e: egui::Event| {
+            h.app.synthetic.push(e);
+            h.frame();
+        };
+        send(&mut h, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        send(&mut h, egui::Event::PointerMoved(at));
+        send(&mut h, egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: true, modifiers: shift });
+        for i in 1..=6 {
+            send(&mut h, egui::Event::PointerMoved(at + vec2(12.0 * i as f32, 3.0 * i as f32)));
+        }
+        assert_eq!(h.app.viewport.orbit_mark, Some(solidcore_record::Vec3::ZERO), "marked while the drag goes on");
+        send(&mut h, egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: false, modifiers: shift });
+        h.frames(2);
+        assert_eq!(h.app.viewport.orbit_mark, None, "let go with the drag");
     }
 
     #[test]
