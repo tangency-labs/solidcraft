@@ -944,6 +944,11 @@ pub struct Stitch<'c> {
 /// Not upstream (#18166): the cover one join leaves pending until its operation ends
 /// ([`Stitch::finish_joins`]): the faces the join gave the kept edge, each with a proved
 /// bound on its distance from the kept curve as it was at the join.
+///
+/// The join's bound is the two curves' proved distance plus the deleted edge's tolerance:
+/// a proof on the condition that the deleted edge's tolerance covered its own curve on
+/// that face, as the input B-rep's tolerances state. The face's own enclosure, where it is
+/// smaller, needs no such condition.
 #[derive(Debug, Clone)]
 struct JoinCover {
     /// The kept edge, or a piece split from it.
@@ -1219,7 +1224,8 @@ impl<'c> Stitch<'c> {
     /// # Errors
     ///
     /// `outcome`'s; [`SolidError::NotFound`] for a dangling id; the covers' unported and
-    /// cancelled statuses.
+    /// cancelled statuses, which take precedence over a failed `outcome` (a cancel or an
+    /// unported path is reported as such, whatever failed before it).
     pub(crate) fn finish_joins<T>(
         &mut self,
         k: &Kernel,
@@ -1238,12 +1244,11 @@ impl<'c> Stitch<'c> {
                 continue;
             }
             let holds = cover.holds_on(b)?;
-            let at = match edges.iter().position(|(e, _)| *e == cover.edge) {
-                Some(at) => at,
-                None => {
-                    edges.push((cover.edge, Vec::new()));
-                    edges.len() - 1
-                }
+            let at = if let Some(at) = edges.iter().position(|(e, _)| *e == cover.edge) {
+                at
+            } else {
+                edges.push((cover.edge, Vec::new()));
+                edges.len() - 1
             };
             let Some((_, faces)) = edges.get_mut(at) else {
                 continue;

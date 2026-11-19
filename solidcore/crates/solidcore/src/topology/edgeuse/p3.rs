@@ -99,6 +99,12 @@
 //!   `EvaluateBinormal`'s `GetOrCreateUVTrimCurve`, derivatives, normal and
 //!   `ComputeParamDirection`; `NormalizedEvaluate`'s derivatives) are returned instead of
 //!   ignored, as upstream does. `GetEnds` stays ignored, as in the fork.
+//! - **Stitch covers (#18166, not upstream).** `cover_joined_faces` raises a stitched
+//!   edge's tolerance to the proved distance of its curve from the faces a join gave it
+//!   with no trim there, at the end of the stitch operation; `covered_trimless_faces` and
+//!   `keep_trimless_faces_covered` (crate-private) keep that cover across `StitchAndOrient`'s
+//!   orientation; `settle_face_bounds` (private) re-bounds the faces at the raised
+//!   tolerance for at most `SETTLE_ROUNDS` rounds.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
@@ -1879,7 +1885,7 @@ fn other_trims_bound(
 /// ([`crate::heal::stitch::p1::Stitch::finish_joins`]). A join keeps `e`'s curve for the
 /// deleted edge's faces and raises the tolerance to the two curves' distance only
 /// (`UpdateObjectTolerance`), which does not cover that curve's distance to those faces: the
-/// deleted edge's own tolerance covered its own curve there (`heal.stitch_p2` cov_tjunc8: a
+/// deleted edge's own tolerance covered its own curve there (`heal.stitch_p2` `cov_tjunc8`: a
 /// face joined 2.43e-4 from the kept curve under a tolerance of 2.18e-4). A face with no
 /// finite bound, or whose bound is within the tolerance, is left as upstream leaves it.
 ///
@@ -1890,7 +1896,7 @@ fn other_trims_bound(
 /// 1.2e-7 from the kept curve by samples, bounded at 4.76e4 where its nearest points are not
 /// followed), and the join's alone holds where the face's is not enclosed. The join's own
 /// distance is no bound: the stitch samples it (five or ten points, none for two lines), and
-/// on cov_tjunc8 it is 0 under a deleted-edge tolerance of 1e-5, where the kept curve is
+/// on `cov_tjunc8` it is 0 under a deleted-edge tolerance of 1e-5, where the kept curve is
 /// 2.43e-4 from the face.
 ///
 /// After a raise, the faces' own bounds are settled at the raised tolerance
@@ -2007,7 +2013,7 @@ pub(crate) fn covered_trimless_faces(
 /// its face after an edit that rewrote the face's surface without moving it
 /// (`OrientTrimmedSurfaces` reverses a surface: its knots are reflected, with rounding), where
 /// the edge is still on the face and still holds no trim there: the face's bound, which
-/// comes out a rounding apart on the rewritten surface (`heal.stitch_p1` cov_tjunc11_stitch
+/// comes out a rounding apart on the rewritten surface (`heal.stitch_p1` `cov_tjunc11_stitch`
 /// edge 12: 1.0687382852519145e-5 before the stitch's orientation, 1.0687382852519804e-5
 /// after it), is settled at the edge's tolerance ([`settle_face_bounds`]), up to twice the
 /// tolerance the edge had (a bound past that is no rounding, and is left as upstream leaves

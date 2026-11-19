@@ -36,7 +36,6 @@ use solidcore::nurbs::math::{gamma, CPoint};
 use solidcore::query::curve_surface_gap::{
     curve_face_gap_bound_within, line_evaluation_slack, trim_image_gap_bound,
 };
-use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
@@ -1052,7 +1051,9 @@ fn certify(unit: &str) -> Tally {
                 let key = (row.case.clone(), body, format!("v{index}"));
                 // (a vertex raised to exactly the new tolerance of an edge of its that this row
                 // raises: `edge::set_tolerance` keeps a vertex's tolerance at least its edges',
-                // so it follows that edge, whose own raise is certified above or fails)
+                // so it follows that edge, whose own raise is certified above or fails; the
+                // raise is then the edge's, not the vertex's, and the new tolerance must still
+                // cover the ends of every edge of the vertex)
                 let follows_a_raised_edge = || {
                     solidcore::topology::vertex::edges(b, v, None)
                         .expect("edges")
@@ -1068,9 +1069,11 @@ fn certify(unit: &str) -> Tally {
                                 })
                         })
                 };
-                if raised && follows_a_raised_edge() {
+                let follows = raised && follows_a_raised_edge();
+                if follows && vertex_covers_its_ends(&k, b, v, new) {
                     tally.vertices += 1;
-                } else if raised && vertex_covers_its_ends(&k, b, v, old) {
+                    assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
+                } else if raised && !follows && vertex_covers_its_ends(&k, b, v, old) {
                     failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
                 } else if vertex_covers_its_ends(&k, b, v, new) {
                     tally.vertices += 1;
