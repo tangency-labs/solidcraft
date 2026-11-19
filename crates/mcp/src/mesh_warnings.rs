@@ -7,11 +7,13 @@
 //! finite, is kept as it is: a changed wording makes the compact reply longer, never shorter
 //! by a warning.
 
+use std::collections::HashMap;
+
 use serde_json::{Map, Value, json};
 
 /// What a line says, with the words that tell two groups apart. Only lines with the same kind
 /// are counted together: a face past its chord tolerance is never counted with one within it.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 enum Kind<'a> {
     /// A face short of the smallest angle asked (the angle asked, in degrees).
     ShortOfAngle(&'a str),
@@ -80,6 +82,16 @@ fn number(t: &str, format: Format) -> Option<f64> {
 
 /// What the export writes for a face whose shaping no bound stopped.
 const NOTHING_STOPPED: &str = "nothing stopped it";
+
+/// The reason the export writes for a face off its surface whose shared boundary was kept.
+const BOUNDARY_KEPT: &str = "its shared boundary was kept";
+
+/// Whether `reason` is one the export writes before ". Its triangles lie up to":
+/// [`BOUNDARY_KEPT`] or "its refinement stopped at a bound (...)" with the bounds inside.
+fn surface_reason(reason: &str) -> bool {
+    reason == BOUNDARY_KEPT
+        || reason.strip_prefix("its refinement stopped at a bound (").and_then(|r| r.strip_suffix(')')).is_some_and(|caps| !caps.is_empty())
+}
 
 /// The bounds in "Points, Side".
 fn list(t: &str) -> Vec<&str> {
@@ -152,6 +164,9 @@ fn note(w: &str) -> Option<Note<'_>> {
     }
     // {reason}. Its triangles lie up to {sag} mm off the surface, {how} (chord tolerance {tol} mm[, {n} middles unmeasured])
     let (reason, r) = rest.split_once(". Its triangles lie up to ")?;
+    if !surface_reason(reason) {
+        return None;
+    }
     let (sag, r) = r.split_once(" mm off the surface, ")?;
     let (how, r) = r.split_once(" (chord tolerance ")?;
     if !matches!(how, "past it" | "still within it" | "within it where measured") {
@@ -166,6 +181,12 @@ fn note(w: &str) -> Option<Note<'_>> {
     Some(base(Kind::OffSurface(how), vec![reason], sag, tol, if t > 0.0 { s / t } else { s }, unmeasured))
 }
 
+/// A body's name quoted as a JSON string, as the bodies list and the worst line's location
+/// write it.
+fn quoted(body: &str) -> String {
+    Value::String(body.to_string()).to_string()
+}
+
 /// The bodies of `notes` in the order they first appear, each with how many lines it has:
 /// `"Base" (2), "Lid" (1)`. Names are quoted as JSON strings, so a name holding " (" or ", "
 /// can't be mistaken for two bodies or a count.
@@ -178,7 +199,7 @@ fn bodies(notes: &[&Note<'_>]) -> String {
         }
     }
     seen.iter()
-        .map(|(b, c)| if b.is_empty() { format!("no body named ({c})") } else { format!("{} ({c})", Value::String((*b).to_string())) })
+        .map(|(b, c)| if b.is_empty() { format!("no body named ({c})") } else { format!("{} ({c})", quoted(b)) })
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -213,7 +234,8 @@ fn summary(kind: &Kind<'_>, group: &[&Note<'_>]) -> Option<String> {
         Kind::ShortOfAngle(_) | Kind::BoundReached(_) => group.iter().min_by(|a, b| a.badness.total_cmp(&b.badness)),
         Kind::OffSurface(_) | Kind::OffCurve => group.iter().max_by(|a, b| a.badness.total_cmp(&b.badness)),
     }?;
-    let at = if worst.body.is_empty() { worst.item.clone() } else { format!("{}: {}", worst.body, worst.item) };
+    // Quoted like the bodies list, so a name ending in ": face 9" can't be read as the face.
+    let at = if worst.body.is_empty() { worst.item.clone() } else { format!("{}: {}", quoted(worst.body), worst.item) };
     let (n, why, on) = (group.len(), reasons(group), bodies(group));
     Some(match kind {
         Kind::ShortOfAngle(asked) => {
@@ -238,37 +260,65 @@ fn summary(kind: &Kind<'_>, group: &[&Note<'_>]) -> Option<String> {
     })
 }
 
+/// The lines of each kind, in the order the kinds first appear, each as the indices of its lines
+/// in `notes`; and the group of each line (`None` for a line that is no mesh warning). Built in
+/// one pass over the lines, so a reply of many warnings takes time in proportion to its length.
+fn groups<'a>(notes: &[Option<Note<'a>>]) -> (Vec<Vec<usize>>, Vec<Option<usize>>) {
+    let mut index: HashMap<&Kind<'a>, usize> = HashMap::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut of_line: Vec<Option<usize>> = Vec::new();
+    for (i, n) in notes.iter().enumerate() {
+        #[cfg(test)]
+        tests::LINES_READ.with(|c| c.set(c.get() + 1));
+        of_line.push(n.as_ref().map(|n| {
+            let g = *index.entry(&n.kind).or_insert_with(|| {
+                groups.push(Vec::new());
+                groups.len() - 1
+            });
+            if let Some(lines) = groups.get_mut(g) {
+                lines.push(i);
+            }
+            g
+        }));
+    }
+    (groups, of_line)
+}
+
 /// A compact reply's `warnings`: two or more lines of one kind become one line, and
 /// `warning_count` keeps the number of lines the full reply has. Other warnings, and a kind with
 /// one line, stay as they are. Nothing changes when no kind has two lines.
 pub(crate) fn compact(o: &mut Map<String, Value>) {
     let Some(lines) = o.get("warnings").and_then(Value::as_array).cloned() else { return };
     let notes: Vec<Option<Note<'_>>> = lines.iter().map(|w| w.as_str().and_then(note)).collect();
-    let group = |k: &Kind<'_>| notes.iter().flatten().filter(|n| n.kind == *k).collect::<Vec<_>>();
-    if !notes.iter().flatten().any(|n| group(&n.kind).len() >= 2) {
+    let (groups, of_line) = groups(&notes);
+    if !groups.iter().any(|g| g.len() >= 2) {
         return;
     }
     let total = lines.len();
     let mut out: Vec<Value> = Vec::new();
-    let mut done: Vec<Kind<'_>> = Vec::new();
-    for (line, n) in lines.iter().zip(&notes) {
-        let Some(n) = n else {
+    let mut done = vec![false; groups.len()];
+    for ((line, n), g) in lines.iter().zip(&notes).zip(&of_line) {
+        let (Some(n), Some(g)) = (n, g) else {
             out.push(line.clone());
             continue;
         };
-        let same = group(&n.kind);
-        if same.len() < 2 {
+        let members = groups.get(*g).map_or(&[][..], Vec::as_slice);
+        if members.len() < 2 {
             out.push(line.clone());
             continue;
         }
-        if done.contains(&n.kind) {
-            continue;
+        // The summary goes where the group's first line was; its other lines leave nothing.
+        match done.get_mut(*g) {
+            Some(d) if !*d => *d = true,
+            _ => continue,
         }
-        done.push(n.kind.clone());
+        #[cfg(test)]
+        tests::LINES_READ.with(|c| c.set(c.get() + members.len()));
+        let same: Vec<&Note<'_>> = members.iter().filter_map(|&i| notes.get(i).and_then(Option::as_ref)).collect();
         // A group always has a worst line; were it to have none, its lines stay.
         match summary(&n.kind, &same) {
             Some(s) => out.push(Value::String(s)),
-            None => out.extend(lines.iter().zip(&notes).filter(|(_, m)| m.as_ref().is_some_and(|m| m.kind == n.kind)).map(|(l, _)| l.clone())),
+            None => out.extend(members.iter().filter_map(|&i| lines.get(i)).cloned()),
         }
     }
     o.insert("warnings".into(), Value::Array(out));
@@ -277,7 +327,15 @@ pub(crate) fn compact(o: &mut Map<String, Value>) {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    thread_local! {
+        /// How many times `compact` has read a line while grouping: once to place it in its
+        /// group and once more when its group's summary is written.
+        pub(super) static LINES_READ: Cell<usize> = const { Cell::new(0) };
+    }
 
     fn compacted(lines: &[&str]) -> Value {
         let mut o = Map::new();
@@ -306,8 +364,8 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "2 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, A: face 1); bodies: \"A\" (2)",
-                "2 faces whose triangles lie off the surface, still within it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 1.000e-3 mm (chord tolerance 2.000e-3 mm, B: face 4); 6 middles unmeasured; bodies: \"B\" (2)",
+                "2 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, \"A\": face 1); bodies: \"A\" (2)",
+                "2 faces whose triangles lie off the surface, still within it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 1.000e-3 mm (chord tolerance 2.000e-3 mm, \"B\": face 4); 6 middles unmeasured; bodies: \"B\" (2)",
             ]),
             "{r}"
         );
@@ -329,7 +387,7 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "3 faces short of the 25° asked (stopped by: Corner, Points, Side); the sharpest: smallest angle 3.00° (Base: face 9); bodies: \"Lid\" (1), \"Base\" (2)"
+                "3 faces short of the 25° asked (stopped by: Corner, Points, Side); the sharpest: smallest angle 3.00° (\"Base\": face 9); bodies: \"Lid\" (1), \"Base\" (2)"
             ]),
             "{r}"
         );
@@ -341,7 +399,7 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "2 edges whose chords lie off the curve, past the chord tolerance (stopped by: Points); the farthest for its tolerance: up to 2.000e-2 mm (chord tolerance 5.000e-3 mm, body `Disc`: edge 4); bodies: \"body `Disc`\" (2)"
+                "2 edges whose chords lie off the curve, past the chord tolerance (stopped by: Points); the farthest for its tolerance: up to 2.000e-2 mm (chord tolerance 5.000e-3 mm, \"body `Disc`\": edge 4); bodies: \"body `Disc`\" (2)"
             ]),
             "{r}"
         );
@@ -359,7 +417,7 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                r#"4 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° (Lid (1): face 1); bodies: "Lid (1)" (1), "Lid, Base" (1), "Lid" (1), "Say \"hi\"" (1)"#
+                r#"4 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° ("Lid (1)": face 1); bodies: "Lid (1)" (1), "Lid, Base" (1), "Lid" (1), "Say \"hi\"" (1)"#
             ]),
             "{r}"
         );
@@ -373,14 +431,14 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                r#"3 faces short of the 25° asked (stopped by: Corner, Points; nothing stopped 1 face); the sharpest: smallest angle 11.00° (A: face 1); bodies: "A" (3)"#
+                r#"3 faces short of the 25° asked (stopped by: Corner, Points; nothing stopped 1 face); the sharpest: smallest angle 11.00° ("A": face 1); bodies: "A" (3)"#
             ]),
             "{r}"
         );
         let r = compacted(&[&line(1, "nothing stopped it"), &line(2, "nothing stopped it")]);
         assert_eq!(
             r["warnings"],
-            json!([r#"2 faces short of the 25° asked (nothing stopped them); the sharpest: smallest angle 11.00° (A: face 1); bodies: "A" (2)"#]),
+            json!([r#"2 faces short of the 25° asked (nothing stopped them); the sharpest: smallest angle 11.00° ("A": face 1); bodies: "A" (2)"#]),
             "{r}"
         );
     }
@@ -396,7 +454,7 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "2 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° (Top: face plate: face 1); bodies: \"Top: face plate\" (2)"
+                "2 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° (\"Top: face plate\": face 1); bodies: \"Top: face plate\" (2)"
             ]),
             "{r}"
         );
@@ -436,5 +494,99 @@ mod tests {
             json!(["2 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 9.00° (face 2); bodies: no body named (2)"]),
             "{r}"
         );
+    }
+
+    /// A surface line whose reason is not one the export writes stays as it is, while the two
+    /// reasons it does write are still counted (#19250).
+    #[test]
+    fn a_surface_line_with_an_unknown_reason_stays() {
+        let line = |f: u32, reason: &str| {
+            format!("A: face {f}: {reason}. Its triangles lie up to 2.000e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)")
+        };
+        for reason in [
+            "its boundary was moved",
+            "its refinement stopped at a bound ()",
+            "Its shared boundary was kept",
+            "its refinement stopped at a bound (Points",
+        ] {
+            let odd = [line(1, reason), line(2, reason)];
+            let r = compacted(&odd.iter().map(String::as_str).collect::<Vec<_>>());
+            assert_eq!(r["warnings"], json!(odd), "{r}");
+            assert!(r.get("warning_count").is_none(), "{r}");
+        }
+        // The exact reasons are counted; an unknown one beside them stays on its own line.
+        let lines = [line(1, "its shared boundary was kept"), line(2, "its boundary was moved"), line(3, "its shared boundary was kept")];
+        let r = compacted(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(r["warning_count"], json!(3), "{r}");
+        assert_eq!(
+            r["warnings"],
+            json!([
+                r#"2 faces whose triangles lie off the surface, past it (its shared boundary was kept); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, "A": face 3); bodies: "A" (2)"#,
+                lines[1],
+            ]),
+            "{r}"
+        );
+    }
+
+    /// The worst line's location quotes the body name like the bodies list, so a name that ends
+    /// in ": face 9" can't be read as the face (#19250).
+    #[test]
+    fn the_worst_location_quotes_the_body_name() {
+        let r = compacted(&[
+            "Lid: face 9: face 2: smallest angle 10.00°, short of the 25° asked (stopped by: Corner)",
+            "Lid (rev A): face 3: smallest angle 11.00°, short of the 25° asked (stopped by: Corner)",
+        ]);
+        assert_eq!(
+            r["warnings"],
+            json!([
+                r#"2 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° ("Lid: face 9": face 2); bodies: "Lid: face 9" (1), "Lid (rev A)" (1)"#
+            ]),
+            "{r}"
+        );
+        let r = compacted(&[
+            "Lid (rev A): face 3: smallest angle 11.00°, short of the 25° asked (stopped by: Corner)",
+            "Lid (rev A): face 4: smallest angle 10.50°, short of the 25° asked (stopped by: Corner)",
+        ]);
+        assert_eq!(
+            r["warnings"],
+            json!([
+                r#"2 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.50° ("Lid (rev A)": face 4); bodies: "Lid (rev A)" (2)"#
+            ]),
+            "{r}"
+        );
+    }
+
+    /// 10,000 warnings of three kinds are grouped by reading each line twice, not once for every
+    /// other line (#19250).
+    #[test]
+    fn ten_thousand_lines_are_grouped_in_one_pass() {
+        let mut lines = vec![String::from("Part has a print face but was written as it lies")];
+        for i in 0..10_000u32 {
+            lines.push(match i % 3 {
+                0 => format!("Part: face {i}: smallest angle {:.2}°, short of the 25° asked (stopped by: Corner)", 10.0 + f64::from(i % 997) / 100.0),
+                1 => format!(
+                    "Part: face {i}: its refinement stopped at a bound (Points). Its triangles lie up to {} mm off the surface, past it (chord tolerance 1.000e-3 mm)",
+                    if i == 4999 { "9.000e-3" } else { "2.000e-3" }
+                ),
+                _ => format!(
+                    "Part: edge {i}: its sampling stopped at a bound (Points); its chords lie up to {} mm off the curve, past the 5.000e-3 mm chord tolerance",
+                    if i == 7001 { "8.000e-2" } else { "1.000e-2" }
+                ),
+            });
+        }
+        LINES_READ.with(|c| c.set(0));
+        let r = compacted(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(r["warning_count"], json!(10_001));
+        assert_eq!(
+            r["warnings"],
+            json!([
+                "Part has a print face but was written as it lies",
+                r#"3334 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° ("Part": face 0); bodies: "Part" (3334)"#,
+                r#"3333 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 9.000e-3 mm (chord tolerance 1.000e-3 mm, "Part": face 4999); bodies: "Part" (3333)"#,
+                r#"3333 edges whose chords lie off the curve, past the chord tolerance (stopped by: Points); the farthest for its tolerance: up to 8.000e-2 mm (chord tolerance 5.000e-3 mm, "Part": edge 7001); bodies: "Part" (3333)"#,
+            ])
+        );
+        // Every line once to group it, and each of the 10,000 counted lines once more for its summary.
+        assert_eq!(LINES_READ.with(Cell::get), 10_001 + 10_000);
     }
 }
