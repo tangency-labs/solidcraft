@@ -1127,9 +1127,8 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
     let d1_scaled = d1 * scale;
     let scaled_len_sq = d1_scaled.length_squared();
     let d2 = get(2);
-    let curvature = d1_scaled.cross(d2).cross(d1_scaled) / (scaled_len_sq * scaled_len_sq)
-        * scale
-        * scale;
+    let curvature =
+        d1_scaled.cross(d2).cross(d1_scaled) / (scaled_len_sq * scaled_len_sq) * scale * scale;
     out.push(curvature);
     if n == 2 {
         return Ok(out);
