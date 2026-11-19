@@ -3243,9 +3243,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ok: "OK",
             cancel: "Cancel",
             apply: "Apply",
-            search: solidcraft_ui_text::tr("prefs.search"),
-            no_results: solidcraft_ui_text::tr("prefs.search_empty"),
-            restore_defaults: solidcraft_ui_text::tr("prefs.restore_page_defaults"),
             restore_defaults_hint: solidcraft_ui_text::tr(if layout_page {
                 "ui.panel_layout.page_defaults_hint"
             } else {

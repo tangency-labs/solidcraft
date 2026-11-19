@@ -3586,6 +3586,127 @@ fn a_spline_surface_on_unclamped_knots_is_not_closed() {
     assert!(closed_within(&unclamped, 1e-3).is_none());
 }
 
+/// A cubic along x whose third control point steps back `back` mm against the polygon's way
+/// (and a little off it, `off` along y), its ends at x = 0 and 10.
+fn wiggle(back: f64, off: f64) -> BCurve {
+    BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0 - back, off, 0.0], [7.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+    }
+}
+
+/// A control polygon whose step turns back on the one before it by no more than the tolerance
+/// has that step's inner point moved onto its neighbour: the curve moves by at most the step, its
+/// ends stay, and the polygon no longer turns back. A step back longer than the tolerance, a
+/// polygon that does not turn back, and a step that turns less than the check's 170 degrees are
+/// left as they are. A rational point keeps its weight.
+#[test]
+fn a_control_polygon_that_turns_back_within_the_tolerance_is_unfolded() {
+    let tol = 1e-3;
+    let near = wiggle(5e-4, 0.0);
+    let (unfolded, moved) = unfolded_curve(&near, tol).expect("a step back within the tolerance");
+    assert_eq!(moved, 1);
+    let BCurve::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(points[2], [4.0, 0.0, 0.0], "onto its neighbour");
+    assert_eq!((points[0], points[4]), ([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]), "the ends stay");
+    let (before, after) = (CurveEval::new(&near).unwrap(), CurveEval::new(&unfolded).unwrap());
+    let moved_by = (0..=200).map(|k| f64::from(k) / 200.0).map(|t| before.point(t).unwrap().dist(after.point(t).unwrap())).fold(0.0, f64::max);
+    assert!(moved_by <= 5e-4 * (1.0 + 1e-12), "moved {moved_by}");
+    assert!(unfolded_curve(&unfolded, tol).is_none(), "nothing left to unfold");
+
+    assert!(unfolded_curve(&wiggle(2e-3, 0.0), tol).is_none(), "farther back than the tolerance");
+    assert!(unfolded_curve(&wiggle(-5e-4, 0.0), tol).is_none(), "no step back");
+    // 5e-4 back and 2e-4 aside turns about 158 degrees: under the check's 170.
+    assert!(unfolded_curve(&wiggle(5e-4, 2e-4), tol).is_none(), "turns less than 170 degrees");
+
+    let BCurve::Spline { knots, points } = wiggle(5e-4, 0.0) else { panic!("a spline") };
+    let w = [1.0, 0.5, 2.0, 1.0, 1.0];
+    let homogeneous = points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, w]).collect();
+    let (rational, _) = unfolded_curve(&BCurve::RationalSpline { knots, homogeneous }, tol).expect("a rational step back");
+    let BCurve::RationalSpline { homogeneous, .. } = rational else { panic!("rational") };
+    assert_eq!(homogeneous[2], [8.0, 0.0, 0.0, 2.0], "onto its neighbour, keeping its weight");
+}
+
+/// A spline surface's control rows and columns are unfolded as a curve's polygon is: a row that
+/// steps back within the tolerance has that point moved onto its neighbour, the surface moving
+/// by at most the step.
+#[test]
+fn a_control_net_that_turns_back_within_the_tolerance_is_unfolded() {
+    let tol = 1e-3;
+    let row = |y: f64, back: f64| vec![[0.0, y, 0.0], [4.0, y, 0.0], [4.0 - back, y, 0.0], [7.0, y, 0.0], [10.0, y, 0.0]];
+    let net = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        points: vec![row(0.0, 0.0), row(5.0, 5e-4)],
+    };
+    let (unfolded, moved) = unfolded_surface(&net, tol).expect("a row that steps back");
+    assert_eq!(moved, 1);
+    let BSurface::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(points[1][2], [4.0, 5.0, 0.0]);
+    assert_eq!(points[0], row(0.0, 0.0), "the other row stays");
+    let (before, after) = (SurfaceEval::new(&net).unwrap(), SurfaceEval::new(&unfolded).unwrap());
+    let mut moved_by = 0.0_f64;
+    for i in 0..=10 {
+        for j in 0..=100 {
+            let uv = [f64::from(i) / 10.0, f64::from(j) / 100.0];
+            moved_by = moved_by.max(before.point(uv).unwrap().dist(after.point(uv).unwrap()));
+        }
+    }
+    assert!(moved_by <= 5e-4 * (1.0 + 1e-12), "moved {moved_by}");
+    assert!(unfolded_surface(&unfolded, tol).is_none());
+}
+
+/// A polygon whose run back reaches its last point keeps that end: the run's points from the
+/// end of the last step forward are moved onto it, each within the tolerance of where it was,
+/// and nothing that turns back is left. Moved one point at a time, the run left a step back of
+/// 0.8 µm behind (review of the first version).
+#[test]
+fn a_run_back_to_a_polygons_last_point_is_moved_onto_it() {
+    let tol = 1e-3;
+    let points = vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9996, 0.0, 0.0], [3.9992, 0.0, 0.0]];
+    let curve = BCurve::Spline { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], points: points.clone() };
+    let (unfolded, moved) = unfolded_curve(&curve, tol).expect("a run back to the end");
+    let BCurve::Spline { points: now, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(now, &vec![[0.0, 0.0, 0.0], [3.9992, 0.0, 0.0], [3.9992, 0.0, 0.0], [3.9992, 0.0, 0.0]]);
+    assert_eq!(moved, 2);
+    assert!(now.iter().zip(&points).all(|(a, b)| (a[0] - b[0]).abs() <= tol), "{now:?}");
+    assert!(unfolded_curve(&unfolded, tol).is_none(), "nothing left that turns back");
+    // A run back farther than the tolerance from where its points were is left as it is.
+    let far = BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9994, 0.0, 0.0], [3.9988, 0.0, 0.0], [3.9985, 0.0, 0.0]],
+    };
+    let BCurve::Spline { points: far_points, .. } = &far else { panic!("a spline") };
+    if let Some((c, _)) = unfolded_curve(&far, tol) {
+        let BCurve::Spline { points: now, .. } = &c else { panic!("a spline") };
+        assert!(now.iter().zip(far_points).all(|(a, b)| (a[0] - b[0]).abs() <= tol), "{now:?}");
+    }
+}
+
+/// A control point a row and its column both move stays within the tolerance of where the file
+/// put it: every move is bounded against the original net. The rows' pass moves the centre point
+/// to 3.9994 and the columns' pass would carry it on to 3.9988, 1.2 µm from 4.0 (review of the
+/// first version).
+#[test]
+fn a_control_point_moved_by_its_row_and_its_column_stays_within_the_tolerance() {
+    let tol = 1e-3;
+    let points = vec![
+        vec![[0.0, -1.0, 0.0], [3.9988, 0.0, 0.0], [5.0, -1.0, 0.0]],
+        vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9994, 0.0, 0.0]],
+        vec![[0.0, 1.0, 0.0], [3.9989, 0.0, 0.0], [5.0, 1.0, 0.0]],
+    ];
+    let bezier = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let net = BSurface::Spline { u_knots: bezier.clone(), v_knots: bezier, points: points.clone() };
+    let (unfolded, _) = unfolded_surface(&net, tol).expect("a row that steps back to its end");
+    let BSurface::Spline { points: now, .. } = &unfolded else { panic!("a spline") };
+    for (row, was) in now.iter().zip(&points) {
+        for (p, q) in row.iter().zip(was) {
+            let d = ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+            assert!(d <= tol, "a point moved {d}: {now:?}");
+        }
+    }
+}
+
 /// A rational surface's end lines are made one only while the surface moves by at most the
 /// tolerance: half the gap, and half the weights' difference times the control net's size over
 /// its least weight. Far from the origin (1e6 mm) as near it: a weight difference just inside

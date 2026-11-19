@@ -402,7 +402,7 @@ pub enum Error {
 /// splits a coarse kind and follows the kernel's module paths, so a refactor can move it: it is
 /// the second level of a grouping, never its key.
 ///
-/// The session gives it for every failed call but a cancelled one
+/// The session gives it for every failed call it runs but a cancelled one
 /// ([`crate::session::take_failure_code`], [`crate::session::Failure::code`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FailureCode {
