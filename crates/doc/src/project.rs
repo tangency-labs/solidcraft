@@ -2338,15 +2338,16 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
         edges.extend(solidcore_ops::outline::tidy_stretch(geom.into_iter().map(outline_piece).collect()));
     }
     // The silhouettes of the curved faces, traced where they lie inside them.
-    let opts = hlr::Options { trim_samples: 1024, threads: 1, ..hlr::Options::default() };
-    let def = hlr::prepare(rec, &opts).ok()?;
+    // Prepared once per body: every sketch that projects it, on any plane, shares it.
+    let def = body.body.outline_prepared()?;
+    let opts = hlr::Options { trim_samples: solidcraft_kernel::OUTLINE_TRIM_SAMPLES, threads: 1, ..hlr::Options::default() };
     if !def.report.freeform_faces.is_empty() || !def.report.unsupported_trims.is_empty() {
         return None;
     }
     let view = hlr::View { x: plane.x, y: plane.y, d: n };
     let placed = hlr::Placement { body: 0, rotation: [Vec3::X, Vec3::Y, Vec3::Z], translation: Vec3::ZERO - plane.origin };
     let mut sils = Vec::new();
-    for s in hlr::silhouettes(&def, &placed, &view, &opts).ok()? {
+    for s in hlr::silhouettes(def, &placed, &view, &opts).ok()? {
         match s.accuracy {
             solidcraft_geom::section::CurveAccuracy::Analytic => {
                 let pieces: Vec<LinkGeom> = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<_>>()?;
