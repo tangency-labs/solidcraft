@@ -10,8 +10,8 @@ use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
     InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_PALETTE, Material, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer,
-    SHARED_SIZE, SceneBlock, SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, lit_line_style,
-    placement_scale, runs_within, supersampled_size,
+    SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width,
+    lit_line_style, placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -25,7 +25,9 @@ fn background_uv(image: egui::Vec2, rect: egui::Rect, window: egui::Rect) -> egu
 
 /// A picture's pixels, at most `limit` on a side (what the GPU takes).
 fn decode_background(bytes: &[u8], limit: u32) -> Result<egui::ColorImage, String> {
-    let mut image = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    // Upright, as every viewer shows it: a photo stored turned by its EXIF orientation (#19138).
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
+    let (mut image, _) = solidcraft_engine::upright_image::decode_upright(reader).map_err(|e| e.to_string())?;
     if image.width().max(image.height()) > limit {
         image = image.resize(limit, limit, image::imageops::FilterType::Triangle);
     }
@@ -215,7 +217,7 @@ mod test_support {
             };
             let format = wgpu::TextureFormat::Rgba8UnormSrgb;
             let renderer = Arc::new(egui::epaint::mutex::RwLock::new(egui_wgpu::Renderer::new(&device, format, Default::default())));
-            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
             let scene = GpuTarget { depth: Some(solidcraft_viewport_gpu::depth_format(&device, true)), ..window };
             let view = Renderer::with_window_target(&device, scene, window, None);
             let installed = view.target();
@@ -729,7 +731,7 @@ fn offscreen(
     let compute = tess.and_then(|shader| {
         solidcraft_viewport_gpu::view::tessellation(&adapter, &device, &queue, shader, solidcraft_gpu::env::force_cpu_tessellation())
     });
-    let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false };
+    let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false, edges: false };
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
@@ -864,7 +866,7 @@ impl OffscreenFrames {
         } else {
             None
         };
-        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false };
+        let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false, edges: false };
         let mut resources = egui_wgpu::CallbackResources::default();
         resources.insert(Renderer::new(&device, target, compute));
         let texture = |format, usage| {
@@ -948,6 +950,11 @@ impl OffscreenFrames {
     /// What the model scene's last change uploaded.
     pub(crate) fn uploads(&self) -> solidcraft_viewport_gpu::view::UploadStats {
         self.resources.get::<Renderer>().map(Renderer::uploads).unwrap_or_default()
+    }
+
+    /// What the highlight scene's last change uploaded.
+    pub(crate) fn highlight_uploads(&self) -> solidcraft_viewport_gpu::view::UploadStats {
+        self.resources.get::<Renderer>().map(Renderer::highlight_uploads).unwrap_or_default()
     }
 
     /// What the last frame drew.
@@ -1153,7 +1160,7 @@ mod tests {
             app.viewport.suspend_refinement = true;
             app.cam.distance = 110.0;
             app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.5);
-            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
             let scene = GpuTarget { depth: Some(solidcraft_viewport_gpu::depth_format(&device, true)), ..window };
             let view = Renderer::with_window_target(&device, scene, window, None);
             app.viewport.gpu = Some(view.target());
@@ -1300,6 +1307,37 @@ mod tests {
         }
         assert!(f.renderer.read().frame_compositor.is_none());
         assert!(f.app.blur.painted_frame().is_none());
+    }
+
+    /// A surface translucent only to be seen through or because it fades (#10395) records no
+    /// blur marker, while the same glass fill at full opacity does.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_faded_and_see_through_surfaces_emit_no_marker() {
+        use crate::ui_kit::{Container, LayoutMode, Surface};
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
+        f.radius(18.0);
+        f.frame();
+        let _scope = f.app.blur.begin(&f.ctx, true);
+        assert!(crate::blur::enabled());
+        let fill = egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180);
+        let frame = egui::Frame::NONE.fill(fill);
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(120.0, 80.0));
+        let painter = f.ctx.layer_painter(egui::LayerId::background());
+        let markers = |app: &crate::SolveApp| app.blur.counters().markers_emitted;
+        let before = markers(&f.app);
+        let _ = crate::blur::decorate(&painter, frame, rect, egui::Shape::Noop);
+        assert_eq!(markers(&f.app), before + 1, "a glass panel at full opacity still blurs");
+        let mut faded = painter.clone();
+        faded.multiply_opacity(0.5);
+        let _ = crate::blur::decorate(&faded, frame, rect, egui::Shape::Noop);
+        let _ = crate::blur::decorate(&faded, egui::Frame::NONE.fill(egui::Color32::from_rgb(40, 80, 100)), rect, egui::Shape::Noop);
+        assert_eq!(markers(&f.app), before + 1, "a faded surface, opaque fill included, blurs nothing");
+        let host = Container::for_layout(LayoutMode::Floating, Surface::Panel);
+        host.see_through().paint_background(&painter, frame, rect);
+        assert_eq!(markers(&f.app), before + 1, "a see-through host blurs nothing");
+        host.paint_background(&painter, frame, rect);
+        assert_eq!(markers(&f.app), before + 2, "the ordinary host beside it still blurs");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1664,8 +1702,14 @@ mod tests {
             return;
         };
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
-        app.viewport.gpu =
-            Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        app.viewport.gpu = Some(super::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        });
         let ready = solidcraft_viewport_egui::TessReady::default();
         app.viewport.tess_ready = Some(ready.clone());
         super::tick_tessellation(&mut app);
@@ -1907,5 +1951,14 @@ mod background_picture_tests {
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::new(40, 20).write_to(&mut png, image::ImageFormat::Png).unwrap();
         assert_eq!(super::decode_background(png.get_ref(), 10).unwrap().size, [10, 5]);
+    }
+
+    /// #19138: a photo stored turned (EXIF orientation 6) is the background picture upright: a
+    /// 60 x 40 file is shown 40 x 60, as it is when it carries no tag.
+    #[test]
+    fn a_background_photo_with_an_exif_orientation_stands_upright() {
+        let plain = super::decode_background(&crate::test_pictures::jpeg(40, 60, None), 8192).unwrap();
+        let turned = super::decode_background(&crate::test_pictures::jpeg(60, 40, Some(6)), 8192).unwrap();
+        assert_eq!((plain.size, turned.size), ([40, 60], [40, 60]));
     }
 }

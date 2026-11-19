@@ -43,7 +43,8 @@ pub enum Error {
     WallsTouch,
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (the kernel's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room, when the refusal names them.
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
+    /// when the refusal names them.
     TooLarge {
         /// The largest size that builds it.
         size: f64,
@@ -51,6 +52,8 @@ pub enum Error {
         kind: FitKind,
         /// A point at the middle of the edge it was found for.
         at: Option<[f64; 3]>,
+        /// An exact point on the face that limits the size, when the kernel names it.
+        face: Option<[f64; 3]>,
         /// Why there is no room.
         why: Option<RoomReason>,
     },
@@ -454,6 +457,13 @@ pub enum OffsetRefusal {
     /// In a local operation, the new surfaces of the face and of its neighbour across an
     /// edge meet nowhere near the edge, so the edge cannot be found again.
     FacesApart,
+    /// In a local operation, the face moves past where the curved face beside it ends (a
+    /// sphere's cap moved past the sphere's top): no extension of that face meets it there.
+    /// `largest` is how far the face could move and still meet it.
+    PastSide {
+        /// How far the face could move and still meet the face beside it.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -523,6 +533,11 @@ impl std::fmt::Display for OffsetRefusal {
                     "its new surface and a neighbour's meet nowhere near their edge"
                 )
             }
+            OffsetRefusal::PastSide { largest } => write!(
+                f,
+                "it would move past where the curved face beside it ends; it meets that face \
+                 only while it moves less than {largest}"
+            ),
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,
@@ -687,7 +702,7 @@ pub enum RoomReason {
 pub enum FitKind {
     /// A round's radius.
     Radius,
-    /// An equal chamfer's distance.
+    /// A chamfer's first distance, for equal distances or a fixed angle.
     Distance,
     /// A factor on a chamfer's two distances.
     Scale,

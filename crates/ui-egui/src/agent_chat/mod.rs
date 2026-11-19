@@ -185,7 +185,7 @@ fn decode_picture(bytes: &[u8]) -> Option<egui::ColorImage> {
     limits.max_image_height = Some(20_000);
     limits.max_alloc = Some(1 << 30);
     reader.limits(limits);
-    let rgba = reader.decode().ok()?.to_rgba8();
+    let rgba = solidcraft_engine::upright_image::decode_upright(reader).ok()?.0.to_rgba8();
     let size = [usize::try_from(rgba.width()).ok()?, usize::try_from(rgba.height()).ok()?];
     Some(egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()))
 }
@@ -2325,6 +2325,8 @@ fn pump_tools(app: &mut SolveApp) {
             refuse(req, error);
             continue;
         }
+        // What runs after the gate is what the gate decided on: the registered command ids.
+        gate::canonicalize(&req.method, &mut req.params);
         let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());
@@ -2343,12 +2345,8 @@ fn pump_tools(app: &mut SolveApp) {
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);
         let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
-        let plugin_run = req
-            .params
-            .get("command")
-            .or_else(|| req.params.get("id"))
-            .and_then(Value::as_str)
-            .is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"));
+        // Plugin runs, named tools and importers ask in every mode, alone or as a batch step.
+        let plugin_run = gate::runs_plugin(&req.method, &req.params) || crate::plugins::runs_plugin_code(&app.session, &req.method, &req.params);
         let verdict = match gate::request(&req.method, &req.params, undo_left) {
             gate::Verdict::Ask(_) if !plugin_run && (mode == agents::Mode::All || always) => gate::Verdict::Run { change: true },
             gate::Verdict::Run { change: true } if mode == agents::Mode::Ask && !always => {
@@ -2383,6 +2381,8 @@ fn pump_tools(app: &mut SolveApp) {
                 app.agent_chat.notice(trf("ui.agent_chat_refused", &[("reason", &e)]), false);
                 refuse(req, e);
             }
+            // A mistyped id: the agent hears what the engine would have said, and nothing runs.
+            gate::Verdict::Unknown(e) => refuse(req, e),
         }
     }
     app.agent_chat.tools_rx = Some(rx);

@@ -905,6 +905,15 @@ impl Worker {
         if let Some(m) = &self.mcp {
             m.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
         }
+        self.refresh_tools()
+    }
+
+    /// Lists the tools again, so a plugin installed, enabled or removed since the last turn is
+    /// offered (or no longer offered) from the next turn on. Both lists change together.
+    fn refresh_tools(&mut self) -> Result<(), String> {
+        if self.mcp.is_none() {
+            return Ok(());
+        }
         let list = self.mcp_call("tools/list", json!({}))?;
         self.tools = match self.cfg.protocol {
             Protocol::OpenAi => openai_tools(&list),
@@ -915,6 +924,8 @@ impl Worker {
     }
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
+        // A failed refresh keeps the previous listing: the turn still runs with the tools it had.
+        let _ = self.refresh_tools();
         self.history.push(user_message(self.cfg.protocol, &parts));
         let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
         let trimmed = self.trim_history();
@@ -979,7 +990,9 @@ impl Worker {
                 } else if !self.tool_names.iter().any(|n| n == &c.name) {
                     (format!("unknown tool `{}`", c.name), true)
                 } else {
-                    match self.mcp_call("tools/call", json!({"name": c.name, "arguments": args})) {
+                    // A plugin tool goes back by its MCP name, and through the same approval
+                    // gate as every other call: the app asks before it runs.
+                    match self.mcp_call("tools/call", json!({"name": mcp_tool_name(&c.name), "arguments": args})) {
                         Ok(r) => tool_text(&r),
                         Err(e) => (e, true),
                     }
@@ -1573,8 +1586,8 @@ pub fn openai_tools(list: &Value) -> Vec<Value> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    if HIDDEN_TOOLS.contains(&name) {
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    if HIDDEN_TOOLS.contains(&name.as_str()) {
                         return None;
                     }
                     let params = t.get("inputSchema").cloned().filter(Value::is_object).unwrap_or(json!({"type": "object", "properties": {}}));
@@ -1597,8 +1610,8 @@ pub fn anthropic_tools(list: &Value) -> Vec<Value> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    if HIDDEN_TOOLS.contains(&name) {
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    if HIDDEN_TOOLS.contains(&name.as_str()) {
                         return None;
                     }
                     let schema = t.get("inputSchema").cloned().filter(Value::is_object).unwrap_or(json!({"type": "object", "properties": {}}));
@@ -1621,12 +1634,31 @@ fn tool_names(list: &Value) -> Vec<String> {
             a.iter()
                 .take(128)
                 .filter_map(|t| {
-                    let name = t.get("name")?.as_str()?;
-                    (!HIDDEN_TOOLS.contains(&name)).then(|| name.to_string())
+                    let name = api_tool_name(t.get("name")?.as_str()?)?;
+                    (!HIDDEN_TOOLS.contains(&name.as_str())).then_some(name)
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A tool's name as the model APIs take it (letters, digits, `_` and `-`, at most 64): a plugin
+/// tool's `<plugin>.<entry>` is offered as `<plugin>__<entry>` (plugin and entry ids never hold
+/// `_`). A name that still does not fit is not offered.
+fn api_tool_name(name: &str) -> Option<String> {
+    let api = name.replacen('.', "__", 1);
+    (!api.is_empty() && api.len() <= 64 && api.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')).then_some(api)
+}
+
+/// The MCP name of the tool the model called by its API name: `<plugin>__<entry>` is the plugin
+/// tool `<plugin>.<entry>`; any other name is the same in both.
+fn mcp_tool_name(api: &str) -> String {
+    match api.split_once("__") {
+        Some((plugin, entry)) if solidcraft_engine::plugin::valid_id(plugin) && solidcraft_engine::plugin::valid_id(entry) => {
+            format!("{plugin}.{entry}")
+        }
+        _ => api.to_string(),
+    }
 }
 
 /// `{base}/v1/{path}`, whether the user's base URL ends in `/v1` or in the endpoint root the
@@ -2894,6 +2926,23 @@ mod tests {
         let sent = seen.lock().unwrap();
         assert_eq!(sent.len(), 1, "the refusal is shown, not replayed with none");
         assert_eq!(sent[0]["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn plugin_tools_reach_the_model_under_api_names_and_go_back_under_their_own() {
+        let list = json!({"tools": [
+            {"name": "measure"},
+            {"name": "gears.make", "description": "Plugin tool", "inputSchema": {"type": "object"}, "plugin": {"id": "gears"}},
+            {"name": "bad name"},
+        ]});
+        assert_eq!(tool_names(&list), ["measure", "gears__make"]);
+        assert_eq!(anthropic_tools(&list)[1]["name"], "gears__make");
+        assert_eq!(openai_tools(&list)[1]["function"]["name"], "gears__make");
+        assert_eq!(mcp_tool_name("gears__make"), "gears.make");
+        assert_eq!(mcp_tool_name("measure"), "measure");
+        assert_eq!(mcp_tool_name("skill_reference"), "skill_reference");
+        let long = format!("{}.{}", "a".repeat(40), "b".repeat(40));
+        assert_eq!(api_tool_name(&long), None, "a name past 64 characters is left out, never sent");
     }
 
     #[test]
