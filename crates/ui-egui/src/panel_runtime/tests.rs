@@ -300,6 +300,45 @@ fn remembered_preference_fixture() -> crate::SolveApp {
 }
 
 #[test]
+fn detached_panel_host_follows_workspace_and_remembers_its_own_placement() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    super::production::enable_production(&mut app).unwrap();
+    let root = app.panel_runtime().unwrap().environment().window.clone();
+    let review = WorkspaceId::new("solidcraft.review").unwrap();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
+    let ctx = egui::Context::default();
+    let mut detached = PopOutPanels::default();
+    detached.swap(&mut app);
+    assert!(app.panel_runtime().is_none());
+    let mut remembered = None;
+    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        assert!(prepare_pop_out_panels(&mut app, ui, rect, Some(&review), "detached.review", &remembered));
+    });
+    let live = app.panel_runtime().unwrap();
+    assert_eq!(live.layout().layout().workspace, review);
+    assert_ne!(live.environment().window, root);
+    let browser = live.layout().layout().containing(&InstanceId::new("browser").unwrap()).unwrap().id.clone();
+    app.dispatch_panel_layout(LayoutAction::Apply {
+        expected_revision: None,
+        mutations: vec![Mutation::Collapse { section: browser.clone(), collapsed: true }],
+    })
+    .unwrap();
+    detached.save(&app, &mut remembered);
+    assert!(remembered.is_some());
+    detached.swap(&mut app);
+    assert_eq!(app.panel_runtime().unwrap().environment().window, root);
+    let mut reopened = PopOutPanels::default();
+    reopened.swap(&mut app);
+    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        assert!(prepare_pop_out_panels(&mut app, ui, rect, Some(&review), "detached.review", &remembered));
+    });
+    let live = app.panel_runtime().unwrap();
+    assert_eq!(live.layout().layout().workspace, review);
+    assert!(live.layout().layout().section(&browser).unwrap().collapsed);
+    reopened.swap(&mut app);
+}
+
+#[test]
 fn application_panel_preferences_round_trip_named_layouts_columns_and_expansion() {
     let mut app = remembered_preference_fixture();
     assert!(app.panel_runtime().unwrap().layout().inspect().capabilities.persistence);
@@ -14293,4 +14332,27 @@ fn header_content_takes_the_titles_place_after_the_grip() {
         assert!(c.tab_strip.is_some() && c.header_content.is_none(), "a group keeps its tabs in the header");
         raw.host.set_header_content(id("lone"), None);
     }
+}
+
+#[test]
+fn pop_out_browser_draws_after_the_main_browser_without_replacing_its_rows() {
+    use crate::semantic_content::{self, ContentOwner, ContentRequest};
+
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    let mut detached = semantic_content::Detached::default();
+    let request = ContentRequest::Browser { shrink_height: true };
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        semantic_content::begin(&mut app, ui.ctx());
+        semantic_content::show(&mut app, ui, ContentOwner::BROWSER, request);
+        semantic_content::finalize(&mut app, ui.ctx());
+        let main_rows = semantic_content::output(ContentOwner::BROWSER).rows;
+        assert!(!main_rows.is_empty());
+        detached.show(&mut app, ui, |app, ui| {
+            semantic_content::show(app, ui, ContentOwner::BROWSER, request);
+            assert!(!semantic_content::output(ContentOwner::BROWSER).rows.is_empty());
+        });
+        assert_eq!(semantic_content::output(ContentOwner::BROWSER).rows, main_rows);
+    })
+    .drop_without_applying_deltas();
 }

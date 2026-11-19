@@ -903,6 +903,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         f.body_names = names.clone();
     }
     s.active_sketch = None;
+    s.sketching_view = None;
     s.refresh();
     // A feature that makes more bodies than it was given names (a multi-profile extrude with one
     // `body_name`) has the rest numbered after the first by the evaluator: `Ribs`, `Ribs (2)`,
@@ -1460,6 +1461,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         Some(fp) => {
             let (id, inside, _) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
             s.active_sketch = None;
+            s.sketching_view = None;
             (id, Some(ProfileSel::Points { points: vec![inside] }))
         }
         None => (feature_sketch(s, p, cmd)?, None),
