@@ -3006,9 +3006,12 @@ mod tests {
             })
             .unwrap();
         // in the plane of the top, from inside it through the corner and on past it
-        let crease: Curve =
-            Line::from_points(Point3::new(30.0, 10.0, 10.0), Point3::new(50.0, 30.0, 10.0), 3)
-                .into();
+        let crease: Curve = Line::from_points(
+            Point3::new(30.0, 10.0, 10.0),
+            Point3::new(50.0, 30.0, 10.0),
+            3,
+        )
+        .into();
         let (mut in_face, mut along) = (Vec::new(), Vec::new());
         let events =
             pieces_in_face_to_ends(&k, &crease, &mut b, top, TOL, &mut in_face, &mut along)

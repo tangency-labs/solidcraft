@@ -203,10 +203,9 @@ pub(super) trait RecoveryOps {
     }
     fn tangent(&mut self, c: &mut Recovery<'_>, side: EdgeId, point: Point3) -> Result<bool> {
         let tolerance = c.solver.rollover_tolerance(c.k, c.target)?;
-        let curve = edge::curve(c.target, side)?
-            .ok_or_else(|| {
-                SolidError::blend_crossing_input_missing(OP, CrossingInput::SideEdgeCurve)
-            })?;
+        let curve = edge::curve(c.target, side)?.ok_or_else(|| {
+            SolidError::blend_crossing_input_missing(OP, CrossingInput::SideEdgeCurve)
+        })?;
         let (parameter, _) = super::super::p3::drop_param(
             c.k,
             curve,

@@ -516,14 +516,15 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
+            Self::StageFailed | Self::SkinMeasureNotFinite { .. } | Self::CrossingNotFinite => {
+                ErrorKind::StageFailed
+            }
             Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
                 ErrorKind::NotWithinTolerance
             }
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
             Self::BandInputMissing(_) | Self::CrossingInputMissing(_) => ErrorKind::Missing,
-            Self::CrossingNotFinite => ErrorKind::StageFailed,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)

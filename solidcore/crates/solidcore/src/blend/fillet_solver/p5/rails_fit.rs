@@ -161,10 +161,9 @@ fn is_concave_edge_at(
     let Some(use_) = material_use(target, edge_id)? else {
         return Ok(false);
     };
-    let radial = eu::radial(target, use_)?
-        .ok_or_else(|| {
-            SolidError::blend_crossing_input_missing(OP, CrossingInput::MaterialEdgeUseRadial)
-        })?;
+    let radial = eu::radial(target, use_)?.ok_or_else(|| {
+        SolidError::blend_crossing_input_missing(OP, CrossingInput::MaterialEdgeUseRadial)
+    })?;
     let options = eu2::StepOffOptions::default();
     let first = eu2::evaluate_binormal_step_off(k, target, use_, parameter, 0.0, &options)?;
     let second = eu2::evaluate_binormal_step_off(k, target, radial, parameter, 0.0, &options)?;
