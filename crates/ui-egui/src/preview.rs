@@ -314,7 +314,7 @@ impl PreviewState {
         }
     }
 
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.straight.clear();
         self.moving.clear();
         self.detach();
@@ -350,6 +350,11 @@ impl PreviewState {
             *slot = Some(sc);
         }
         self.key = self.key.wrapping_add(1);
+    }
+
+    pub(crate) fn show_joint_drive(&mut self, key: u64, start: f64, built: Built) {
+        self.started = start;
+        self.apply(key, Ok(built));
     }
 
     fn apply(&mut self, key: u64, job: Job) {
@@ -564,6 +569,10 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::control_joint_drive::expire(app);
+    if app.control_joint_drive.active() {
+        return;
+    }
     // A Mirror's operation follows whether a copy meets the body it was made from: Join when one
     // overlaps or touches its body, New Body when none does. It is set once for each pick of
     // bodies and plane, so an operation picked by hand afterwards stays until they change.

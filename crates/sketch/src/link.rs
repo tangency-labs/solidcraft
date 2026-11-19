@@ -6,8 +6,10 @@
 //! Linked points are fixed and linked circles keep their radius, so the solver treats them as
 //! constants; they still bound profiles and take constraints and dimensions like any curve.
 
+use std::f64::consts::TAU;
+
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
 
@@ -51,6 +53,15 @@ pub enum LinkSource {
     Body { body: String },
     /// A body vertex at `at`.
     Vertex { body: String, at: Vec3 },
+    /// A model edge as a drawing view draws it, named as the drawing names edges (its fields are
+    /// the drawing's edge reference): only in that view's sketch.
+    ViewEdge {
+        body: String,
+        origin_feature: u64,
+        name: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path: Vec<u64>,
+    },
     /// A curve of another sketch.
     SketchCurve { sketch: u64, curve: String },
     /// A point of another sketch.
@@ -144,6 +155,7 @@ impl LinkSource {
             LinkSource::Face { body, .. } => of_body("face", body),
             LinkSource::Body { body } => body.clone(),
             LinkSource::Vertex { body, .. } => of_body("vertex", body),
+            LinkSource::ViewEdge { body, .. } => of_body("edge", body),
             LinkSource::SketchCurve { curve, .. } => format!("sketch curve {curve}"),
             LinkSource::SketchPoint { point, .. } => format!("sketch point {point}"),
             LinkSource::Origin => "origin".into(),
@@ -168,7 +180,8 @@ impl LinkSource {
             | LinkSource::Vertex { body, .. }
             | LinkSource::OnSurface { body, .. }
             | LinkSource::Iso { body, .. }
-            | LinkSource::Spun { body, .. } => vec![body.as_str()],
+            | LinkSource::Spun { body, .. }
+            | LinkSource::ViewEdge { body, .. } => vec![body.as_str()],
             LinkSource::Intersection { a, b } => {
                 let mut bodies = a.bodies();
                 bodies.extend(b.bodies());
@@ -285,6 +298,26 @@ pub enum LinkGeom {
 }
 
 impl LinkGeom {
+    /// A boundary segment as the link geometry of the same curve: an arc counter-clockwise
+    /// whichever way it was swept, a conic of weight `w` as rho `w / (1 + w)`, a Bézier as its
+    /// control spline. `None` for a Bézier whose degree is past its control points.
+    pub fn from_seg(s: &Seg2) -> Option<LinkGeom> {
+        Some(match *s {
+            Seg2::Line { a, b } => LinkGeom::Line(a, b),
+            Seg2::Arc { center, radius, sweep, .. } if sweep.abs() >= TAU - 1e-9 => LinkGeom::Circle(center, radius),
+            Seg2::Arc { center, radius, start, sweep } => {
+                let at = |t: f64| center + Vec2::new(t.cos(), t.sin()) * radius;
+                let (a, b) = if sweep > 0. { (at(start), at(start + sweep)) } else { (at(start + sweep), at(start)) };
+                LinkGeom::Arc { c: center, a, b }
+            }
+            Seg2::Conic { a, apex, b, w } => LinkGeom::Conic { a, apex, b, rho: w / (1. + w) },
+            Seg2::Cubic { p0, p1, p2, p3 } => LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false, nurbs: None },
+            Seg2::Bezier { n, p } => {
+                LinkGeom::Spline { pts: p.get(..=usize::from(n))?.to_vec(), control: true, degree: n, periodic: false, nurbs: None }
+            }
+        })
+    }
+
     fn finite(&self) -> bool {
         let ok = |p: &Vec2| in_range(*p);
         match self {
@@ -337,6 +370,15 @@ fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
         pts.push(p);
         pts.len() - 1
     }
+    fn spline_point(pts: &mut Vec<Vec2>, p: Vec2) -> usize {
+        // A nearby endpoint is a different control and changes the curve. Native edge
+        // topology has already supplied shared vertices before the geometry reaches us.
+        if let Some(i) = pts.iter().position(|q| *q == p) {
+            return i;
+        }
+        pts.push(p);
+        pts.len() - 1
+    }
     // A face seen edge-on projects its edges onto one another; one line stands for them.
     let same_line = |cs: &[LCurve], a: usize, b: usize| cs.iter().any(|k| matches!(*k, LCurve::Line(x, y) if (x, y) == (a, b) || (x, y) == (b, a)));
     for g in geom.iter().filter(|g| g.finite()) {
@@ -379,11 +421,11 @@ fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
             }
             LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
                 let (Some(first), Some(last)) = (pts.first(), pts.last()) else { continue };
-                let s0 = pt(&mut l.pts, *first);
+                let s0 = spline_point(&mut l.pts, *first);
                 let first_in = l.pts.len();
                 let inner = pts.get(1..pts.len() - 1).unwrap_or_default();
                 l.pts.extend(inner.iter().copied());
-                let s1 = pt(&mut l.pts, *last);
+                let s1 = spline_point(&mut l.pts, *last);
                 l.curves.push(LCurve::Spline(s0, s1, first_in, inner.len(), control, degree, periodic, nurbs));
             }
         }
@@ -448,16 +490,6 @@ fn same_shape(a: &LCurve, b: &LCurve) -> bool {
     )
 }
 
-/// Whether two splines' own knots and weights ([`crate::Nurbs`]) are the same within `close`.
-fn same_nurbs(a: Option<&crate::Nurbs>, b: Option<&crate::Nurbs>, close: impl Fn(f64, f64) -> bool) -> bool {
-    let all = |x: &[f64], y: &[f64]| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| close(*p, *q));
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => all(&a.knots, &b.knots) && all(&a.weights, &b.weights),
-        _ => false,
-    }
-}
-
 /// Whether two readings of a linked point are the same point: within [`same_geometry`]'s tolerance.
 fn near_point(p: Vec2, q: Vec2) -> bool {
     p.dist(q) <= SAME_TOL * (1.0 + p.len().max(q.len()))
@@ -470,22 +502,27 @@ const SAME_TOL: f64 = 1e-6;
 /// the direction a loop was walked? Lines match with either end first; circles by centre and
 /// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
 fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
+    let near = near_point;
     let close = |x: f64, y: f64| (x - y).abs() <= SAME_TOL * (1.0 + x.abs().max(y.abs()));
     let matches = |(ca, pa): &(LCurve, Vec<Vec2>), (cb, pb): &(LCurve, Vec<Vec2>)| -> bool {
         if pa.len() != pb.len() {
             return false;
         }
-        let all = || pa.iter().zip(pb).all(|(p, q)| near_point(*p, *q));
+        let all = || pa.iter().zip(pb).all(|(p, q)| near(*p, *q));
         match (ca, cb) {
             (LCurve::Line(..), LCurve::Line(..)) => {
-                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near_point(*a0, *b1) && near_point(*a1, *b0))
+                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near(*a0, *b1) && near(*a1, *b0))
             }
             (LCurve::Circle(_, ra), LCurve::Circle(_, rb)) => all() && close(*ra, *rb),
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
             (LCurve::Conic(.., ra), LCurve::Conic(.., rb)) => all() && close(*ra, *rb),
             (LCurve::Ellipse(.., ra), LCurve::Ellipse(.., rb)) => all() && close(*ra, *rb),
-            (LCurve::Spline(.., ca, da, pa, ka), LCurve::Spline(.., cb, db, pb, kb)) => {
-                ca == cb && da == db && pa == pb && same_nurbs(ka.as_ref(), kb.as_ref(), close) && all()
+            (LCurve::Spline(.., ca, da, periodic_a, ka), LCurve::Spline(.., cb, db, periodic_b, kb)) => {
+                ca == cb
+                    && da == db
+                    && periodic_a == periodic_b
+                    && ka == kb
+                    && pa.iter().zip(pb).all(|(p, q)| p.dist(*q) <= f64::EPSILON * 64. * (1.0 + p.len().max(q.len())))
             }
             _ => false,
         }
@@ -1116,7 +1153,27 @@ impl Sketch {
         }
         // A resized face can enumerate the same boundary in another order. Match the
         // shared-point graph in normalized sketch space before discarding its identity.
-        let mut same_order_agrees = false;
+        // Large links skip the quadratic loop matcher. The sharing graph must still agree,
+        // and the kernel must witness a unique nearby point for every ordered point. This
+        // establishes identity only: the changed coordinates are applied below.
+        let mut same_order_agrees = if same && (points.len() > 512 || curves.len() > 512) && self.link(id).is_some_and(closed_boundary) {
+            let parameters_agree = cur.as_ref().is_some_and(|cur| {
+                cur.iter().zip(&new).all(|(a, b)| match (a, b) {
+                    (LCurve::Circle(_, a), LCurve::Circle(_, b))
+                    | (LCurve::Conic(.., a), LCurve::Conic(.., b))
+                    | (LCurve::Ellipse(.., a), LCurve::Ellipse(.., b)) => a == b,
+                    _ => true,
+                })
+            });
+            let old: Option<Vec<Vec2>> = points.iter().map(|i| self.point(*i)).collect();
+            let fresh: Option<Vec<Vec2>> = order.iter().map(|i| lay.pts.get(*i).copied()).collect();
+            parameters_agree
+                && old
+                    .zip(fresh)
+                    .is_some_and(|(old, fresh)| solidcore_ops::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
+        } else {
+            false
+        };
         if let Some(cur) = &cur
             && points.len() == lay.pts.len()
             && cur.len() == lay.curves.len()
@@ -1254,9 +1311,14 @@ impl Sketch {
                     {
                         *r = *value;
                     }
-                    if let (Some(Curve { kind: CurveKind::Spline { nurbs, .. }, .. }), Some(LCurve::Spline(.., value))) =
-                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                    if let (
+                        Some(Curve { kind: CurveKind::Spline { control, degree, periodic, nurbs, .. }, .. }),
+                        Some(LCurve::Spline(_, _, _, _, ct, d, closed, value)),
+                    ) = (self.curves.get_mut(*ci), lay.curves.get(li))
                     {
+                        *control = *ct;
+                        *degree = *d;
+                        *periodic = *closed;
                         nurbs.clone_from(value);
                     }
                 }
@@ -1454,6 +1516,7 @@ impl Sketch {
                     || o.outputs.iter().any(curve)
                     || o.topology.as_ref().is_some_and(|t| t.roles.iter().any(|r| curve(&r.output) || point(&r.start) || point(&r.end)))
             }) || self.freeform_offsets.iter().any(|o| curve(&o.source) || curve(&o.output))
+                || self.freeform_chain_offsets.iter().any(|o| o.sources.iter().any(|(id, _)| curve(id)) || o.outputs.iter().any(curve))
             {
                 return false;
             }

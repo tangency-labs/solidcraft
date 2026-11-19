@@ -474,13 +474,18 @@ pub fn turned(s: &Surface, angle: f64) -> Option<Surface> {
 /// How many quarters a torus face over `[u, v]` (its box on the label, as for
 /// [`surface_within`]) spans along its tube on the label's quarter grid ([`turn_quarters`] for
 /// the tube angle): five when the face does not start on a quarter line of the tube and more
-/// than three quarters are left to it. [`tube_turned`] puts its start on one. `None` for another
-/// surface.
+/// than three quarters are left to it, a whole turn round the tube included (its form of four
+/// quarters from the one it starts in ends short of its seam's second use). A whole turn is
+/// counted from its start, within the rounding [`face_quarters`] takes for one. [`tube_turned`]
+/// puts its start on one. `None` for another surface.
 pub fn tube_quarters(s: &Surface, [_, v]: [[f64; 2]; 2], tolerance: f64) -> Option<usize> {
     if !matches!(s, Surface::Torus { .. }) {
         return None;
     }
-    Some(face_quarters(v, reaches(s, v, tolerance).1)?.0 .1)
+    let reach = reaches(s, v, tolerance).1;
+    let whole = valid_angles(v) && v[1] - v[0] >= TAU * (1.0 - TURN_ROUNDING);
+    let v = if whole { [v[0], v[0] + TAU] } else { v };
+    Some(quarters(v, reach)?.1)
 }
 
 /// A torus with its tube start moved on by `angle`: the same surface, its tube angle parameter

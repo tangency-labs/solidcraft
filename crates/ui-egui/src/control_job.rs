@@ -47,7 +47,7 @@ use crate::control::ControlRequest;
 pub use solidcraft_control::{Cancel, Ticket};
 
 /// A stop flag for the work computing `ticket`'s request, which its cancel sets.
-fn progress_of(ticket: &Ticket) -> Arc<Progress> {
+pub(crate) fn progress_of(ticket: &Ticket) -> Arc<Progress> {
     let progress = Arc::new(Progress::default());
     let stop = Arc::clone(&progress);
     ticket.on_stop(move || stop.cancel());
@@ -126,6 +126,8 @@ const ANSWERED_ON_A_COPY: &[&str] =
 const READ_ON_A_COPY: &[&str] = &[
     "model.mesh",
     "plugin.inspect",
+    // Compiles the package's component to check it: tens of seconds for a large importer.
+    "plugin.check",
     "inspect.measure",
     "document.inspect",
     "inspect.clearance",
@@ -184,7 +186,17 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
 
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
-    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch" | "document.import" | "document.saved")
+    matches!(
+        method,
+        "engine.execute"
+            | "command"
+            | "engine.script"
+            | "engine.batch"
+            | "document.import"
+            | "document.saved"
+            | "document.close"
+            | crate::control_joint_drive::METHOD
+    )
 }
 
 /// Whether `doc` is the design `session` shows, as it is or edited since (an undo step away).
@@ -252,11 +264,11 @@ fn label(app: &SolveApp, command: &str) -> String {
 
 /// Run `f` on a worker thread (with the request's folder scope, stopping early once `progress`
 /// is cancelled), answering on the returned channel. `None` without threads (the web).
-fn spawn(
+pub(crate) fn spawn<T: Send + 'static>(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     progress: Arc<Progress>,
-    f: impl FnOnce() -> Option<Value> + Send + 'static,
-) -> Option<Receiver<Option<Value>>> {
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<Receiver<T>> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("agent".into())
@@ -844,6 +856,9 @@ impl SolveApp {
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
+                // After the new geometry is in the live session, including a run that did not
+                // change the document. `accept_computed` does not copy the camera.
+                self.apply_plugin_view(&reply);
                 Ok(reply)
             });
             let result = self.command_completed("plugin.run", result);
@@ -925,6 +940,29 @@ impl SolveApp {
                 }
                 Err(TryRecvError::Empty) => i += 1,
             }
+        }
+    }
+
+    /// Move the camera the way the matching button does, for the last view command the plugin called.
+    fn apply_plugin_view(&mut self, reply: &Value) {
+        let Some(kind) = reply.get("view").and_then(|view| view.get("kind")).and_then(Value::as_str) else { return };
+        match kind {
+            "fit" | "home" => {
+                let id = if kind == "home" { "view.home" } else { "view.fit" };
+                let _ = self.command_completed(id, Ok(json!({})));
+            }
+            "camera" => {
+                let Some(value) = reply.pointer("/view/camera").filter(|value| !value.is_null()) else { return };
+                let Ok(camera) = serde_json::from_value::<solidcraft_viewport::Camera>(value.clone()) else { return };
+                self.session.camera = Some(camera);
+                self.follow_view_request(true);
+            }
+            "navigate" => {
+                if let Some(inner) = reply.pointer("/view/reply").cloned() {
+                    let _ = self.command_completed("view.navigate", Ok(inner));
+                }
+            }
+            _ => {}
         }
     }
 }

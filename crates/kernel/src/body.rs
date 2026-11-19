@@ -1221,9 +1221,12 @@ impl Body {
         // Moved lazily already and not moved yet: both motions from the part's record.
         // A placed copy of a part another body shows (an assembly's instance) still shows it,
         // placed by both: it is meshed and planned from the part's, not on its own.
-        let display_of = self.display_of.as_deref().map(|(shared, t)| std::sync::Arc::new((shared.clone(), mat4_mul(t, &matrix))));
+        let display_of = match self.display_of.as_deref() {
+            Some((shared, t)) => Some(std::sync::Arc::new((shared.clone(), solidcore_ops::affine::then(t, &matrix).ok()?))),
+            None => None,
+        };
         let (source, matrix) = match self.record.lazy().filter(|_| self.record.pending()) {
-            Some(inner) => (inner.source().clone(), mat4_mul(&inner.matrix, &matrix)),
+            Some(inner) => (inner.source().clone(), solidcore_ops::affine::then(&inner.matrix, &matrix).ok()?),
             None => (self.record.arc().clone(), matrix),
         };
         let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&matrix).filter(|m| movable.by(m))?;
@@ -1336,8 +1339,17 @@ impl Body {
         // Placed lazily and not moved yet: the part's box with its corners moved, a little
         // larger than the moved body's for a turned part. Read from the moved record, every
         // placement of a large assembly was moved to frame the view while it opened.
+        // (A box that does not move to finite numbers is read from the moved record instead.)
         if let Some(lazy) = self.record.lazy().filter(|_| self.record.pending()) {
-            return moved_box(&record_outline(lazy.source()), &lazy.matrix);
+            let part = record_outline(lazy.source());
+            if part.is_empty() {
+                return part;
+            }
+            if let Ok((lo, hi)) =
+                solidcore_ops::affine::moved_box(&lazy.matrix, [part.min.x, part.min.y, part.min.z], [part.max.x, part.max.y, part.max.z])
+            {
+                return Aabb3 { min: v3(lo), max: v3(hi) };
+            }
         }
         record_outline(&self.record)
     }
@@ -1609,31 +1621,40 @@ impl Body {
         (self.size() * 1e-7).max(1e-9) * 10.0
     }
 
-    /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
-    /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. An edge out of the plane that lies on a
-    /// cylinder whose axis is `plane`'s normal (a hole's rim on a curved wall) projects onto that
-    /// cylinder's circle: the arc of it ([`Body::projected_on_cylinder`]). `None` for any other
-    /// edge that doesn't lie in a plane parallel to `plane`, one that isn't read exactly or isn't
-    /// there, and for every edge of a mesh body.
+    /// Edges `indices` (record edge indices) as planar curves in `plane`'s coordinates:
+    /// lines, circular arcs and splines with their own knots and weights. An edge must lie
+    /// in a plane parallel to `plane`, except a cylinder's rim read along its axis
+    /// ([`Body::projected_on_cylinder`]). Nonparallel curves, unreadable edges and mesh
+    /// bodies return `None`; drawing measurements must not measure a flattened image.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
-        let mut faces = None;
         indices
             .iter()
             .map(|i| {
-                let mut work = 262_144usize;
-                let run = crate::prism_curve::Run::of(&self.record, *i, true)?;
-                crate::prism_curve::projected_curves(&run, plane, tol, &mut work).or_else(|| {
-                    let faces = faces.get_or_insert_with(|| crate::history::edge_faces(&self.record));
-                    let segs = self.projected_on_cylinder(plane, *i, faces.get(*i)?, tol)?;
-                    Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect())
-                })
+                if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, *i, tol) {
+                    solidcore_ops::spline_projection::project_edges(&self.record, plane, &[*i], tol).pop().flatten()
+                } else {
+                    self.cylinder_edge_projection(plane, *i)
+                }
             })
             .collect()
+    }
+
+    /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
+    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate.
+    pub fn cylinder_edge_projection(&self, plane: &solidcore_record::Plane, edge: usize) -> Option<Vec<crate::PlanarPiece>> {
+        if self.is_mesh() {
+            return None;
+        }
+        let tol = self.planar_edges_tolerance();
+        if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
+            return None;
+        }
+        let faces = crate::history::faces_of(self.record.edges.get(edge)?);
+        self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
     }
 
     /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it
@@ -2099,14 +2120,6 @@ mod display_mesh_tests;
 #[path = "regularization_protection_tests.rs"]
 mod regularization_protection_tests;
 
-/// `a` then `b`, for matrices that act on row points (`[p, 1] · m`, as [`Rigid::of_matrix`]
-/// reads them).
-///
-/// [`Rigid::of_matrix`]: solidcraft_geom::brep::placement::Rigid::of_matrix
-fn mat4_mul(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
-    std::array::from_fn(|i| std::array::from_fn(|j| (0..4).map(|k| a[i][k] * b[k][j]).sum()))
-}
-
 /// The box of a record's vertices and its edges' control hulls ([`Body::outline_bounds`]).
 fn record_outline(record: &Brep) -> Aabb3 {
     let mut b = Aabb3::EMPTY;
@@ -2117,21 +2130,4 @@ fn record_outline(record: &Brep) -> Aabb3 {
         curve_hull(e.parameters(), e.interval, &mut b);
     }
     b
-}
-
-/// The box around `b`'s corners moved by `m` (rows act on row points, as [`mat4_mul`]'s).
-fn moved_box(b: &Aabb3, m: &[[f64; 4]; 4]) -> Aabb3 {
-    if b.is_empty() {
-        return *b;
-    }
-    let mut out = Aabb3::EMPTY;
-    for i in 0..8 {
-        let p = [if i & 1 == 0 { b.min.x } else { b.max.x }, if i & 2 == 0 { b.min.y } else { b.max.y }, if i & 4 == 0 { b.min.z } else { b.max.z }];
-        out.add(Vec3::new(
-            m[0][0] * p[0] + m[1][0] * p[1] + m[2][0] * p[2] + m[3][0],
-            m[0][1] * p[0] + m[1][1] * p[1] + m[2][1] * p[2] + m[3][1],
-            m[0][2] * p[0] + m[1][2] * p[1] + m[2][2] * p[2] + m[3][2],
-        ));
-    }
-    out
 }
