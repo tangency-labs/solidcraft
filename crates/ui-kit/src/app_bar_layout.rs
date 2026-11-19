@@ -45,6 +45,8 @@ pub struct Item {
     pub priority: u8,
     /// Never moved to overflow (it still steps down its ladder).
     pub locked: bool,
+    /// Retains a visible slot while still allowing the user to move it.
+    pub never_overflow: bool,
     /// A Centre item takes all the room left; otherwise it keeps its least width.
     pub flexible: bool,
 }
@@ -52,7 +54,7 @@ pub struct Item {
 impl Item {
     /// An unlocked, fixed item.
     pub fn new(id: &str, zone: Zone, ladder: &[f32], priority: u8) -> Self {
-        Self { id: id.to_owned(), zone, ladder: ladder.to_vec(), priority, locked: false, flexible: false }
+        Self { id: id.to_owned(), zone, ladder: ladder.to_vec(), priority, locked: false, never_overflow: false, flexible: false }
     }
 
     /// This item locked.
@@ -64,6 +66,11 @@ impl Item {
     /// This item flexible.
     pub fn flexible(mut self) -> Self {
         self.flexible = true;
+        self
+    }
+
+    pub fn never_overflow(mut self) -> Self {
+        self.never_overflow = true;
         self
     }
 }
@@ -195,7 +202,15 @@ fn layout_row(spec: &Spec) -> Placed {
             let taken = index < MAX_ITEMS && seen.insert(item.id.as_str());
             let second_centre = taken && item.zone == Zone::Centre && std::mem::replace(&mut centre_taken, true);
             let state = if taken && !second_centre { State::Placed } else { State::Out };
-            Work { zone: item.zone, ladder, priority: item.priority, locked: item.locked, flexible: item.flexible, step: 0, state }
+            Work {
+                zone: item.zone,
+                ladder,
+                priority: item.priority,
+                locked: item.locked || item.never_overflow,
+                flexible: item.flexible,
+                step: 0,
+                state,
+            }
         })
         .collect();
 
@@ -428,7 +443,7 @@ pub mod application {
         // Home -> separator (8), then File's left edge (3).
         items.push(item("brand", Zone::Start, 11.0));
         // First file-action centre is 17 beyond File; each slot centres on step / 2.
-        items.push(item("file", Zone::Start, clean(m.file) + 17.0 - step / 2.0));
+        items.push(Item::new("file", Zone::Start, &[clean(m.file) + 17.0 - step / 2.0], 255).never_overflow());
         // Keep room under MAX_ITEMS for the fixed slots and the flexible tabs.
         let action_count = m.actions.len().min(MAX_ITEMS.saturating_sub(17));
         for (i, &wide_only) in m.actions.iter().take(action_count).enumerate() {
@@ -535,7 +550,7 @@ pub mod application {
         }
         items.push(Item::new("home", Zone::Start, &[32.0], 85));
         items.push(Item::new("brand", Zone::Start, &[11.0, 0.0], 0).locked());
-        items.push(Item::new("file", Zone::Start, &[clean(m.file)], 255).locked());
+        items.push(Item::new("file", Zone::Start, &[clean(m.file)], 255).never_overflow());
         let action_count = m.actions.len().min(MAX_ITEMS.saturating_sub(16 + m.quick.min(24)));
         let pill_count = m.pills.len().min(MAX_ITEMS.saturating_sub(14 + action_count + m.quick.min(24)));
         for (i, wide_only) in m.actions.iter().take(action_count).enumerate() {
@@ -634,9 +649,7 @@ pub mod application {
                 .filter_map(|p| {
                     let mut item = slots
                         .iter()
-                        .find(|s| {
-                            stable(&s.id) == p.id && !matches!(s.id.as_str(), "logo" | "leading" | "brand" | "file" | "tabs" | "managed" | "offered")
-                        })?
+                        .find(|s| stable(&s.id) == p.id && !matches!(s.id.as_str(), "logo" | "leading" | "brand" | "tabs" | "managed" | "offered"))?
                         .clone();
                     item.zone = match zone {
                         SavedZone::Start => Zone::Start,
@@ -647,14 +660,8 @@ pub mod application {
                 .collect::<Vec<_>>()
         };
         spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "logo" | "leading")).cloned());
-        let mut start = movable(SavedZone::Start);
-        // Keep Home before the locked File group when it is still the first Start control.
-        // Hiding an unrelated item must not move Home across File.
-        if start.first().is_some_and(|item| item.id == "home") {
-            spec.items.extend(start.drain(..1));
-        }
-        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "brand" | "file")).cloned());
-        spec.items.extend(start);
+        spec.items.extend(slots.iter().filter(|s| s.id == "brand").cloned());
+        spec.items.extend(movable(SavedZone::Start));
         spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "tabs" | "managed")).cloned());
         let mut end = movable(SavedZone::End);
         // Update follows the community pills in today's bar, immediately before the cluster.
@@ -851,7 +858,7 @@ pub mod default_bar {
             // 8 after Home, the separator, 16 before File.
             Item::new("separator.brand", Start, &[24.0], 255).locked(),
             // The text button: 16 around its label, and 17 after it.
-            Item::new("file", Start, &[62.0], 255).locked(),
+            Item::new("file", Start, &[62.0], 255).never_overflow(),
             // Each file action steps 34, or 22 on a compact bar; Undo and Redo go first there.
             Item::new("save", Start, &[34.0, 22.0], 90),
             Item::new("undo", Start, &[34.0, 22.0], 50),

@@ -642,12 +642,16 @@ mod migration_tests {
         let hide = rows.iter().find(|r| r.params.as_ref().and_then(|p| p.get("action")).and_then(Value::as_str) == Some("hide")).unwrap();
         run_item(&mut h.app, hide, egui::Pos2::ZERO);
         assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().shown);
-        for id in ["logo", "file", "tabs", "more", "captions", "managed", "offered"] {
+        for id in ["logo", "tabs", "more", "captions", "managed", "offered"] {
             let rows = items(&h.app, &Target::AppBar { id: Some(id.into()) });
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].id, "ui.appBarCustomize");
         }
         let empty = items(&h.app, &Target::AppBar { id: None });
+        let file_rows = items(&h.app, &Target::AppBar { id: Some("file".into()) });
+        assert!(!file_rows[0].enabled, "File can move but Hide is disabled");
+        run_item(&mut h.app, &file_rows[0], egui::Pos2::ZERO);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "file").unwrap().shown);
         assert_eq!(empty.len(), 2);
         run_item(&mut h.app, empty.iter().find(|r| r.id == "ui.appBarReset").unwrap(), egui::Pos2::ZERO);
         assert_eq!(h.app.toolbar_custom.app_bar, ui_kit::app_bar_items::Layout::default());

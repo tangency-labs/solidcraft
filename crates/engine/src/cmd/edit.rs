@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&APP_BAR_CUSTOMIZE_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AppBarCustomizeResult>)
-        .params("Validate access to the application bar editor; returns {available: true}. Only an interactive start opens the window; programmatic calls never open dialogs"),
+        .params("Validate access to the application bar editor; returns {available: true}. Only an interactive start toggles tray edit mode; programmatic calls never open dialogs"),
     CommandSpec::new("ui.appBarReset", "Reset App Bar", crate::checked!("ui.appBarReset", app_bar_reset))
         .any_part()
         .icon("restore")

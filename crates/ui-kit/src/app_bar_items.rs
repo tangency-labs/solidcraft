@@ -8,6 +8,7 @@ pub const MAX_ID_CHARS: usize = 100;
 /// Stable ids, independent of the measured layout engine's slot ids.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ItemId {
+    File,
     Home,
     Save,
     Undo,
@@ -31,6 +32,7 @@ impl ItemId {
             return None;
         }
         Some(match id {
+            "file" => Self::File,
             "home" => Self::Home,
             "save" => Self::Save,
             "undo" => Self::Undo,
@@ -50,6 +52,7 @@ impl ItemId {
 
     pub fn id(&self) -> String {
         match self {
+            Self::File => "file".into(),
             Self::Quick(id) => format!("quick:{id}"),
             Self::Home => "home".into(),
             Self::Save => "save".into(),
@@ -103,6 +106,35 @@ pub struct DropSlot {
 /// Ignore pointer jitter before beginning a direct bar edit.
 pub fn is_drag(dx: f32, dy: f32) -> bool {
     dx.is_finite() && dy.is_finite() && dx.hypot(dy) >= 5.0
+}
+
+/// Removal is a separate capability from moving. File is always reachable.
+pub fn can_remove(id: &str) -> bool {
+    matches!(ItemId::parse(id), Some(item) if item != ItemId::File && item != ItemId::Update)
+}
+
+pub fn drag_out(pointer_y: f32, bar_bottom: f32) -> bool {
+    pointer_y.is_finite() && bar_bottom.is_finite() && pointer_y > bar_bottom
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragRelease {
+    Insert,
+    Remove,
+    Return,
+}
+
+/// Tray drops outside the bar return. File also returns instead of being removed.
+pub fn drag_release(id: &str, from_bar: bool, below_bar: bool, over_slot: bool, cancelled: bool) -> DragRelease {
+    if cancelled {
+        DragRelease::Return
+    } else if over_slot {
+        DragRelease::Insert
+    } else if from_bar && below_bar && can_remove(id) {
+        DragRelease::Remove
+    } else {
+        DragRelease::Return
+    }
 }
 
 /// Find the insertion point in physical bar order, excluding the item being dragged.
@@ -200,7 +232,7 @@ impl Layout {
 
     pub fn set_shown(&mut self, id: &str, shown: bool, defaults: &Self) -> bool {
         self.sanitize(defaults);
-        if !self.editable(id) {
+        if !self.editable(id) || (!shown && !can_remove(id)) {
             return false;
         }
         if let Some(item) = self.items.iter_mut().find(|p| p.id == id) {
@@ -232,7 +264,7 @@ impl Layout {
     /// placements. Legacy visibility preferences remain an additional draw-time condition.
     pub fn default_for<'a>(quick: impl IntoIterator<Item = &'a str>) -> Self {
         let mut items = Vec::new();
-        for id in ["home", "save", "undo", "redo"] {
+        for id in ["home", "file", "save", "undo", "redo"] {
             items.push(Placement { id: id.into(), zone: Zone::Start, shown: true });
         }
         for id in quick.into_iter().take(24) {
@@ -278,6 +310,22 @@ impl Layout {
             let at = before.or_else(|| after.map(|at| at + 1)).unwrap_or(kept.len());
             kept.insert(at, (*p).clone());
         }
+        if !kept.iter().any(|p| p.id == "file") {
+            let at = kept.iter().position(|p| p.id == "home" && p.zone == Zone::Start).map_or(0, |i| i + 1);
+            kept.insert(at, Placement { id: "file".into(), zone: Zone::Start, shown: true });
+        }
+        for p in &mut kept {
+            if p.id == "file" {
+                p.shown = true;
+            }
+        }
+        while kept.len() > MAX_ITEMS {
+            if let Some(at) = kept.iter().rposition(|p| p.id != "file") {
+                kept.remove(at);
+            } else {
+                break;
+            }
+        }
         self.items = kept;
     }
 
@@ -317,5 +365,5 @@ fn valid_id(id: &str) -> bool {
 }
 
 fn placement_id(id: &str) -> bool {
-    valid_id(id) && !matches!(id, "logo" | "file" | "tabs" | "more" | "overflow" | "update" | "managed" | "leading")
+    valid_id(id) && !matches!(id, "logo" | "tabs" | "more" | "overflow" | "update" | "managed" | "leading")
 }

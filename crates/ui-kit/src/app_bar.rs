@@ -132,6 +132,186 @@ pub struct Version<'a> {
     pub url: &'a str,
 }
 
+/// One bar control's drawing, shared by its live widget, tray tile and lifted preview.
+#[derive(Clone, Copy)]
+pub enum Control<'a> {
+    Icon { icon: &'a str, size: f32, enabled: bool },
+    Command { icon: &'a str, enabled: bool },
+    File { label: &'a str, enabled: bool, open: bool },
+    Pill { data: Pill<'a>, lift: f32, veil: f32, focused: bool },
+    Report { label: &'a str, labelled: bool },
+    Version(&'a str),
+    Assistant { state: crate::AssistantEntryState, open: bool },
+}
+
+pub fn editing(ctx: &egui::Context, active: bool, lifted: Option<String>) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("appbar_edit_paint"), (active, lifted)));
+}
+
+pub fn item_opacity(ctx: &egui::Context, id: &str) -> f32 {
+    let state = ctx.data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint")));
+    match state {
+        Some((true, Some(lifted))) if lifted == id => 0.0,
+        _ => 1.0,
+    }
+}
+
+/// No feature-owned lookalikes: all bar/tray painting goes through this function.
+pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response: &egui::Response, opacity: f32) {
+    ui.scope(|ui| {
+        let editing = ui.ctx().data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint"))).is_some_and(|s| s.0);
+        if editing {
+            ui.set_opacity(opacity);
+        } else {
+            ui.multiply_opacity(opacity);
+        }
+        let t = Tokens::get();
+        let p = ui.painter();
+        let hot = response.hovered() || response.has_focus();
+        match control {
+            Control::Icon { icon, size, enabled } => {
+                let enabled = enabled || editing;
+                if enabled && hot {
+                    p.rect_filled(rect.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+                }
+                crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(size, size)), icon, if enabled { 1.0 } else { 0.35 });
+            }
+            Control::Command { icon, enabled } => {
+                if enabled && hot {
+                    p.rect_filled(rect.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+                }
+                crate::icons::paint_on(
+                    p,
+                    Rect::from_center_size(rect.center(), vec2(20.0, 20.0)),
+                    icon,
+                    Some(true),
+                    if enabled { 1.0 } else { 0.35 },
+                );
+            }
+            Control::File { label, enabled, open } => {
+                if enabled && (hot || open) {
+                    p.rect_filled(rect, t.radius_sm, t.app_bar_hover);
+                }
+                let galley = p.layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
+                p.galley(
+                    pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0),
+                    galley,
+                    if enabled { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.35) },
+                );
+            }
+            Control::Pill { data, lift, veil, focused } => paint_link_pill(
+                ui,
+                Rect::from_center_size(rect.center(), vec2(rect.width(), PILL_HEIGHT)),
+                &data,
+                lift,
+                veil,
+                focused || response.has_focus(),
+            ),
+            Control::Report { label, labelled } => {
+                let capsule_rect = Rect::from_center_size(rect.center(), vec2(rect.width().min(if labelled { f32::MAX } else { 28.0 }), PILL_HEIGHT));
+                let ink = t.app_bar_text;
+                capsule(ui, capsule_rect, t.app_bar.lerp_to_gamma(ink, 0.12), hot);
+                if labelled {
+                    crate::icons::paint_ink(
+                        p,
+                        Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0)),
+                        "bug_report",
+                        ink,
+                    );
+                    p.text(
+                        pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
+                        Align2::LEFT_CENTER,
+                        label,
+                        FontId::proportional(t.font_button),
+                        ink,
+                    );
+                } else {
+                    crate::icons::paint_ink(p, Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
+                }
+            }
+            Control::Version(text) => {
+                let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(t.font_small), t.app_bar_text);
+                let text_rect = Rect::from_center_size(rect.center(), galley.size());
+                if hot {
+                    p.hline(text_rect.x_range(), text_rect.bottom(), Stroke::new(1.0, t.app_bar_text));
+                }
+                p.galley(text_rect.min, galley, t.app_bar_text);
+            }
+            Control::Assistant { state, open } => crate::assistant_entry(ui, response, state, open, ui.ctx().global_style().animation_time > 0.0),
+        }
+    });
+}
+
+pub fn control_size(ctx: &egui::Context, control: Control<'_>) -> egui::Vec2 {
+    let t = Tokens::get();
+    let text = |s: &str, size| ctx.fonts_mut(|f| f.layout_no_wrap(s.into(), FontId::proportional(size), t.app_bar_text)).size().x;
+    let width = match control {
+        Control::File { label, .. } => text(label, t.font_button) + 16.0,
+        Control::Pill { data, .. } => pill_width(ctx, &data),
+        Control::Report { label, labelled: true } => REPORT_TEXT_X + text(label, t.font_button) + 11.0,
+        Control::Version(label) => text(label, t.font_small) + 4.0,
+        _ => 32.0,
+    };
+    vec2(width.max(1.0), 32.0)
+}
+
+/// Render the very same widget into a fitted cell. Lifted controls are tessellated and rotated
+/// together with their tokenised card/shadow; no alternate drawing or bitmap asset is involved.
+pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opacity: f32, lifted: bool, warning: bool) {
+    let native = Rect::from_min_size(Pos2::ZERO, control_size(ui.ctx(), control));
+    let layer = egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("control_preview_paint"));
+    let mut child = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(native));
+    child.set_clip_rect(Rect::EVERYTHING);
+    if lifted {
+        let t = Tokens::get();
+        let host = crate::Container::new(ui.ctx(), crate::Surface::Window);
+        let mut frame = host.frame(ui.ctx(), t.app_bar, crate::frame::Side::Left);
+        frame.stroke = Stroke::new(1.0, if warning { t.warning } else { t.accent });
+        host.paint_background(child.painter(), frame, native.expand(t.space_3));
+    }
+    let response = child.interact(native, child.scope_id().with("preview"), Sense::hover());
+    paint_control(&mut child, native, control, &response, opacity);
+    let shapes = ui.ctx().graphics_mut(|g| std::mem::take(g.entry(layer))).all_entries().cloned().collect();
+    let scale = (cell.width() / native.width()).min(cell.height() / native.height()).min(1.0);
+    let rotation = egui::emath::Rot2::from_angle(if lifted { -3.0_f32.to_radians() } else { 0.0 });
+    for clipped in ui.ctx().tessellate(shapes, ui.ctx().pixels_per_point()) {
+        if let egui::epaint::Primitive::Mesh(mut mesh) = clipped.primitive {
+            for v in &mut mesh.vertices {
+                v.pos = cell.center() + rotation * ((v.pos - native.center()) * scale);
+            }
+            ui.painter().add(egui::Shape::mesh(mesh));
+        }
+    }
+}
+
+fn paint_link_pill(ui: &egui::Ui, rect: Rect, p: &Pill<'_>, lift: f32, veil: f32, focused: bool) {
+    let t = Tokens::get();
+    let ppp = ui.ctx().pixels_per_point();
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
+    let fill = p.fill.lerp_to_gamma(t.on_accent, 0.08 * lift);
+    ui.painter().rect_filled(rect, egui::CornerRadius::same((PILL_HEIGHT / 2.0) as u8), fill);
+    if focused {
+        ui.painter().rect_stroke(
+            rect.expand(1.5),
+            egui::CornerRadius::same((PILL_HEIGHT / 2.0 + 1.5) as u8),
+            Stroke::new(1.5, t.app_bar_text),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let icon = Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), vec2(14.0, 14.0));
+    crate::icons::paint_ink(ui.painter(), icon, p.icon, p.ink);
+    if p.labelled && !p.label.is_empty() {
+        let galley = ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(t.font_label), p.ink);
+        let top = rect.center().y - galley.size().y / 2.0 + 0.5;
+        ui.painter().galley(pos2(snap(icon.right() + 5.0), snap(top)), galley, p.ink);
+    }
+    if veil > 0.0 {
+        ui.painter().circle_filled(x_rect.center(), PILL_X / 2.0, t.figure_shadow.to_opaque().gamma_multiply(0.38 * veil));
+    }
+    crate::icons::paint_ink(ui.painter(), Rect::from_center_size(x_rect.center(), vec2(8.0, 8.0)), "close", p.ink);
+}
+
 /// The bar as the app describes it this frame.
 pub struct AppBar<'a> {
     /// Saved movable items; None uses today's default arrangement.
@@ -171,15 +351,9 @@ pub struct AppBar<'a> {
 /// was clicked while `idle`. Drawn held while its menu is `open`.
 /// It shows `label`; `name` is its accessible name.
 fn text_button(ui: &mut egui::Ui, rect: Rect, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
-    let t = Tokens::get();
-    let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
     let resp = ui.interact(rect, ui.scope_id().with(("ab", salt)), if idle { Sense::click() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, name));
-    if idle && (resp.hovered() || resp.has_focus() || open) {
-        ui.painter().rect_filled(rect, t.radius_sm, t.app_bar_hover);
-    }
-    let ink = if idle { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.35) };
-    ui.painter().galley(pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0), galley, ink);
+    paint_control(ui, rect, Control::File { label, enabled: idle, open }, &resp, item_opacity(ui.ctx(), "file"));
     (rect, idle && resp.clicked())
 }
 
@@ -303,9 +477,9 @@ pub fn search_rect(ctx: &egui::Context, shortcut: Option<&str>, bar: Rect, right
 }
 
 /// A pill's width: pad, mark, label, ×.
-fn pill_width(ui: &egui::Ui, p: &Pill) -> f32 {
+fn pill_width(ctx: &egui::Context, p: &Pill) -> f32 {
     let label = if p.labelled && !p.label.is_empty() {
-        5.0 + ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink).size().x
+        5.0 + ctx.fonts_mut(|f| f.layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink)).size().x
     } else {
         0.0
     };
@@ -323,7 +497,6 @@ fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
 /// round translucent dark background (black at 38 %) that fades in while it is hovered. Edges are
 /// snapped to whole pixels so they stay crisp at any scale.
 fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) {
-    let t = Tokens::get();
     let ppp = ui.ctx().pixels_per_point();
     let snap = |v: f32| (v * ppp).round() / ppp;
     let rect = Rect::from_min_size(pos2(rect.left(), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(rect.width(), PILL_HEIGHT));
@@ -336,28 +509,8 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
     let (hot, hot_x) = (main_resp.hovered() || main_resp.has_focus() || x_resp.hovered(), x_resp.hovered() || x_resp.has_focus());
     let lift = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_lift", p.id)), hot, 0.1);
     let veil = ui.ctx().animate_bool_with_time(ui.scope_id().with(("sc_pill_veil", p.id)), hot_x, 0.1);
-    let fill = p.fill.lerp_to_gamma(egui::Color32::WHITE, 0.08 * lift);
-    ui.painter().rect_filled(rect, egui::CornerRadius::same((PILL_HEIGHT / 2.0) as u8), fill);
-    if main_resp.has_focus() || x_resp.has_focus() {
-        ui.painter().rect_stroke(
-            rect.expand(1.5),
-            egui::CornerRadius::same((PILL_HEIGHT / 2.0 + 1.5) as u8),
-            Stroke::new(1.5, t.app_bar_text),
-            egui::StrokeKind::Outside,
-        );
-    }
-    let icon = Rect::from_center_size(pos2(rect.left() + 8.0 + 7.0, rect.center().y), vec2(14.0, 14.0));
-    crate::icons::paint_ink(ui.painter(), icon, p.icon, p.ink);
-    if p.labelled && !p.label.is_empty() {
-        // Centred on the capitals' height, not the line box, so the name sits level with the mark.
-        let galley = ui.painter().layout_no_wrap(p.label.to_string(), crate::type_face::semibold(Tokens::get().font_label), p.ink);
-        let top = rect.center().y - galley.size().y / 2.0 + 0.5;
-        ui.painter().galley(pos2(snap(icon.right() + 5.0), snap(top)), galley, p.ink);
-    }
-    if veil > 0.0 {
-        ui.painter().circle_filled(x_rect.center(), PILL_X / 2.0, egui::Color32::from_black_alpha((97.0 * veil) as u8));
-    }
-    crate::icons::paint_ink(ui.painter(), Rect::from_center_size(x_rect.center(), vec2(8.0, 8.0)), "close", p.ink);
+    let id = if p.id == "kofi" { "donate" } else { p.id };
+    paint_control(ui, rect, Control::Pill { data: *p, lift, veil, focused: x_resp.has_focus() }, &main_resp, item_opacity(ui.ctx(), id));
     solidcraft_ui_registry::publish_target(&handle(h.pill, p.id), main);
     solidcraft_ui_registry::publish_target(&format!("{}{}:hide", h.pill, p.id), x_rect);
     if main_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.tip).clicked() {
@@ -379,7 +532,6 @@ pub fn separator(ui: &egui::Ui, bar: Rect, x: f32, group: &str, handles: &Handle
 /// An icon button of the bar, dimmed and deaf to clicks when disabled (its tip still shows).
 /// Returns whether it was clicked.
 fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bool, handles: &Handles) -> bool {
-    let t = Tokens::get();
     let width = if compact && b.narrow { 22.0 } else { 32.0 };
     let br = Rect::from_center_size(pos2(at, bar.center().y), vec2(width, 32.0));
     let resp = ui.interact(br, ui.scope_id().with(("ab", b.id)), if b.id == "overflow" { Sense::click() } else { Sense::click_and_drag() });
@@ -387,10 +539,7 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
     for prefix in handles.button {
         solidcraft_ui_registry::publish_target(&handle(prefix, b.id), br);
     }
-    if b.enabled && (resp.hovered() || resp.has_focus()) {
-        ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-    }
-    crate::icons::paint_app_bar(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), b.icon, if b.enabled { 1.0 } else { 0.35 });
+    paint_control(ui, br, Control::Icon { icon: b.icon, size: 18.0, enabled: b.enabled }, &resp, item_opacity(ui.ctx(), b.id));
     let clicked = resp.backing_on_hover_text(b.tip).clicked();
     b.enabled && clicked
 }
@@ -427,7 +576,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         quick: data.quick,
         report: label_width,
         report_icon_only: data.report.icon_only,
-        pills: data.pills.iter().map(|p| pill_width(ui, p)).collect(),
+        pills: data.pills.iter().map(|p| pill_width(ui.ctx(), p)).collect(),
         search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
         assistant: data.assistant,
         version: version.as_ref().map(|(_, galley)| galley.size().x),
@@ -482,10 +631,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         for name in h.home_rect {
             solidcraft_ui_registry::publish_rect(name, home);
         }
-        if idle && (home_response.hovered() || home_response.has_focus()) {
-            ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-        }
-        crate::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
+        paint_control(ui, home, Control::Icon { icon: data.home.icon, size: 18.0, enabled: idle }, &home_response, item_opacity(ui.ctx(), "home"));
         if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
             actions.push(BarAction::Home);
         }
@@ -542,26 +688,13 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
         solidcraft_ui_registry::publish_target(h.report, report);
-        let hot = response.hovered() || response.has_focus();
-        // A neutral pill shaped like the link pills: the bug mark, and the label where there is room.
-        let capsule_rect = Rect::from_center_size(report.center(), vec2(report.width().min(if report_label { f32::MAX } else { 28.0 }), PILL_HEIGHT));
-        // Neutral: a raised control in the theme's own colours, the same shape as the link pills.
-        let (neutral, ink) = (t.app_bar.lerp_to_gamma(t.app_bar_text, 0.12), t.app_bar_text);
-        capsule(ui, capsule_rect, neutral, hot);
+        paint_control(ui, report, Control::Report { label: data.report.label, labelled: report_label }, &response, item_opacity(ui.ctx(), "report"));
         let tip = if report_label {
-            let icon = Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0));
-            crate::icons::paint_ink(ui.painter(), icon, "bug_report", ink);
-            ui.painter().text(
-                pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
-                Align2::LEFT_CENTER,
-                data.report.label,
-                report_font,
-                ink,
-            );
             data.report.tip
+        } else if data.report.icon_only {
+            data.report.label
         } else {
-            crate::icons::paint_ink(ui.painter(), Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
-            if data.report.icon_only { data.report.label } else { data.report.tip }
+            data.report.tip
         };
         if response.backing_on_hover_text(tip).clicked() {
             actions.push(BarAction::Report);
@@ -578,10 +711,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     let gear = rect(geometry.settings, 32.0);
     if visible("settings") {
         let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click_and_drag());
-        if gresp.hovered() || gresp.has_focus() {
-            ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-        }
-        crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
+        paint_control(ui, gear, Control::Icon { icon: data.settings.icon, size: 18.0, enabled: true }, &gresp, item_opacity(ui.ctx(), "settings"));
         solidcraft_ui_registry::publish_rect(h.settings, gear);
         solidcraft_ui_registry::publish_handle(h.settings, gear.center());
         if gresp.backing_on_hover_text(data.settings.tip).clicked() {
@@ -595,10 +725,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         let vrect = rect(span, galley.size().y);
         let vresp = ui.interact(vrect.expand2(vec2(2.0, 4.0)), ui.scope_id().with("sc_version_link"), Sense::click_and_drag());
         let vresp = vresp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(v.url);
-        if vresp.hovered() || vresp.has_focus() {
-            ui.painter().hline(vrect.x_range(), vrect.bottom(), Stroke::new(1.0, t.app_bar_text));
-        }
-        ui.painter().galley(vrect.min, galley, t.app_bar_text);
+        paint_control(ui, vrect, Control::Version(v.text), &vresp, item_opacity(ui.ctx(), "version"));
         solidcraft_ui_registry::publish_handle(h.version, vrect.center());
         if vresp.clicked() {
             actions.push(BarAction::Version);
@@ -656,7 +783,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             edit_item(id.into(), br, false);
         }
     }
-    edit_item("file".into(), file, true);
+    edit_item("file".into(), file, false);
     edit_item("tabs".into(), Rect::from_min_max(pos2(tabs_start, r.top()), pos2(r.left() + geometry.tabs_end, r.bottom())), true);
     if let Some(br) = leading {
         edit_item("leading".into(), br, true);

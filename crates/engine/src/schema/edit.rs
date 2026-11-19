@@ -24,7 +24,7 @@ pub struct AssistantResult {}
 #[schemars(deny_unknown_fields)]
 pub struct AppBarResetParams {}
 
-/// Validate access to the app-owned editor. Only an interactive start opens its window.
+/// Validate access to the app-owned editor. Only an interactive start toggles its tray.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AppBarCustomizeParams {}

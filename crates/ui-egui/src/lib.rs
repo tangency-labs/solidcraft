@@ -2189,7 +2189,7 @@ impl SolveApp {
         }
         if id == "ui.appBarCustomize" {
             match self.run(id, json!({})) {
-                Ok(_) => self.toolbar_custom.app_bar_customizing = true,
+                Ok(_) => self.toolbar_custom.app_bar_customizing = !self.toolbar_custom.app_bar_customizing,
                 Err(why) => self.set_status(why, true),
             }
             return;
@@ -3982,7 +3982,7 @@ impl SolveApp {
         tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
-        if self.issue_report.draft.is_none() && self.file_picker.is_none() {
+        if self.issue_report.draft.is_none() && self.file_picker.is_none() && !self.toolbar_custom.app_bar_customizing {
             // Completion owns its keys before either CAD shortcuts or text editors see them.
             panel_runtime::reserve_host_input(self, ctx);
             if !keymap::capturing(self) {
@@ -4221,6 +4221,10 @@ impl SolveApp {
         if !self.embedded && !self.embed_editor {
             toolbar::app_bar(self, ui);
         }
+        app_bar_custom::shield(self, ui.ctx());
+        if self.toolbar_custom.app_bar_customizing {
+            ui.disable();
+        }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
         kicad_import_dialog::show(self, ui.ctx());
@@ -4253,7 +4257,7 @@ impl SolveApp {
                 if matches!(self.menu.target, context_menu::Target::AppBar { .. }) {
                     context_menu::show(self, ui.ctx());
                 }
-                app_bar_custom::window(self, ui.ctx());
+                app_bar_custom::show(self, ui.ctx());
                 if settings_open {
                     panel_runtime::hide_app_host(self);
                 }
@@ -4302,7 +4306,7 @@ impl SolveApp {
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
-        app_bar_custom::window(self, ui.ctx());
+        app_bar_custom::show(self, ui.ctx());
         // All persistent producers have now registered this pass's actual
         // visible paint. Place independent controls and finish result navigation
         // against those footprints; the render domain stays unchanged.

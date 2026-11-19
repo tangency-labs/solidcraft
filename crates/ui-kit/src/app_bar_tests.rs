@@ -2,6 +2,46 @@
 use super::*;
 
 #[test]
+fn app_bar_file_migrates_moves_but_never_disappears() {
+    use crate::app_bar_items::{Layout, Preset, Zone, can_remove};
+    let defaults = Layout::default();
+    assert_eq!(defaults.items.iter().take(5).map(|p| p.id.as_str()).collect::<Vec<_>>(), ["home", "file", "save", "undo", "redo"]);
+    let mut legacy = defaults.clone();
+    legacy.items.retain(|p| p.id != "file");
+    assert_eq!(Layout::from_value(&legacy.to_value(), &defaults), defaults);
+    let mut saved = defaults.clone();
+    assert!(saved.move_before("file", Zone::End, Some("settings"), &defaults));
+    assert!(!can_remove("file"));
+    assert!(!saved.set_shown("file", false, &defaults));
+    let file = saved.items.iter_mut().find(|p| p.id == "file").unwrap();
+    file.shown = false;
+    let loaded = Layout::from_value(&saved.to_value(), &defaults);
+    let file = loaded.items.iter().find(|p| p.id == "file").unwrap();
+    assert!(file.shown);
+    assert_eq!(file.zone, Zone::End);
+    for preset in [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact] {
+        saved.set_preset(preset, &defaults);
+        assert!(saved.items.iter().find(|p| p.id == "file").unwrap().shown);
+    }
+}
+
+#[test]
+fn app_bar_drag_out_and_release_decisions_include_file_spring_back() {
+    use crate::app_bar_items::{DragRelease, drag_out, drag_release, is_drag};
+    assert!(!drag_out(34.0, 34.0));
+    assert!(drag_out(34.1, 34.0));
+    assert!(!drag_out(f32::NAN, 34.0));
+    assert!(!drag_out(100.0, f32::INFINITY));
+    assert!(!is_drag(3.0, 3.0));
+    assert!(is_drag(5.1, 0.0));
+    assert_eq!(drag_release("save", true, true, false, false), DragRelease::Remove);
+    assert_eq!(drag_release("file", true, true, false, false), DragRelease::Return);
+    assert_eq!(drag_release("save", false, true, false, false), DragRelease::Return);
+    assert_eq!(drag_release("file", true, false, true, false), DragRelease::Insert);
+    assert_eq!(drag_release("save", true, false, true, true), DragRelease::Return);
+}
+
+#[test]
 fn app_bar_edit_moves_before_after_and_between_zones() {
     use crate::app_bar_items::{Layout, Zone};
     let defaults = Layout::default_for(["solid.box"]);
@@ -9,7 +49,7 @@ fn app_bar_edit_moves_before_after_and_between_zones() {
     assert!(layout.move_before("redo", Zone::Start, Some("save"), &defaults));
     assert_eq!(
         layout.items.iter().filter(|p| p.zone == Zone::Start).map(|p| p.id.as_str()).collect::<Vec<_>>(),
-        ["home", "redo", "save", "undo", "quick:solid.box"]
+        ["home", "file", "redo", "save", "undo", "quick:solid.box"]
     );
     assert!(layout.move_after("redo", "undo", &defaults));
     assert!(layout.move_before("save", Zone::End, Some("settings"), &defaults));
@@ -33,7 +73,7 @@ fn app_bar_edit_presets_and_hostile_operations_keep_sanitize_guarantees() {
     layout.items.extend((0..5000).map(|i| Placement { id: format!("future:{i}"), zone: Zone::End, shown: false }));
     layout.items.insert(0, Placement { id: "file".into(), zone: Zone::End, shown: false });
     layout.items.push(Placement { id: "save".into(), zone: Zone::End, shown: false });
-    for id in ["logo", "file", "tabs", "more", "update", "managed", "leading", "captions", "unknown", "", "\n", &"x".repeat(10000)] {
+    for id in ["logo", "tabs", "more", "update", "managed", "leading", "captions", "unknown", "", "\n", &"x".repeat(10000)] {
         assert!(!layout.move_before(id, Zone::End, None, &defaults));
         assert!(!layout.set_shown(id, false, &defaults));
         assert!(!layout.move_after("save", id, &defaults));
@@ -42,13 +82,13 @@ fn app_bar_edit_presets_and_hostile_operations_keep_sanitize_guarantees() {
     assert_eq!(layout.items.iter().filter(|p| p.id == "save").count(), 1);
     let clean = layout.clone();
     assert!(!layout.move_before("save", Zone::Start, Some("settings"), &defaults), "wrong-zone target is stale");
-    assert!(!layout.move_before("save", Zone::Start, Some("file"), &defaults));
+    assert!(!layout.move_before("save", Zone::Start, Some("file"), &defaults), "File was saved in End");
     assert_eq!(layout, clean);
     for preset in [Preset::Minimal, Preset::Full, Preset::Compact, Preset::Default] {
         layout.set_preset(preset, &defaults);
         let shown: Vec<_> = layout.items.iter().filter(|p| p.shown).map(|p| p.id.as_str()).collect();
         match preset {
-            Preset::Minimal => assert_eq!(shown, ["save", "undo", "redo", "search", "settings", "help"]),
+            Preset::Minimal => assert_eq!(shown, ["file", "save", "undo", "redo", "search", "settings", "help"]),
             Preset::Full | Preset::Default => assert!(defaults.items.iter().all(|p| shown.contains(&p.id.as_str()))),
             Preset::Compact => assert!(["donate", "discord", "report", "version"].iter().all(|id| !shown.contains(id))),
         }
@@ -64,7 +104,7 @@ fn app_bar_drop_slots_cross_zones_reject_locked_parts_and_ignore_tiny_drags() {
     use crate::app_bar_items::{DropItem, Zone, drop_slot, is_drag};
     let row = |id: &str, zone, left, right, locked| DropItem { id: id.into(), zone, left, right, locked };
     let items = vec![
-        row("file", Zone::Start, 0.0, 30.0, true),
+        row("logo", Zone::Start, 0.0, 30.0, true),
         row("save", Zone::Start, 35.0, 65.0, false),
         row("undo", Zone::Start, 70.0, 100.0, false),
         row("tabs", Zone::Start, 110.0, 200.0, true),
@@ -81,6 +121,8 @@ fn app_bar_drop_slots_cross_zones_reject_locked_parts_and_ignore_tiny_drags() {
     assert_eq!((across.zone, across.before.as_deref(), across.x), (Zone::End, Some("settings"), 210.0));
     let end = drop_slot(276.0, 155.0, &items, "save").unwrap();
     assert_eq!((end.zone, end.before, end.x), (Zone::End, None, 275.0));
+    assert_eq!(drop_slot(31.0, 155.0, &items, "file").unwrap().before.as_deref(), Some("save"));
+    assert_eq!(drop_slot(105.0, 155.0, &items, "file").unwrap().before, None);
     for x in [10.0, 155.0, 295.0, f32::NAN, f32::INFINITY] {
         assert!(drop_slot(x, 155.0, &items, "save").is_none());
     }
@@ -962,7 +1004,7 @@ fn locked_items_and_the_tabs_minimum_are_always_kept() {
     for width in 480..=3840 {
         let spec = default_spec(width as f32);
         let placed = layout(&spec);
-        for item in spec.items.iter().filter(|i| i.locked) {
+        for item in spec.items.iter().filter(|i| i.locked || i.never_overflow) {
             assert!(placed.placements[index_of(&spec, &item.id)].is_some(), "{} is kept at {width}", item.id);
             assert!(!placed.overflow.contains(&item.id));
         }
@@ -1298,7 +1340,7 @@ fn app_bar_application_never_overlaps_at_any_width() {
                     let spec = crate::app_bar_layout::application::spec(width as f32, left, if has(7) { 138.0 } else { 0.0 }, m);
                     let placed = layout(&spec);
                     assert_sound(&spec, &placed);
-                    for item in spec.items.iter().filter(|i| i.locked) {
+                    for item in spec.items.iter().filter(|i| i.locked || i.never_overflow) {
                         assert!(!placed.overflow.contains(&item.id), "locked {} at {width}/{bits}/{quick}", item.id);
                         if spec.width - spec.captions_left - spec.captions_right >= 232.0 {
                             assert!(placed.placements[index_of(&spec, &item.id)].is_some(), "locked {} fits at {width}/{bits}/{quick}", item.id);
@@ -1376,7 +1418,7 @@ mod app_bar_items {
     fn defaults_match_the_actual_drawing_order() {
         let layout = Layout::default_for(["solid.box", "solid.fillet"]);
         let ids = |zone| layout.items.iter().filter(|p| p.zone == zone).map(|p| p.id.as_str()).collect::<Vec<_>>();
-        assert_eq!(ids(Zone::Start), ["home", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet"]);
+        assert_eq!(ids(Zone::Start), ["home", "file", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet"]);
         assert_eq!(ids(Zone::End), ["donate", "discord", "assistant", "search", "settings", "help", "report", "version"]);
         assert!(layout.items.iter().all(|p| p.shown));
         for item in &layout.items {
@@ -1431,7 +1473,7 @@ mod app_bar_items {
         for value in [
             json!(null),
             json!([]),
-            json!({"items":[7, {}, {"id":"save","zone":"centre","shown":true}, {"id":"update","zone":"start","shown":false}, {"id":"file","zone":"end","shown":false}]}),
+            json!({"items":[7, {}, {"id":"save","zone":"centre","shown":true}, {"id":"update","zone":"start","shown":false}]}),
         ] {
             assert_eq!(Layout::from_value(&value, &defaults), defaults);
         }
@@ -1513,6 +1555,7 @@ fn app_bar_random_sanitized_layouts_never_overlap() {
         saved.items.push(saved.items[0].clone());
         saved.items.remove(random() as usize % saved.items.len());
         saved.sanitize(&defaults);
+        assert!(saved.items.iter().any(|p| p.id == "file" && p.shown), "random hide/removal attempts cannot lose File");
         for width in 200..=3840 {
             let mut measurements = measured_bar();
             measurements.managed = Some(130.0);
