@@ -211,6 +211,11 @@ pub struct Resolved {
     /// The vertex a `Vertex` reference resolved to (its index in the body's B-rep record),
     /// whose persistent name the link keeps ([`resolved_vertex_name`]). Computed metadata only.
     pub vertex_index: Option<usize>,
+    /// For a face's projection, the persistent name of the edge each piece of `geom` comes from
+    /// (empty for an edge no name follows exactly); empty when the pieces do not stand one for
+    /// one for edges. The link records them ([`Link::curve_edges`]) and is matched by them when
+    /// it is read again (#18711).
+    pub edge_names: Vec<String>,
 }
 
 /// Resolutions of body-based references, keyed by the reference, the sketch plane and the
@@ -297,6 +302,7 @@ fn resolve_uncached(
     let mut face_index = None;
     let mut edge_index = None;
     let mut vertex_index = None;
+    let mut edge_names = Vec::new();
     let mut source = src.clone();
     let mut wires: Vec<Vec<Vec3>> = Vec::new();
     let mut exact: Vec<Vec<WireCurve>> = Vec::new();
@@ -342,8 +348,11 @@ fn resolve_uncached(
                     if target.body.is_mesh() {
                         crate::project3d::flat_outline(&mesh, q).iter().flat_map(|outline| fit_mesh_outline(plane, outline)).collect()
                     } else {
-                        let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?)?;
-                        if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
+                        let (g, names) = projected_edges_named(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?)?;
+                        let before = g.len();
+                        let g = if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g };
+                        edge_names = names_kept(names, before, &g);
+                        g
                     }
                 }
             }
@@ -557,7 +566,8 @@ fn resolve_uncached(
     if geom.is_empty() && wires.is_empty() {
         return Err(DocError::Invalid(format!("the {} projects to nothing on this sketch plane", src.describe())));
     }
-    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved, face_index, edge_index, vertex_index })
+    let edge_names = names_kept(edge_names, geom.len(), &geom);
+    Ok(Resolved { geom: merge_split_circles(geom), wires, exact, source, moved, face_index, edge_index, vertex_index, edge_names })
 }
 
 /// Whether a curve (world points) leaves the sketch plane: included, it then stays 3D.
@@ -787,12 +797,25 @@ fn projection_links(geometry: Vec<solidcore_ops::conic_projection::Projection>) 
 
 /// `edges` of `body` projected on `plane`: each exactly ([`exact_edges`]) or fitted to its
 /// polyline in `mesh`.
-fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<Vec<LinkGeom>> {
-    let mut out = projected_edges_apart(body, mesh, plane, edges)?;
+///
+/// With each piece, the persistent name of the edge it comes from, when
+/// that name follows exact history (the faces it separates do, and it is not one of several edges
+/// between them numbered by where they lie); empty otherwise, and for a mesh body.
+fn projected_edges_named(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<(Vec<LinkGeom>, Vec<String>)> {
+    let (mut out, owners) = projected_edges_owned(body, mesh, plane, edges)?;
     if body.body.is_mesh() {
         meet_at_shared_ends(&mut out, order::join_tolerance(mesh));
     }
-    Ok(out)
+    let named = (!body.body.is_mesh()).then(|| crate::name_lookup::BodyEdges::new(body));
+    let name = |e: usize| named.as_ref().filter(|n| n.verified(e)).and_then(|n| n.name(e)).unwrap_or_default().to_string();
+    let names = owners.into_iter().map(name).collect();
+    Ok((out, names))
+}
+
+/// The names of `geom`'s pieces (see [`Resolved::edge_names`]) after a pass that keeps each piece
+/// where it was unless it joins pieces together: kept while the pass gave as many pieces back.
+fn names_kept(names: Vec<String>, before: usize, geom: &[LinkGeom]) -> Vec<String> {
+    if names.len() == before && geom.len() == before { names } else { Vec::new() }
 }
 
 /// Where curve ends lie within `gap` of each other, moves them onto the first of them. A fitted
@@ -838,10 +861,13 @@ fn link_of_piece(g: solidcore_ops::outline::Piece) -> LinkGeom {
     }
 }
 
-/// Each of `edges` projected on its own ([`projected_edges`] without the ends brought together).
-fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<Vec<LinkGeom>> {
+/// Each of `edges` projected on its own ([`projected_edges_named`] without the ends brought together).
+/// With each piece, the edge (of `edges`) it comes from.
+fn projected_edges_owned(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<(Vec<LinkGeom>, Vec<usize>)> {
     let mut out = Vec::new();
+    let mut owners = Vec::new();
     for (e, exact) in edges.iter().zip(exact_edges(body, plane, edges)?) {
+        let before = out.len();
         match exact {
             Some(mut g) => {
                 at_vertices(body, plane, *e, &mut g);
@@ -853,8 +879,9 @@ fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, ed
                 }
             }
         }
+        owners.resize(out.len().max(before), *e);
     }
-    Ok(out)
+    Ok((out, owners))
 }
 
 /// Edge `e`'s exact pieces `g` with their outer ends on the edge's vertices, where they lie
@@ -1009,6 +1036,7 @@ fn resolve_named_edge(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         face_index: None,
         edge_index: Some(index),
         vertex_index: None,
+        edge_names: Vec::new(),
     })
 }
 
@@ -1026,6 +1054,7 @@ fn resolve_named_vertex(plane: &Plane, body: &str, index: usize, at: Vec3) -> Re
         face_index: None,
         edge_index: None,
         vertex_index: Some(index),
+        edge_names: Vec::new(),
     })
 }
 
@@ -1037,15 +1066,19 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
     }
     let face_index = Some(index);
     let index = u32::try_from(index).map_err(|_| DocError::Invalid("named projection face index exceeds limit".into()))?;
+    let mut edge_names = Vec::new();
     let geom = if kind == LinkKind::Intersect {
         match axial_section(target, plane, index)? {
             Some(exact) => exact,
             None => section(plane, &mesh, Some(index)),
         }
     } else {
-        let geom = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, index, plane)?)?;
+        let (geom, names) = projected_edges_named(target, &mesh, plane, &projection_face_edges(target, &mesh, index, plane)?)?;
+        let before = geom.len();
         let geom = merge_split_circles(geom);
-        if certified_planar_construction(target, index as usize) { merge_family_lines(geom)? } else { geom }
+        let geom = if certified_planar_construction(target, index as usize) { merge_family_lines(geom)? } else { geom };
+        edge_names = names_kept(names, before, &geom);
+        geom
     };
     if geom.is_empty() {
         return Err(DocError::Invalid("named face projects to nothing on this sketch plane".into()));
@@ -1059,6 +1092,7 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
         face_index,
         edge_index: None,
         vertex_index: None,
+        edge_names,
     })
 }
 
@@ -1107,6 +1141,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
     }
     let selected: std::collections::BTreeSet<_> = indices.iter().copied().collect();
     let mut geometry = Vec::new();
+    let mut edge_names = Vec::new();
     if kind == LinkKind::Intersect {
         for index in indices {
             let index = u32::try_from(*index).map_err(|_| DocError::Invalid("anchored face index exceeds format bounds".into()))?;
@@ -1126,10 +1161,17 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
         } else {
             order::family_edges(&mesh, &selected, plane)?
         };
-        geometry.extend(projected_edges(body, &mesh, plane, &edges)?);
+        let (pieces, names) = projected_edges_named(body, &mesh, plane, &edges)?;
+        // Only a single face's pieces are named: a family's edges are its outline, not one face's.
+        if indices.len() == 1 {
+            edge_names = names;
+        }
+        geometry.extend(pieces);
     }
     if kind != LinkKind::Intersect && (indices.len() > 1 || indices.first().is_some_and(|index| certified_planar_construction(body, *index))) {
+        let before = geometry.len();
         geometry = merge_family_lines(geometry)?;
+        edge_names = names_kept(edge_names, before, &geometry);
     }
     let point = mesh
         .triangles
@@ -1149,6 +1191,7 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
         face_index: if indices.len() == 1 { indices.first().copied() } else { None },
         edge_index: None,
         vertex_index: None,
+        edge_names,
     })
 }
 
@@ -1382,6 +1425,7 @@ fn refresh_links_in(
                     face_index: None,
                     edge_index: None,
                     vertex_index: None,
+                    edge_names: Vec::new(),
                 })
             })
         } else if l.auto_face {
@@ -1425,7 +1469,11 @@ fn refresh_links_in(
                 let words_follow = matches!(&l.source, LinkSource::Text { exprs, .. } if exprs.text.is_some());
                 let others = |sk: &Sketch| (sk.constraints.len(), sk.curves.len().saturating_sub(sk.link_curves(&l.id).len()));
                 let before = others(sk);
-                match sk.update_link(&l.id, &r.geom) {
+                // A face's projection is matched to its curves by the names of its edges, where
+                // the link recorded them (#18711).
+                let updated =
+                    if l.kind == LinkKind::Project { sk.update_link_named(&l.id, &r.geom, &r.edge_names) } else { sk.update_link(&l.id, &r.geom) };
+                match updated {
                     Ok(true) if words_follow => {}
                     // A rebuilt projection is only worth a warning when it took something of
                     // the user's with it: a constraint, a dimension or a curve drawn on it.
