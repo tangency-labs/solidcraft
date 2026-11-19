@@ -187,3 +187,10 @@ fn the_sweep_reports_english_only_where_a_translation_exists() {
     assert_ne!(ro.text("render.frame_aspect"), "Aspect");
     assert!(english_leaks("ro", &["Aspect".to_string()].into(), &english, &BTreeSet::new()).is_empty());
 }
+
+#[test]
+fn lao_catalog_has_no_leaks() {
+    let mut h = sample();
+    let names = design_names(&h.app);
+    assert!(english_leaks("lo", &english_ids(), &names, &mut h).is_empty());
+}
