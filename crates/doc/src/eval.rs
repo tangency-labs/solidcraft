@@ -5634,6 +5634,13 @@ fn apply_traced_with(
         }
         v
     };
+    // A surface body is no solid to join a solid tool with: the union of the two fails in the
+    // kernel. A join that names no target leaves the surface bodies alone, Thicken's own source
+    // among them (#12326), and joins the solids; with none it makes a new body. A named surface
+    // target is not dropped here, and a tool that is itself a surface keeps its targets.
+    if op == Operation::Join && !named && tools.iter().all(|t| !t.body.is_mesh() && !t.body.is_surface()) {
+        target_idx.retain(|&i| state.bodies.get(i).is_none_or(|b| !b.is_surface()));
+    }
     // Bodies that take part besides the feature's own targets: the body a Join extrude runs to
     // joins with the tool (#6424), when it is in the feature's own component. A body of another
     // component (the shell a connector's boss runs up to) joins only when the feature names it:
