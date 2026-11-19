@@ -739,6 +739,8 @@ pub struct GpuScene {
     /// Hovered faces of opaque bodies in their own palette slots (the model's colour and
     /// finish for each face): lit over the model like a whole hovered body, tinted by the hover.
     pub hover_faces: Vec<u8>,
+    /// An opaque imported mesh's single display face, tinted using the model's indexed buffers.
+    pub hover_face_instanced: Vec<InstancedMesh>,
     /// Whole highlighted bodies the model builds in its blocks but does not draw opaque (faded
     /// context, see-through): every one of their vertices drawn again, in this scene's palette,
     /// whose entries for their faces hold the highlight colour. No triangle is copied.
@@ -2194,6 +2196,7 @@ struct Batches {
     open_tris: Option<Batch>,
     /// [`GpuScene::hover_faces`].
     hover_faces: Option<Batch>,
+    hover_face_instanced: Vec<InstancedDraw>,
     ground_ao: Option<Batch>,
     ground_input: Option<GroundAo>,
     pbr: Option<Batch>,
@@ -2276,8 +2279,8 @@ impl Batches {
     /// scene shares with `donor` (another scene drawn in the same frame) instead of uploading and
     /// evaluating them again: a dragged component's bodies move between the model scene and the
     /// moving layer. `uniform` is the one the scene's palette is bound with (the layer has its
-    /// own). The donor gives them up only when the upload succeeded. The scene's lit instanced
-    /// edges are drawn from `edges_from`'s segment buffer (the model's) where it holds them.
+    /// own). The donor gives them up only when the upload succeeded. Instanced hover faces and
+    /// lit edges can also share the model's triangle and segment buffers.
     fn take_sharing(
         &mut self,
         device: &wgpu::Device,
@@ -2289,7 +2292,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         donor: Option<&mut Batches>,
-        edges_from: Option<&edges::Edges>,
+        model: Option<&Batches>,
     ) -> Result<(), String> {
         if self.key == Some(key) {
             return Ok(());
@@ -2298,7 +2301,7 @@ impl Batches {
         let _ = take_upload_failure();
         let mut next = self.clone();
         let mut taken = donor.as_deref().cloned();
-        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut(), edges_from);
+        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut(), model);
         match take_upload_failure() {
             None => {
                 next.upload_failed = false;
@@ -2334,7 +2337,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         mut donor: Option<&mut Batches>,
-        edges_from: Option<&edges::Edges>,
+        model: Option<&Batches>,
     ) {
         {
             self.uploads = UploadStats::default();
@@ -2373,7 +2376,7 @@ impl Batches {
             };
             let parts = edges::Part::of_draws(&self.instanced);
             self.edges = shared_edges(&parts, self.edges.as_ref());
-            let lit_from = self.edges.as_ref().or(edges_from);
+            let lit_from = self.edges.as_ref().or_else(|| model.and_then(|scene| scene.edges.as_ref()));
             let lit_parts = edges::Part::of_meshes(&sc.lit_instanced_edges);
             self.lit_shared_edges = shared_edges(&lit_parts, lit_from);
             let lit_hidden_parts = edges::Part::of_meshes(&sc.lit_instanced_hidden);
@@ -2394,6 +2397,11 @@ impl Batches {
             self.lit_edges = sc.lit_edges.clone();
             self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref(), arena.as_deref());
             self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref(), arena.as_deref());
+            self.hover_face_instanced = if sc.hover_face_instanced.is_empty() {
+                Vec::new()
+            } else {
+                self.instanced(device, &sc.hover_face_instanced, model, arena.as_deref())
+            };
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
             let mut geometry = 0;
@@ -2514,7 +2522,15 @@ impl Batches {
             let mut levels = Vec::with_capacity(1 + m.levels.len());
             for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().map(|(t, e)| (t, *e))).enumerate() {
                 let key = Arc::as_ptr(tris) as usize;
-                let shared = || donor?.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned();
+                let shared = || {
+                    let scene = donor?;
+                    scene.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned().or_else(|| {
+                        // An arena draw holds the uploaded mesh in its level, and may have no
+                        // entry in the standalone buffer cache.
+                        let level = scene.instanced.iter().flat_map(|draw| &draw.levels).find(|level| Arc::ptr_eq(&level.src, tris))?;
+                        Some((tris.clone(), level.tris.clone()))
+                    })
+                };
                 let in_arena = arena.and_then(|a| a.place(tris));
                 let gpu = match in_arena {
                     Some(g) => (tris.clone(), Arc::new(g)),
@@ -2871,6 +2887,8 @@ pub struct Renderer {
     tri_hl_selected: wgpu::RenderPipeline,
     /// The same for bodies the model builds on the CPU, from its blocks' triangle buffers.
     tri_hl_hover_built: wgpu::RenderPipeline,
+    tri_hl_hover_instanced: wgpu::RenderPipeline,
+    tri_hl_hover_instanced_flat: wgpu::RenderPipeline,
     tri_hl_selected_built: wgpu::RenderPipeline,
     /// The same for bodies drawn as placements of shared triangles (the placement's colour is
     /// the highlight's), smooth and flat.
@@ -3800,6 +3818,8 @@ impl Renderer {
             (
                 solid("sc_tris_hl_hover", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Planned),
                 solid("sc_tris_hl_hover_built", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Built),
+                solid("sc_tris_hl_hover_instanced", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Instanced),
+                solid("sc_tris_hl_hover_instanced_flat", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::InstancedFlat),
             )
         };
         let selected = || {
@@ -3913,7 +3933,7 @@ impl Renderer {
             let (tri, tri_marks, tri_planned, planned_marks, tri_instanced, instanced_marks) = tris.join();
             let (tri_cap, planned_cap, instanced_cap) = caps.join();
             let (tri_instanced_flat, flat_marks) = flat.join();
-            let (tri_hl_hover, tri_hl_hover_built) = hover.join();
+            let (tri_hl_hover, tri_hl_hover_built, tri_hl_hover_instanced, tri_hl_hover_instanced_flat) = hover.join();
             let (tri_hl_selected, tri_hl_selected_built) = selected.join();
             let (
                 tri_hl,
@@ -4046,6 +4066,8 @@ impl Renderer {
                 tri_hl_hover,
                 tri_hl_selected,
                 tri_hl_hover_built,
+                tri_hl_hover_instanced,
+                tri_hl_hover_instanced_flat,
                 tri_hl_selected_built,
                 tri_hl_instanced,
                 tri_hl_instanced_flat,
@@ -4613,7 +4635,7 @@ impl Renderer {
         // The highlight evaluates plans of its own where the model has none to draw again (in
         // Wireframe, a whole lit body's faces).
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        // Its lit instanced edges are drawn from the model's segment buffer, not uploaded again.
+        // Lit edges and a mesh body's hovered face reuse the model's buffers.
         uploads.push(res.highlight.take_sharing(
             device,
             queue,
@@ -4624,7 +4646,7 @@ impl Renderer {
             tess,
             oit,
             None,
-            res.model.edges.as_ref(),
+            Some(&res.model),
         ));
         uploads.push(res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit));
         // A refused scene leaves the previous picture; a capture must not pass it off as the new one.
@@ -5048,6 +5070,7 @@ impl Renderer {
         // Hovered faces of opaque bodies: their own colour and finish, tinted as a whole hovered
         // body is.
         tris(pass, &res.tri_hl_hover_built, &h.hover_faces);
+        tinted_instanced(pass, &res.tri_hl_hover_instanced, &res.tri_hl_hover_instanced_flat, &h.hover_face_instanced);
         // Hidden edges before the visible ones, so a visible edge is drawn over them. An edge
         // within a pixel of a nearer face's outline (a face seen edge on beside it) is hidden
         // under part of its own width; drawn after, its light hidden copy covered the visible

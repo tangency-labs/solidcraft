@@ -3314,16 +3314,15 @@ impl Surface {
         }
     }
 
-    /// Reverses the parameterisation in `param`'s direction (`Reverse`; a surface of
-    /// revolution runs the B-spline reversal, whose virtual
-    /// `RebuildSTEPFromNURBParameters` rebuilds its analytic data, status ignored). Not
-    /// upstream (#16982 review): for a cone, a refused rebuild leaves the surface
-    /// unchanged and is returned.
+    /// Reverses the parameterisation in `param`'s direction (`Reverse`). A cone,
+    /// sphere, torus or surface of revolution rebuilds its analytic data from the
+    /// reversed NURB. A refused reversal or rebuild keeps its original NURB and
+    /// analytic data together and returns the error.
     ///
     /// # Errors
     ///
-    /// Those of the kind's override (the base default is `SM_ERR`); for a cone, those
-    /// of the reversal and the rebuild.
+    /// Those of the kind's override (the base default is `SM_ERR`); for a cone,
+    /// sphere, torus or surface of revolution, those of the reversal and rebuild.
     pub fn reverse(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
         // (#2485, #2572) an exact round's leader map and a sweep's map follow the net's
         // reversal, w = lo + hi - w'
@@ -3381,32 +3380,36 @@ impl Surface {
                 })
             }
             SurfaceKind::Sphere(s) => {
-                // SmBSplineSurface::Reverse: GetOrCreateGwNurbPointer (the sphere's
-                // MakeNurb when missing, status ignored), the NURB reversal, then the
-                // sphere's RebuildSTEPFromNURBParameters (status ignored)
-                if s.base().base().gw_nurb().is_none() {
-                    ignore_status(s.make_nurb(k))?;
+                // Stage the exact base so a refused rebuild preserves its definition and NURB.
+                let mut reversed = s.clone();
+                reversed.base = s.base().clone_exact();
+                if reversed.base().base().gw_nurb().is_none() {
+                    ignore_status(reversed.make_nurb(k))?;
                 }
-                s.base.base_mut().reverse(param)?;
-                ignore_status(s.rebuild_step_from_nurb_parameters(k))
+                reversed.base.base_mut().reverse(param)?;
+                reversed.rebuild_step_from_nurb_parameters(k)?;
+                *s = reversed;
+                Ok(())
             }
             SurfaceKind::Torus(s) => {
-                // SmBSplineSurface::Reverse: GetOrCreateGwNurbPointer (the torus's
-                // MakeNurb when missing, status ignored), the NURB reversal, then the
-                // torus's RebuildSTEPFromNURBParameters (status ignored)
-                if s.base().base().gw_nurb().is_none() {
-                    ignore_status(s.make_nurb(k))?;
+                let mut reversed = s.clone();
+                reversed.base = s.base().clone_exact();
+                reversed.inside_out = s.inside_out;
+                if reversed.base().base().gw_nurb().is_none() {
+                    ignore_status(reversed.make_nurb(k))?;
                 }
-                s.base.base_mut().reverse(param)?;
-                ignore_status(s.rebuild_step_from_nurb_parameters(k))
+                reversed.base.base_mut().reverse(param)?;
+                reversed.rebuild_step_from_nurb_parameters(k)?;
+                *s = reversed;
+                Ok(())
             }
             SurfaceKind::SurfOfRevolution(s) => {
-                // Upstream reaches the NURB through the virtual GetOrCreateGwNurbPointer,
-                // which would call SmSurfOfRevolution::MakeNurb for a surface without
-                // one; every constructed surface of revolution has its NURB, so the
-                // stored base is used directly.
-                s.base_mut().reverse(param)?;
-                ignore_status(s.rebuild_step_from_nurb_parameters(k))
+                // The stored NURB supplies the surface's current parametrisation.
+                let mut reversed = Box::new(s.clone_exact());
+                reversed.base_mut().reverse(param)?;
+                reversed.rebuild_step_from_nurb_parameters(k)?;
+                *s = reversed;
+                Ok(())
             }
             SurfaceKind::SurfOfExtrusion(s) => {
                 // SmBSplineSurface::Reverse: GetOrCreateGwNurbPointer (the extrusion's
@@ -7778,6 +7781,276 @@ mod tests {
     use crate::geom::extent3d::Extent3d;
     use crate::geom::tree::NodeId;
     use crate::geom::vector2d::Vec2;
+
+    /// A nonplanar cubic generator is accepted by the revolution constructor and its
+    /// exact NURB construction. Reversing its NURB must not silently leave the old
+    /// analytic definition behind when the planar-generator recognizer refuses it.
+    #[test]
+    fn reversing_a_nonplanar_revolution_is_consistent_or_fails_unchanged() {
+        use crate::curve::curve::CurveKind;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+
+        fn assert_aligned(k: &Kernel, r: &SurfOfRevolution) {
+            // Quarter turns are exact segment boundaries of the rational circle,
+            // so these fractions agree in the angular and NURB parameterizations.
+            for u in [0.25, 0.5, 0.75] {
+                for v in [0.25, 0.5, 0.75] {
+                    let point = r
+                        .base()
+                        .evaluate_point(r.base().natural_uv_domain().evaluate(u, v))
+                        .unwrap();
+                    let analytic = r
+                        .evaluate_step_point(k, r.step_uv_domain().evaluate(u, v))
+                        .unwrap();
+                    let gap = (point - analytic).length();
+                    assert!(gap <= 1e-9, "{u} {v}: analytic/NURB gap {gap}");
+                }
+            }
+        }
+
+        let k = Kernel::default();
+        // The existing r3b_rev_bez3d_0_False_0 golden's noncoplanar Bezier polygon.
+        let profile = NurbCurve::new(
+            vec![
+                CPoint::new(2.0, 0.0, 0.0, 1.0),
+                CPoint::new(2.5, 0.4, 0.5, 1.0),
+                CPoint::new(3.2, -0.2, 1.7, 1.0),
+                CPoint::new(2.7, 0.3, 3.0, 1.0),
+            ],
+            3,
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let mut original = SurfOfRevolution::new(
+            &k,
+            Curve::from(BSplineCurve::from_nurb(profile, 3, false)),
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        assert!(!original.planar_generator());
+        original.make_nurb(&k).unwrap();
+        assert!(original.base().gw_nurb().is_some());
+        assert_aligned(&k, &original);
+
+        for param in [SurfParamType::U, SurfParamType::V] {
+            let mut surface = Surface::from(original.clone_exact());
+            let domain = original.base().natural_uv_domain();
+            // Exercise the public wrapper before taking its exact concrete snapshot.
+            // clone_exact preserves the stored knot vectors for the refusal comparison.
+            let points: Vec<_> = [0.25, 0.5, 0.75]
+                .into_iter()
+                .flat_map(|u| {
+                    [0.25, 0.5, 0.75]
+                        .into_iter()
+                        .map(move |v| domain.evaluate(u, v))
+                })
+                .map(|uv| (uv, surface.evaluate_point(&k, uv).unwrap()))
+                .collect();
+            let SurfaceKind::SurfOfRevolution(actual) = surface.kind() else {
+                panic!("the constructed surface is a revolution");
+            };
+            let before = actual.clone_exact();
+            let owner = (
+                surface.owner,
+                surface.owner_chain_face,
+                surface.owner_zone_tol_3d,
+            );
+            let definition_kept = surface.definition.is_some();
+            let cache_tree = surface.cache_tree_state();
+            let result = surface.reverse(&k, param);
+            let SurfaceKind::SurfOfRevolution(after) = surface.kind() else {
+                panic!("reversal changed the surface kind");
+            };
+            if result.is_err() {
+                assert_eq!(
+                    (
+                        surface.owner,
+                        surface.owner_chain_face,
+                        surface.owner_zone_tol_3d
+                    ),
+                    owner
+                );
+                assert_eq!(surface.definition.is_some(), definition_kept);
+                assert_eq!(surface.cache_tree_state(), cache_tree);
+                for (uv, point) in &points {
+                    assert_eq!(
+                        surface.evaluate_point(&k, *uv).unwrap(),
+                        *point,
+                        "refusal changed the public surface at {uv:?}"
+                    );
+                }
+                assert_eq!(after.base().gw_nurb(), before.base().gw_nurb());
+                assert_eq!(after.position(), before.position());
+                assert_eq!(after.step_uv_domain(), before.step_uv_domain());
+                assert_eq!(after.swap_uv(), before.swap_uv());
+                assert_eq!(after.planar_generator(), before.planar_generator());
+                assert_eq!(after.make_nurb_gen_curve(), before.make_nurb_gen_curve());
+                assert_eq!(after.polar_converter(), before.polar_converter());
+                match (after.polar_curve(), before.polar_curve()) {
+                    (Some(a), Some(b)) => {
+                        assert_eq!(a.base().gw_nurb(), b.base().gw_nurb());
+                        assert_eq!(a.canonical(), b.canonical());
+                        assert_eq!(a.polar_converter(), b.polar_converter());
+                    }
+                    (None, None) => {}
+                    _ => panic!("refusal changed the stored sweep circle"),
+                }
+                let CurveKind::BSpline(a) = after.gen_curve().unwrap().kind() else {
+                    panic!("reversal changed the generator kind");
+                };
+                let CurveKind::BSpline(b) = before.gen_curve().unwrap().kind() else {
+                    panic!("the original generator is a B-spline");
+                };
+                assert_eq!(a.gw_nurb(), b.gw_nurb());
+            } else {
+                // A future exact reversal is allowed: it must reflect the old net
+                // and keep the analytic definition aligned with that reflected net.
+                for u in [0.25, 0.5, 0.75] {
+                    for v in [0.25, 0.5, 0.75] {
+                        let (old_u, old_v) = if param == SurfParamType::U {
+                            (1.0 - u, v)
+                        } else {
+                            (u, 1.0 - v)
+                        };
+                        let old = before
+                            .base()
+                            .evaluate_point(
+                                before.base().natural_uv_domain().evaluate(old_u, old_v),
+                            )
+                            .unwrap();
+                        let new = after
+                            .base()
+                            .evaluate_point(after.base().natural_uv_domain().evaluate(u, v))
+                            .unwrap();
+                        assert!((new - old).length() <= 1e-9);
+                    }
+                }
+            }
+            assert_aligned(&k, after);
+        }
+    }
+
+    #[test]
+    fn canonical_spheres_and_tori_reverse_their_public_parameterization() {
+        use crate::surface::sphere::SphereOptions;
+        use crate::surface::torus::TorusOptions;
+
+        fn make(k: &Kernel, torus: bool, lazy: bool, inside: bool) -> Surface {
+            let frame = Axis2Placement::default();
+            if torus {
+                let options = TorusOptions {
+                    inside_out: inside,
+                    ..TorusOptions::default()
+                };
+                Surface::from(
+                    if lazy {
+                        Torus::new(
+                            k,
+                            Point3::ZERO,
+                            Vec3::X,
+                            Vec3::Y,
+                            Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+                            4.0,
+                            1.5,
+                            options,
+                        )
+                    } else {
+                        Torus::create_canonical(k, &frame, 4.0, 1.5, options, None)
+                    }
+                    .unwrap(),
+                )
+            } else {
+                Surface::from(
+                    if lazy {
+                        Sphere::new(
+                            k,
+                            Point3::ZERO,
+                            Vec3::X,
+                            Vec3::Y,
+                            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+                            2.0,
+                            SphereOptions {
+                                inside_out: inside,
+                                ..SphereOptions::default()
+                            },
+                        )
+                    } else {
+                        Sphere::create_canonical(k, &frame, if inside { -2.0 } else { 2.0 })
+                    }
+                    .unwrap(),
+                )
+            }
+        }
+
+        let k = Kernel::default();
+        for torus in [false, true] {
+            for inside in [false, true] {
+                let original = make(&k, torus, false, inside);
+                let old_domain = original.natural_uv_domain_with_nurb(&k).unwrap();
+                for lazy in [false, true] {
+                    for param in [SurfParamType::U, SurfParamType::V] {
+                        let mut surface = make(&k, torus, lazy, inside);
+                        let built = match surface.kind() {
+                            SurfaceKind::Sphere(s) => s.base().base().gw_nurb().is_some(),
+                            SurfaceKind::Torus(t) => t.base().base().gw_nurb().is_some(),
+                            _ => panic!("the constructed canonical kind"),
+                        };
+                        assert_eq!(built, !lazy);
+                        // The lazy candidate reaches Reverse before evaluation, so the
+                        // public edit constructs its own net.
+                        surface.reverse(&k, param).unwrap();
+                        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+                        for u in [0.25, 0.5, 0.75] {
+                            for v in [0.25, 0.5, 0.75] {
+                                let old_uv = if param == SurfParamType::U {
+                                    old_domain.evaluate(1.0 - u, v)
+                                } else {
+                                    old_domain.evaluate(u, 1.0 - v)
+                                };
+                                let uv = domain.evaluate(u, v);
+                                let old = original.evaluate_point(&k, old_uv).unwrap();
+                                let point = surface.evaluate_point(&k, uv).unwrap();
+                                let case = format!("torus={torus}, inside={inside}, lazy={lazy}, {param:?}, {u}, {v}");
+                                assert!((point - old).length() <= 1e-9, "reflected point: {case}");
+                                let old_normal = original
+                                    .evaluate_normal(&k, old_uv, Side::Left, Side::Left)
+                                    .unwrap();
+                                let normal = surface
+                                    .evaluate_normal(&k, uv, Side::Left, Side::Left)
+                                    .unwrap();
+                                assert!(
+                                    (normal + old_normal).length() <= 1e-9,
+                                    "reversed normal: {case}"
+                                );
+                                let base = match surface.kind() {
+                                    SurfaceKind::Sphere(s) => s.base().base(),
+                                    SurfaceKind::Torus(t) => t.base().base(),
+                                    _ => panic!("reversal changed the canonical kind"),
+                                };
+                                let nurb = base.evaluate_point(uv).unwrap();
+                                let step = surface.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                                let analytic = surface.evaluate_step_point(&k, step).unwrap();
+                                assert!(
+                                    (point - nurb).length() <= 1e-9,
+                                    "public/NURB point: {case}"
+                                );
+                                assert!(
+                                    (nurb - analytic).length() <= 1e-9,
+                                    "analytic/NURB quarter grid: {case}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fn bilinear() -> Surface {
         Surface::from(

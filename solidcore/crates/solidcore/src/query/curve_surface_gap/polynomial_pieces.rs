@@ -115,10 +115,15 @@ fn magnitude(c: &[Ivl], rho: f64, from: usize) -> f64 {
     }
 }
 
+/// `c`'s constant coefficient (its value at `δ = 0`), enclosed.
+fn head(c: &[Ivl]) -> Ivl {
+    c.first().copied().unwrap_or_else(zero)
+}
+
 /// The values of `c` over `|δ| ≤ ρ`, enclosed.
 fn range(c: &[Ivl], rho: f64) -> Ivl {
     let rest = magnitude(c, rho, 1);
-    c.first().copied().unwrap_or_else(zero) + Ivl::new(-rest, rest)
+    head(c) + Ivl::new(-rest, rest)
 }
 
 /// The values of the quotient `x / w` over `|δ| ≤ ρ`, enclosed; not finite where `w` is not
@@ -133,17 +138,19 @@ fn range(c: &[Ivl], rho: f64) -> Ivl {
 /// trim running along a knot line or ending tangent to the net's end (`ss_plane_sph1.smp`'s
 /// sphere sheet) then stays on its side of it on all but the pieces next to the tangency,
 /// instead of reaching across it (into another cell, or past the end with the
-/// continuation's first-order slack) on every piece within `√ρ` of it.
+/// continuation's first-order slack) on every piece within `√ρ` of it. The box is never
+/// wider than the plain quotient's; its midpoint is also the cells' expansion centre, so a
+/// piece's bound can shift by rounding either way.
 fn quotient_range(x: &[Ivl], w: &[Ivl], rho: f64) -> Ivl {
     let den = range(w, rho);
     let plain = range(x, rho) / den;
-    let head = |c: &[Ivl]| c.first().copied().unwrap_or_else(zero);
     let x0 = (head(x) / head(w)).mid();
     if !x0.is_finite() {
         return plain;
     }
     let centred = Ivl::from(x0) + range(&sub(x, &mul(&[Ivl::from(x0)], w)), rho) / den;
-    // (each holds the true values, so they meet; a NaN end fails `is_finite` downstream)
+    // (each holds the true values, so they meet; an overflow that inverts them fails
+    // `is_finite` downstream)
     Ivl::new(plain.lo.max(centred.lo), plain.hi.min(centred.hi))
 }
 
@@ -1069,6 +1076,28 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(g >= lift && g <= 1e-5, "{g:e}");
+    }
+
+    /// An arc `lift` above its own UV arc where the UV arc touches the net's end `v = 1`
+    /// tangentially at its top (centre `(cx, 0.6)`, radius 0.4). Every piece near the
+    /// tangency has a UV box that, enclosed as the plain quotient, reaches past the end and
+    /// takes the continuation's slack, so the pieces never close and the bisection budget
+    /// runs out (no bound). With the centred form those boxes stay on the net, and the bound
+    /// closes as it does away from the end: at least `lift`, within the closing rule's
+    /// thousandth.
+    #[test]
+    fn an_arc_tangent_to_the_net_end_is_bounded_by_its_height() {
+        let k = Kernel::default();
+        let s = plane();
+        let lift = 3.0e-7;
+        for cx in [0.45, 0.5] {
+            let curve = half_circle(cx, 0.6, lift);
+            let uv = half_circle(cx, 0.6, 0.0);
+            let g = distance(&k, &curve, &uv, &s, [0.0, 1.0], 1e-12, 0.0)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{cx}: no bound"));
+            assert!(g >= lift && g <= lift * (1.0 + 1.1e-3), "{cx}: {g:e}");
+        }
     }
 
     /// A UV arc moved 1e-4 along u from its curve's shadow (the half circle of radius `r`):

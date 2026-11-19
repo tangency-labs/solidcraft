@@ -380,7 +380,6 @@ unfold	false
 update	false
 warning	false
 web	false
-ws_animate	false
 ws_design	false
 ws_drawing	false
 ws_render	false
