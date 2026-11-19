@@ -1960,8 +1960,9 @@ impl SectionView {
 }
 
 /// The section member feature `f` (not made yet: no Rotate step turns it) puts on its first line
-/// (see [`SectionView`]); an error when the feature could not be made as it stands.
-pub fn section_view(doc: &Document, st: &ModelState, f: &Feature) -> Result<SectionView> {
+/// (see [`SectionView`]), carried to world by `placed` (the component's frame as shown: the active
+/// occurrence's, with its pending move); an error when the feature could not be made as it stands.
+pub fn section_view(doc: &Document, st: &ModelState, f: &Feature, placed: &crate::Mat) -> Result<SectionView> {
     let FeatureKind::FrameMember { corner, corners, gap, mirror, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -1977,11 +1978,11 @@ pub fn section_view(doc: &Document, st: &ModelState, f: &Feature) -> Result<Sect
     let m = segments.iter().position(|s| s.0 == line).ok_or_else(|| DocError::Invalid("the member feature has no lines".into()))?;
     let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &vec![0.0; segments.len()])?;
     let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid("the first line has no length".into()))?;
-    // The whole carried from the component's frame to world.
-    let t = doc.component_transform(f.component);
-    let unit = |v: Vec3| crate::apply_vector(&t, v).normalized().ok_or_else(|| DocError::Invalid("the component frame is degenerate".into()));
+    // The whole carried to world as the component is shown.
+    let t = placed;
+    let unit = |v: Vec3| crate::apply_vector(t, v).normalized().ok_or_else(|| DocError::Invalid("the component frame is degenerate".into()));
     let (x, y) = (unit(x)?, unit(y)?);
-    Ok(SectionView { start: crate::apply_point(&t, a), end: crate::apply_point(&t, b), x, y, regions, at, origin, mirror: *mirror })
+    Ok(SectionView { start: crate::apply_point(t, a), end: crate::apply_point(t, b), x, y, regions, at, origin, mirror: *mirror })
 }
 
 /// The member of feature `f` with id `line` (a line, a pair, or a piece of a line cut where tubes cross, [`pieced`]),

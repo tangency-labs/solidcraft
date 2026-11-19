@@ -356,10 +356,12 @@ fn member_pairs(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<MemberPair>, u
 /// before OK. An error when the command would refuse the parameters or the member cannot be made.
 pub fn member_section_view(s: &Session, p: &Value) -> Result<frame::SectionView> {
     let cmd = "frame.member";
-    let Parsed { kind, .. } = parse_member(s, p)?;
+    let Parsed { mut kind, .. } = parse_member(s, p)?;
+    // Read as the member is made: in the design's units, shown where the active occurrence is.
+    super::features::in_design_units(s, &mut kind);
     let f = feature_in_active(s, cmd, &kind)?;
     let st = s.model.state();
-    frame::section_view(&s.doc, &st, &f).map_err(|e| bad(cmd, e.to_string()))
+    frame::section_view(&s.doc, &st, &f, &s.active_component_frame()).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// `kind` as the feature it will be added as: in the active component, whose frame it is laid out in.

@@ -795,6 +795,16 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
     add_feature_in(s, p, kind, true)
 }
 
+/// Bare lengths typed in an inch (or cm…) design mean that unit: `kind`'s inputs with it written
+/// out, as the feature is made and as a preview of it is read.
+pub(super) fn in_design_units(s: &Session, kind: &mut FeatureKind) {
+    if s.doc.units.trim() != "mm" {
+        for (_, e, k) in kind.inputs_mut() {
+            *e = s.doc.with_design_unit(e, k).into();
+        }
+    }
+}
+
 /// `add_feature`; `world` is false when `kind` is already in the active component's frame.
 pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) -> Result<Value> {
     let name = str_(p, "name");
@@ -811,13 +821,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         super::component::to_active_frame(s, &mut kind);
     }
     super::component::pin_picked_placements(s, &mut kind);
-    // Bare lengths typed in an inch (or cm…) design mean that unit.
-    if s.doc.units.trim() != "mm" {
-        let doc = s.doc.clone();
-        for (_, e, k) in kind.inputs_mut() {
-            *e = doc.with_design_unit(e, k).into();
-        }
-    }
+    in_design_units(s, &mut kind);
     // Profiles picked by index are kept by the curves around them: a recompute can renumber a
     // sketch's profiles (a face sketch's projected outline rebuilt), never the curves.
     stable_profiles(s, &mut kind, exact_regions(p))?;
