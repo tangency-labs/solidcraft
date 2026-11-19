@@ -3257,7 +3257,7 @@ fn split_body_by_a_curved_face_sends_it_as_a_tool() {
 /// #9305: the Split Body panel cuts with a surface body's picked faces as they are, or with the
 /// whole surface body. A 10 mm cube from (0, 0, 5), and a sheet of two faces across it: y = 5
 /// for x -3…5, then rising 1 in 2 to (13, 9), 20 mm high. "Whole surface body" sends the tool
-/// face alone; "Picked faces as they are" sends the other face too, and the cube splits into
+/// face alone; "Picked faces" sends the other face too, and the cube splits into
 /// 437.5 and 562.5 mm³ (the first face extended would halve it). Editing the split shows the
 /// choice and the other face again, and running it keeps the parts.
 #[test]
