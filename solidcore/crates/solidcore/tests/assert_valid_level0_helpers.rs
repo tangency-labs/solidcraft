@@ -334,3 +334,51 @@ fn the_downward_face_use_of_a_box_face_has_its_side_outside_the_surface() {
     assert_eq!(side.edgeuse_index, first_bad);
     assert!(side.on_natural_boundary);
 }
+
+#[test]
+fn a_face_narrower_than_the_side_band_has_its_loop_side_in_the_surface() {
+    // #18540: a box 0.008 thick under a 0.005 face tolerance, as a faceted STEP import has
+    // it. Four of its faces are 0.008 across, narrower than the band of twice the tolerance
+    // within which a sample lies on a side of the face's domain: every sample of such a face
+    // lies within it of both opposite sides, which then tell nothing of the side its inside
+    // is on. The two wide faces keep the side test.
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::ZERO, 2.0, 0.008, 4.0).unwrap();
+    for f in b.face_list().to_vec() {
+        solidcore::topology::face::p3::set_tolerance(&mut b, f, 0.005, true, true).unwrap();
+    }
+    let mut thin = 0;
+    for f in b.face_list().to_vec() {
+        // the face's extents along x, y and z, from its corners
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for &l in &b.face(f).unwrap().loops {
+            for le in &b.loop_(l).unwrap().edges {
+                for v in b.edge(le.edge).unwrap().vertices {
+                    let p = b.vertex(v).unwrap().point;
+                    for (i, c) in [p.x, p.y, p.z].into_iter().enumerate() {
+                        lo[i] = lo[i].min(c);
+                        hi[i] = hi[i].max(c);
+                    }
+                }
+            }
+        }
+        let widths = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+        let narrow = widths.iter().any(|&w| w > 0.0 && w < 2.0 * 0.005);
+        thin += usize::from(narrow);
+        let face = b.face(f).unwrap();
+        let up = face.faceuse.unwrap();
+        for &lu in &b.faceuse(up).unwrap().loopuses {
+            let side = is_loopuse_side_in_surface(&k, &b, lu, None, None).unwrap();
+            assert!(side.in_surface, "face {f:?} (widths {widths:?}): {side:?}");
+        }
+        if !narrow {
+            // the downward face use of a wide face still has its side outside
+            let down = b.faceuse(up).unwrap().mate.unwrap();
+            for &lu in &b.faceuse(down).unwrap().loopuses {
+                let side = is_loopuse_side_in_surface(&k, &b, lu, None, None).unwrap();
+                assert!(!side.in_surface, "face {f:?} (widths {widths:?}): {side:?}");
+            }
+        }
+    }
+    assert_eq!(thin, 4, "the faces 0.008 across");
+}
