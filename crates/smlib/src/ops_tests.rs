@@ -257,7 +257,7 @@ fn a_shell_of_a_face_whose_outline_touches_itself_is_refused_as_such() {
     };
     let top = [[0.15, -0.25, 10.0]];
     match padded(2e-5).shell(&top, 0.01, -0.05).unwrap_err() {
-        Error::OutlineTouches { at } => {
+        Error::OutlineTouches { at, .. } => {
             assert!((at[0] - 0.5).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 10.0).abs() < 1e-9, "at {at:?}");
         }
         e => panic!("refused as {e}"),

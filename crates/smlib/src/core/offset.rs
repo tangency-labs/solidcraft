@@ -337,7 +337,7 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
         };
         match shelled {
             Err(e) if is_bare_failure(&e) => match solidcore_ops::offset::outline_touch(k, &w)? {
-                Some(at) => Ok(Err(Error::OutlineTouches { at })),
+                Some(at) => Ok(Err(Error::OutlineTouches { at, detail: e.to_string() })),
                 None => Ok(Err(e)),
             },
             r => Ok(r),

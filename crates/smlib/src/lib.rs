@@ -54,8 +54,8 @@ pub enum Error {
     /// `at`: a corner of one of its loops on another loop, within the two's tolerances (a pad
     /// or hole whose corner reaches the face's edge there). The walls offset from the two
     /// would meet at that point, which the offset does not build. Moved clear of the edge,
-    /// or across it, the feature shells.
-    OutlineTouches { at: [f64; 3] },
+    /// or across it, the feature shells. `detail` is the kernel's own failure, kept whole.
+    OutlineTouches { at: [f64; 3], detail: String },
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (solidcore's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
     /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
@@ -132,9 +132,9 @@ impl std::fmt::Display for Error {
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
-            Error::OutlineTouches { at: [x, y, z] } => write!(
+            Error::OutlineTouches { at: [x, y, z], detail } => write!(
                 f,
-                "a face's outline touches itself at ({x:.5}, {y:.5}, {z:.5}), where a corner of one of its loops lies on another, and the offset does not build walls that meet at a point"
+                "a face's outline touches itself at ({x:.5}, {y:.5}, {z:.5}), where a corner of one of its loops lies on another, and the offset does not build walls that meet at a point; the kernel's failure: {detail}"
             ),
             Error::TooLarge { size, kind, at, face, why } => {
                 write!(f, "the blend is larger than its faces allow")?;

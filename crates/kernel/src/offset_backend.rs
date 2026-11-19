@@ -42,7 +42,7 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
             ))
         }
         // A pad's or hole's corner on the edge of its face (#18568).
-        SmError::OutlineTouches { at: [x, y, z] } => KernelError::Invalid(format!(
+        SmError::OutlineTouches { at: [x, y, z], .. } => KernelError::Invalid(format!(
             "{op}: a corner of a pad or hole touches the edge of its face at ({x:.4}, {y:.4}, {z:.4}), so the walls offset from them would meet at a point, \
              which the {op} does not build; move the feature clear of the edge"
         )),
