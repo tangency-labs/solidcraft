@@ -19,10 +19,13 @@
 //! - an occurrence of a text the scan names (the bare statuses, counted as text);
 //! - a call of a local *wrapper*: a `let` closure, a private `fn` or a `macro_rules!` that
 //!   builds one of the above in the way the scan's [`Wrappers`] says. The wrapper's body is
-//!   not a site; each call of it in its scope is (the rest of the enclosing block for a
-//!   closure, less the calls after a `let` that binds its name again, in that `let`'s
-//!   block; the file for a `fn` or a macro). A macro is always a wrapper when its body builds one, whatever its body
-//!   holds: each call expands it.
+//!   not a site; each call of it in its scope is, and so is each use of a closure's or a
+//!   `fn`'s name as a value (`ok_or_else(fail)`, as an argument or a result; a field, a
+//!   method or a path segment of the same name is not one). The scope is the rest of the
+//!   enclosing block for a closure and the file for a `fn` or a macro, less what follows a
+//!   `let` that binds the closure's or the `fn`'s name again, within that `let`'s block. A
+//!   macro is always a wrapper when its body builds one, whatever its body holds: each call
+//!   expands it.
 //!
 //! Under [`Wrappers::Phrase`], a wrapper `fn` visible outside its file fails the scan, since
 //! its calls elsewhere would not be seen: make it private, or list it as a
@@ -702,7 +705,11 @@ fn wrapper_calls(code: &str, def: &Def, param: Option<usize>, wraps: &str) -> Ve
                     skip_ws(s, after + 1)
                 }
                 Kind::Fn => {
-                    if code[..at].ends_with("SolidError::") || ident_before(code, at) == "fn" {
+                    // a `let` of the same name hides the `fn` for the rest of its block
+                    if code[..at].ends_with("SolidError::")
+                        || ident_before(code, at) == "fn"
+                        || rebound(code, &def.name, 0, at)
+                    {
                         return None;
                     }
                     skip_ws(s, after)
@@ -716,9 +723,9 @@ fn wrapper_calls(code: &str, def: &Def, param: Option<usize>, wraps: &str) -> Ve
                     skip_ws(s, after)
                 }
             };
-            matches!(s.get(open), Some(b'(' | b'[' | b'{')).then(|| {
+            if matches!(s.get(open), Some(b'(' | b'[' | b'{')) {
                 let args = pieces(code, open);
-                Occurrence {
+                return Some(Occurrence {
                     at,
                     phrase: match param {
                         Some(k) => args.into_iter().skip(k).take(1).collect(),
@@ -727,10 +734,46 @@ fn wrapper_calls(code: &str, def: &Def, param: Option<usize>, wraps: &str) -> Ve
                     via: via.clone(),
                     wrapped: true,
                     pattern: false,
+                });
+            }
+            // the name passed as a value (`ok_or_else(fail)`): each such use is a site too
+            (def.kind != Kind::Macro && is_value_use(code, at, def.name.len())).then(|| {
+                Occurrence {
+                    at,
+                    phrase: Vec::new(),
+                    via: via.clone(),
+                    wrapped: true,
+                    pattern: false,
                 }
             })
         })
         .collect()
+}
+
+/// Whether the identifier of `len` bytes at `at` stands as a value of its own, an argument
+/// or a result (`f(name)`, `f(x, name)`, `name;`): not a field, a method or a path segment of
+/// something else, nor a binding, a parameter or a struct field's name.
+fn is_value_use(code: &str, at: usize, len: usize) -> bool {
+    let s = code.as_bytes();
+    let next = skip_ws(s, at + len);
+    let before = code[..at].trim_end();
+    !before.ends_with('.')
+        && !before.ends_with("::")
+        && !before.ends_with('|')
+        && !matches!(
+            ident_before(code, at),
+            "fn" | "let"
+                | "mut"
+                | "struct"
+                | "enum"
+                | "const"
+                | "static"
+                | "type"
+                | "use"
+                | "as"
+                | "ref"
+        )
+        && matches!(s.get(next), Some(b')' | b',' | b';'))
 }
 
 /// The wrapper `occ` is built in, if any: the definition, and the parameter it passes on as
@@ -983,6 +1026,47 @@ fn c() {
                 (4, "err (wraps CurveFailure::StageFailed)".to_owned()),
                 (9, "err (wraps CurveFailure::StageFailed)".to_owned()),
             ]
+        );
+    }
+
+    /// A wrapper's name passed as a value is a site, as a call is; a field, a method or a
+    /// path segment of the same name is not.
+    #[test]
+    fn a_wrapper_passed_by_name_is_a_site() {
+        let fixture = "
+fn stage() -> E { SolidError::curve(OP, CurveFailure::StageFailed) }
+fn a(x: Option<u8>, y: Option<u8>) -> Result<u8> {
+    let fail = || SolidError::curve(OP, CurveFailure::StageFailed);
+    x.ok_or_else(fail)?;
+    y.ok_or_else(stage)?;
+    let _ = (t.fail, t.fail(), m::fail, Thing { fail: 1 }, t.stage, m::stage);
+    Err(stage())
+}
+";
+        let lines = lines(&STAGE, fixture);
+        let wraps = |name: &str| format!("{name} (wraps CurveFailure::StageFailed)");
+        assert_eq!(
+            lines,
+            vec![(5, wraps("fail")), (6, wraps("stage")), (8, wraps("stage"))]
+        );
+    }
+
+    /// A `let` of a wrapper `fn`'s name hides the `fn` for the rest of its block.
+    #[test]
+    fn a_let_of_the_same_name_hides_a_wrapper_fn() {
+        let fixture = "
+fn missing() -> E { SolidError::curve(OP, CurveFailure::StageFailed) }
+fn a() -> Result<()> {
+    {
+        let missing = || SolidError::invalid_input(OP, \"x\");
+        let _ = missing();
+    }
+    Err(missing())
+}
+";
+        assert_eq!(
+            lines(&STAGE, fixture),
+            vec![(8, "missing (wraps CurveFailure::StageFailed)".to_owned())]
         );
     }
 
