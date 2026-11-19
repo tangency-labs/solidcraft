@@ -2521,7 +2521,7 @@ fn export_to(
         return export_glb(s, cmd, path, bodies, quality);
     }
     if written_by_cadmpeg(format) {
-        return export_cadmpeg(s, path, bodies, quality, format);
+        return export_cadmpeg(s, cmd, path, bodies, quality, format);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
@@ -2951,17 +2951,31 @@ fn written_by_cadmpeg(format: Format) -> bool {
 /// body's exact B-rep and, where the format takes it, its mesh at `quality`, and the looks the
 /// design shows), then written by cadmpeg's writer for `format`; for OpenUSD the path's extension
 /// picks text (`.usda`), binary (`.usdc`, `.usd`) or a package (`.usdz`). FreeCAD is refused:
-/// cadmpeg cannot write a new FreeCAD file yet. Written atomically, so a refusal or a failed write
-/// leaves a file already there as it was. What the file could not carry is in the reply's
-/// warnings.
-fn export_cadmpeg(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, format: Format) -> Result<Value> {
+/// cadmpeg cannot write a new FreeCAD file yet. What the view hides is written hidden. Written
+/// atomically, so a refusal or a failed write leaves a file already there as it was. What the
+/// file could not carry is in the reply's warnings, among them each body a render setup gives an
+/// image texture or optics, written with its look alone.
+fn export_cadmpeg(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, format: Format) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let world = s.world_state()?;
     // The placements the world has, uncaptured moves included, so the assembly is written where
     // the design shows it, as chosen bodies are.
     let doc = s.placed_document();
-    let (bytes, warnings) =
-        solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, path, quality, format).map_err(EngineError::Other)?;
+    let hidden = solidcraft_io::Hidden {
+        bodies: world.bodies.iter().filter(|b| !s.body_visible(&b.name)).map(|b| b.name.clone()).collect(),
+        placements: s.visibility.hidden_occurrences.clone(),
+    };
+    let options = solidcraft_io::CadmpegOptions { hidden };
+    let (bytes, mut warnings) =
+        solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
+    let label = if format == Format::Usd { "OpenUSD" } else { "Rhino" };
+    let bound = super::render::bound_bodies(s, cmd)?;
+    for b in world.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)) {
+        if let Some((setup, what)) = bound.get(&b.name) {
+            warnings
+                .push(format!("{}: render setup `{setup}` gives it {what}, which {label} export does not write yet: written with its look", b.name));
+        }
+    }
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

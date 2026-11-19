@@ -408,6 +408,22 @@ pub use usd::{USD_EXTS, is_usd_path};
 
 mod cadir_out;
 mod export;
+
+/// What the design's view hides, for an export that writes it: bodies by their world name
+/// (hidden themselves, by a folder or by a placement above them) and placements by their path
+/// (hidden themselves).
+#[derive(Clone, Debug, Default)]
+pub struct Hidden {
+    pub bodies: std::collections::BTreeSet<String>,
+    pub placements: Vec<Vec<u64>>,
+}
+
+/// The choices of an export through cadmpeg beyond its bodies, file and quality.
+#[derive(Clone, Debug, Default)]
+pub struct CadmpegOptions {
+    /// What the design's view hides, written hidden.
+    pub hidden: Hidden,
+}
 pub(crate) use export::FREECAD_REFUSED;
 
 /// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
@@ -415,19 +431,22 @@ pub(crate) use export::FREECAD_REFUSED;
 /// the extension picking the encoding) or Rhino ([`crate::Format::Rhino`]); FreeCAD is refused,
 /// as cadmpeg cannot write a new FreeCAD file yet. With no bodies chosen, a design with components
 /// keeps them where the format holds them: `model`, the model before placing, holds each
-/// component's bodies. Meshes are made at `quality`. Returns the file's bytes and what it could not
-/// carry (`export` says what each format leaves out). Panics inside cadmpeg become errors.
+/// component's bodies. `options` says what else is written. Meshes are made at `quality`. Returns
+/// the file's bytes and what it could not carry (`export` says what each format leaves out).
+/// Panics inside cadmpeg become errors.
+#[allow(clippy::too_many_arguments)]
 pub fn cadmpeg_export(
     doc: &solidcraft_doc::Document,
     model: &solidcraft_doc::ModelState,
     world: &solidcraft_doc::ModelState,
     bodies: &[String],
+    options: &CadmpegOptions,
     file: &str,
     quality: crate::MeshQuality,
     format: crate::Format,
 ) -> Result<(Vec<u8>, Vec<String>), String> {
     solidcraft_kernel::guard("cadmpeg export", || {
-        export::from_design(doc, model, world, bodies, file, quality, format).map_err(solidcraft_kernel::KernelError::Invalid)
+        export::from_design(doc, model, world, bodies, options, file, quality, format).map_err(solidcraft_kernel::KernelError::Invalid)
     })
     .map_err(|e| match e {
         solidcraft_kernel::KernelError::Invalid(m) => m,
@@ -441,10 +460,11 @@ pub fn usd_from_design(
     model: &solidcraft_doc::ModelState,
     world: &solidcraft_doc::ModelState,
     bodies: &[String],
+    options: &CadmpegOptions,
     file: &str,
     quality: crate::MeshQuality,
 ) -> Result<(Vec<u8>, Vec<String>), String> {
-    cadmpeg_export(doc, model, world, bodies, file, quality, crate::Format::Usd)
+    cadmpeg_export(doc, model, world, bodies, options, file, quality, crate::Format::Usd)
 }
 
 /// An OpenUSD file (`file` is its name) read for an import of its exact geometry, kept as records

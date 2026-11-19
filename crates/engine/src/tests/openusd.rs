@@ -339,3 +339,55 @@ fn an_uncaptured_move_is_written_where_it_is_shown() {
     assert_eq!(shown_boxes(&back), shown);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The text of the `Xform` prim named `name` in `text`: from its `def` to its closing brace.
+fn prim<'a>(text: &'a str, name: &str) -> &'a str {
+    let start = text.find(&format!("def Xform \"{name}\"")).unwrap_or_else(|| panic!("no {name} prim:\n{text}"));
+    let mut depth = 0usize;
+    for (i, c) in text[start..].char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth == 1 => return &text[start..=start + i],
+            '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    panic!("{name}'s prim does not close:\n{text}")
+}
+
+/// A body the view hides is written invisible. A body a render setup gives optics is written,
+/// with a warning naming the body, the setup and what the file leaves out.
+#[test]
+fn hidden_bodies_are_invisible_and_render_setup_optics_warn() {
+    let dir = temp_dir("view");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "body_name": "Glass"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "corner": [20, 0, 0], "operation": "new", "body_name": "Shelf"}));
+    run(
+        &mut s,
+        "render.settings.set",
+        json!({"name": "Studio", "set": {"width": 4, "height": 4, "job": {"method": "cpu_raytrace", "options": {"lights": [],
+               "environment": {"color": [1, 1, 1], "intensity": 1}, "progressive": {"samples_per_pixel": 1, "seed": 1}}}}}),
+    );
+    let revision = s.revision;
+    run(
+        &mut s,
+        "render.optics.bind",
+        json!({"name": "Studio", "body_index": 0, "body_name": "Glass", "expected_revision": revision,
+               "optics": {"ior": 1.5, "absorption_per_mm": [0.0, 0.0, 0.0], "boundary": "closed_mesh"}}),
+    );
+    run(&mut s, "browser.visibility", json!({"items": ["Shelf"], "visible": false}));
+    let path = dir.join("view.usda");
+    let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy()}));
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap();
+    assert!(
+        warnings.iter().any(|w| w.starts_with("Glass: render setup `Studio` gives it optics, which OpenUSD export does not write yet")),
+        "{warnings:?}"
+    );
+    let text = std::fs::read_to_string(&path).unwrap();
+    let invisible = "token visibility = \"invisible\"";
+    assert_eq!(text.matches(invisible).count(), 1, "{text}");
+    assert!(prim(&text, "Shelf").contains(invisible), "the Shelf prim holds it:\n{text}");
+    assert!(!prim(&text, "Glass").contains(invisible), "Glass stays shown:\n{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

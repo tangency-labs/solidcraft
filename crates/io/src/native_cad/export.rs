@@ -37,6 +37,7 @@ const RHINO: Writes = Writes {
     appearances: false,
     linear: false,
     planar_pcurves: false,
+    named_bodies: false,
     admit: Some(rhino_admits),
 };
 
@@ -85,12 +86,14 @@ pub(super) fn mesh_only_rounds(ir: &CadIr) -> bool {
 /// The bodies of `world` (all when `bodies` is empty) as a `format` file called `file`, written by
 /// cadmpeg, with what the file could not carry: the design's components and placements when no
 /// bodies are chosen and the format holds them ([`cadir_out::design_for`] says how), each mesh at
-/// `quality`.
+/// `quality`, and what `options` asks for.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn from_design(
     doc: &solidcraft_doc::Document,
     model: &solidcraft_doc::ModelState,
     world: &solidcraft_doc::ModelState,
     bodies: &[String],
+    options: &super::CadmpegOptions,
     file: &str,
     quality: crate::MeshQuality,
     format: Format,
@@ -109,7 +112,7 @@ pub(super) fn from_design(
         other => return Err(format!("{name}: {other:?} is not written through cadmpeg")),
     };
     let stem = std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let built = cadir_out::design_for(doc, model, world, bodies, &stem, quality, writes).map_err(|e| format!("{name}: {e}"))?;
+    let built = cadir_out::design_for(doc, model, world, bodies, options, &stem, quality, writes).map_err(|e| format!("{name}: {e}"))?;
     let label = writes.label;
     let plan = build_encoder(codec)
         .plan(EncodeInput::new(&built.ir, None), TargetRequest::Explicit(target))

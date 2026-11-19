@@ -895,7 +895,7 @@ fn evaluated(doc: &solidcraft_doc::Document) -> solidcraft_doc::Model {
 fn exported(doc: &solidcraft_doc::Document, file: &str, format: crate::Format) -> Result<(Vec<u8>, Vec<String>), String> {
     let model = evaluated(doc);
     let world = solidcraft_doc::world_state(doc, &model.state()).unwrap();
-    cadmpeg_export(doc, &model.state(), &world, &[], file, crate::MeshQuality::Standard, format)
+    cadmpeg_export(doc, &model.state(), &world, &[], &crate::CadmpegOptions::default(), file, crate::MeshQuality::Standard, format)
 }
 
 /// Each imported body's volume and box (`[min, max]`), sorted, rounded to a micrometre.
@@ -1031,6 +1031,27 @@ fn rhino_export_keeps_colours_and_writes_a_cylinder_as_its_mesh() {
     }
 }
 
+/// A hidden body Rhino writes as its exact shape is hidden in the file; a hidden cylinder, which
+/// cadmpeg's Rhino writer writes as a mesh with no visibility, is said to be written shown.
+#[test]
+fn a_hidden_body_rhino_writes_as_a_mesh_is_said_to_be_shown() {
+    let mut doc = solidcraft_doc::Document::new("Parts");
+    add_box(&mut doc, solidcore_record::Vec3::ZERO, [10.0, 20.0, 30.0], 0);
+    add_cylinder(&mut doc);
+    let model = evaluated(&doc);
+    let names: Vec<String> = model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { hidden: crate::Hidden { bodies: names.iter().cloned().collect(), ..Default::default() } };
+    let (bytes, warnings) =
+        cadmpeg_export(&doc, &model.state(), &world, &[], &options, "parts.3dm", crate::MeshQuality::Standard, crate::Format::Rhino).unwrap();
+    let shown = |name: &str| warnings.iter().any(|w| w.starts_with(&format!("{name}: hidden, but written shown")));
+    assert!(shown(&names[1]), "{warnings:?}");
+    assert!(!shown(&names[0]), "{warnings:?}");
+    let ir = rhino_model(&bytes);
+    let block = ir.model.bodies.iter().find(|b| b.name.as_deref() == Some(names[0].as_str())).unwrap();
+    assert_eq!(block.visible, Some(false));
+}
+
 /// Rhino has no assemblies here, so every body of the galvanometer is written where the design
 /// shows it, with a warning, and reads back there.
 #[test]
@@ -1064,7 +1085,19 @@ fn cadmpeg_export_refuses_what_it_cannot_write() {
     assert!(exported(&solidcraft_doc::Document::new("Empty"), "empty.3dm", crate::Format::Rhino).is_err());
     let model = evaluated(&doc);
     let st = model.state();
-    assert!(cadmpeg_export(&doc, &st, &st, &["Nothing".into()], "x.3dm", crate::MeshQuality::Standard, crate::Format::Rhino).is_err());
+    assert!(
+        cadmpeg_export(
+            &doc,
+            &st,
+            &st,
+            &["Nothing".into()],
+            &crate::CadmpegOptions::default(),
+            "x.3dm",
+            crate::MeshQuality::Standard,
+            crate::Format::Rhino
+        )
+        .is_err()
+    );
     let mut odd = solidcraft_doc::Document::new("\0\u{7}  ");
     add_box(&mut odd, solidcore_record::Vec3::new(1e9, -1e9, 0.0), [1e-3, 1e6, 1.0], 0);
     let r = std::panic::catch_unwind(|| exported(&odd, "\0.3dm", crate::Format::Rhino));

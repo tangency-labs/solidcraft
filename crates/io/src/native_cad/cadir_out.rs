@@ -28,6 +28,20 @@
 //! `BrepArray` prim, which OpenUSD's validation refuses (no family name, and a parent that is not
 //! imageable). A body with no look but a colour (an imported one) carries that colour.
 //!
+//! What the view hides is written hidden: a placement hidden itself as a hidden occurrence, and
+//! a body as a hidden body when it is hidden in every shown placement of its component. A body
+//! hidden in some of those placements and shown in others is written shown, with a warning: the
+//! file gives a component's body one visibility.
+//!
+//! Body names, for OpenUSD ([`Writes::named_bodies`]): cadmpeg 0.6.12 names the prim of a
+//! component's only body after the placement when the component is placed once (the design's own
+//! included), so a body named otherwise lost its name. Such a body is put in a definition of its
+//! own, named after the component and placed once in the placement, with no offset and the
+//! body's name: the file then holds a prim named after the placement and one named after the
+//! body. A component placed more than once keeps cadmpeg's form, its only body's prim named after
+//! the component: moving the body out would make each placement a component of its own when the
+//! file is read back.
+//!
 //! The design is untrusted: every placement is checked, the placements walked are capped as the
 //! design's own walk caps them, and the meshes' size is capped ([`MAX_BYTES`]).
 
@@ -46,6 +60,7 @@ use cadmpeg_ir::transform::Transform;
 use solidcraft_doc::appearance::Look;
 use solidcraft_doc::{Document, Mat, ModelBody, ModelState};
 
+use super::CadmpegOptions;
 use crate::MeshQuality;
 
 /// Largest total size of the meshes written, estimated as the text layer holds them (about 40
@@ -80,6 +95,9 @@ pub(crate) struct Writes {
     /// Pcurves on planes kept; `false` leaves them out, for a writer that makes them from the
     /// edges itself and takes no other.
     pub planar_pcurves: bool,
+    /// A component's only body named other than the prim the writer names after its one
+    /// placement is put in a definition of its own, so its name reaches the file.
+    pub named_bodies: bool,
     /// Whether the writer takes a body's exact shape (the body alone in a model, planned by the
     /// writer); a body it refuses is written as its mesh, with a warning naming it and why.
     pub admit: Option<fn(&CadIr) -> Result<(), String>>,
@@ -96,6 +114,7 @@ impl Writes {
         appearances: true,
         linear: true,
         planar_pcurves: true,
+        named_bodies: true,
         admit: None,
     };
 }
@@ -113,29 +132,33 @@ pub(crate) fn design(
     model: &ModelState,
     world: &ModelState,
     bodies: &[String],
+    options: &CadmpegOptions,
     name: &str,
     quality: MeshQuality,
 ) -> Result<Built, String> {
-    design_for(doc, model, world, bodies, name, quality, Writes::USD)
+    design_for(doc, model, world, bodies, options, name, quality, Writes::USD)
 }
 
 /// The bodies of `world` (the design's model placed in the world) as CADIR: all of them as the
 /// design's product structure when `bodies` is empty and the design has placements (`model`, the
 /// model before placing, holds each component's bodies), else the chosen bodies (all when
-/// `bodies` is empty) where the world has them. `name` names the root when the design's own name
-/// is blank. Each mesh at `quality`. Built for the writer `writes` describes.
+/// `bodies` is empty) where the world has them, with what `options` asks for. `name` names
+/// the root when the design's own name is blank. Each mesh at `quality`. Built for the writer
+/// `writes` describes.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn design_for(
     doc: &Document,
     model: &ModelState,
     world: &ModelState,
     bodies: &[String],
+    options: &CadmpegOptions,
     name: &str,
     quality: MeshQuality,
     writes: Writes,
 ) -> Result<Built, String> {
     let _span = solidcraft_profile::span("io", "cadir_out.design");
     let root = clean(&doc.name).or_else(|| clean(name)).unwrap_or_else(|| "Design".into());
-    let mut b = Builder::new(doc, quality, writes);
+    let mut b = Builder::new(doc, quality, writes, &options.hidden);
     let assembly = bodies.is_empty() && !doc.occurrences.is_empty();
     if assembly && !writes.products {
         b.warnings.push(format!(
@@ -200,6 +223,7 @@ struct Builder<'a> {
     doc: &'a Document,
     quality: MeshQuality,
     writes: Writes,
+    hidden: &'a super::Hidden,
     ir: CadIr,
     warnings: Vec<String>,
     looks: HashMap<LookKey, AppearanceId>,
@@ -212,11 +236,12 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(doc: &'a Document, quality: MeshQuality, writes: Writes) -> Self {
+    fn new(doc: &'a Document, quality: MeshQuality, writes: Writes, hidden: &'a super::Hidden) -> Self {
         Builder {
             doc,
             quality,
             writes,
+            hidden,
             ir: CadIr::empty(),
             warnings: Vec::new(),
             looks: HashMap::new(),
@@ -237,8 +262,75 @@ impl<'a> Builder<'a> {
         if !self.writes.planar_pcurves {
             without_planar_pcurves(&mut self.ir);
         }
+        if self.writes.named_bodies {
+            self.keep_body_names()?;
+        }
         self.ir.finalize();
         Ok(Built { ir: self.ir, warnings: self.warnings })
+    }
+
+    /// Each definition placed once, holding one body and placing nothing, whose body is named
+    /// other than the placement: the body moves to a definition of its own named as this one,
+    /// placed in that placement with no offset and named after the body.
+    fn keep_body_names(&mut self) -> Result<(), String> {
+        let model = &self.ir.model;
+        // Indexed once, so the pass stays linear in the definitions and placements.
+        let names: HashMap<&BodyId, &str> = model.bodies.iter().filter_map(|b| b.name.as_deref().map(|n| (&b.id, n))).collect();
+        let mut placing: HashMap<&ProductDefinitionId, Vec<(cadmpeg_ir::ids::OccurrenceId, Option<String>)>> = HashMap::new();
+        for o in &model.occurrences {
+            if let PrototypeReference::Local { definition } = &o.prototype {
+                placing.entry(definition).or_default().push((o.id.clone(), o.name.clone()));
+            }
+        }
+        let parents: std::collections::HashSet<&cadmpeg_ir::ids::OccurrenceId> = model
+            .occurrences
+            .iter()
+            .filter_map(|o| match &o.parent {
+                OccurrenceParent::Occurrence { occurrence } => Some(occurrence),
+                _ => None,
+            })
+            .collect();
+        let mut moves = Vec::new();
+        for (index, d) in model.product_definitions.iter().enumerate() {
+            let [body] = d.bodies.as_slice() else { continue };
+            let Some(&name) = names.get(body) else { continue };
+            let Some(placements) = placing.get(&d.id) else { continue };
+            let [(placement, placed_as)] = placements.as_slice() else { continue };
+            if !parents.contains(placement) && placed_as.as_deref() != Some(name) {
+                moves.push((index, name.to_string(), placements.clone()));
+            }
+        }
+        for (index, name, placements) in moves {
+            let key = self.ir.model.product_definitions.len();
+            let id: ProductDefinitionId = id("product", key)?;
+            let Some(outer) = self.ir.model.product_definitions.get_mut(index) else { continue };
+            let bodies = std::mem::take(&mut outer.bodies);
+            let source_name = outer.source_name.clone();
+            self.ir.model.product_definitions.push(ProductDefinition {
+                id: id.clone(),
+                kind: ProductDefinitionKind::Object,
+                source_name,
+                label: None,
+                description: None,
+                part_number: None,
+                bom_properties: BTreeMap::new(),
+                bodies,
+                sketches: Vec::new(),
+                native_ref: None,
+            });
+            for (parent, _) in placements {
+                let key = self.ir.model.occurrences.len();
+                self.occurrence(key, &id, OccurrenceParent::Occurrence { occurrence: parent }, 0, Transform::identity(), Some(name.clone()))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Body `id` written hidden.
+    fn hide(&mut self, id: &BodyId) {
+        if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == *id) {
+            body.visible = Some(false);
+        }
     }
 
     /// A product definition named `name` holding `bodies`, with its id.
@@ -292,8 +384,23 @@ impl<'a> Builder<'a> {
         let sel = crate::selected(world, bodies).map_err(|e| e.to_string())?;
         let mut ids = Vec::with_capacity(sel.len());
         for b in sel {
-            if let Some(id) = self.body(b, &b.body, &b.name)? {
-                ids.push(id);
+            let meshes = self.ir.model.tessellations.len();
+            match self.body(b, &b.body, &b.name)? {
+                Some(id) => {
+                    if self.hidden.bodies.contains(&b.name) {
+                        self.hide(&id);
+                    }
+                    ids.push(id);
+                }
+                // Written as a mesh of its own, which the writer gives no visibility.
+                None if self.hidden.bodies.contains(&b.name) && self.ir.model.tessellations.len() > meshes => {
+                    self.warnings.push(format!(
+                        "{}: hidden, but written shown: cadmpeg's {} writer gives a mesh no visibility",
+                        clean(&b.name).unwrap_or_else(|| "a body".into()),
+                        self.writes.label
+                    ));
+                }
+                None => {}
             }
         }
         if self.writes.products {
@@ -321,6 +428,15 @@ impl<'a> Builder<'a> {
         }
         let mut owned: Vec<Vec<BodyId>> = vec![Vec::new(); names.len()];
         let owners = doc.model_body_components(model);
+        // The paths of each component's shown placements: a hidden placement hides what it
+        // places, so a body's own state counts in the others only.
+        let mut shown: HashMap<u64, Vec<Vec<u64>>> = HashMap::new();
+        for (component, path, _) in doc.placements() {
+            if !self.hidden.placements.iter().any(|h| !h.is_empty() && path.starts_with(h)) {
+                shown.entry(component).or_default().push(path);
+            }
+        }
+        let world_names = solidcraft_doc::WorldNames::new(doc, model);
         for (b, owner) in model.bodies.iter().zip(owners) {
             let Some(&key) = keys.get(&owner) else { continue };
             let framed = match doc.model_body_offset(b) {
@@ -336,6 +452,17 @@ impl<'a> Builder<'a> {
             if let Some(id) = self.body(b, framed.as_ref().unwrap_or(&b.body), b.definition_name())?
                 && let Some(list) = owned.get_mut(key)
             {
+                let paths = shown.get(&owner).map(Vec::as_slice).unwrap_or_default();
+                let hidden_in = paths.iter().filter(|p| self.hidden.bodies.contains(&world_names.name(&b.name, owner, p))).count();
+                if hidden_in > 0 && hidden_in == paths.len() {
+                    self.hide(&id);
+                } else if hidden_in > 0 {
+                    self.warnings.push(format!(
+                        "{}: hidden in {hidden_in} of the {} shown placements of its component: written shown, as the file gives a component's body one visibility",
+                        clean(&b.name).unwrap_or_else(|| "a body".into()),
+                        paths.len()
+                    ));
+                }
                 list.push(id);
             }
         }
@@ -379,6 +506,11 @@ impl<'a> Builder<'a> {
                 let parent = OccurrenceParent::Occurrence { occurrence: parent.clone() };
                 let id = self.occurrence(made, definition, parent, *ordinal, placement, clean(&o.name))?;
                 made += 1;
+                if self.hidden.placements.contains(&placed)
+                    && let Some(occurrence) = self.ir.model.occurrences.last_mut()
+                {
+                    occurrence.visible = Some(false);
+                }
                 stack.push((o.component, id, placed));
             }
         }
