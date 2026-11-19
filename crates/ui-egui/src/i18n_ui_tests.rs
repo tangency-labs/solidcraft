@@ -4,6 +4,22 @@ use crate::scenario::{self, Harness};
 use serde_json::json;
 
 #[test]
+fn direct_mesh_reduce_status_uses_saved_language() {
+    let mut h = Harness::new();
+    let path = h.dir.join("reduce-language.obj");
+    std::fs::write(&path, "v 0 0 0\nv 2 0 0\nv 2 2 0\nv 0 2 0\nv 1 1 0\nf 1 2 5\nf 2 3 5\nf 3 4 5\nf 4 1 5\n").unwrap();
+    h.app.run("file.insert_mesh", json!({"path":path})).unwrap();
+    let body = h.app.session.model.state().bodies[0].name.clone();
+    h.app.preferences.language = "ja".into();
+    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences");
+    let result = h.app.run("mesh.reduce", json!({"body":body,"triangle_count":1})).unwrap();
+    assert_eq!(result["achieved_triangles"], 2);
+    let (status, _, is_error) = h.app.status.as_ref().unwrap();
+    assert_eq!(status, "メッシュを削減: 元の三角形数 4、目標 1、結果 2。今回の処理では目標に達しませんでした。");
+    assert!(!is_error);
+}
+
+#[test]
 fn japanese_dialog_keeps_english_scenario_handles() {
     let mut h = Harness::new();
     h.app.preferences.language = "ja".into();

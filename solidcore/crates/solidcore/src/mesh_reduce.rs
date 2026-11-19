@@ -8,10 +8,13 @@
 
 use std::{cmp::Reverse, collections::BinaryHeap};
 
+use crate::{Result, SolidError};
+
 mod collision;
 mod quadric;
 mod topology;
 
+use collision::Bounds;
 use quadric::Quadric;
 
 /// The compacted positions and reduced indexed triangles.
@@ -29,28 +32,40 @@ pub struct ReducedMesh {
     pub reduced_triangles: usize,
 }
 
-/// Why reduction could not produce a result.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum MeshReductionError {
-    /// The index or attribute arrays do not describe finite indexed triangles.
-    #[error("invalid indexed mesh: {0}")]
-    Invalid(&'static str),
-    /// Reduction was cancelled by the caller.
-    #[error("mesh reduction cancelled")]
-    Cancelled,
-}
-
+const OPERATION: &str = "mesh.reduce";
 const CANCEL_STRIDE: usize = 4096;
 
-fn check_cancel(cancel: &mut impl FnMut() -> bool) -> Result<(), MeshReductionError> {
+fn invalid(reason: &'static str) -> SolidError {
+    SolidError::invalid_input(OPERATION, reason)
+}
+
+fn invariant(reason: &'static str) -> SolidError {
+    SolidError::port_invariant(OPERATION, reason)
+}
+
+fn buffer<T>(capacity: usize) -> Result<Vec<T>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(capacity)
+        .map_err(|_| invalid("mesh reduction buffers are too large"))?;
+    Ok(values)
+}
+
+fn filled<T: Clone>(len: usize, value: T) -> Result<Vec<T>> {
+    let mut values = buffer(len)?;
+    values.resize(len, value);
+    Ok(values)
+}
+
+fn check_cancel(cancel: &mut impl FnMut() -> bool) -> Result<()> {
     if cancel() {
-        Err(MeshReductionError::Cancelled)
+        Err(SolidError::cancelled(OPERATION))
     } else {
         Ok(())
     }
 }
 
-fn check_stride(index: usize, cancel: &mut impl FnMut() -> bool) -> Result<(), MeshReductionError> {
+fn check_stride(index: usize, cancel: &mut impl FnMut() -> bool) -> Result<()> {
     if index % CANCEL_STRIDE == 0 {
         check_cancel(cancel)?;
     }
@@ -164,13 +179,15 @@ struct Star {
 }
 
 impl Star {
-    fn links(&self) -> &[(usize, usize)] {
-        &self.links[..self.len]
+    fn links(&self) -> Option<&[(usize, usize)]> {
+        self.links.get(..self.len)
     }
 
-    fn common_neighbours(&self, other: &Self) -> usize {
+    fn common_neighbours(&self, other: &Self) -> Option<usize> {
+        let left = self.links()?;
+        let right = other.links()?;
         let (mut a, mut b, mut count) = (0, 0, 0);
-        while let (Some(&(u, _)), Some(&(v, _))) = (self.links().get(a), other.links().get(b)) {
+        while let (Some(&(u, _)), Some(&(v, _))) = (left.get(a), right.get(b)) {
             if u == v {
                 count += 1;
             }
@@ -181,12 +198,14 @@ impl Star {
                 b += 1;
             }
         }
-        count
-            + usize::from(other.boundary_end.is_some_and(|end| {
-                self.links()
-                    .binary_search_by_key(&end, |&(from, _)| from)
-                    .is_ok()
-            }))
+        Some(
+            count
+                + usize::from(
+                    other.boundary_end.is_some_and(|end| {
+                        left.binary_search_by_key(&end, |&(from, _)| from).is_ok()
+                    }),
+                ),
+        )
     }
 }
 
@@ -208,10 +227,17 @@ fn star(
     for (link, &id) in links.iter_mut().zip(ids) {
         let face = faces.get(id)?.as_ref()?;
         let i = face.vertices.iter().position(|&v| v == vertex)?;
-        *link = (face.vertices[(i + 1) % 3], face.vertices[(i + 2) % 3]);
+        *link = (
+            *face.vertices.get((i + 1) % 3)?,
+            *face.vertices.get((i + 2) % 3)?,
+        );
     }
     links.sort_unstable_by_key(|&(from, _)| from);
-    if links.windows(2).any(|w| w[0].0 == w[1].0) {
+    if links
+        .iter()
+        .zip(links.iter().skip(1))
+        .any(|(a, b)| a.0 == b.0)
+    {
         return None;
     }
     let first = links.first()?.0;
@@ -292,35 +318,62 @@ struct Replacement {
     id: usize,
     face: Face,
     points: [[f64; 3]; 3],
-    bounds: collision::Bounds,
+    bounds: Bounds,
 }
 
+struct Collapse {
+    retained_normal: Option<[f64; 3]>,
+}
+
+// Refuse turns above about 18 degrees: the score ranks endpoint collapses
+// but does not measure fold angles. This quality limit is independent of the
+// source crease threshold and the predicates' roundoff guards.
+const MIN_REPLACEMENT_NORMAL_DOT: f64 = 0.95;
+
 impl WorkingMesh<'_> {
-    fn conflicts(&self, face: &Face, points: [[f64; 3]; 3], skip: impl Fn(usize) -> bool) -> bool {
+    fn conflicts(
+        &self,
+        face: &Face,
+        points: [[f64; 3]; 3],
+        skip_id: usize,
+        cancel: &mut impl FnMut() -> bool,
+    ) -> Result<bool> {
         let scale = points.iter().flatten().fold(1.0_f64, |m, x| m.max(x.abs()));
-        self.bvh
-            .any_overlap(points, scale * (64.0 * f64::EPSILON), |id| {
-                if skip(id) {
-                    return false;
+        self.bvh.any_overlapping_bounds(
+            Bounds::triangle(points),
+            scale * (64.0 * f64::EPSILON),
+            |id| {
+                if id == skip_id {
+                    return Ok(false);
                 }
-                let Some(other) = self.faces.get(id).and_then(Option::as_ref) else {
-                    return false;
-                };
-                face_points(other, self.positions)
-                    .is_none_or(|p| collision::conflicts(face.vertices, points, other.vertices, p))
-            })
+                let other = self
+                    .faces
+                    .get(id)
+                    .and_then(Option::as_ref)
+                    .ok_or_else(|| invariant("missing indexed face"))?;
+                let other_points = face_points(other, self.positions)
+                    .ok_or_else(|| invariant("invalid indexed face"))?;
+                Ok(collision::conflicts(
+                    face.vertices,
+                    points,
+                    other.vertices,
+                    other_points,
+                ))
+            },
+            cancel,
+        )
     }
 
-    fn candidate(
-        &mut self,
+    fn propose(
+        &self,
         from: usize,
         to: usize,
         from_star: &Star,
         proposed: &mut Vec<Replacement>,
-    ) -> Option<Option<[f64; 3]>> {
+    ) -> Option<Collapse> {
         let (from_faces, to_faces) = (self.incident.get(from)?, self.incident.get(to)?);
         let to_star = star(to, &self.faces, to_faces, false)?;
-        if from_star.common_neighbours(&to_star) != 2 {
+        if from_star.common_neighbours(&to_star)? != 2 {
             return None;
         }
         if from_faces.iter().filter(|id| to_faces.contains(id)).count() != 2 {
@@ -335,7 +388,7 @@ impl WorkingMesh<'_> {
                     let face = self.faces.get(id)?.as_ref()?;
                     let corner = face.vertices.iter().position(|&v| v == vertex)?;
                     let normal = *normals.get(id)?.get(corner)?;
-                    if shared.is_some_and(|n| n != normal) {
+                    if shared.is_some_and(|n| !topology::same_normal_direction(n, normal)) {
                         return None;
                     }
                     shared = Some(normal);
@@ -359,7 +412,7 @@ impl WorkingMesh<'_> {
             if dot(
                 face_normal(face_points(face, self.positions)?)?,
                 face_normal(replacement)?,
-            ) <= 0.95
+            ) <= MIN_REPLACEMENT_NORMAL_DOT
             {
                 return None;
             }
@@ -367,49 +420,75 @@ impl WorkingMesh<'_> {
                 id: *id,
                 face: changed,
                 points: replacement,
-                bounds: collision::Bounds::triangle(replacement),
+                bounds: Bounds::triangle(replacement),
             });
         }
+        Some(Collapse { retained_normal })
+    }
+
+    fn candidate(
+        &mut self,
+        from: usize,
+        to: usize,
+        from_star: &Star,
+        proposed: &mut Vec<Replacement>,
+        cancel: &mut impl FnMut() -> bool,
+    ) -> Result<Option<Collapse>> {
+        let Some(collapse) = self.propose(from, to, from_star, proposed) else {
+            return Ok(None);
+        };
+        let from_faces = self
+            .incident
+            .get(from)
+            .ok_or_else(|| invariant("missing vertex incidence"))?;
 
         // Query each external triangle once for the whole fan. Leaf bounds
         // still gate each exact pair test, including pairs inside the fan.
         let patch = proposed
             .iter()
             .map(|r| r.bounds)
-            .reduce(collision::Bounds::union)?;
+            .reduce(Bounds::union)
+            .ok_or_else(|| invariant("empty collapse fan"))?;
         let scale = proposed
             .iter()
             .flat_map(|r| r.points.iter().flatten())
             .fold(1.0_f64, |m, x| m.max(x.abs()));
         let padding = scale * (64.0 * f64::EPSILON);
-        let conflict = self.bvh.any_overlapping_bounds(patch, padding, |id| {
-            if from_faces.contains(&id) {
-                return false;
-            }
-            let Some(bounds) = self.bvh.face_bounds(id) else {
-                return true;
-            };
-            let mut hits = proposed
-                .iter()
-                .filter(|r| r.bounds.overlaps(bounds, padding));
-            let Some(first) = hits.next() else {
-                return false;
-            };
-            let Some(other) = self.faces.get(id).and_then(Option::as_ref) else {
-                return true;
-            };
-            let Some(points) = face_points(other, self.positions) else {
-                return true;
-            };
-            std::iter::once(first)
-                .chain(hits)
-                .any(|r| collision::conflicts(r.face.vertices, r.points, other.vertices, points))
-        });
+        let conflict = self.bvh.any_overlapping_bounds(
+            patch,
+            padding,
+            |id| {
+                if from_faces.contains(&id) {
+                    return Ok(false);
+                }
+                let bounds = self
+                    .bvh
+                    .face_bounds(id)?
+                    .ok_or_else(|| invariant("missing overlapping face bounds"))?;
+                let mut hits = proposed
+                    .iter()
+                    .filter(|r| r.bounds.overlaps(bounds, padding));
+                let Some(first) = hits.next() else {
+                    return Ok(false);
+                };
+                let other = self
+                    .faces
+                    .get(id)
+                    .and_then(Option::as_ref)
+                    .ok_or_else(|| invariant("missing overlapping face"))?;
+                let points = face_points(other, self.positions)
+                    .ok_or_else(|| invariant("invalid overlapping face"))?;
+                Ok(std::iter::once(first).chain(hits).any(|r| {
+                    collision::conflicts(r.face.vertices, r.points, other.vertices, points)
+                }))
+            },
+            cancel,
+        )?;
         if conflict {
-            return None;
+            return Ok(None);
         }
         for (i, changed) in proposed.iter().enumerate() {
-            for other in proposed.get(..i)? {
+            for other in proposed.iter().take(i) {
                 if changed.bounds.overlaps(other.bounds, padding)
                     && collision::conflicts(
                         changed.face.vertices,
@@ -418,7 +497,7 @@ impl WorkingMesh<'_> {
                         other.points,
                     )
                 {
-                    return None;
+                    return Ok(None);
                 }
             }
         }
@@ -426,18 +505,30 @@ impl WorkingMesh<'_> {
         // Do not erase a pre-existing crossing. Check each original at most
         // once after it is proven clear, even when other candidates fail.
         for &id in from_faces {
-            if *self.clear.get(id)? {
+            let clear = self
+                .clear
+                .get(id)
+                .copied()
+                .ok_or_else(|| invariant("invalid collapse fan face id"))?;
+            if clear {
                 continue;
             }
-            let face = self.faces.get(id)?.as_ref()?;
-            if self.conflicts(face, face_points(face, self.positions)?, |other| {
-                other == id
-            }) {
-                return None;
+            let face = self
+                .faces
+                .get(id)
+                .and_then(Option::as_ref)
+                .ok_or_else(|| invariant("missing collapse fan face"))?;
+            let points = face_points(face, self.positions)
+                .ok_or_else(|| invariant("invalid collapse fan face"))?;
+            if self.conflicts(face, points, id, cancel)? {
+                return Ok(None);
             }
-            *self.clear.get_mut(id)? = true;
+            *self
+                .clear
+                .get_mut(id)
+                .ok_or_else(|| invariant("invalid collapse fan face id"))? = true;
         }
-        Some(retained_normal)
+        Ok(Some(collapse))
     }
 }
 
@@ -512,7 +603,7 @@ pub fn reduce_mesh(
     indices: &[u32],
     corner_normals: Option<&[[f64; 3]]>,
     target_triangles: usize,
-) -> Result<ReducedMesh, MeshReductionError> {
+) -> Result<ReducedMesh> {
     reduce_mesh_with_cancel(positions, indices, corner_normals, target_triangles, || {
         false
     })
@@ -525,9 +616,8 @@ pub fn reduce_mesh_with_cancel(
     corner_normals: Option<&[[f64; 3]]>,
     target_triangles: usize,
     mut cancel: impl FnMut() -> bool,
-) -> Result<ReducedMesh, MeshReductionError> {
+) -> Result<ReducedMesh> {
     check_cancel(&mut cancel)?;
-    let invalid = |s| MeshReductionError::Invalid(s);
     if indices.len() % 3 != 0 {
         return Err(invalid("indices are not triangle triples"));
     }
@@ -550,12 +640,13 @@ pub fn reduce_mesh_with_cancel(
     }
     let original_triangles = indices.len() / 3;
     check_cancel(&mut cancel)?;
-    let protected = topology::validate_with_cancel(indices, positions, &mut cancel)?;
+    let protected =
+        topology::validate_with_cancel(indices, positions, corner_normals, &mut cancel)?;
     check_cancel(&mut cancel)?;
     let origin = positions.first().copied().unwrap_or([0.; 3]);
-    let mut quadrics = vec![Quadric::default(); positions.len()];
-    let mut faces = Vec::with_capacity(original_triangles);
-    let mut incident: Vec<Vec<usize>> = positions.iter().map(|_| Vec::new()).collect();
+    let mut quadrics = filled(positions.len(), Quadric::default())?;
+    let mut faces = buffer(original_triangles)?;
+    let mut incident = filled(positions.len(), Vec::<usize>::new())?;
     for (id, tri) in indices.chunks_exact(3).enumerate() {
         check_stride(id, &mut cancel)?;
         let [a, b, c] = tri else {
@@ -579,10 +670,12 @@ pub fn reduce_mesh_with_cancel(
                 .ok_or_else(|| invalid("vertex quadric overflow"))?;
         }
         for vertex in vertices {
-            incident
+            let ids = incident
                 .get_mut(vertex)
-                .ok_or_else(|| invalid("invalid triangle indices"))?
-                .push(id);
+                .ok_or_else(|| invalid("invalid triangle indices"))?;
+            ids.try_reserve(1)
+                .map_err(|_| invalid("mesh incidence is too large"))?;
+            ids.push(id);
         }
         faces.push(Some(face));
     }
@@ -598,18 +691,33 @@ pub fn reduce_mesh_with_cancel(
         &mut cancel,
     )?;
     check_cancel(&mut cancel)?;
-    let normals = corner_normals.map(|n| n.as_chunks::<3>().0.to_vec());
+    let normals = if let Some(normals) = corner_normals {
+        let mut grouped = buffer(original_triangles)?;
+        for (id, triangle) in normals.chunks_exact(3).enumerate() {
+            check_stride(id, &mut cancel)?;
+            let &[a, b, c] = triangle else {
+                return Err(invalid("invalid corner normals"));
+            };
+            grouped.push([a, b, c]);
+        }
+        Some(grouped)
+    } else {
+        None
+    };
     let mut mesh = WorkingMesh {
         positions,
         faces,
         normals,
         incident,
         bvh,
-        clear: vec![false; original_triangles],
+        clear: filled(original_triangles, false)?,
     };
     let mut remaining = original_triangles;
-    let mut pending = Work::with_capacity(positions.len());
-    let mut queued = vec![QueueState::Idle; positions.len()];
+    let mut pending = Work::new();
+    pending
+        .try_reserve_exact(positions.len())
+        .map_err(|_| invalid("mesh work queue is too large"))?;
+    let mut queued = filled(positions.len(), QueueState::Idle)?;
     let mut ticket = 0;
     for (vertex, ids) in mesh.incident.iter().enumerate() {
         check_stride(vertex, &mut cancel)?;
@@ -619,8 +727,10 @@ pub fn reduce_mesh_with_cancel(
         let Some(link) = star(vertex, &mesh.faces, ids, true) else {
             continue;
         };
-        let Some(cost) = link
+        let links = link
             .links()
+            .ok_or_else(|| invariant("invalid vertex star size"))?;
+        let Some(cost) = links
             .iter()
             .filter_map(|&(to, _)| score(vertex, to, positions, &quadrics, origin))
             .min()
@@ -630,8 +740,8 @@ pub fn reduce_mesh_with_cancel(
         queue_vertex(&mut pending, &mut queued, &mut ticket, vertex, band(cost.0))
             .ok_or_else(|| invalid("mesh reduction work queue overflow"))?;
     }
-    let mut proposed = Vec::new();
-    let mut neighbours = Vec::new();
+    let mut proposed = buffer(MAX_STAR)?;
+    let mut neighbours = buffer(MAX_STAR)?;
     check_cancel(&mut cancel)?;
     let mut attempts = 0usize;
     while remaining >= target_triangles.saturating_add(2) {
@@ -658,10 +768,12 @@ pub fn reduce_mesh_with_cancel(
         else {
             continue;
         };
+        let links = from_star
+            .links()
+            .ok_or_else(|| invariant("invalid vertex star size"))?;
         neighbours.clear();
         neighbours.extend(
-            from_star
-                .links()
+            links
                 .iter()
                 .filter_map(|&(to, _)| score(from, to, positions, &quadrics, origin)),
         );
@@ -677,7 +789,9 @@ pub fn reduce_mesh_with_cancel(
                 continue;
             };
             // The cost orders candidates. It never overrides a guard.
-            let Some(retained_normal) = mesh.candidate(from, to, &from_star, &mut proposed) else {
+            let Some(Collapse { retained_normal }) =
+                mesh.candidate(from, to, &from_star, &mut proposed, &mut cancel)?
+            else {
                 continue;
             };
             *quadrics
@@ -688,7 +802,7 @@ pub fn reduce_mesh_with_cancel(
                     .get_mut(from)
                     .ok_or_else(|| invalid("invalid collapse vertex"))?,
             );
-            let mut changed = proposed.drain(..).peekable();
+            let mut changed = proposed.iter().peekable();
             for id in affected {
                 let slot = mesh
                     .faces
@@ -709,7 +823,14 @@ pub fn reduce_mesh_with_cancel(
                         .iter()
                         .position(|&other| other == id)
                         .ok_or_else(|| invalid("missing incident face"))?;
-                    ids.swap_remove(i);
+                    // Remove by moving the last face ID into its slot. `i` was found
+                    // in this vec; the slot is absent only when it was the last one.
+                    let last = ids
+                        .pop()
+                        .ok_or_else(|| invariant("empty incident face list"))?;
+                    if let Some(slot) = ids.get_mut(i) {
+                        *slot = last;
+                    }
                     if !protected.get(vertex).copied().unwrap_or(true) {
                         // Flat regions have many zero-cost ties. Let untouched
                         // stars go first instead of growing a long fan in
@@ -728,7 +849,7 @@ pub fn reduce_mesh_with_cancel(
                 }
                 if face.vertices.contains(&to) {
                     remaining -= 1;
-                    mesh.bvh.update(id, None);
+                    mesh.bvh.update(id, None)?;
                 } else {
                     let replacement = changed
                         .next_if(|replacement| replacement.id == id)
@@ -748,12 +869,15 @@ pub fn reduce_mesh_with_cancel(
                             .ok_or_else(|| invalid("missing replacement normal"))? = value;
                     }
                     for vertex in face.vertices {
-                        mesh.incident
+                        let ids = mesh
+                            .incident
                             .get_mut(vertex)
-                            .ok_or_else(|| invalid("invalid replacement vertex"))?
-                            .push(id);
+                            .ok_or_else(|| invariant("invalid replacement vertex"))?;
+                        ids.try_reserve(1)
+                            .map_err(|_| invalid("mesh incidence is too large"))?;
+                        ids.push(id);
                     }
-                    mesh.bvh.update(id, Some(replacement.points));
+                    mesh.bvh.update(id, Some(replacement.points))?;
                     *slot = Some(face);
                     *mesh
                         .clear
@@ -766,7 +890,7 @@ pub fn reduce_mesh_with_cancel(
     }
     check_cancel(&mut cancel)?;
     let mut out_positions = Vec::new();
-    let mut remap = Vec::with_capacity(positions.len());
+    let mut remap = buffer(positions.len())?;
     for (i, (position, used)) in positions.iter().zip(&mesh.incident).enumerate() {
         check_stride(i, &mut cancel)?;
         if used.is_empty() {
@@ -774,12 +898,15 @@ pub fn reduce_mesh_with_cancel(
         } else {
             let index = u32::try_from(out_positions.len())
                 .map_err(|_| invalid("vertex index exceeds u32"))?;
+            out_positions
+                .try_reserve(1)
+                .map_err(|_| invalid("mesh output is too large"))?;
             remap.push(Some(index));
             out_positions.push(*position);
         }
     }
-    let mut out_indices = Vec::with_capacity(remaining * 3);
-    let mut out_normals = corner_normals.map(|_| Vec::with_capacity(remaining * 3));
+    let mut out_indices = buffer(remaining * 3)?;
+    let mut out_normals = corner_normals.map(|_| buffer(remaining * 3)).transpose()?;
     for (id, face) in mesh.faces.into_iter().enumerate() {
         check_stride(id, &mut cancel)?;
         let Some(face) = face else { continue };
@@ -867,7 +994,7 @@ mod tests {
             checks += 1;
             checks >= stop_at
         });
-        assert_eq!(cancelled, Err(MeshReductionError::Cancelled));
+        assert!(cancelled.unwrap_err().is_cancelled());
         assert_eq!(checks, stop_at, "cancelled work must not continue");
     }
 
@@ -959,6 +1086,30 @@ mod tests {
         let result = reduce_mesh(&positions, &indices, Some(&normals), 0).unwrap();
         assert_eq!(result.indices, indices);
         assert_eq!(result.corner_normals, Some(normals));
+    }
+
+    #[test]
+    fn a_corner_normal_seam_at_only_one_endpoint_protects_the_edge() {
+        let positions = [
+            [0., 0., 0.],
+            [2., 0., 0.],
+            [2., 2., 0.],
+            [0., 2., 0.],
+            [1., 1., 0.],
+        ];
+        let indices = [0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4];
+        let mut normals = [[0., 0., 1.]; 12];
+        normals[1] = [0.6, 0., 0.8];
+        let result = reduce_mesh(&positions, &indices, Some(&normals), 2).unwrap();
+        assert_eq!(result.indices, indices);
+        assert_eq!(result.corner_normals.as_deref(), Some(normals.as_slice()));
+
+        // A change in length alone does not create a shading seam.
+        normals[1] = [0., 0., 1.];
+        normals[2] = [0., 0., 2.];
+        let result = reduce_mesh(&positions, &indices, Some(&normals), 2).unwrap();
+        assert_eq!(result.reduced_triangles, 2);
+        assert_eq!(area(&result.positions, &result.indices), 4.);
     }
 
     #[test]

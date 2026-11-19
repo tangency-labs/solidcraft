@@ -146,15 +146,47 @@ fn reduction_uses_source_component_and_its_placements() {
     let owner = inserted["component"].as_u64().unwrap();
     run(&mut s, "occurrence.copy", json!({"component": "Scan", "translate": [0, 40, 0]}));
     let definition = s.model.state().bodies[0].name.clone();
+    s.doc_mut().body_offsets.insert(definition.clone(), solidcraft_doc::rigid(Vec3::new(7.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
     let second = s.world_state().unwrap().bodies.iter().find(|b| b.name != definition).unwrap().name.clone();
     let context = (s.active_component, s.active_occurrence_path.clone());
     let reply = run(&mut s, "mesh.reduce", json!({"body": second, "triangle_count": 1}));
     assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
     let name = reply["created_bodies"][0].as_str().unwrap();
     assert_eq!(s.doc.model_body_component(s.model.state().body(name).unwrap()), owner);
-    assert_eq!(s.world_state().unwrap().bodies.len(), 4);
+    let check = |s: &Session, source_x: f64, derived_x: f64| {
+        let world = s.world_state().unwrap();
+        let bounds = |definition: &str| {
+            let mut boxes: Vec<_> = world.bodies.iter().filter(|b| b.definition_name() == definition).map(|b| b.mesh().bounds()).collect();
+            boxes.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+            boxes
+        };
+        let source = bounds(&definition);
+        let reduced = bounds(name);
+        assert_eq!(source.len(), 2);
+        assert_eq!(reduced.len(), 2);
+        for (original, result) in source.iter().zip(&reduced) {
+            assert!((original.min.x - source_x).abs() < 1e-8);
+            assert!((result.min.x - derived_x).abs() < 1e-8);
+            assert!((original.min.y - result.min.y).abs() < 1e-8);
+            assert!((original.max.y - result.max.y).abs() < 1e-8);
+            assert!((original.min.z - result.min.z).abs() < 1e-8);
+            assert!((original.max.z - result.max.z).abs() < 1e-8);
+        }
+    };
+    check(&s, 7.0, 7.0);
     let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-    assert_eq!(cold.world_state().unwrap().bodies.len(), 4);
+    check(&cold, 7.0, 7.0);
+    // A warm evaluation must follow subsequent changes to the source offset.
+    s.doc_mut().body_offsets.insert(definition.clone(), solidcraft_doc::rigid(Vec3::new(9.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    check(&s, 9.0, 9.0);
+    // A separately stored derived-body placement wins, rather than being composed twice.
+    s.doc_mut().body_offsets.insert(name.to_string(), solidcraft_doc::rigid(Vec3::new(20.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    check(&s, 9.0, 20.0);
+    let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    check(&cold, 9.0, 20.0);
     std::fs::remove_file(path).unwrap();
 }
 

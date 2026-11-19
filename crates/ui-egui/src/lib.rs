@@ -1724,7 +1724,7 @@ impl SolveApp {
                     ) {
                         let key = if achieved > target { "ui.mesh_reduce_shortfall" } else { "ui.mesh_reduce_result" };
                         self.set_status(
-                            solidcraft_ui_text::format(
+                            solidcraft_ui_text::Locale::for_language(&self.preferences.language).format(
                                 key,
                                 &[("original", &original.to_string()), ("target", &target.to_string()), ("achieved", &achieved.to_string())],
                             ),

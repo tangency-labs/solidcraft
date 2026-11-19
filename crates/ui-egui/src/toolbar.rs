@@ -5683,6 +5683,7 @@ mod persistent_ribbon_tests {
         assert!(scenario::handle_at("button:surface.thicken").is_some());
         assert!(scenario::handle_at("button:mesh.convert").is_some());
         assert!(scenario::handle_at("button:mesh.reduce").is_none());
+        assert!(scenario::handle_at("button:file.insert_mesh").is_none(), "Mesh customizations stay hidden in the legacy layout");
         h.app.preferences.legacy_surface_toolbar = false;
         h.frames(3);
         assert!(scenario::handle_at("button:file.insert_mesh").is_some());

@@ -115,7 +115,7 @@ pub fn unstoppable<R>(f: impl FnOnce() -> R) -> R {
     scoped(None, f)
 }
 
-/// solidcore's token of the work on this thread.
-pub(crate) fn token() -> Option<CancelToken> {
+/// The current kernel token, for Ops calls that do not go through a SMLib body.
+pub fn token() -> Option<CancelToken> {
     CURRENT.with(|c| c.borrow().as_ref().map(|s| s.0.cancel.clone()))
 }

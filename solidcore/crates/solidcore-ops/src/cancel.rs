@@ -93,10 +93,10 @@ mod tests {
         let token = CancelToken::new();
         token.cancel();
         within(&token, || {
-            assert_eq!(
+            assert!(matches!(
                 crate::reduce_mesh(&[], &[], None, 0),
-                Err(crate::MeshReductionError::Cancelled)
-            );
+                Err(crate::Error::Cancelled)
+            ));
         });
         assert!(crate::reduce_mesh(&[], &[], None, 0).is_ok());
     }

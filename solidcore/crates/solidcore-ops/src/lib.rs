@@ -101,14 +101,14 @@ pub use error::{
     Error, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest, Unblendable,
     Unsoundness,
 };
-pub use solidcore::mesh_reduce::{MeshReductionError, ReducedMesh};
+pub use solidcore::mesh_reduce::ReducedMesh;
 /// Reduce a mesh under the current cooperative cancellation context.
 pub fn reduce_mesh(
     positions: &[[f64; 3]],
     indices: &[u32],
     corner_normals: Option<&[[f64; 3]]>,
     target_triangles: usize,
-) -> std::result::Result<ReducedMesh, MeshReductionError> {
+) -> Result<ReducedMesh> {
     solidcore::mesh_reduce::reduce_mesh_with_cancel(
         positions,
         indices,
@@ -116,6 +116,7 @@ pub fn reduce_mesh(
         target_triangles,
         cancel::is_cancelled,
     )
+    .map_err(error::status)
 }
 pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,

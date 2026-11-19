@@ -3204,6 +3204,15 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // fold in here, each relative to the reading component, as `reads.paths` does.
             return mirror_placements_digest(doc, f, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
         }
+        FeatureKind::MeshReduce { body, .. } => {
+            reads.placed_body(st, body);
+            if let Some(st) = st {
+                let name = copy_body_name(st, f, 0, &format!("{body} Reduced"));
+                serde_json::to_string(&doc.body_offsets.get(&name)).unwrap_or_default().hash(&mut h);
+            } else {
+                reads.all = true;
+            }
+        }
         // A combine moves tools placed differently from its target into the target's frame (#3383).
         FeatureKind::Combine { target, tools, .. } => {
             frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
@@ -12082,7 +12091,14 @@ fn eval_feature_kind(
                     "reduction stopped at {achieved} triangles; requested {target}; geometric or topology constraints prevented further reduction"
                 ));
             }
+            let source_offset = doc.model_body_offset(source).copied();
             let name = copy_body_name(st, f, 0, &format!("{body} Reduced"));
+            // A stored placement for the new body takes precedence. Otherwise materialize the
+            // source offset in its geometry: no new document placement is needed.
+            let result = match source_offset.filter(|_| !doc.body_offsets.contains_key(&name)) {
+                Some(offset) => kernel::transform_matrix(&result, offset)?,
+                None => result,
+            };
             st.bodies.push(ModelBody::new(name, result, f.id));
             Ok(())
         }
