@@ -1464,6 +1464,7 @@ fn split_region_into(
         return Ok(());
     }
     let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
+    let mut pieces = Vec::new();
     let result = split_closed(
         k,
         brep,
@@ -1473,9 +1474,105 @@ fn split_region_into(
         start,
         &lock,
         attempt,
+        &mut pieces,
     );
     lock.release(std::slice::from_mut(&mut k.context))?;
-    result
+    result?;
+    split_vertex_joined_pieces(k, brep, marks, env, do_infinite_region_testing, &pieces, 0)
+}
+
+/// (not upstream, #18851) The split hands each piece of the old shell joined to the rest
+/// only at a vertex to one of the two shells as a whole, by a ray fire. A piece that is
+/// both sides of a closed set of faces (the walls of a void that touches the rest at a
+/// vertex, as a void touching a notch's wall along a line does) then has both sides in
+/// one shell, the void's inside among the material's faces, and the void is lost. Each
+/// such piece is split again, as the glue would have split it, had it been joined by
+/// edges: the void becomes a region of its own, void where the region across its faces is
+/// material (and material where that is void). A piece with a lamina edge, or whose
+/// sides are already in different shells, is left as it is. `depth` bounds the nesting.
+fn split_vertex_joined_pieces(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyState<'_>,
+    do_infinite_region_testing: bool,
+    pieces: &[FaceuseId],
+    depth: usize,
+) -> Result<()> {
+    const MAX_DEPTH: usize = 16;
+    if depth >= MAX_DEPTH {
+        return Ok(());
+    }
+    for &fu in pieces {
+        let seed = brep.faceuse(fu)?;
+        let Some(mate) = seed.mate else { continue };
+        if seed.shell.is_none() || brep.faceuse(mate)?.shell != seed.shell {
+            continue;
+        }
+        let mut attempt = RegionSplitAttempt {
+            status: Ok(()),
+            shell: None,
+            region: None,
+        };
+        let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
+        let mut nested = Vec::new();
+        let result = if tr::has_lamina_edge(brep, split_link(seed.face)?)? {
+            Ok(())
+        } else {
+            split_closed(
+                k,
+                brep,
+                marks,
+                env,
+                do_infinite_region_testing,
+                fu,
+                &lock,
+                &mut attempt,
+                &mut nested,
+            )
+        };
+        lock.release(std::slice::from_mut(&mut k.context))?;
+        // as the glue's own split, a native failure leaves the region unsplit
+        if let Err(error) = result {
+            if matches!(
+                error,
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::InvalidInput { .. }
+                    | SolidError::PortInvariant { .. }
+                    | SolidError::NotFound { .. }
+            ) {
+                return Err(error);
+            }
+            continue;
+        }
+        // The new region is across the piece's faces from the region it was split out of:
+        // material where that is void, void where that is material.
+        if let Some(region) = attempt.region {
+            let mut across = None;
+            for side in [fu, mate] {
+                let shell = split_link(brep.faceuse(side)?.shell)?;
+                let r = split_link(brep.shell(shell)?.region)?;
+                if r != region {
+                    across = Some(r);
+                }
+            }
+            if let Some(across) = across {
+                let is_void = i32::from(brep.region(across)?.is_void == 0);
+                brep.region_mut(region)?.is_void = is_void;
+            }
+        }
+        split_vertex_joined_pieces(
+            k,
+            brep,
+            marks,
+            env,
+            do_infinite_region_testing,
+            &nested,
+            depth + 1,
+        )?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -1488,6 +1585,7 @@ fn split_closed(
     start: FaceuseId,
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
+    pieces: &mut Vec<FaceuseId>,
 ) -> Result<()> {
     // Not upstream (WR-584, fork tangency-labs/smlib@69c5198): search from both sides
     // at once. Same answer; no walk across the whole shell, no marks (nothing below
@@ -1642,6 +1740,7 @@ fn split_closed(
             rays,
             &faceuses,
             &mut replaced_all,
+            pieces,
         )?;
     }
 
@@ -1772,6 +1871,7 @@ fn distribute_faceuses(
     rays: RayShells,
     faceuses: &[FaceuseId],
     replaced_all: &mut Vec<FaceuseId>,
+    pieces: &mut Vec<FaceuseId>,
 ) -> Result<()> {
     let mark = lock.mark_type();
     let mut more_replaced = Vec::new();
@@ -1876,6 +1976,8 @@ fn distribute_faceuses(
         // mark and move faceuse and all faceuses connected to it through edgeuses to
         // the MoveShell
         tr::faceuse_shell_replacement(k, brep, marks, fu, move_shell, &mut more_replaced, lock)?;
+        // (not upstream, #18851) the piece, for `split_vertex_joined_pieces`
+        pieces.push(fu);
         // add MoreReplacedFaceuses to the list of distributed faceuses
         replaced_all.extend_from_slice(&more_replaced);
 
