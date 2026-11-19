@@ -665,6 +665,9 @@ fn add_mesh(
 ) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let gltf = solidcraft_io::is_gltf_path(path);
+    let usd = solidcraft_io::is_usd_path(path);
+    // An OpenUSD file says which axis is up (Y when it says nothing).
+    let mut file_y_up = gltf;
     // A mesh file is read up to the limit for STEP and import files, which Preferences raise
     // (#17446, #14548).
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -673,6 +676,13 @@ fn add_mesh(
         let mut load =
             |name: &str| solidcraft_io::limits::read(&dir.join(name).to_string_lossy(), solidcraft_io::limits::Kind::Step).map_err(|e| e.to_string());
         let mut g = solidcraft_io::read_gltf(&bytes, path, &mut load).map_err(err)?;
+        if !import::mesh_plan_fits(&g.plan) {
+            g.flatten();
+        }
+        (g.feature, Some(g.plan), g.looks)
+    } else if usd {
+        let (mut g, y_up) = solidcraft_io::read_usd(&bytes, path).map_err(err)?;
+        file_y_up = y_up;
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
         }
@@ -710,7 +720,7 @@ fn add_mesh(
         }
         s.refresh();
     }
-    let turned = if gltf && y_up.unwrap_or(true) { turn_up(s, &placed)? } else { None };
+    let turned = if (gltf || usd) && y_up.unwrap_or(file_y_up) { turn_up(s, &placed)? } else { None };
     // After the turn, so it is the stood-up mesh that sits on Z = 0.
     let moved = if origin { import::move_to_origin(s, &placed)? } else { None };
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
@@ -745,14 +755,15 @@ fn turn_up(s: &mut Session, placed: &import::Placed) -> Result<Option<u64>> {
     Ok(Some(occ))
 }
 
-/// `up` for a glTF file: `y` (the default: glTF is Y up) turns it to Z up, `z` keeps its axes.
-/// Other mesh files take no `up`.
+/// `up` for a glTF or OpenUSD file: `y` turns it to Z up, `z` keeps its axes. Without it a glTF
+/// file is turned (glTF is Y up) and an OpenUSD file is turned when it says Y is up. Other mesh
+/// files take no `up`.
 fn mesh_up(p: &Value, path: &str, cmd: &str) -> Result<Option<bool>> {
     if p.get("up").is_none_or(Value::is_null) {
         return Ok(None);
     }
-    if !solidcraft_io::is_gltf_path(path) {
-        return Err(bad(cmd, "`up` applies to STEP, IGES and glTF files only"));
+    if !solidcraft_io::is_gltf_path(path) && !solidcraft_io::is_usd_path(path) {
+        return Err(bad(cmd, "`up` applies to STEP, IGES, glTF and OpenUSD files only"));
     }
     Ok(Some(step_options(p, cmd)?.y_up))
 }
@@ -772,8 +783,8 @@ fn mesh_units(p: &Value, path: &str, cmd: &str) -> Result<Option<(&'static str, 
             .ok_or_else(|| bad(cmd, format!("`units` must be one of {} (not `{u}`)", names())))?,
         Some(_) => return Err(bad(cmd, format!("`units` must be one of {}", names()))),
     };
-    if solidcraft_io::is_gltf_path(path) || path.to_ascii_lowercase().ends_with(".3mf") {
-        return Err(bad(cmd, "`units` applies to STL, OBJ and PLY files only: a 3MF or glTF file states its own"));
+    if solidcraft_io::is_gltf_path(path) || solidcraft_io::is_usd_path(path) || path.to_ascii_lowercase().ends_with(".3mf") {
+        return Err(bad(cmd, "`units` applies to STL, OBJ and PLY files only: a 3MF, glTF or OpenUSD file states its own"));
     }
     Ok(Some(unit))
 }
@@ -782,7 +793,10 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.insert_mesh";
     let path = path_arg(p, cmd)?;
     if !solidcraft_io::is_mesh_path(path) && !solidcraft_io::is_ply_path(path) {
-        return Err(bad(cmd, "only 3MF, STL, OBJ, PLY and glTF files (.3mf, .stl, .obj, .ply, .glb, .gltf) can be inserted as meshes"));
+        return Err(bad(
+            cmd,
+            "only 3MF, STL, OBJ, PLY, glTF and OpenUSD files (.3mf, .stl, .obj, .ply, .glb, .gltf, .usd, .usda, .usdc, .usdz) can be inserted as meshes",
+        ));
     }
     let up = mesh_up(p, path, cmd)?;
     let unit = mesh_units(p, path, cmd)?;
@@ -1264,8 +1278,9 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if !solidcraft_io::is_step_path(path) && p.get("names").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`names` applies to STEP and IGES files only"));
     }
-    if !solidcraft_io::is_step_path(path) && !solidcraft_io::is_gltf_path(path) && p.get("up").is_some_and(|v| !v.is_null()) {
-        return Err(bad("doc.open", "`up` applies to STEP, IGES and glTF files only"));
+    let gltf_or_usd = solidcraft_io::is_gltf_path(path) || solidcraft_io::is_usd_path(path);
+    if !solidcraft_io::is_step_path(path) && !gltf_or_usd && p.get("up").is_some_and(|v| !v.is_null()) {
+        return Err(bad("doc.open", "`up` applies to STEP, IGES, glTF and OpenUSD files only"));
     }
     if !solidcraft_io::is_mesh_path(path) && p.get("origin").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`origin` applies to 3MF, STL, OBJ and glTF files only"));
@@ -1757,18 +1772,32 @@ fn write_bytes(
 ) -> Result<Value> {
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
-    let bytes = if sign {
-        if !s.signing_allowed {
-            return Err(bad(
-                "file.save",
-                "signing is only available from the app's Save, with the key chosen in Preferences; a script or agent cannot sign",
-            ));
+    let mut notes: Vec<String> = Vec::new();
+    // Signing never refuses a save: whatever stops it (no GnuPG, no key, a wrong passphrase, a
+    // cancelled prompt, a script that may not sign), the design is saved unsigned and the save
+    // says why. Only a failure of the save itself stops it.
+    let mut signed_bytes = None;
+    if sign {
+        let why = if !s.signing_allowed {
+            Some("signing is only available from the app's Save, with the key chosen in Preferences; a script or agent cannot sign".to_owned())
+        } else if format != "container" {
+            Some("only a container can carry a signature: save as .sc (format container), not json".to_owned())
+        } else {
+            match write_signed_container(s, &chain, path, compression, preview, cache, signing_key) {
+                Ok(Ok((bytes, signed))) => {
+                    signature = signed;
+                    signed_bytes = Some(bytes);
+                    None
+                }
+                Ok(Err(why)) => Some(why),
+                Err(e) => Some(e.to_string()),
+            }
+        };
+        if let Some(why) = why {
+            notes.push(format!("Saved without a signature, because it could not be signed: {why}"));
         }
-        if format != "container" {
-            return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
-        }
-        let (bytes, signed) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
-        signature = signed;
+    }
+    let bytes = if let Some(bytes) = signed_bytes {
         bytes
     } else if !chain.records.is_empty() {
         // A save without a key keeps the history it opened with, so the newest record is reported
@@ -1804,9 +1833,10 @@ fn write_bytes(
     s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
     s.provenance = None;
     s.mark_saved();
+    let bytes_len = bytes.len();
     let mut out = SaveResult {
         path: path.to_string(),
-        bytes: bytes.len(),
+        bytes: bytes_len,
         name: s.doc.name.clone(),
         kept_format: None,
         warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
@@ -1815,6 +1845,14 @@ fn write_bytes(
         param_warnings: Vec::new(),
         signature,
     };
+    if bytes_len > solidcraft_io::limits::max_design_bytes() {
+        notes.push(format!(
+            "Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit: {}",
+            bytes_len >> 20,
+            solidcraft_io::limits::max_design_bytes() >> 20,
+            solidcraft_io::limits::how_to_raise()
+        ));
+    }
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
     if s.doc.newer_file.is_some() {
@@ -1827,6 +1865,9 @@ fn write_bytes(
             out.warnings.get_or_insert_with(Vec::new).extend(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")));
             out.not_kept = Some(lost);
         }
+    }
+    if !notes.is_empty() {
+        out.warnings.get_or_insert_with(Vec::new).extend(notes);
     }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
@@ -1841,8 +1882,8 @@ fn write_signed_container(
     preview: bool,
     cache: bool,
     signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
-    let gpg = crate::gpg::Gpg::find().ok_or_else(|| bad("file.save", "signing needs GnuPG, which was not found on this computer"))?;
+) -> Result<std::result::Result<(Vec<u8>, Option<SignedSave>), String>> {
+    let Some(gpg) = crate::gpg::Gpg::find() else { return Ok(Err("GnuPG was not found on this computer".to_owned())) };
     let signer = crate::gpg::Signer::new(&gpg, signing_key.map(str::trim).filter(|key| !key.is_empty()));
     let save = solidcraft_io::ProvenanceSave {
         source: Some(solidcraft_io::SignatureSource::OpenPgp(&signer)),
@@ -1854,7 +1895,7 @@ fn write_signed_container(
     };
     let bytes = s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let info = signer.signing_info().ok_or_else(|| EngineError::Other(format!("{path}: GnuPG signed the design but named no key")))?;
-    Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id })))
+    Ok(Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id }))))
 }
 
 /// The browser cannot run GnuPG.
@@ -1867,8 +1908,8 @@ fn write_signed_container(
     _preview: bool,
     _cache: bool,
     _signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
-    Err(bad("file.save", "signing needs the desktop app and GnuPG; the browser cannot sign"))
+) -> Result<std::result::Result<(Vec<u8>, Option<SignedSave>), String>> {
+    Ok(Err("the browser cannot sign; signing needs the desktop app and GnuPG".to_owned()))
 }
 
 /// `file.verify`: check a saved design's signature.
@@ -2322,6 +2363,9 @@ fn export_to(
     if format == Format::Glb {
         return export_glb(s, cmd, path, bodies, quality);
     }
+    if format == Format::Usd {
+        return export_usd(s, path, bodies);
+    }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
     // smallest angle or the chord tolerance, as the reply's warnings.
@@ -2559,6 +2603,28 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
     let bytes = solidcraft_io::export_glb(&s.doc, &s.model.state(), &world, bodies, &name, quality)?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
+}
+
+/// The OpenUSD export: the bodies written as STEP, as `file.export` writes STEP (a design with
+/// components, when no bodies are chosen, as a STEP assembly), then restated as OpenUSD by
+/// cadmpeg; the path's extension picks text (`.usda`), binary (`.usdc`, `.usd`) or a package
+/// (`.usdz`). Written atomically, so a refusal or a failed write leaves a file already there as it
+/// was. What the file could not carry is in the reply's warnings.
+fn export_usd(s: &Session, path: &str, bodies: &[String]) -> Result<Value> {
+    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
+    let step = if bodies.is_empty() && !s.doc.occurrences.is_empty() {
+        solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
+    } else {
+        let quality = solidcraft_io::MeshQuality::default();
+        solidcraft_io::export_with_parts_noted(&s.doc.painted(&*s.world_state()?), bodies, &[], Format::Step, &name, &s.doc.metadata, quality, None)?
+            .0
+    };
+    let (bytes, warnings) = solidcraft_io::usd_from_step(&step, path).map_err(EngineError::Other)?;
+    solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let reply =
+        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{:?}", Format::Usd), warnings, ..ExportResult::default() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
@@ -3374,6 +3440,32 @@ mod tests {
             assert_eq!(s.doc, before, "a failed open preserves the current design");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #18686: Save As with signing on, on a computer without GnuPG, writes the design unsigned and
+    /// says why, instead of refusing to save.
+    #[test]
+    fn signing_failures_save_unsigned_with_a_warning() {
+        struct Present;
+        impl Drop for Present {
+            fn drop(&mut self) {
+                crate::gpg::tests_without_gpg::set(false);
+            }
+        }
+        crate::gpg::tests_without_gpg::set(true);
+        let _present = Present;
+        let dir = std::env::temp_dir().join(format!("solidcraft-18686-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Unsigned.sc");
+        let mut s = Session { signing_allowed: true, ..Session::default() };
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let out = s.execute("file.save_as", &json!({"path": path.to_string_lossy(), "sign": true})).unwrap();
+        assert!(path.exists(), "the design was written");
+        assert!(out["signature"].is_null(), "{out}");
+        let warning = out["warnings"][0].as_str().unwrap_or_default();
+        assert!(warning.contains("without a signature") && warning.contains("GnuPG was not found"), "{out}");
+        assert!(solidcraft_io::read_design_provenance_chain(&std::fs::read(&path).unwrap()).is_none_or(|chain| chain.records.is_empty()));
+        let _ = std::fs::remove_file(&path);
     }
 
     /// #3044: a save run on a scratch copy of the session (on a worker, so the window keeps

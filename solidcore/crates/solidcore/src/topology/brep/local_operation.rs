@@ -315,6 +315,10 @@ fn local_operation_on(
     // (not upstream: the port's cached topology fields, true again for the caller)
     b.refresh_cached_topology();
     moved?;
+    // (not upstream, #18570) copying the faces in can split a cavity that touched the
+    // outside along a line (a notch's wall tangent to it) into a region of its own, made
+    // material: its void flag is read from the faces again (`p5::set_alternating_void_flags`)
+    p5::set_alternating_void_flags(b)?;
     refuse_unsound(k, b, &input)
 }
 
