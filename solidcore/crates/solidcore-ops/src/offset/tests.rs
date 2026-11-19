@@ -914,6 +914,78 @@ fn a_plate_thickens_and_offsets() {
     assert_eq!(p.counts().unwrap()[0], 6);
 }
 
+/// The `l` x `h` plate in y = 0 (x across, z up) with its two corners on x = 0 rounded at
+/// `r`: four lines and two quarter circles, each tangent to the lines beside it.
+fn plate_with_round_corners(l: f64, h: f64, r: f64) -> Body {
+    use crate::sweep::Curve;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], 0.0, a[1]],
+        end: [b[0], 0.0, b[1]],
+    };
+    // a quarter turn about +y from the direction `from` off the centre `c`
+    let corner = |c: [f64; 2], from: [f64; 3]| Curve::Arc {
+        center: [c[0], 0.0, c[1]],
+        axis: [0.0, 1.0, 0.0],
+        reference: from,
+        radius: r,
+        start: 0.0,
+        end: PI / 2.0,
+    };
+    crate::sweep::planar_faces(&[
+        line([l, 0.0], [r, 0.0]),
+        corner([r, r], [0.0, 0.0, -1.0]),
+        line([0.0, r], [0.0, h - r]),
+        corner([r, h - r], [-1.0, 0.0, 0.0]),
+        line([r, h], [l, h]),
+        line([l, h], [l, 0.0]),
+    ])
+    .unwrap()
+}
+
+/// A flat sheet with two rounded corners thickens to the prism of its outline: its area,
+/// `l h - 2 (1 - pi/4) r^2`, times the thickness, in eight faces (the sheet's two copies
+/// and a wall for each of its six edges), eighteen edges and twelve vertices, from the
+/// sheet's plane to the thickness off it, or half the thickness to either side.
+///
+/// Each quarter circle's offset is trimmed on its own curve continued ten lengths each
+/// way, which runs round the circle five times, so each of its ends has a parameter on
+/// every turn. An end taken on another turn gave the corner the other three quarters of
+/// its circle, and the thicken failed (status 1001): which turn was taken changed with
+/// the radius, the thickness and the side.
+#[test]
+fn a_plate_with_round_corners_thickens_to_its_prism() {
+    all_fixes();
+    let (l, h) = (30.0, 40.0);
+    for r in [16.0, 17.0, 18.0] {
+        let area = l * h - 2.0 * (1.0 - PI / 4.0) * r * r;
+        for t in [2.0, 104.0] {
+            for symmetric in [false, true] {
+                let p = plate_with_round_corners(l, h, r);
+                thicken(&p, t, symmetric)
+                    .unwrap_or_else(|e| panic!("r {r}, by {t}, symmetric {symmetric}: {e:?}"));
+                let got = volume(&p);
+                assert!(
+                    rel(got, area * t) < 1e-9,
+                    "r {r}, by {t}, symmetric {symmetric}: {got} against {}",
+                    area * t
+                );
+                assert_eq!(
+                    p.counts().unwrap(),
+                    [8, 18, 12],
+                    "r {r}, by {t}, symmetric {symmetric}"
+                );
+                let (low, high) = p.bounds().unwrap();
+                let reach = if symmetric { 0.5 * t } else { t };
+                assert!(
+                    (high[1] - low[1] - t).abs() < 1e-9
+                        && (low[1].abs().max(high[1].abs()) - reach).abs() < 1e-9,
+                    "r {r}, by {t}, symmetric {symmetric}: {low:?} {high:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn a_ball_offsets_as_a_sheet() {
     all_fixes();
