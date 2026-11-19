@@ -2501,6 +2501,20 @@ fn a_round_is_carried_on_between_a_flat_end_and_a_sloped_one() {
         "{corners:?}"
     );
     assert_eq!(c.depth, [-c.reach, 0.0]);
+    // past the edge's line, 5 out on the other face's side, between the same two ends
+    let past = c
+        .past_edge(5.0)
+        .unwrap()
+        .map(|[a, x]| v(c.origin) + along * a + across * x);
+    let x = 20.0 + 5.0 * c.other_side * across.dot(Vec3::new(1.0, 0.0, 0.0));
+    for (px, pz) in [(20.0, 0.0), (20.0, 20.0), (x, 0.0), (x, 15.0 + x / 4.0)] {
+        assert!(
+            past.iter()
+                .any(|p| (*p - Vec3::new(px, 20.0, pz)).length() < 1e-6),
+            "({px}, {pz}) in {past:?}"
+        );
+    }
+    assert!(matches!(c.past_edge(f64::NAN), Err(Error::Argument)));
     assert_eq!(
         solidcore_ops::carried_faces(&b, inner, 79.0).unwrap().len(),
         1
