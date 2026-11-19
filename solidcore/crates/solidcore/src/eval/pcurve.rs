@@ -792,15 +792,11 @@ impl On {
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
-    /// loop order and direction), then all together by whole periods into the surface's range:
-    /// of the period that holds the loop's lowest point and the next, the one that leaves less
-    /// of the loop outside it. A loop once round the surface whose lowest point lies a rounding
-    /// below a period's start thus goes into that period, a rounding outside it, and is not left
-    /// in the one below, which holds only that rounding of it. Where uses meet at a pole
-    /// (within `tol`) the periodic
-    /// parameter is free: there the offsets that turn the loop counter-clockwise in (u, v) (a
-    /// face boundary seen from the natural normal) by more than rounding are taken, else the
-    /// nearest. A seam used twice from pole to pole thus encloses its face, never nothing.
+    /// loop order and direction), then all together into the surface's base period where the
+    /// loop's lowest vertex allows, each vertex where the higher of its two uses puts it. Where
+    /// uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets that
+    /// turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural normal)
+    /// by more than rounding are taken, else the nearest. A seam used twice from pole to pole thus encloses its face, never nothing.
     fn close(&self, uses: &mut [(Curve2, bool)], tol: f64) -> Result<()> {
         let n = uses.len();
         let mut ends = Vec::new();
@@ -918,23 +914,20 @@ impl On {
                 .copied()
                 .flatten()
                 .map_or(0.0, |(a, b)| a.min(b));
-            let (low, high) = uses
-                .iter()
-                .zip(&shift)
-                .flat_map(|((c, _), s)| points(c).into_iter().map(move |q| at(q, d) + s))
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| {
-                    (a.min(x), b.max(x))
-                });
-            // How much of the loop lies outside the period that starts `base` past the range's.
-            let outside =
-                |base: f64| (lo + base - low).max(0.0) + (high - (lo + base + period)).max(0.0);
-            let base = if low.is_finite() && high.is_finite() {
-                let below = ((low - lo) / period).floor() * period;
-                if outside(below + period) < outside(below) {
-                    below + period
-                } else {
-                    below
-                }
+            // The loop's lowest vertex: its vertices are points of the loop itself, where a
+            // control polygon may reach past its curve. Two uses meet at a vertex only to within
+            // their rounding, so each vertex is taken where the higher of the two puts it: one
+            // that a use puts a rounding below a period's start and the other on it lies there.
+            let low = (0..n)
+                .filter_map(|k| {
+                    let before = k.checked_sub(1).or_else(|| n.checked_sub(1))?;
+                    let (start, _) = ends.get(k)?;
+                    let (_, end) = ends.get(before)?;
+                    Some((at(*start, d) + shift.get(k)?).max(at(*end, d) + shift.get(before)?))
+                })
+                .fold(f64::INFINITY, f64::min);
+            let base = if low.is_finite() {
+                ((low - lo) / period + 1e-9).floor() * period
             } else {
                 0.0
             };
