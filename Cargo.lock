@@ -6352,7 +6352,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-panel-layout"
-version = "0.45.0-rc.4"
+version = "0.45.0"
 dependencies = [
  "schemars",
  "serde",
