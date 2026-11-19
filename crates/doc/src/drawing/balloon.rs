@@ -21,20 +21,25 @@
 //!
 //! [`Document::resolve_balloons`] finds each balloon's edge again as a dimension's is found
 //! ([`super::dimension::Status`]): by name, strictly, and what it can't decide it says.
+//! [`balloon_rows`] reads each balloon's number, the one rule for `drawing.balloon.inspect`
+//! and the sheet, from the design its list's source means as the engine answers it ([`Design`]): a
+//! list whose design can't be read numbers none.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
+use solidcraft_geom::table::Ballooned;
 
 use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, Status, check_edge};
 use super::table::{Kind, PartsList, SheetTable};
 use super::{Drawing, require};
-use crate::bom::{Bom, Tree, item_text};
-use crate::{DocError, Document, Model, Result, ids};
+use crate::bom::{self, Bom, Tree, Unlisted, item_text};
+use crate::{DocError, Document, Model, ModelState, Result, ids};
 
 /// The most balloons a drawing may have.
 pub const MAX_BALLOONS: usize = 10_000;
@@ -93,12 +98,16 @@ impl Drawing {
         }
     }
 
-    /// The balloons that read each parts list ([`Self::parts_list_for`]), by the list's id: each
-    /// balloon's list worked out once. A balloon with no list to go by reads none.
+    /// The balloons each parts list counts ([`Self::parts_list_for`]), by the list's id: each balloon's
+    /// list worked out once. A list whose filter shows only what its sheet's balloons read
+    /// ([`Ballooned::Sheet`]) counts only the balloons on its sheet. A balloon with no list to go by
+    /// reads none.
     pub fn balloons_by_list(&self) -> HashMap<u64, Vec<&Balloon>> {
         let mut by_list: HashMap<u64, Vec<&Balloon>> = HashMap::new();
         for b in &self.balloons {
-            if let Ok((list, _)) = self.parts_list_for(b) {
+            let Ok((list, _)) = self.parts_list_for(b) else { continue };
+            let sheet_only = self.tables.by_id(list).filter(|t| t.table.filter.ballooned == Some(Ballooned::Sheet)).map(|t| t.sheet);
+            if sheet_only.is_none_or(|sheet| self.view(b.view).is_some_and(|v| v.sheet == sheet)) {
                 by_list.entry(list).or_default().push(b);
             }
         }
@@ -145,6 +154,39 @@ pub fn balloons_by_row(balloons: &[&Balloon], listed: &Bom, tree: &Tree) -> Vec<
         .collect()
 }
 
+/// What a balloon reads of the parts list it goes by ([`balloon_rows`]): never saved.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RowRead {
+    /// Its row's item in list `list`.
+    Item { list: u64, item: String },
+    /// No list to go by: the lists it could name ([`Drawing::parts_list_for`]).
+    NoList(Vec<u64>),
+    /// List `list` has no row for it, and why. A list whose component is deleted, or too large to
+    /// list, reads [`Unlisted::NotFound`].
+    Unlisted { list: u64, why: Unlisted },
+    /// The design list `list` documents can't be read, and why ([`Design`]): no row, never another
+    /// design's.
+    Unread { list: u64, why: String },
+}
+
+impl RowRead {
+    /// The parts list it reads, when it has one to go by.
+    pub fn list(&self) -> Option<u64> {
+        match self {
+            RowRead::Item { list, .. } | RowRead::Unlisted { list, .. } | RowRead::Unread { list, .. } => Some(*list),
+            RowRead::NoList(_) => None,
+        }
+    }
+
+    /// Its row's item, when it has one.
+    pub fn item(&self) -> Option<&str> {
+        match self {
+            RowRead::Item { item, .. } => Some(item),
+            _ => None,
+        }
+    }
+}
+
 /// A balloon as the model has it now ([`Document::resolve_balloons`]): never saved.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Resolved {
@@ -171,6 +213,58 @@ impl Document {
             })
             .collect()
     }
+}
+
+/// The design a drawing's source means, to list its parts from, as it is now; or why it can't be
+/// read. The engine answers it (`Session::drawn`), the one place that decides which design a source
+/// means.
+pub type Design<'a> = std::result::Result<(&'a Document, Arc<ModelState>), String>;
+
+/// Each of `balloons`' rows, in their order: one list made for each parts list they read, from the
+/// design its source means (`design`, asked once per source, one tree per source), with each row's
+/// members, then one lookup per level of each balloon's path. A list whose design can't be read
+/// reads [`RowRead::Unread`] for each of its balloons.
+pub fn balloon_rows<'a>(drawing: &Drawing, balloons: &[&Balloon], mut design: impl FnMut(u64) -> Design<'a>) -> Vec<RowRead> {
+    let mut rows: Vec<RowRead> = Vec::with_capacity(balloons.len());
+    // By source, then by list: the places in `balloons` of each list's balloons.
+    let mut by_source: BTreeMap<u64, BTreeMap<u64, (PartsList, Vec<usize>)>> = BTreeMap::new();
+    for (at, balloon) in balloons.iter().enumerate() {
+        match drawing.parts_list_for(balloon) {
+            Ok((list, parts_list)) => {
+                let lists = by_source.entry(parts_list.of.source).or_default();
+                lists.entry(list).or_insert((parts_list, Vec::new())).1.push(at);
+                rows.push(RowRead::Unlisted { list, why: Unlisted::NotFound });
+            }
+            Err(choices) => rows.push(RowRead::NoList(choices)),
+        }
+    }
+    for (source, lists) in by_source {
+        let (doc, state) = match design(source) {
+            Ok(read) => read,
+            Err(why) => {
+                for (list, (_, places)) in lists {
+                    for at in places {
+                        let Some(row) = rows.get_mut(at) else { continue };
+                        *row = RowRead::Unread { list, why: why.clone() };
+                    }
+                }
+                continue;
+            }
+        };
+        let mut tree = Tree::new(doc, &state);
+        for (list, (parts_list, places)) in lists {
+            // Its component deleted, or too large to list: nothing it can read.
+            let Ok(listed) = bom::list_with(&mut tree, &parts_list.request(), true) else { continue };
+            for at in places {
+                let (Some(balloon), Some(row)) = (balloons.get(at), rows.get_mut(at)) else { continue };
+                *row = match listed.item_of(&tree, balloon.occurrence()) {
+                    Ok(item) => RowRead::Item { list, item },
+                    Err(why) => RowRead::Unlisted { list, why },
+                };
+            }
+        }
+    }
+    rows
 }
 
 #[cfg(test)]

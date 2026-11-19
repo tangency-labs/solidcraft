@@ -544,6 +544,16 @@ fn fields(edges: &[f64], label: impl Fn(usize) -> String) -> Vec<Field> {
         .collect()
 }
 
+/// The letters a drawing's views are named by (#13044): views placed apart from their projection
+/// place, and section and auxiliary views, draw them from this one sequence. I, O and Q are skipped
+/// (they read as 1, 0 and O), as detail views' labels skip them.
+pub const VIEW_LETTERS: &[u8] = b"ABCDEFGHJKLMNPRSTUVWXYZ";
+
+/// The `i`th view letter (0 is A): [`VIEW_LETTERS`], then AA, AB and on.
+pub fn view_letter(i: usize) -> Option<String> {
+    letters_from_alphabet(i, VIEW_LETTERS)
+}
+
 /// The row label for row `i` (0 is A): A to Z, then AA, AB and on (without I and O if asked).
 pub fn letters(i: usize, skip_i_and_o: bool) -> String {
     const ALL: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";

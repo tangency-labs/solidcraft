@@ -25,8 +25,6 @@ use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
 use solidcore::error::defeature::DefeatureFailure;
 use solidcore::error::{Reason, SM_ERR};
 use solidcore::geom::attribute::AttributeStore;
-use solidcore::geom::attribute::ObjectKey;
-use solidcore::geom::object::ObjectRef;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
@@ -50,10 +48,7 @@ fn fillet1019(k: &mut Kernel) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -97,7 +92,7 @@ fn defeature_goes_on_past_a_failing_glue() {
                 ),
                 "{r:?}"
             );
-            assert!(matches!(f.entity, Some(EntityRef::Edge(_))), "{r:?}");
+            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
             assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
         }
         other => panic!("{other:?}"),

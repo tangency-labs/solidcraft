@@ -1,0 +1,22 @@
+[
+  {"note": "#12335: the Hole dialog's Clearance tap type. Picking Clearance and M4 (normal fit) drills the ISO 273 clearance hole, Ø4.5, without typing a diameter: 10 deep to the shoulder with the 118° drill point, 30000 − 159.04 − 7.17 mm³. Loose fit gives Ø4.8: 30000 − 180.96 − 8.70 mm³."},
+  {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 50, "width": 30, "height": 20}}},
+  {"call": "ui.view", "params": {"view": "iso"}},
+  {"start": "solid.hole"},
+  {"click": {"world": [25, 15, 20]}},
+  {"click": {"handle": "dialog:Hole Tap Type"}},
+  {"click": {"handle": "dialog:Hole Tap Type:ui.hole_clearance"}},
+  {"click": {"handle": "dialog:Size"}},
+  {"click": {"handle": "dialog:Size:M4"}},
+  {"expect": {"dialog": "error: None"}},
+  {"click": {"handle": "dialog:OK"}},
+  {"expect": {"bodies": 1, "errors": 0, "dialog": null, "volume": [29833.79, 1e-6]}},
+  {"start": "solid.hole"},
+  {"click": {"world": [10, 15, 20]}},
+  {"click": {"handle": "dialog:Hole Tap Type"}},
+  {"click": {"handle": "dialog:Hole Tap Type:ui.hole_clearance"}},
+  {"click": {"handle": "dialog:ui.clearance_fit"}},
+  {"click": {"handle": "dialog:ui.clearance_fit:ui.fit_loose"}},
+  {"click": {"handle": "dialog:OK"}},
+  {"expect": {"bodies": 1, "errors": 0, "dialog": null, "volume": [29644.14, 1e-6]}}
+]

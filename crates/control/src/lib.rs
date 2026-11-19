@@ -10,6 +10,7 @@
 
 pub mod auth;
 mod cancel;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod client;
 mod effect;
 mod request;
@@ -19,3 +20,7 @@ pub mod server;
 pub use cancel::{Cancel, Ticket};
 pub use effect::Effect;
 pub use request::{ControlRequest, ControlResponse, DOCUMENT_WATCH, DocumentWatch, Subscriber, cancelled_chat_response, chat_turn_cancelled};
+
+/// How an error from the client (`client`, native only) starts when a request is still running
+/// in the app after the wait. Outside the client so callers on every target can test for it.
+pub const STILL_RUNNING: &str = "still running:";

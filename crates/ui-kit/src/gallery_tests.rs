@@ -21,6 +21,30 @@ const SAMPLE_EMPHASIS: EmphasisLabels<'static> = EmphasisLabels { bold: "Bold", 
 /// The paging arrows' names a host passes to [`theme_browser`].
 const SAMPLE_ARROWS: PageLabels<'static> = PageLabels { previous: "Previous themes", next: "Next themes" };
 
+/// The grid specimen's rows: names, units, expressions and a read-only value.
+struct GallerySheet;
+
+impl GridSource for GallerySheet {
+    fn columns(&self) -> Vec<GridColumn> {
+        vec![
+            GridColumn::new("name", "Name", 1.0, CellKind::Text).flex(),
+            GridColumn::new("unit", "Unit", 0.6, CellKind::Choice(vec!["mm".into(), "in".into()])),
+            GridColumn::new("expression", "Expression", 1.4, CellKind::Expression).flex(),
+            GridColumn::new("value", "Value", 1.0, CellKind::ReadOnly).flex(),
+        ]
+    }
+    fn row_count(&self) -> usize {
+        2
+    }
+    fn row_key(&self, row: usize) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(if row == 0 { "width" } else { "height" })
+    }
+    fn text(&self, row: usize, col: usize) -> std::borrow::Cow<'_, str> {
+        let cells = [["width", "mm", "40 mm", "40 mm"], ["height", "mm", "width / 2", "20 mm"]];
+        std::borrow::Cow::Borrowed(cells.get(row).and_then(|r| r.get(col)).copied().unwrap_or(""))
+    }
+}
+
 /// One gallery specimen: its name, the published rect it fills, the handle inside it, and how
 /// to draw it.
 pub struct Element {
@@ -430,6 +454,38 @@ pub const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("browser", |ui, _| {
+        let mut state = browser::BrowserState::default();
+        let header = browser::Header { title: "Objects", count: "2 objects", collapsible: true, search: Some("Search objects") };
+        let _ = browser::Browser::new(&mut state, browser::Style::default(), 0).header(header).show(ui, |rows| {
+            rows.row(browser::Node {
+                id: 1,
+                key: "layer",
+                row: Row { fold: Some(true), eye: Some(true), icon: "folder", label: "Default", radio: Some(true), count: "2", ..Default::default() },
+                click_folds: true,
+                ..Default::default()
+            });
+            for (id, label, selected) in [(2, "Body 1", true), (3, "Body 2", false)] {
+                rows.row(browser::Node {
+                    id,
+                    key: label,
+                    row: Row {
+                        depth: 1,
+                        eye: Some(true),
+                        icon: "body",
+                        label,
+                        name: true,
+                        selected,
+                        mark: if selected { Mark::Here } else { Mark::None },
+                        ..Default::default()
+                    },
+                    select: browser::Selectable::Yes(0),
+                    rename: browser::Rename::Inline,
+                    ..Default::default()
+                });
+            }
+        });
+    }),
     element!("tree_row_disabled_actions", |ui, _| {
         let actions =
             [TreeAction { icon: "lookat", hover_only: true, label: "Solo", reason: Some("Not available yet"), target: "gallery:tree:solo" }];
@@ -668,13 +724,7 @@ pub const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| {
-                    layout_preview(
-                        ui,
-                        LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true },
-                        "Where the panels go",
-                    )
-                },
+                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history_in_browser: false }, "Where the panels go"),
             )
         });
     }),
@@ -1085,9 +1135,6 @@ pub const ELEMENTS: &[Element] = &[
             history_marker(ui.painter(), rect, false, accent);
         });
     }),
-    element!("history_seam_rest", |ui, _| history_seam_example(ui, HistoryHandleState::Rest)),
-    element!("history_seam_hover", |ui, _| history_seam_example(ui, HistoryHandleState::Hover)),
-    element!("history_seam_drag", |ui, _| history_seam_example(ui, HistoryHandleState::Drag)),
     element!("file_navigation", |ui, _| {
         FileView::navigation(ui, |ui| {
             FileView::back_to(ui, "gallery:file:back", "Back to {name}", "Sample Plate", "Esc");
@@ -1130,6 +1177,7 @@ pub const ELEMENTS: &[Element] = &[
                         workspace: "Design",
                         thumbnail: None,
                         thumbnail_failed: false,
+                        security: None,
                     },
                 );
             }
@@ -1146,6 +1194,7 @@ pub const ELEMENTS: &[Element] = &[
                 workspace: "Design",
                 thumbnail: None,
                 thumbnail_failed: false,
+                security: None,
             },
         );
     }),
@@ -1412,11 +1461,11 @@ pub const ELEMENTS: &[Element] = &[
             sort_header(ui, "Name", &mut Sort::Ascending);
         });
     }),
-    element!("plus_header", |ui, _| {
-        ui.allocate_ui(vec2(140.0, row_height()), |ui| {
-            ui.set_min_size(vec2(140.0, row_height()));
-            plus_header(ui, |_| {});
-        });
+    element!("add_column_button", |ui, _| {
+        add_column_button(ui, |_| {});
+    }),
+    element!("grid", |ui, _| {
+        Grid::new("gallery_grid").empty("Empty").show(ui, &mut GallerySheet);
     }),
     element!("table_custom", |ui, _| {
         table_custom(ui, "custom", &[Column::new("Name", 1.0)], "Empty", |ui, table| {
@@ -1494,7 +1543,7 @@ pub const ELEMENTS: &[Element] = &[
         slider(ui, &mut 12.0, 0.0..=100.0, Slider { show_value: false, integer: true, ..Default::default() });
     }),
     element!("canvas_value_field", |ui, s| {
-        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false);
+        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false, "");
     }),
     element!("placement_field", |ui, s| {
         placement_field(ui, ui.scope_id().with("placement"), &mut s.value, "Distance");
@@ -1604,6 +1653,9 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("text", "dialog:report:gallery", Some("dialog:report:gallery"), |ui, _| {
         text(ui, "Validation report with retained units: 10 mm", Text::Report("gallery", false));
+    }),
+    element!("shell_search_field", |ui, s| {
+        shell_search_field(ui, ui.scope_id().with("shell_search"), &mut s.value, "Search");
     }),
     element!("name_cell_with_hint", "dialog:cell:Width", Some("dialog:cell:Width"), |ui, _| {
         name_cell_with_hint(ui, "Width", false, "Double-click to rename");
@@ -1719,6 +1771,12 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
+    }),
+    element!("action_row", "dialog:action:gallery", Some("dialog:action:gallery"), |ui, _| {
+        action_row(ui, "gallery", "Option");
+    }),
+    element!("value_row", "dialog:row:Gallery", None, |ui, _| {
+        value_row(ui, "Gallery", "XY plane");
     }),
     element!("count_row", "dialog:row:Gallery", Some("dialog:Gallery up"), |ui, _| {
         let mut count = "6".to_owned();
@@ -2021,6 +2079,21 @@ pub const ELEMENTS: &[Element] = &[
             [false, true],
             [PairButton { key: "look_at", label: "ui.look_at", icon: Some("lookat") }, PairButton { key: "slice", label: "Slice", icon: None }],
         );
+    }),
+    element!("button_row_in_card", "library:insert_mesh", Some("library:insert_mesh"), |ui, _| {
+        button_row_in_card(
+            ui,
+            "library",
+            [
+                PairButton { key: "insert_step", label: "STEP", icon: Some("insert_step") },
+                PairButton { key: "insert_iges", label: "IGES", icon: Some("insert_step") },
+                PairButton { key: "insert_mesh", label: "Mesh", icon: Some("insert_mesh") },
+            ],
+        );
+    }),
+    element!("icon_button_colored", |ui, _| {
+        let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
+        icon_button_colored(ui, rect, "refresh", "Refresh", Some(solidcraft_theme::Tokens::get().text));
     }),
     element!("icon_button_at", |ui, _| {
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
@@ -2484,6 +2557,7 @@ fn gallery_covers_every_inline_element() {
         "disclosure.rs",
         "fields.rs",
         "framing.rs",
+        "grid.rs",
         "layout.rs",
         "look_chain.rs",
         "menu.rs",
@@ -2524,19 +2598,6 @@ fn gallery_covers_every_inline_element() {
                 }
             }
         }
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-fn history_seam_example(ui: &mut Ui, state: HistoryHandleState) {
-    let t = Tokens::get();
-    let allocation = ui.allocate_space(vec2(280.0, 250.0)).1;
-    for (names, offset) in [(false, 0.0), (true, 125.0)] {
-        let width = if state == HistoryHandleState::Drag { 112.0 } else { history_width(names) };
-        // Separate samples vertically so the guide/chip fits within the gallery allocation.
-        let card = egui::Rect::from_min_size(allocation.min + vec2(t.space_8, offset + t.space_8), vec2(width, 104.0));
-        ui.painter().rect(card, t.radius_lg, t.panel, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        HistorySeam::new(card).paint(ui.painter(), card, names, state);
     }
 }
 
@@ -2686,6 +2747,53 @@ fn preset_card_and_help_icon_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
+}
+
+/// The (i) shows its text after a click or a key, not only on hover: a click opens the popover, a
+/// click outside closes it, and Enter or Space on the focused icon opens it again until Escape closes it.
+#[test]
+fn help_icon_opens_its_text_on_a_click_or_a_key() {
+    use super::preferences_cards::help_icon;
+    use super::test_support::{frame, frame_cursor, key, pointer};
+    let ctx = super::test_support::context();
+    let focus = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        let response = help_icon(ui, "Help text");
+        if focus.replace(false) {
+            response.request_focus();
+        }
+    };
+    let popover = || solidcraft_ui_registry::rect_of("prefs:help_icon:popover");
+    frame(&ctx, vec![], &mut draw);
+    let at = solidcraft_ui_registry::handle_at("prefs:help_icon").expect("the icon publishes its handle");
+    assert_eq!(frame_cursor(&ctx, at, &mut draw), egui::CursorIcon::PointingHand);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(at, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "a click on the icon opens the popover");
+    let outside = egui::pos2(300.0, 390.0);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(outside, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "a click outside closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Enter on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Space), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Space on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover again");
 }
 
 /// Light and dark boards of the shared Preferences widgets and of every figure, rendered on the CPU.

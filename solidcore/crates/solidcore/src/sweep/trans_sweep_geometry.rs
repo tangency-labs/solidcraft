@@ -27,7 +27,7 @@
 use crate::curve::curve::p7::{PropertyAnalysis, PropertyAnalysisOptions};
 use crate::curve::curve::{Curve, CurvePropertyType};
 use crate::curve::line::Line;
-use crate::error::{ignore_status, passed_on, Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::SolutionArray;
@@ -102,10 +102,7 @@ impl TranslationalSweepGeometry {
         x = y.cross(v).unitize()?;
         let mut frame = Axis2Placement::IDENTITY;
         // SetCanonical's status is ignored upstream; the fork passes it on (c8f6a31).
-        let status = frame.set_canonical(point, x, y);
-        if self.base.statuses_pass_on {
-            status?;
-        }
+        frame.set_canonical(point, x, y)?;
         Ok(frame)
     }
 
@@ -173,8 +170,7 @@ impl TranslationalSweepGeometry {
         let mut curve = original.copy(k)?;
         let mut ivl = edge::interval(b, e)?;
         // fork c8f6a31 (WR-662): SER(pNewEdgeCurve->Trim(sIvl)).
-        let p = k.fixes.sweep_statuses_pass_on;
-        ignore_status(passed_on(curve.trim(k, &mut ivl, TrimMode::Notify), p)?)?;
+        curve.trim(k, &mut ivl, TrimMode::Notify)?;
         curve.transform(k, &self.sweep_transform(), None)?;
         Ok((curve, tol))
     }
@@ -230,7 +226,7 @@ impl TranslationalSweepGeometry {
             &options,
             &mut analysis,
         );
-        ignore_status(passed_on(analysis_status, k.fixes.sweep_statuses_pass_on)?)?;
+        analysis_status?;
         Ok(if analysis.solutions.is_empty() {
             SweepCheckType::Okay
         } else {
@@ -278,6 +274,14 @@ impl TranslationalSweepGeometry {
                 OP,
                 "the sweep is shorter than twice the edge or vertex tolerances",
             ));
+        }
+        // `CreateLinearSweep(.., pBSC2, ..)` on the trimmed copy itself: its
+        // GetOrCreateGwNurbPointer runs a line's own MakeNurb (a two-point line has no NURB
+        // yet, and a trim to its whole interval makes none), status ignored
+        if let crate::curve::curve::CurveKind::Line(l) = start.kind_mut() {
+            if l.base().gw_nurb().is_none() {
+                ignore_status(l.make_nurb())?;
+            }
         }
         let base = gen_base_mut(&mut start)
             .ok_or_else(|| SolidError::sweep_missing(OP, "the trimmed curve's B-spline form"))?;

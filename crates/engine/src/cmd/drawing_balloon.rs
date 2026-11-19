@@ -6,15 +6,14 @@
 //! of the drawing each, and none of the commands evaluates the model.
 //!
 //! The number it shows is its row's item in the parts list it reads
-//! ([`solidcraft_doc::drawing::Drawing::parts_list_for`]), worked out on each read and never saved.
-//! One list is made for a read, with each row's members, then one lookup per level of its path.
+//! ([`solidcraft_doc::drawing::Drawing::parts_list_for`]), worked out on each read and never saved,
+//! by the one rule the sheet draws it with ([`balloon_rows`]).
 
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_doc::bom::{self, Tree, Unlisted};
-use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::balloon::Balloon;
+use solidcraft_doc::bom::Unlisted;
+use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
@@ -82,7 +81,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              failed or lost, why?, point?: where its arrow ends (its edge's middle, in the design's frame), exact, candidates?: [{edge: \
              {body, index}}] what an ambiguous edge's name finds, or a lost one's leads ({face: {body, index}} too), parts_list?: the \
              list it reads, choices?: with none to go by, those it could name, item?: its row's item (\"1.2\"), \
-             row_status: ok, no_list, reference, no_row or not_found, warnings?: such as its view edited since to leave its part out}. A lost row never removes it. Read-only; no model is \
+             row_status: ok, no_list, reference, no_row, not_found or unread (its list's design can't be read), warnings?: such as its view edited since to leave its part out}. A lost row never removes it. Read-only; no model is \
              evaluated.",
         ),
 ];
@@ -92,7 +91,6 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let record = s.drawing(ADD)?.clone();
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
-    crate::drawing_view::refuse_apart(&record, view, "balloons", ADD)?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|why| bad(ADD, why.to_string()))?;
     check_drawn(&record, view, [edge.path.as_slice()], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
@@ -130,8 +128,10 @@ fn repair(s: &mut Session, p: &Value) -> Result<Value> {
     let id = request.balloon.0;
     let unknown = || bad(REPAIR, format!("the drawing has no balloon {}", ids::encode(id)));
     let d = s.drawing(REPAIR)?;
-    d.balloons.by_id(id).ok_or_else(unknown)?;
-    let read = s.doc.resolve_balloons(&s.model, d, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
+    let view = d.balloons.by_id(id).ok_or_else(unknown)?.view;
+    let read = crate::drawing_view::ViewSessions::new(s)
+        .read_on(d, &[(id, view)], solidcraft_doc::Document::resolve_balloons)
+        .map_err(|e| bad(REPAIR, e.to_string()))?;
     let now = read.into_iter().next().map(|r| r.status).ok_or_else(unknown)?;
     repair_reference(s, REPAIR, now, |s, copy| {
         let balloon = copy.balloons.index_of(id).and_then(|at| copy.balloons.get_mut(at)).map(Arc::make_mut).ok_or_else(unknown)?;
@@ -149,11 +149,15 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let balloon = d.balloons.by_id(id).ok_or_else(|| bad(cmd, format!("the drawing has no balloon {}", ids::encode(id))))?;
-    let resolved = s.doc.resolve_balloons(&s.model, d, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
+    let resolved = crate::drawing_view::ViewSessions::new(s)
+        .read_on(d, &[(id, balloon.view)], solidcraft_doc::Document::resolve_balloons)
+        .map_err(|e| bad(cmd, e.to_string()))?;
     let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("balloon {} wasn't read", ids::encode(id))))?;
     let (status, why, candidates) = status_words(r.status);
-    let row = read_row(s, d, balloon);
-    let mut warnings = if row.status == "reference" { vec!["it points at a reference, which no parts list counts".to_string()] } else { Vec::new() };
+    let row = balloon_rows(d, &[balloon], |source| s.source_design(d, source)).pop().unwrap_or(RowRead::NoList(Vec::new()));
+    // Why it has no number, in the sheet's words, when no edit to the balloon gives it one.
+    let lasting = matches!(row, RowRead::Unlisted { why: Unlisted::Reference, .. } | RowRead::Unread { .. });
+    let mut warnings: Vec<String> = if lasting { crate::drawing_scene::row_why(&row).into_iter().collect() } else { Vec::new() };
     warnings.extend(drawn_warning(d, balloon.view, [balloon.edge.path.as_slice()]));
     let reply = BalloonResult {
         balloon: ids::encode(id),
@@ -165,46 +169,29 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         point: r.point.map(|p| [p.x, p.y, p.z]),
         exact: r.exact,
         candidates,
-        parts_list: row.list.map(ids::encode),
-        choices: row.choices.into_iter().map(ids::encode).collect(),
-        item: row.item,
-        row_status: row.status.to_string(),
+        parts_list: row.list().map(ids::encode),
+        row_status: row_word(&row).to_string(),
+        item: row.item().map(str::to_string),
+        choices: match row {
+            RowRead::NoList(choices) => choices.into_iter().map(ids::encode).collect(),
+            _ => Vec::new(),
+        },
         warnings,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// A balloon's row in the parts list it reads.
-#[derive(Default)]
-struct RowRead {
-    list: Option<u64>,
-    choices: Vec<u64>,
-    item: Option<String>,
-    status: &'static str,
-}
-
-fn read_row(s: &Session, d: &Drawing, balloon: &Balloon) -> RowRead {
-    let (list, parts_list) = match d.parts_list_for(balloon) {
-        Ok(found) => found,
-        Err(choices) => return RowRead { choices, status: "no_list", ..Default::default() },
-    };
-    let state = s.model.state();
-    let mut tree = Tree::new(&s.doc, &state);
-    // Its component deleted, or too large to list: nothing it can read.
-    let Ok(listed) = bom::list_with(&mut tree, &parts_list.request(), true) else {
-        return RowRead { list: Some(list), status: "not_found", ..Default::default() };
-    };
-    match listed.item_of(&tree, balloon.occurrence()) {
-        Ok(item) => RowRead { list: Some(list), item: Some(item), status: "ok", ..Default::default() },
-        Err(why) => {
-            let status = match why {
-                Unlisted::NotFound => "not_found",
-                Unlisted::Reference => "reference",
-                Unlisted::NoRow => "no_row",
-            };
-            RowRead { list: Some(list), status, ..Default::default() }
-        }
+/// What a balloon reads of its parts list, in a reply's words: `ok`, `no_list`, `not_found`,
+/// `reference`, `no_row` or `unread`.
+pub(crate) fn row_word(row: &RowRead) -> &'static str {
+    match row {
+        RowRead::Item { .. } => "ok",
+        RowRead::NoList(_) => "no_list",
+        RowRead::Unlisted { why: Unlisted::NotFound, .. } => "not_found",
+        RowRead::Unlisted { why: Unlisted::Reference, .. } => "reference",
+        RowRead::Unlisted { why: Unlisted::NoRow, .. } => "no_row",
+        RowRead::Unread { .. } => "unread",
     }
 }
 

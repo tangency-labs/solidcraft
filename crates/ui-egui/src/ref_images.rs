@@ -1,13 +1,11 @@
 //! Canvases and decals: the design's reference images. With the GPU viewport they are textured
 //! quads in the 3D pass (the model hides them); the CPU viewport draws them over its image.
 
-use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{Color32, Mesh, Shape, TextureHandle, TextureId, pos2};
-use solidcore_record::Vec2;
 use solidcraft_engine::doc::canvas::Canvas;
 
 use crate::SolveApp;
@@ -74,13 +72,15 @@ pub fn gpu_images(app: &SolveApp) -> Vec<GpuImage> {
         return Vec::new();
     }
     let (vals, _) = doc.param_values();
+    let state = app.session.model.state();
     doc.canvases
         .iter()
         .filter(|c| c.visible && c.opacity > 0.0)
         .filter_map(|c| {
-            let plane = doc.canvas_plane(&vals, c).ok()?;
+            // An anchored canvas follows its sketch's points.
+            let corners = doc.canvas_corners(&vals, c, &state).ok()?;
             let (_, version, size, rgba) = pixels(c)?;
-            let corners = c.world_corners(&plane).map(|p| [p.x as f32, p.y as f32, p.z as f32]);
+            let corners = corners.map(|p| [p.x as f32, p.y as f32, p.z as f32]);
             Some(GpuImage { id: c.id, version, size, rgba, corners, opacity: c.opacity.clamp(0.0, 1.0) as f32 })
         })
         .collect()
@@ -114,19 +114,21 @@ pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj)
         return;
     }
     let (vals, _) = doc.param_values();
+    let state = app.session.model.state();
     for c in doc.canvases.iter().filter(|c| c.visible) {
-        let Ok(plane) = doc.canvas_plane(&vals, c) else { continue };
+        let Ok([bl, br, _, tl]) = doc.canvas_corners(&vals, c, &state) else { continue };
         let Some(tex) = texture(ui.ctx(), c) else { continue };
-        let [bl, br, _, tl] = c.corners();
-        let (u, v) = (br - bl, tl - bl);
+        let arr = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
+        let (corner, u, v) = (arr(bl), arr(br - bl), arr(tl - bl));
         let tint = Color32::from_white_alpha((c.opacity.clamp(0.0, 1.0) * 255.0) as u8);
         let mut mesh = Mesh::with_texture(tex);
         let mut ok = true;
         for j in 0..=CELLS {
             for i in 0..=CELLS {
                 let (s, t) = (i as f64 / CELLS as f64, j as f64 / CELLS as f64);
-                let p: Vec2 = bl + u * s + v * t;
-                let Some(q) = proj.to_screen(plane.to_world(p)) else {
+                // The point on the image's quad, from the kernel.
+                let [x, y, z] = solidcore_ops::affine::parallelogram_point(corner, u, v, s, t);
+                let Some(q) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)) else {
                     ok = false;
                     continue;
                 };
@@ -152,6 +154,30 @@ pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj)
 #[cfg(test)]
 mod codec_tests {
     use super::decode_reference;
+
+    #[test]
+    fn gpu_images_include_canvases_on_model_planes() {
+        use serde_json::json;
+
+        let mut h = crate::scenario::Harness::new();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let data = solidcraft_engine::doc::canvas::base64_encode(png.get_ref());
+        h.app
+            .run(
+                "construct.plane.three_points",
+                json!({"a": {"point": [0, 0, 5]}, "b": {"point": [1, 0, 5]}, "c": {"point": [0, 1, 5]}, "name": "Three"}),
+            )
+            .unwrap();
+        for plane in ["XY", "Three"] {
+            h.app.run("canvas.insert", json!({"data": data, "plane": plane, "name": plane, "width": 40})).unwrap();
+        }
+        let images = super::gpu_images(&h.app);
+        assert_eq!(images.len(), 2, "both visible canvases must reach the renderer");
+        let canvas = h.app.session.doc.canvases.iter().find(|c| c.name == "Three").unwrap();
+        let image = images.iter().find(|i| i.id == canvas.id).unwrap();
+        assert_eq!(image.corners, [[-20.0, -20.0, 5.0], [20.0, -20.0, 5.0], [20.0, 20.0, 5.0], [-20.0, 20.0, 5.0]]);
+    }
 
     #[test]
     fn hdr_feature_does_not_enable_synchronous_canvas_hdr_decoding() {

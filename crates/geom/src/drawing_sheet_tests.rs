@@ -318,6 +318,17 @@ fn rows_skip_i_and_o_and_letters_go_on_past_z() {
     assert_eq!(rows, "ABCDEFGHIJ");
 }
 
+/// A view's letters (#13044) skip I, O and Q, then go on past Z as a grid's rows do.
+#[test]
+fn view_letters_skip_i_o_and_q() {
+    assert_eq!((0..23).filter_map(view_letter).collect::<String>(), "ABCDEFGHJKLMNPRSTUVWXYZ");
+    assert_eq!(view_letter(23).as_deref(), Some("AA"));
+    assert_eq!(view_letter(23 + 23 * 23).as_deref(), Some("AAA"));
+    for i in 0..2000 {
+        assert!(view_letter(i).is_some_and(|l| !l.contains(['I', 'O', 'Q'])), "{i}");
+    }
+}
+
 #[test]
 fn hostile_sizes_and_profiles_are_refused() {
     let custom = |a: f64, b: f64| Sheet { size: SheetSize::Custom { sides_mm: [a, b] }, orientation: Orientation::Landscape };

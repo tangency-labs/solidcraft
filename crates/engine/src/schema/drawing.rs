@@ -10,7 +10,7 @@ use solidcraft_geom::cell::Projection;
 use solidcraft_geom::revision::Numbering;
 
 use super::check::whole;
-use super::drawing_view::LineGroupParam;
+use super::drawing_view::{LineGroupParam, SheetParam};
 use super::types::present;
 
 /// Make a drawing of the design from a template, with ids of its own, and open it.
@@ -27,6 +27,20 @@ pub struct DrawingCreateParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub template: Option<String>,
+    /// The first sheet's name, overriding the template's name when supplied.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub first_sheet_name: Option<String>,
+    /// The first sheet's paper size, orientation and DPI when supplied.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SheetParam")]
+    pub first_sheet_paper: Option<SheetParam>,
+    /// Starts the first sheet without a title block when true.
+    #[serde(default)]
+    pub omit_first_sheet_title_block: bool,
+    /// Place front, top, right and isometric views on the first sheet at a fitted scale.
+    #[serde(default)]
+    pub standard_views: bool,
     /// Its content language, a BCP 47 tag (the template's when not given).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -45,6 +59,11 @@ pub struct DrawingCreateParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub font: Option<String>,
+    /// Another design file to draw instead of this design, which may then be empty: a design
+    /// file's path, at most 4096 bytes.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub source: Option<String>,
 }
 
 /// Change the open drawing's own settings: one undo step.
@@ -80,6 +99,10 @@ pub struct DrawingSetParams {
     #[serde(default, deserialize_with = "revision_numbering", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "revision_numbering_schema")]
     pub revision_numbering: Option<Numbering>,
+    /// Whether a deleted view's letter is given again (true) or never (false).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub view_letters_reuse: Option<bool>,
 }
 
 /// `units` as given: `follow_model`, or a length unit the drawing's rules check.
