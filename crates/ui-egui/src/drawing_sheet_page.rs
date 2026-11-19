@@ -23,8 +23,8 @@
 //! - **A view's state shows in words and shape**, never colour alone (D26): needs update (dashed),
 //!   nothing to draw (dotted) and can't be drawn (a cross), each with its words beside the view's
 //!   boundary.
-//! - **Hover**: a view's boundary shows only while the pointer is near its edge, so the sheet stays
-//!   clean (D17); any other object shows its box while the pointer is over it.
+//! - **Hover and selection** look as they do in a sketch: what the pointer is over, and what is
+//!   selected, is drawn in the accent colour, with no box round it.
 
 mod view_tools;
 
@@ -578,17 +578,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         crate::drawing_workspace::edit_title_cell(app, sheet, point, at);
     }
     crate::dim_view::show_sheet_editor(app, ui.ctx());
-    if let Some(hit) = hit
-        && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
+    // What is hovered or selected is drawn again in the accent colour, as a sketch draws its
+    // hovered and selected dimensions and curves: no box round it.
+    let mut lit = view_tools::selected(app, drawing.id);
+    lit.extend(hit.filter(|hit| drawing.has_object(hit.object)).map(|hit| hit.object));
+    if !lit.is_empty()
+        && let Some(marks) = &app.drawing_workspace.page.marks
     {
-        let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
-        let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
-        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(t.space_2 * 0.5, t.accent), t.space_4, t.space_2));
-    }
-    let chosen = view_tools::selected(app, drawing.id);
-    for object in view.objects.iter().filter(|o| chosen.contains(&o.object)) {
-        let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
-        painter.rect_stroke(r, t.radius_sm, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+        marks.paint_lit(&painter, &at, visible, ppp as f32, &app.drawing_workspace.page.pictures, &lit, t.accent);
     }
     let states = view_states(&painter, &at, &view.views, &view.stale, &view.objects);
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
@@ -625,7 +622,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "views": states,
         "pictures": app.drawing_workspace.page.pictures.inspect(),
         "working": working,
-        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "outlined": true})),
+        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "lit": lit.contains(&h.object)})),
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
     }));
     true
@@ -894,6 +891,9 @@ pub(crate) struct Marks {
     generation: u64,
     tolerance: f64,
     pub(crate) marks: Vec<Mark>,
+    /// The object each mark draws, by index: what is hovered or selected is drawn in the accent
+    /// colour, as a sketch draws its hovered and selected dimensions and curves.
+    owners: Vec<u64>,
     /// Why the sheet is drawn coarser than asked, or not at all.
     error: Option<String>,
 }
@@ -932,21 +932,39 @@ impl Marks {
         let mut tol = tolerance;
         for _ in 0..8 {
             match marks(scene, tol) {
-                Ok(marks) => {
+                Ok((marks, owners)) => {
                     let error = (tol != tolerance).then(|| solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned());
-                    return Marks { generation, tolerance, marks, error };
+                    return Marks { generation, tolerance, marks, owners, error };
                 }
                 Err(Fault::TooMany) => tol *= 8.0,
-                Err(Fault::Invalid(why)) => return Marks { generation, tolerance, marks: Vec::new(), error: Some(why) },
+                Err(Fault::Invalid(why)) => return Marks { generation, tolerance, marks: Vec::new(), owners: Vec::new(), error: Some(why) },
             }
         }
-        Marks { generation, tolerance, marks: Vec::new(), error: Some(solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned()) }
+        Marks { generation, tolerance, marks: Vec::new(), owners: Vec::new(), error: Some(solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned()) }
     }
 
     fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32, pictures: &PictureTextures) {
+        self.paint_some(painter, at, visible, ink, ppp, pictures, None);
+    }
+
+    /// The marks of the objects in `lit` again, over the sheet, in `accent`: a hovered or selected
+    /// object, as a sketch shows its hovered and selected dimensions and curves, with no box round it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn paint_lit(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ppp: f32, pictures: &PictureTextures, lit: &[u64], accent: Color32) {
+        self.paint_some(painter, at, visible, accent, ppp, pictures, Some(lit));
+    }
+
+    /// Every mark, or with `only` the marks of those objects, in `ink`.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_some(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32, pictures: &PictureTextures, only: Option<&[u64]>) {
         let hair = 1.0 / ppp.max(0.1);
         let mut mesh = egui::Mesh::default();
-        for mark in &self.marks {
+        for (index, mark) in self.marks.iter().enumerate() {
+            if let Some(only) = only
+                && !self.owners.get(index).is_some_and(|owner| only.contains(owner))
+            {
+                continue;
+            }
             match mark {
                 Mark::Line { points, closed, width_mm, bounds } => {
                     if !bounds.inflated(*width_mm).meets(&visible) {
@@ -1209,10 +1227,11 @@ enum Fault {
 }
 
 /// Every mark of `scene`'s groups, in paint order, cut to their clips as every writer reads them.
-fn marks(scene: &Scene, tol: f64) -> Result<Vec<Mark>, Fault> {
+fn marks(scene: &Scene, tol: f64) -> Result<(Vec<Mark>, Vec<u64>), Fault> {
     let prepared = scene.prepare().map_err(|e| Fault::Invalid(e.to_string()))?;
     let mut budget = MAX_POINTS;
     let mut out = Vec::new();
+    let mut owners = Vec::new();
     let sheet = Aabb2 { min: Vec2::ZERO, max: scene.size_mm };
     // `prepare` checked there is one clip an object.
     let clips: HashMap<u64, Clip> = scene.clips.iter().copied().collect();
@@ -1257,9 +1276,10 @@ fn marks(scene: &Scene, tol: f64) -> Result<Vec<Mark>, Fault> {
                     out.push(Mark::Picture { source: picture.source, rect: picture.rect, opacity: picture.opacity, clip, within });
                 }
             }
+            owners.resize(out.len(), group.object);
         }
     }
-    Ok(out)
+    Ok((out, owners))
 }
 
 fn bounds_of(points: &[Vec2]) -> Aabb2 {
