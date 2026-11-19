@@ -2495,6 +2495,16 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export";
     let path = path_arg(p, cmd)?;
     let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
+    // The path's extension picks the OpenUSD encoding; a `format` naming another one is refused
+    // rather than ignored.
+    if format == Format::Usd
+        && let Some(f) = str_(p, "format")
+        && !f.eq_ignore_ascii_case("usd")
+        && solidcraft_io::is_usd_path(path)
+        && usd_encoding(f) != usd_encoding(path)
+    {
+        return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which picks the OpenUSD encoding")));
+    }
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2603,6 +2613,15 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
     let bytes = solidcraft_io::export_glb(&s.doc, &s.model.state(), &world, bodies, &name, quality)?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
+}
+
+/// The OpenUSD encoding a name or extension asks for: text, binary or package.
+fn usd_encoding(name: &str) -> &'static str {
+    match name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase().as_str() {
+        "usda" => "text",
+        "usdz" => "package",
+        _ => "binary",
+    }
 }
 
 /// The OpenUSD export: the bodies written as STEP, as `file.export` writes STEP (a design with

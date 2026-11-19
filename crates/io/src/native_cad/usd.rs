@@ -526,7 +526,14 @@ impl<'a> Reader<'a> {
                 self.warnings.push(format!("mesh `{name}`: not imported: {e}"));
                 continue;
             }
-            let normals = t.per_corner_normals();
+            // Normals per triangle corner, or per vertex spread to each corner that uses it.
+            let mut normals = t.per_corner_normals();
+            if normals.is_empty() {
+                let per_vertex = t.vertex_normals();
+                if per_vertex.len() == vertices.len() {
+                    normals = triangles.iter().flatten().filter_map(|&i| per_vertex.get(i as usize).copied()).collect();
+                }
+            }
             let corner_normals: Vec<f64> = if turn_normals && !flip && normals.len() == triangles.len() * 3 {
                 normals
                     .iter()
