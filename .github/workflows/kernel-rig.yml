@@ -14,39 +14,21 @@
 # - The ladder fails on any case whose status or counts differ from
 #   tests/kernel-cases/ladder/golden.json; a right change is re-recorded (`--record "why"`).
 #
-# The trigger paths are whole folders that hold every area's PATHS (a self-test,
-# scripts/ci/test_kernel_rig_plan.py, checks they do), so a pull request that touches none of
-# them (the UI, docs, packaging) starts no runner at all, and a new area needs no edit here: the
-# plan finds the areas from the folders. Merge groups run the areas their batch's diff reaches, like a
-# pull request. Pushes to main and develop on the same paths, the release gate (release-gate.yml, workflow_call) and a run by hand run
-# every area; those pushes also commit the compiler cache (a Blacksmith sticky disk) that every
-# other run mounts read-only.
+# Pull requests and merge groups run the rig inside CI: ci.yml calls this workflow (workflow_call)
+# for them, and its required `ci` check fails when the rig does. A called workflow sees the
+# caller's event, so the plan below still diffs the pull request or the merge group. A change
+# that reaches no area costs the plan job and the summary, both on the smallest runner. A merge
+# group's base is the queue entry ahead of it, so its diff is that pull request's own; the queue
+# merges a pull request only when its own entry passed (grouping ALLGREEN), so each change is
+# graded on its own diff. Pushes to main and develop on the paths below, the release gate
+# (release-gate.yml, workflow_call) and a run by hand run every area; those pushes also commit
+# the compiler cache (a Blacksmith sticky disk) that every other run mounts read-only.
 name: Kernel rig
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "crates/kernel/**"
-      - "crates/geom/**"
-      - "crates/smlib/**"
-      - "crates/io/src/**"
-      - "crates/doc/src/**"
-      - "crates/develop/**"
-      - "crates/engine/src/**"
-      - "tests/kernel-cases/**"
-      # The vendored kernel: a change here runs every area (tests/kernel-cases/PATHS-ALL).
-      - "solidcore/**"
-      # The rig itself: the grading, the runner, the selection and this workflow.
-      - "apps/solidcraft-cli/src/kernel_cases.rs"
-      - "xtask/src/kernel_cases.rs"
-      - "xtask/src/kernel_ladder.rs"
-      - "scripts/ci/kernel_rig_plan.py"
-      - "scripts/ci/test_kernel_rig_plan.py"
-      - ".github/workflows/kernel-rig.yml"
   push:
     branches: [main, develop]
-    # The same paths as pull_request.
+    # Whole folders that hold every area's PATHS (the self-test checks they do).
     paths:
       - "crates/kernel/**"
       - "crates/geom/**"
@@ -65,7 +47,8 @@ on:
       - "scripts/ci/kernel_rig_plan.py"
       - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
-  merge_group:
+  # CI (ci.yml) calls this on pull requests and merge groups, so the rig is part of the required
+  # `ci` check; the release gate (release-gate.yml) calls it too.
   workflow_call:
   workflow_dispatch:
 
