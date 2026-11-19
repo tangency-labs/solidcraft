@@ -23,6 +23,7 @@
 //! of the face ([`Assembly::drop_inner_slits`]).
 
 use crate::vec::Vec3Geom as _;
+use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::kernel::{CurveEval, Starts, SurfaceEval};
@@ -908,10 +909,21 @@ impl Assembly<'_> {
     /// ([`Self::complete_sphere_outside`]). Returns how many faces were completed.
     pub(crate) fn complete_outsides(&mut self) -> R<usize> {
         let mut completed = 0;
+        // The faces each edge bounds, so a face's neighbours are found without a pass over all.
+        let mut users: HashMap<u32, Vec<usize>> = HashMap::new();
+        for (fi, f) in self.faces.iter().enumerate() {
+            for l in &f.loops {
+                if let Bound::Edges(es) = l {
+                    for (e, _) in es {
+                        users.entry(*e).or_default().push(fi);
+                    }
+                }
+            }
+        }
         for fi in 0..self.faces.len() {
             let Some(face) = self.faces.get(fi) else { continue };
             if let BSurface::Sphere { frame, radius } = face.surface.clone() {
-                if self.complete_sphere_outside(fi, &frame, radius)? {
+                if self.complete_sphere_outside(fi, &frame, radius, &users)? {
                     completed += 1;
                 }
                 continue;
@@ -988,7 +1000,7 @@ impl Assembly<'_> {
                 }
                 _ => false,
             };
-            if !outside || !self.patch_beside(fi, &loops, same) {
+            if !outside || !self.patch_beside(fi, &loops, &users, same) {
                 continue;
             }
             // The seams go through the middle of the widest stretch of longitude and of tube
@@ -1105,17 +1117,16 @@ impl Assembly<'_> {
         Ok(seated)
     }
 
-    /// A face sharing an edge with one of `loops` (of face `fi`) lies on a surface `same` takes
-    /// for face `fi`'s, and faces the same way as face `fi`.
-    fn patch_beside(&self, fi: usize, loops: &[Vec<(u32, bool)>], same: impl Fn(&BSurface) -> bool) -> bool {
+    /// A face sharing an edge with one of `loops` (of face `fi`; `users` the faces each edge
+    /// bounds) lies on a surface `same` takes for face `fi`'s, and faces the same way as face `fi`.
+    fn patch_beside(&self, fi: usize, loops: &[Vec<(u32, bool)>], users: &HashMap<u32, Vec<usize>>, same: impl Fn(&BSurface) -> bool) -> bool {
         let Some(forward) = self.faces.get(fi).map(|f| f.forward) else { return false };
-        let edges: std::collections::HashSet<u32> = loops.iter().flatten().map(|u| u.0).collect();
-        self.faces.iter().enumerate().any(|(gi, g)| {
-            gi != fi
-                && g.forward == forward
-                && same(&g.surface)
-                && g.loops.iter().any(|l| matches!(l, Bound::Edges(es) if es.iter().any(|u| edges.contains(&u.0))))
-        })
+        loops
+            .iter()
+            .flatten()
+            .filter_map(|u| users.get(&u.0))
+            .flatten()
+            .any(|&gi| gi != fi && self.faces.get(gi).is_some_and(|g| g.forward == forward && same(&g.surface)))
     }
 
     /// Complete face `fi`, on the sphere about `frame` of `radius`, when it is the outside of its
@@ -1130,7 +1141,7 @@ impl Assembly<'_> {
     /// its x axis through the loop's first vertex: the loop then runs once round the axis the
     /// way u falls, so the face covers the lower pole, and gets its seam to it as a cap bounded
     /// by one circle does ([`Self::add_seams`]). Returns whether it was completed.
-    fn complete_sphere_outside(&mut self, fi: usize, frame: &Frame, radius: f64) -> R<bool> {
+    fn complete_sphere_outside(&mut self, fi: usize, frame: &Frame, radius: f64, users: &HashMap<u32, Vec<usize>>) -> R<bool> {
         let Some(face) = self.faces.get(fi) else { return Ok(false) };
         let [Bound::Edges(l)] = face.loops.as_slice() else { return Ok(false) };
         if l.is_empty() || super::seam_only(l) {
@@ -1177,7 +1188,7 @@ impl Assembly<'_> {
         let tol = self.tol;
         let same =
             |s: &BSurface| matches!(s, BSurface::Sphere { frame: f, radius: r } if Vec3::from(f.origin).dist(o) <= tol && (r - radius).abs() <= tol);
-        if !(twice < 0.0) || !self.patch_beside(fi, std::slice::from_ref(&l), same) {
+        if !(twice < 0.0) || !self.patch_beside(fi, std::slice::from_ref(&l), users, same) {
             return Ok(false);
         }
         // The new axis, towards the loop's mean point, and the x axis through its first vertex.
@@ -1186,21 +1197,20 @@ impl Assembly<'_> {
         let start = self.vpoint(self.start(*l.first().ok_or("empty loop")?)?)? - o;
         let Some(ex) = (start - up * start.dot(up)).normalized() else { return Ok(false) };
         let ey = up.cross(ex);
-        // About it, the loop runs once round the way u falls, clear of both poles by more than
-        // the tolerance: else the patch is not one this turn makes a cap of.
+        // About it, the loop runs once round the way u falls (whole turns, as [`Turns`] counts
+        // them): else the patch is not one this turn makes a cap of. One through a pole is
+        // `add_seams`'s to close there.
         let mut turned = 0.0;
-        let mut nearest = f64::INFINITY;
         let mut prev: Option<f64> = None;
         for p in points.iter().chain(points.first()) {
             let d = *p - o;
-            nearest = nearest.min((d - up * d.dot(up)).len());
             let a = d.dot(ey).atan2(d.dot(ex));
             if let Some(b) = prev {
                 turned += wrap(a - b);
             }
             prev = Some(a);
         }
-        if !(nearest > 4.0 * tol) || !((turned / TAU + 1.0).abs() < 0.25) {
+        if (turned / TAU).round() as i64 != -1 {
             return Ok(false);
         }
         let seated = BSurface::Sphere { frame: Frame { origin: frame.origin, x_axis: arr(ex), y_axis: arr(ey) }, radius };

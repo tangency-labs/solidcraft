@@ -345,8 +345,9 @@ fn a_torus_written_as_a_patch_and_the_rest_round_it_imports_whole() {
 /// on a sphere of its own about +y. Each reads as the closed ball: two faces; the loop's circle
 /// and the rest's seam from it to the pole the rest covers as its edges; the circle's vertex and
 /// that pole; one shell.
-/// Its area is 4πr² and its volume 4πr³/3, and its display mesh covers the ball once: inscribed
-/// within a chord deviation δ, its area is short of 4πr² by at most a factor (1 − δ/r)².
+/// Its area is 4πr² and its volume 4πr³/3, and each face's display mesh covers its own zone of
+/// the ball: inscribed within a chord deviation δ, a zone's mesh area is short of its exact
+/// area by at most a factor (1 − δ/r)².
 #[test]
 fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
     use std::f64::consts::PI;
@@ -385,10 +386,20 @@ fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
         assert_eq!((m.faces, m.edges, m.vertices, m.shells), (2, 2, 2, 1), "{what}");
         assert!(rel(m.area, area) < 1e-6, "{what}: area {} vs {area}", m.area);
         assert!(rel(m.volume, volume) < 1e-6, "{what}: volume {} vs {volume}", m.volume);
+        // Each face's own triangles: the cap's zone of height r − 3 has area 2πr·2, the rest the
+        // other 2πr·8 (whichever face the file names Cap).
         let chord = 0.01;
-        let shown = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(chord)).unwrap().measure().area;
-        let floor = area * (1.0 - chord / r).powi(2);
-        assert!(shown >= floor && shown <= area * (1.0 + 1e-9), "{what}: display mesh area {shown}, the ball's {area}");
+        let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(chord)).unwrap();
+        let mut shown = [0.0_f64; 2];
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+            shown[*f as usize] += 0.5 * (b - a).cross(c - a).len();
+        }
+        shown.sort_by(f64::total_cmp);
+        for (s, exact) in shown.into_iter().zip([2.0 * PI * r * 2.0, 2.0 * PI * r * 8.0]) {
+            let floor = exact * (1.0 - chord / r).powi(2);
+            assert!(s >= floor && s <= exact * (1.0 + 1e-9), "{what}: a face's display mesh area {s}, its zone's {exact}");
+        }
     }
 }
 
