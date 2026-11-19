@@ -192,6 +192,15 @@ fn class_of(m: Enclosure, n: Enclosure) -> Class {
     }
 }
 
+/// Enclosures that meet are not `equal` when this branch's upper end is far above main's
+/// (#19318): main's distance at most 1e-12, this branch's at most 1e-9, both lower ends 0.
+#[test]
+fn meeting_enclosures_with_a_far_higher_upper_end_are_not_equal() {
+    let m = Enclosure { lo: 0.0, hi: 1e-12 };
+    let n = Enclosure { lo: 0.0, hi: 1e-9 };
+    assert_eq!(class_of(m, n), Class::Farther);
+}
+
 /// The surfaces of the faces of `e`'s uses.
 fn edge_faces(b: &Brep, e: EdgeId) -> Vec<FaceId> {
     let mut out = Vec::new();
@@ -885,6 +894,37 @@ mod local_operation {
             ROWS.len()
         );
         assert_eq!(ROWS.len(), 65);
+    }
+
+    /// A trim off its edge's tolerance on an edge no moved value touches passes only as
+    /// main's own trim (#19318). `box_face0_in` moves no value; the first two trimmed uses of
+    /// its first edge with two swap their trims (each now in the other face's parameters),
+    /// so neither lies on its edge, and neither is main's (main's record holds no trim).
+    #[test]
+    #[should_panic(expected = "not main's")]
+    fn an_off_trim_that_is_not_main_s_fails() {
+        let case = crate::case::regression_case(&Runner, "box_face0_in");
+        let out = Runner.run_rust(&case).unwrap();
+        let (_, mut bodies) = result_breps(&case).unwrap();
+        let (_, b) = &mut bodies[0];
+        // the check_brep level 2 runs on the body as built
+        let mut raw = b.clone_standing_for_self().unwrap();
+        let uses = solidcore::topology::brep::p1::edges(b, None)
+            .unwrap()
+            .into_iter()
+            .map(|e| {
+                let mut uses = b.edge(e).unwrap().edgeuses.clone();
+                uses.retain(|&u| b.edgeuse(u).unwrap().uv_trim_curve.is_some());
+                uses
+            })
+            .find(|u| u.len() >= 2)
+            .expect("an edge with two trimmed uses");
+        let (u0, u1) = (uses[0], uses[1]);
+        let t0 = b.edgeuse(u0).unwrap().uv_trim_curve.clone();
+        let t1 = b.edgeuse(u1).unwrap().uv_trim_curve.clone();
+        b.edgeuse_mut(u0).unwrap().uv_trim_curve = t1;
+        b.edgeuse_mut(u1).unwrap().uv_trim_curve = t0;
+        super::certify_body("box_face0_in", &out, "", b, Some(&mut raw), &[], &[], true);
     }
 }
 
