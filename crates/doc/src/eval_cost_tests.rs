@@ -3546,3 +3546,46 @@ fn a_refused_round_that_names_a_radius_to_try_searches_for_it() {
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 1, "{work:?}");
 }
+
+/// A round refused because it would cut through a thin wall into the hollow behind it names
+/// the radius at which it opens, so the document still searches for the largest radius that
+/// fits and names it (the kernel rig's 1668 case). A 104 x 64 x 42 box hollowed 2 mm from the
+/// inside, open at the bottom: an R7 round of the outer top edge at (32, 42) has its centre at
+/// (32 - r, 42 - r), and its arc uncovers the hollow's corner (30, 40) where sqrt2 (r - 2) = r,
+/// r = 4 + 2 sqrt2 = 6.8284; the search builds 6.828.
+#[test]
+fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
+    let mut doc = Document::new("thin wall");
+    block(&mut doc, "Case", Vec3::new(-52.0, -32.0, 0.0), [104.0, 64.0, 42.0]);
+    let hollow = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-50.0, -30.0, -1.0)),
+        length: "100".into(),
+        width: "60".into(),
+        height: "41".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    doc.add_feature(hollow, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(0.0, 32.0, 42.0))],
+        radius: "7".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    let fillet = doc.add_feature(kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    let error = model.result(fillet).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{error}");
+    assert!(error.contains("the largest radius that fits is 6.828 mm"), "{error}");
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 1, "{work:?}");
+}
