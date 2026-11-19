@@ -44,6 +44,13 @@
 //! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing;
 //! - `KERNEL_CASES_SMB`: a directory to write each run case's bodies to as `<case>.smb`, for
 //!   its render (`solidcore-diag`): the final bodies, or the inputs of the refusal that ends it.
+//!
+//! One entry from outside the corpus (a reported failure's case, `docs/failure-codes-and-reproduction.md`
+//! 3.4) replays with `KERNEL_CASES_ENTRY=<path to its .json>` (its records beside it) through
+//! the test `kernel_case_entry` (which does nothing without it): it prints the outcome as a JSON line, `same failure` when the
+//! call that fails fails with the entry's failure code (the failing call's `code`), `other
+//! failure`, `builds now`, or `unsupported`, and fails unless it is `same failure` (or
+//! `KERNEL_CASES_REPORT_ONLY` is set). `KERNEL_CASES_REPORT` writes the line to a file too.
 
 #![allow(
     clippy::unwrap_used,
@@ -78,7 +85,7 @@ use solidcore_ops::sweep::{
     Ends, SweepFrame,
 };
 use solidcore_ops::untrim::{untrim_face, Holes};
-use solidcore_ops::{make_sphere, offset, session, Body, Order};
+use solidcore_ops::{make_sphere, offset, session, Body, FailureCode, Order};
 use solidcore_record::brep::{Brep as Record, Frame, Surface as RecordSurface};
 
 fn corpus() -> PathBuf {
@@ -1384,6 +1391,8 @@ fn run_case_with_records(
                 }
             }
             (Err(x), Some(_)) => {
+                // what the call failed with, for a replay that compares failure codes
+                REFUSED.with(|r| r.set(session::take_failure_code()));
                 // An entry may name the refusal it expects (`refused_as`, a part of the
                 // error's text): any other error, such as a blend that fails inside instead of
                 // being refused, does not stand for it, whether the refusal was handled or not.
@@ -1403,6 +1412,7 @@ fn run_case_with_records(
                 }
             }
             (Err(x), None) => {
+                REFUSED.with(|r| r.set(session::take_failure_code()));
                 write_smb(e, &ins);
                 return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}")));
             }
@@ -4451,6 +4461,156 @@ fn kernel_cases() {
             moved.len()
         );
     }
+}
+
+thread_local! {
+    /// The failure code of the last call the replay on this thread saw refused.
+    static REFUSED: std::cell::Cell<Option<FailureCode>> = const { std::cell::Cell::new(None) };
+}
+
+/// A failure code as an entry writes it: `{"call", "kind", "operation"}`.
+fn code_json(c: &FailureCode) -> Value {
+    serde_json::json!({"call": c.call, "kind": c.kind, "operation": c.operation})
+}
+
+/// The outcome of replaying `e`, a single entry at `entry`, against the failure code its failing
+/// call records: `same failure`, `other failure`, `builds now` or `unsupported`, as a JSON object
+/// with the code the replay failed with and the entry's.
+fn replay_entry(entry: &Path, e: &Value) -> Value {
+    let expected = e["calls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .rev()
+        .find(|c| {
+            c["error"].is_string() && c.get("continued").and_then(Value::as_bool) != Some(true)
+        })
+        .map_or(Value::Null, |c| c["code"].clone());
+    REFUSED.with(|r| r.set(None));
+    let ran = run_case(entry, e);
+    let got = REFUSED.with(std::cell::Cell::take).map(|c| code_json(&c));
+    let (outcome, note) = match &ran {
+        Err(Stop::Unsupported(why)) => ("unsupported", why.clone()),
+        // the replay ended at a refusal where the entry's run did
+        Ok(None) => match &got {
+            Some(g) if !expected.is_null() && *g == expected => ("same failure", String::new()),
+            Some(_) => ("other failure", "refused with another code".to_owned()),
+            None => ("other failure", "refused without a code".to_owned()),
+        },
+        Ok(Some(_)) if expected.is_null() => ("builds now", String::new()),
+        Ok(Some(_)) => ("builds now", "the entry's failing call builds".to_owned()),
+        Err(Stop::Fail(why))
+            if got.is_none()
+                && why.starts_with("call ")
+                && why.contains("ran where the rig's refused") =>
+        {
+            ("builds now", why.clone())
+        }
+        Err(Stop::Fail(why)) => ("other failure", why.clone()),
+    };
+    serde_json::json!({
+        "case": e["case"],
+        "outcome": outcome,
+        "code": got,
+        "expected": expected,
+        "note": note,
+    })
+}
+
+/// `KERNEL_CASES_ENTRY`: one entry from outside the corpus, replayed against its failure code
+/// ([`replay_entry`]). Without it, nothing runs.
+#[test]
+fn kernel_case_entry() {
+    let Some(path) = std::env::var_os("KERNEL_CASES_ENTRY") else {
+        return;
+    };
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let path = PathBuf::from(path);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|x| panic!("KERNEL_CASES_ENTRY: {}: {x}", path.display()));
+    let e: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|x| panic!("KERNEL_CASES_ENTRY: {}: {x}", path.display()));
+    let line = replay_entry(&path, &e);
+    println!("{line}");
+    if let Ok(p) = std::env::var("KERNEL_CASES_REPORT") {
+        std::fs::write(p, format!("{line}\n")).unwrap();
+    }
+    if std::env::var_os("KERNEL_CASES_REPORT_ONLY").is_none() {
+        assert_eq!(line["outcome"], "same failure", "{line}");
+    }
+}
+
+/// A 30 x 2 x 10 wall's two top edges, by their record indices, and the wall's record.
+fn wall_and_top_edges() -> (Body, Order, solidcore_record::brep::Brep, Vec<usize>) {
+    let wall = solidcore_ops::make_box([0.0; 3], [30.0, 2.0, 10.0]).unwrap();
+    let (record, order) = wall.to_record().unwrap();
+    let at = |v: u32| record.vertices[v as usize].point;
+    let top: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let [a, b] = record.edges[i].vertices.map(at);
+            a[2] == 10.0 && b[2] == 10.0 && a[1] == b[1] && a[0] != b[0]
+        })
+        .collect();
+    assert_eq!(top.len(), 2, "the wall has two top edges along x");
+    (wall, order, record, top)
+}
+
+/// A single entry outside the corpus (a reported failure's case) replays to the failure code its
+/// failing call records: the wall's top edges rounded 1.5, past the 1 its 2 wide top allows, are
+/// refused with the code the same call gives run directly; another code is another failure; a
+/// round that fits builds now.
+#[test]
+fn a_single_entry_replays_to_its_failure_code() {
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let (wall, order, record, top) = wall_and_top_edges();
+    let _ = session::take_failure_code();
+    let direct = blend_ordered(
+        &wall,
+        &order,
+        Blend::Round,
+        &top,
+        &[1.5, 1.5],
+        &[],
+        Corners::Filled,
+        BlendOptions::default(),
+    );
+    assert!(direct.is_err());
+    let code = session::take_failure_code().unwrap();
+
+    let dir = std::env::temp_dir().join(format!("kernel-case-entry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let gz = std::fs::File::create(dir.join("wall.bodies.json.gz")).unwrap();
+    let mut w = flate2::write::GzEncoder::new(gz, flate2::Compression::default());
+    std::io::Write::write_all(
+        &mut w,
+        serde_json::json!({"b1": record}).to_string().as_bytes(),
+    )
+    .unwrap();
+    w.finish().unwrap();
+    let entry = |size: f64, code: Value| {
+        serde_json::json!({
+            "case": "report-wall", "area": "reports", "records": "wall.bodies.json.gz",
+            "bodies": {"b1": {"trusted": true, "keeping_splines": true}},
+            "calls": [{"op": "blend_dropping", "inputs": ["b1"],
+                "params": {"kind": "round", "sizes": [size],
+                    "edges": {"kind": "edge", "picked": top.iter().map(|i| serde_json::json!({"index": i})).collect::<Vec<_>>()}},
+                "error": "too large", "code": code}],
+            "result": [], "operation_expressible": true,
+        })
+    };
+    let path = dir.join("wall.json");
+    let same = replay_entry(&path, &entry(1.5, code_json(&code)));
+    assert_eq!(same["outcome"], "same failure", "{same}");
+    assert_eq!(same["code"], code_json(&code), "{same}");
+    let other = FailureCode {
+        operation: "another::routine",
+        ..code
+    };
+    let differs = replay_entry(&path, &entry(1.5, code_json(&other)));
+    assert_eq!(differs["outcome"], "other failure", "{differs}");
+    let fits = replay_entry(&path, &entry(0.5, code_json(&code)));
+    assert_eq!(fits["outcome"], "builds now", "{fits}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Set, a run of this binary is a case process: the case's path under the corpus.
