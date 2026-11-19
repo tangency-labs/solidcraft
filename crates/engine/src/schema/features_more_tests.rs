@@ -145,6 +145,8 @@ fn coil_axis_contract_accepts_directions_and_revolve_references() {
         json!({"face": [10, 0, 0]}),
         json!({"type": "edge", "at": [10, 0, 0]}),
         json!({"type": "face", "at": [10, 0, 0]}),
+        json!({"type": "sketch_axis", "axis": "x"}),
+        json!({"type": "sketch_axis", "axis": "y"}),
         json!({"type": "world", "axis": "Y"}),
     ] {
         let p = with(&coil(), "axis", axis.clone());
@@ -165,6 +167,8 @@ fn coil_axis_contract_accepts_directions_and_revolve_references() {
         json!({"curve": 7}),
         json!({"edge": [1, 2]}),
         json!({"face": null}),
+        json!({"type": "sketch_axis", "axis": "z"}),
+        json!({"type": "sketch_axis"}),
         json!({"type": "world", "axis": "y"}),
         json!({"type": "world"}),
     ] {

@@ -969,9 +969,8 @@ fn paste_new_of_a_mesh_import_with_one_label_on_all_objects_moves_the_copy_of_ea
 }
 
 /// A construction axis through a nested placement's origin datum is copied with its datum path
-/// rebuilt through the copy (the source's ancestors are not in the occurrence map); an axis
-/// whose datum names a placement outside the copied tree refuses the copy - the reference could
-/// not follow, and a dangling one would resolve against whatever then sits at those ids.
+/// rebuilt through the copy. References to another tree in the same document keep that tree's
+/// datum paths.
 #[test]
 fn cloned_datum_references_follow_the_copy() {
     let mut s = Session::default();
@@ -1000,19 +999,32 @@ fn cloned_datum_references_follow_the_copy() {
         }
         other => panic!("expected a datum reference, got {other:?}"),
     }
-    // An axis whose datum names a placement outside the copied tree refuses the copy. Outside is
-    // made at the root: `component.create` places under the active component (the paste left
-    // Parent active), and a datum key names its placement from the root, so a placement inside
-    // Parent would be unreachable to the resolver and inside the copy's map at once.
+    // Make a second tree at the root so its origin datums lie outside the copied subtree.
     run(&mut s, "component.activate", json!({"component": 0}));
     let outside = component(&mut s, "Outside");
-    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
     let outside_occ = s.doc.occurrence_of(outside).unwrap().id;
     run(&mut s, "component.activate", json!({"component": "Parent"}));
     run(&mut s, "construct.axis.two_points", json!({"a": format!("o:{outside_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "OutsideAxis"}));
+    run(&mut s, "construct.plane.offset", json!({"base": format!("o:{outside_occ}/origin/XY"), "offset": 2, "name": "OutsidePlane"}));
+    let copied = run(&mut s, "component.paste_new", json!({"component": parent, "translate": [40, 0, 0]}))["component"].as_u64().unwrap();
+    use solidcraft_doc::construct::{AxisDef, DatumItem, GeoRef};
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let features = || s.doc.features.iter().filter(|f| f.component == copied);
     assert!(
-        s.execute("component.paste_new", &json!({"component": parent, "translate": [40, 0, 0]})).is_err(),
-        "a datum into another tree cannot follow the copy"
+        features().any(|f| matches!(
+            &f.kind,
+            FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a: GeoRef::Datum { datum }, .. } }
+                if datum.path == [outside_occ] && datum.item == DatumItem::O
+        )),
+        "the copied axis keeps the outside origin point"
+    );
+    assert!(
+        features().any(|f| matches!(
+            &f.kind,
+            FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base, .. } }
+                if matches!(&**base, PlaneRef::Datum { datum } if datum.path == [outside_occ] && datum.item == DatumItem::XY)
+        )),
+        "the copied plane keeps the outside origin plane"
     );
 }
 

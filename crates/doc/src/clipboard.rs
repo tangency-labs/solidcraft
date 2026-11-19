@@ -250,7 +250,7 @@ fn remap_geo(
             }
         }
         GeoRef::Plane { plane } => remap_plane(plane, ids, bodies, depth + 1, placements)?,
-        GeoRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements, false)?,
+        GeoRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements, true)?,
         GeoRef::Snap { of, .. } => remap_geo(of, ids, bodies, depth + 1, placements)?,
         _ => {}
     }
@@ -268,7 +268,7 @@ fn remap_plane(
         return Err(crate::DocError::Invalid("clone plane reference depth exceeded".into()));
     }
     match p {
-        PlaneRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements, false)?,
+        PlaneRef::Datum { datum } => remap_occurrence_path(&mut datum.path, placements, true)?,
         PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1, placements)?,
         PlaneRef::ThroughPoint { base, point } => {
             remap_plane(base, ids, bodies, depth + 1, placements)?;
@@ -300,8 +300,8 @@ fn remap_plane(
     Ok(())
 }
 
-/// Keep every selected occurrence within the copied subtree. The new root supplies the
-/// destination's ancestors, which are outside the copy.
+/// Map the selected occurrences inside the copied subtree through the destination's ancestors.
+/// A reference may keep a valid external placement in the same document.
 fn remap_occurrence_path(path: &mut Vec<u64>, placements: Option<&ClonePlacements<'_>>, keep_external: bool) -> crate::Result<()> {
     if path.is_empty() {
         return Err(crate::DocError::Invalid("a copied reference names no placement".into()));
@@ -578,6 +578,24 @@ fn checked_link(source: &solidcraft_sketch::LinkSource, depth: usize) -> crate::
 #[cfg(test)]
 mod clone_tests {
     use super::*;
+
+    #[test]
+    fn external_datum_paths_require_an_existing_placement_in_the_same_document() {
+        let mut doc = crate::Document::new("datum paths");
+        let external = doc.add_component(Some("External"), 0).unwrap();
+        let external_placement = doc.occurrence_of(external).unwrap().id;
+        let copy = doc.add_component(Some("Copy"), 0).unwrap();
+        let root = doc.occurrence_of(copy).unwrap().id;
+        let placements = ClonePlacements { occurrences: &BTreeMap::new(), source_roots: &BTreeSet::new(), root, doc: &doc, same_document: true };
+        let original = vec![external_placement];
+        let mut path = original.clone();
+        remap_occurrence_path(&mut path, Some(&placements), true).unwrap();
+        assert_eq!(path, original);
+        let mut broken = vec![external_placement, root];
+        assert!(remap_occurrence_path(&mut broken, Some(&placements), true).is_err());
+        let other_document = ClonePlacements { same_document: false, ..placements };
+        assert!(remap_occurrence_path(&mut path, Some(&other_document), true).is_err());
+    }
 
     #[test]
     fn construction_feature_names_are_remapped_only_once_when_copied() {

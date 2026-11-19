@@ -12,6 +12,7 @@ pub(crate) fn profile_frame(doc: &Document, feature: &crate::Feature, sketch: u6
         feature.kind,
         crate::FeatureKind::Extrude { operation: crate::Operation::NewBody, .. }
             | crate::FeatureKind::Revolve { operation: crate::Operation::NewBody, .. }
+            | crate::FeatureKind::Coil { sketch: Some(_), operation: crate::Operation::NewBody, .. }
     ) || feature.body_names.is_empty()
     {
         return None;
@@ -93,6 +94,61 @@ pub(crate) fn evaluate(doc: &Document, st: &mut ModelState, bodies: &[String], f
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_transferred_coil_keeps_its_recorded_profile_frame() {
+        use crate::{AxisRef, BodyName, FeatureKind, Model, PlaneRef, rigid, world_state};
+        use solidcore_record::{Vec2, Vec3};
+
+        for use_sketch_axis in [false, true] {
+            let mut doc = Document::new("transferred coil");
+            let destination = doc.add_component(Some("Profile part"), 0).unwrap();
+            let placement = |y, z| rigid(Vec3::new(0., y, z), Vec3::ZERO, Vec3::Z, 0.);
+            doc.occurrences.iter_mut().find(|o| o.component == destination).unwrap().transform = placement(0., 7.);
+            let mut profile = crate::sketch::Sketch::new();
+            profile.add_circle(Vec2::new(20., 0.), 1., None, None).unwrap();
+            let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "YZ".into() }, sketch: profile }, None).unwrap();
+            doc.feature_mut(sketch).unwrap().component = destination;
+            let axis_ref = use_sketch_axis.then(|| AxisRef::SketchAxis { axis: "y".into() });
+            let coil = serde_json::from_value(serde_json::json!({
+                "type": "coil", "base": ["0", "0", "0"], "sketch": sketch, "axis_ref": axis_ref,
+                "pitch": "8", "turns": "2", "operation": "new_body"
+            }))
+            .unwrap();
+            let coil = doc.add_feature(coil, Some("Coil")).unwrap();
+            doc.feature_mut(coil).unwrap().body_names = vec!["Coil".into()];
+            let transfer = doc
+                .add_feature(
+                    FeatureKind::BodyTransfer { bodies: vec![BodyName("Coil".into())], from: 0, to: destination, transform: placement(0., -7.) },
+                    None,
+                )
+                .unwrap();
+
+            let mut model = Model::new();
+            let check = |model: &mut Model, doc: &Document, owner, min_z: f64| {
+                model.evaluate(doc);
+                let errors: Vec<_> = model.results.iter().filter_map(|r| r.error.as_ref()).collect();
+                assert!(errors.is_empty(), "{errors:?}");
+                let world = world_state(doc, &model.state()).unwrap();
+                let body = world.body("Coil").unwrap();
+                assert_eq!(body.component, owner);
+                let bounds = body.body.exact_bounds().unwrap();
+                // The coil starts one section radius below its profile centre and rises by 16 mm.
+                assert!((bounds.min.z - min_z).abs() < 1e-6 && (bounds.max.z - (min_z + 18.)).abs() < 1e-6, "{bounds:?}");
+                bounds
+            };
+            let before = check(&mut model, &doc, destination, 6.);
+            let dy = if use_sketch_axis { 40. } else { 0. };
+            doc.occurrences.iter_mut().find(|o| o.component == destination).unwrap().transform = placement(dy, 47.);
+            let after = check(&mut model, &doc, destination, 46.);
+            assert!((after.min.y - before.min.y - dy).abs() < 1e-6 && (after.max.y - before.max.y - dy).abs() < 1e-6, "{before:?} -> {after:?}");
+
+            // Without the transfer, the coil is back in the root and uses the live sketch frame.
+            doc.feature_mut(transfer).unwrap().suppressed = true;
+            let live = check(&mut model, &doc, 0, 46.);
+            assert!((live.min.y - after.min.y).abs() < 1e-6 && (live.max.y - after.max.y).abs() < 1e-6, "{live:?}");
+        }
+    }
 
     #[test]
     fn invalid_transfer_constructor_preserves_document_and_allocator() {

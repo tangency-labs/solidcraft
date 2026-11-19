@@ -8772,7 +8772,12 @@ fn feature_tools_with_constructor(
                         owner.or(sketch.map(|id| id.0)).ok_or_else(|| DocError::Invalid("a sketch-line axis needs its owning sketch".into()))?;
                     let solved =
                         st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
-                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)?
+                    let solved = if sketch.is_some_and(|id| id.0 == owner) {
+                        constructor_profile_in_frame(doc, solved, f)?
+                    } else {
+                        sketch_in_feature_frame(doc, solved, f.component)?
+                    };
+                    sketch_line_world(&solved, curve)?
                 }
                 Some(AxisRef::World { axis }) => {
                     let direction = match axis.to_ascii_uppercase().as_str() {
@@ -8786,7 +8791,7 @@ fn feature_tools_with_constructor(
                 Some(AxisRef::SketchAxis { axis }) => {
                     let solved =
                         sketch.and_then(|id| st.sketch(id.0)).ok_or_else(|| DocError::Invalid("a sketch axis needs its owning sketch".into()))?;
-                    let solved = sketch_in_feature_frame(doc, solved, f.component)?;
+                    let solved = constructor_profile_in_frame(doc, solved, f)?;
                     let direction = match axis.as_str() {
                         "x" => solved.plane.x,
                         "y" => solved.plane.y,
@@ -8817,7 +8822,7 @@ fn feature_tools_with_constructor(
             }
             if let Some(sk) = sketch {
                 let stored = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
-                let ss = sketch_in_feature_frame(doc, stored, f.component)?;
+                let ss = constructor_profile_in_frame(doc, stored, f)?;
                 let regions = select_profiles(&ss, profiles)?;
                 if regions.iter().any(|r| !r.holes.is_empty()) {
                     return Err(DocError::Invalid("a coil from a sketch takes a profile without holes".into()));

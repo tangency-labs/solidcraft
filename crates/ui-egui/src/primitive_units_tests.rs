@@ -523,6 +523,38 @@ fn editing_a_coil_keeps_its_explicit_world_axis_and_saved_base() {
 }
 
 #[test]
+fn editing_a_coil_keeps_a_saved_sketch_coordinate_axis() {
+    use solidcraft_engine::doc::{AxisRef, FeatureKind};
+
+    for (axis, world) in [("x", "Y"), ("y", "Z")] {
+        let mut h = design("mm");
+        let sketch = h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,2],"p1":[12,4]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let id = h.app.run("solid.coil", json!({"sketch":sketch,"axis":world,"revolutions":1,"pitch":8})).unwrap()["feature"].as_u64().unwrap();
+        match &mut h.app.session.doc_mut().feature_mut(id).unwrap().kind {
+            FeatureKind::Coil { axis_ref, .. } => *axis_ref = Some(AxisRef::SketchAxis { axis: axis.into() }),
+            other => panic!("expected a coil: {other:?}"),
+        }
+        h.app.session.refresh();
+
+        h.app.edit_feature(id);
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[1].items, vec![solidcraft_engine::Sel::Axis { name: axis.into() }]);
+        let commands = apply_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["params"]["axis"], json!({"type":"sketch_axis","axis":axis}));
+        type_into(&mut h, "pitch", "10");
+        ok(&mut h);
+        assert!(matches!(
+            &h.app.session.doc.feature(id).unwrap().kind,
+            FeatureKind::Coil { axis_ref: Some(AxisRef::SketchAxis { axis: stored }), pitch, .. }
+            if stored == axis && pitch.as_str() == "10"
+        ));
+    }
+}
+
+#[test]
 fn editing_a_coil_keeps_its_sketch_axis_when_the_profile_owner_changes() {
     use solidcraft_engine::Sel;
 

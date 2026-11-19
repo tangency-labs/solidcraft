@@ -7104,12 +7104,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split) && k == "split_tool_mode" {
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
+                continue;
+            }
+            // Keep the primitive section in the dialog while a sketch supplies the profile.
+            if coil_profile && matches!(k.as_str(), "diameter" | "section_size" | "section" | "section_position" | "start_angle") {
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -8535,6 +8540,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     _ => axis_reference_pick(s, reference, profile_sketch),
                 };
                 let (axis, pick) = match (reference, pick) {
+                    (AxisRef::SketchAxis { .. }, pick) => (serde_json::to_value(reference).ok()?, pick),
                     (AxisRef::SketchLine { curve, sketch }, pick) => {
                         // A deleted line leaves the field empty so a new pick can replace the saved reference.
                         let axis = match sketch {

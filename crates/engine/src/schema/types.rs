@@ -318,7 +318,7 @@ impl JsonSchema for CoilAxis {
         let reference = generator.subschema_for::<RevolveAxis>();
         let point = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
             "anyOf": [direction, {
                 "type": "object",
                 "properties": {
@@ -1627,6 +1627,10 @@ const REVOLVE_AXIS_MESSAGE: &str =
 /// What `features::axis_param` finds wrong with an object axis that isn't an edge or face of the
 /// model, before it looks anything up in the design.
 fn revolve_axis_object_problem(o: &Value) -> Option<String> {
+    if o.get("type").and_then(Value::as_str) == Some("sketch_axis") {
+        let ok = o.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "x" | "y"));
+        return (!ok).then(|| whole("sketch axis requires `axis` to be x or y"));
+    }
     if o.get("type").and_then(Value::as_str) == Some("world") {
         let ok = o.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"));
         return (!ok).then(|| whole("world axis requires `axis` to be X, Y or Z"));
@@ -1648,8 +1652,9 @@ fn revolve_axis_object_problem(o: &Value) -> Option<String> {
 }
 
 /// Revolve's `axis`, as `features::axis_param` reads it before it looks anything up: a sketch
-/// line's id or name, `x` or `y`, X, Y or Z, a construction axis's name (any text), `{type: "world",
-/// axis}`, `{sketch?, curve}` (a line of another sketch, #6548), `{origin?, dir}`, or an edge or
+/// line's id or name, `x` or `y` (also as `{type: "sketch_axis", axis}`), X, Y or Z, a
+/// construction axis's name (any text), `{type: "world", axis}`, `{sketch?, curve}` (a line of
+/// another sketch, #6548), `{origin?, dir}`, or an edge or
 /// face of the model (as `construct::model_axis_param`
 /// reads it). Kept as given, for the handler. Whether a line or axis exists, and whether a picked
 /// edge or face gives an axis, is checked by the handler, which has the design.
@@ -1688,13 +1693,14 @@ impl JsonSchema for RevolveAxis {
             "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); {\"sketch\"?: an id or name, \"curve\": an id} — a line of that sketch, which the revolve follows when that sketch is edited; x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
             "anyOf": [
                 {"type": "string"},
+                {"type": "object", "properties": {"type": {"enum": ["sketch_axis"]}, "axis": {"enum": ["x", "y"]}}, "required": ["type", "axis"]},
                 {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"]},
                 {"type": "object", "properties": {"sketch": id_or_name, "curve": {"type": "string"}}, "required": ["curve"]},
                 {
                     "type": "object",
                     "properties": {"origin": origin, "dir": point},
                     "required": ["dir"],
-                    "not": {"anyOf": [model, {"required": ["type"], "properties": {"type": {"enum": ["world"]}}}]}
+                    "not": {"anyOf": [model, {"required": ["type"], "properties": {"type": {"enum": ["sketch_axis", "world"]}}}]}
                 },
                 picked_at("face", &point),
                 picked_at("edge", &point),

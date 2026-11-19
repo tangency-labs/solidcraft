@@ -1805,16 +1805,33 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
     let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    let primitive_options = [("section", json!("square")), ("section_position", json!("outside")), ("start_angle", json!("30 deg"))];
+    for (key, value) in &primitive_options {
+        d.extra.insert((*key).into(), value.clone());
+    }
+    d.extra.insert("clockwise".into(), json!(true));
+    d.extra.insert("reversed".into(), json!(true));
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     let commands = apply_commands(&h.app, &d).unwrap();
     let (id, p) = &commands[0];
     assert_eq!(id, "solid.coil");
     assert_eq!(p["sketch"], json!(sketch));
     assert_eq!(p["profiles"], json!([0]));
-    assert!(p.get("diameter").is_none(), "{p}");
-    assert!(p.get("section_size").is_none(), "{p}");
+    for key in ["diameter", "section_size", "section", "section_position", "start_angle"] {
+        assert!(p.get(key).is_none(), "{key}: {p}");
+    }
     assert!(p.get("revolutions").is_some() && p.get("pitch").is_some(), "{p}");
     assert!(p.get("operation").is_some(), "{p}");
+    assert_eq!((p["clockwise"].as_bool(), p["reversed"].as_bool()), (Some(true), Some(true)));
+
+    d.inputs[0].items.clear();
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let p = &commands[0].1;
+    assert!(p.get("sketch").is_none(), "{p}");
+    assert!(p.get("diameter").is_some() && p.get("section_size").is_some(), "{p}");
+    for (key, value) in primitive_options {
+        assert_eq!(p[key], value);
+    }
 }
 
 /// The Revolutions field steps by whole turns like the other counts (#7481).
