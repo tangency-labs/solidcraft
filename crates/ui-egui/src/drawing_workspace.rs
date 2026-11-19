@@ -47,7 +47,8 @@ pub struct State {
     drawing_settings: Option<drawing_settings::Settings>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
-    delete_sheet: Option<(u64, u64, u64)>,
+    /// The sheet or drawing waiting on its delete Confirm: (document, drawing, row).
+    delete: Option<(u64, u64, MenuRow)>,
     first_sheet: Option<first_sheet::BlankSheet>,
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
@@ -97,7 +98,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.drawing_settings = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
-        app.drawing_workspace.delete_sheet = None;
+        app.drawing_workspace.delete = None;
         app.drawing_workspace.first_sheet = None;
         app.drawing_workspace.strip = None;
         app.drawing_workspace.settings = None;
@@ -631,7 +632,16 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
     }
     use ui_kit::Item;
     let (heading, items) = match menu.row {
-        MenuRow::Drawing => (&drawing.name, vec![Item::action(drawing_settings::COMMAND, app.tr("cmd.drawing_set"), "settings")]),
+        MenuRow::Drawing => {
+            // Off with the engine's own refusal (a sheet sketch open).
+            let refusal = solidcraft_engine::find_command("drawing.delete").and_then(|spec| spec.allowed(&app.session).err());
+            let items = vec![
+                Item::action(drawing_settings::COMMAND, app.tr("cmd.drawing_set"), "settings"),
+                Item::sep(),
+                Item::action("delete", app.tr("cmd.drawing_delete"), "delete").off_because(refusal.map(|why| crate::i18n::tr_diagnostic(&why))),
+            ];
+            (&drawing.name, items)
+        }
         MenuRow::Sheet(sheet_id) => {
             let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
             let items = vec![
@@ -666,6 +676,10 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
             })
         });
     if let Some(action) = popup.inner {
+        if action.id == "delete" {
+            app.drawing_workspace.delete = Some((document, drawing_id, menu.row));
+            return;
+        }
         let MenuRow::Sheet(sheet_id) = menu.row else {
             if action.id == drawing_settings::COMMAND {
                 start(app, drawing_settings::COMMAND);
@@ -686,7 +700,6 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     app.drawing_workspace.add_sheet = Some(form);
                 }
             }
-            "delete" => app.drawing_workspace.delete_sheet = Some((document, drawing_id, sheet_id)),
             _ => {}
         }
         return;
@@ -910,7 +923,7 @@ pub fn chrome(app: &mut SolveApp, ui: &mut egui::Ui, domain: Rect) {
 pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
     first_sheet::show_picker(app, ctx);
     show_sheet_menu(app, ctx);
-    show_delete_sheet(app, ctx);
+    show_delete(app, ctx);
     drawing_settings::show(app, ctx);
     if active(app)
         && let Some(form) = app.drawing_workspace.add_sheet.take()
@@ -919,32 +932,54 @@ pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-fn show_delete_sheet(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(pending @ (document, drawing_id, sheet_id)) = app.drawing_workspace.delete_sheet.take() else { return };
+/// The Confirm before a sheet or the whole drawing is deleted: one pending delete for either row.
+fn show_delete(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(pending @ (document, drawing_id, row)) = app.drawing_workspace.delete.take() else { return };
     if !active(app) || app.session.uid != document {
         return;
     }
-    let Ok(drawing) = app.session.drawing("drawing.inspect") else { return };
-    if drawing.id != drawing_id || drawing.sheets.len() <= 1 {
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return };
+    if drawing.id != drawing_id {
         return;
     }
-    let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
-    let label = app.tr("cmd.drawing_sheet_delete");
-    let message = solidcraft_ui_text::format("ui.drawing_sheets.delete_confirm", &[("name", &sheet.name)]);
-    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique(("drawing_delete_sheet", pending)), "delete", label)
+    let encode = solidcraft_engine::doc::ids::encode;
+    let (label, message, command, params) = match row {
+        MenuRow::Drawing => (
+            "cmd.drawing_delete",
+            solidcraft_ui_text::format("ui.drawing_browser.delete_confirm", &[("name", &drawing.name)]),
+            "drawing.delete",
+            serde_json::json!({"drawing": encode(drawing_id)}),
+        ),
+        MenuRow::Sheet(sheet_id) => {
+            let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id).filter(|_| drawing.sheets.len() > 1) else { return };
+            (
+                "cmd.drawing_sheet_delete",
+                solidcraft_ui_text::format("ui.drawing_sheets.delete_confirm", &[("name", &sheet.name)]),
+                "drawing.sheet.delete",
+                serde_json::json!({"sheet": encode(sheet_id), "contents": "delete"}),
+            )
+        }
+    };
+    let label = app.tr(label);
+    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique(("drawing_delete", pending)), "delete", label)
         .tone(ui_kit::Tone::Danger)
         .actions(label, app.tr("ui.cancel"), None)
         .show(ctx, true, |ui| {
             ui.label(message);
         });
     if answer == ui_kit::Action::Ok {
-        if let Err(error) =
-            app.run("drawing.sheet.delete", serde_json::json!({"sheet":solidcraft_engine::doc::ids::encode(sheet_id),"contents":"delete"}))
-        {
+        let whole = row == MenuRow::Drawing;
+        if whole {
+            // The drawing's panels and drafts go with it.
+            close_panel(app);
+        }
+        // Nothing else opens after a drawing's delete: the page that makes one shows, and Design's
+        // undo brings the drawing back.
+        if let Err(error) = app.run(command, params) {
             app.set_status(error, true);
         }
     } else if !closed && answer != ui_kit::Action::Cancel {
-        app.drawing_workspace.delete_sheet = Some(pending);
+        app.drawing_workspace.delete = Some(pending);
     }
 }
 
@@ -2175,5 +2210,67 @@ mod tests {
         assert!(offered(&h), "in Drawing with a drawing open");
         enter(&mut h.app, false).unwrap();
         assert!(!offered(&h), "not once Drawing is left");
+    }
+
+    /// Right-clicks the Browser's drawing row and picks Delete Drawing, so its Confirm shows.
+    fn ask_to_delete_the_drawing(h: &mut Harness, drawing: u64) {
+        let row = format!("drawing:browser:{}", solidcraft_engine::doc::ids::encode(drawing));
+        h.step(&serde_json::json!({"click":{"handle":row},"button":"right"})).unwrap();
+        h.frames(3);
+        h.step(&serde_json::json!({"widget":"Delete Drawing"})).unwrap();
+        h.frames(3);
+    }
+
+    /// Delete Drawing on the Browser's drawing row asks first, then deletes the whole drawing as one
+    /// step of the model and closes its panels. The page that starts a drawing shows. Design's
+    /// Ctrl+Z brings the same drawing back, and entering Drawing opens it with no new step.
+    #[test]
+    fn browser_drawing_menu_deletes_the_open_drawing_after_confirmation() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let drawing = the_drawing(&h);
+        let steps = h.app.session.undo.len();
+        assert!(start(&mut h.app, "drawing.sheet.set"));
+        h.frames(2);
+        ask_to_delete_the_drawing(&mut h, drawing.id);
+        assert!(h.widget("Delete Bracket and all its sheets?").is_some(), "the Confirm names the drawing");
+        assert!(std::sync::Arc::ptr_eq(&the_drawing(&h), &drawing), "nothing is deleted before the Confirm");
+
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.session.doc.drawings.is_empty());
+        assert_eq!(h.app.session.open_drawing, None);
+        assert_eq!(h.app.session.undo.len(), steps + 1, "one step of the model");
+        assert!(!h.app.drawing_workspace.settings_open, "the drawing's panels close with it");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_some(), "the page that starts a drawing shows");
+
+        // With no drawing open, Drawing's own undo does nothing; the model's is Design's.
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.doc.drawings.len(), 1, "Design's Ctrl+Z undoes the delete");
+        enter(&mut h.app, true).unwrap();
+        h.frames(3);
+        assert!(std::sync::Arc::ptr_eq(&the_drawing(&h), &drawing), "the same drawing is back, and open");
+        assert_eq!(h.app.session.undo.len(), steps, "the undo took its one step and opening the drawing added none");
+        assert_eq!(active_sheet(&h.app), Some(drawing.sheets[0].id));
+    }
+
+    /// Cancel in Delete Drawing's Confirm leaves the design, its steps and the open drawing as
+    /// they were.
+    #[test]
+    fn cancelling_delete_drawing_changes_nothing() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let (doc, steps, open) = (h.app.session.doc.clone(), h.app.session.undo.len(), h.app.session.open_drawing);
+        let drawing = the_drawing(&h).id;
+        ask_to_delete_the_drawing(&mut h, drawing);
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        h.frames(3);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.open_drawing), (steps, open));
     }
 }
