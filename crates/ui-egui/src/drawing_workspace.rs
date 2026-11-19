@@ -327,6 +327,34 @@ pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> 
     true
 }
 
+/// A double-click on a text cell of the sheet's title block edits what the cell shows, where it
+/// is, in the box a dimension's or a note's text is typed in (true: the box opened at `at`).
+/// `point` is the pointer on paper. A cell that shows a logo or the projection symbol has no text.
+pub(crate) fn edit_title_cell(app: &mut SolveApp, sheet: u64, point: Vec2, at: egui::Pos2) -> bool {
+    use solidcraft_engine::doc::ids::encode;
+    use solidcraft_engine::geom::title_block::CellKind;
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return false };
+    let Some(record) = drawing.sheets.iter().find(|record| record.id == sheet) else { return false };
+    let (Some(block), Ok(Some(placed))) = (&record.title_block, record.title_block_layout()) else { return false };
+    let Some(cell) = block.cells.iter().zip(&placed.cells).find(|(_, placed)| placed.rect.contains(point)).map(|(cell, _)| cell) else {
+        return false;
+    };
+    if !matches!(cell.kind, CellKind::Text(_)) {
+        return false;
+    }
+    let Ok(read) = app.run("drawing.inspect", serde_json::json!({})) else { return false };
+    let text = read["sheets"]
+        .as_array()
+        .and_then(|sheets| sheets.iter().find(|s| s["id"].as_str() == Some(encode(sheet).as_str())))
+        .and_then(|s| s["title_block_cells"].as_array()?.iter().find(|c| c["name"].as_str() == Some(cell.name.as_str())))
+        .and_then(|c| c["text"].as_str().map(str::to_owned));
+    let Some(text) = text.filter(|text| !text.contains('\n')) else { return false };
+    let title = cell.label.as_ref().map_or(cell.name.as_str(), |label| label.text.as_str()).to_owned();
+    close_panel(app);
+    crate::dim_view::edit_sheet_text(crate::dim_view::SheetText::TitleCell { sheet, cell: cell.name.clone() }, &title, text, at);
+    true
+}
+
 pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
     let tool = match kind {
         "view" => Tool::Edit(Some(object)),
