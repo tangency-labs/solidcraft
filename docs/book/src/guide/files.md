@@ -22,6 +22,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
+| Airfoil coordinates (`.dat`, Selig or Lednicer) | into a sketch, as one spline at the chord you set | |
 | PNG, JPEG | canvases and decals | |
 
 **File → Export GLB…** (`file.export` with a `.glb` path) writes one binary glTF file for web viewers,
@@ -214,11 +215,55 @@ retain world coordinates. A lost cross-component association refreshed by an old
 need an explicit relink or refresh when its source returns. Loading never guesses a numerical
 correction. Association records, coordinate arrays and placements are bounded and checked.
 
+## Airfoil coordinate files
+
+Wing sections are published as plain-text coordinate files (`.dat`): a name line, then `x y`
+pairs with the chord running from 0 to 1, in one of two layouts. **Selig** files hold one loop from
+the trailing edge over the upper side to the leading edge and back; **Lednicer** files give the two
+point counts, then the upper and the lower side, each from the leading edge. `sketch.insert_airfoil`
+reads either, told apart by the content (`format` overrides it), and draws the section into a
+sketch as one fit point spline through every point of the file, scaled to `chord` in millimetres.
+The spline is not closed round: the trailing edge stays sharp, and when the file leaves it open a
+straight line closes the gap, so the sketch has one profile to extrude or loft. `pivot` names the
+share of the chord that `at` places and `angle` turns about (0.25 for the quarter-chord line),
+`flip` mirrors the section across its chord line, and `tolerance` says how close two points must be
+to become one. Real files vary, and the reader takes what they do (CRLF, `#` comments, counts
+written as `61.0`, a leading edge written twice, an `x` a hair above 1); what it can't read it
+refuses with the file's name and line, and never reads a placeholder as 0.
+
+The reply says what came in: the name, the layout, the point count, whether the trailing edge is
+open or closed and its gap, how far at most a merged point is from the curve (0 unless points
+merged within the tolerance), and how far at most the spline bows from the straight lines between
+the file points, which shows an overshoot at the nose as a number. A sketch per section and a loft between them make a
+wing. `angle` turns counter-clockwise in the sketch plane, so on the planes below, whose sketch `y`
+points up (+Z), a positive angle lowers the leading edge: the usual washout at the tip.
+
+```json
+{"commands": [
+  {"command": "sketch.insert_airfoil", "params": {"path": "mh45.dat", "chord": 180, "pivot": 0.25, "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Root"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sketch.insert_airfoil", "params": {"path": "mh45.dat", "chord": 120, "pivot": 0.25, "angle": 2, "plane": {"origin": [0, 400, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Tip"}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.loft", "params": {"sections": [{"sketch": "Root"}, {"sketch": "Tip"}], "body_name": "Wing"}}
+]}
+```
+
+## Opening a file while SolidCraft runs
+
+Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
+running opens it in that window, as File > Open does, and no second app starts. The two launches
+talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
+nothing listens on the network, and only file paths are sent. If the running window does not answer
+within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
+a separate app.
+
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files
-up to **256 MB**. A larger file is refused before it is read, and the message says how to raise
-the limit. In the desktop app you can raise both:
+up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, XYZ, PTS) follow the
+limit for import files: a point cloud file is read up to 1 GB, and more when that limit is raised.
+A larger file is refused before it is read, and the message says how to raise the limit. In the
+desktop app you can raise both:
 
 - **Preferences › General › Largest file to open** sets each limit in MB, from its default up to
   16 GB (16384 MB). It is kept between runs; Restore page defaults on the General page puts back 512 MB
@@ -234,9 +279,10 @@ Before you raise them:
 - **Memory:** a file is read whole, and what is built from it is held in memory beside it. Expect
   several times the file's size in RAM, more for finely detailed parts, and a long open and a slow
   view for an assembly with hundreds of thousands of faces.
-- **Saving:** a design keeps the text of a STEP import, compressed, and the design limit applies
-  to the saved file. An import whose compressed text doesn't fit in a design file is refused when
-  it is imported, so it never opens and then fails to save; raise the design file limit too, or
+- **Saving:** a design keeps the text of a STEP import, compressed. A design that grows past the
+  design limit is still saved (and autosaved), and the save says that the file is over the limit and
+  how to raise it to open the file again. An import whose compressed text doesn't fit in a design file is refused when
+  it is imported; raise the design file limit too, or
   open the file with `--max-file-size`, which raises both. Opening that design again needs the
   same limits.
 - **Web app:** the browser version keeps 512 MB and 256 MB: a browser tab can't hold larger files.

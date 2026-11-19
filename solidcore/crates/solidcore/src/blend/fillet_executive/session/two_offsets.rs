@@ -179,8 +179,8 @@ impl FilletSession<'_> {
     /// entry per edge. The offsets follow [`Self::blend_edgeuse`]'s surface order.
     ///
     /// Resets the same execution switches and preparation bookkeeping as
-    /// `SetFilletParameters` (including disabling global merge), and honors
-    /// `fixes.fillet_corner_per_vertex_fan`. Solvers use four times the edge tolerance for
+    /// `SetFilletParameters` (including disabling global merge), and splits the filleted
+    /// edges' vertices by fans as it does. Solvers use four times the edge tolerance for
     /// approximation, 20 degrees for angle and 10 degrees for tangency. A shared
     /// generator is retained before loading; per-edge generators are retained
     /// after loading each solver. Initialization is set only when all loads
@@ -213,18 +213,16 @@ impl FilletSession<'_> {
 
         self.executive.initialized = false;
         self.executive.reset_parameter_state();
-        if k.fixes.fillet_corner_per_vertex_fan {
-            let objects: Vec<_> = edges
-                .iter()
-                .map(|&id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)))
-                .collect();
-            let points = self.objects.parameters_split_blended_vertex_fans(
-                k,
-                FilletObject::Body(FilletBody::Target),
-                &objects,
-            )?;
-            self.executive.fan_split_points.extend(points);
-        }
+        let objects: Vec<_> = edges
+            .iter()
+            .map(|&id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)))
+            .collect();
+        let points = self.objects.parameters_split_blended_vertex_fans(
+            k,
+            FilletObject::Body(FilletBody::Target),
+            &objects,
+        )?;
+        self.executive.fan_split_points.extend(points);
 
         let shared = if generators.len() == 1 {
             Some(self.add_surface_generator(value(generators, 0)?)?)
@@ -262,7 +260,7 @@ impl FilletSession<'_> {
     /// wedge of its edges between planes, else at the narrowest of its wedges at which no
     /// station folds ([`unfolded_wedge`]), so their rails meet where they run on into each
     /// other. Then prepared as [`Self::prepare_per_edge_two_offsets`] with the linear
-    /// section, and the solver keeps the sizes: with `fixes.fillet_round_as_definition` the
+    /// section, and the solver keeps the sizes: the
     /// chamfer's surface is its definition, the
     /// chord of order 0, and keeps them too. A distance is along the edge's blend edge
     /// use's face (support 1) or its radial mate's (support 2); an angle is to support 1.

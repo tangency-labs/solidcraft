@@ -420,7 +420,7 @@ pub(super) struct EdgeCap {
     pub(super) trim_curves: Vec<Curve>,
     /// `sTrimOrientations`.
     pub(super) trim_orientations: Vec<OrientType>,
-    /// Not upstream (`bClosingWall`, opt-in `Kernel::fixes.local_operation_step_walls`):
+    /// Not upstream (`bClosingWall`, the WR-530 addendum's step walls):
     /// the cap is a step wall, kept out of the face extensions.
     pub(super) closing_wall: bool,
 }
@@ -1247,6 +1247,12 @@ impl CreatorExecutive<Handle> for Executive<'_> {
 
     fn has_collapsed_faces(&self) -> bool {
         !self.inner.collapsed_faces.is_empty()
+    }
+
+    fn note_inverted_face(&mut self, offset_face: Handle) {
+        if let Object::Topology(Arena::Offset, EntityRef::Face(f)) = offset_face.object {
+            self.inner.inverted_faces.insert(f);
+        }
     }
 
     fn is_collapsed_face(&self, face: Handle) -> bool {

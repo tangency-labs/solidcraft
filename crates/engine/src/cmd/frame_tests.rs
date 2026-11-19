@@ -241,6 +241,23 @@ fn members_follow_every_line_of_a_rectangle() {
     assert!(bs.iter().any(|b| near3(b.2, [580.0, 0.0, -20.0]) && near3(b.3, [620.0, 400.0, 20.0])), "{bs:?}");
 }
 
+/// A member's body name counts characters, as the refusal says: a hundred `ł` (200 bytes) is
+/// taken, 129 characters are not.
+#[test]
+fn member_body_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let long = "ł".repeat(100);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "body_name": long}));
+    assert_eq!(bodies(&mut s)[0].0, long);
+    let error = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "body_name": "ł".repeat(129)})).unwrap_err().to_string();
+    assert!(error.contains("1…128 characters"), "{error}");
+    // So does each name in `names`.
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "names": {"l1": long}}));
+    let error = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "names": {"l1": "ł".repeat(129)}})).unwrap_err().to_string();
+    assert!(error.contains("1…128 characters"), "{error}");
+}
+
 #[test]
 fn members_are_made_of_a_standard_size_by_name() {
     let mut s = Session::default();

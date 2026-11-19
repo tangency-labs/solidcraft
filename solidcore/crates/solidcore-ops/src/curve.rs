@@ -1,7 +1,7 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
 //! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
-//! curves joined end to end, the point of a curve nearest a given point, and a planar curve
+//! curves joined end to end, the point of a curve nearest a given point or a ray, and a planar curve
 //! offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
 //! [`solidcore::query::deviation::distance_deviation`]), and a curve on a sheet offset along its
 //! surface ([`offset_on_surface`]: the kernel's
@@ -27,6 +27,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::from_parameters::{from_parameters, record_parameter, EdgeCurve};
 use solidcore::geom::certified::Verdict;
 use solidcore::geom::global_solver::SolverOperation;
+use solidcore::intersect::api_intersectors;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -45,6 +46,67 @@ use crate::curve_knots::{net_of, nurb_of, record_of};
 use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
+
+/// What an imported cubic Bezier curve on `[0, 1]` stands as in the model: its chord, a curve,
+/// or a curve the B-spline curve check refuses.
+pub use solidcore::curve::hermite_curve::CubicStanding;
+
+impl crate::session::Answer for CubicStanding {}
+
+/// [`CubicStanding`] of the cubic Bezier curve through `points` on `[0, 1]`, the curve a profile
+/// cubic is built as: its chord where the whole curve (bounded by the larger distance of its
+/// inner control points from the finite chord, the convex hull property) lies within the model's
+/// zone tolerance of it, else whether the B-spline curve check passes it
+/// ([`solidcore::curve::hermite_curve::classify_cubic`]).
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound; those of
+/// the session.
+pub fn classify_cubic(points: [[f64; 3]; 4]) -> Result<CubicStanding> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    run("classify_cubic", |k| {
+        solidcore::curve::hermite_curve::classify_cubic(k, points.map(point))
+    })
+}
+
+/// One piece of an imported cubic Bezier curve ([`cubic_pieces`]): the cubic Bezier curve through
+/// `points` on `[0, 1]` and what it stands as.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicPiece {
+    /// Its four control points.
+    pub points: [[f64; 3]; 4],
+    /// What it stands as in the model.
+    pub standing: CubicStanding,
+}
+
+impl crate::session::Answer for Vec<CubicPiece> {}
+
+/// The cubic Bezier curve through `points` on `[0, 1]` as pieces the model can keep, in order:
+/// the whole curve unless the B-spline curve check refuses it, else the same curve split exactly
+/// (de Casteljau) into pieces that each pass the check or lie within the zone tolerance of their
+/// chord, or the whole curve, refused, when no such split exists
+/// ([`solidcore::curve::hermite_curve::cubic_pieces`]).
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound; those of
+/// the session.
+pub fn cubic_pieces(points: [[f64; 3]; 4]) -> Result<Vec<CubicPiece>> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    run("cubic_pieces", |k| {
+        let pieces = solidcore::curve::hermite_curve::cubic_pieces(k, points.map(point))?;
+        Ok(pieces
+            .into_iter()
+            .map(|p| CubicPiece {
+                points: p.points.map(|q| [q.x, q.y, q.z]),
+                standing: p.standing,
+            })
+            .collect())
+    })
+}
 
 /// Which end of a curve a blend meets, and how ([`blend_curve`]).
 pub use solidcore::curve::blend::{Contact, End};
@@ -130,20 +192,24 @@ fn periodic_twin(knots: &[f64], points: &[[f64; 3]], index: usize) -> Option<usi
 /// and ±1 on a spline's points). Reflections, non-uniform scales and shears are maps like any
 /// other. A spline or a rational spline, clamped or closed (a closed curve's repeated points are
 /// carried alike, so it stays closed).
+/// Lines and polylines keep their kinds, with their points carried by the kernel. Circles and
+/// ellipses become exact rational quadratics through [`from_parameters`], then follow the same
+/// control-point map. Their full-turn knot range is `[0, 360]`, the kernel conic's parameter,
+/// not the record's angle in radians.
 ///
 /// # Errors
 /// [`Error::Argument`], before the curve is read, for a matrix the kernel does not prove regular
 /// ([`solidcore::Transform::is_regular`] at [`REGULAR_RATIO`]: an entry not finite, a fourth
 /// column that is not `(0, 0, 0, 1)`, a smallest scale not proved above the ratio of the
-/// largest); [`Error::Argument`] for another kind of curve, one the record refuses, or an image
-/// the record refuses (a coordinate carried past what a double holds); the kernel's status
-/// otherwise.
+/// largest); [`Error::Argument`] for a traced [`Curve::SurfaceIntersection`], one the record
+/// refuses, a conic with non-unit or non-square frame axes, or an image the record refuses
+/// (out-of-range coordinates or a collapsed line or polyline segment); the kernel's status otherwise.
 pub fn transform(curve: &Curve, matrix: &[[f64; 4]; 4]) -> Result<Curve> {
     let map = solidcore::Transform { m: *matrix };
     if map.is_regular(REGULAR_RATIO) != Verdict::Yes {
         return Err(Error::Argument);
     }
-    let mut nurb = net_of(curve)?;
+    check_curve(curve, &mut Budget::input()).map_err(|_| Error::Argument)?;
     // The kernel's matrix acts on a column (`x' = r00 x + r01 y + r02 z + r03`): the record's
     // row-vector matrix, its entries moved to their transposed places.
     let [[a00, a01, a02, a03], [a10, a11, a12, a13], [a20, a21, a22, a23], [a30, a31, a32, a33]] =
@@ -154,7 +220,46 @@ pub fn transform(curve: &Curve, matrix: &[[f64; 4]; 4]) -> Result<Curve> {
         vec![a02, a12, a22, a32],
         vec![a03, a13, a23, a33],
     ];
-    run("curve::transform", |_| {
+    run("curve::transform", |k| {
+        let polygon = match curve {
+            Curve::Line { start, end } => {
+                let mut points = [*start, *end];
+                map.transform_points(&mut points);
+                let [start, end] = points;
+                Some(Curve::Line { start, end })
+            }
+            Curve::Polyline { points } => {
+                let mut points = points.clone();
+                map.transform_points(&mut points);
+                Some(Curve::Polyline { points })
+            }
+            _ => None,
+        };
+        if let Some(image) = polygon {
+            return Ok(check_curve(&image, &mut Budget::input())
+                .map(|()| image)
+                .map_err(|_| Error::Argument));
+        }
+        let mut nurb = match curve {
+            Curve::Circle { .. } | Curve::Ellipse { .. } => {
+                let Ok(record) = solidcore_convert::curve(curve) else {
+                    return Ok(Err(Error::Argument));
+                };
+                let made = match from_parameters(k, &record, [0.0, std::f64::consts::TAU]) {
+                    Ok(made) => made,
+                    Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                    Err(e) => return Err(e),
+                };
+                let Some(nurb) = made.curve.b_spline_base().and_then(BSplineCurve::gw_nurb) else {
+                    return Ok(Err(Error::Argument));
+                };
+                nurb.clone()
+            }
+            _ => match net_of(curve) {
+                Ok(nurb) => nurb,
+                Err(e) => return Ok(Err(e)),
+            },
+        };
         let columns = RealMatrix::from_rows(3, 3, rows, MatrixType::Full, 3)?;
         nurb.transform(&columns)?;
         Ok(record_of(&nurb))
@@ -494,7 +599,8 @@ pub enum CurveExtension {
     /// The same knots and control points, the control polygon stretched along itself from the
     /// other end so each point keeps its share of it (the kernel's
     /// [`solidcore::nurbs::crv_basic::Curve::extend_keeping_proportion`]): the curve grows by the
-    /// length to the kernel's stop, its shape slides along the polygon.
+    /// length, its growth certified within `1e-7` of the growth asked, relatively, its shape slides along the polygon;
+    /// refused ([`Error::NotExact`]) where that is not certified.
     Proportion,
 }
 
@@ -510,7 +616,8 @@ pub enum CurveExtension {
 /// clamped spline or rational spline, a closed one (a periodic curve, or one whose ends meet
 /// to the kernel's model tolerance), or an extension the record cannot hold; the kernel's
 /// status otherwise (a natural extension of a rational curve whose weights leave the
-/// kernel's range).
+/// kernel's range); [`Error::NotExact`] for a proportional extension whose length is not
+/// certified.
 pub fn extend_curve(
     curve: &Curve,
     at: CurveEndAt,
@@ -539,6 +646,7 @@ pub fn extend_curve(
                     extended = match extended.extend_keeping_proportion(length, end) {
                         Ok((curve, _)) => curve,
                         Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                        Err(SolidError::ExtendRefused { .. }) => return Ok(Err(Error::NotExact)),
                         Err(e) => return Err(e),
                     };
                 }
@@ -831,7 +939,7 @@ pub fn crossings(
             Ok(m) => m,
             Err(e) => return Ok(Err(e)),
         };
-        let found = match solidcore::intersect::api_intersectors::curve_crossings(
+        let found = match api_intersectors::curve_crossings(
             k,
             &ka.curve,
             &ka.interval,
@@ -859,6 +967,115 @@ pub fn crossings(
     })?
 }
 
+/// The point of a free curve nearest a ray ([`closest_to_ray`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveRayPoint {
+    /// The curve's parameter there, the record's.
+    pub parameter: f64,
+    /// The curve's point there.
+    pub point: [f64; 3],
+    /// The ray's point nearest it.
+    pub on_ray: [f64; 3],
+    /// The distance between the two: the kernel solve's (not certified).
+    pub distance: f64,
+}
+
+/// The point of `curve` nearest the ray from `origin` along `direction`, over the record's own
+/// range (as [`closest_point`] takes it): a pick through the view lands on the curve drawn
+/// under the pointer in any view, where the curve point nearest one point of the ray does so
+/// only when that point is the nearest. The curve as the kernel's ([`from_parameters`]), the
+/// kernel's curve/ray solve ([`solidcore::query::curve::closest_point_to_ray`], the one an
+/// edge's pick uses) within `tolerance`, and its parameter as the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or ellipse).
+/// `None` where the solve finds no point.
+///
+/// # Errors
+/// [`Error::Argument`] for an origin or direction not finite or past the coordinate bound, a
+/// direction of no length, a tolerance not finite and positive, or a curve the record or the
+/// kernel's constructors refuse; the kernel's status otherwise.
+pub fn closest_to_ray(
+    curve: &Curve,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    tolerance: f64,
+) -> Result<Option<CurveRayPoint>> {
+    if !coord_ok(&origin) || !coord_ok(&direction) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::closest_to_ray", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let found = match solidcore::query::curve::closest_point_to_ray(
+            k,
+            &made.curve,
+            &made.interval,
+            point(origin),
+            point(direction),
+            tolerance,
+        ) {
+            Ok(found) => found,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        Ok(Ok(found.map(|f| CurveRayPoint {
+            parameter: record_parameter(&record, range, f.parameter, f.point),
+            point: [f.point.x, f.point.y, f.point.z],
+            on_ray: [f.on_ray.x, f.on_ray.y, f.on_ray.z],
+            distance: f.distance,
+        })))
+    })?
+}
+
+/// Isolated intersections of `curve` over the record's parameter `interval` with `plane`,
+/// in curve order and in the plane's local coordinates. The kernel solves the exact curve
+/// against the plane at its model tolerance; contacts at both interval endpoints count.
+/// A curve lying in the plane has no isolated intersections and gives an empty list.
+///
+/// # Errors
+/// [`Error::Argument`] for invalid curve data, a nonfinite or reversed interval, or a plane
+/// that is not finite and orthonormal; the kernel's status otherwise.
+pub fn plane_crossings(
+    curve: &Curve,
+    interval: [f64; 2],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<solidcore_record::Vec2>> {
+    if !interval.iter().all(|t| t.is_finite())
+        || ![plane.origin, plane.x, plane.y]
+            .iter()
+            .all(|p| coord_ok(&<[f64; 3]>::from(*p)))
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let frame = solidcore_convert::plane(plane);
+    run("curve::plane_crossings", |k| {
+        let made = match from_parameters(k, &record, interval) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let found =
+            match api_intersectors::curve_plane_crossings(k, &made.curve, &made.interval, &frame) {
+                Ok(found) => found,
+                Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                Err(e) => return Err(e),
+            };
+        Ok(Ok(found
+            .into_iter()
+            .map(|p| solidcore_record::Vec2::new(p.x, p.y))
+            .collect()))
+    })?
+}
+
 pub use solidcore::curve::stretch::Stretch;
 
 /// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
@@ -867,7 +1084,9 @@ pub use solidcore::curve::stretch::Stretch;
 /// it over its length from the pivot to the handle (the pivot stays, the handle moves by `delta`
 /// whole); with [`Stretch::None`] each by `delta`. With `plane` (as
 /// [`crate::curve_plane::plane_of`] gives it), `delta` is first taken into the plane, so a
-/// planar curve stays planar. A closed periodic spline's repeated points move with their twins.
+/// planar curve stays planar. A closed periodic spline's repeated points are one editable point:
+/// picks, pivot and handle use its first occurrence along the stored control polygon, and all
+/// copies move together. Picking more than one copy does not change the stretch.
 ///
 /// # Errors
 /// [`Error::Argument`] for another kind of curve than a spline or polyline, an index past its
@@ -886,11 +1105,32 @@ pub fn stretch_cvs(
     let (Curve::Spline { points, .. } | Curve::Polyline { points }) = curve else {
         return Err(Error::Argument);
     };
+    let period = match curve {
+        Curve::Spline { knots, points } => periodic_twin(knots, points, 0),
+        _ => None,
+    };
+    let canonical = |index: usize| -> Result<usize> {
+        if index >= points.len() {
+            return Err(Error::Argument);
+        }
+        match period {
+            Some(period) => index.checked_rem(period).ok_or(Error::Argument),
+            None => Ok(index),
+        }
+    };
+    let pivot = canonical(pivot)?;
+    let handle = canonical(handle)?;
+    let mut picked: Vec<usize> = picked
+        .iter()
+        .map(|&i| canonical(i))
+        .collect::<Result<_>>()?;
+    picked.sort_unstable();
+    picked.dedup();
     let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let given: Vec<Point3> = points.iter().map(|p| v(*p)).collect();
     let stretched = solidcore::curve::stretch::stretch_points(
         &given,
-        picked,
+        &picked,
         pivot,
         handle,
         v(delta),
@@ -899,7 +1139,14 @@ pub fn stretch_cvs(
     )
     .map_err(|_| Error::Argument)?;
     let mut out = curve.clone();
-    for &i in picked {
+    let (Curve::Spline { points: moved, .. } | Curve::Polyline { points: moved }) = &mut out else {
+        return Err(Error::Argument);
+    };
+    for (i, point) in moved.iter_mut().enumerate() {
+        let i = canonical(i)?;
+        if picked.binary_search(&i).is_err() {
+            continue;
+        }
         let to = stretched
             .get(i)
             .map(|p| [p.x, p.y, p.z])
@@ -907,7 +1154,7 @@ pub fn stretch_cvs(
         if !coord_ok(&to) {
             return Err(Error::Argument);
         }
-        out = move_cv(&out, i, to)?;
+        *point = to;
     }
     Ok(out)
 }
@@ -918,12 +1165,95 @@ pub fn stretch_cvs(
 mod tests {
     use super::*;
 
+    #[test]
+    fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {
+        use solidcore_record::{Plane, Vec2, Vec3};
+
+        for (start, end, expected) in [
+            ([-1.0, -2.0, 0.0], [1.0, 0.0, 0.0], 1.0),
+            ([-1.0, 0.0, 0.0], [1.0, -2.0, 0.0], -1.0),
+            ([-1.0, -2.0, 0.0], [1.0, 2.0, 0.0], 0.0),
+        ] {
+            assert_eq!(
+                plane_crossings(&Curve::Line { start, end }, [0.0, 1.0], &Plane::XZ),
+                Ok(vec![Vec2::new(expected, 0.0)])
+            );
+        }
+        let line = Curve::Line {
+            start: [-1.0, -2.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        for interval in [[0.0, f64::NAN], [0.0, f64::INFINITY], [1.0, 0.0]] {
+            assert_eq!(
+                plane_crossings(&line, interval, &Plane::XZ),
+                Err(Error::Argument)
+            );
+        }
+        for plane in [
+            Plane {
+                origin: Vec3::new(f64::NAN, 0.0, 0.0),
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::ZERO,
+                ..Plane::XZ
+            },
+            Plane {
+                y: Vec3::X,
+                ..Plane::XZ
+            },
+            Plane {
+                x: Vec3::new(f64::INFINITY, 0.0, 0.0),
+                ..Plane::XZ
+            },
+        ] {
+            assert_eq!(
+                plane_crossings(&line, [0.0, 1.0], &plane),
+                Err(Error::Argument)
+            );
+        }
+        let invalid = Curve::Line {
+            start: [f64::NAN, 0.0, 0.0],
+            end: [1.0, 2.0, 0.0],
+        };
+        assert_eq!(
+            plane_crossings(&invalid, [0.0, 1.0], &Plane::XZ),
+            Err(Error::Argument)
+        );
+    }
+
     const SQUARE: [[f64; 3]; 4] = [
         [0.0, 0.0, 0.0],
         [10.0, 0.0, 0.0],
         [10.0, 10.0, 0.0],
         [0.0, 10.0, 0.0],
     ];
+
+    #[test]
+    fn a_cubic_is_its_chord_only_within_the_zone_tolerance() {
+        // Chord 10 along x; the zone tolerance is 1e-5.
+        let off = |y: f64| [[0., 0., 0.], [3., y, 0.], [7., 0., 0.], [10., 0., 0.]];
+        let class = |p| classify_cubic(p).unwrap();
+        assert_eq!(class(off(0.)), CubicStanding::Chord);
+        assert_eq!(class(off(0.9e-5)), CubicStanding::Chord);
+        assert_eq!(class(off(1.1e-5)), CubicStanding::Curve);
+        assert_eq!(class(off(2.)), CubicStanding::Curve);
+        // A point is its own chord.
+        assert_eq!(class([[1., 2., 3.]; 4]), CubicStanding::Chord);
+        // Inner control points almost on the start, 0.002 off a chord of 100: the speed
+        // there falls below the check's tolerance (#16190).
+        assert_eq!(
+            class([
+                [0., 0., 0.],
+                [0.001, 0.002, 0.],
+                [0.002, 0.001, 0.],
+                [0., 100., 0.]
+            ]),
+            CubicStanding::Refused
+        );
+        assert!(classify_cubic([[f64::NAN, 0., 0.]; 4]).is_err());
+        assert!(classify_cubic([[f64::INFINITY, 0., 0.]; 4]).is_err());
+    }
 
     #[test]
     fn a_cubic_through_four_points_is_clamped_on_its_end_points() {
@@ -1062,6 +1392,126 @@ mod tests {
     ];
 
     #[test]
+    fn a_record_line_and_polyline_follow_an_affine_map() {
+        // x' = 2x + y + 10, y' = -y + 20, z' = z + 30.
+        let map = [
+            [2.0, 0.0, 0.0, 0.0],
+            [1.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        let line = Curve::Line {
+            start: [1.0, 2.0, 3.0],
+            end: [4.0, 5.0, 6.0],
+        };
+        assert_eq!(
+            transform(&line, &map).unwrap(),
+            Curve::Line {
+                start: [14.0, 18.0, 33.0],
+                end: [23.0, 15.0, 36.0],
+            }
+        );
+        let polyline = Curve::Polyline {
+            points: vec![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-1.0, 0.0, 2.0]],
+        };
+        assert_eq!(
+            transform(&polyline, &map).unwrap(),
+            Curve::Polyline {
+                points: vec![[14.0, 18.0, 33.0], [23.0, 15.0, 36.0], [8.0, 20.0, 32.0]],
+            }
+        );
+    }
+
+    fn assert_quadratic_conic(image: Curve, poles: [[f64; 3]; 9]) {
+        let Curve::RationalSpline { knots, homogeneous } = image else {
+            panic!("an exact rational quadratic: {image:?}")
+        };
+        assert_eq!(
+            knots,
+            vec![0.0, 0.0, 0.0, 90.0, 90.0, 180.0, 180.0, 270.0, 270.0, 360.0, 360.0, 360.0]
+        );
+        assert_eq!(homogeneous.len(), poles.len());
+        for (i, (actual, expected)) in homogeneous.iter().zip(poles).enumerate() {
+            let weight = if i % 2 == 0 {
+                1.0
+            } else {
+                std::f64::consts::FRAC_1_SQRT_2
+            };
+            assert!((actual[3] - weight).abs() < 1e-14);
+            for (got, point) in actual.iter().zip(expected) {
+                assert!(
+                    (got - point * weight).abs() < 1e-12,
+                    "pole {i}: {actual:?}, {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_record_circle_translates_as_an_exact_rational_quadratic() {
+        let circle = Curve::Circle {
+            frame: solidcore_record::brep::Frame {
+                origin: [500.0, 100.0, 250.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 0.0, 1.0],
+            },
+            radius: 150.0,
+        };
+        let up = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 100.0, 1.0],
+        ];
+        assert_quadratic_conic(
+            transform(&circle, &up).unwrap(),
+            [
+                [650.0, 100.0, 350.0],
+                [650.0, 100.0, 500.0],
+                [500.0, 100.0, 500.0],
+                [350.0, 100.0, 500.0],
+                [350.0, 100.0, 350.0],
+                [350.0, 100.0, 200.0],
+                [500.0, 100.0, 200.0],
+                [650.0, 100.0, 200.0],
+                [650.0, 100.0, 350.0],
+            ],
+        );
+    }
+
+    #[test]
+    fn a_record_ellipse_keeps_its_exact_conic_under_shear_scale_and_reflection() {
+        let ellipse = Curve::Ellipse {
+            frame: solidcore_record::brep::Frame {
+                origin: [2.0, 3.0, 4.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+            },
+            radii: [3.0, 2.0],
+        };
+        let map = [
+            [2.0, 0.0, 0.0, 0.0],
+            [1.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        assert_quadratic_conic(
+            transform(&ellipse, &map).unwrap(),
+            [
+                [23.0, 17.0, 34.0],
+                [25.0, 15.0, 34.0],
+                [19.0, 15.0, 34.0],
+                [13.0, 15.0, 34.0],
+                [11.0, 17.0, 34.0],
+                [9.0, 19.0, 34.0],
+                [15.0, 19.0, 34.0],
+                [21.0, 19.0, 34.0],
+                [23.0, 17.0, 34.0],
+            ],
+        );
+    }
+
+    #[test]
     fn a_cubic_reflected_about_y_0_has_its_cvs_mirrored_exactly() {
         let wave = [
             [0.0, 1.0, 0.5],
@@ -1161,7 +1611,7 @@ mod tests {
     }
 
     #[test]
-    fn a_singular_matrix_or_another_curve_is_refused() {
+    fn a_singular_matrix_or_traced_intersection_is_refused() {
         let c = cv_curve(&SQUARE, 3).unwrap();
         let mut flat = MIRROR_Y;
         flat[1][1] = 0.0;
@@ -1172,11 +1622,98 @@ mod tests {
         let mut nan = MIRROR_Y;
         nan[3][0] = f64::NAN;
         assert_eq!(transform(&c, &nan), Err(Error::Argument));
+        let line = Curve::Polyline {
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+        };
+        let plane = solidcore_record::brep::Surface::Plane {
+            origin: [0.0; 3],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+        };
+        let traced = Curve::SurfaceIntersection {
+            surfaces: [Box::new(plane.clone()), Box::new(plane)],
+            leader: Box::new(line),
+            tolerance: 1e-5,
+        };
+        check_curve(&traced, &mut Budget::input()).unwrap();
+        assert_eq!(transform(&traced, &MIRROR_Y), Err(Error::Argument));
+    }
+
+    #[test]
+    fn transformed_record_curves_reject_bad_input_and_invalid_images() {
+        let frame = solidcore_record::brep::Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        };
+        for curve in [
+            Curve::Line {
+                start: [f64::NAN, 0.0, 0.0],
+                end: [1.0; 3],
+            },
+            Curve::Polyline { points: vec![] },
+            Curve::Polyline {
+                points: vec![[0.0; 3]; 2],
+            },
+            Curve::Circle {
+                frame: frame.clone(),
+                radius: -1.0,
+            },
+            Curve::Circle {
+                frame: solidcore_record::brep::Frame {
+                    x_axis: [2.0, 0.0, 0.0],
+                    ..frame.clone()
+                },
+                radius: 1.0,
+            },
+            Curve::Ellipse {
+                frame: solidcore_record::brep::Frame {
+                    y_axis: [1.0, 0.0, 0.0],
+                    ..frame.clone()
+                },
+                radii: [1.0, 2.0],
+            },
+        ] {
+            assert_eq!(
+                transform(&curve, &MIRROR_Y),
+                Err(Error::Argument),
+                "{curve:?}"
+            );
+        }
         let line = Curve::Line {
             start: [0.0; 3],
-            end: [1.0; 3],
+            end: [1e-6, 0.0, 0.0],
         };
-        assert_eq!(transform(&line, &MIRROR_Y), Err(Error::Argument));
+        let polyline = Curve::Polyline {
+            points: vec![[0.0; 3], [1e-6, 0.0, 0.0]],
+        };
+        let mut far = MIRROR_Y;
+        far[3][0] = 1e12;
+        // The matrix is regular, but translation rounds the distinct endpoints together.
+        for curve in [line, polyline] {
+            check_curve(&curve, &mut Budget::input()).unwrap();
+            assert_eq!(transform(&curve, &far), Err(Error::Argument));
+        }
+        far[3][0] = 2e12;
+        for curve in [
+            Curve::Line {
+                start: [0.0; 3],
+                end: [1.0; 3],
+            },
+            Curve::Polyline {
+                points: vec![[0.0; 3], [1.0; 3]],
+            },
+            Curve::Circle {
+                frame: frame.clone(),
+                radius: 1.0,
+            },
+            Curve::Ellipse {
+                frame,
+                radii: [1.0, 2.0],
+            },
+        ] {
+            assert_eq!(transform(&curve, &far), Err(Error::Argument));
+        }
     }
 
     /// The kernel's default approximation tolerance of a traced curve: half its zone tolerance

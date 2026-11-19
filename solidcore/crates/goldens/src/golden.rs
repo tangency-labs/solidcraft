@@ -433,11 +433,22 @@ pub fn check_unit(
     res
 }
 
-/// The golden a bless writes: `old` with every case this run produced replaced or added, and,
-/// for an unfiltered run, the cases it no longer produces dropped.
+/// The golden a bless writes: `old` with every case [`check_unit`] reported as changed
+/// replaced, every added case added, and, for an unfiltered run, the cases the run no longer
+/// produces dropped. A case the check found unchanged (its output agrees with its golden line
+/// under [`diff`]) keeps its old line byte for byte, so a blessed diff holds exactly the
+/// changed and added cases the check listed and no rounding noise.
 pub fn blessed(old: &Golden, res: &GoldenResult, filtered: bool) -> Golden {
     let mut out = if filtered { old.clone() } else { Golden::new() };
-    out.extend(res.now.iter().map(|(k, v)| (k.clone(), v.clone())));
+    let changed: std::collections::BTreeSet<&str> =
+        res.changed.iter().map(|(name, _)| name.as_str()).collect();
+    for (name, line) in &res.now {
+        let kept = old
+            .get(name)
+            .filter(|_| !changed.contains(name.as_str()))
+            .unwrap_or(line);
+        out.insert(name.clone(), kept.clone());
+    }
     out
 }
 
@@ -783,6 +794,86 @@ mod tests {
         assert!(same.passed(), "{same:?}");
         assert_eq!(same.cases(), 2);
         assert!(same.changed.is_empty() && same.added.is_empty() && same.removed.is_empty());
+    }
+
+    /// A unit whose case `a` produces `values` and whose cases `b` and `c` produce `[2.0]`.
+    struct Values(Vec<f64>);
+
+    impl UnitDiff for Values {
+        fn id(&self) -> &'static str {
+            "golden.values"
+        }
+        fn cases(&self, _ctx: &CaseContext) -> Result<Vec<crate::Case>, HarnessError> {
+            Ok(["a", "b", "c"]
+                .iter()
+                .map(|n| crate::Case {
+                    unit: self.id().into(),
+                    name: (*n).into(),
+                    source: crate::case::CaseSource::Inline,
+                    inputs: json!({}),
+                })
+                .collect())
+        }
+        fn run_rust(&self, case: &crate::Case) -> Result<Output, HarnessError> {
+            Ok(match case.name.as_str() {
+                "a" => out(&self.0),
+                _ => out(&[2.0]),
+            })
+        }
+    }
+
+    /// Blessing keeps the old line of a case the check calls unchanged, byte for byte, and
+    /// rewrites only the cases it reports as changed (plus the added ones).
+    #[test]
+    fn bless_rewrites_only_the_cases_the_check_reports_changed() {
+        let ctx = CaseContext {
+            root: std::env::temp_dir(),
+            seeds: 0,
+        };
+        let opts = RunOptions::default();
+        let none = KnownFailing::new();
+        let mut g = Golden::new();
+        g.insert("a".into(), encode("a", &out(&[1.0])));
+        g.insert("b".into(), encode("b", &out(&[2.0 * (1.0 + 1e-13)])));
+        g.insert("gone".into(), encode("gone", &out(&[3.0])));
+        let old_b = g["b"].to_string();
+
+        let res = check_unit(&Values(vec![1.0 + 1e-6]), &ctx, &opts, &g, &none, false);
+        let changed: Vec<&str> = res.changed.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(changed, ["a"]);
+        assert_eq!(res.added, ["c"]);
+        assert_eq!(res.removed, ["gone"]);
+
+        let new = blessed(&g, &res, false);
+        assert_eq!(
+            new["b"].to_string(),
+            old_b,
+            "within tolerance: old text kept"
+        );
+        assert_ne!(
+            new["b"], res.now["b"],
+            "the run's own value differed in its last bits"
+        );
+        assert_eq!(new["a"], res.now["a"], "outside tolerance: rewritten");
+        assert_eq!(new["c"], res.now["c"], "an added case is added");
+        assert!(
+            !new.contains_key("gone"),
+            "an unfiltered bless drops a removed case"
+        );
+
+        let dir = std::env::temp_dir().join(format!("goldens-bless-{}", std::process::id()));
+        write(&dir, "unit.x", &g).unwrap();
+        let before = std::fs::read_to_string(path_of(&dir, "unit.x")).unwrap();
+        write(&dir, "unit.x", &new).unwrap();
+        let after = std::fs::read_to_string(path_of(&dir, "unit.x")).unwrap();
+        let line_of = |text: &str| -> String {
+            text.lines()
+                .find(|l| l.starts_with(r#"{"case":"b""#))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert_eq!(line_of(&after), line_of(&before));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -116,6 +116,8 @@ pub struct Harness {
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
     pub output: egui::PlatformOutput,
+    /// Every URL a frame asked the platform to open, until [`Harness::take_opened`].
+    pub opened: Vec<String>,
     /// The last frame's painted shapes.
     pub shapes: Vec<egui::epaint::ClippedShape>,
     /// Files the scenario saves and opens live here; file pickers answer from it.
@@ -158,6 +160,7 @@ impl Harness {
                 ctx
             },
             output: Default::default(),
+            opened: Vec::new(),
             shapes: Vec::new(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
@@ -202,6 +205,16 @@ impl Harness {
     /// One frame that receives all these events at once (a quick tap, or input queued during a
     /// slow frame), before any queued ones.
     pub fn frame_with(&mut self, events: Vec<egui::Event>) {
+        self.frame_with_pen(events, None);
+    }
+
+    /// One frame with a release identified as a pen tip by the platform.
+    pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
+        self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, ..Default::default() });
+    }
+
+    /// One frame with what the platform says about its taps (a pen tip lifted, a finger down).
+    pub fn frame_with_taps(&mut self, events: Vec<egui::Event>, taps: crate::pencil::PlatformTaps) {
         self.tick();
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
@@ -210,7 +223,7 @@ impl Harness {
             events,
             ..Default::default()
         };
-        self.app.raw_input_hook(&mut raw);
+        self.app.raw_input_hook_with_taps(&self.ctx, &mut raw, taps);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
@@ -218,8 +231,17 @@ impl Harness {
         });
         // Nothing is painted: drop the frame's texture changes.
         out.textures_delta.clear();
+        self.opened.extend(out.platform_output.commands.iter().filter_map(|c| match c {
+            egui::OutputCommand::OpenUrl(u) => Some(u.url.clone()),
+            _ => None,
+        }));
         self.output = out.platform_output;
         self.shapes = out.shapes;
+    }
+
+    /// The URLs opened since the last call.
+    pub fn take_opened(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.opened)
     }
 
     pub fn frames(&mut self, n: usize) {
@@ -977,7 +999,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 approx(w, v, "canvas width")?;
             }
             "section" => {
-                if h.app.session.section.is_some() != v.as_bool().unwrap_or(false) {
+                if h.app.session.section.is_empty() == v.as_bool().unwrap_or(false) {
                     return Err(format!("section view: want {v}"));
                 }
             }

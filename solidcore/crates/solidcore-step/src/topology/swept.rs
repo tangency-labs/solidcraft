@@ -15,13 +15,16 @@
 //! parameter); pcurves and domains come from the records, never from STEP's parameters.
 
 use crate::vec::Vec3Geom as _;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Surface as BSurface};
 
 use super::{MAX_NESTING, R, frame, map_bspline_curve, unsupported, v3};
+use crate::assembly::SweptSurface;
 use crate::geom::{Axis1, Curve, P3, Placement, Surface};
+use solidcore_record::brep::Frame;
+use std::sync::Arc;
 
 /// Margin around a face's parameters on a profile, as a fraction of their span.
 const MARGIN: f64 = 0.1;
@@ -36,7 +39,7 @@ const AXIS_SAMPLES: usize = 128;
 /// Points of a face's boundary (its edges sampled) and of its seam edges (used twice), and each
 /// of its edge loops walked in order (each use sampled the way the loop runs it).
 #[derive(Default)]
-pub(super) struct Extent {
+pub(crate) struct Extent {
     pub points: Vec<Vec3>,
     pub seam: Vec<Vec3>,
     pub walks: Vec<Vec<Vec3>>,
@@ -417,8 +420,14 @@ fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
             }
         }
     };
+    Ok(revolved(curve, o, k))
+}
+
+/// An exact profile turned about the axis through `o` along the unit `k`: u the angle, v the
+/// profile's parameter (`forward: false`), so the natural normal is ∂S/∂angle × ∂S/∂profile.
+fn revolved(curve: BCurve, o: Vec3, k: Vec3) -> BSurface {
     let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
-    Ok(BSurface::PlacedRevolution { profile: Box::new(curve), origin: p3(o), axis: p3(k), matrix: identity, forward: false })
+    BSurface::PlacedRevolution { profile: Box::new(curve), origin: p3(o), axis: p3(k), matrix: identity, forward: false }
 }
 
 /// A torus whose tube reaches its axis (a spindle or horn torus: major radius at most the
@@ -560,6 +569,16 @@ fn extrusion(profile: &Curve, direction: P3, magnitude: f64, ext: &Extent) -> R<
             bounded(c, s)?
         }
     };
+    extruded(curve, d, ext)
+}
+
+/// An exact profile (a spline) along u, degree 1 along the vector `d` in v, over the face's
+/// reach along it.
+fn extruded(curve: BCurve, d: Vec3, ext: &Extent) -> R<BSurface> {
+    let dd = d.len2();
+    if !(dd > 0.0 && dd.is_finite()) {
+        return Err("an extrusion of no length".into());
+    }
     let (knots, homogeneous, rational) = match curve {
         BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect::<Vec<_>>(), false),
         BCurve::RationalSpline { knots, homogeneous } => (knots, homogeneous, true),
@@ -636,12 +655,120 @@ pub(super) fn map_surface(s: &Surface, ext: &Extent, tol: f64) -> R<(BSurface, b
     Ok((s, reversed))
 }
 
+/// The assembly's format-neutral surfaces ([`SweptSurface`], [`crate::assembly::Assembly::swept_surface`])
+/// read by the code that reads STEP's: a linear sweep as a SURFACE_OF_LINEAR_EXTRUSION, a
+/// revolution as a SURFACE_OF_REVOLUTION, a cone as a CONICAL_SURFACE, each through
+/// [`map_surface`] (a spline profile, which STEP's needs no bounds for either, straight to the
+/// surface it makes). The sweep's and revolution's own normals are STEP's (∂profile × the
+/// vector; ∂angle × ∂profile), the cone's the record cone's: `true` where the record's natural
+/// normal is opposite.
+pub(crate) fn map_neutral(s: &SweptSurface, ext: &Extent, tol: f64) -> R<(BSurface, bool)> {
+    let surface = match s {
+        SweptSurface::LinearSweep { profile, direction } => {
+            let d = v3(*direction);
+            let (magnitude, unit) = (d.len(), d.normalized().ok_or("a linear sweep along no direction")?);
+            match step_profile(profile)? {
+                Some(c) => Surface::Extrusion { profile: Arc::new(c), direction: p3(unit), magnitude },
+                None => return Ok((extruded(profile.clone(), d, ext)?, false)),
+            }
+        }
+        SweptSurface::Revolution { profile, origin, axis } => {
+            let k = v3(*axis).normalized().ok_or("a revolution about no direction")?;
+            match step_profile(profile)? {
+                Some(c) => Surface::Revolution { profile: Arc::new(c), axis: Axis1 { origin: *origin, direction: p3(k) } },
+                None => return Ok((revolved(profile.clone(), v3(*origin), k), false)),
+            }
+        }
+        SweptSurface::Cone { frame, radius, half_angle } => Surface::Cone { position: placement(frame)?, radius: *radius, semi_angle: *half_angle },
+    };
+    map_surface(&surface, ext, tol)
+}
+
+/// The placement of a record frame: x its x axis, z its x × y.
+fn placement(f: &Frame) -> R<Placement> {
+    let (x, y) = (v3(f.x_axis), v3(f.y_axis));
+    let z = x.cross(y).normalized().ok_or("a frame whose axes are parallel")?;
+    let x = x.normalized().ok_or("a frame of no x axis")?;
+    Ok(Placement { origin: f.origin, axis: p3(z), ref_direction: p3(x) })
+}
+
+/// A record profile as the STEP curve the swept code bounds by the face (a line, circle,
+/// ellipse or polyline, with the record's parameter), or `None` for a spline, which is swept
+/// whole.
+fn step_profile(c: &BCurve) -> R<Option<Curve>> {
+    Ok(Some(match c {
+        BCurve::Line { start, end } => {
+            let d = v3(*end) - v3(*start);
+            let unit = d.normalized().ok_or("a line profile of no length")?;
+            Curve::Line { origin: *start, direction: p3(unit), magnitude: d.len() }
+        }
+        BCurve::Circle { frame, radius } => Curve::Circle { position: placement(frame)?, radius: *radius },
+        BCurve::Ellipse { frame, radii } => Curve::Ellipse { position: placement(frame)?, semi_axis_1: radii[0], semi_axis_2: radii[1] },
+        BCurve::Polyline { points } => Curve::Polyline(points.clone()),
+        BCurve::Spline { .. } | BCurve::RationalSpline { .. } => return Ok(None),
+        BCurve::SurfaceIntersection { .. } => return Err(unsupported("an intersection curve as a profile")),
+    }))
+}
+
+/// Samples a spline is checked at to be a circle.
+const CIRCLE_SAMPLES: usize = 64;
+
+/// A rational B-spline that is exactly a circle or an arc of one, as that circle, its angle
+/// running the way the spline runs and starting at the spline's start, and the angle the spline
+/// sweeps (a full turn or more for one that closes); `None` for any other spline. The circle is
+/// the one through the spline's points at the start and a third and two thirds of the way along
+/// its parameter; every sample of the spline lies on it to within rounding (1e-9 of its size).
+pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64)> {
+    b.weights.as_ref()?;
+    let (t0, t1) = b.domain()?;
+    let at = |s: f64| b.point(t0 + (t1 - t0) * s).map(v3);
+    let (a, m, c) = (at(0.0)?, at(1.0 / 3.0)?, at(2.0 / 3.0)?);
+    let (ab, ac) = (m - a, c - a);
+    let n = ab.cross(ac);
+    let nn = n.dot(n);
+    if !(nn > 0.0) {
+        return None;
+    }
+    // The circumcentre of a, m and c.
+    let centre = a + (n.cross(ab) * ac.dot(ac) + ac.cross(n) * ab.dot(ab)) * (0.5 / nn);
+    let radius = (a - centre).len();
+    let axis = n.normalized()?;
+    let x = (a - centre).normalized()?;
+    let y = axis.cross(x);
+    let reach = 1e-9 * (radius + centre.len());
+    let (mut swept, mut last) = (0.0, 0.0);
+    for k in 0..=CIRCLE_SAMPLES {
+        let d = at(k as f64 / CIRCLE_SAMPLES as f64)? - centre;
+        if !((d.len() - radius).abs() <= reach && d.dot(axis).abs() <= reach) {
+            return None;
+        }
+        let angle = d.dot(y).atan2(d.dot(x));
+        let step = (angle - last + PI).rem_euclid(TAU) - PI;
+        // Samples a fraction of a turn apart: a step back is not this spline's way round.
+        if !(step >= -1e-9) {
+            return None;
+        }
+        swept += step;
+        last = angle;
+    }
+    Some((Curve::Circle { position: Placement { origin: p3(centre), axis: p3(axis), ref_direction: p3(x) }, radius }, swept))
+}
+
 /// An extruded circle along its axis is a cylinder; a circle in a plane through the axis,
 /// revolved, a ring torus. `None` for anything else.
 fn canonical(s: &Surface, reversed: &mut bool) -> Option<BSurface> {
     let c = match s {
         Surface::Extrusion { profile, .. } | Surface::Revolution { profile, .. } => basis(profile).ok()?,
         _ => return None,
+    };
+    // A rational spline that is exactly a circle (an exporter's NURBS circle) is that circle.
+    let fitted;
+    let c = match c {
+        Curve::BSpline(b) => {
+            fitted = spline_circle(b)?.0;
+            &fitted
+        }
+        c => c,
     };
     let Curve::Circle { position, radius } = c else { return None };
     let n = v3(position.axis);

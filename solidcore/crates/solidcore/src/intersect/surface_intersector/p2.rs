@@ -96,6 +96,7 @@ use crate::surface::surface_cache::PatchBoundaryBoundingPlanes;
 
 use super::p1::{flush_crv, IntersectionPointType, SrfIndex, SurfaceIntersector, TsectPnt};
 use super::p4::IntersectorVirtuals;
+use super::sphere_span;
 
 const OP_CPV: &str = "intersect::surface_intersector::p2::SurfaceIntersector::compute_point_values";
 const OP_SING: &str =
@@ -646,7 +647,6 @@ impl SurfaceIntersector<'_> {
                             uv_values,
                             point,
                             previous.map(TsectPnt::crv_deriv),
-                            k.fixes.dupin_bottom_hyperbola_axis,
                         ) {
                             Ok(()) => {}
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -903,7 +903,10 @@ impl SurfaceIntersector<'_> {
     ///
     /// A single point becomes degenerate curves (type touching) when it is a tangent
     /// point or unique ([`is_point_unique`] against the start points and the 3D
-    /// curves' ends). A curve whose consecutive points are all within
+    /// curves' ends), and never when it is
+    /// [`SurfaceIntersector::lone_start_on_found_curve`] (fix WR-76: a point of a curve
+    /// already found, where upstream's uniqueness test, which reads only the found
+    /// curves' ends, can call it a touching point). A curve whose consecutive points are all within
     /// `this_approx_tol_3d` is dropped. A last span shorter than a tenth of the one
     /// before is merged into it (only when the merged
     /// span passes `SurfaceIntersector::span_keeps_accuracy`). A crossing curve with
@@ -912,7 +915,9 @@ impl SurfaceIntersector<'_> {
     /// # Errors
     ///
     /// Those of the degenerate curves and of [`flush_crv`]; [`SolidError::Unported`]
-    /// from the curve evaluations of [`is_point_unique`].
+    /// from the curve evaluations of [`is_point_unique`]; cancellation, and
+    /// `IntersectFailed` for a UV trim on a sphere the monotone-sweep fit refuses
+    /// ([`sphere_span::fit_monotone_sweep`]).
     pub fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         // take (and clear) the curve points
         let ids = core::mem::take(&mut self.curve_points);
@@ -921,10 +926,20 @@ impl SurfaceIntersector<'_> {
             .map(|&id| self.point(id).cloned())
             .collect::<Result<Vec<_>>>()?;
 
+        let lone_start_on_found_curve = self.lone_start_on_found_curve.take();
+
         // check no points to flush.
         let Some(first) = pnts.first() else {
             return Ok(());
         };
+
+        // fix (WR-76): a trace that stopped at its start point because its first span lies
+        // on a found curve leaves a point of that curve, not a touching point
+        if let [only] = ids.as_slice() {
+            if lone_start_on_found_curve == Some(*only) {
+                return Ok(());
+            }
+        }
 
         // When intersection is single point, output a degenerate curve
         if pnts.len() == 1 {
@@ -1058,6 +1073,31 @@ impl SurfaceIntersector<'_> {
                 ctrl.extend([Vec3::from(pt2), Vec3::from(pt3), Vec3::from(pt4)]);
             }
             i += 1;
+        }
+
+        // Not upstream (#17110): each span of a UV trim on a sphere is made monotone in
+        // its sweep coordinate wherever its 3D span is monotone in longitude, certified, or
+        // the whole intersection is refused (IntersectFailed); the trace's points stay.
+        // Cancellation is polled inside the fit
+        for (srf, ctrl) in [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(&mut ctrl_uv)
+        {
+            let fitted = sphere_span::fit_monotone_sweep(
+                k,
+                self.surface(srf),
+                ctrl,
+                &ctrl_3d,
+                self.this_approx_tol_3d,
+            )?;
+            match fitted {
+                // the refitted trim's certified distance from the 3D curve joins the
+                // published deviation
+                Ok(fit) => max_deviation = max_deviation.max(fit.bound),
+                Err(why) => {
+                    return Err(SolidError::intersect_failed(OP_FLUSH, sweep_refusal(why)));
+                }
+            }
         }
 
         // build the B-spline curves
@@ -1884,6 +1924,33 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         OP_LAW,
         "no delta step gives the law point's values",
     ))
+}
+
+/// Not upstream (#17110): the message of a refused monotone sweep fit
+/// ([`sphere_span::fit_monotone_sweep`]).
+const fn sweep_refusal(why: sphere_span::SweepRefusal) -> &'static str {
+    match why {
+        sphere_span::SweepRefusal::Off(sphere_span::Refusal::Off) => {
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude lies off the 3D curve by more than the tolerance"
+        }
+        sphere_span::SweepRefusal::Off(_) => {
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude could not be certified within the tolerance of the 3D \
+             curve"
+        }
+        sphere_span::SweepRefusal::TurnsBack => {
+            "a refitted span of the UV trim on the sphere could not be certified monotone \
+             in its sweep coordinate where the curve is monotone in longitude"
+        }
+        sphere_span::SweepRefusal::Degenerate => {
+            "the UV trim on the sphere made monotone in its sweep coordinate has a zero \
+             derivative at a joint"
+        }
+        sphere_span::SweepRefusal::Shape => {
+            "the UV and 3D control points of the traced curve are not matching cubic spans"
+        }
+    }
 }
 
 #[cfg(test)]
