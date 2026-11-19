@@ -289,7 +289,7 @@ fn replies_match_the_output_schema() {
     run(json!({"path": robot, "names": 5, "folder": "x"}));
 
     let stood = run(json!({"path": robot}));
-    assert!(stood["stand_up"].is_u64() && stood["subcomponents"].is_u64() && stood["rigid_joints"].is_u64(), "{stood}");
+    assert!(stood["stand_up"].is_u64() && stood["subcomponents"].is_u64() && stood["rigid_members"].is_u64(), "{stood}");
     let kept = run(json!({"path": robot, "up": "Z", "names": " Instance ", "folder": true, "origin": true}));
     assert!(kept.get("stand_up").is_none() && kept["subcomponents"].is_u64(), "{kept}");
     let turned = run(json!({"path": robot, "up": " y "}));

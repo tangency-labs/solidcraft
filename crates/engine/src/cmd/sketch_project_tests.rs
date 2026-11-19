@@ -1107,6 +1107,295 @@ fn isoparametric_curves_of_a_cylinder() {
 }
 
 #[test]
+fn projection_fidelity_keeps_the_full_edge_on_spline_interval() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Source"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[0,0], [90,10], [17,20], [0,30]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"sketch": "Source", "curve": "s1"}]}));
+    let result = inspect(&mut s);
+    let curves = result["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "{result}");
+    assert_eq!(curves[0]["type"], "line", "{result}");
+    let t = (978.0 - f64::sqrt(978.0 * 978.0 - 4.0 * 657.0 * 270.0)) / (2.0 * 657.0);
+    let maximum = 270.0 * t - 489.0 * t * t + 219.0 * t * t * t;
+    let ends = [&curves[0]["start_at"], &curves[0]["end_at"]];
+    let hi = ends.iter().map(|p| p[0].as_f64().unwrap()).fold(f64::NEG_INFINITY, f64::max);
+    let lo = ends.iter().map(|p| p[0].as_f64().unwrap()).fold(f64::INFINITY, f64::min);
+    assert!((hi - maximum).abs() < 1e-8 && lo.abs() < 1e-8, "expected [0, {maximum}], got [{lo}, {hi}]");
+}
+
+#[test]
+fn projection_fidelity_keeps_a_large_fit_spline_exact() {
+    let mut s = Session::default();
+    let points: Vec<[f64; 2]> =
+        (0..168).map(|i| [10.0 * f64::from(i) / 167.0, 5.0 * (3.0 * std::f64::consts::PI * f64::from(i) / 167.0).sin()]).collect();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Source"}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points": points}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"x_dir": [0.8,0,0.6], "y_dir": [0,1,0]}}));
+    run(&mut s, "sketch.project", json!({"refs": [{"sketch": "Source", "curve": "s1"}], "projection_link": false}));
+    let result = inspect(&mut s);
+    let curves = result["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "the fit spline must stay one exact spline, got {} curves", curves.len());
+    assert_eq!(curves[0]["type"], "spline", "{result}");
+    let st = s.model.state();
+    let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+    let ci = sk.curve_index(curves[0]["id"].as_str().unwrap()).unwrap();
+    let solidcraft_sketch::CurveKind::Spline { pts, degree, nurbs: Some(nurbs), .. } = &sk.curves[ci].kind else { panic!("expected exact NURBS") };
+    let controls: Vec<_> = pts.iter().map(|p| sk.point(*p).unwrap()).collect();
+    let h: Vec<_> = points.windows(2).map(|w| f64::hypot(w[1][0] - w[0][0], w[1][1] - w[0][1])).collect();
+    let total: f64 = h.iter().sum();
+    let mut distance = 0.0;
+    for (i, [x, y]) in points.iter().enumerate() {
+        let actual = nurbs.point(&controls, *degree, distance / total).unwrap();
+        let expected = solidcore_record::Vec2::new(0.8 * x, *y);
+        assert!(actual.dist(expected) < 1e-8, "fit point {i}: {actual:?} != {expected:?}");
+        distance += h.get(i).copied().unwrap_or(0.0);
+    }
+}
+
+#[test]
+fn projection_fidelity_keeps_a_spline_that_collapses_to_a_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Source"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[5,0], [5,10], [5,20], [5,30]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"sketch": "Source", "curve": "s1"}]}));
+    let result = inspect(&mut s);
+    assert!(result["curves"].as_array().unwrap().is_empty(), "{result}");
+    assert!(result["points"].as_array().unwrap().iter().any(|p| p["link"].is_string() && p["at"] == json!([5.0, 0.0])), "{result}");
+}
+
+#[test]
+fn projection_fidelity_does_not_round_an_almost_circular_edge() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.ellipse", json!({"center": [0,0], "major": [10,0], "minor_radius": 8.00001}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0,0,5], "x_dir": [0.8,0,0.6], "y_dir": [0,1,0]}}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [10,0,5]}]}));
+    let result = inspect(&mut s);
+    let curves = result["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "{result}");
+    assert_eq!(curves[0]["type"], "spline", "the almost-circular ellipse must retain its exact spline: {result}");
+}
+
+#[test]
+fn projection_fidelity_preserves_a_thin_curve_and_its_distinct_endpoints() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Source"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[0,0], [90,10], [17,20], [0,30]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"x_dir": [1,0,0], "y_dir": [0,1e-10,1]}}));
+    run(&mut s, "sketch.project", json!({"refs": [{"sketch":"Source", "curve":"s1"}]}));
+    let result = inspect(&mut s);
+    let curve = &result["curves"][0];
+    assert_eq!(curve["type"], "spline", "{result}");
+    let points = curve["points_at"].as_array().unwrap();
+    assert_eq!(points.len(), 4);
+    let last = points[3][1].as_f64().unwrap();
+    assert!((last - 3e-9).abs() < 1e-20, "a thin projected endpoint must not merge into the start: {result}");
+}
+
+#[test]
+fn projection_fidelity_keeps_the_full_edge_on_circle_interval() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0], "radius":10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":5}));
+    run(&mut s, "sketch.create", json!({"plane":"XZ"}));
+    run(&mut s, "sketch.project", json!({"refs":[{"edge":[10,0,5]}]}));
+    let result = inspect(&mut s);
+    let curves = result["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "{result}");
+    assert_eq!(curves[0]["type"], "line", "{result}");
+    let mut xs = [curves[0]["start_at"][0].as_f64().unwrap(), curves[0]["end_at"][0].as_f64().unwrap()];
+    xs.sort_by(f64::total_cmp);
+    assert!((xs[0] + 10.).abs() < 1e-8 && (xs[1] - 10.).abs() < 1e-8, "{result}");
+}
+
+#[test]
+fn projection_fidelity_follows_tangent_handle_edits_through_reload_and_undo() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,0],[8,13],[20,-2]]}));
+    let handle = run(&mut s, "sketch.spline.handles", json!({"curve":"s1"}))["handles"][1].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let target = run(&mut s, "sketch.create", json!({"plane":{"x_dir":[0.8,0,0.6],"y_dir":[0,1,0]},"name":"Target"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source","curve":"s1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let controls = |session: &Session| {
+        let state = session.model.state();
+        let sk = &state.sketch(target).unwrap().sketch;
+        assert_eq!(sk.curves.len(), 2);
+        assert!(!sk.links[0].lost);
+        sk.curves
+            .iter()
+            .map(|curve| {
+                let solidcraft_sketch::CurveKind::Spline { pts, control: true, .. } = &curve.kind else { panic!("not an exact spline") };
+                (curve.id.clone(), pts.iter().map(|p| sk.point(*p).unwrap()).collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>()
+    };
+    let original = controls(&s);
+    run(&mut s, "sketch.edit", json!({"sketch":"Source"}));
+    run(&mut s, "sketch.move_point", json!({"point":handle,"to":[15,4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let edited = controls(&s);
+    assert_ne!(original, edited);
+    assert_eq!(original.iter().map(|c| &c.0).collect::<Vec<_>>(), edited.iter().map(|c| &c.0).collect::<Vec<_>>());
+    let reloaded = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(edited, controls(&reloaded));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(original, controls(&s));
+}
+
+#[test]
+fn projection_fidelity_refreshes_a_split_fit_spline_after_source_edit_and_reload() {
+    let mut s = Session::default();
+    let points: Vec<_> = (0..498).map(|i| [i as f64 * 0.1, (i as f64 * 0.07).sin()]).collect();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+    let made = run(&mut s, "sketch.spline.fit_point", json!({"points":points}));
+    let middle = made["created"]["points"][250].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let target = run(&mut s, "sketch.create", json!({"plane":{"x_dir":[0.8,0,0.6], "y_dir":[0,1,0]}, "name":"Target"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source", "curve":"s1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.model.state().sketch(target).unwrap().sketch.curves.len(), 1);
+    run(&mut s, "sketch.edit", json!({"sketch":"Source"}));
+    let added = run(&mut s, "sketch.spline.insert_point", json!({"curve":"s1", "at":[49.8,0.5], "end":"end"}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.move_point", json!({"point":middle, "to":[25.,4.]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let verify = |session: &Session| {
+        let state = session.model.state();
+        let sk = &state.sketch(target).unwrap().sketch;
+        assert_eq!(sk.curves.len(), 2);
+        assert!(!sk.links[0].lost);
+        let all: Vec<Vec<_>> = sk
+            .curves
+            .iter()
+            .map(|c| {
+                let solidcraft_sketch::CurveKind::Spline { pts, control: true, nurbs: Some(nurbs), .. } = &c.kind else {
+                    panic!("not an exact spline")
+                };
+                nurbs.check(pts.len(), 3).unwrap();
+                pts.iter().map(|p| sk.point(*p).unwrap()).collect()
+            })
+            .collect();
+        assert_eq!(all[0].last(), all[1].first());
+        assert!(all.iter().flatten().any(|p| p.y > 3.), "source edit must reach the projected curve");
+    };
+    verify(&s);
+    verify(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+    run(&mut s, "sketch.edit", json!({"sketch":"Source"}));
+    run(&mut s, "sketch.spline.remove_point", json!({"curve":"s1", "point":added}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.model.state().sketch(target).unwrap().sketch.curves.len(), 1);
+    run(&mut s, "edit.undo", json!({}));
+    verify(&s);
+}
+
+#[test]
+fn projection_fidelity_keeps_control_splines_with_fewer_points_than_their_degree() {
+    for points in [json!([[0, 0], [10, 10]]), json!([[0, 0], [5, 10], [10, 0]])] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+        run(&mut s, "sketch.spline.control_point", json!({"points":points}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sketch.create", json!({"plane":{"x_dir":[0.8,0,0.6], "y_dir":[0,1,0]}}));
+        run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source", "curve":"s1"}], "projection_link":false}));
+        let result = inspect(&mut s);
+        assert_eq!(result["curves"][0]["type"], "spline", "{result}");
+        for (actual, source) in result["curves"][0]["points_at"].as_array().unwrap().iter().zip(points.as_array().unwrap()) {
+            assert!((actual[0].as_f64().unwrap() - 0.8 * source[0].as_f64().unwrap()).abs() < 1e-12);
+            assert!((actual[1].as_f64().unwrap() - source[1].as_f64().unwrap()).abs() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn edge_on_sketch_lines_project_to_points_and_a_rectangle_outline() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Front"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0,0], "p1": [20,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let refs: Vec<Value> = (1..=4).map(|i| json!({"sketch": "Front", "curve": format!("l{i}")})).collect();
+    run(&mut s, "sketch.project", json!({"refs": refs}));
+    let result = inspect(&mut s);
+    let curves = result["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "{result}");
+    assert_eq!(curves[0]["type"], "line", "{result}");
+    let points = result["points"].as_array().unwrap();
+    for x in [0., 20.] {
+        assert!(points.iter().any(|p| p["link"].is_string() && p["at"] == json!([x, 0.])), "{result}");
+    }
+}
+
+#[test]
+fn a_linked_sketch_line_can_refresh_to_a_projected_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Front"}));
+    run(&mut s, "sketch.line", json!({"points": [[5,0], [8,10]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"sketch": "Front", "curve": "l1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Front"}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [5,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Top"}));
+    let result = inspect(&mut s);
+    assert!(result["curves"].as_array().unwrap().is_empty(), "{result}");
+    let links = result["links"].as_array().unwrap();
+    assert_eq!(links.len(), 1, "{result}");
+    assert_ne!(links[0]["lost"], json!(true), "{result}");
+    assert!(result["points"].as_array().unwrap().iter().any(|p| p["link"].is_string() && p["at"] == json!([5., 0.])), "{result}");
+}
+
+#[test]
+fn tilted_spline_edges_keep_straight_seams_and_edge_on_boundaries_as_lines() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[0,0], [10,12], [25,12], [40,0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[40,0], [0,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "body_name": "Curved"}));
+    for (plane, reference) in [
+        (json!({"x_dir": [0.8,0,0.6], "y_dir": [0,1,0]}), json!({"body": "Curved", "edge": [0,0,2.5]})),
+        (json!("XZ"), json!({"body": "Curved", "face": [20,4,5]})),
+        (json!("XZ"), json!({"sketch": "Outline", "curve": "s1"})),
+    ] {
+        run(&mut s, "sketch.create", json!({"plane": plane}));
+        run(&mut s, "sketch.project", json!({"refs": [reference]}));
+        let result = inspect(&mut s);
+        let curves = result["curves"].as_array().unwrap();
+        assert_eq!(curves.len(), 1, "{reference}: {curves:?}");
+        assert_eq!(curves[0]["type"], "line", "{reference}: {curves:?}");
+        run(&mut s, "sketch.finish", json!({}));
+    }
+}
+
+#[test]
+fn tilted_circular_nurbs_edges_project_as_ellipses() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10,0,10]], "radius": 2}));
+    run(&mut s, "sketch.create", json!({"plane": {"x_dir": [0.8,0,0.6], "y_dir": [0,1,0]}}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [8,0,10]}]}));
+    let result = inspect(&mut s);
+    let curves = result["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "{curves:?}");
+    assert_eq!(curves[0]["type"], "ellipse", "{curves:?}");
+    assert!((curves[0]["minor_radius"].as_f64().unwrap() - 6.4).abs() < 1e-7, "{curves:?}");
+}
+
+#[test]
 fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 1], "radius": 5, "height": 20}));
@@ -1830,6 +2119,93 @@ fn a_free_form_edge_projects_as_one_spline_with_its_own_knots() {
     run(&mut s, "solid.extrude", json!({"sketch":"Bottom","distance":10,"operation":"new","body_name":"P"}));
     let prism = volume(&s, "P");
     assert!((prism - rounded).abs() < rounded * 1e-6, "{prism} vs {rounded}");
+}
+
+/// An imported rational cubic keeps its degree, weights and shape on both sides of a cut.
+#[test]
+fn break_and_trim_preserve_the_intervals_of_a_weighted_cubic() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::{CurveKind, Nurbs};
+
+    let controls = [Vec2::new(0., 0.), Vec2::new(4., 8.), Vec2::new(8., 8.), Vec2::new(12., 0.)];
+    let nurbs = Nurbs { knots: vec![3., 3., 3., 3., 9., 9., 9., 9.], weights: vec![1., 2., 2., 1.] };
+    let evaluate = |t| nurbs.point(&controls, 3, t).unwrap();
+    for command in ["sketch.break", "sketch.trim"] {
+        let mut s = Session::default();
+        let sid = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        // Projected splines use the imported degree, control points, knots and weights.
+        let sketch = s.doc_mut().sketch_mut(sid).unwrap();
+        let pts = controls.iter().map(|&p| sketch.add_point(p, None).unwrap()).collect();
+        let kind = CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() };
+        sketch.add_curve(kind, Some("weighted")).unwrap();
+        let mark = evaluate(0.223);
+        let snap = run(&mut s, "sketch.point", json!({"point":format!("on:weighted:{},{}",mark.x,mark.y)}));
+        let x = evaluate(0.75).x;
+        run(&mut s, "sketch.line", json!({"points":[[x,-10],[x,10]], "infer":false, "connect":false}));
+        let pick = evaluate(0.5);
+        let before = s.doc.sketch(sid).unwrap().clone();
+        let preview = crate::cmd::trim_piece(&before, "weighted", pick).unwrap();
+        assert!(preview.first().unwrap().dist(mark) < 1e-5 && preview.last().unwrap().dist(evaluate(0.75)) < 1e-5);
+        run(&mut s, command, json!({"curve":"weighted", "at":[pick.x,pick.y]}));
+        let sk = s.doc.sketch(sid).unwrap();
+        let point = sk.resolve_point(snap["point"].as_str().unwrap()).unwrap();
+        assert!(
+            sk.curves.iter().any(|c| c.kind.is_freeform() && c.kind.ends().is_some_and(|(a, b)| a == point || b == point)),
+            "the constrained point becomes an endpoint"
+        );
+        let mut pieces: Vec<_> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match &c.kind {
+                CurveKind::Spline { pts, degree: 3, nurbs: Some(n), .. } => Some((pts.iter().map(|&p| sk.point(p).unwrap()).collect::<Vec<_>>(), n)),
+                _ => None,
+            })
+            .collect();
+        pieces.sort_by(|(a, _), (b, _)| a[0].x.total_cmp(&b[0].x));
+        let intervals = if command == "sketch.break" { vec![(0., 0.223), (0.223, 0.75), (0.75, 1.)] } else { vec![(0., 0.223), (0.75, 1.)] };
+        assert_eq!(pieces.len(), intervals.len(), "{command}");
+        for ((points, piece), (a, b)) in pieces.iter().zip(intervals) {
+            assert!(piece.weights.windows(2).any(|pair| pair[0] != pair[1]));
+            for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let actual = piece.point(points, 3, t).unwrap();
+                let expected = evaluate(a + (b - a) * t);
+                assert!(actual.dist(expected) < 1e-5, "{command} [{a}, {b}] at {t}: {actual:?} vs {expected:?}");
+            }
+        }
+    }
+}
+
+/// A piece straddling the old seam of a closed, weighted spline is still a single spline.
+#[test]
+fn break_keeps_a_weighted_spline_piece_that_wraps_across_its_seam() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::{CurveKind, Nurbs};
+
+    let mut s = Session::default();
+    let sid = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    let sk = s.doc_mut().sketch_mut(sid).unwrap();
+    let controls = [Vec2::new(1., 1.), Vec2::new(9., 1.), Vec2::new(1., 9.), Vec2::new(1., 1.)];
+    let pts = controls.iter().map(|&p| sk.add_point(p, None).unwrap()).collect();
+    let nurbs = Nurbs { knots: vec![0., 0., 0., 0., 1., 1., 1., 1.], weights: vec![1., 2., 2., 1.] };
+    let evaluate = |t| nurbs.point(&controls, 3, t).unwrap();
+    sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() }, Some("loop"))
+        .unwrap();
+    for t in [0.25, 0.75] {
+        let q = evaluate(t);
+        run(&mut s, "sketch.point", json!({"point": format!("on:loop:{},{}",q.x,q.y)}));
+    }
+    let pick = evaluate(0.125);
+    let preview = crate::cmd::trim_piece(s.doc.sketch(sid).unwrap(), "loop", pick).unwrap();
+    assert!(preview.first().unwrap().dist(evaluate(0.75)) < 1e-5 && preview.last().unwrap().dist(evaluate(0.25)) < 1e-5);
+    run(&mut s, "sketch.break", json!({"curve":"loop","at":[pick.x,pick.y]}));
+    let sk = s.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), 2);
+    let wrapped = sk.curves.iter().find(|c| c.kind.ends().is_some_and(|(a, _)| sk.point(a).unwrap().dist(evaluate(0.75)) < 1e-5)).unwrap();
+    let CurveKind::Spline { pts, degree: 3, nurbs: Some(w), .. } = &wrapped.kind else { panic!("expected one rational cubic") };
+    let points: Vec<_> = pts.iter().map(|&p| sk.point(p).unwrap()).collect();
+    for (t, source) in [(0., 0.75), (0.25, 0.875), (0.5, 0.), (0.75, 0.125), (1., 0.25)] {
+        assert!(w.point(&points, 3, t).unwrap().dist(evaluate(source)) < 1e-5);
+    }
 }
 
 #[test]

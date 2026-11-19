@@ -1155,8 +1155,12 @@ pub struct UnlockParams {
 pub struct UnlockResult {
     /// The component, by id.
     pub component: u64,
-    /// The joints removed, by id.
+    /// The rigid joints removed, by id (an import saved before rigid groups held its contents
+    /// with these).
     pub joints: Vec<u64>,
+    /// The rigid group removed, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_group: Option<u64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

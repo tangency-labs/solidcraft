@@ -6,7 +6,8 @@
 //! the software renderer; see `startup` and docs/book/src/guide/troubleshooting.md.
 //!
 //! A `.step`/`.stp` file opens as a new design holding the file's bodies (an Import feature); a
-//! `.3mf`/`.stl`/`.obj`/`.glb`/`.gltf` file as a new design holding mesh bodies.
+//! `.3mf`/`.stl`/`.obj`/`.glb`/`.gltf` or OpenUSD (`.usd`/`.usda`/`.usdc`/`.usdz`) file as a new
+//! design holding mesh bodies.
 //!
 //! `SOLIDCRAFT_SETTINGS_DIR` selects an explicit absolute settings directory without legacy adoption.
 //! `--control <port>` (or `SOLIDCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control

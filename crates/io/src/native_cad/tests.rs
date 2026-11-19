@@ -368,7 +368,7 @@ fn by_step_text(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::
 
 /// The route they take with the cadmpeg reader: the neutral model read into records, the records made into bodies.
 fn by_records(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::StepImport, String>, Vec<String>) {
-    let records = cadir_records(ir, "compared", "test");
+    let records = cadir_records(ir, "compared", "test", true);
     let warnings = records.warnings.clone();
     (solidcraft_kernel::records_import(&records).map_err(|e| e.to_string()), warnings)
 }
@@ -579,7 +579,7 @@ fn a_mirrored_component_is_left_out_with_why() {
     let mirror = cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap();
     let leaf = ir.model.occurrences.iter_mut().find(|o| !matches!(o.parent, cadmpeg_ir::products::OccurrenceParent::Root {})).unwrap();
     leaf.transform = mirror;
-    let records = cadir_records(&ir, "mirrored", "test");
+    let records = cadir_records(&ir, "mirrored", "test", true);
     assert_eq!(records.bodies.len(), 1, "{:?}", records.warnings);
     assert!(records.warnings.iter().any(|w| w.contains("mirrors")), "{:?}", records.warnings);
 }
@@ -615,11 +615,69 @@ fn occurrences_in_a_cycle_end_with_a_warning() {
     for (k, o) in ir.model.occurrences.iter_mut().enumerate() {
         o.parent = cadmpeg_ir::products::OccurrenceParent::Occurrence { occurrence: ids[(k + 1) % ids.len()].clone() };
     }
-    let records = cadir_records(&ir, "cycle", "test");
+    let records = cadir_records(&ir, "cycle", "test", true);
     assert!(solidcraft_kernel::records_import(&records).is_ok());
     if let Some(first) = ir.model.occurrences.first_mut() {
         first.parent = cadmpeg_ir::products::OccurrenceParent::Root {};
     }
-    let records = cadir_records(&ir, "cycle", "test");
+    let records = cadir_records(&ir, "cycle", "test", true);
     assert!(solidcraft_kernel::records_import(&records).is_ok(), "{:?}", records.warnings);
+}
+
+/// The washer with a named colour on the solid, a see-through named colour on one face, and a
+/// pre-defined colour (`red`) on another: the see-through one's
+/// transparency in a SURFACE_STYLE_RENDERING_WITH_PROPERTIES, as the CAx-IF recommended practice
+/// for colours writes it.
+fn coloured_washer() -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("washer.step")).unwrap();
+    let style = |id: u64, item: &str, colour: &str, extra: &str| {
+        let n = |k: u64| id + k;
+        format!(
+            "#{}=STYLED_ITEM('',(#{}),{item});\n#{}=PRESENTATION_STYLE_ASSIGNMENT((#{}));\n#{}=SURFACE_STYLE_USAGE(.BOTH.,#{});\n#{}=SURFACE_SIDE_STYLE('',(#{}{extra}));\n#{}=SURFACE_STYLE_FILL_AREA(#{});\n#{}=FILL_AREA_STYLE('',(#{}));\n#{}=FILL_AREA_STYLE_COLOUR('',#{});\n#{}={colour};\n",
+            n(0),
+            n(1),
+            n(1),
+            n(2),
+            n(2),
+            n(3),
+            n(3),
+            n(4),
+            n(4),
+            n(5),
+            n(5),
+            n(6),
+            n(6),
+            n(7),
+            n(7)
+        )
+    };
+    let styles = style(200, "#99", "COLOUR_RGB('Body grey',0.5,0.5,0.5)", "")
+        + &style(220, "#73", "COLOUR_RGB('Accent',0.,0.,1.)", ",#240")
+        + &style(250, "#85", "DRAUGHTING_PRE_DEFINED_COLOUR('red')", "")
+        + "#240=SURFACE_STYLE_RENDERING_WITH_PROPERTIES(.NORMAL_SHADING.,#227,(#242));\n#242=SURFACE_STYLE_TRANSPARENT(0.25);\n#241=MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(#200,#220,#250),#5);\n";
+    let at = text.rfind("ENDSEC;").unwrap();
+    format!("{}{styles}{}", &text[..at], &text[at..])
+}
+
+/// A STEP file's colours read through cadmpeg come in as SolidCraft's reader brings them in: the
+/// body's colour and its name, and each face's own colour, opacity and name, a pre-defined
+/// colour's name being its own.
+#[test]
+fn colours_read_into_records_are_the_ones_our_step_reader_reads() {
+    let text = coloured_washer();
+    let ours = solidcraft_kernel::step_import(&text).unwrap();
+    let (theirs, warnings) = by_records(&neutral(text.as_bytes(), "washer.step"));
+    let theirs = theirs.unwrap_or_else(|e| panic!("{e} {warnings:?}"));
+    let look = |imp: &solidcraft_kernel::StepImport| {
+        let b = &imp.bodies[0].body;
+        let p = b.paint().cloned().unwrap_or(solidcraft_kernel::Paint { opacity: 1.0, faces: Vec::new(), name: None });
+        let mut faces: Vec<String> = p.faces.iter().map(|f| format!("{:?} {:.3} {:?}", f.color, f.opacity, f.name)).collect();
+        faces.sort();
+        (b.color(), p.name, format!("{:.3}", p.opacity), faces)
+    };
+    let (o, t) = (look(&ours), look(&theirs));
+    assert_eq!(o.0, Some([0.5, 0.5, 0.5]), "our reader: {o:?}");
+    assert_eq!(o.3.len(), 2, "our reader: {o:?}");
+    assert_eq!(t, o);
 }
