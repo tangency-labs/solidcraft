@@ -663,7 +663,7 @@ fn refuse_offset_ends(sk: &Sketch, ci: usize, what: &str, cmd: &str) -> Result<(
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.trim";
     let at = req_vec2(cmd, p, "at")?;
-    let model_edit = s.open_drawing.is_none();
+    let model_edit = !s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
         let released = release_trim_offsets(sk, doc, ci, cmd)?;
@@ -1077,7 +1077,7 @@ fn trim_path_reply(s: &mut Session, p: &Value) -> Result<TrimPathResult> {
         out.dry_run = Some(true);
         return Ok(out);
     }
-    let model_edit = s.open_drawing.is_none();
+    let model_edit = !s.sheet_sketching();
     let ((trimmed, removed, skipped), info) = edit(s, p, cmd, false, |sk, doc| {
         let mut trimmed: Vec<TrimOutcome> = Vec::new();
         let mut removed: Vec<Vec<[f64; 2]>> = Vec::new();
@@ -1123,7 +1123,7 @@ const BREAK_GAP: f64 = 1e-6;
 fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.break";
     let points = if p.get("points").is_some() { Some(vec2_list(cmd, p, "points", MAX_BREAK_POINTS)?) } else { None };
-    let model_edit = s.open_drawing.is_none();
+    let model_edit = !s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
         if points.is_none()
@@ -1660,7 +1660,7 @@ pub fn extend_arc_preview(sk: &solidcraft_sketch::Sketch, ci: usize, hover_pos: 
 
 fn extend(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.extend";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let pair = pair_request(p, cmd)?;
     let at = if pair.is_none() { req_vec2(cmd, p, "at")? } else { Vec2::default() };
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
@@ -2453,7 +2453,7 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = req_expr(cmd, p, "radius")?;
     let corners = corner_list(p, cmd)?;
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
         if !(r > 1e-9 && r < 1e8) {

@@ -631,7 +631,7 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     if !keys.iter().any(|k| p.get(*k).is_some_and(|v| model_ref(v) || middle_of(v).is_some())) {
         return Ok(p.clone());
     }
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -692,7 +692,7 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
     if !entities.iter().any(model_ref) {
         return Ok(p.clone());
     }
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Err(bad(cmd, "not supported yet: model projection in a sheet sketch; use exact sheet-local geometry"));
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -888,7 +888,7 @@ fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     // A sheet may be open while the model retains its own active sketch. Never
     // project into that model or reinterpret its new local ids as sheet points.
-    let sheet = s.open_drawing.is_some();
+    let sheet = s.sheet_sketching();
     let target = if sheet { None } else { sketch_store::active(s) };
     if !sheet && target.is_none() {
         return Ok(p.clone());

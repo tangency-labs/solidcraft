@@ -49,12 +49,15 @@ pub(crate) struct Meshing {
     /// When it started, and whether the first bodies have been shown (`SOLIDCRAFT_PROFILE_OPEN`).
     began: Option<f64>,
     first_shown: bool,
+    /// The parts placed more than once, made ahead for the scenes that draw them as instances.
+    parts: crate::viewport::WarmedParts,
 }
 
 impl Meshing {
-    /// `plans`: the bodies are drawn from their display plans; `shared`: large meshes are drawn
-    /// from shared vertices (a GPU viewport), made here too.
-    fn start(world: Arc<ModelState>, plans: bool, shared: bool) -> Meshing {
+    /// `plans`: the bodies are drawn from their display plans; `shared`: large meshes and parts
+    /// placed more than once are drawn from shared vertices (a GPU viewport), made here too, with
+    /// the parts' shared edges when the renderer draws instances' edges (`edges`).
+    fn start(world: Arc<ModelState>, plans: bool, shared: bool, edges: bool) -> Meshing {
         let n = world.bodies.len();
         let ready = Arc::new(Mutex::new(Vec::with_capacity(n)));
         let (done, stop) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
@@ -66,18 +69,23 @@ impl Meshing {
         }
         first.extend(rest);
         let repeated = repeated_parts(&world);
-        let job = (world.clone(), ready.clone(), done.clone(), stop.clone(), repeated);
+        let parts = crate::viewport::WarmedParts::default();
+        let job = (world.clone(), ready.clone(), done.clone(), stop.clone(), repeated, parts.clone());
         let spawned = threads()
             && std::thread::Builder::new()
                 .name("open-meshing".into())
                 .spawn(move || {
-                    let (world, ready, done, stop, repeated) = job;
+                    let (world, ready, done, stop, repeated, parts) = job;
                     solidcraft_engine::kernel::for_each_on_threads(&first, 16, |&i| {
                         if stop.load(Ordering::Relaxed) {
                             return;
                         }
                         if let Some(b) = world.bodies.get(i) {
-                            warm(b, plans, shared, &repeated, solidcraft_engine::doc::display_quality::current());
+                            let q = solidcraft_engine::doc::display_quality::current();
+                            warm(b, plans, shared, &repeated, q);
+                            if shared && b.placed_definition().is_some_and(|id| repeated.contains(&id)) {
+                                warm_part(b, &parts, edges, q);
+                            }
                         }
                         if let Ok(mut r) = ready.lock() {
                             r.push(i);
@@ -106,6 +114,7 @@ impl Meshing {
             remember: None,
             began: None,
             first_shown: false,
+            parts,
         }
     }
 
@@ -125,7 +134,8 @@ impl Drop for Meshing {
 pub(crate) fn start(app: &mut SolveApp, remember: Option<String>) {
     app.open_meshing_next = false;
     let plans = app.viewport.gpu.is_some_and(|g| g.tess);
-    let mut meshing = Meshing::start(crate::open_meshing::session_world(&app.session), plans, app.viewport.gpu.is_some());
+    let edges = app.viewport.gpu.is_some_and(|g| g.edges);
+    let mut meshing = Meshing::start(crate::open_meshing::session_world(&app.session), plans, app.viewport.gpu.is_some(), edges);
     meshing.remember = remember;
     app.open_meshing = Some(meshing);
     app.fit_view();
@@ -200,7 +210,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         // The design changed (an edit, an undo): mesh the new world; what is made is kept.
         let (framed, remember) = (m.framed, m.remember.clone());
         let plans = app.viewport.gpu.is_some_and(|g| g.tess);
-        let mut next = Meshing::start(world.clone(), plans, app.viewport.gpu.is_some());
+        let mut next = Meshing::start(world.clone(), plans, app.viewport.gpu.is_some(), app.viewport.gpu.is_some_and(|g| g.edges));
         (next.framed, next.remember) = (framed, remember);
         app.open_meshing = Some(next);
     }
@@ -321,6 +331,19 @@ pub(crate) fn warm(
     if plans || q != DisplayQuality::Normal {
         let _ = b.plan_mesh_in_place_at(q);
     }
+}
+
+/// Make the part `b` places (its mesh as the viewport draws it at display quality `q`) for the
+/// scenes that draw it as an instance ([`crate::viewport::warm_part`]).
+fn warm_part(b: &ModelBody, parts: &crate::viewport::WarmedParts, edges: bool, q: solidcraft_engine::doc::display_quality::DisplayQuality) {
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
+    let mesh = if q == DisplayQuality::Normal { b.mesh_in_place().0 } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()).0 };
+    crate::viewport::warm_part(parts, &mesh, edges);
+}
+
+/// The parts the design being opened made ahead, while it is the one shown.
+pub(crate) fn warmed_parts(app: &SolveApp) -> Option<crate::viewport::WarmedParts> {
+    app.open_meshing.as_ref().filter(|m| Arc::ptr_eq(&m.world, &session_world(&app.session))).map(|m| m.parts.clone())
 }
 
 /// Whether the meshes may be made on a thread of their own. The web build cannot start one; a
