@@ -549,6 +549,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     corner_relief_shape,
                     corner_relief,
                     height_from: height_from.clone(),
+                    profile: None,
                 },
             )?;
             // Each further bend stands on the far edge of the flange before it.
@@ -569,6 +570,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief_shape: None,
                         corner_relief: None,
                         height_from: height_from.clone(),
+                        profile: None,
                     },
                 )?;
             }
