@@ -1017,6 +1017,7 @@ certified_units! {
     fillet_executive_p3: "blend.fillet_executive_p3",
     feature_executive: "blend.feature_executive",
     offset_geometry_creation: "offset.offset_geometry_creation",
+    offset_executive_p2: "offset.offset_executive_p2",
     stitch_p1: "heal.stitch_p1",
     stitch_p2: "heal.stitch_p2",
     brep: "query.brep",
