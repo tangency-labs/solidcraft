@@ -75,7 +75,10 @@ impl PaletteArena {
         if self.bodies.get(name) != Some(&slots) {
             self.bodies.insert(name.to_string(), slots);
         }
-        self.shared.insert(name.to_string());
+        // Most rebuilds find every copy already there: no name copied for each.
+        if !self.shared.contains(name) {
+            self.shared.insert(name.to_string());
+        }
         slots
     }
 

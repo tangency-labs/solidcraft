@@ -332,7 +332,7 @@ impl RealSolid {
         let Some(select) = self.select else {
             return Ok(self.edges.clone());
         };
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let [x, y, z] = self.dimensions.unwrap_or_default();
         let body = solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, x, y, z)?;
         let mut picked = Vec::new();
@@ -839,6 +839,8 @@ fn record(
     }
     // (a soundness probe's measure of the result: nothing unless capture is on)
     crate::soundness::measure(body);
+    // (a certificate's look at the result: nothing unless a test installs a hook)
+    crate::trim_hook::observe(body);
     Ok(values)
 }
 /// Configure one actual retained corner between native corner creation and filleting.
@@ -1184,6 +1186,10 @@ fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResu
         ]),
         Err(error) => values.push(status(error)?),
     }
+    // (a soundness probe's measure and a certificate's look at the shelled body: nothing
+    // unless capture is on or a test installs a hook)
+    crate::soundness::measure(&mut result);
+    crate::trim_hook::observe(&mut result);
     let mut geometry = Vec::new();
     crate::util::primitive::append(k, &result, &mut geometry)?;
     section(&mut values, &geometry);
@@ -1362,7 +1368,7 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
     if !matches!(example, 0..=6) {
         return Ok(None);
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut run = || -> SolidResult<Vec<f64>> {
         let (dx, dy, dz) = if example < 2 {
             (5.0, 10.0, 15.0)
@@ -1434,7 +1440,7 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
 pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     input.validate()?;
     if let Some(shell) = input.shell {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         return match shell_rust(&mut k, input, shell) {
             Ok(values) => Ok(super::with_point_step(
                 shell_output(&values)?,
@@ -1446,7 +1452,7 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
             },
         };
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let body = build(&mut k, input)?;
     match run_rust(&mut k, body, input) {
         Ok(values) => {
@@ -1506,7 +1512,7 @@ fn surface_surface_output(values: &[f64]) -> Result<Output, HarnessError> {
 /// result B-rep is recorded as the shim records it.
 pub(super) fn surface_surface_rust(input: &SurfaceSurface) -> Result<Output, HarnessError> {
     contract::validate_surface_surface(&input.wire()).map_err(|e| HarnessError::new(e.to_string()))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut run = || -> SolidResult<Vec<f64>> {
         let surface = |c: &[[f64; 3]; 4]| {
             solidcore::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
@@ -1855,7 +1861,7 @@ pub(super) mod round_definition_proof {
     use solidcore::kernel::Kernel;
     use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume};
     use solidcore::mass::integrator::properties::{
-        brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
+        brep_mass_properties, MassProperties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
     use solidcore::math::Vec3;
     use solidcore::surface::surface::Surface;
@@ -1864,6 +1870,16 @@ pub(super) mod round_definition_proof {
 
     /// The golden's requested relative accuracy of the mass properties.
     pub(in super::super) const MASS_ACCURACY: f64 = 1e-4;
+
+    /// The integrator's estimates of a closed body's mass values (density 1, about the
+    /// origin), taken once by [`volume_band`] and read again by [`mass_bands`]: at the
+    /// golden's accuracy and at the integrator's finest, where it converges.
+    pub(in super::super) struct Estimates {
+        /// At [`MASS_ACCURACY`], as the golden measures.
+        golden: MassProperties,
+        /// At [`ESTIMATE_ACCURACY_FINEST`].
+        converged: MassProperties,
+    }
 
     /// The faces of `b` whose surface is a blend by its definition, each with the proved
     /// distance `d_f` between its net and its definition (`recertify`, at most its bound);
@@ -1913,28 +1929,30 @@ pub(super) mod round_definition_proof {
     /// [`certified_blends`]). Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
     /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
-    /// printed beside the band for the record only: an estimate is not a bound.
+    /// printed beside the band for the record only: an estimate is not a bound. Returns
+    /// both estimates, for [`mass_bands`].
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
         blends: &[(FaceId, f64)],
         old: f64,
         name: &str,
-    ) {
+    ) -> Estimates {
         let spread = spread(k, b, blends);
         let store = solidcore::geom::attribute::AttributeStore::default();
         let attributes = PropertyAttributes {
             store: &store,
             key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
         };
-        let mut volume = |accuracy: f64| {
-            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes)
-                .unwrap()
-                .properties
-                .volume
+        let mut at = |accuracy: f64| {
+            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap()
         };
-        let new = volume(MASS_ACCURACY);
-        let converged = volume(ESTIMATE_ACCURACY_FINEST);
+        let estimates = Estimates {
+            golden: at(MASS_ACCURACY),
+            converged: at(ESTIMATE_ACCURACY_FINEST),
+        };
+        let new = estimates.golden.properties.volume;
+        let converged = estimates.converged.properties.volume;
         let enclosure = enclose_volume(k, b, 1e-6 * new.abs()).unwrap();
         let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
         assert!(
@@ -1946,6 +1964,7 @@ pub(super) mod round_definition_proof {
              certified [{lo}, {hi}], band width {:e}",
             hi - lo
         );
+        estimates
     }
 
     /// The certified bands of the closed body `b`'s other mass values, as the golden
@@ -1960,21 +1979,15 @@ pub(super) mod round_definition_proof {
     /// within that accuracy of it; prints `PROVEN` where the band is at most that accuracy
     /// wide (the golden's value is then within twice its accuracy of the true one) and
     /// `WIDE` where it is not. The bands are of the body as stored (its nets), which is the
-    /// body the golden measures.
-    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, name: &str) {
+    /// body the golden measures. The estimates are [`volume_band`]'s, of the same body.
+    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, estimates: &Estimates, name: &str) {
         use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
-        let store = solidcore::geom::attribute::AttributeStore::default();
-        let attributes = PropertyAttributes {
-            store: &store,
-            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
-        };
-        let mut at = |accuracy: f64| {
-            let m = brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap();
+        let at = |m: &MassProperties| {
             let v = |p: Vec3| [p.x, p.y, p.z];
             (m.properties.area, v(m.centroid), v(m.inertia), v(m.products))
         };
-        let golden = at(MASS_ACCURACY);
-        let converged = at(ESTIMATE_ACCURACY_FINEST);
+        let golden = at(&estimates.golden);
+        let converged = at(&estimates.converged);
         let e = enclose_mass_properties(k, b, 1e-5).unwrap();
         if let Some((q, stop)) = e.short {
             eprintln!("{name}: the {q:?} enclosure stopped at {stop:?}, its band wider");
@@ -2206,8 +2219,8 @@ pub(super) mod round_definition_rows {
             }
             let blends = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
-                volume_band(&k, &mut body, &blends, old, name);
-                mass_bands(&k, &mut body, name);
+                let estimates = volume_band(&k, &mut body, &blends, old, name);
+                mass_bands(&k, &mut body, &estimates, name);
             }
         }
     }
@@ -2440,18 +2453,17 @@ mod wr457_certificates {
     /// summed length `length`, meet at a vertex whose third edge is convex. Each round
     /// adds its section, the square of side `r` less its quarter disc, of area
     /// `A = r^2 (1 - pi/4)`, along its edge up to the plane through the convex edge square
-    /// to it. Between those two planes the round turns the corner: the section, whose
-    /// square corner lies on the convex edge, revolves a quarter turn about it, adding
-    /// `(pi/2) A d` (Pappus), where `d = r (10 - 3 pi) / (12 - 3 pi)` is the section's
-    /// centroid distance from its square corner along either leg. So the volume is
-    /// `2600 + A L + (pi/2) A d`. The premises (square ends, a convex third edge, a
-    /// rolling-ball quarter turn) are ARGUED from the fixture geometry; the cases are
+    /// to it. The common face's corner between the edges is concave, so the rounds are
+    /// mitred there (WR-642, the owner's ruling of 2026-10-30; before its flag was retired
+    /// the section turned a quarter about the convex edge, adding `(pi/2) A d` by Pappus):
+    /// the mitre adds `r^3 (5/3 - pi/2)`, as `g5_blend_corner_certificates::mitred`
+    /// derives. So the volume is `2600 + A L + r^3 (5/3 - pi/2)`. The premises (square
+    /// ends, a convex third edge) are ARGUED from the fixture geometry; the cases are
     /// picked by name in [`CONCAVE_PAIRS`].
     fn two_concave_rounds(r: f64, length: f64) -> f64 {
-        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4};
         let a = r * r * (1.0 - FRAC_PI_4);
-        let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
-        UNION_VOLUME + a * length + FRAC_PI_2 * a * d
+        UNION_VOLUME + a * length + r * r * r * (5.0 / 3.0 - FRAC_PI_2)
     }
 
     fn load(file: &str, name: &str) -> RealSolid {
@@ -2675,6 +2687,51 @@ mod wr455_certificates {
     }
 }
 
+/// #18930: with the tangent curve tracer (then the opt-in `ssi_tangent_curve_tracer`) on,
+/// the round of edge 8 of `bottle.smb` at r 0.1 (`stubs4-delete-edge-bottle-e8-r0.1`) failed
+/// (status 1001). In two intersections of a round with its support face the tracer
+/// reported 16 and 11 touching points, all on the rail, on the edge of the round's domain,
+/// where the marcher returns a tangent curve: contacts on that one curve, taken for nodes
+/// where crossing branches meet. The round builds a manifold body of 31 vertices, 47 edges
+/// and 18 faces, the counts the row records (the row holds the rest of the body).
+#[cfg(test)]
+mod wr75_rail_contacts {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+
+    const NAME: &str = "stubs4-delete-edge-bottle-e8-r0.1";
+
+    #[test]
+    fn a_round_touching_its_face_along_the_rail_builds_with_the_tracer() {
+        let case = crate::case::regression_case(&super::super::Runner, NAME);
+        let inputs: super::super::Inputs = case.parse().expect("inputs");
+        let input: RealSolid = inputs.real_solid.expect("a real_solid case");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).expect("fixture").expect("bottle");
+        let edges = p1::edges(&body, None).expect("edges");
+        let selected: Vec<_> = input
+            .edge_indices()
+            .expect("edge indices")
+            .iter()
+            .map(|&i| *edges.get(i).expect("selected edge"))
+            .collect();
+        apply(&mut k, &mut body, &selected, &input)
+            .unwrap_or_else(|e| panic!("{NAME}: the round failed: {e:?}"));
+        assert!(
+            is_manifold_solid(&body).expect("manifold check"),
+            "{NAME}: not a manifold solid"
+        );
+        let counts = [
+            p1::vertices(&body, None).expect("vertices").len(),
+            p1::edges(&body, None).expect("edges").len(),
+            p1::faces(&body, None).expect("faces").len(),
+        ];
+        assert_eq!(counts, [31, 47, 18], "{NAME}: vertices, edges, faces");
+    }
+}
+
 /// WR-56 (#17467): the two rows it moved, `source-file-6_sided_corner-all-edges` and
 /// `source-file-nurb_box-all-edges`, round every edge of a B-spline body. Their mass
 /// properties did not move (bit for bit), and their topology and geometry records hold the
@@ -2728,5 +2785,393 @@ mod wr56_certificates {
                 e.hi
             );
         }
+    }
+}
+
+/// WR-661 (#14246, `fillet_statuses_pass_on` retired): a fillet of an open sheet may keep
+/// its result. The stitched result has lamina edges, so the closed-solid orientation's
+/// "face uses gathered from both sides" check fires (walking a face use's neighbours
+/// crosses the sheet's boundary to its other side) without the sheet being
+/// non-orientable. The executive keeps the stitched body only when the input was open,
+/// every lamina edge of the result has its ends on the input's boundary, no lamina edge
+/// runs along another (an unstitched seam), and, once the filleting is done, the body
+/// passes the level-2 check; otherwise the 1005 is returned and the body is restored.
+/// The `degenerate-test5` and `shell_fillet2` rows pass all three and are kept, as with the
+/// status ignored; the open-shell row fails level 2 and is refused.
+#[cfg(test)]
+mod wr661_open_sheets {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// `name`'s sheet is open before and after; the fillet adds one face, and the
+    /// result passes the level-2 check.
+    fn keeps_the_filleted_sheet(name: &str, faces_before: usize) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before + 1, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2).unwrap().lines();
+        assert!(lines.is_empty(), "{name}: {lines:?}");
+    }
+
+    #[test]
+    fn a_degenerate_test5_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-degenerate-test5-e2-r0.5", 4);
+    }
+
+    #[test]
+    fn a_shell_fillet2_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-shell_fillet2-e5-r0.5", 3);
+    }
+
+    /// The open-shell sheet is open too, and its stitched result has its ends on the
+    /// sheet's boundary, but it fails the level-2 check (nine gaps beyond tolerance, up to
+    /// 3.0e-5: main's known-failing entry for this case, tangency-labs/solidcraft#13733), so
+    /// the pass-over does not keep it: the orientation's failure (1005) is returned and the
+    /// body is put back as it was.
+    #[test]
+    fn an_open_shell_sheet_fillet_that_fails_level_2_is_refused() {
+        let name = "stubs4-open_shell-e5-r0.5";
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let faces = p1::faces(&body, None).unwrap();
+        assert_eq!(faces.len(), 6, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let error = fillet_selected(&mut k, &mut body, &selected, &input)
+            .ok()
+            .unwrap()
+            .expect_err("the invalid open result is refused");
+        assert_eq!(solidcore::error::upstream_status(&error), Some(1005), "{name}: {error:?}");
+        // the closed-solid orientation's "gathered from both sides" failure, not another one
+        assert!(
+            matches!(
+                error.failure().map(|f| &f.reason),
+                Some(solidcore::error::Reason::Topology(
+                    solidcore::error::topology::TopologyFailure::Inconsistent(
+                        "more face uses are connected than faces remain to be oriented"
+                    )
+                ))
+            ),
+            "{name}: {error:?}"
+        );
+        assert_eq!(p1::faces(&body, None).unwrap(), faces, "{name}: the body is put back");
+    }
+}
+
+/// The G5 blend-corner flag retirement (#14246) of WR-642's mitred concave face corner
+/// (`fillet_mitre_concave_face_corners`) moved 10 rows.
+#[cfg(test)]
+mod g5_blend_corner_certificates {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::{apply, build, select_edges};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::edge;
+
+    /// The rows the mitred concave face corner moved, each two concave rounds r 1 of the
+    /// box union meeting at one corner whose third edge is convex (a boss's root at its
+    /// sharp corner, WR-642's case), with the volume its golden row held before.
+    const MITRE: &[(&str, f64)] = &[
+        ("stubs3-union-inset-side-step-edges13-15-r1", 2603.938129447188),
+        ("stubs3-union-inset-side-step-edges13-17-r1", 2602.865120264477),
+        ("stubs3-union-inset-side-step-edges14-15-r1", 2603.938129447186),
+        ("stubs3-union-inset-side-step-edges14-18-r1", 2602.8651202644614),
+        ("stubs3-union-inset-side-step-edges16-17-r1", 2603.2943239376245),
+        ("stubs3-union-inset-side-step-edges16-18-r1", 2603.294323937609),
+        ("stubs3-union-overhang-corner-edges12-13-r1", 2602.65051842809),
+        ("stubs3-union-overhang-corner-edges14-15-r1", 2602.65051842809),
+        ("stubs3-union-overhang-front-edges14-15-r1", 2603.0797221012954),
+        ("stubs3-union-overhang-front-edges15-16-r1", 2603.0797221012954),
+    ];
+
+    /// The union's volume, 20 x 10 x 10 + 10 x 6 x 10.
+    const UNION_VOLUME: f64 = 2600.0;
+
+    /// The volume of the union with two concave rounds of radius `r` along edges of summed
+    /// length `length` that meet at a corner whose third edge is convex, mitred there
+    /// (WR-642: the owner's ruling of 2026-10-30, the fork's 4f06e72). Each round adds its
+    /// section, the square of side `r` less its quarter disc, `A = r^2 (1 - pi/4)`, along
+    /// its edge up to the corner, and the mitre fills the square of side `r` beyond the
+    /// corner up to the lower of the two sections: with `g(t) = r - sqrt(r^2 - (r - t)^2)`
+    /// the section's height `t` from its wall (decreasing), that is
+    /// `int int g(max(x, y)) = int_0^r 2 m g(m) dm = r^3 - 2 int_0^r (r - u) sqrt(r^2 - u^2) du
+    /// = r^3 - (pi r^3 / 2 - 2 r^3 / 3) = r^3 (5/3 - pi/2)` (PROVEN; the corner term of
+    /// WR-642's closed forms). The premises (straight axis-aligned edges meeting square, a
+    /// convex third edge) are ARGUED from the fixture geometry and the edges' lengths.
+    fn mitred(r: f64, length: f64) -> f64 {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+        UNION_VOLUME + r * r * (1.0 - FRAC_PI_4) * length + r * r * r * (5.0 / 3.0 - FRAC_PI_2)
+    }
+
+    /// Main's swept corner: the section turned a quarter about the convex edge (Pappus),
+    /// `(pi/2) A d` with `d = r (10 - 3 pi) / (12 - 3 pi)` the section's centroid distance
+    /// from its square corner (the former closed form of `wr457_certificates`).
+    fn swept(r: f64, length: f64) -> f64 {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let a = r * r * (1.0 - FRAC_PI_4);
+        let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+        UNION_VOLUME + a * length + FRAC_PI_2 * a * d
+    }
+
+    /// Each mitred row builds one closed manifold solid with no Level 2 report whose
+    /// enclosed volume (an interval no wider than `1e-7 * 2600`) holds the mitred closed
+    /// form [`mitred`] (up to its f64 rounding, `16 eps |V|` as in `wr457_certificates`),
+    /// and excludes main's swept corner [`swept`], which the golden held before (the
+    /// golden's old volume, an estimate, lies within `1e-4` of it). So each row's volume
+    /// is PROVEN closer to the ruled shape's than main's: main's is `(5/3 - pi/2) -
+    /// (pi/2) A d = 0.02057` away, the new one inside the enclosure.
+    #[test]
+    fn mitred_rows_hold_the_mitred_closed_form() {
+        let width = 1e-7 * UNION_VOLUME;
+        for &(name, before) in MITRE {
+            let input = inputs(name).real_solid.expect("a real solid");
+            let mut k = Kernel::default();
+            let mut body = build(&mut k, &input).unwrap().unwrap();
+            let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+            assert_eq!(selected.len(), 2, "{name}");
+            let mut length = 0.0;
+            for &e in &selected {
+                let ivl = edge::interval(&body, e).unwrap();
+                let c = edge::curve(&body, e).unwrap().unwrap();
+                let a = c.evaluate_point(&k, ivl.min()).unwrap();
+                let b = c.evaluate_point(&k, ivl.max()).unwrap();
+                length += a.distance(b);
+            }
+            apply(&mut k, &mut body, &selected, &input)
+                .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+            let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+            assert!(is_manifold_solid(&body).unwrap(), "{name}: not one closed solid");
+            let e = enclose_volume(&k, &mut body, width).unwrap();
+            assert!(e.width() <= width, "{name}: enclosure {e:?} wider than {width}");
+            let r = input.radius;
+            let (exact, old) = (mitred(r, length), swept(r, length));
+            let slack = 16.0 * f64::EPSILON * exact.abs();
+            eprintln!(
+                "MITRE {name}: length {length}, volume in [{}, {}], mitred {exact}, swept {old}",
+                e.lo, e.hi
+            );
+            assert!(
+                e.lo - slack <= exact && exact <= e.hi + slack,
+                "{name}: the mitred closed form {exact} is outside [{}, {}]",
+                e.lo,
+                e.hi
+            );
+            assert!(
+                old < e.lo - slack || e.hi + slack < old,
+                "{name}: main's swept form {old} is inside [{}, {}]",
+                e.lo,
+                e.hi
+            );
+            assert!((before - old).abs() <= 1e-4, "{name}: main's row {before} is not swept {old}");
+            assert!((before - exact).abs() > 1e-2, "{name}: main's row {before} is not farther");
+            let row = super::rust(&input).unwrap_or_else(|e| panic!("{name}: harness: {e:?}"));
+            let volume = *row.values["mass_properties"].get(1).unwrap();
+            assert!(
+                e.lo - 1e-4 <= volume && volume <= e.hi + 1e-4,
+                "{name}: the row's volume {volume} is not within 1e-4 of [{}, {}]",
+                e.lo,
+                e.hi
+            );
+        }
+    }
+}
+
+/// WR-613 (#18640): the rows a face-sided corner patch can move, each checked against
+/// main's figures.
+#[cfg(test)]
+#[path = "wr613_certificates.rs"]
+mod wr613_certificates;
+
+#[cfg(test)]
+mod wr664_near_knot_trims {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::{counts, inputs};
+    use super::*;
+    use solidcore::blend::definition_check::BlendFaceLog;
+    use solidcore::geom::tol::{brep_zone_tol_3d, SmallTopoType};
+
+    /// The rows whose results the near-knot snap (WR-664) moves: name, the golden's status
+    /// and vertex, edge and face counts, which the snap leaves as they were, and the number
+    /// of rail edges.
+    const ROWS: [(&str, [i64; 4], usize); 5] = [
+        ("stubs4-delete-edge-bottle-e8-r0.1", [0, 31, 47, 18], 5),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", [0, 27, 42, 10], 2),
+    ];
+
+    /// `name` builds with the golden's counts and `rails` rail edges (an edge between a blend
+    /// face the round made and a face it did not make, with knots inside: the traced rail,
+    /// not a one-span end of the blend), and every rail edge starts in a span at
+    /// least as long as the B-rep's zone tolerance: the chord from the edge's start to its
+    /// curve's first knot inside the edge, a lower bound of the span's length. The start is where
+    /// `TrimRailCurves` trims the rail at its vertex's drop. On main the `sphere_diff` rails
+    /// started 9.5e-7 to 9.8e-7 short of their knot at 0.004 (a span of 9.5e-7 to 9.6e-7),
+    /// their control points coinciding there.
+    ///
+    /// Their other ends are not checked here: there the trace's own last span, from knot to
+    /// knot, is 9.5e-7 long on the `sphere_diff` rails, and no trim at a knot can lengthen
+    /// it (on main one of them ended 2.2e-8 past that knot; the snap moves it onto it). The
+    /// snap of an end is `blend::fillet_geom::p5`'s
+    /// `rail_end_snaps_to_a_knot_within_the_zone_tolerance`. The bottle's rails start in long
+    /// spans on main too; its golden pins what the snap moves there.
+    fn check(name: &str, expected: [i64; 4], rails: usize) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        k.blend_face_log = Some(BlendFaceLog::default());
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(counts(&body, 0), expected, "{name}");
+        let made: Vec<_> = k.blend_face_log.as_ref().unwrap().last().iter().map(|m| m.face).collect();
+        let zone = brep_zone_tol_3d(&k, &body, SmallTopoType::NormalSize);
+        let mut found = 0;
+        for e in p1::edges(&body, None).unwrap() {
+            let faces = edge::faces(&body, e, None).unwrap();
+            if faces.iter().filter(|f| made.contains(f)).count() != 1 {
+                continue;
+            }
+            let curve = edge::curve(&body, e).unwrap().expect("an edge curve");
+            let ivl = edge::interval(&body, e).unwrap();
+            let (knots, _) = curve.knots(&k, None).unwrap();
+            // a traced rail has knots inside; an edge of one span (a blend's end) is no rail
+            let Some(&first) = knots.iter().find(|&&t| t > ivl.min() && t < ivl.max()) else {
+                continue;
+            };
+            found += 1;
+            let start = curve.evaluate_point(&k, ivl.min()).unwrap();
+            let span = start.distance(curve.evaluate_point(&k, first).unwrap());
+            println!("WR664 {name}: rail edge {e:?} starts at {} in a span of {span:e}", ivl.min());
+            assert!(span >= zone, "{name}: rail edge {e:?} starts in a span of {span:e} < {zone:e}");
+        }
+        assert_eq!(found, rails, "{name}: rail edges");
+    }
+
+    /// Every loop of every rolled blend face `name`'s round made (a face whose surface has a
+    /// procedural blend definition: the faces whose rails `TrimRailCurves` trims) closes in
+    /// the face's UV space: at each vertex the start of an edge use's UV trim curve and the
+    /// end of its clockwise neighbour's are no farther apart than `EFF_ZERO * (1 + |uv|)`,
+    /// the gap below which the face builder counts a loop corner as closed
+    /// (`topology::face::p3`'s `create_uv_trim_curves_body`, `uv_scaled_zero`). The near-knot
+    /// snap moves a rail's end along it by about the zone tolerance after the end curve is
+    /// built; an end curve left where it was opens the loop there by that much, and the
+    /// volume enclosure of the body can then no longer prove its volume positive
+    /// (`round_definition_rows`). Where the snap moved the rail's end, the end curve's end is
+    /// set to it, so the two agree to rounding. Where no end snaps, they differ by the
+    /// drop's accuracy (4.2e-9 in u on main's e1 r0.1), more than this bound: on these five
+    /// rows every corner of a rolled blend face closes (MEASURED), so a corner that stops
+    /// snapping fails here and needs its own look.
+    ///
+    /// The bottle's other blend face, a patch without a definition, is not checked: three of
+    /// its corners are open by 1.4e-10 to 3.9e-6 on main as well.
+    fn loops_close(name: &str) {
+        use solidcore::topology::edgeuse::p3::normalized_evaluate_read_only;
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        k.blend_face_log = Some(BlendFaceLog::default());
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        let made: Vec<_> = k
+            .blend_face_log
+            .as_ref()
+            .unwrap()
+            .last()
+            .iter()
+            .map(|m| m.face)
+            .filter(|&f| {
+                let surface = body.face(f).unwrap().surface.as_ref().expect("a blend surface");
+                surface.procedural_blend().is_some()
+            })
+            .collect();
+        assert!(!made.is_empty(), "{name}: no rolled blend face");
+        let mut open = Vec::new();
+        for &f in &made {
+            for l in face::loops(&body, f, false, None).unwrap() {
+                for use_ in loopuse::loop_edgeuses(&body, l).unwrap() {
+                    let cw = eu::cw_edgeuse(&body, use_).unwrap().expect("a clockwise neighbour");
+                    let start = normalized_evaluate_read_only(&k, &body, use_, 0.0, true, false).unwrap().point;
+                    let end = normalized_evaluate_read_only(&k, &body, cw, 1.0, true, false).unwrap().point;
+                    let gap = start.distance(end);
+                    let closed = solidcore::math::EFF_ZERO * (1.0 + start.x.abs().max(start.y.abs()));
+                    println!("WR664 {name}: face {f:?} at ({}, {}) gap {gap:e} (closed below {closed:e})", start.x, start.y);
+                    // Written to accept: a NaN gap or bound counts the corner as open.
+                    let closes = gap.is_finite() && closed.is_finite() && gap <= closed;
+                    if !closes {
+                        open.push((f, start.x, start.y, gap));
+                    }
+                }
+            }
+        }
+        assert!(open.is_empty(), "{name}: blend face loops open at {open:?}");
+    }
+
+    #[test]
+    fn bottle_e8_r0_1_loops_close() {
+        loops_close(ROWS[0].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_1_loops_close() {
+        loops_close(ROWS[1].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_5_loops_close() {
+        loops_close(ROWS[2].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_1_loops_close() {
+        loops_close(ROWS[3].0);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_5_loops_close() {
+        loops_close(ROWS[4].0);
+    }
+
+    #[test]
+    fn bottle_e8_r0_1() {
+        check(ROWS[0].0, ROWS[0].1, ROWS[0].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_1() {
+        check(ROWS[1].0, ROWS[1].1, ROWS[1].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_5() {
+        check(ROWS[2].0, ROWS[2].1, ROWS[2].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_1() {
+        check(ROWS[3].0, ROWS[3].1, ROWS[3].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_5() {
+        check(ROWS[4].0, ROWS[4].1, ROWS[4].2);
     }
 }

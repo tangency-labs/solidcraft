@@ -422,8 +422,8 @@ mod tests {
             ("sketch.insert_svg", vec!["svg"]),
             ("sketch.insert_dxf", vec!["dxf"]),
             ("file.insert_step", vec![]),
-            ("canvas.insert", vec!["png", "jpg", "jpeg"]),
-            ("canvas.decal", vec!["png", "jpg", "jpeg"]),
+            ("canvas.insert", vec!["png", "jpg", "jpeg", "svg"]),
+            ("canvas.decal", vec!["png", "jpg", "jpeg", "svg"]),
         ] {
             h.app.start(command);
             tick(&mut h.app, &h.ctx);
@@ -494,7 +494,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.app.start("canvas.insert");
         h.frames(2);
-        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg"]]);
+        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg", "svg"]]);
     }
 
     /// #4717: a canvas placed with a click on the origin of a sketch on XY, seen from the top,

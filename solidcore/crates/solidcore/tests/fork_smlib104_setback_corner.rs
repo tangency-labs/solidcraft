@@ -216,7 +216,7 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity` and `fillet_exact_round_classes`. The pins are
+/// Every fix but `fillet_exact_round_classes`. The pins are
 /// the fork's; `fillet_exact_round_classes` carries a solidcore-native change the fork does
 /// not have (#2419, WR-669 addendum: a line round's cylinder on its exact spine), which moves
 /// the volumes by about 1e-10. `SmFace::SwapUV`'s exact transpose of a swapped face's trims
@@ -225,7 +225,7 @@ fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && name != "fillet_exact_round_classes" {
+        if name != "fillet_exact_round_classes" {
             *f.flag_mut(name).unwrap() = true;
         }
     }

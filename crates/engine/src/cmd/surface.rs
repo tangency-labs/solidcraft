@@ -432,6 +432,16 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    // A surface sweep's path is the curves of one sketch (its own format keeps plain ids);
+    // a curve of another sketch is refused.
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            _ => Err(bad(cmd, "the surface sweep's path curves must be in one sketch")),
+        })
+        .collect::<Result<Vec<_>>>()?;
     if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
@@ -2078,7 +2088,7 @@ mod tests {
             run(&mut s, "solid.pattern.rectangular", json!({"features": ["Half"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10}));
             let state = s.world_state().unwrap();
             assert!(state.body("Plate").is_none());
-            assert!(state.sheets.is_empty());
+            assert!(state.surface_sheets.is_empty());
             assert_eq!(state.bodies.len(), usize::from(with_surface));
             assert_eq!(state.body("Sheet").map(|b| b.body.record()), surface.as_ref());
         }
@@ -2206,6 +2216,47 @@ mod tests {
             assert!(st.body("Tube").unwrap().body.is_surface());
             assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
         }
+    }
+
+    /// #18708: a Combine cut or intersect with an open (non-closed) tool body is refused up front
+    /// with an informative message instead of failing in kernel export; bodies are left unchanged.
+    #[test]
+    fn a_cut_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "cut"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
+    /// #18708: a Combine intersect with an open tool body is refused up front and names the tool.
+    #[test]
+    fn an_intersect_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "intersect"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
     }
 
     /// #15913 negative control: a join of overlapping solids still makes one body of the union.

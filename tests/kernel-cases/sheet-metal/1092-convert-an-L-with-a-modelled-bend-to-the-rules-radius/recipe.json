@@ -80,12 +80,12 @@
      4
     ],
     "start": [
-     4,
-     2
-    ],
-    "end": [
      2,
      4
+    ],
+    "end": [
+     4,
+     2
     ]
    }
   },
@@ -121,7 +121,7 @@
    }
   },
   {
-   "command": "sheet.convert",
+   "command": "sheet.recognize",
    "params": {
     "body": "Angle",
     "face": [
@@ -144,4 +144,4 @@
    "params": {}
   }
  ]
-}
+}

@@ -101,8 +101,8 @@ pub mod topology;
 
 use crate::math::Point3;
 use crate::topology::{
-    BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
-    VertexuseId,
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId,
+    VertexId, VertexuseId,
 };
 
 /// Shorthand for `core::result::Result<T, SolidError>`.
@@ -169,23 +169,6 @@ pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
 /// `pass_on` its error is returned, without it the status is ignored as upstream.
 pub(crate) fn ignore_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<()> {
     ignore_status(passed_on(r, pass_on)?)
-}
-
-/// [`ignored`] of a call whose status SMLib drops and the fork passes on: with
-/// `pass_on` its error is returned, without it the value is `None` as upstream.
-pub(crate) fn ignored_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<Option<T>> {
-    ignored(passed_on(r, pass_on)?)
-}
-
-/// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
-/// drops it and the fork passes it on (`SER(...)`): returned as the error with
-/// `pass_on`, dropped without (except [`SolidError::Unported`] and
-/// [`SolidError::Cancelled`], which always propagate).
-pub(crate) fn status_passed_on(status: Option<SolidError>, pass_on: bool) -> Result<()> {
-    match status {
-        Some(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
-        _ => Ok(()),
-    }
 }
 
 /// A reference to one topological entity, used as error context.
@@ -568,7 +551,8 @@ fn fmt_entity(entity: Option<EntityRef>) -> String {
 /// An edge of the caller's body (the target an operation edits), as a failure's [`Site`]
 /// names it. Built only by the mapping from an operation's own objects to the caller's
 /// body (for the blend, [`TargetEdge::of_fillet_object`], the mapping the fillet session's
-/// `fit_size` uses), so an id of an intermediate body cannot be named.
+/// `fit_size` uses; for offsets, [`TargetEdge::of_offset_edgeuse`], the executive's
+/// provenance), so an id of an intermediate body cannot be named.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TargetEdge(EdgeId);
 
@@ -594,6 +578,22 @@ fn target_entity(
 }
 
 impl TargetEdge {
+    /// The caller's edge the executive made an offset edge use from, also consulting
+    /// its mate's provenance. Missing or ambiguous provenance names no caller edge.
+    #[must_use]
+    pub(crate) fn of_offset_edgeuse(
+        executive: &crate::offset::offset_executive::p1::OffsetExecutive,
+        original: &Brep,
+        offset: &Brep,
+        edgeuse: EdgeuseId,
+    ) -> Option<Self> {
+        executive
+            .original_edge(original, offset, edgeuse)
+            .ok()
+            .flatten()
+            .map(Self)
+    }
+
     /// The edge of the caller's body a blend object is: `Some` only for an edge of the fillet
     /// session's target body.
     #[must_use]
@@ -614,6 +614,17 @@ impl TargetEdge {
 }
 
 impl TargetFace {
+    /// The caller's face the executive made an offset face from. Missing or
+    /// ambiguous provenance names no caller face.
+    #[must_use]
+    pub(crate) fn of_offset_face(
+        executive: &crate::offset::offset_executive::p1::OffsetExecutive,
+        original: &Brep,
+        face: FaceId,
+    ) -> Option<Self> {
+        executive.original_face(original, face).map(Self)
+    }
+
     /// The face of the caller's body a blend object is: `Some` only for a face of the fillet
     /// session's target body.
     #[must_use]
@@ -2066,7 +2077,6 @@ mod tests {
             passed_on::<()>(Err(e.clone()), false).map(|_| ()),
             Err(e.clone())
         );
-        assert_eq!(status_passed_on(Some(e.clone()), false), Err(e.clone()));
         assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
         assert!(!SolidError::sm_err("t").is_not_certified());
     }
@@ -2359,8 +2369,8 @@ mod tests {
                     BooleanFailure::SolidLeaks { face },
                 )
                 .into_error(),
-                "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
-                 the solid it bounds into the outside",
+                "boolean::merge::p4::manifold_boolean: the union deleted face 7 and the solid \
+                 it bounded merged into the outside",
                 ErrorKind::Failed,
                 SM_ERR,
             ),

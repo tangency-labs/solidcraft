@@ -8,7 +8,7 @@ use solidcraft_engine::crash;
 
 /// The command's usage, from the same lines the top-level usage lists.
 fn usage() -> String {
-    crate::command_usage("crashes")
+    crate::command_usage("crashes", &[])
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -63,6 +63,10 @@ fn replay(report: &Value) -> Result<(), String> {
         Some(d) => super::load(d)?,
         None => solidcraft_engine::Session::default(),
     };
+    // The ids the session drew from there, so the commands give the same objects the same ids.
+    if let Some(seed) = script["ids"].as_u64() {
+        s.seed_ids(seed);
+    }
     std::panic::set_hook(Box::new(|info| {
         let loc = info.location().map_or_else(|| "(unknown)".to_string(), |l| format!("{}:{}", l.file(), l.line()));
         let msg = info.payload_as_str().unwrap_or("(not a text message)").to_string();
