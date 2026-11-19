@@ -149,6 +149,14 @@ const HISTORY: OptionSpec = OptionSpec {
 
 const FREECAD_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, HISTORY];
 
+/// What an OpenUSD file brings: its meshes as mesh bodies (the default, as before the option), or
+/// its exact B-rep where it has one (see `file.insert_mesh` and [`crate::UsdGeometry`]).
+const USD_GEOMETRY: OptionSpec = OptionSpec {
+    param: "geometry",
+    label: "Geometry",
+    kind: OptionKind::Choice { choices: &[("meshes", "Meshes"), ("exact", "Exact B-rep where the file has it")], default: 0 },
+};
+
 /// A KiCad PCB's import options (see `doc.open`). The board's own thickness and colour are used
 /// unless the command is given others, so neither is offered here.
 const KICAD_IMPORT: &[OptionSpec] = &[
@@ -307,14 +315,15 @@ pub static FORMATS: &[FormatSpec] = &[
         export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
     // Read through cadmpeg: meshes as mesh bodies and the prim tree as components, turned to Z up
-    // when the file says Y is up. Written through cadmpeg from the STEP the bodies make: exact
-    // B-rep and meshes, in metres with Z up; the extension picks the encoding.
+    // when the file says Y is up; with `geometry: exact`, its B-reps as B-rep bodies of an Import
+    // feature instead. Written through cadmpeg from the STEP the bodies make: exact B-rep and
+    // meshes, in metres with Z up; the extension picks the encoding.
     FormatSpec {
         id: "usd",
         label: "OpenUSD",
         extensions: &["usd", "usda", "usdc", "usdz"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[], native_only: false }),
+        import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[USD_GEOMETRY], native_only: false }),
         export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
     FormatSpec {
