@@ -1027,10 +1027,10 @@ fn golden_max(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> f64 {
 /// A boundary point is on a pole when the label is collapsed there within `reach` mm (the
 /// face's edge or vertex tolerance: a pole row an importer left coinciding only to its own
 /// tolerance is a pole too), and its collapsed parameter then bounds nothing. A loop that turns
-/// more than once on poles turns the way its face's side says (the loops as the record keeps
-/// them, the face on their left in (u, v)), and a seam loop (a meridian up to a pole and back)
-/// spans the whole turn whatever holes the face has. `Ok(None)` where
-/// the label or a boundary point has no parameters; the classifier's refusal is the error.
+/// more than once on poles and runs along a seam both ways turns the way its face's side says
+/// (the loops as the record keeps them, the face on their left in (u, v)), and a seam loop (a
+/// meridian up to a pole and back) spans the whole turn whatever holes the face has. `Ok(None)`
+/// where the label or a boundary point has no parameters; the classifier's refusal is the error.
 pub fn extent(
     label: &Surface,
     loops: &[Vec<(&Curve, [f64; 2], bool)>],
@@ -1293,16 +1293,24 @@ fn extent_in(
         // That holds for a loop with one free turn. One that passes a pole twice, counting the
         // turn from its last point to its first (a sphere less a bore that crosses its seam, up
         // the seam on one side of the bore, over the pole and down the other side), closes
-        // whatever its turns are, so closing it says nothing: each crossing turns the way the
-        // face's side says instead ([`pole_jump`]).
+        // whatever its turns are, so closing it says nothing. Where it also runs along an edge
+        // both ways (a seam: the face spans the whole turn there), each crossing turns the way
+        // the face's side says instead ([`pole_jump`]). A loop with no seam (a narrow lune, up
+        // one meridian and down another) keeps closing: its width is the one it shows.
         wraps |= on_pole;
-        let by_side = crossings + usize::from(wraps) >= 2;
-        let mut turned = Vec::with_capacity(jumps.len() + 1);
-        turned.push([0.0; 2]);
-        for j in &jumps {
-            let s = turned.last().copied().unwrap_or([0.0; 2]);
-            turned.push([s[0] + j[0], s[1] + j[1]]);
-        }
+        let by_side = crossings + usize::from(wraps) >= 2
+            && l.iter().enumerate().any(|(i, (c, t, f))| {
+                l.iter()
+                    .skip(i + 1)
+                    .any(|(c2, t2, f2)| f != f2 && t == t2 && c == c2)
+            });
+        // The turn the points past each crossing are moved by: none before the first.
+        let turned: Vec<[f64; 2]> = std::iter::once([0.0; 2])
+            .chain(jumps.iter().scan([0.0; 2], |s, j| {
+                *s = [s[0] + j[0], s[1] + j[1]];
+                Some(*s)
+            }))
+            .collect();
         let last = prev;
         let mut net_turn = 0.0;
         for d in 0..2 {
