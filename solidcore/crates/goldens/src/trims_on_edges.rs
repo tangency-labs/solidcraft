@@ -720,6 +720,19 @@ pub(crate) fn certify_brep(k: &Kernel, b: &Brep) -> Result<Vec<TrimCertificate>,
 mod tests {
     use super::*;
 
+    /// A part ending on an interior knot takes the span on its own side, even where its
+    /// middle rounds onto the knot (the float just below 1.0 to 1.0); a point part on the
+    /// knot is listed on both spans that meet there.
+    #[test]
+    fn cuts_pick_each_parts_span_from_its_ends() {
+        let u = [0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0];
+        let below = 1.0_f64.next_down();
+        assert_eq!(0.5 * (below + 1.0), 1.0, "the middle rounds onto the knot");
+        assert_eq!(cuts(&u, 2, 4, below, 1.0), vec![(below, 1.0, 2)]);
+        assert_eq!(cuts(&u, 2, 4, 1.0, 1.0), vec![(1.0, 1.0, 3), (1.0, 1.0, 2)]);
+        assert_eq!(cuts(&u, 2, 4, 0.5, 1.5), vec![(0.5, 1.0, 2), (1.0, 1.5, 3)]);
+    }
+
     /// A box's trims (made by the kernel) are certified on their edges far inside the
     /// tolerance; a trim put on another edge's use of the same face is bounded at least
     /// as far as the edges are apart.

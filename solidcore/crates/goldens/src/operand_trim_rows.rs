@@ -763,7 +763,10 @@ pub(crate) fn certify_body(
         }
     }
     // a moved domain bound moves the face's samples taken on it: it is classed as the most
-    // distant of the face's moved samples, and one at least must have moved
+    // distant of the face's moved samples. Where none moved (a bound moved by a few ulps that
+    // the samples' evaluation does not see), every point the record takes on the face is
+    // main's bit for bit (the digests), so their enclosed distances are main's: `equal`, once
+    // every trim on the face's edges is certified on its edge
     domain_faces.sort();
     domain_faces.dedup();
     for f in domain_faces {
@@ -772,11 +775,26 @@ pub(crate) fn certify_body(
             .filter(|(g, _)| *g == f)
             .map(|(_, c)| *c)
             .collect();
-        assert!(
-            !of_face.is_empty(),
-            "{name}: face {} domain moved, no sample of it moved",
-            f.index()
-        );
+        if of_face.is_empty() {
+            let on_face: Vec<_> = certs
+                .iter()
+                .filter(|c| edge_faces(b, c.edge).contains(&f))
+                .collect();
+            assert!(
+                !on_face.is_empty(),
+                "{name}: face {} has no trims",
+                f.index()
+            );
+            for c in on_face {
+                assert!(c.holds(), "{name}: face {} domain moved: {c:?}", f.index());
+            }
+            eprintln!(
+                "  face {} domain: Equal (no sample moved, its trims certified)",
+                f.index()
+            );
+            classes.push(Class::Equal);
+            continue;
+        }
         let class = if of_face.contains(&Class::Farther) {
             Class::Farther
         } else if of_face.contains(&Class::Equal) {
@@ -870,7 +888,8 @@ mod local_operation {
     }
 }
 
-/// The `blend.feature_executive` rows the copy moves (6). The unit writes, for the base B-rep
+/// The `blend.feature_executive` rows the copy moves (10: the four `extrusion.smb` rows move
+/// because an intersection edge on a free-form face takes the intersector's trace). The unit writes, for the base B-rep
 /// and each feature B-rep, `topology.brep_mirror`'s geometry record without trims and
 /// `graph`; each row is replayed with [`plain_digest`] (nothing blinded: every moved value is
 /// listed), and each body's moved values are classed by [`certify_body`]: edge and vertex
@@ -951,7 +970,7 @@ mod feature_executive {
              moved values closer {closer}, equal {equal}",
             ROWS.len()
         );
-        assert_eq!(ROWS.len(), 6);
+        assert_eq!(ROWS.len(), 10);
     }
 }
 
