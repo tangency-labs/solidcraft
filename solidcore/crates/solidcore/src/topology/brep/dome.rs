@@ -29,9 +29,9 @@
 //! The volume of a dome is `(2/3) A h` for any star-shaped outline, because the section at
 //! height `h sin s` is the outline scaled by `cos s` about `C`.
 
-use std::f64::consts::PI;
-
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::EntityRef;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::tol::USE_DEFAULT;
 use crate::kernel::Kernel;
@@ -44,7 +44,8 @@ use crate::query::api_queries::{edge_curve_copy, face_normal_at_edge};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p3::new_brep;
 use crate::topology::brep::p4::stitch_faces;
-use crate::topology::brep::sheet::face_on;
+use crate::topology::brep::p2::ArenaNotifyState;
+use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::face::p2 as face_p2;
 use crate::topology::loopuse;
 use crate::topology::{Brep, FaceId};
@@ -119,8 +120,9 @@ impl Turn {
 
 /// The outline of a planar face, chained end to end and trimmed to its edges.
 struct Outline {
-    /// The chained outline, one curve over its parameter range.
-    curve: BSplineCurve,
+    /// The chained outline's pieces, each trimmed to its edge and turned to run on from the one
+    /// before.
+    pieces: Vec<BSplineCurve>,
     /// The radius, when the outline is one whole circle about the centroid.
     circle_radius: Option<f64>,
 }
@@ -173,11 +175,11 @@ pub fn dome_cap(
             None => return Ok(Err(DomeRefusal::SphericalNeedsCircle)),
         },
     };
-    let surface = cap_surface(&outline.curve, centre, normal, &meridian)?;
+    let (curve, pieces) = join_pieces(outline.pieces)?;
+    let surface = cap_surface(&curve, centre, normal, &meridian)?;
+    let seam = seam_curve(&curve, centre, normal, &meridian)?;
     let mut sheet = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-    let surface = Surface::from(surface);
-    let bx = surface.natural_uv_domain_with_nurb(k)?;
-    face_on(k, &mut sheet, surface, &bx)?;
+    cap_face(k, &mut sheet, surface, &pieces, &seam)?;
     sheet.refresh_cached_topology();
     let tol = sheet.tolerance();
     stitch_faces(k, &mut sheet, tol, None, false)?;
@@ -262,9 +264,8 @@ fn outline(
     if turns.iter().any(|t| *t != Some(sign)) {
         return Ok(Err(DomeRefusal::NotStar));
     }
-    let curve = BSplineCurve::create_by_joining(&mut parts, None)?;
     Ok(Ok(Outline {
-        curve,
+        pieces: parts,
         circle_radius,
     }))
 }
@@ -521,17 +522,7 @@ fn cap_surface(
             let (h, w) = homogeneous(p);
             meridian
                 .iter()
-                .map(|&[x, y, mw]| {
-                    let xyz: [f64; 3] = std::array::from_fn(|d| {
-                        mw * (w * centre[d] + x * (h[d] - w * centre[d]) + y * w * normal[d])
-                    });
-                    CPoint {
-                        x: xyz[0],
-                        y: xyz[1],
-                        z: xyz[2],
-                        w: mw * w,
-                    }
-                })
+                .map(|&m| cap_point(h, w, centre, normal, m))
                 .collect()
         })
         .collect();
@@ -571,4 +562,161 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
+}
+
+/// The cap's control point on meridian point `[x, y, mw]` for the outline's control point with
+/// homogeneous coordinates `h` and weight `w`: `mw (w C + x (h - w C) + y w n)`, weight `mw w`.
+fn cap_point(h: [f64; 3], w: f64, centre: [f64; 3], normal: [f64; 3], [x, y, mw]: [f64; 3]) -> CPoint {
+    let xyz: [f64; 3] = std::array::from_fn(|d| {
+        mw * (w * centre[d] + x * (h[d] - w * centre[d]) + y * w * normal[d])
+    });
+    CPoint {
+        x: xyz[0],
+        y: xyz[1],
+        z: xyz[2],
+        w: mw * w,
+    }
+}
+
+/// The cap's meridian at the outline's start: the iso curve `u = 0` of the cap, the seam.
+fn seam_curve(
+    curve: &BSplineCurve,
+    centre: [f64; 3],
+    normal: [f64; 3],
+    meridian: &[[f64; 3]; 3],
+) -> Result<BSplineCurve> {
+    let (h, w) = homogeneous(&curve.control_points()?[0]);
+    let points: Vec<CPoint> = meridian
+        .iter()
+        .map(|&m| cap_point(h, w, centre, normal, m))
+        .collect();
+    bspline(&points, 2, &MERIDIAN_KNOTS)
+}
+
+/// The outline's pieces joined into one curve over `[0, m]` (the piece `i` on `[i, i+1]`),
+/// by an affine reparametrisation of each piece and the knot and control point layout of a
+/// clamped B-spline: the joints are knots of multiplicity `degree` (continuous), and each
+/// later piece drops its first control point, which the joint shares. Returns the joined curve
+/// and the pieces, reparametrised the same way.
+fn join_pieces(mut pieces: Vec<BSplineCurve>) -> Result<(BSplineCurve, Vec<BSplineCurve>)> {
+    let mut degree = 0;
+    for piece in &pieces {
+        degree = degree.max(piece.degree()?);
+    }
+    for (i, piece) in pieces.iter_mut().enumerate() {
+        if piece.degree()? < degree {
+            piece.degree_elevate(degree)?;
+        }
+        piece.edit_parameterization(&Extent1d::from_min_max(i as f64, (i + 1) as f64))?;
+    }
+    let count = pieces.len();
+    let mut points: Vec<CPoint> = Vec::new();
+    let mut knots: Vec<f64> = Vec::new();
+    for (i, piece) in pieces.iter().enumerate() {
+        let full = full_knots(piece)?;
+        let first_knot = if i == 0 { 0 } else { degree + 1 };
+        let end_knot = if i + 1 == count { full.len() } else { full.len() - 1 };
+        knots.extend_from_slice(&full[first_knot..end_knot]);
+        let first_point = if i == 0 { 0 } else { 1 };
+        points.extend(piece.control_points()?[first_point..].iter().map(rational));
+    }
+    let joined = bspline(&points, degree, &knots)?;
+    Ok((joined, pieces))
+}
+
+/// A curve's knot vector with each knot repeated by its multiplicity.
+fn full_knots(curve: &BSplineCurve) -> Result<Vec<f64>> {
+    let (unique, multiplicities) = curve.knots(None)?;
+    Ok(unique
+        .iter()
+        .zip(multiplicities)
+        .flat_map(|(&value, mult)| std::iter::repeat_n(value, mult))
+        .collect())
+}
+
+/// A control point with its weight made explicit (`1` for a non-rational point).
+fn rational(p: &CPoint) -> CPoint {
+    if p.w == NOW {
+        CPoint {
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            w: 1.0,
+        }
+    } else {
+        *p
+    }
+}
+
+/// A straight parameter-space segment from `a` to `b` over `[t0, t1]`, as a pcurve.
+fn uv_line(a: [f64; 2], b: [f64; 2], t0: f64, t1: f64) -> Result<Curve> {
+    let points = vec![
+        CPoint { x: a[0], y: a[1], z: 0.0, w: 1.0 },
+        CPoint { x: b[0], y: b[1], z: 0.0, w: 1.0 },
+    ];
+    Ok(Curve::from(bspline(&points, 1, &[t0, t0, t1, t1])?))
+}
+
+/// The cap's one face, made from explicit loop uses: the outline's pieces along `v = 0`, the seam
+/// up at `u = m`, a degenerate pole use with no 3D curve (its neighbours share the apex vertex,
+/// as the STEP reader's collapsed side does), and the seam down at `u = 0`, `v` from 1 to 0.
+/// The seam curve is used twice, once in each direction.
+fn cap_face(
+    k: &mut Kernel,
+    b: &mut Brep,
+    surface: BSplineSurface,
+    pieces: &[BSplineCurve],
+    seam: &BSplineCurve,
+) -> Result<()> {
+    let surface = Surface::from(surface);
+    let bx = surface.natural_uv_domain_with_nurb(k)?;
+    let top = pieces.len() as f64;
+    let mut curves: Vec<Option<Curve>> = Vec::with_capacity(pieces.len() + 3);
+    let mut uvs: Vec<Curve> = Vec::with_capacity(pieces.len() + 3);
+    let mut orientations = Vec::with_capacity(pieces.len() + 3);
+    for (i, piece) in pieces.iter().enumerate() {
+        let (lo, hi) = (i as f64, (i + 1) as f64);
+        curves.push(Some(Curve::from(piece.clone())));
+        uvs.push(uv_line([lo, 0.0], [hi, 0.0], lo, hi)?);
+        orientations.push(OrientType::Same);
+    }
+    curves.push(Some(Curve::from(seam.clone())));
+    uvs.push(uv_line([top, 0.0], [top, 1.0], 0.0, 1.0)?);
+    orientations.push(OrientType::Same);
+    curves.push(None);
+    uvs.push(uv_line([top, 1.0], [0.0, 1.0], 0.0, 1.0)?);
+    orientations.push(OrientType::Same);
+    curves.push(Some(Curve::from(seam.clone())));
+    uvs.push(uv_line([0.0, 0.0], [0.0, 1.0], 0.0, 1.0)?);
+    orientations.push(OrientType::Opposite);
+    let input = FaceCurvesInput {
+        loops: vec![pieces.len() + 3],
+        curves_3d: Some(curves),
+        uv_curves: Some(uvs),
+        orientations,
+        loop_points: Vec::new(),
+    };
+    let region = b.infinite_region();
+    let mut state = ArenaNotifyState::new(b);
+    let mut env = state.env(None);
+    let key_of = env.key_of;
+    let this_face = |f: FaceId| key_of(EntityRef::Face(f));
+    make_face_with_curves(
+        k,
+        b,
+        region,
+        input,
+        surface,
+        &bx,
+        OrientType::Same,
+        None,
+        &this_face,
+        &mut env,
+    )?;
+    Ok(())
+}
+
+/// The B-spline of `points` (homogeneous, `dim` 3) of `degree` over `knots`, clamped.
+fn bspline(points: &[CPoint], degree: usize, knots: &[f64]) -> Result<BSplineCurve> {
+    BSplineCurve::from_data(3, points.len() - 1, knots.len() - 1, degree, points, knots)
 }
