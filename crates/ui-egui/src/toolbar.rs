@@ -1051,6 +1051,50 @@ struct RibbonShape {
     folded: bool,
 }
 
+const POP_OUT_RIBBON: &str = "sc_pop_out_ribbon";
+
+fn pop_out_ribbon_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::unique((POP_OUT_RIBBON, ctx.viewport_id()))
+}
+
+pub(crate) fn pop_out_ribbon_focus(ctx: &egui::Context) -> bool {
+    ctx.memory(|m| m.focused())
+        .and_then(|id| ctx.read_response(id))
+        .is_some_and(|response| response.layer_id == egui::LayerId::new(egui::Order::Middle, pop_out_ribbon_id(ctx)))
+}
+
+/// The usual full ribbon, painted in its own clipped layer. Its bounding box is an
+/// input shield, never an anchored shell card or an obstacle for fit.
+pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, fraction: f32, keyboard: bool) {
+    use crate::ui_kit::LayoutMode;
+    if fraction <= 0.0 || !content.is_positive() {
+        app.shell.ribbon_overlay = None;
+        return;
+    }
+    crate::workspace::sync_context(app);
+    let t = Tokens::get();
+    let height = ribbon_height(app.preferences.ribbon_labels);
+    let r = Rect::from_min_size(content.min - vec2(0.0, height * (1.0 - fraction)), vec2(content.width(), height));
+    let visible = content.intersect(r);
+    let cards = crate::ui_kit::Cards::new(r, LayoutMode::Docked, height, WORKSPACE_WIDTH);
+    let ws = Rect::from_min_size(r.min, vec2(WORKSPACE_WIDTH.min(r.width()), height - 1.0));
+    let host = Container::for_layout(LayoutMode::Docked, Surface::Chrome);
+    let previous_cards = std::mem::take(&mut app.shell.cards);
+    host.area(pop_out_ribbon_id(ui.ctx())).fixed_pos(visible.min).constrain(false).show(ui.ctx(), |ui| {
+        ui.set_min_size(visible.size());
+        ui.set_clip_rect(ui.clip_rect().intersect(content));
+        let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
+        Container::paint_frame(ui.painter(), frame, r);
+        if keyboard && ui.is_visible() && !ui.is_sizing_pass() {
+            ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("workspace_switcher")));
+        }
+        ribbon_contents(app, ui, RibbonShape { floating: false, cards, r, ws, folded: false });
+    });
+    app.shell.cards = previous_cards;
+    app.shell.ribbon_overlay = Some(visible);
+    crate::scenario::publish_rect("ribbon:pop_out", visible);
+}
+
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     crate::workspace::sync_context(app);
@@ -2564,6 +2608,14 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    if crate::view_window_drag::keyboard_active(app, ctx) {
+        return;
+    }
+    if crate::view_windows::is_clean(app) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        let window = app.view_windows.current_window();
+        drop(app.run("tab.window.clean", json!({"window": window, "on": false})));
+        return;
+    }
     crate::viewport_status::reconcile(app, ctx);
     crate::browser::update_folder_pick(app, ctx);
     let chat_owner = crate::agent_chat::owns_keyboard_input(app, ctx);
@@ -2618,6 +2670,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     if crate::params_dialog::cancel_on_escape(app, ctx) {
+        return;
+    }
+    if crate::view_tiles::cancel_placement_on_escape(app, ctx) {
+        app.esc_handled = true;
+        app.last_escape = None;
         return;
     }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
@@ -2725,7 +2782,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             && !mods.shift
             && let Some(place) = view_place(k)
         {
-            drop(app.run("tab.view.activate", json!({"index": place})));
+            let key = crate::keymap::key_name(k, mods);
+            if crate::keymap::commands_for(app, &key).is_empty() {
+                drop(app.run("tab.view.activate", json!({"index": place})));
+            } else {
+                crate::keymap::press(app, &key, repeat);
+            }
             continue;
         }
         if mods.command {
@@ -2734,7 +2796,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::N | Key::O | Key::S | Key::W | Key::Comma if app.embed_editor => {}
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
-                Key::O => {
+                Key::O if !mods.alt => {
                     app.pick_open(|app, path| {
                         if let Some(path) = path {
                             app.open_chosen_file(&path);
@@ -2754,7 +2816,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
                 Key::W if !mods.alt => {
-                    if mods.shift || app.docs.views.len() < 2 {
+                    let key = crate::keymap::key_name(k, mods);
+                    if mods.shift && !crate::keymap::commands_for(app, &key).is_empty() {
+                        crate::keymap::press(app, &key, repeat);
+                    } else if !mods.shift && app.docs.views.len() < 2 && app.view_windows.close_current() {
+                        continue;
+                    } else if mods.shift || app.docs.views.len() < 2 {
                         crate::documents::close(app, app.docs.active, false);
                     } else {
                         drop(app.run("tab.view.close", json!({})));
@@ -2909,6 +2976,23 @@ fn dropdown_cell(
 #[cfg(test)]
 mod header_report_tests {
     use super::*;
+
+    #[test]
+    fn custom_view_chords_run_before_builtin_view_shortcuts() {
+        for (chord, input) in [("Alt+1", json!({"key":"1", "alt":true})), ("Ctrl+Shift+W", json!({"key":"W", "cmd":true, "shift":true}))] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            let second = h.app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+            crate::keymap::bind_at(&mut h.app, "view.grid", None, chord, true).unwrap();
+            h.frames(2);
+            let grid = h.app.ui.show_grid;
+            h.call("ui.key", input);
+            h.frames(2);
+            assert_eq!(h.app.ui.show_grid, !grid, "{chord} runs its assigned command");
+            assert_eq!(h.app.docs.views.active().id, second, "{chord} does not activate or close a view");
+            assert!(!h.app.home.open && h.app.docs.closing.is_none(), "{chord} does not close the design");
+        }
+    }
 
     #[test]
     fn escape_closes_file_menu_on_home_and_over_a_sketch_without_cancelling_it() {
@@ -5412,6 +5496,26 @@ mod fill_width_tests {
     /// width it has. No blank run wider than one button while something is hidden, every panel
     /// on the toolbar shows its icons, the » menu only when even one button a panel won't fit,
     /// and neither the tab row nor the title bar's own controls run into each other.
+    #[test]
+    fn pop_out_ribbon_overlays_without_changing_view_bounds() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.shell.cards.clear();
+        let rect = Rect::from_min_size(pos2(0.0, 42.0), vec2(900.0, 650.0));
+        let expected = crate::shell::panel_bounds(&h.app, rect);
+        for fraction in [0.0, 0.2, 1.0, 0.0] {
+            let _ = h.ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_max(egui::Pos2::ZERO, rect.max)), ..Default::default() }, |ui| {
+                pop_out_ribbon(&mut h.app, ui, rect, fraction, false);
+                assert_eq!(crate::shell::panel_bounds(&h.app, rect), expected);
+                assert_eq!(h.app.shell.ribbon_overlay.is_some(), fraction > 0.0);
+                if let Some(overlay) = h.app.shell.ribbon_overlay {
+                    assert_eq!(overlay.top(), rect.top());
+                    assert!(crate::shell::covered(&h.app, overlay.center()));
+                }
+            });
+        }
+    }
+
     #[test]
     fn toolbar_fills_its_width_from_wide_to_narrow_windows() {
         // Either header layout: the ribbon fits the same way with search in the bar.

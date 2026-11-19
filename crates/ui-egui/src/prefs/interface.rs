@@ -330,6 +330,42 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 "tab_double_click_renames",
             );
             windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
+            layout_check(
+                ui,
+                app.tr("window_ribbon.ribbon"),
+                app.tr("window_ribbon.preference_help"),
+                &mut app.preferences.pop_out_window_defaults.ribbon,
+                "pop_out_ribbon",
+            );
+            ui.add_enabled_ui(app.preferences.pop_out_window_defaults.ribbon, |ui| {
+                layout_check(
+                    ui,
+                    app.tr("window_ribbon.auto_hide"),
+                    app.tr("window_ribbon.auto_hide_help"),
+                    &mut app.preferences.pop_out_window_defaults.ribbon_auto_hide,
+                    "pop_out_ribbon_auto_hide",
+                );
+            });
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                use solidcraft_views::CardHeaders;
+                let labels = [app.tr("window_options.always"), app.tr("window_options.on_hover"), app.tr("window_options.hidden")];
+                ui_kit::settings_row_help(ui, app.tr("window_options.card_headers"), app.tr("window_options.card_headers_help"), |ui| {
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let mut selection = CardHeaders::ALL.iter().position(|state| *state == options.card_headers).unwrap_or_default();
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(state) = CardHeaders::ALL.get(selection)
+                    {
+                        options.card_headers = *state;
+                    }
+                });
+            });
+            layout_check(
+                ui,
+                app.tr("window_options.keep_on_top"),
+                app.tr("window_options.keep_on_top_help"),
+                &mut app.preferences.pop_out_window_defaults.keep_on_top,
+                "pop_out_keep_on_top",
+            );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
@@ -354,6 +390,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.show_design_view_switcher_note"),
                 &mut app.preferences.show_design_view_switcher,
                 "show_design_view_switcher",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.clear_view_tabs"),
+                app.tr("prefs.clear_view_tabs.help"),
+                &mut app.preferences.clear_view_tabs,
+                "clear_view_tabs",
             );
             layout_check(
                 ui,
