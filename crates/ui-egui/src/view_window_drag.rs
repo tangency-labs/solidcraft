@@ -9,7 +9,6 @@ use crate::{SolveApp, app_bar::ViewDropZone};
 
 use crate::view_tiles::DockTarget;
 use crate::view_windows::{DragSource, DragWindow};
-use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -26,8 +25,6 @@ struct Drag {
     view: DesignView,
     origin: Rect,
     source: DragSource,
-    picture: Picture,
-    capture_frame: Option<u64>,
     keyboard: Option<usize>,
     target: Option<Target>,
     pointer: Pos2,
@@ -41,7 +38,6 @@ struct Flight {
     from: Rect,
     origin: Rect,
     start: f64,
-    picture: Picture,
 }
 
 struct DockCanvas {
@@ -273,66 +269,13 @@ pub(crate) fn record_canvas(app: &mut SolveApp, ctx: &Context) {
         let convert = |point| screen.local(source.desktop(point));
         let origin = Rect::from_min_max(convert(drag.origin.min), convert(drag.origin.max));
         let pointer = convert(drag.pointer);
-        let picture = drag.picture.lock().ok().and_then(|image| image.clone());
-        paint_preview(ctx, &drag.view, origin, pointer, picture.as_ref(), Preview::Dock { dock, attraction: *attraction, displaced: None });
-    }
-}
 
-type Picture = Arc<Mutex<Option<egui::TextureHandle>>>;
-
-fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> (Picture, Option<u64>) {
-    let picture = Picture::default();
-    if cfg!(target_arch = "wasm32") || ctx.embed_viewports() {
-        return (picture, None);
+        paint_preview(ctx, &drag.view, origin, pointer, Preview::Dock { dock, attraction: *attraction, displaced: None });
     }
-    let frame = if app.docs.views.active().id == view {
-        app.viewport.rect
-    } else if app.docs.views.is_tiled() && app.docs.views.tiles().is_some_and(|tiles| tiles.contains(view)) {
-        app.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
-    } else {
-        None
-    };
-    if let Some(frame) = frame.map(|frame| frame.intersect(ctx.viewport_rect())).filter(|frame| frame.is_positive() && frame.is_finite()) {
-        let capture_frame = ctx.cumulative_frame_nr();
-        let output = Arc::downgrade(&picture);
-        let scale = ctx.pixels_per_point();
-        let ctx = ctx.clone();
-        let ui = ctx.clone();
-        let viewport = ctx.viewport_id();
-        ctx.request_screenshot(move |image| {
-            let Some(output) = output.upgrade() else { return };
-            let min = [frame.left(), frame.top()];
-            let max = [frame.right(), frame.bottom()];
-            let left = (min[0] * scale).max(0.0) as usize;
-            let top = (min[1] * scale).max(0.0) as usize;
-            let right = ((max[0] * scale).ceil() as usize).min(image.size[0]);
-            let bottom = ((max[1] * scale).ceil() as usize).min(image.size[1]);
-            if right <= left || bottom <= top {
-                return;
-            }
-            let size = [right - left, bottom - top];
-            let stride = size[0].max(size[1]).div_ceil(512).max(1);
-            let scaled = [size[0].div_ceil(stride), size[1].div_ceil(stride)];
-            let mut pixels = Vec::with_capacity(scaled[0] * scaled[1]);
-            for y in (top..bottom).step_by(stride) {
-                let start = y * image.size[0];
-                let Some(row) = image.pixels.get(start + left..start + right) else { return };
-                pixels.extend(row.iter().step_by(stride).copied());
-            }
-            let texture = ui.load_texture("view drag still", egui::ColorImage::new(scaled, pixels), egui::TextureOptions::LINEAR);
-            if let Ok(mut output) = output.lock() {
-                *output = Some(texture);
-                ui.request_repaint_of(viewport);
-            }
-        });
-        return (picture, Some(capture_frame));
-    }
-    (picture, None)
 }
 
 fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool) -> Option<Drag> {
     let design_view = app.docs.views.get(view)?.clone();
-    let (picture, capture_frame) = capture_picture(app, ctx, view);
     Some(Drag {
         viewport: ctx.viewport_id(),
         tab: app.docs.current_tab(),
@@ -340,8 +283,6 @@ fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool)
         view: design_view,
         origin,
         source: crate::view_windows::drag_source(app, view, ctx.viewport_rect()),
-        picture,
-        capture_frame,
         keyboard: keyboard.then_some(0),
         target: None,
         pointer: origin.center(),
@@ -597,14 +538,7 @@ fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
     if ctx.global_style().animation_time > 0.0
         && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph_id(ctx, drag.view.id)))
     {
-        state.flight = Some(Flight {
-            view: drag.view,
-            viewport: drag.viewport,
-            from: morph.rect,
-            origin: drag.origin,
-            start: ctx.input(|i| i.time),
-            picture: drag.picture,
-        });
+        state.flight = Some(Flight { view: drag.view, viewport: drag.viewport, from: morph.rect, origin: drag.origin, start: ctx.input(|i| i.time) });
         ctx.request_repaint();
     }
 }
@@ -658,7 +592,7 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(32));
         return;
     }
-    let picture = drag.picture.lock().ok().and_then(|image| image.clone());
+
     let blocked = refusal.is_some();
     let label = refusal.unwrap_or(&window.label);
     let pointer = drag.screen.map(|screen| screen.desktop(drag.pointer));
@@ -675,14 +609,7 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
         let t = Tokens::get();
         p.rect_filled(client, 0, t.app_bar);
         let ink = if blocked { t.error } else { t.accent };
-        draw_shape(
-            ctx,
-            &p,
-            &drag.view,
-            client.shrink(2.0),
-            GhostStyle { form: Form::Window, tilt: 0.0, detail: 1.0, ink, shadow: false },
-            picture.as_ref(),
-        );
+        draw_shape(ctx, &p, &drag.view, client.shrink(2.0), GhostStyle { form: Form::Window, tilt: 0.0, detail: 1.0, ink, shadow: false });
         let point = pointer.and_then(|point| Screen::current(ctx).map(|screen| screen.local(point))).unwrap_or(client.left_top() + vec2(24.0, 14.0));
         paint_hint(&p, client, &drag.view, point, Some(label), blocked);
     });
@@ -690,13 +617,7 @@ pub(crate) fn show_native_preview(app: &SolveApp, ctx: &Context) {
 
 fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
     update_slot(ctx, drag.target.as_ref(), drag.origin.width());
-    // Native readback uses the frame that requested it. Paint the ghost starting
-    // with the next frame so its outline and tint stay out of the captured picture.
-    if drag.capture_frame == Some(ctx.cumulative_frame_nr()) {
-        ctx.request_repaint();
-        return;
-    }
-    let picture = drag.picture.lock().ok().and_then(|image| image.clone());
+
     if let Some(target) = drag.target.as_ref().filter(|target| target.viewport(drag.viewport) != drag.viewport) {
         ctx.request_repaint_of(target.viewport(drag.viewport));
         return;
@@ -705,7 +626,7 @@ fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
         Some(Target::Strip { slot, label, blocked: false }) => paint_tab(ctx, &drag.view, drag.origin, *slot, drag.pointer, label),
         Some(Target::Dock { dock, attraction, .. }) => {
             let displaced = dock.displaced.and_then(|(id, rect)| app.docs.views.get(id).map(|view| (view, rect)));
-            paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Dock { dock, attraction: *attraction, displaced });
+            paint_preview(ctx, &drag.view, drag.origin, drag.pointer, Preview::Dock { dock, attraction: *attraction, displaced });
         }
         Some(Target::Window { window, refusal }) => {
             if native_preview_window(ctx, drag).is_some() && native_preview_scale(ctx).is_some() {
@@ -714,10 +635,10 @@ fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
             }
             let rect = Screen::current(ctx).map(|screen| Rect::from_min_max(screen.local(window.outline.min), screen.local(window.outline.max)));
             let label = refusal.unwrap_or(&window.label);
-            paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Window { rect, label, blocked: refusal.is_some() });
+            paint_preview(ctx, &drag.view, drag.origin, drag.pointer, Preview::Window { rect, label, blocked: refusal.is_some() });
         }
-        Some(Target::Strip { label, .. }) => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Held(Some(label))),
-        None => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Held(None)),
+        Some(Target::Strip { label, .. }) => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, Preview::Held(Some(label))),
+        None => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, Preview::Held(None)),
     }
 }
 
@@ -738,7 +659,7 @@ enum Form {
     Window,
 }
 
-fn paint_preview(ctx: &Context, view: &DesignView, origin: Rect, pointer: Pos2, picture: Option<&egui::TextureHandle>, preview: Preview<'_>) {
+fn paint_preview(ctx: &Context, view: &DesignView, origin: Rect, pointer: Pos2, preview: Preview<'_>) {
     let client = ctx.viewport_rect();
     let t = Tokens::get();
     let p = painter(ctx).with_clip_rect(client);
@@ -764,7 +685,7 @@ fn paint_preview(ctx: &Context, view: &DesignView, origin: Rect, pointer: Pos2, 
                     p.rect_stroke(*neighbor, 8, Stroke::new(1.0, t.accent.gamma_multiply(0.45)), StrokeKind::Inside);
                 }
                 if let Some((other, rect)) = displaced {
-                    draw_shape(ctx, &p, other, rect, GhostStyle { form: Form::Card, tilt: 0.0, detail: 1.0, ink: t.border, shadow: false }, None);
+                    draw_shape(ctx, &p, other, rect, GhostStyle { form: Form::Card, tilt: 0.0, detail: 1.0, ink: t.border, shadow: false });
                 }
                 let outline = dock.rect.expand(3.0);
                 if attraction >= 1.0 {
@@ -784,7 +705,7 @@ fn paint_preview(ctx: &Context, view: &DesignView, origin: Rect, pointer: Pos2, 
     };
     let params = morph(ctx, view.id, origin, goal, form, pointer);
     let ink = if blocked { t.error } else { t.accent };
-    draw_shape(ctx, &p, view, params.rect, GhostStyle { form, tilt: params.tilt, detail: params.detail, ink, shadow: true }, picture);
+    draw_shape(ctx, &p, view, params.rect, GhostStyle { form, tilt: params.tilt, detail: params.detail, ink, shadow: true });
     if focused && params.rect.width() > 50.0 && params.detail > 0.65 {
         p.circle_filled(params.rect.right_top() + vec2(-14.0, 14.0), 3.5, t.accent);
     }
@@ -799,7 +720,7 @@ fn paint_tab(ctx: &Context, view: &DesignView, origin: Rect, slot: Slot, pointer
     if let Some(tab) = crate::app_bar::view_drag_gap(ctx, crate::documents::tab_strip_id(slot.viewport), slot.index) {
         morph(ctx, view.id, origin, tab, Form::Tab, pointer);
         let tab_painter = p.with_clip_rect(tab);
-        draw_shape(ctx, &tab_painter, view, tab, GhostStyle { form: Form::Tab, tilt: 0.0, detail: 0.0, ink: t.accent, shadow: false }, None);
+        draw_shape(ctx, &tab_painter, view, tab, GhostStyle { form: Form::Tab, tilt: 0.0, detail: 0.0, ink: t.accent, shadow: false });
     }
     paint_hint_label(&p, client, pos2(pointer.x, slot.hit.top() + 48.0), label, false);
 }
@@ -813,9 +734,9 @@ fn paint_flight(ctx: &Context, flight: &Flight) -> bool {
     let phase = 1.0 - (1.0 - linear).powi(3);
     let rect = lerp_rect(flight.from, flight.origin, phase).translate(vec2(0.0, -42.0 * (phase * std::f32::consts::PI).sin()));
     let painter = painter(ctx).with_clip_rect(ctx.viewport_rect());
-    let picture = flight.picture.lock().ok().and_then(|image| image.clone());
+
     let style = GhostStyle { form: Form::Card, tilt: 0.0, detail: 1.0 - phase, ink: Tokens::get().border, shadow: true };
-    draw_shape(ctx, &painter, &flight.view, rect, style, picture.as_ref());
+    draw_shape(ctx, &painter, &flight.view, rect, style);
     ctx.request_repaint();
     true
 }
@@ -837,7 +758,7 @@ struct GhostStyle {
     shadow: bool,
 }
 
-fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: Rect, style: GhostStyle, image: Option<&egui::TextureHandle>) {
+fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: Rect, style: GhostStyle) {
     let GhostStyle { form, tilt, detail, ink, shadow } = style;
     if !rect.is_positive() {
         return;
@@ -862,20 +783,13 @@ fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: R
         painter.rect_filled(header, egui::CornerRadius { nw: radius, ne: radius, sw: 0, se: 0 }, bar);
         paint_header(painter, header, &view.name, view.kind.key(), t.app_bar_text);
     }
-    let picture = Rect::from_min_max(header.left_bottom(), rect.max).shrink(3.0);
-    if picture.is_positive() && detail > 0.03 {
-        solidcraft_viewport_egui::paint_background(painter, picture, t.viewport_top, t.viewport_bottom);
-        if let Some(image) = image {
-            let scaled = image.size_vec2();
-            let size = scaled * (picture.width() / scaled.x).min(picture.height() / scaled.y);
-            let show = Rect::from_center_size(picture.center(), size);
-            painter.image(image.id(), show, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.app_bar_text.linear_multiply(detail));
-        } else {
-            paint_kind(painter, picture.center(), view, t.text_dim.gamma_multiply(0.4 * detail), 32.0_f32.min(picture.height()));
-        }
-        if form == Form::Window && picture.height() > 65.0 {
+    let body = Rect::from_min_max(header.left_bottom(), rect.max).shrink(3.0);
+    if body.is_positive() && detail > 0.03 {
+        solidcraft_viewport_egui::paint_background(painter, body, t.viewport_top, t.viewport_bottom);
+        paint_kind(painter, body.center(), view, t.text_dim.gamma_multiply(0.4 * detail), 32.0_f32.min(body.height()));
+        if form == Form::Window && body.height() > 65.0 {
             let name = painter.layout_no_wrap(view.name.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text);
-            let pill = Rect::from_min_size(picture.left_bottom() + vec2(5.0, -31.0), vec2((name.size().x + 30.0).min(picture.width() - 8.0), 26.0));
+            let pill = Rect::from_min_size(body.left_bottom() + vec2(5.0, -31.0), vec2((name.size().x + 30.0).min(body.width() - 8.0), 26.0));
             if pill.is_positive() {
                 painter.rect_filled(pill, 13, t.dialog_body);
                 painter.circle_filled(pill.left_center() + vec2(11.0, 0.0), 3.5, t.accent);
@@ -1049,6 +963,41 @@ fn morph(ctx: &Context, view: u64, origin: Rect, goal: Rect, form: Form, pointer
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starting_a_view_drag_draws_immediately_without_requesting_a_screenshot() {
+        for keyboard in [false, true] {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            let view = app.docs.views.active().id;
+            app.viewport.rect = Some(Rect::from_min_size(pos2(0.0, 44.0), vec2(800.0, 500.0)));
+            let ctx = Context::default();
+            ctx.set_embed_viewports(false);
+            let origin = Rect::from_min_size(pos2(100.0, 4.0), vec2(80.0, 24.0));
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
+            let output = ctx.run_ui(raw, |ui| {
+                if keyboard {
+                    lift(&mut app, ui.ctx(), view, origin);
+                    assert!(keyboard_active(&app, ui.ctx()));
+                } else {
+                    route(&mut app, ui.ctx(), view, origin, pos2(230.0, 80.0), false);
+                    assert!(
+                        ui.ctx().data(|data| data.get_temp::<Morph>(morph_id(ui.ctx(), view))).is_some(),
+                        "the preview paints in the first drag frame"
+                    );
+                }
+                assert!(app.view_window_drag.drag.is_some());
+            });
+            assert!(
+                output
+                    .viewport_output
+                    .values()
+                    .flat_map(|viewport| &viewport.commands)
+                    .all(|command| !matches!(command, egui::ViewportCommand::Screenshot(_))),
+                "mouse and keyboard dragging never read back a view image"
+            );
+            output.drop_without_applying_deltas();
+        }
+    }
 
     #[test]
     fn a_preview_stays_in_the_client_and_snaps_to_the_target_without_animation() {
