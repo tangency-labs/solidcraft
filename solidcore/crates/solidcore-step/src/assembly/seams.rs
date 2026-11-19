@@ -378,10 +378,11 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
 
 impl Assembly<'_> {
     /// Start every B-spline surface closed around u that a face lies across the start of, without
-    /// winding round it, in the middle of the widest stretch of u the face leaves free: the face's
-    /// pcurves then run inside the surface's knots, as a kernel's trims have to (one crossing the
-    /// start had its pcurve clamped there, mm off its edge). Exact ([`restarted`]). Returns how
-    /// many surfaces were started anew.
+    /// winding round it, in the middle of the widest stretch of u the face leaves free, or at the
+    /// face's own seam where it goes once round bounded by one: the face's pcurves then run inside
+    /// the surface's knots, as a kernel's trims have to (one crossing the start had its pcurve
+    /// clamped there, mm off its edge). Exact ([`restarted`]). Returns how many surfaces were
+    /// started anew.
     pub(crate) fn start_splines_clear_of_faces(&mut self) -> R<usize> {
         let mut turned = 0;
         for fi in 0..self.faces.len() {
@@ -395,12 +396,13 @@ impl Assembly<'_> {
             let poles: Vec<Vec3> = spline_axis(&face.surface, &eval).iter().flat_map(|ax| ax.poles.iter().flatten().copied()).collect();
             // How far along u each loop of the face reaches, followed round from its first point
             // (unwrapped across the start); a face winding round is the seams' to handle. The
-            // widest loop bounds the face.
-            let mut widest: Option<(f64, f64)> = None;
+            // widest loop bounds the face, with the seam it has: an edge it uses twice.
+            let mut widest: Option<(f64, f64, Option<u32>)> = None;
             let mut winds = false;
             for l in &face.loops {
                 let Bound::Edges(es) = l else { continue };
                 winds |= self.winding(&eval, es, [Some(period), None], &poles)?[0] != 0;
+                let seam = es.iter().enumerate().find_map(|(i, &(e, _))| es.get(i + 1..)?.iter().any(|&(f, _)| f == e).then_some(e));
                 let mut last: Option<f64> = None;
                 let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for &(e, _) in es {
@@ -415,22 +417,45 @@ impl Assembly<'_> {
                         last = Some(u);
                     }
                 }
-                if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b)| b - a) {
-                    widest = Some((lo, hi));
+                if hi - lo > widest.map_or(f64::NEG_INFINITY, |(a, b, _)| b - a) {
+                    widest = Some((lo, hi, seam));
                 }
             }
-            let Some((lo, hi)) = widest else { continue };
+            let Some((lo, hi, seam)) = widest else { continue };
             // Across the start: a whole number of periods from it lies inside the reach, clear of
             // its ends (a face that only meets the start there runs inside the knots already).
             let start = u0 + ((hi - u0) / period).floor() * period;
             let clear = 1e-9 * period;
             let crossing = hi - start > clear && start - lo > clear;
-            if winds || !crossing || !(hi - lo < period) {
+            if winds {
                 continue;
             }
-            // The middle of the stretch the face leaves free.
-            let free = hi + 0.5 * (period - (hi - lo));
-            let at = u0 + (free - u0).rem_euclid(period);
+            let at = if hi - lo < period {
+                if !crossing {
+                    continue;
+                }
+                // The middle of the stretch the face leaves free.
+                let free = hi + 0.5 * (period - (hi - lo));
+                u0 + (free - u0).rem_euclid(period)
+            } else if let Some(e) = seam {
+                // A whole turn bounded by its own seam (the edges are followed along their
+                // curves, so a band's reach is two turns): started at the seam where that is off
+                // the start (a band round a hole as a general placement writes it, #18779), so
+                // the seam's two uses are the knots' two ends, a period apart. Off the start,
+                // both were given the seam's one u inside the knots, and the band enclosed no
+                // (u, v) area.
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                let [a, b] = edge.interval;
+                let Some(q) = c.point(0.5 * (a + b)).and_then(|p| eval.project(p, None, f64::INFINITY)) else { continue };
+                let at = u0 + (q[0] - u0).rem_euclid(period);
+                if at - u0 <= clear || u0 + period - at <= clear {
+                    continue;
+                }
+                at
+            } else {
+                continue;
+            };
             let Some(surface) = restarted(&face.surface, at, period) else { continue };
             if let Some(f) = self.faces.get_mut(fi) {
                 f.surface = surface;
