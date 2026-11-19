@@ -1533,6 +1533,14 @@ mod tests {
         let a = ev(v(1.0, 0.0, 0.0), v(600.0, 9.0, 0.0));
         let b = ev(v(1.0 + 1e-7, 0.0, 0.0), v(600.0, 9.0, 0.0));
         assert_eq!(c(&a, &b), ContinuityType::C1);
+
+        // a curvature whose length overflows (|P''| 1e200 squares past f64::MAX) makes
+        // the gap tolerance infinite, and `inf <= inf` would accept any pair: opposite
+        // normals, and a unit curvature against an overflowing one, are not G2
+        let huge_up = ev(v(1.0, 0.0, 0.0), v(0.0, 1e200, 0.0));
+        let huge_down = ev(v(1.0, 0.0, 0.0), v(0.0, -1e200, 0.0));
+        assert_eq!(c(&huge_up, &huge_down), ContinuityType::C1);
+        assert_eq!(c(&up, &huge_up), ContinuityType::C1);
     }
 
     /// WR-10: an oblique collinear set is Linear with the line tangent (pinned v1.0.1:
