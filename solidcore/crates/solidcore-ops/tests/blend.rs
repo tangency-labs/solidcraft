@@ -302,7 +302,7 @@ const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (
 /// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
 /// Computation Failure"). The piece is now the crease line continued: the rounds build valid
 /// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
-/// application's fix set (every fix less `kernel_cases/held_back.json`).
+/// application's fix set (every fix on).
 #[test]
 fn rounds_overflowing_a_shallow_concave_crease_build() {
     for (r, mitre) in CREASE_PLATE_MITRE {
@@ -3514,6 +3514,131 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     }
 }
 
+/// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
+/// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
+#[test]
+fn both_flat_face_loops_of_a_notched_half_torus_round() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    let reopen = |body: Body| {
+        let (record, _) = body.to_record().unwrap();
+        Body::from_record(&record, true).unwrap().0
+    };
+    let cylinder = |base, radius, height| {
+        let (s, c) = 0.6131_f64.sin_cos();
+        extrude(
+            &[Curve::Arc {
+                center: base,
+                axis: [0.0, 0.0, 1.0],
+                reference: [c, s, 0.0],
+                radius,
+                start: 0.0,
+                end: 2.0 * PI,
+            }],
+            [0.0, 0.0, 1.0],
+            height,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let ring = revolve(
+        &[Curve::Arc {
+            center: [30.0, 0.0, 0.0],
+            axis: [0.0, -1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 8.0,
+            start: 0.0,
+            end: 2.0 * PI,
+        }],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        2.0 * PI,
+        true,
+    )
+    .unwrap();
+    let below = make_box([-100.0; 3], [200.0, 200.0, 100.0]).unwrap();
+    let half = reopen(
+        boolean(reopen(ring), below, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let boss = cylinder([29.984954243751982, 0.95001, -1.9], 0.95, 1.9);
+    let joined = reopen(boolean(half, boss, BooleanOp::Union).unwrap().unwrap());
+    let notch = cylinder([0.0, 38.0, -1.0], 0.7, 4.0);
+    let body = reopen(
+        boolean(joined, notch, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let edges: Vec<_> = [[-38.0, 0.0, 0.0], [0.0, 37.3, 0.0], [-22.0, 0.0, 0.0]]
+        .into_iter()
+        .map(|point| nearest_edge(&body, point))
+        .collect();
+    // solid.fillet propagates the picks across tangent joins by default (2 degrees).
+    let edges = tangent_chain(&body, None, &edges, &[], 2.0 * PI / 180.0)
+        .unwrap()
+        .members;
+    let run = || blend(&body, Blend::Round, &edges, &[0.8], &[], Corners::Filled);
+    #[cfg(feature = "profile")]
+    let (result, profiles) = solidcore_ops::session::profiled(run);
+    #[cfg(not(feature = "profile"))]
+    let result = run();
+    let result = result.unwrap();
+    #[cfg(feature = "profile")]
+    for call in profiles {
+        let certificates: u64 = call
+            .profile
+            .summary
+            .iter()
+            .filter(|s| s.name == "blend::certificate::gn_certify_span")
+            .map(|s| s.count)
+            .sum();
+        assert_eq!(
+            certificates, 0,
+            "circular spines need no generic span certificates"
+        );
+    }
+    assert!(result.dropped.iter().all(|dropped| !dropped));
+    assert!(body.is_manifold_solid().unwrap());
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(body.solid_count().unwrap(), 1);
+    // At z=0.1 the rounded rims are at radii 22.4573 and 37.5427;
+    // the notch's radius is 1.1127. The boss and notch roof stay intact.
+    for (inside, outside) in [
+        ([-37.4, 0.0, 0.1], [-37.8, 0.0, 0.1]),
+        ([-22.6, 0.0, 0.1], [-22.3, 0.0, 0.1]),
+        ([0.0, 36.8, 0.1], [0.0, 37.2, 0.1]),
+        ([0.0, 37.35, 3.1], [0.0, 37.35, 2.9]),
+    ] {
+        assert_eq!(
+            body.classify_point(inside).unwrap(),
+            solidcore_ops::measure::PointClass::Inside,
+            "{inside:?}"
+        );
+        assert_eq!(
+            body.classify_point(outside).unwrap(),
+            solidcore_ops::measure::PointClass::Outside,
+            "{outside:?}"
+        );
+    }
+    assert_eq!(
+        body.classify_point([29.984954243751982, 0.95001, -0.95])
+            .unwrap(),
+        solidcore_ops::measure::PointClass::Inside
+    );
+    // Meridian-area and circle-intersection integration, independently derived in
+    // plan/findings/acid1-half-torus-flat-rim-round.md.
+    let expected = 18892.19338975647;
+    let actual = body.volume(1e-10).unwrap();
+    assert!(rel(actual, expected) < 1e-8, "{actual} vs {expected}");
+}
+
 /// A revolved r8 corner, clipped on x = +/-10. Its torus support must survive the
 /// round's definition record and reload, including the partial generator's parameters.
 #[test]
@@ -3891,8 +4016,7 @@ fn issue_13911_rails(
 /// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
-    // SolidCraft's fix set when it traced the case: its preset, which has every flag on but the
-    // held-back ones
+    // SolidCraft's fix set: every flag on
     solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (input, _) = issue_13911_body();
     let before = input.check(CheckLevel::All).unwrap();
@@ -4852,4 +4976,165 @@ fn a_round_on_a_sphere_s_rim_turned_about_the_face_normal_builds() {
             }
         }
     }
+}
+
+/// #17594's slab: the top 1.206 of a hexagonal boss whose six upright corners are rounds of
+/// radius 1 (axes on the circle of radius `HEX_RC` about (0, -69.5), top z = 30.706, bottom
+/// z = 29.5), cut from the imported part as SolidCraft traced it (`b1`).
+fn hex_slab() -> Body {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/issue_17594_hex_slab.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// The radius of the circle the slab's corner axes stand on: 2 x 5.928203230275 / sqrt(3).
+const HEX_RC: f64 = 6.845_299_461_620_161;
+
+/// #17594: the slab's top rim (six straight edges and the six corner rounds' arcs, one
+/// tangent chain) rounded at the corners' own radius, r 1. Along each arc the ball touches the
+/// corner's cylinder all round its equator, so its centre stays on the corner's axis: the
+/// piece is a sphere of radius 1 about the axis 1 below the top (the round's arc turned about
+/// the axis, a torus with no hole). Each
+/// straight round removes `(1 - pi/4) HEX_RC` (its section over the side between the axes),
+/// each corner `pi/6 - pi/9 = pi/18` (the 60 degree sector of the unit cylinder 1 high less
+/// that of the upper half ball). On main, at the one corner whose round has the top as its
+/// first face, the turn was taken from the top's rail point, the ball's pole on the axis, and
+/// the section to the next straight round came out a curve up to 0.61 off its meridian and
+/// 0.21 off that round's cylinder: the check finds that gap, and the volume is off where the
+/// faces miss each other (the slab lost 9.674 for 9.861; the whole part gained 5.85).
+#[test]
+fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
+    rig_fixes();
+    let b = hex_slab();
+    let before = b.volume(1e-11).unwrap();
+    let top = 30.706;
+    let corners: Vec<[f64; 2]> = (0..6)
+        .map(|i| {
+            let a = (90.0 - 60.0 * f64::from(i)).to_radians();
+            [HEX_RC * a.cos(), -69.5 + HEX_RC * a.sin()]
+        })
+        .collect();
+    // the arc about corner `i`: its middle, one out from the axis, away from the centre
+    let arc = |i: usize| {
+        let c = corners[i];
+        let (dx, dy) = (c[0], c[1] + 69.5);
+        nearest_edge(&b, [c[0] + dx / HEX_RC, c[1] + dy / HEX_RC, top])
+    };
+    // the side from corner `i` to the next: its middle, one out from the axes' midpoint
+    let side = |i: usize| {
+        let (c, n) = (corners[i], corners[(i + 1) % 6]);
+        let m = [0.5 * (c[0] + n[0]), 0.5 * (c[1] + n[1])];
+        let (mx, my) = (m[0], m[1] + 69.5);
+        let len = mx.hypot(my);
+        nearest_edge(&b, [m[0] + mx / len, m[1] + my / len, top])
+    };
+    // in SolidCraft's order: the picked side x = 6.928, then its tangent chain outward both
+    // ways (the order the chain's start and its corners are taken in)
+    let rim = [
+        side(1),
+        arc(1),
+        arc(2),
+        side(0),
+        side(2),
+        arc(0),
+        arc(3),
+        side(5),
+        side(3),
+        arc(5),
+        arc(4),
+        side(4),
+    ];
+    let mut distinct = rim.to_vec();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert_eq!(distinct.len(), 12, "the rim's twelve edges");
+    blend(&b, Blend::Round, &rim, &[1.0], &[], Corners::Filled).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // the slab's 14 faces and the twelve rounds; the sides' 12 upright edges, the bottom's
+    // 12, the rounds' 12 contacts with the walls, 6 on the top and their 12 sections; the
+    // bottom's 12 vertices, the contacts' 12 ends and the six poles on the top
+    assert_eq!(b.counts().unwrap(), [26, 54, 30]);
+    // the top, the bottom and the six sides; the six corner walls and the six straight
+    // rounds, cylinders; the six corner pieces, each the arc turned about its corner's axis
+    // (26 in all: no face of another kind)
+    let (_, brep) = kernel_copy(&b);
+    for &f in brep.face_list() {
+        if let SurfaceKind::Cone(c) = brep.face(f).unwrap().surface.as_ref().unwrap().kind() {
+            assert!(c.is_cylinder(), "face {f:?} on a cone");
+        }
+    }
+    let count = |name: &str| {
+        brep.face_list()
+            .iter()
+            .filter(|&&f| {
+                surface_kind_name(brep.face(f).unwrap().surface.as_ref().unwrap()) == name
+            })
+            .count()
+    };
+    assert_eq!(
+        [
+            count("plane"),
+            count("cone"),
+            count("surface-of-revolution")
+        ],
+        [8, 12, 6]
+    );
+    // each surface of revolution is the ball about its own corner's axis point 1 below the
+    // top: a 7 x 7 grid over its face's domain lies on that unit sphere
+    let (k, _) = kernel_copy(&b);
+    let mut at_corner = Vec::new();
+    for &f in brep.face_list() {
+        let s = brep.face(f).unwrap().surface.as_ref().unwrap();
+        if surface_kind_name(s) != "surface-of-revolution" {
+            continue;
+        }
+        let d = solidcore::topology::face::uv_domain(&brep, f).unwrap();
+        let mid = s
+            .evaluate_point(
+                &k,
+                Point2::new(0.5 * (d.u_min() + d.u_max()), 0.5 * (d.v_min() + d.v_max())),
+            )
+            .unwrap();
+        let (i, c) = corners
+            .iter()
+            .enumerate()
+            .min_by(|a, b| {
+                let da = (a.1[0] - mid.x).hypot(a.1[1] - mid.y);
+                let db = (b.1[0] - mid.x).hypot(b.1[1] - mid.y);
+                da.total_cmp(&db)
+            })
+            .unwrap();
+        at_corner.push(i);
+        let centre = Vec3::new(c[0], c[1], top - 1.0);
+        for a in 0..7 {
+            for e in 0..7 {
+                let u = d.u_min() + (d.u_max() - d.u_min()) * f64::from(a) / 6.0;
+                let v = d.v_min() + (d.v_max() - d.v_min()) * f64::from(e) / 6.0;
+                let p = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+                let off = (p.distance(centre) - 1.0).abs();
+                assert!(
+                    off <= 1e-9,
+                    "face {f:?} at corner {i}: {off:e} off its ball"
+                );
+            }
+        }
+    }
+    at_corner.sort_unstable();
+    assert_eq!(at_corner, [0, 1, 2, 3, 4, 5], "one sphere at each corner");
+    let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
+    let after = b.volume(1e-11).unwrap();
+    assert!(
+        (before - after - removed).abs() <= 1e-9 * removed,
+        "removed {}, the closed form {removed}",
+        before - after
+    );
 }

@@ -20,6 +20,7 @@
 //! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
 //! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
 //! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
+//! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
@@ -1021,13 +1022,13 @@ pub enum Probe<'c> {
     Point(Point3),
 }
 
-/// The closest points of a [`Probe`] and some faces and edges of a B-rep
-/// ([`closest_to_members`]).
+/// The closest points of selected exact geometry ([`closest_to_members`],
+/// [`closest_between_faces`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MembersClosest {
     /// The distance the solver reached between the two points.
     pub distance: f64,
-    /// The point of the probe: on its curve, within its interval, or the point itself.
+    /// The point of the probe, or the first set of trimmed faces.
     pub on_probe: Point3,
     /// The point of the faces (as they are trimmed) and edges (over their intervals).
     pub on_members: Point3,
@@ -1113,6 +1114,56 @@ pub fn closest_to_members(
     }
     Ok(MembersClosest {
         distance: solution.start.solution_value,
+        on_probe,
+        on_members,
+    })
+}
+
+/// The minimum distance between two sets of trimmed faces of one B-rep, including their
+/// boundary edges and vertices. Both witnesses are evaluated on the exact geometry named by
+/// the topology solver's solution; no tessellation supplies a point or limits the search.
+///
+/// # Errors
+/// Those of shape construction and the topology solver; [`SolidError::query_failed`] when
+/// there is no solution or either witness does not evaluate to a finite point.
+pub fn closest_between_faces(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    id: BrepId,
+    first: &[FaceId],
+    second: &[FaceId],
+) -> Result<MembersClosest> {
+    let first: Vec<FaceKey> = first.iter().map(|f| (id, *f)).collect();
+    let second: Vec<FaceKey> = second.iter().map(|f| (id, *f)).collect();
+    let first = Shape::new(k, &(id, &*brep), &[], &first, &[], &[])?;
+    let second = Shape::new(k, &(id, &*brep), &[], &second, &[], &[])?;
+    let query = qbrep::BrepQuery::of_brep(brep);
+    let identity = query.effective_identity();
+    let objects = qbrep::LiveBrepObjects::new(brep, &identity, None)?;
+    let solutions = TopologySolver::shape_shape_solve(
+        k,
+        &objects,
+        &first,
+        &second,
+        solve_options(k, SolutionRequested::Single),
+    )?;
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+    let on_probe = solution_point(k, &objects, solution, 0)?;
+    let on_members = solution_point(k, &objects, solution, 1)?;
+    let distance = solution.start.solution_value;
+    let evaluated =
+        |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(distance.is_finite() && distance >= 0.0 && evaluated(on_probe) && evaluated(on_members)) {
+        return Err(SolidError::query_failed(
+            OP,
+            "a closest point does not evaluate",
+        ));
+    }
+    Ok(MembersClosest {
+        distance,
         on_probe,
         on_members,
     })
@@ -1801,7 +1852,7 @@ pub fn edgeuse_face_frame(
             return Err(SolidError::Unsupported {
                 operation: OP,
                 reason: "a faceuse whose orientation is unknown has no proved sense",
-            })
+            });
         }
     };
     let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
@@ -2015,6 +2066,43 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
+
+    /// Opposite faces of a 1 × 2 × 3 block are 3 apart. Adjacent faces meet on their
+    /// shared boundary; reversing the selected sets preserves the distance and ownership.
+    #[test]
+    fn closest_between_faces_respects_selected_faces_and_their_boundaries() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let at_z = |z: f64| {
+            *faces
+                .iter()
+                .find(|&&f| {
+                    let box_ = face_bounding_box(&k, &b, f, true).unwrap();
+                    (box_.min().z - z).abs() <= 1e-9 && (box_.max().z - z).abs() <= 1e-9
+                })
+                .unwrap()
+        };
+        let (bottom, top) = (at_z(0.0), at_z(3.0));
+        let side = *faces.iter().find(|&&f| f != bottom && f != top).unwrap();
+        let id = BrepId::from_index(0);
+        for (first, second, distance) in [(bottom, top, 3.0), (top, bottom, 3.0), (top, side, 0.0)]
+        {
+            let c = closest_between_faces(&mut k, &mut b, id, &[first], &[second]).unwrap();
+            assert!((c.distance - distance).abs() <= 1e-9, "{c:?}");
+            assert!(
+                (c.on_probe.distance(c.on_members) - distance).abs() <= 1e-9,
+                "{c:?}"
+            );
+            for (f, p) in [(first, c.on_probe), (second, c.on_members)] {
+                let near =
+                    closest_to_members(&mut k, &mut b, id, &[f], &[], Probe::Point(p)).unwrap();
+                assert!(near.distance <= 1e-9, "{c:?}: {near:?}");
+            }
+        }
+    }
 
     /// Both call sites of [`faces_closest_distances_within`] read a kernel status as no answer
     /// about that one pair, and keep every other pair's answer. The status paths are not

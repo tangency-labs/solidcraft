@@ -85,6 +85,97 @@ fn a_cylinder_shells_open_at_its_top() {
     assert!(rel(volume(&c), PI * 25.0 * 10.0 - PI * 16.0 * 9.0) < 1e-9);
 }
 
+fn drilled_half_torus(center: f64) -> Body {
+    let torus = crate::make_torus([0.0; 3], 30.0, 8.0).unwrap();
+    let upper = make_box([-40.0, -40.0, 0.0], [80.0, 80.0, 16.0]).unwrap();
+    let half = crate::boolean::boolean(torus, upper, crate::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let drill = make_cylinder([center, 0.0, 0.0], 0.95, 4.0).unwrap();
+    crate::boolean::boolean(half, drill, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// Stress corpus S1983: the blind hole leaves 0.00002 mm at the outer rim of a
+/// half torus. Opening the annular bottom must produce a closed hollow body.
+#[test]
+fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
+    crate::test_corpus::rig_fixes();
+    let body = drilled_half_torus(37.049_98);
+    let input_report = body.copy().unwrap().check(crate::CheckLevel::All).unwrap();
+    assert!(input_report.is_valid(), "{}", input_report.text);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -0.8).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // Half-torus wall volume minus the original drill/torus overlap, plus the
+    // expanded drill/cavity overlap; the polar integral is derived in the finding.
+    let actual = volume(&body);
+    assert!(
+        rel(actual, 3_607.142_961_425_14) < 1e-9,
+        "shell volume {actual:.17}"
+    );
+}
+
+/// The same incidence graph before the seam disappears: the outer rim is
+/// 37.99 and the grown drill reaches 37.96, so their meridian still survives.
+#[test]
+fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
+    crate::test_corpus::rig_fixes();
+    let body = drilled_half_torus(37.0);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -0.01).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // The same polar integral as S1983, with a=37 and wall=0.01;
+    // its hand derivation and converged values are in the construction finding.
+    let actual = volume(&body);
+    assert!(
+        rel(actual, 47.498_020_998_403_7) < 1e-9,
+        "shell volume {actual:.17}"
+    );
+    let (record, _) = body.to_record().unwrap();
+    let cavity_faces: Vec<_> = record
+        .faces
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            matches!(
+                f.surface,
+                solidcore_record::brep::Surface::Torus { minor_radius, .. } if minor_radius < 8.0
+            )
+            .then_some(i)
+        })
+        .collect();
+    assert_eq!(cavity_faces.len(), 1, "one inset torus face");
+    let cavity = cavity_faces[0];
+    let query = crate::query::Query::new(&record);
+    // The short seam has two distinct ends beyond the drill centre, x = 37.
+    // The other meridian ends on the cap at x < 37; the outer rim is closed.
+    let seam_edges: Vec<_> = record
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| {
+            query.edge_faces(*i).contains(&cavity)
+                && e.vertices[0] != e.vertices[1]
+                && e.vertices
+                    .iter()
+                    .all(|&v| record.vertices[v as usize].point[0] > 37.0)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(seam_edges.len(), 1, "one retained outer-rim seam");
+    assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
+}
+
 /// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than
 /// twice the wall holds no cavity. A cylinder r 1.5, h 4 with a
 /// pin r 0.15, 1.2 high on its top, and a 30 x 20 x 10 block with a 2 x 2 x 3 boss on its
@@ -130,18 +221,7 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
 #[test]
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_basin_shells_past_its_rim_to_its_closed_form() {
-    session::set_thread_fixes(
-        solidcore::kernel::UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| {
-                !matches!(
-                    *n,
-                    "fillet_refuse_rounds_breaking_through" | "fillet_round_ends_on_outline"
-                )
-            }),
-    )
-    .unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64, z: f64| {
         let p = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
         (0..4)
@@ -2096,5 +2176,124 @@ mod drafts {
         b.check_solid().unwrap();
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
+    }
+}
+
+/// Kernel diagnostics cross the application seam here; the app receives only ops
+/// data and need not name the kernel's reason classes or construct kernel errors.
+#[test]
+fn offset_failures_keep_the_kernel_reason_and_class() {
+    use crate::OffsetRefusal;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Failure;
+    use solidcore::{EntityRef, FaceId};
+
+    for why in [
+        OffsetFailure::Failed("the offset edge has no intersection"),
+        OffsetFailure::Missing("the face's surface"),
+        OffsetFailure::InvalidValue("the offset distance is zero"),
+        OffsetFailure::Inconsistent("the edge's mate is absent"),
+    ] {
+        let error = Failure::new("offset::offset_executive::crossing_loops", why)
+            .at(EntityRef::Face(FaceId::from_index(2)))
+            .into_error();
+        let diagnostic = super::diagnostic(&error);
+        assert_eq!(diagnostic.detail, error.to_string());
+        assert_eq!(
+            diagnostic.refusal,
+            Some(Error::OffsetRefused {
+                face: None,
+                why: OffsetRefusal::Phrase {
+                    class: why.kind(),
+                    defect: why.is_defect(),
+                    phrase: error.to_string()
+                },
+            })
+        );
+    }
+}
+
+#[test]
+fn typed_offset_refusals_keep_their_nested_kernel_cause() {
+    use crate::OffsetRefusal;
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Failure;
+
+    let cause = Failure::new(
+        "intersect::clip",
+        IntersectFailure::Failed("the exact trim does not cross the face boundary"),
+    )
+    .into_error();
+    let error = Failure::new("offset::trim", OffsetFailure::ExactCurveUncut)
+        .caused_by(cause)
+        .into_error();
+    let diagnostic = super::diagnostic(&error);
+    assert_eq!(
+        diagnostic.refusal,
+        Some(Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::ExactCurveUncut
+        })
+    );
+    assert_eq!(diagnostic.detail, error.to_string());
+    assert!(
+        diagnostic
+            .detail
+            .contains("intersect::clip: the exact trim does not cross the face boundary"),
+        "{}",
+        diagnostic.detail
+    );
+
+    let error = Failure::new(
+        "offset::face",
+        OffsetFailure::Folds {
+            face: solidcore::FaceId::from_index(2),
+            distance: 2.0,
+            largest: 1.0,
+        },
+    )
+    .caused_by(error)
+    .into_error();
+    let diagnostic = super::diagnostic(&error);
+    assert_eq!(
+        diagnostic.refusal,
+        Some(Error::WallFolds { largest: Some(1.0) })
+    );
+    assert_eq!(diagnostic.detail, error.to_string());
+}
+
+/// Intersections and Booleans inside shelling also keep their named cause,
+/// including the failure beneath an offset stage.
+#[test]
+fn offset_substages_keep_their_failure_reason() {
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::{Failure, Reason};
+
+    let cause = Failure::new(
+        "intersect::surface_surface",
+        IntersectFailure::Failed("the two face trims do not cross"),
+    )
+    .into_error();
+    let offset = Failure::new("offset::offset_executive", OffsetFailure::StageFailed)
+        .caused_by(cause.clone())
+        .into_error();
+    let boolean = Failure::new(
+        "boolean::merge::p3",
+        Reason::Failed("a Boolean of the tree failed"),
+    )
+    .caused_by(cause.clone())
+    .into_error();
+    for error in [cause, offset, boolean] {
+        let diagnostic = super::diagnostic(&error);
+        assert_eq!(diagnostic.detail, error.to_string());
+        assert!(
+            diagnostic
+                .detail
+                .contains("the two face trims do not cross"),
+            "{}",
+            diagnostic.detail
+        );
     }
 }

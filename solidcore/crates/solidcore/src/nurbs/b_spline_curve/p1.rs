@@ -542,6 +542,23 @@ impl BSplineCurve {
         }
     }
 
+    /// Not upstream: the same curve by definition. The dimension, the out-of-bounds
+    /// switch, the STEP knot type and form are equal, and both have no NURB or NURBs of
+    /// the same definition ([`Curve::same_definition`]): exact, unlike
+    /// [`approx_eq`](Self::approx_eq).
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.dim == other.dim
+            && self.out_of_bounds_enabled == other.out_of_bounds_enabled
+            && self.knot_type == other.knot_type
+            && self.form == other.form
+            && match (&self.nurb, &other.nurb) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_definition(b),
+                _ => false,
+            }
+    }
+
     /// Upstream `operator==`: same dimension and either both without NURB or NURBs
     /// equal within `SM_EFF_ZERO` (`N_CrvsAreEqual`).
     #[must_use]
