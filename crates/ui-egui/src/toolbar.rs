@@ -758,6 +758,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
+    // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+    if !cfg!(target_arch = "wasm32") {
+        rows.push(row("export_3dm", &format!("{}…", app.tr("ui.export_3dm")), "", "export", shown));
+    }
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
@@ -851,6 +855,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         }
         "export_glb" => FileAction::Export("glb").run(app),
         "export_usd" => FileAction::Export("usd").run(app),
+        "export_3dm" => FileAction::Export("3dm").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {

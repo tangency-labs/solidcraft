@@ -323,5 +323,148 @@ fn either_reader_names_the_program_and_its_up_axis() {
             }
         }
     }
+
+// Rhino export through cadmpeg (`file.export` to `.3dm`), read back through the Rhino import
+// above. Expected volumes and boxes come from the designs' dimensions.
+
+/// The world box of every shown body, rounded to a micrometre, sorted.
+fn shown_boxes(s: &Session) -> Vec<[i64; 6]> {
+    let mut out: Vec<[i64; 6]> = s
+        .world_state()
+        .unwrap()
+        .bodies
+        .iter()
+        .map(|b| {
+            let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+            [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].map(|v| (v * 1e3).round() as i64)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+fn um(b: [f64; 6]) -> [i64; 6] {
+    b.map(|v| (v * 1e3).round() as i64)
+}
+
+/// A loose 10 mm cube, a coloured cylinder (radius 6 mm, 15 mm high, at x = 80 mm), and a
+/// `Bracket` component (a 20 × 20 × 10 mm base and a 10 × 10 × 10 mm block on it) placed twice,
+/// the second copy 40 mm along Y.
+fn parts() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-30, 0, 0], "body_name": "Loose"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 15, "base": [80, 0, 0], "body_name": "Pin"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Pin"], "color": "#0040ff"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Loose"], "color": "#ff8000"}));
+    run(&mut s, "component.create", json!({"name": "Bracket"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 5, 10], "operation": "new", "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.copy", json!({"component": "Bracket", "translate": [0, 40, 0]}));
+    s
+}
+
+/// The design's solids that Rhino holds exactly: the cube and the bracket's boxes, twice.
+fn exact_boxes() -> Vec<[i64; 6]> {
+    let mut want = vec![
+        um([-30.0, 0.0, 0.0, -20.0, 10.0, 10.0]),
+        um([0.0, 0.0, 0.0, 20.0, 20.0, 10.0]),
+        um([0.0, 40.0, 0.0, 20.0, 60.0, 10.0]),
+        um([5.0, 5.0, 10.0, 15.0, 15.0, 20.0]),
+        um([5.0, 45.0, 10.0, 15.0, 55.0, 20.0]),
+    ];
+    want.sort();
+    want
+}
+
+/// `file.export` writes a `.3dm` file (any case) from the design: every box where the design shows
+/// it, as an exact solid that both Rhino readers bring back with its volume, and the cylinder,
+/// which cadmpeg's Rhino writer cannot hold exactly yet, as its mesh with a warning naming it.
+/// The components are not kept, and a warning says so.
+#[test]
+fn file_export_writes_rhino_and_it_reads_back() {
+    let (dir, _) = file("rhino-out", "unused", b"");
+    let mut s = parts();
+    let cylinder = s.world_state().unwrap().bodies.iter().find(|b| b.name.starts_with("Pin")).map(|b| b.name.clone()).unwrap();
+    for name in ["parts.3dm", "PARTS.3DM"] {
+        let path = dir.join(name).to_string_lossy().to_string();
+        let out = run(&mut s, "file.export", json!({"path": path}));
+        assert_eq!(out["format"], "Rhino", "{out}");
+        let warnings = out["warnings"].to_string();
+        assert!(warnings.contains(&format!("{cylinder}: written as its mesh only")), "{out}");
+        assert!(warnings.contains("components and placements are not written"), "{out}");
+        for reader in ["solidcraft", "cadmpeg"] {
+            let mut back = Session::default();
+            run(&mut back, "file.insert_step", json!({"path": path, "reader": reader}));
+            // SolidCraft's own Rhino reader leaves the cylinder's mesh out; cadmpeg's brings it in
+            // as a mesh body spanning the cylinder (radius 6 mm, 15 mm high, at x = 80 mm).
+            let mut want = exact_boxes();
+            let mut mesh_volume = 0.0;
+            if reader == "cadmpeg" {
+                let world = back.world_state().unwrap();
+                let meshes: Vec<_> = world.bodies.iter().filter(|b| b.body.is_mesh()).collect();
+                let [mesh] = meshes.as_slice() else { panic!("{name}: one mesh body, got {}", meshes.len()) };
+                let m = solidcraft_kernel::measure(&mesh.body).unwrap();
+                let bb = [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z];
+                for (got, want) in bb.iter().zip([74.0, -6.0, 0.0, 86.0, 6.0, 15.0]) {
+                    assert!((got - want).abs() < 0.01, "{name}: {bb:?}");
+                }
+                want.push(bb.map(|v| (v * 1e3).round() as i64));
+                want.sort();
+                // The cylinder's volume is π r² h = π · 6² · 15 mm³. Its mesh is a prism on a
+                // polygon inscribed in the circle, at a chord tolerance of at most 2e-4 of the
+                // body's size (its 22.6 mm diagonal: a sagitta s ≤ 0.0046 mm), so short of it by
+                // less than (4/3) s / r ≈ 0.1%; 1% allows that, and the file's single-precision
+                // points (≈1e-6 relative) cannot take it past π r² h by 1e-4.
+                let exact = std::f64::consts::PI * 36.0 * 15.0;
+                assert!(
+                    m.volume > 0.99 * exact && m.volume < exact * (1.0 + 1e-4),
+                    "{name}: the cylinder's mesh holds {} mm³, not {exact}",
+                    m.volume
+                );
+                mesh_volume = m.volume;
+            }
+            assert_eq!(shown_boxes(&back), want, "{name} {reader}");
+            let v = volume(&mut back);
+            assert!((v - (1000.0 + 2.0 * (4000.0 + 1000.0)) - mesh_volume).abs() < 1e-6, "{name} {reader}: {v}");
+        }
+    }
+    // Chosen bodies only.
+    let path = dir.join("loose.3dm").to_string_lossy().to_string();
+    let out = run(&mut s, "file.export", json!({"path": path, "bodies": ["Loose"]}));
+    assert!(out.get("warnings").is_none_or(|w| w.as_array().is_some_and(Vec::is_empty)), "{out}");
+    let mut back = Session::default();
+    run(&mut back, "file.insert_step", json!({"path": path}));
+    assert_eq!(shown_boxes(&back), vec![um([-30.0, 0.0, 0.0, -20.0, 10.0, 10.0])]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `format: 3dm` names Rhino; `format: 3dm` under another format's extension is refused, while
+/// another format named under a Rhino extension is written as asked; FreeCAD is refused with
+/// why, leaving no file behind.
+#[test]
+fn rhino_and_freecad_export_check_their_format() {
+    let (dir, _) = file("rhino-format", "unused", b"");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    let path = dir.join("block.3dm").to_string_lossy().to_string();
+    assert_eq!(run(&mut s, "file.export", json!({"path": path, "format": "3dm"}))["format"], "Rhino");
+    let step = dir.join("block.step").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": step, "format": "3dm"})).unwrap_err().to_string();
+    assert!(e.contains("disagrees with the path's extension"), "{e}");
+    assert!(!std::path::Path::new(&step).exists());
+    // The other way round, a format SolidCraft writes itself, named, is written whatever the
+    // extension, as an explicit format always was: STEP under a Rhino name.
+    let rhino = dir.join("part.3dm").to_string_lossy().to_string();
+    assert_eq!(run(&mut s, "file.export", json!({"path": rhino, "format": "step"}))["format"], "Step");
+    assert!(std::fs::read(&rhino).unwrap().starts_with(b"ISO-10303-21;"));
+    let fcstd = dir.join("block.FCStd").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": fcstd})).unwrap_err().to_string();
+    assert!(e.contains("FreeCAD files cannot be exported yet"), "{e}");
+    assert!(!std::path::Path::new(&fcstd).exists());
+    // A file already there is left as it was by a refused export.
+    std::fs::write(&fcstd, b"kept").unwrap();
+    assert!(s.execute("file.export", &json!({"path": fcstd})).is_err());
+    assert_eq!(std::fs::read(&fcstd).unwrap(), b"kept");
     let _ = std::fs::remove_dir_all(&dir);
 }

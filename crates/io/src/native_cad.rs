@@ -1,6 +1,7 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]); and STEP and IGES when the
-//! cadmpeg reader is chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]). cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` files are read, and Rhino `.3dm` and OpenUSD files read and written
+//! ([`usd`], [`cadmpeg_export`]); STEP and IGES files are read when the cadmpeg reader is
+//! chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]) and written through it. cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
@@ -11,8 +12,8 @@
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
-//! records or the OpenUSD bytes plus warnings; an OpenUSD export writes the design into cadmpeg's
-//! model directly (`cadir_out`). A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! records or the exported bytes plus warnings; an export writes the design into cadmpeg's model
+//! directly (`cadir_out`) and cadmpeg's writer writes the file (`export`). A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
@@ -494,12 +495,35 @@ mod usd;
 pub use usd::{USD_EXTS, is_usd_path};
 
 mod cadir_out;
+mod export;
+pub(crate) use export::FREECAD_REFUSED;
 
 /// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
-/// empty) as an OpenUSD file called `file`: `.usda` text, `.usdc` or `.usd` binary, or a `.usdz`
-/// package. With no bodies chosen, a design with components keeps them: `model`, the model before
-/// placing, holds each component's bodies. Meshes are made at `quality`. Returns the file's bytes
-/// and what it could not carry. Panics inside cadmpeg become errors.
+/// empty) as a `format` file called `file`, written by cadmpeg: OpenUSD ([`crate::Format::Usd`],
+/// the extension picking the encoding) or Rhino ([`crate::Format::Rhino`]); FreeCAD is refused,
+/// as cadmpeg cannot write a new FreeCAD file yet. With no bodies chosen, a design with components
+/// keeps them where the format holds them: `model`, the model before placing, holds each
+/// component's bodies. Meshes are made at `quality`. Returns the file's bytes and what it could not
+/// carry (`export` says what each format leaves out). Panics inside cadmpeg become errors.
+pub fn cadmpeg_export(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    file: &str,
+    quality: crate::MeshQuality,
+    format: crate::Format,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    solidcraft_kernel::guard("cadmpeg export", || {
+        export::from_design(doc, model, world, bodies, file, quality, format).map_err(solidcraft_kernel::KernelError::Invalid)
+    })
+    .map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => m,
+        e => e.to_string(),
+    })
+}
+
+/// [`cadmpeg_export`] as OpenUSD: `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package.
 pub fn usd_from_design(
     doc: &solidcraft_doc::Document,
     model: &solidcraft_doc::ModelState,
@@ -508,13 +532,7 @@ pub fn usd_from_design(
     file: &str,
     quality: crate::MeshQuality,
 ) -> Result<(Vec<u8>, Vec<String>), String> {
-    solidcraft_kernel::guard("cadmpeg USD export", || {
-        usd::from_design(doc, model, world, bodies, file, quality).map_err(solidcraft_kernel::KernelError::Invalid)
-    })
-    .map_err(|e| match e {
-        solidcraft_kernel::KernelError::Invalid(m) => m,
-        e => e.to_string(),
-    })
+    cadmpeg_export(doc, model, world, bodies, file, quality, crate::Format::Usd)
 }
 
 /// An OpenUSD file (`file` is its name) read for an import of its exact geometry, kept as records

@@ -2023,9 +2023,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
+            // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
+            let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
+                .into_iter()
+                .filter(|f| *f != "3dm" || !cfg!(target_arch = "wasm32"))
+                .collect();
             app.pick_save_command(
                 &format!("{name}.step"),
-                &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
+                &formats,
                 "file.export",
                 // `hierarchy` is read for GLB only.
                 json!({"bodies": bodies, "hierarchy": app.preferences.glb_export_hierarchy}),

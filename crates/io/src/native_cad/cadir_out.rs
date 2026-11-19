@@ -1,5 +1,8 @@
-//! A design written as cadmpeg's neutral model (CADIR), for the writers cadmpeg has (OpenUSD so
-//! far): nothing passes through STEP text on the way.
+//! A design written as cadmpeg's neutral model (CADIR), for the writers cadmpeg has (OpenUSD and
+//! Rhino): nothing passes through STEP text on the way. What each writer can hold differs, and
+//! [`Writes`] says what the model is built with for it: the product structure or the bodies where
+//! the design shows them, a mesh beside each exact shape or only for mesh bodies, looks as
+//! appearances or as each body's colour, and colours linear or as SolidCraft keeps them (sRGB).
 //!
 //! Product structure: each component is a product definition named after it, holding its bodies
 //! in its own frame, and each placement of it an occurrence named after the occurrence, placed in
@@ -57,17 +60,54 @@ const BYTES_PER_TRIANGLE: usize = 30;
 /// Longest name written (prims are named after them).
 const MAX_NAME: usize = 128;
 
+/// What the model is built with for one of cadmpeg's writers.
+#[derive(Clone, Copy)]
+pub(crate) struct Writes {
+    /// The format's name, for warnings.
+    pub label: &'static str,
+    /// Components as product definitions and placements as occurrences. Without them every body
+    /// is written where the design shows it, with no product records at all.
+    pub products: bool,
+    /// A body with an exact shape carries its mesh too (else only mesh bodies have a mesh).
+    pub brep_meshes: bool,
+    /// Meshes are bound to their body; else each is a mesh of its own, with no body record (and
+    /// no face groups, so a face's own look is not written).
+    pub bound_meshes: bool,
+    /// Looks as appearances bound to bodies and faces; else each body's colour alone.
+    pub appearances: bool,
+    /// Colours linear (OpenUSD's); else as SolidCraft keeps them, sRGB.
+    pub linear: bool,
+    /// Pcurves on planes kept; `false` leaves them out, for a writer that makes them from the
+    /// edges itself and takes no other.
+    pub planar_pcurves: bool,
+    /// Whether the writer takes a body's exact shape (the body alone in a model, planned by the
+    /// writer); a body it refuses is written as its mesh, with a warning naming it and why.
+    pub admit: Option<fn(&CadIr) -> Result<(), String>>,
+}
+
+impl Writes {
+    /// OpenUSD: the product structure, each body's exact shape and mesh, looks as materials with
+    /// linear colours.
+    pub const USD: Writes = Writes {
+        label: "OpenUSD",
+        products: true,
+        brep_meshes: true,
+        bound_meshes: true,
+        appearances: true,
+        linear: true,
+        planar_pcurves: true,
+        admit: None,
+    };
+}
+
 /// A design (or the chosen bodies of it) as CADIR, with what could not be carried.
 pub(crate) struct Built {
     pub ir: CadIr,
     pub warnings: Vec<String>,
 }
 
-/// The bodies of `world` (the design's model placed in the world) as CADIR: all of them as the
-/// design's product structure when `bodies` is empty and the design has placements (`model`, the
-/// model before placing, holds each component's bodies), else the chosen bodies (all when
-/// `bodies` is empty) where the world has them. `name` names the root when the design's own name
-/// is blank. Each mesh at `quality`.
+/// [`design_for`] for OpenUSD ([`Writes::USD`]).
+#[cfg(test)]
 pub(crate) fn design(
     doc: &Document,
     model: &ModelState,
@@ -76,10 +116,34 @@ pub(crate) fn design(
     name: &str,
     quality: MeshQuality,
 ) -> Result<Built, String> {
+    design_for(doc, model, world, bodies, name, quality, Writes::USD)
+}
+
+/// The bodies of `world` (the design's model placed in the world) as CADIR: all of them as the
+/// design's product structure when `bodies` is empty and the design has placements (`model`, the
+/// model before placing, holds each component's bodies), else the chosen bodies (all when
+/// `bodies` is empty) where the world has them. `name` names the root when the design's own name
+/// is blank. Each mesh at `quality`. Built for the writer `writes` describes.
+pub(crate) fn design_for(
+    doc: &Document,
+    model: &ModelState,
+    world: &ModelState,
+    bodies: &[String],
+    name: &str,
+    quality: MeshQuality,
+    writes: Writes,
+) -> Result<Built, String> {
     let _span = solidcraft_profile::span("io", "cadir_out.design");
     let root = clean(&doc.name).or_else(|| clean(name)).unwrap_or_else(|| "Design".into());
-    let mut b = Builder::new(doc, quality);
-    let structured = bodies.is_empty() && !doc.occurrences.is_empty();
+    let mut b = Builder::new(doc, quality, writes);
+    let assembly = bodies.is_empty() && !doc.occurrences.is_empty();
+    if assembly && !writes.products {
+        b.warnings.push(format!(
+            "the components and placements are not written: cadmpeg's {} writer writes no assemblies, so each body is written where the design shows it",
+            writes.label
+        ));
+    }
+    let structured = assembly && writes.products;
     let unplaced = doc.occurrences.iter().find(|o| !solidcraft_doc::is_placement(&o.transform));
     match (structured, unplaced) {
         (true, None) => b.assembly(model, &root)?,
@@ -115,9 +179,11 @@ fn transform(m: &Mat) -> Option<Transform> {
     Transform::affine([row(0), row(1), row(2)])
 }
 
-/// SolidCraft's sRGB colour (bytes) and an opacity as CADIR's linear colour.
-fn linear(rgb: [u8; 3], opacity: f64) -> Option<Color> {
-    let [r, g, b] = rgb.map(|v| solidcraft_color::srgb::decode8(v).clamp(0.0, 1.0) as f32);
+/// SolidCraft's sRGB colour (bytes) and an opacity as a CADIR colour: linear when `linear` (as
+/// OpenUSD's are), else the sRGB values themselves.
+fn colour(rgb: [u8; 3], opacity: f64, linear: bool) -> Option<Color> {
+    let channel = |v: u8| if linear { solidcraft_color::srgb::decode8(v) } else { f64::from(v) / 255.0 };
+    let [r, g, b] = rgb.map(|v| channel(v).clamp(0.0, 1.0) as f32);
     let a = if opacity.is_finite() { opacity.clamp(0.0, 1.0) as f32 } else { 1.0 };
     Color::new(r, g, b, a)
 }
@@ -133,6 +199,7 @@ fn look_key(look: &Look) -> LookKey {
 struct Builder<'a> {
     doc: &'a Document,
     quality: MeshQuality,
+    writes: Writes,
     ir: CadIr,
     warnings: Vec<String>,
     looks: HashMap<LookKey, AppearanceId>,
@@ -145,16 +212,30 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(doc: &'a Document, quality: MeshQuality) -> Self {
-        Builder { doc, quality, ir: CadIr::empty(), warnings: Vec::new(), looks: HashMap::new(), bodies: 0, bindings: 0, tolerance: None, bytes: 0 }
+    fn new(doc: &'a Document, quality: MeshQuality, writes: Writes) -> Self {
+        Builder {
+            doc,
+            quality,
+            writes,
+            ir: CadIr::empty(),
+            warnings: Vec::new(),
+            looks: HashMap::new(),
+            bodies: 0,
+            bindings: 0,
+            tolerance: None,
+            bytes: 0,
+        }
     }
 
     fn finish(mut self) -> Result<Built, String> {
-        if self.ir.model.bodies.is_empty() {
+        if self.ir.model.bodies.is_empty() && self.ir.model.tessellations.is_empty() {
             return Err("there is no geometry to write".into());
         }
         if let Some(t) = self.tolerance.and_then(PositiveLength::new) {
             self.ir.tolerances.linear = t;
+        }
+        if !self.writes.planar_pcurves {
+            without_planar_pcurves(&mut self.ir);
         }
         self.ir.finalize();
         Ok(Built { ir: self.ir, warnings: self.warnings })
@@ -215,8 +296,10 @@ impl<'a> Builder<'a> {
                 ids.push(id);
             }
         }
-        let definition = self.definition(0, root, ids)?;
-        self.occurrence(0, &definition, OccurrenceParent::Root {}, 0, Transform::identity(), Some(root.to_string()))?;
+        if self.writes.products {
+            let definition = self.definition(0, root, ids)?;
+            self.occurrence(0, &definition, OccurrenceParent::Root {}, 0, Transform::identity(), Some(root.to_string()))?;
+        }
         Ok(())
     }
 
@@ -333,7 +416,7 @@ impl<'a> Builder<'a> {
             physical_token: None,
             schema: None,
             category: None,
-            base_color: linear(look.color, look.opacity),
+            base_color: colour(look.color, look.opacity, self.writes.linear),
             properties,
             textures: Vec::new(),
         });
@@ -357,54 +440,37 @@ impl<'a> Builder<'a> {
     }
 
     /// Body `b` (its looks), its geometry `geometry` (the body itself, or taken into its
-    /// component's frame), named `name`: its B-rep and its mesh. `None` when nothing of it could
-    /// be written, with a warning naming it.
+    /// component's frame), named `name`: its B-rep and, where the writer takes one, its mesh.
+    /// `None` when nothing of it could be written, with a warning naming it, or when it is
+    /// written as a mesh of its own, with no body record ([`Writes::bound_meshes`]).
     fn body(&mut self, b: &ModelBody, geometry: &solidcraft_kernel::Body, name: &str) -> Result<Option<BodyId>, String> {
         let shown = clean(&b.name).unwrap_or_else(|| "a body".into());
-        let mesh = crate::display_mesh_at(geometry, self.quality).map_err(|e| format!("{shown}: could not be meshed: {e}"))?;
-        let size = mesh
-            .positions
-            .len()
-            .checked_mul(BYTES_PER_POINT)
-            .zip(mesh.triangles.len().checked_mul(BYTES_PER_TRIANGLE))
-            .and_then(|(p, t)| p.checked_add(t))
-            .and_then(|n| n.checked_add(self.bytes))
-            .filter(|n| *n <= MAX_BYTES)
-            .ok_or_else(|| {
-                format!(
-                    "{shown}: the meshes are too large for the file (at most {} MiB); export fewer bodies or use standard quality",
-                    MAX_BYTES >> 20
-                )
-            })?;
-        self.bytes = size;
         let n = self.bodies;
         self.bodies += 1;
         let prefix = format!("solidcraft:body-{n:09}");
         let name = clean(name).unwrap_or_else(|| shown.clone());
-        let mut has_brep = false;
-        let body = if geometry.is_mesh() {
+        let label = self.writes.label;
+        let brep = if geometry.is_mesh() {
             None
         } else {
-            match solidcraft_kernel::brep_record(geometry).map_err(|e| e.to_string()).and_then(|record| {
-                let w = solidcore_cadir::write_body(&mut self.ir.model, &record, &prefix, Some(&name)).map_err(|e| e.to_string())?;
-                Ok((w, record.tolerance))
-            }) {
-                Ok((w, tolerance)) => {
-                    if tolerance.is_finite() && tolerance > 0.0 {
-                        self.tolerance = Some(self.tolerance.map_or(tolerance, |t| t.max(tolerance)));
-                    }
-                    has_brep = true;
-                    Some(w.body)
-                }
+            match self.brep(geometry, &prefix, &name) {
+                Ok(written) => Some(written),
                 Err(e) => {
                     self.warnings.push(format!("{shown}: written as its mesh only: its exact shape could not be: {e}"));
                     None
                 }
             }
         };
-        let id = match body {
-            Some(id) => id,
-            None => {
+        let has_brep = brep.is_some();
+        let mesh = if has_brep && !self.writes.brep_meshes {
+            None
+        } else {
+            let made = self.mesh(geometry, &shown);
+            kept_without_mesh(made, has_brep, &shown, &mut self.warnings)?
+        };
+        let id = match brep {
+            Some(id) => Some(id),
+            None if self.writes.bound_meshes => {
                 let id: BodyId = BodyId::try_from(format!("{prefix}:body#0")).map_err(|_| format!("{prefix}: not a CADIR identity"))?;
                 self.ir.model.bodies.push(Body {
                     id: id.clone(),
@@ -415,52 +481,136 @@ impl<'a> Builder<'a> {
                     color: None,
                     visible: None,
                 });
-                id
+                Some(id)
             }
+            None => None,
         };
         // Looks: the body's, else its colour; and each face's own.
         let doc = self.doc;
-        match doc.model_body_look(b) {
-            Some(look) => {
-                let a = self.appearance(&look)?;
-                self.bind(AppearanceTarget::Body(id.clone()), a)?;
-            }
-            None => {
-                if let Some(c) = doc.body_color(b) {
-                    let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-                    let color = linear(c.map(to8), doc.model_body_opacity(b));
-                    if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == id) {
-                        body.color = color;
+        let look = doc.model_body_look(b);
+        let mut face_looks: BTreeMap<u32, AppearanceId> = BTreeMap::new();
+        let faces = doc.face_colors(b);
+        match &id {
+            Some(id) if self.writes.appearances => {
+                match &look {
+                    Some(look) => {
+                        let a = self.appearance(look)?;
+                        self.bind(AppearanceTarget::Body(id.clone()), a)?;
+                    }
+                    None => self.set_colour(id, b),
+                }
+                if self.writes.bound_meshes {
+                    for (face, look) in &faces {
+                        let a = self.appearance(look)?;
+                        if let Ok(face) = u32::try_from(*face) {
+                            face_looks.insert(face, a);
+                        }
                     }
                 }
             }
-        }
-        let mut face_looks: BTreeMap<u32, AppearanceId> = BTreeMap::new();
-        for (face, look) in doc.face_colors(b) {
-            let a = self.appearance(&look)?;
-            if let Ok(face) = u32::try_from(face) {
-                face_looks.insert(face, a);
+            Some(id) => {
+                let linear = self.writes.linear;
+                match &look {
+                    Some(look) => {
+                        if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == *id) {
+                            body.color = colour(look.color, look.opacity, linear);
+                        }
+                    }
+                    None => self.set_colour(id, b),
+                }
+                if !faces.is_empty() {
+                    self.warnings
+                        .push(format!("{shown}: the colours of its own faces are not written: cadmpeg's {label} writer writes one colour a body"));
+                }
+            }
+            None => {
+                if look.is_some() || doc.body_color(b).is_some() || !faces.is_empty() {
+                    self.warnings
+                        .push(format!("{shown}: written as a mesh without its name or colour: cadmpeg's {label} writer writes a mesh without them"));
+                } else {
+                    self.warnings.push(format!("{shown}: written as a mesh without its name: cadmpeg's {label} writer writes a mesh without one"));
+                }
             }
         }
-        match self.tessellation(&prefix, &id, &mesh, &face_looks) {
+        let Some(mesh) = mesh else { return Ok(id) };
+        match self.tessellation(&prefix, id.as_ref(), &mesh, &face_looks) {
             Ok(()) => {}
             Err(e) if has_brep => self.warnings.push(format!("{shown}: its mesh was not written ({e}), so the file's writer meshes it")),
             Err(e) => {
                 self.warnings.push(format!("{shown}: not written: {e}"));
-                self.ir.model.bodies.retain(|x| x.id != id);
-                self.ir.model.appearance_bindings.retain(|x| x.target != AppearanceTarget::Body(id.clone()));
+                if let Some(id) = &id {
+                    self.ir.model.bodies.retain(|x| x.id != *id);
+                    self.ir.model.appearance_bindings.retain(|x| x.target != AppearanceTarget::Body(id.clone()));
+                }
                 return Ok(None);
             }
         }
-        Ok(Some(id))
+        Ok(id)
     }
 
-    /// `mesh` as the tessellation of body `body`, the triangles of each face in `face_looks`
-    /// a triangle group bound to that face's appearance.
+    /// A body with no look but a colour (an imported one) carries that colour.
+    fn set_colour(&mut self, id: &BodyId, b: &ModelBody) {
+        let doc = self.doc;
+        if let Some(c) = doc.body_color(b) {
+            let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let color = colour(c.map(to8), doc.model_body_opacity(b), self.writes.linear);
+            if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == *id) {
+                body.color = color;
+            }
+        }
+    }
+
+    /// `geometry`'s exact shape written as body `name` under `prefix`, once the writer takes it
+    /// ([`Writes::admit`]).
+    fn brep(&mut self, geometry: &solidcraft_kernel::Body, prefix: &str, name: &str) -> Result<BodyId, String> {
+        let record = solidcraft_kernel::brep_record(geometry).map_err(|e| e.to_string())?;
+        let tolerance = record.tolerance;
+        if let Some(admit) = self.writes.admit {
+            let mut alone = CadIr::empty();
+            solidcore_cadir::write_body(&mut alone.model, &record, prefix, Some(name)).map_err(|e| e.to_string())?;
+            if let Some(t) = PositiveLength::new(tolerance) {
+                alone.tolerances.linear = t;
+            }
+            if !self.writes.planar_pcurves {
+                without_planar_pcurves(&mut alone);
+            }
+            alone.finalize();
+            admit(&alone).map_err(|e| format!("cadmpeg's {} writer cannot write it yet ({e})", self.writes.label))?;
+        }
+        let w = solidcore_cadir::write_body(&mut self.ir.model, &record, prefix, Some(name)).map_err(|e| e.to_string())?;
+        if tolerance.is_finite() && tolerance > 0.0 {
+            self.tolerance = Some(self.tolerance.map_or(tolerance, |t| t.max(tolerance)));
+        }
+        Ok(w.body)
+    }
+
+    /// `geometry`'s mesh at the export's quality, within the file's size cap.
+    fn mesh(&mut self, geometry: &solidcraft_kernel::Body, shown: &str) -> Result<solidcraft_geom::Mesh, Unmeshed> {
+        let mesh = crate::display_mesh_at(geometry, self.quality).map_err(|e| Unmeshed::Failed(format!("could not be meshed: {e}")))?;
+        let size = mesh
+            .positions
+            .len()
+            .checked_mul(BYTES_PER_POINT)
+            .zip(mesh.triangles.len().checked_mul(BYTES_PER_TRIANGLE))
+            .and_then(|(p, t)| p.checked_add(t))
+            .and_then(|n| n.checked_add(self.bytes))
+            .filter(|n| *n <= MAX_BYTES)
+            .ok_or_else(|| {
+                Unmeshed::TooLarge(format!(
+                    "{shown}: the meshes are too large for the file (at most {} MiB); export fewer bodies or use standard quality",
+                    MAX_BYTES >> 20
+                ))
+            })?;
+        self.bytes = size;
+        Ok(mesh)
+    }
+
+    /// `mesh` as the tessellation of body `body` (a mesh of its own when `None`), the triangles of
+    /// each face in `face_looks` a triangle group bound to that face's appearance.
     fn tessellation(
         &mut self,
         prefix: &str,
-        body: &BodyId,
+        body: Option<&BodyId>,
         mesh: &solidcraft_geom::Mesh,
         face_looks: &BTreeMap<u32, AppearanceId>,
     ) -> Result<(), String> {
@@ -474,7 +624,7 @@ impl<'a> Builder<'a> {
             && mesh.normals.iter().all(|n| n.x.is_finite() && n.y.is_finite() && n.z.is_finite()))
         .then(|| mesh.normals.iter().map(|n| Vector3::new(n.x, n.y, n.z)).collect());
         let lanes = TessellationMesh::from_list_lanes(positions, mesh.triangles.clone(), normals).map_err(|e| e.to_string())?;
-        let mut t = Tessellation::new(id.clone(), lanes, Vec::new()).map_err(|e| e.to_string())?.with_body(Some(body.clone()));
+        let mut t = Tessellation::new(id.clone(), lanes, Vec::new()).map_err(|e| e.to_string())?.with_body(body.cloned());
         if !face_looks.is_empty() && mesh.tri_face.len() == mesh.triangles.len() {
             let mut groups: BTreeMap<Option<u32>, Vec<u32>> = BTreeMap::new();
             for (i, f) in mesh.tri_face.iter().enumerate() {
@@ -495,5 +645,57 @@ impl<'a> Builder<'a> {
         }
         self.ir.model.tessellations.push(t);
         Ok(())
+    }
+}
+
+/// `ir` without the pcurves of faces on planes: a writer that makes them from the edges takes no
+/// other ([`Writes::planar_pcurves`]).
+fn without_planar_pcurves(ir: &mut CadIr) {
+    use cadmpeg_ir::geometry::{SolvedSurfaceGeometry, SurfaceGeometry};
+    use std::collections::HashSet;
+    let planes: HashSet<&str> = ir
+        .model
+        .surfaces
+        .iter()
+        .filter(|s| matches!(s.geometry, SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(_))))
+        .map(|s| s.id.as_str())
+        .collect();
+    let planar_faces: HashSet<&str> = ir.model.faces.iter().filter(|f| planes.contains(f.surface.as_str())).map(|f| f.id.as_str()).collect();
+    let planar_loops: HashSet<String> =
+        ir.model.loops.iter().filter(|l| planar_faces.contains(l.face.as_str())).map(|l| l.id.as_str().to_string()).collect();
+    let mut dropped: HashSet<String> = HashSet::new();
+    for c in ir.model.coedges.iter_mut().filter(|c| planar_loops.contains(c.owner_loop.as_str())) {
+        dropped.extend(c.pcurves.drain(..).map(|u| u.pcurve.as_str().to_string()));
+    }
+    ir.model.pcurves.retain(|p| !dropped.contains(p.id.as_str()));
+}
+
+/// Why a body's mesh was not made ([`Builder::mesh`]).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Unmeshed {
+    /// Its display mesh could not be made, with why.
+    Failed(String),
+    /// The export's meshes would pass the file's size cap ([`MAX_BYTES`]), said in full.
+    TooLarge(String),
+}
+
+/// The mesh `made` for body `shown`, or none: a body with an exact B-rep whose display mesh could
+/// not be made is written as its B-rep alone, with a warning, as one whose mesh the file cannot
+/// take is (the file's writer meshes it). The size cap stays fatal, and so does a failed mesh of a
+/// body with no exact shape, which has nothing else to be written as.
+pub(crate) fn kept_without_mesh(
+    made: Result<solidcraft_geom::Mesh, Unmeshed>,
+    has_brep: bool,
+    shown: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Option<solidcraft_geom::Mesh>, String> {
+    match made {
+        Ok(mesh) => Ok(Some(mesh)),
+        Err(Unmeshed::Failed(e)) if has_brep => {
+            warnings.push(format!("{shown}: its mesh was not written ({e}), so the file's writer meshes it"));
+            Ok(None)
+        }
+        Err(Unmeshed::Failed(e)) => Err(format!("{shown}: {e}")),
+        Err(Unmeshed::TooLarge(e)) => Err(e),
     }
 }

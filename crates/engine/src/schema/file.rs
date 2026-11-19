@@ -190,10 +190,10 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf, sdf or json, or a file name
-    /// whose extension names it, or an installed exporter plugin as `plugin_id.entry` (`plugin.list`'s
-    /// `exporters`). Default: from the path's extension; an extension SolidCraft does not write
-    /// goes to the exporter plugin that claims it.
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, usd, 3dm, urdf, sdf or json, or a
+    /// file name whose extension names it, or an installed exporter plugin as `plugin_id.entry`
+    /// (`plugin.list`'s `exporters`). Default: from the path's extension; an extension SolidCraft
+    /// does not write goes to the exporter plugin that claims it.
     #[serde(default)]
     pub format: Option<String>,
     /// An exporter plugin's options, as its slot declares them. Refused for SolidCraft's own
@@ -204,7 +204,7 @@ pub struct ExportParams {
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// How closely the mesh follows curved faces (STL, OBJ, 3MF and GLB). Default: standard. Not read
+    /// How closely the mesh follows curved faces (STL, OBJ, 3MF, GLB, OpenUSD and Rhino). Default: standard. Not read
     /// for URDF.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
@@ -420,7 +420,8 @@ pub struct ExportResult {
     /// Its size in bytes.
     pub bytes: usize,
     /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` and
-    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design and Glb).
+    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design, Glb, Usd
+    /// and Rhino).
     pub format: String,
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

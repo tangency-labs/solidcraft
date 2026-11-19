@@ -100,6 +100,15 @@ fn an_assembly_exports_to_openusd_and_reads_back_in_place() {
     }
     let e = s.execute("file.export", &json!({"path": path, "format": "usda"})).unwrap_err().to_string();
     assert!(e.contains("disagrees with the path's extension"), "{e}");
+    // A format SolidCraft writes itself, named, is written whatever the extension, as it always
+    // was; another format cadmpeg writes is not written under an OpenUSD name.
+    let stl = dir.join("named-stl.usda").to_string_lossy().to_string();
+    assert_eq!(run(&mut s, "file.export", json!({"path": stl, "format": "stl"}))["format"], "StlBinary");
+    assert!(!std::fs::read(&stl).unwrap().starts_with(b"#usda"));
+    let rhino = dir.join("named-rhino.usda").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": rhino, "format": "3dm"})).unwrap_err().to_string();
+    assert!(e.contains("disagrees with the path's extension"), "{e}");
+    assert!(!std::path::Path::new(&rhino).exists());
     // Chosen bodies only.
     let path = dir.join("loose.usda").to_string_lossy().to_string();
     run(&mut s, "file.export", json!({"path": path, "bodies": ["Loose"]}));

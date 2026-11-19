@@ -2694,8 +2694,8 @@ fn export_to(
     if format == Format::Glb {
         return export_glb(s, cmd, path, bodies, quality, hierarchy);
     }
-    if format == Format::Usd {
-        return export_usd(s, path, bodies, quality);
+    if written_by_cadmpeg(format) {
+        return export_cadmpeg(s, path, bodies, quality, format);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
@@ -2852,6 +2852,18 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Checked first so URDF and SDF refuse `solids: face` too, rather than ignoring it.
     let face_solids = stl_solids(p, cmd, format)?;
+    // A format asked for by name is written whatever the path's extension, as it always was
+    // (`format: stl` writes STL to `part.usda`), but for one cadmpeg writes: a Rhino or OpenUSD
+    // file asked for under another format's extension is refused, rather than written under
+    // the wrong one (OpenUSD's own target check refused that before; Rhino and FreeCAD are new).
+    if let Some(f) = str_(p, "format")
+        && let Ok(by_path) = Format::from_name(path)
+        && by_path != format
+        && written_by_cadmpeg(format)
+        && std::path::Path::new(path).extension().is_some()
+    {
+        return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which names {by_path:?}")));
+    }
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -3212,22 +3224,29 @@ fn usd_encoding(name: &str) -> &'static str {
     }
 }
 
-/// The OpenUSD export: the design written into cadmpeg's neutral model (its components and
-/// placements when no bodies are chosen, each body's exact B-rep and its mesh at `quality`, and
-/// the looks the design shows), then written as OpenUSD by cadmpeg; the path's extension picks
-/// text (`.usda`), binary (`.usdc`, `.usd`) or a package (`.usdz`). Written atomically, so a
-/// refusal or a failed write leaves a file already there as it was. What the file could not carry
-/// is in the reply's warnings.
-fn export_usd(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
+/// Whether cadmpeg writes `format` from the design ([`export_cadmpeg`]).
+fn written_by_cadmpeg(format: Format) -> bool {
+    matches!(format, Format::Usd | Format::Rhino | Format::FreeCad)
+}
+
+/// An export through cadmpeg (OpenUSD, Rhino): the design written into cadmpeg's neutral model
+/// (its components and placements when no bodies are chosen and the format holds them, each
+/// body's exact B-rep and, where the format takes it, its mesh at `quality`, and the looks the
+/// design shows), then written by cadmpeg's writer for `format`; for OpenUSD the path's extension
+/// picks text (`.usda`), binary (`.usdc`, `.usd`) or a package (`.usdz`). FreeCAD is refused:
+/// cadmpeg cannot write a new FreeCAD file yet. Written atomically, so a refusal or a failed write
+/// leaves a file already there as it was. What the file could not carry is in the reply's
+/// warnings.
+fn export_cadmpeg(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, format: Format) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let world = s.world_state()?;
     // The placements the world has, uncaptured moves included, so the assembly is written where
     // the design shows it, as chosen bodies are.
     let doc = s.placed_document();
-    let (bytes, warnings) = solidcraft_io::usd_from_design(&doc, &s.model.state(), &world, bodies, path, quality).map_err(EngineError::Other)?;
+    let (bytes, warnings) =
+        solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, path, quality, format).map_err(EngineError::Other)?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply =
-        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{:?}", Format::Usd), warnings, ..ExportResult::default() };
+    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 

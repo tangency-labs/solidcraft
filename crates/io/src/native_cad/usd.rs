@@ -1,7 +1,7 @@
 //! OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`) through cadmpeg's USD codec, both ways.
 //!
-//! Export: the design is written straight into cadmpeg's neutral model
-//! ([`super::cadir_out::design`]: components, placements, bodies with their exact B-rep and the
+//! Export ([`super::export`]): the design is written straight into cadmpeg's neutral model
+//! ([`super::cadir_out::design_for`]: components, placements, bodies with their exact B-rep and the
 //! mesh SolidCraft draws them with, and their looks), and cadmpeg's USD writer writes the model:
 //! each component an `Xform` prim named after its occurrence, holding its bodies, each named after
 //! it, as the exact B-rep (a `BrepArray` prim) and SolidCraft's `Mesh` of it; a part placed more
@@ -26,12 +26,10 @@ use std::hash::{Hash, Hasher};
 
 use cadmpeg_core::decode::DecodeDepth;
 use cadmpeg_ir::appearance::AppearanceTarget;
-use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
 use cadmpeg_ir::document::CadIr;
 use cadmpeg_ir::products::{Occurrence, OccurrenceParent, ProductDefinition, PrototypeReference};
 use cadmpeg_ir::tessellation::Tessellation;
 use cadmpeg_ir::topology::Color;
-use cadmpeg_registry::{Format, build_encoder};
 use solidcore_record::Vec3;
 use solidcraft_doc::MeshData;
 use solidcraft_doc::appearance::Look;
@@ -57,10 +55,6 @@ const MAX_COMPONENT_DEPTH: usize = 32;
 /// Most components one file makes.
 const MAX_COMPONENTS: usize = 5_000;
 
-/// Losses cadmpeg reports that say nothing to the person exporting: that mesh points are single
-/// precision, which every USD mesh is (the exact B-rep beside it keeps double precision).
-const QUIET_LOSSES: [&str; 1] = ["usd/export.vertex-precision"];
-
 /// Is this an OpenUSD file name (any case)?
 pub fn is_usd_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| USD_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))
@@ -68,7 +62,7 @@ pub fn is_usd_path(path: &str) -> bool {
 
 /// The cadmpeg write target a file name asks for: `.usda` text, `.usdz` a package, and `.usdc` or
 /// `.usd` binary (a `.usd` layer is binary unless it says otherwise, as OpenUSD writes it).
-fn target(file: &str) -> Option<&'static str> {
+pub(super) fn target(file: &str) -> Option<&'static str> {
     let ext = std::path::Path::new(file).extension().and_then(|e| e.to_str())?.to_ascii_lowercase();
     match ext.as_str() {
         "usda" => Some("usda"),
@@ -76,37 +70,6 @@ fn target(file: &str) -> Option<&'static str> {
         "usdz" => Some("usdz"),
         _ => None,
     }
-}
-
-/// The bodies of `world` (all when `bodies` is empty) as an OpenUSD file called `file`, whose
-/// extension picks the encoding, with what the file could not carry: the design's components and
-/// placements when no bodies are chosen ([`super::cadir_out::design`] says how), each mesh at
-/// `quality`.
-pub(super) fn from_design(
-    doc: &solidcraft_doc::Document,
-    model: &solidcraft_doc::ModelState,
-    world: &solidcraft_doc::ModelState,
-    bodies: &[String],
-    file: &str,
-    quality: crate::MeshQuality,
-) -> Result<(Vec<u8>, Vec<String>), String> {
-    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
-    let target = target(&name).ok_or_else(|| format!("{name}: not an OpenUSD file name (.usda, .usdc, .usd or .usdz)"))?;
-    let stem = std::path::Path::new(&name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let built = super::cadir_out::design(doc, model, world, bodies, &stem, quality).map_err(|e| format!("{name}: {e}"))?;
-    let plan = build_encoder(Format::Usd)
-        .plan(EncodeInput::new(&built.ir, None), TargetRequest::Explicit(target))
-        .map_err(|e| format!("{name}: could not write OpenUSD: {e}"))?;
-    let mut warnings = built.warnings;
-    for l in &plan.report().losses {
-        let code = l.code.to_string();
-        if !QUIET_LOSSES.contains(&code.as_str()) {
-            warnings.push(format!("{code}: {}", l.message));
-        }
-    }
-    let mut out = Vec::new();
-    plan.write_to(&mut out).map_err(|e| format!("{name}: could not write OpenUSD: {e}"))?;
-    Ok((out, warnings))
 }
 
 /// USD's colours are linear; SolidCraft's are sRGB. For a file read into records.

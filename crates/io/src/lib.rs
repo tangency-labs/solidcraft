@@ -86,6 +86,7 @@ pub use native_cad::NATIVE_CAD_EXTS;
 pub use native_cad::NativeDesign;
 pub use native_cad::RecordsRead;
 pub use native_cad::USD_EXTS;
+pub use native_cad::cadmpeg_export;
 pub use native_cad::cadmpeg_iges_records;
 pub use native_cad::cadmpeg_step_records;
 pub use native_cad::detects_freecad;
@@ -894,6 +895,12 @@ pub enum Format {
     /// file's extension ([`usd_from_design`]); written from the design, which holds the
     /// components and looks.
     Usd,
+    /// Rhino `.3dm`, written by cadmpeg from the design ([`cadmpeg_export`]): each body's exact
+    /// shape where cadmpeg's Rhino writer can write it, else its mesh.
+    Rhino,
+    /// FreeCAD `.FCStd`: named so that `file.export` can say why it is not written yet (cadmpeg
+    /// cannot write a new FreeCAD file; [`cadmpeg_export`] refuses it).
+    FreeCad,
 }
 
 impl Format {
@@ -912,6 +919,8 @@ impl Format {
             "glb" => Format::Glb,
             "sdf" => Format::Sdf,
             "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
+            "3dm" => Format::Rhino,
+            "fcstd" => Format::FreeCad,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -1791,6 +1800,8 @@ pub fn export_with_parts_noted(
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
         Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
         Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
+        Format::Rhino => return Err(IoError::Format("3dm (written from the design by cadmpeg; use file.export)".into())),
+        Format::FreeCad => return Err(IoError::Invalid(native_cad::FREECAD_REFUSED.into())),
     };
     Ok((bytes, notes))
 }
