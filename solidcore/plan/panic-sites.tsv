@@ -1093,7 +1093,7 @@ crates/solidcore/src/topology/brep/p4.rs	vertex_remove	Vec::remove	1	proven	remo
 crates/solidcore/src/topology/brep/p5.rs	make_manifold_in	Vec::remove	1	proven	remove(index)	index is position() in the same Vec, with no intervening mutation
 crates/solidcore/src/topology/brep/p5.rs	remove_vertexuse	Vec::remove	1	proven	remove(index)	index is position() in the same Vec, with no intervening mutation
 crates/solidcore/src/topology/brep/p7.rs	edge_remove	Vec::remove	1	open	remove(at)	
-crates/solidcore/src/topology/brep/p7.rs	glue_edges_general	Vec::remove	1	open	remove(at)	
+crates/solidcore/src/topology/brep/p7.rs	glue_edges_general_searching	Vec::remove	1	open	remove(at)	
 crates/solidcore/src/topology/brep/p9.rs	faceuse_pre_insert_loopuse	Vec::insert	1	proven	insert(0, lu)	index 0 is never past the end
 crates/solidcore/src/topology/brep/p9.rs	faceuse_remove_loopuse	Vec::remove	1	proven	remove(at)	index is position() in the same Vec, with no intervening mutation
 crates/solidcore/src/topology/brep/p9.rs	make_vertex_split_edge_with_curve_identity_state	chunks	1	proven	chunks_exact(2)	constant non-zero size
