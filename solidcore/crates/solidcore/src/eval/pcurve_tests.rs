@@ -1388,8 +1388,9 @@ fn a_loop_whose_control_polygon_reaches_past_its_period_stays_in_it() {
 /// Loops on a spline closed in u (period and range [0, 4]) that lie outside the range both where
 /// their lowest point puts them and a period lower stay where their lowest point puts them: a
 /// rectangle across the seam, u 3 to 5, and one a period wide from a ten-thousandth of a period
-/// short of the range's end, u 3.9996 to 7.9996, whose uses meet exactly. Only a loop that lies
-/// in the range a period lower, to within how far its uses miss each other, is moved there.
+/// short of the range's end, u 3.9996 to 7.9996, whose uses meet exactly. Both are placed as on
+/// main: only a loop that lies in the range a period lower, to within how far its uses miss each
+/// other, is moved there.
 #[test]
 fn a_loop_outside_the_range_a_period_lower_too_stays_where_its_lowest_point_puts_it() {
     let full = [0., TAU];
@@ -1439,6 +1440,52 @@ fn a_loop_outside_the_range_a_period_lower_too_stays_where_its_lowest_point_puts
                 "u {a} to {b}, use {k}: left where it is"
             );
         }
+    }
+}
+
+/// A loop on a sphere from its south pole up the meridian at u = 2π - 0.5, along the equator to
+/// u = 2π + 2.5 and back down to the pole along the meridian at u = 2π + 0.5: its two uses meet at
+/// the pole a radian apart, where u is free, and exactly elsewhere. It lies outside the range
+/// [0, 2π] where its lowest point puts it and would lie inside it a period lower to within that
+/// radian; the pole's free parameter is no rounding, so it stays as on main.
+#[test]
+fn a_loop_whose_uses_meet_at_a_pole_a_radian_apart_stays_where_its_lowest_point_puts_it() {
+    let sphere = Surface::Sphere {
+        frame: about_z([0.; 3], false),
+        radius: 6.,
+    };
+    let domain = SurfaceEval::new(&sphere).unwrap().domain();
+    assert_eq!(domain.period[0], Some(TAU));
+    let (a, b, c) = (TAU - 0.5, TAU + 2.5, TAU + 0.5);
+    let corners = [[a, -FRAC_PI_2], [a, 0.], [b, 0.], [c, 0.], [c, -FRAC_PI_2]];
+    let sides: Vec<Curve2> = corners
+        .windows(2)
+        .map(|w| Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: w.to_vec(),
+        })
+        .collect();
+    // The edges' curves are not read: a given pcurve is taken as it is.
+    let line = Curve::Line {
+        start: [6., 0., 0.],
+        end: [0., 0., -6.],
+    };
+    let l: Vec<EdgeUse<'_>> = sides
+        .iter()
+        .zip(0..)
+        .map(|(pc, edge)| EdgeUse {
+            edge,
+            curve: &line,
+            interval: [0., 1.],
+            forward: true,
+            tolerance: 0.0,
+            given: Some(pc),
+        })
+        .collect();
+    let out = &pcurves(&sphere, &[l], 1e-7).unwrap()[0];
+    assert_eq!(out.len(), 4);
+    for (k, (got, given)) in out.iter().zip(&sides).enumerate() {
+        assert_eq!(points(got), points(given), "use {k}: left where it is");
     }
 }
 

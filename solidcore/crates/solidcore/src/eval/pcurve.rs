@@ -794,7 +794,8 @@ impl On {
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in
     /// loop order and direction), then all together into the surface's base period where the
     /// loop's lowest point allows; a loop that lies outside the surface's range there but within
-    /// it a period lower, to within how far its uses miss each other at its vertices, goes there.
+    /// it a period lower, to within how far its uses miss each other at its vertices away from a
+    /// pole and a billionth of the period, goes there (and may start below the range by that).
     /// Where uses meet at a pole (within `tol`) the periodic parameter is free: there the offsets
     /// that turn the loop counter-clockwise in (u, v) (a face boundary seen from the natural
     /// normal) by more than rounding are taken, else the nearest. A seam used twice from pole to
