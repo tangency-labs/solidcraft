@@ -2682,7 +2682,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             // As in a sketch: the first Esc drops the Dimension tool's picks, the next leaves it.
             if cancel_unfinished(app)
                 || crate::drawing_workspace::dimension::clear_picks(app)
-                || crate::drawing_workspace::close_panel(app)
+                || crate::drawing_workspace::escape_panel(app)
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
@@ -2759,6 +2759,17 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::S => save(app),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
+            continue;
+        }
+        // On a drawing's sheet, a sketch tool's key starts the tool that does its job there: the
+        // Dimension key (D by default, or the key it was rebound to) starts Dimension.
+        if drawing_history
+            && app.session.active_sketch.is_none()
+            && !mods.alt
+            && let Some(tool) =
+                crate::keymap::commands_for(app, &crate::keymap::key_name(k, mods)).into_iter().find_map(crate::drawing_workspace::counterpart)
+        {
+            app.start(tool);
             continue;
         }
         if !shown {
