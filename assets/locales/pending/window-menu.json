@@ -1,0 +1,98 @@
+{
+  "en": {
+    "cmd.tab.window.move_to_display": "Move Window to Display",
+    "cmd.tab.window.rename": "Rename Window",
+    "window_menu.display_number": "Display {n}",
+    "window_menu.move_to_display": "Move to display",
+    "window_menu.name": "Window name",
+    "window_menu.preview": "Miniature of how this window will look",
+    "window_menu.rename": "Rename window…",
+    "window_menu.show_here": "Show in this window",
+    "window_menu.use_default": "Use these as the default for new windows",
+    "window_menu.window": "Window"
+  },
+  "ar": {
+    "cmd.tab.window.move_to_display": "نقل النافذة إلى شاشة",
+    "cmd.tab.window.rename": "إعادة تسمية النافذة",
+    "window_menu.display_number": "الشاشة {n}",
+    "window_menu.move_to_display": "نقل إلى شاشة",
+    "window_menu.name": "اسم النافذة",
+    "window_menu.preview": "معاينة مصغرة لمظهر النافذة",
+    "window_menu.rename": "إعادة تسمية النافذة…",
+    "window_menu.show_here": "إظهار في هذه النافذة",
+    "window_menu.use_default": "استخدام هذه الإعدادات افتراضيًا للنوافذ الجديدة",
+    "window_menu.window": "النافذة"
+  },
+  "de": {
+    "cmd.tab.window.move_to_display": "Fenster auf Bildschirm verschieben",
+    "cmd.tab.window.rename": "Fenster umbenennen",
+    "window_menu.display_number": "Bildschirm {n}",
+    "window_menu.move_to_display": "Auf Bildschirm verschieben",
+    "window_menu.name": "Fenstername",
+    "window_menu.preview": "Miniatur der Fensteransicht",
+    "window_menu.rename": "Fenster umbenennen…",
+    "window_menu.show_here": "In diesem Fenster anzeigen",
+    "window_menu.use_default": "Als Standard für neue Fenster verwenden",
+    "window_menu.window": "Fenster"
+  },
+  "he": {
+    "cmd.tab.window.move_to_display": "העברת חלון למסך",
+    "cmd.tab.window.rename": "שינוי שם החלון",
+    "window_menu.display_number": "מסך {n}",
+    "window_menu.move_to_display": "העברה למסך",
+    "window_menu.name": "שם החלון",
+    "window_menu.preview": "תצוגה ממוזערת של החלון",
+    "window_menu.rename": "שינוי שם החלון…",
+    "window_menu.show_here": "הצגה בחלון זה",
+    "window_menu.use_default": "שימוש כברירת מחדל לחלונות חדשים",
+    "window_menu.window": "חלון"
+  },
+  "ja": {
+    "cmd.tab.window.move_to_display": "ウィンドウをディスプレイに移動",
+    "cmd.tab.window.rename": "ウィンドウ名を変更",
+    "window_menu.display_number": "ディスプレイ {n}",
+    "window_menu.move_to_display": "ディスプレイに移動",
+    "window_menu.name": "ウィンドウ名",
+    "window_menu.preview": "ウィンドウの外観のミニチュア",
+    "window_menu.rename": "ウィンドウ名を変更…",
+    "window_menu.show_here": "このウィンドウに表示",
+    "window_menu.use_default": "新しいウィンドウの既定値にする",
+    "window_menu.window": "ウィンドウ"
+  },
+  "ko": {
+    "cmd.tab.window.move_to_display": "창을 디스플레이로 이동",
+    "cmd.tab.window.rename": "창 이름 변경",
+    "window_menu.display_number": "디스플레이 {n}",
+    "window_menu.move_to_display": "디스플레이로 이동",
+    "window_menu.name": "창 이름",
+    "window_menu.preview": "이 창 모양의 미리보기",
+    "window_menu.rename": "창 이름 변경…",
+    "window_menu.show_here": "이 창에 표시",
+    "window_menu.use_default": "새 창의 기본값으로 사용",
+    "window_menu.window": "창"
+  },
+  "vi": {
+    "cmd.tab.window.move_to_display": "Chuyển cửa sổ sang màn hình",
+    "cmd.tab.window.rename": "Đổi tên cửa sổ",
+    "window_menu.display_number": "Màn hình {n}",
+    "window_menu.move_to_display": "Chuyển sang màn hình",
+    "window_menu.name": "Tên cửa sổ",
+    "window_menu.preview": "Hình thu nhỏ của cửa sổ",
+    "window_menu.rename": "Đổi tên cửa sổ…",
+    "window_menu.show_here": "Hiện trong cửa sổ này",
+    "window_menu.use_default": "Dùng làm mặc định cho cửa sổ mới",
+    "window_menu.window": "Cửa sổ"
+  },
+  "zh": {
+    "cmd.tab.window.move_to_display": "将窗口移到显示器",
+    "cmd.tab.window.rename": "重命名窗口",
+    "window_menu.display_number": "显示器 {n}",
+    "window_menu.move_to_display": "移到显示器",
+    "window_menu.name": "窗口名称",
+    "window_menu.preview": "此窗口外观的缩略图",
+    "window_menu.rename": "重命名窗口…",
+    "window_menu.show_here": "在此窗口中显示",
+    "window_menu.use_default": "用作新窗口的默认设置",
+    "window_menu.window": "窗口"
+  }
+}

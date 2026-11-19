@@ -404,7 +404,7 @@ pub fn theme_option_control(
     }
 }
 
-pub fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
+pub fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) -> Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(t.space_24 + t.space_8, t.control_height), Sense::click());
     if response.clicked() {
@@ -419,6 +419,7 @@ pub fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
     solidcraft_ui_registry::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
+    response
 }
 
 /// Page scroller keeps content aligned while centring its bar in the window's right inset.
