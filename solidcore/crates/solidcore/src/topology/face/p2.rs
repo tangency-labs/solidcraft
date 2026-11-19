@@ -3378,8 +3378,8 @@ pub fn fix_uv_trim_curves_notified(
     // Not upstream (#18162): the two trims and their edges' tolerances before they are
     // edited, to ask after the edits whether the tolerance provably covered the trim
     // ([`keep_trim_covered`]).
-    let curr_before = trim_before(b, eu_current, curr_holder)?;
-    let prev_before = trim_before(b, eu_previous, prev_holder)?;
+    let curr_before = trim_before(k, b, eu_current, curr_holder)?;
+    let prev_before = trim_before(k, b, eu_previous, prev_holder)?;
 
     // drop sUVVertex to each UVTrimCurve, trim there and stretch back (upstream). The
     // opt-in WR-255 fix (#959/#570) skips this and only moves the end points below.
@@ -3503,18 +3503,36 @@ pub fn fix_uv_trim_curves_notified(
     Ok(true)
 }
 
-/// Not upstream (#18162): the UV trim held at `holder` for `eu`, copied for evaluation, and
-/// the tolerance of `eu`'s edge, before [`fix_uv_trim_curves_notified`] edits it; `None`
+/// Not upstream (#18162): the UV trim held at `holder` for `eu`, copied for evaluation, the
+/// tolerance of `eu`'s edge and the tolerance its trims are fitted at
+/// (`edgeuse::p3::fit_tolerance`), before [`fix_uv_trim_curves_notified`] edits it; `None`
 /// without an edge.
-fn trim_before(b: &Brep, eu: EdgeuseId, holder: EdgeuseId) -> Result<Option<(Curve, f64)>> {
+fn trim_before(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    holder: EdgeuseId,
+) -> Result<Option<TrimBefore>> {
     let Some(e) = eu1::edge(b, eu)? else {
         return Ok(None);
     };
     let tolerance = b.edge(e)?.tolerance;
-    Ok(Some((
-        held_curve(b, holder)?.clone_for_evaluation()?,
+    let fit = crate::topology::edgeuse::p3::fit_tolerance(k, b, e)?;
+    Ok(Some(TrimBefore {
+        trim: held_curve(b, holder)?.clone_for_evaluation()?,
         tolerance,
-    )))
+        fit,
+    }))
+}
+
+/// Not upstream (#18162): a UV trim and its edge's tolerances before an edit ([`trim_before`]).
+struct TrimBefore {
+    /// The trim, copied for evaluation.
+    trim: Curve,
+    /// The edge's tolerance.
+    tolerance: f64,
+    /// The tolerance the edge's trims are fitted at.
+    fit: f64,
 }
 
 /// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
@@ -3538,15 +3556,16 @@ fn keep_trim_covered(
     b: &mut Brep,
     eu: EdgeuseId,
     holder: EdgeuseId,
-    before: Option<(Curve, f64)>,
+    before: Option<TrimBefore>,
 ) -> Result<()> {
-    let Some((trim_before, tolerance_before)) = before else {
+    let Some(before) = before else {
         return Ok(());
     };
     let Some(e) = eu1::edge(b, eu)? else {
         return Ok(());
     };
     let tolerance = b.edge(e)?.tolerance;
+    let fit = crate::topology::edgeuse::p3::fit_tolerance(k, b, e)?;
     let bound = {
         let trim = held_curve(b, holder)?;
         // (a bound past twice the tolerance is not taken; one within it raises nothing)
@@ -3555,6 +3574,7 @@ fn keep_trim_covered(
             b,
             eu,
             trim,
+            fit,
             [tolerance, 2.0 * tolerance],
         )?
     };
@@ -3570,10 +3590,11 @@ fn keep_trim_covered(
             k,
             b,
             eu,
-            &trim_before,
-            [tolerance_before; 2],
+            &before.trim,
+            before.fit,
+            [before.tolerance; 2],
         )?,
-        Some(was) if was <= tolerance_before
+        Some(was) if was <= before.tolerance
     );
     if covered {
         crate::topology::edge::set_tolerance(b, e, bound, true, true)?;

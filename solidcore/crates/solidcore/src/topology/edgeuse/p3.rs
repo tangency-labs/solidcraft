@@ -1767,7 +1767,7 @@ pub fn get_or_create_uv_trim_curve(
 /// Those of [`trim_deviation_bound`].
 pub(crate) fn trim_raise_distance(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
     eu: EdgeuseId,
     trim: &Curve,
     upstream: f64,
@@ -1781,10 +1781,13 @@ pub(crate) fn trim_raise_distance(
     if !raises {
         return Ok(upstream);
     }
+    // (the bounds are as tight as the tolerance the trim is fitted at asks: a tolerance the
+    // healer raised to cover a gap leaves them as they are, as it leaves the fit)
+    let fit = fit_tolerance(k, b, e)?;
     // (a bound not below `upstream` is not taken)
     // (a bound at most half the tolerance raises nothing, whatever its value: the bisection
     // stops tightening it there)
-    let raise_by = match trim_deviation_bound(k, b, eu, trim, [0.5 * tol, upstream])? {
+    let raise_by = match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, upstream])? {
         Some(bound) if bound < upstream => bound,
         _ => return Ok(upstream),
     };
@@ -1794,7 +1797,7 @@ pub(crate) fn trim_raise_distance(
     // not uncover it. Where the lowered tolerance does not cover each other trim's proved
     // distance (or one is not enclosed), the raise is upstream's.
     let lowered = tol.max(2.0 * raise_by);
-    match other_trims_bound(k, b, eu, lowered)? {
+    match other_trims_bound(k, b, eu, fit, lowered)? {
         Some(others) if others <= lowered => Ok(raise_by),
         _ => Ok(upstream),
     }
@@ -1808,7 +1811,13 @@ pub(crate) fn trim_raise_distance(
 /// # Errors
 ///
 /// Those of [`trim_deviation_bound`].
-fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId, lowered: f64) -> Result<Option<f64>> {
+fn other_trims_bound(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    fit: f64,
+    lowered: f64,
+) -> Result<Option<f64>> {
     let Some(e) = edge(b, eu)? else {
         return Ok(Some(0.0));
     };
@@ -1821,7 +1830,7 @@ fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId, lowered: f64) -> Resul
         let Some(other) = b.edgeuse(x)?.uv_trim_curve.as_ref() else {
             continue;
         };
-        match trim_deviation_bound(k, b, x, other, [lowered, lowered])? {
+        match trim_deviation_bound(k, b, x, other, fit, [lowered, lowered])? {
             Some(bound) if bound.is_finite() => worst = worst.max(bound),
             _ => return Ok(None),
         }
@@ -1847,6 +1856,12 @@ fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId, lowered: f64) -> Resul
 /// treats all such bounds alike, and tightening a trim that lies well within its tolerance on
 /// a dense net is what made the same union take 274 s instead of 3.5 s.
 ///
+/// `fit` is the tolerance the trim is fitted at ([`fit_tolerance`]): the bound is cut to a
+/// thousandth of it ([`TRIM_BOUND_FLOOR`]). It is not the edge's tolerance, which the healer
+/// raises to cover a gap without changing the fit: a bound at that tolerance would give a
+/// trim made at the same fit a different raise on a healed edge than on one at the
+/// tolerance before the gap cover (`Fillet/sphere_plane.smb`, by 7e-8 of it).
+///
 /// [`trim_image_gap_bound`]: crate::query::curve_surface_gap::trim_image_gap_bound
 /// [`trim_image_gap_bound_up_to`]: crate::query::curve_surface_gap::trim_image_gap_bound_up_to
 /// [`trim_image_gap_bound_within`]: crate::query::curve_surface_gap::trim_image_gap_bound_within
@@ -1855,6 +1870,7 @@ pub(crate) fn trim_deviation_bound(
     b: &Brep,
     eu: EdgeuseId,
     trim: &Curve,
+    fit: f64,
     [enough, over]: [f64; 2],
 ) -> Result<Option<f64>> {
     let (Some(e), Some(fu)) = (edge(b, eu)?, faceuse(b, eu)?) else {
@@ -1872,8 +1888,8 @@ pub(crate) fn trim_deviation_bound(
     let mut surface = surface.clone_for_evaluation()?;
     let _ = surface.set_owner(None::<ObjectRef>);
     let ivl = edge_rec.interval;
-    // (below a thousandth of the edge's tolerance a tighter bound changes nothing)
-    let floor = TRIM_BOUND_FLOOR * edge_rec.tolerance;
+    // (below a thousandth of the fit tolerance a tighter bound changes nothing)
+    let floor = TRIM_BOUND_FLOOR * fit;
     crate::query::curve_surface_gap::trim_image_gap_bound_within(
         k,
         &surface,
@@ -1885,7 +1901,7 @@ pub(crate) fn trim_deviation_bound(
     )
 }
 
-/// The fraction of the edge tolerance below which [`trim_deviation_bound`] stops tightening.
+/// The fraction of the fit tolerance below which [`trim_deviation_bound`] stops tightening.
 const TRIM_BOUND_FLOOR: f64 = 1.0e-3;
 
 /// [`get_or_create_uv_trim_curve`] of an edge use that has a UV trim curve (its own or
