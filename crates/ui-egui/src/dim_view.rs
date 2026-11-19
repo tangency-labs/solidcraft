@@ -913,10 +913,6 @@ pub(crate) fn begin_group_drag(app: &SolveApp, items: Vec<(Dragged, Vec2)>, pres
     DRAG.with(|g| *g.borrow_mut() = Some(Drag { items, depth: app.session.undo.len(), press }));
 }
 
-/// What the drag in progress moves.
-pub(crate) fn dragged_items() -> Vec<Dragged> {
-    DRAG.with(|g| g.borrow().as_ref().map(|d| d.items.iter().map(|(item, _)| item.clone()).collect()).unwrap_or_default())
-}
 
 /// Is a dimension text being dragged?
 pub fn dragging() -> bool {
