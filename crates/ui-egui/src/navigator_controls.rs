@@ -77,16 +77,34 @@ pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
 }
 
+/// The four orbit arrows: action, offset from the centre, the way the arrow points, tooltip
+/// (in design units, scaled with the navigator).
+const ORBIT_ARROWS: [(&str, egui::Vec2, egui::Vec2, &str); 4] = [
+    ("left", vec2(-74.0, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
+    ("right", vec2(74.0, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
+    ("up", vec2(0.0, -74.0), vec2(0.0, 1.0), "Orbit up 90°"),
+    ("down", vec2(0.0, 74.0), vec2(0.0, -1.0), "Orbit down 90°"),
+];
+/// The side of an orbit arrow's square button, in design units.
+const ORBIT_BUTTON: f32 = 16.0;
+/// The two roll arrows: action, the button's offset and size, whether it curls clockwise, tooltip.
+const ROLL_ARROWS: [(&str, egui::Vec2, egui::Vec2, bool, &str); 2] = [
+    ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
+    ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
+];
+
+/// `p` is on one of the arrows [`arrows`] draws around `c`: the navigator under them leaves it
+/// to the arrow (no axis tip pick, no orbit drag).
+pub(super) fn on_arrow(c: Pos2, scale: f32, p: Pos2) -> bool {
+    let orbit = ORBIT_ARROWS.iter().map(|(_, offset, _, _)| Rect::from_center_size(c + *offset * scale, vec2(ORBIT_BUTTON, ORBIT_BUTTON) * scale));
+    let roll = ROLL_ARROWS.iter().map(|(_, offset, size, _, _)| Rect::from_center_size(c + *offset * scale, *size * scale));
+    orbit.chain(roll).any(|r| r.contains(p))
+}
+
 /// The four orbit arrows and the two roll arrows around a gizmo centred at `c`: painted while the gizmo is `active`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
-    let (distance, button_size) = (74.0, 16.0);
-    for (action, offset, direction, tooltip) in [
-        ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
-        ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
-        ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
-        ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
-    ] {
+    for (action, offset, direction, tooltip) in ORBIT_ARROWS {
         let (action, tooltip) = match app.preferences.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
             Some(swapped) => (
                 swapped,
@@ -100,15 +118,12 @@ pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
             None => (action, tooltip),
         };
         let at = c + offset * scale;
-        let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
+        let hovered = control(app, ui, Rect::from_center_size(at, vec2(ORBIT_BUTTON, ORBIT_BUTTON) * scale), action, tooltip);
         if active {
             arrow(painter, at, direction * scale, hovered, t);
         }
     }
-    for (action, offset, size, clockwise, tooltip) in [
-        ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
-        ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
-    ] {
+    for (action, offset, size, clockwise, tooltip) in ROLL_ARROWS {
         let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
             Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
             None => (action, tooltip),

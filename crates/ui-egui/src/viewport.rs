@@ -9599,7 +9599,7 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         let shown = crate::view_gizmo::shown(app);
         match shown.style {
             crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::drag_origin(app, rect, p),
-            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => axis_rect(app, rect).contains(p),
+            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => axis_rect(app, rect).contains(p) && !on_axes_arrow(app, rect, p),
         }
     });
     (app.viewport.axis_drag, app.viewport.axis_warp) = (drag.at, drag.warp);
@@ -9652,6 +9652,17 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
 }
 
+/// Where the axes navigator's arrows go: its centre and the arrows' scale (the custom
+/// navigator's design units fitted to the axes navigator's box), when they are shown.
+fn axes_arrows(app: &SolveApp, rect: Rect) -> Option<(Pos2, f32)> {
+    app.preferences.axes_navigator_arrows.then(|| (axis_center(app, rect), axis_rect(app, rect).width() / navigator_controls::DESIGN_SIZE))
+}
+
+/// `p` is on one of the axes navigator's arrows, which take it from the axis tips and the drag.
+fn on_axes_arrow(app: &SolveApp, rect: Rect, p: Pos2) -> bool {
+    axes_arrows(app, rect).is_some_and(|(c, scale)| navigator_controls::on_arrow(c, scale, p))
+}
+
 fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if !axis_rect(app, rect).is_positive() || !axis_rect(app, rect).is_finite() {
         app.viewport.axis_drag = None;
@@ -9664,13 +9675,23 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         clip: rect,
         centre: axis_center(app, rect),
         axes: view_axes(&app.cam),
-        hover: ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p)),
+        hover: ui
+            .input(|i| i.pointer.hover_pos())
+            .filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p) && !on_axes_arrow(app, rect, *p)),
         orbiting,
         snap_hint: !app.preferences.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
     };
     // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
-    match crate::view_compass::show(ui, &compass) {
+    let action = crate::view_compass::show(ui, &compass);
+    // The orbit and roll arrows around the axes, as the custom navigator has them, drawn over the
+    // compass's circle; shown while the pointer is over the navigator or it is orbiting.
+    if let Some((c, scale)) = axes_arrows(app, rect) {
+        let active = orbiting || ui.rect_contains_pointer(axis_rect(app, rect));
+        let painter = ui.painter_at(rect);
+        navigator_controls::arrows(app, ui, &painter, c, scale, active, Tokens::get().navigator(active));
+    }
+    match action {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
             let d = Vec3::from(direction);
             let frame = app.cam.to_frame(d);
@@ -17029,6 +17050,37 @@ mod tests {
             h.call("ui.click", json!({"x": p.x, "y": p.y}));
             assert_ne!(serde_json::to_value(h.app.cam).unwrap(), camera);
         }
+    }
+
+    /// The axes navigator has the custom navigator's orbit and roll arrows (on by default): a
+    /// roll arrow turns the picture a quarter turn, an orbit arrow turns the view 90°, and with the
+    /// preference off they are gone. The arrows never cover an axis tip.
+    #[test]
+    fn the_axes_navigator_has_the_orbit_and_roll_arrows() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
+        h.frames(2);
+        assert!(h.app.preferences.axes_navigator_arrows, "on by default");
+        let rect = h.app.viewport.rect.unwrap();
+        for (axis, _) in crate::view_compass::AXES {
+            let tip = crate::scenario::handle_at(&format!("axis_view:{axis}")).unwrap();
+            assert!(!on_axes_arrow(&h.app, rect, tip), "the {axis} tip is clear of the arrows");
+        }
+        let p = crate::scenario::handle_at("navigator:control:clockwise").expect("the roll arrows are there");
+        let camera = h.app.cam;
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        h.settle();
+        let turned = (h.app.cam.roll - camera.roll).rem_euclid(std::f64::consts::TAU);
+        assert!((turned - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "rolled {turned}");
+        let p = crate::scenario::handle_at("navigator:control:left").expect("the orbit arrows are there");
+        let back = h.app.cam.back();
+        h.call("ui.click", json!({"x": p.x, "y": p.y}));
+        h.settle();
+        assert!(h.app.cam.back().dot(back).abs() < 1e-6, "an orbit arrow turns the view a quarter turn");
+        h.call("ui.prefs", json!({"axes_navigator_arrows": false}));
+        h.frames(2);
+        assert!(crate::scenario::handle_at("navigator:control:clockwise").is_none(), "arrows off");
+        assert!(crate::scenario::handle_at("axis_view:z").is_some(), "the axes stay");
     }
 
     /// #10091: an axis tip turns the view in place by default; with Preferences › Navigation

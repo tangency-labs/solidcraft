@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.axes_navigator_arrows": "أسهم الدوران حول المحاور",
+    "prefs.axes_navigator_arrows_note": "تظهر حول المحاور الموجّهة أربعة أسهم تدير العرض 90° وسهمان منحنيان يديران الصورة ربع دورة، كما في المستكشف المخصص. إيقاف: تظهر المحاور وحدها."
+  },
+  "de": {
+    "prefs.axes_navigator_arrows": "Drehpfeile um die Achsen",
+    "prefs.axes_navigator_arrows_note": "Um die Achsen stehen vier Pfeile, die die Ansicht um 90° drehen, und zwei gebogene Pfeile, die das Bild um eine Vierteldrehung rollen, wie beim eigenen Navigator. Aus: Die Achsen stehen allein."
+  },
+  "en": {
+    "prefs.axes_navigator_arrows": "Rotation arrows around the axes",
+    "prefs.axes_navigator_arrows_note": "Four arrows around the signed axes turn the view 90°, and two curved arrows roll the picture a quarter turn, as on the custom navigator. Off: the axes stand alone."
+  },
+  "he": {
+    "prefs.axes_navigator_arrows": "חיצי סיבוב סביב הצירים",
+    "prefs.axes_navigator_arrows_note": "ארבעה חצים סביב הצירים מסובבים את התצוגה ב־90°, ושני חצים מעוגלים מגלגלים את התמונה ברבע סיבוב, כמו בנווט המותאם. כבוי: הצירים מוצגים לבדם."
+  },
+  "ja": {
+    "prefs.axes_navigator_arrows": "軸の周りの回転矢印",
+    "prefs.axes_navigator_arrows_note": "軸の周りの4つの矢印でビューを90°回転し、2つの曲がった矢印で画面を4分の1回転させます（カスタムナビゲーターと同じ）。オフ：軸だけを表示します。"
+  },
+  "ko": {
+    "prefs.axes_navigator_arrows": "축 주위의 회전 화살표",
+    "prefs.axes_navigator_arrows_note": "축 주위의 화살표 4개는 뷰를 90° 돌리고, 곡선 화살표 2개는 화면을 4분의 1 회전시킵니다(사용자 지정 내비게이터와 같음). 끄면 축만 표시됩니다."
+  },
+  "vi": {
+    "prefs.axes_navigator_arrows": "Mũi tên xoay quanh các trục",
+    "prefs.axes_navigator_arrows_note": "Bốn mũi tên quanh các trục xoay khung nhìn 90°, và hai mũi tên cong xoay hình một phần tư vòng, như ở bộ điều hướng tùy chỉnh. Tắt: chỉ hiện các trục."
+  },
+  "zh": {
+    "prefs.axes_navigator_arrows": "坐标轴周围的旋转箭头",
+    "prefs.axes_navigator_arrows_note": "坐标轴周围的四个箭头将视图旋转 90°，两个弯曲箭头将画面转动四分之一圈，与自定义导航器相同。关闭：只显示坐标轴。"
+  }
+}
