@@ -1176,6 +1176,29 @@ impl<O: ClassObject> CurveClassification<O> {
                 {
                     continue;
                 }
+                // Not upstream (tangency-labs/solidcore#3339): an interval from a vertex that
+                // runs along a seam within the intersection tolerance over its whole length,
+                // by enclosure (`Curve::proved_near`), and inside the other face, is
+                // coincident with the seam, not mislabelled. The
+                // heuristics below remove a short run beside its edge because the face on the
+                // edge's other side meets the curve too; across a seam that face is this one,
+                // so the removal lost the run: a tool wall through a cut ball's rim within the
+                // tolerance of the rim's seam vertex was left open there.
+                if !on_surface
+                    && tgt_end.point_class() == PointClassType::Vertex
+                    && mate_mid.point_class() == PointClassType::Face
+                    && seam_edge(geometry, edge_obj)?
+                    && tgt_curve_3d.proved_near(
+                        k,
+                        &tgt_ivl.interval,
+                        edge_curve,
+                        &edge_ivl,
+                        xsect_tol_3d,
+                        &[],
+                    )?
+                {
+                    continue;
+                }
                 let tgt_curve: Cow<'_, Curve> = if on_surface {
                     Cow::Owned(crv_on_surf(
                         k,
@@ -3719,6 +3742,21 @@ fn native_curve_in_strip(
         }
         _ => None,
     }
+}
+
+/// Not upstream (tangency-labs/solidcore#3339): whether edge handle `edge` is a seam, an
+/// edge with the same face on both sides (`topology::edge::face_on_both_sides`); `false`
+/// for a handle the adapter does not resolve to a B-rep edge.
+fn seam_edge<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<bool> {
+    let Some((b, EntityRef::Edge(e))) = geometry.topology_entity(edge) else {
+        return Ok(false);
+    };
+    for f in edge::faces(b, e, None)? {
+        if edge::face_on_both_sides(b, e, f)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

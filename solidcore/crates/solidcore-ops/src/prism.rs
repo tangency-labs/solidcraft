@@ -27,8 +27,9 @@ pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
+use crate::body::Contract;
 use crate::body::{finish, Body, Expect};
-use crate::boolean::{union_all, BooleanOp};
+use crate::boolean::{union_all_with, BooleanOp};
 use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
@@ -250,7 +251,10 @@ pub fn extrude_planar_regions(
         }
         Ok(Out(Ok(solids)))
     })?;
-    union_all(pieces.0?.into_iter().map(Body::new).collect())
+    union_all_with(
+        pieces.0?.into_iter().map(Body::new).collect(),
+        Contract::Proved,
+    )
 }
 
 /// A uniform prism along a plane's normal, as [`prism_section`] proves it.
@@ -422,6 +426,17 @@ pub fn fitted_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Result<Loop
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// Counter-clockwise angle between two planar rays, in radians modulo one turn.
+/// Equal rays give zero. Nonfinite and zero rays have no angle.
+#[must_use]
+pub fn counterclockwise_sweep(center: Vec2, start: Vec2, end: Vec2) -> Option<f64> {
+    kp::counterclockwise_sweep(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+    )
 }
 
 /// The directed parameter interval of a recognized ellipse arc, in the input plane.

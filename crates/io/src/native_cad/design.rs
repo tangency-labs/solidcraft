@@ -376,6 +376,7 @@ impl Builder {
                 to_body_apart: false,
                 from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation,
             targets,
@@ -621,6 +622,7 @@ impl Builder {
                     return Err(format!("{name}: a variable radius fillet is not rebuilt yet"));
                 }
                 FeatureKind::Fillet {
+                    edge_radii: Vec::new(),
                     edges,
                     radius: mm(f(r, "radius").ok_or_else(|| format!("{name}: no radius"))?),
                     body: Some(body.into()),

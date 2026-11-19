@@ -75,6 +75,18 @@ pub enum Error {
     Unsupported(&'static str),
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,
+    /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
+    /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
+    /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
+    /// of four edges, a curved, drafted or tangent side edge); `why` is the kernel's reason.
+    TurnRefused {
+        /// Whether no radius builds it; otherwise the corner is of a kind not built yet.
+        room: bool,
+        /// The kernel's reason.
+        why: String,
+        /// The corner's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+    },
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
     /// back a corner only where every edge meeting it is blended, all convex or all concave, or
     /// of mixed convexity with curvature-continuous rounds between planes.
@@ -436,6 +448,13 @@ pub enum OffsetRefusal {
     /// In a local operation, the new surfaces of the face and of its neighbour across an
     /// edge meet nowhere near the edge, so the edge cannot be found again.
     FacesApart,
+    /// In a local operation, the face moves past where the curved face beside it ends (a
+    /// sphere's cap moved past the sphere's top): no extension of that face meets it there.
+    /// `largest` is how far the face could move and still meet it.
+    PastSide {
+        /// How far the face could move and still meet the face beside it.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -505,6 +524,11 @@ impl std::fmt::Display for OffsetRefusal {
                     "its new surface and a neighbour's meet nowhere near their edge"
                 )
             }
+            OffsetRefusal::PastSide { largest } => write!(
+                f,
+                "it would move past where the curved face beside it ends; it meets that face \
+                 only while it moves less than {largest}"
+            ),
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,
@@ -780,6 +804,13 @@ impl std::fmt::Display for Error {
             Error::WallFolds { largest } => write!(f, "the wall folds (largest {largest:?})"),
             Error::CornerUnsupported => {
                 write!(f, "a blend corner of this kind is not supported yet")
+            }
+            Error::TurnRefused { why, at, .. } => {
+                write!(f, "the swept corner is not built")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, ": {why}")
             }
             Error::CornerRefused { corner } => write!(f, "corner {corner} is not set back"),
             Error::RoundsCross { at, fit } => write!(

@@ -61,10 +61,11 @@ impl Protocol for SolidCraft {
         method == "control.joint_drive"
     }
 
-    /// Advertise the request's parameter checks and interactive desktop joint drive.
+    /// Advertise parameter checks, installed plugin tools and interactive desktop joint drive.
     fn capabilities(&self) -> Value {
         json!({
             "param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name()),
+            "plugin_tools": true,
             "joint_drive": true,
         })
     }

@@ -135,6 +135,7 @@ fn prepare(copy: Session, joint: u64, index: usize, value: f64, colors: Colors) 
         .map_err(|e| e.to_string())?;
     let mut preview = command.preview_visible_world().map_err(|e| e.to_string())?;
     let reply = preview.replies.pop().ok_or("joint drive returned no result")?;
+    let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
     let scene = crate::dialogs_assembly::build_world_preview(preview, colors)?;
     Ok(Prepared { command, scene, reply })
 }

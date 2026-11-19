@@ -636,7 +636,7 @@ fn insert_footer(app: &mut SolveApp, ui: &mut egui::Ui) {
             for (clicked, command, extensions) in [
                 (step, "file.insert_step", &["step", "stp"][..]),
                 (iges, "file.insert_step", &["igs", "iges"][..]),
-                (mesh, "file.insert_mesh", &["3mf", "stl", "obj", "glb", "gltf"][..]),
+                (mesh, "file.insert_mesh", &["3mf", "stl", "obj", "glb", "gltf", "usd", "usda", "usdc", "usdz"][..]),
             ] {
                 if clicked && solidcraft_engine::find_command(command).is_some_and(|spec| spec.info(&app.session).enabled) {
                     app.home.open = false;
@@ -1523,7 +1523,10 @@ mod tests {
             assert!(h.app.library.root.is_none());
         }
         assert_eq!(asked.get(), 3);
-        assert_eq!(*filters.borrow(), vec![vec!["step", "stp"], vec!["igs", "iges"], vec!["3mf", "stl", "obj", "glb", "gltf"]]);
+        assert_eq!(
+            *filters.borrow(),
+            vec![vec!["step", "stp"], vec!["igs", "iges"], vec!["3mf", "stl", "obj", "glb", "gltf", "usd", "usda", "usdc", "usdz"]]
+        );
     }
 
     #[test]
