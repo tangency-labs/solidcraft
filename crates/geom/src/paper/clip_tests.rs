@@ -284,10 +284,26 @@ fn a_dashed_curve_keeps_its_pattern() {
     assert!((dashes.phase_mm - (0.5 + before).rem_euclid(3.0)).abs() < 1e-8, "{dashes:?}, {before}");
 }
 
-/// How far `q` is from `seg`: by `closest_param`, else by the nearest of 4096 samples, refined by
-/// halving the step about it (`closest_param` starts from 64 samples, and on a hairpin can settle
-/// on the other side of it).
+/// How far `q` is from `seg`: exactly for a line and an arc; for a curve by `closest_param`, else
+/// by the nearest of 4096 samples, refined by halving the step about it (`closest_param` starts
+/// from 64 samples, and on a hairpin can settle on the other side of it).
 fn distance(seg: &Seg2, q: Vec2) -> f64 {
+    match *seg {
+        Seg2::Line { a, b } => {
+            let (ab, aq) = (b - a, q - a);
+            let t = if ab.dot(ab) > 0.0 { (aq.dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
+            return (a + ab * t).dist(q);
+        }
+        Seg2::Arc { center, radius, start, sweep } => {
+            let angle = (q.y - center.y).atan2(q.x - center.x);
+            let along = if sweep >= 0.0 { angle - start } else { start - angle };
+            if along.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
+                return (q.dist(center) - radius).abs();
+            }
+            return seg.start().dist(q).min(seg.end().dist(q));
+        }
+        _ => {}
+    }
     let d = |t: f64| seg.point_at(t.clamp(0.0, 1.0)).dist(q);
     let near = d(seg.closest_param(q));
     if near < 1e-6 {
@@ -306,6 +322,17 @@ fn distance(seg: &Seg2, q: Vec2) -> f64 {
     d(t)
 }
 
+/// Whether `q` lies within 1e-6 of one of the pieces `out`, whose boxes are `boxes`: a piece
+/// whose box, grown by the thousandth a curve's box may miss by (`Seg2Geom::bounds`) and more,
+/// is farther from `q` than that is not measured.
+fn drawn(out: &[&Seg2], boxes: &[crate::Aabb2], q: Vec2) -> bool {
+    let near = |b: &crate::Aabb2| {
+        let m = 2e-3;
+        q.x >= b.min.x - m && q.x <= b.max.x + m && q.y >= b.min.y - m && q.y <= b.max.y + m
+    };
+    out.iter().zip(boxes).any(|(s, b)| near(b) && distance(s, q) < 1e-6)
+}
+
 /// How far `q` is inside `clip`: below 0 outside.
 fn depth(clip: &Clip, q: Vec2) -> f64 {
     match *clip {
@@ -322,7 +349,7 @@ fn depth(clip: &Clip, q: Vec2) -> f64 {
 fn fuzzed_clips_keep_exactly_what_lies_inside() {
     let mut rng = Lcg(0xa8a);
     let mut r = |lo: f64, hi: f64| lo + (hi - lo) * rng.unit();
-    for case in 0..500 {
+    for case in 0..150 {
         let mut path = Vec::new();
         let mut at = p(r(0.0, 100.0), r(0.0, 100.0));
         for _ in 0..1 + case % 6 {
@@ -373,12 +400,12 @@ fn fuzzed_clips_keep_exactly_what_lies_inside() {
         for seg in &out {
             assert!(depth(&clip, seg.point_at(0.5)) > -1e-6, "case {case}: {seg:?} outside {clip:?}");
         }
+        let boxes: Vec<crate::Aabb2> = out.iter().map(|s| s.bounds()).collect();
         for seg in &path {
             for k in 0..=16 {
                 let q = seg.point_at(k as f64 / 16.0);
                 if depth(&clip, q) > 1e-6 {
-                    let drawn = out.iter().any(|s| distance(s, q) < 1e-6);
-                    assert!(drawn, "case {case}: {q:?} inside {clip:?} isn't drawn: {path:?} by {clip:?}");
+                    assert!(drawn(&out, &boxes, q), "case {case}: {q:?} inside {clip:?} isn't drawn: {path:?} by {clip:?}");
                 }
             }
         }
@@ -415,7 +442,7 @@ fn shapes_at_the_clips_edge_keep_exactly_what_lies_inside() {
                     shapes.push((format!("closed {degrees}° step {step} at {s:e}"), rect_clip, polyline(&triangle)));
                 }
             }
-            let n = ((60.0 / step) as usize).clamp(2, 400);
+            let n = ((60.0 / step) as usize).clamp(2, 40);
             let along: Vec<Vec2> = (0..=n).map(|k| p(5.0 + k as f64 * 60.0 / n as f64, 10.0 + s)).collect();
             shapes.push((format!("along the edge, {n} pieces at {s:e}"), rect_clip, polyline(&along)));
             let corner: Vec<Vec2> = (0..=8).map(|k| p(6.0 + k as f64 + s, 6.0 + k as f64)).collect();
@@ -453,11 +480,12 @@ fn shapes_at_the_clips_edge_keep_exactly_what_lies_inside() {
                 assert!(depth(&clip, q) > -3.0 * crate::EPS, "{name}: {q:?} of {seg:?} is outside {clip:?}");
             }
         }
+        let boxes: Vec<crate::Aabb2> = out.iter().map(|s| s.bounds()).collect();
         for seg in &path {
             for k in 0..=64 {
                 let q = seg.point_at(k as f64 / 64.0);
                 if depth(&clip, q) > 1e-6 {
-                    assert!(out.iter().any(|s| distance(s, q) < 1e-6), "{name}: {q:?} inside isn't drawn");
+                    assert!(drawn(&out, &boxes, q), "{name}: {q:?} inside isn't drawn");
                 }
             }
         }

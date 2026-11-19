@@ -769,10 +769,12 @@ fn assert_live_line_inputs_are_clear(h: &Harness) {
 fn line_inputs_clear_the_preview_in_all_directions() {
     for command in ["sketch.line", "sketch.line.midpoint"] {
         for view in ["top", "iso"] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":view}));
             for [dx, dy] in [[2, 0], [0, 2], [2, 2], [-2, 2], [-2, 0], [0, -2], [-2, -2], [2, -2]] {
-                let mut h = Harness::new();
-                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-                h.call("ui.view", json!({"view":view}));
+                // Each direction from a tool started afresh.
+                h.step(&json!({"key":"Escape"})).unwrap();
                 h.step(&json!({"start":command})).unwrap();
                 h.step(&json!({"click":{"sketch":[10,10]}})).unwrap();
                 // Approach along the drawing direction so an initial editor does not own the hover.

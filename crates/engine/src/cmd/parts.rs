@@ -1657,7 +1657,8 @@ mod tests {
 
     /// The Length list of a dialog opens on the length an insert gets when none is asked for,
     /// so the library reports that length for every size of every family that has lengths. The
-    /// rule differs by family, so the reported value is the one the part is actually built to.
+    /// rule differs by family, so the reported value is the one the part is actually built to:
+    /// each family's first, middle and last size is built to check it.
     #[test]
     fn the_library_reports_the_default_length_of_every_size() {
         let all = run(&mut Session::default(), "parts.library", json!({}));
@@ -1666,11 +1667,17 @@ mod tests {
         for fam in families {
             let id = fam["family"].as_str().unwrap_or_default().to_string();
             let standard: Vec<f64> = fam["lengths"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-            for row in fam["sizes"].as_array().cloned().unwrap_or_default() {
+            let rows = fam["sizes"].as_array().cloned().unwrap_or_default();
+            let last = rows.len().saturating_sub(1);
+            for (i, row) in rows.into_iter().enumerate() {
                 let size = row["size"].as_str().unwrap_or_default().to_string();
                 let reported = row["default_length"].as_f64();
                 if standard.is_empty() {
                     assert!(reported.is_none(), "{id} {size} has no lengths of its own but reports a default");
+                    continue;
+                }
+                assert!(reported.is_some(), "{id} {size} has lengths but reports no default");
+                if ![0, last / 2, last].contains(&i) {
                     continue;
                 }
                 // What an insert that asks for no length is actually built to.

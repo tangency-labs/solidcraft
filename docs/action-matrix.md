@@ -9,8 +9,12 @@ The test is [`apps/solidcraft-cli/tests/action_matrix.rs`](../apps/solidcraft-cl
 ## Running it
 
 - **Every CI run** (pull requests too) checks a fixed sample, one action in 40 by a stable hash of
-  its name, on every design except the slowest to build (the `SLOW` list, and any design that
-  takes more than 8 s to load in costs.json; `action_matrix_sample`, a few minutes).
+  its name, and fewer in a design whose actions take long, so that no design's sample takes more
+  than about ten seconds of a runner's time (`SAMPLE_DESIGN_SECS`, from costs.json); every design
+  runs except the slowest to build (the `SLOW` list, and any design that takes more than 8 s to
+  load in costs.json) and the designs with single actions of over a minute (`SLOW_ACTIONS`),
+  which only the full matrix tries. The designs start heaviest first (`action_matrix_sample`,
+  about a minute).
 - **Nightly** (and by hand, Run workflow), the "Action matrix" jobs run the whole matrix in 16
   shards (`action_matrix_shard` with `ACTION_MATRIX_SHARD=k/16`) of about equal cost, cut by
   [`tests/action_matrix/costs.json`](../tests/action_matrix/costs.json): what each design took on a

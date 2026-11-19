@@ -162,10 +162,14 @@ fn hostile_revision_calls_are_refused() {
     ] {
         refused(&mut s, cmd, p);
     }
-    // A record holds at most 1000 rows.
-    for _ in 1..solidcraft_geom::revision::MAX_ROWS {
-        add(&mut s, json!({}));
+    // A record holds at most 1000 rows: filled to the cap directly (a thousand `add` commands would
+    // each check a reply listing every row), the command refuses the next.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    while d.revisions.rows().len() < solidcraft_geom::revision::MAX_ROWS {
+        let id = d.allocate_id(&mut s.ids).unwrap();
+        Arc::make_mut(&mut d.revisions).add(None, id).unwrap();
     }
+    s.doc_mut().put_drawing(Arc::new(d));
     assert!(refused(&mut s, ADD, json!({})).contains("at most 1000 rows"));
 }
 

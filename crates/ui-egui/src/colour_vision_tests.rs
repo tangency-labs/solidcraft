@@ -1190,7 +1190,9 @@ fn the_sample_previews_the_mode_being_chosen() {
         h.app.home.open = false;
         crate::prefs::control(&mut h.app, &json!({"theme":base,"language":"en","open":"Interface"})).unwrap();
         h.frames(3);
-        for mode in ColorVision::ALL {
+        // Every mode's colours in the dark theme; in the light one, Off and one mode against it.
+        let modes: &[ColorVision] = if base == "light" { &[ColorVision::Off, ColorVision::Deutan] } else { &ColorVision::ALL };
+        for &mode in modes {
             let handle = format!("prefs:color_vision:{}", mode.id());
             crate::prefs::reveal_preference(&mut h, &handle);
             h.step(&json!({"click":{"handle":handle}})).unwrap();

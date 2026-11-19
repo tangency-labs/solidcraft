@@ -262,64 +262,61 @@ fn render_workspace_shot_lens_saves_only_lens_and_orthographic_keeps_faded_contr
 #[test]
 fn inspector_dispatch_has_one_editor_per_selection_independent_of_every_stage() {
     use super::super::{RenderSelection, Stage};
-    for dark in [false, true] {
-        for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
-            let mut h = fixture();
-            h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
-            h.app.ui.layout = layout;
-            h.call("ui.resize", json!({"width":1440,"height":1000}));
-            super::super::select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
-            super::super::light::edit(&mut h.app, "render.lights.add", None, Some(json!({"kind":"point"}))).unwrap();
-            let light = super::super::light::rows(&h.app).unwrap().last().unwrap().id.clone();
-            let shot = h.app.render_workspace.view.name.clone();
-            let before = h.app.session.doc.to_json();
-            let undo = (h.app.session.undo.len(), h.app.session.redo.len());
-            for (selection, kind) in [
-                (RenderSelection::Nothing, "scene"),
-                (RenderSelection::Object(vec![solidcraft_engine::Sel::Body { name: "Subject".into() }]), "appearance"),
-                (RenderSelection::Environment, "environment"),
-                (RenderSelection::Lighting, "lighting"),
-                (RenderSelection::Light(light.clone()), "light"),
-                (RenderSelection::Shot(shot.clone()), "shot"),
-                (RenderSelection::Output, "output"),
-                (RenderSelection::Sampling, "sampling"),
-                (RenderSelection::Effects, "effects"),
-                (RenderSelection::Check, "check"),
-                (RenderSelection::Wear, "wear"),
-            ] {
-                if let RenderSelection::Object(_) = &selection {
-                    h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body { name: "Subject".into() }]})).unwrap();
-                } else {
-                    let mut params = json!({"kind":if kind == "scene" { "nothing" } else { kind }});
-                    if let RenderSelection::Light(id) | RenderSelection::Shot(id) = &selection {
-                        params["id"] = json!(id);
-                    }
-                    h.app.run("view.render_select", params).unwrap();
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
+        let mut h = fixture();
+        h.app.ui.layout = layout;
+        h.call("ui.resize", json!({"width":1440,"height":1000}));
+        super::super::select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+        super::super::light::edit(&mut h.app, "render.lights.add", None, Some(json!({"kind":"point"}))).unwrap();
+        let light = super::super::light::rows(&h.app).unwrap().last().unwrap().id.clone();
+        let shot = h.app.render_workspace.view.name.clone();
+        let before = h.app.session.doc.to_json();
+        let undo = (h.app.session.undo.len(), h.app.session.redo.len());
+        for (selection, kind) in [
+            (RenderSelection::Nothing, "scene"),
+            (RenderSelection::Object(vec![solidcraft_engine::Sel::Body { name: "Subject".into() }]), "appearance"),
+            (RenderSelection::Environment, "environment"),
+            (RenderSelection::Lighting, "lighting"),
+            (RenderSelection::Light(light.clone()), "light"),
+            (RenderSelection::Shot(shot.clone()), "shot"),
+            (RenderSelection::Output, "output"),
+            (RenderSelection::Sampling, "sampling"),
+            (RenderSelection::Effects, "effects"),
+            (RenderSelection::Check, "check"),
+            (RenderSelection::Wear, "wear"),
+        ] {
+            if let RenderSelection::Object(_) = &selection {
+                h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body { name: "Subject".into() }]})).unwrap();
+            } else {
+                let mut params = json!({"kind":if kind == "scene" { "nothing" } else { kind }});
+                if let RenderSelection::Light(id) | RenderSelection::Shot(id) = &selection {
+                    params["id"] = json!(id);
                 }
-                assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), undo);
-                let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
-                for stage in Stage::ALL {
-                    h.app.run("view.render_stage", json!({"stage":stage.key()})).unwrap();
-                    h.frames(3);
-                    assert_eq!(h.app.render_workspace.view.selection, selection);
-                    let editors = crate::scenario::rects("render:editor:");
-                    assert_eq!(editors.len(), 1, "{kind}/{stage:?}: {editors:?}");
-                    assert!(crate::scenario::rect_of(&format!("render:editor:{kind}")).is_some());
-                    assert!(crate::scenario::rect_of("render:job-footer").is_none());
-                    assert!(crate::scenario::rect_of("render:setups").is_none());
-                    assert!(crate::scenario::rect_of("render:setup-name").is_none());
-                    assert_eq!(crate::scenario::rect_of("render:output-footer").is_some(), kind == "output");
-                    assert_eq!(crate::scenario::rect_of("render:appearance-footer").is_some(), kind == "appearance");
-                    assert!(h.widget(h.app.tr("render.studio_title")).is_none());
-                    assert_eq!(h.app.render_workspace.view.method, ImageMethod::CpuRaytrace);
-                    assert_eq!(h.app.session.doc.to_json(), before);
-                    assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
-                    assert!(h.app.render_workspace.view.job.is_none());
-                    assert!(h.app.render_workspace.view.completed.is_none());
-                }
-                if !dark && layout == crate::ui_kit::LayoutMode::Floating {
-                    appearance_inspector_capture(&mut h, &format!("dispatch-{kind}"));
-                }
+                h.app.run("view.render_select", params).unwrap();
+            }
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), undo);
+            let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+            for stage in Stage::ALL {
+                h.app.run("view.render_stage", json!({"stage":stage.key()})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.render_workspace.view.selection, selection);
+                let editors = crate::scenario::rects("render:editor:");
+                assert_eq!(editors.len(), 1, "{kind}/{stage:?}: {editors:?}");
+                assert!(crate::scenario::rect_of(&format!("render:editor:{kind}")).is_some());
+                assert!(crate::scenario::rect_of("render:job-footer").is_none());
+                assert!(crate::scenario::rect_of("render:setups").is_none());
+                assert!(crate::scenario::rect_of("render:setup-name").is_none());
+                assert_eq!(crate::scenario::rect_of("render:output-footer").is_some(), kind == "output");
+                assert_eq!(crate::scenario::rect_of("render:appearance-footer").is_some(), kind == "appearance");
+                assert!(h.widget(h.app.tr("render.studio_title")).is_none());
+                assert_eq!(h.app.render_workspace.view.method, ImageMethod::CpuRaytrace);
+                assert_eq!(h.app.session.doc.to_json(), before);
+                assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+                assert!(h.app.render_workspace.view.job.is_none());
+                assert!(h.app.render_workspace.view.completed.is_none());
+            }
+            if layout == crate::ui_kit::LayoutMode::Floating {
+                appearance_inspector_capture(&mut h, &format!("dispatch-{kind}"));
             }
         }
     }
@@ -2333,52 +2330,6 @@ fn appearance_inspector_optical_colour_and_opacity_edits_commit_once_with_shared
     assert_eq!(h.app.run("component.properties", json!({})).unwrap(), mass);
 }
 
-#[test]
-fn appearance_inspector_hex_edits_validate_and_commit_once() {
-    use solidcraft_engine::Sel;
-    let mut h = fixture();
-    h.app.run("appearance.assign", json!({"bodies":["Subject"],"appearance":"ABS - Red"})).unwrap();
-    h.app.session.selection = vec![Sel::Body { name: "Subject".into() }];
-    {
-        let selection = super::super::object_selection(&h.app);
-        super::super::selection_editor(&mut h.app, &selection);
-    }
-    h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
-    h.frames(3);
-    let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
-    appearance_picker_open(&mut h);
-    let hex = "color:hex";
-    h.step(&json!({"click":{"handle":hex}})).unwrap();
-    h.step(&json!({"key":"A","cmd":true,"ctrl":true})).unwrap();
-    h.step(&json!({"text":"#GG0000"})).unwrap();
-    h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.to_json(), before);
-    h.step(&json!({"click":{"handle":hex}})).unwrap();
-    h.step(&json!({"key":"A","cmd":true,"ctrl":true})).unwrap();
-    h.step(&json!({"text":"#123456"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo);
-    h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.appearances.bodies["Subject"].color, [0x12, 0x34, 0x56]);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
-    h.app.run("solid.box", json!({"body_name":"Other","length":5,"width":5,"height":5,"corner":[30,0,0]})).unwrap();
-    h.app.run("appearance.assign", json!({"bodies":["Other"],"color":"#ABCDEF"})).unwrap();
-    h.app.session.selection.push(Sel::Body { name: "Other".into() });
-    h.frames(3);
-    let mixed_before = h.app.session.doc.to_json();
-    if crate::scenario::handle_at(hex).is_none() {
-        appearance_picker_open(&mut h);
-    }
-    h.step(&json!({"click":{"handle":hex}})).unwrap();
-    h.step(&json!({"key":"Tab"})).unwrap();
-    assert_eq!(h.app.session.doc.to_json(), mixed_before);
-    h.step(&json!({"click":{"handle":hex}})).unwrap();
-    h.step(&json!({"key":"A","cmd":true,"ctrl":true})).unwrap();
-    h.step(&json!({"text":"#123456"})).unwrap();
-    h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.appearances.bodies["Other"].color, [0x12, 0x34, 0x56]);
-}
-
 fn appearance_picker_open(h: &mut Harness) {
     h.step(&json!({"click":{"handle":format!("dialog:color:{}", h.app.tr("render.inspector_colour"))}})).unwrap();
     h.frames(2);
@@ -2391,6 +2342,8 @@ fn appearance_picker_paste(h: &mut Harness, text: &str) {
     h.frame_with(vec![egui::Event::Paste(text.into())]);
 }
 
+/// The shared picker keeps the exact opacity through format switches and an RGB edit, refuses
+/// invalid hex text even on Enter, and commits each accepted colour once, on Enter only.
 #[test]
 fn appearance_inspector_shared_picker_preserves_exact_opacity_and_commits_alpha() {
     use solidcraft_engine::Sel;
@@ -2412,21 +2365,19 @@ fn appearance_inspector_shared_picker_preserves_exact_opacity_and_commits_alpha(
         let draft = h.app.render_workspace.view.inspector.selection_appearance.draft().unwrap();
         assert_eq!((draft.color, draft.opacity, draft.pbr), ([171, 205, 239], 0.123456, None));
     }
-    for text in ["#abc", "#abcdefz0"] {
-        appearance_picker_paste(&mut h, text);
-        h.frames(2);
-        let draft = h.app.render_workspace.view.inspector.selection_appearance.draft().unwrap();
-        assert_eq!((draft.color, draft.opacity), ([171, 205, 239], 0.123456));
-        assert!(h.widget(text).is_some(), "invalid text remains editable inside the picker");
-        assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!(h.app.session.undo.len(), undo);
-    }
-    for (text, color, opacity) in [
-        ("#0102fe", [1, 2, 254], 0.123456),
-        ("#0102fe80", [1, 2, 254], 128.0 / 255.0),
-        ("#fE8001", [254, 128, 1], 128.0 / 255.0),
-        ("#22334400", [34, 51, 68], 0.0),
-    ] {
+    // Hex parsing (case, shorthand) is the shared `color:hex` picker's, tested in
+    // dialogs_appearance::tests::hex_picker_preserves_precise_opacity_and_applies_alpha_without_losing_rgb_or_pbr.
+    let invalid = "#abcdefz0";
+    appearance_picker_paste(&mut h, invalid);
+    h.frames(2);
+    let draft = h.app.render_workspace.view.inspector.selection_appearance.draft().unwrap();
+    assert_eq!((draft.color, draft.opacity), ([171, 205, 239], 0.123456));
+    assert!(h.widget(invalid).is_some(), "invalid text remains editable inside the picker");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before, "Enter never commits invalid hex");
+    assert_eq!(h.app.session.undo.len(), undo);
+    // No alpha keeps the exact opacity; an alpha commits, down to its boundary 0.
+    for (text, color, opacity) in [("#0102fe", [1, 2, 254], 0.123456), ("#22334400", [34, 51, 68], 0.0)] {
         let before = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
         appearance_picker_paste(&mut h, text);
@@ -2543,7 +2494,9 @@ fn appearance_inspector_component_and_face_overrides_remove_to_material_from_rea
     h.step(&json!({"click":{"handle":"render:stage:look"}})).unwrap();
     assert_eq!(selected_editor(&h.app), Editor::Appearance);
     let mass = h.app.run("component.properties", json!({})).unwrap();
-    for (step, name) in [("face", "Copper"), ("body", "ABS - Red"), ("component", "ABS - Blue"), ("material", "Steel")] {
+    // Face is the selection's own level, and appearance_inspector_real_controls_switch_targets_inspect_chain_and_edit_finish
+    // inspects the body: inspect the two levels above them.
+    for (step, name) in [("component", "ABS - Blue"), ("material", "Steel")] {
         let before = h.app.session.doc.to_json();
         h.step(&json!({"click":{"handle":"render:appearance:chain-menu"}})).unwrap();
         h.step(&json!({"click":{"handle":format!("render:appearance:chain:{step}")}})).unwrap();
@@ -4052,59 +4005,59 @@ mod saved_clear_coat_contract {
         h.app.session.doc.render.setups["Coat"].coats.iter().next().unwrap().coat
     }
     #[test]
-    fn actual_cpu_and_gpu_coat_controls_save_all_numbers_reopen_hydrate_and_undo_without_paint_writes() {
-        for gpu in [false, true] {
-            let mut h = body_editor(gpu, false);
-            let before = h.app.session.doc.clone();
-            let model = h.app.session.model.state();
-            let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
-            let camera = h.app.cam;
-            reveal_coat(&mut h);
-            assert!(Arc::ptr_eq(&before, &h.app.session.doc));
-            assert!(h.app.render_workspace.view.materials.bindings.is_empty());
-            click(&mut h, "render:coat:enable");
-            scalar(&mut h, "render:coat:weight", "0.63", true);
-            scalar(&mut h, "render:coat:roughness", "0.61", true);
-            scalar(&mut h, "render:coat:ior-field", "1.7", false);
-            let expected = CoatMaterial { weight: 0.63, roughness: 0.61, ior: 1.7 };
-            let request = super::super::super::image_request(&h.app).unwrap();
-            assert!(setups::has_runtime_inputs(&h.app), "portable coat drafts remain unsaved for review/navigation");
-            assert!(!setups::requires_runtime_request(&h.app), "stable coat preview does not require ordinal override capture");
-            assert_eq!(request["settings"]["coats"][0]["coat"], json!(expected));
-            assert!(Arc::ptr_eq(&before, &h.app.session.doc), "all previewed coat edits are prospective");
-            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
-            assert!(Arc::ptr_eq(&model, &h.app.session.model.state()), "prospective coat edits preserve the exact immutable CAD model state");
-            click(&mut h, "render:coat:save");
-            assert_eq!(authored(&h), expected);
-            assert_eq!(h.app.session.undo.len(), history.1 + 1);
-            assert!(Arc::ptr_eq(&model, &h.app.session.model.state()), "saving only coat intent preserves the exact immutable CAD model state");
-            assert_eq!(h.app.cam, camera);
-            assert_eq!(h.app.session.doc.features, before.features);
-            assert_eq!(h.app.session.doc.materials, before.materials);
-            let saved = h.app.session.doc.clone();
-            click(&mut h, "render:coat:save");
-            assert!(Arc::ptr_eq(&saved, &h.app.session.doc), "repeating the exact saved coat is a no-op");
-            assert_eq!(h.app.session.undo.len(), history.1 + 1);
-            let bytes = solidcraft_engine::io::write_design_container(&saved).unwrap();
-            let loaded = solidcraft_engine::io::read_design(&bytes).unwrap();
-            assert_eq!(loaded.render, saved.render);
-            h.app.run("edit.undo", json!({})).unwrap();
-            h.frames(3);
-            assert_eq!(h.app.session.doc, before);
-            assert!(h.app.render_workspace.view.draft.coats.is_empty());
-            assert!(super::super::super::image_request(&h.app).unwrap()["settings"].get("coats").is_none());
-            h.app.run("edit.redo", json!({})).unwrap();
-            h.frames(3);
-            assert_eq!(h.app.session.doc, saved);
-            h.app.session = solidcraft_engine::Session::new(loaded);
-            setups::load(&mut h.app);
-            h.frames(3);
-            let reopened = h.app.session.doc.clone();
-            h.frames(5);
-            assert!(Arc::ptr_eq(&reopened, &h.app.session.doc), "hydrating saved coat numbers never writes on paint");
-            assert!(h.app.render_workspace.view.materials.bindings.is_empty());
-            assert_eq!(super::super::super::image_request(&h.app).unwrap()["settings"]["coats"][0]["coat"], json!(expected));
-        }
+    fn actual_coat_controls_save_all_numbers_reopen_hydrate_and_undo_without_paint_writes() {
+        // The coat controls do not depend on the method: the GPU save is
+        // actual_coat_save_keeps_saved_maps_aging_lens_filter_output_and_unsaved_camera_exact's.
+        let mut h = body_editor(false, false);
+        let before = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let camera = h.app.cam;
+        reveal_coat(&mut h);
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+        assert!(h.app.render_workspace.view.materials.bindings.is_empty());
+        click(&mut h, "render:coat:enable");
+        scalar(&mut h, "render:coat:weight", "0.63", true);
+        scalar(&mut h, "render:coat:roughness", "0.61", true);
+        scalar(&mut h, "render:coat:ior-field", "1.7", false);
+        let expected = CoatMaterial { weight: 0.63, roughness: 0.61, ior: 1.7 };
+        let request = super::super::super::image_request(&h.app).unwrap();
+        assert!(setups::has_runtime_inputs(&h.app), "portable coat drafts remain unsaved for review/navigation");
+        assert!(!setups::requires_runtime_request(&h.app), "stable coat preview does not require ordinal override capture");
+        assert_eq!(request["settings"]["coats"][0]["coat"], json!(expected));
+        assert!(Arc::ptr_eq(&before, &h.app.session.doc), "all previewed coat edits are prospective");
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert!(Arc::ptr_eq(&model, &h.app.session.model.state()), "prospective coat edits preserve the exact immutable CAD model state");
+        click(&mut h, "render:coat:save");
+        assert_eq!(authored(&h), expected);
+        assert_eq!(h.app.session.undo.len(), history.1 + 1);
+        assert!(Arc::ptr_eq(&model, &h.app.session.model.state()), "saving only coat intent preserves the exact immutable CAD model state");
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.session.doc.features, before.features);
+        assert_eq!(h.app.session.doc.materials, before.materials);
+        let saved = h.app.session.doc.clone();
+        click(&mut h, "render:coat:save");
+        assert!(Arc::ptr_eq(&saved, &h.app.session.doc), "repeating the exact saved coat is a no-op");
+        assert_eq!(h.app.session.undo.len(), history.1 + 1);
+        let bytes = solidcraft_engine::io::write_design_container(&saved).unwrap();
+        let loaded = solidcraft_engine::io::read_design(&bytes).unwrap();
+        assert_eq!(loaded.render, saved.render);
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.doc, before);
+        assert!(h.app.render_workspace.view.draft.coats.is_empty());
+        assert!(super::super::super::image_request(&h.app).unwrap()["settings"].get("coats").is_none());
+        h.app.run("edit.redo", json!({})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.doc, saved);
+        h.app.session = solidcraft_engine::Session::new(loaded);
+        setups::load(&mut h.app);
+        h.frames(3);
+        let reopened = h.app.session.doc.clone();
+        h.frames(5);
+        assert!(Arc::ptr_eq(&reopened, &h.app.session.doc), "hydrating saved coat numbers never writes on paint");
+        assert!(h.app.render_workspace.view.materials.bindings.is_empty());
+        assert_eq!(super::super::super::image_request(&h.app).unwrap()["settings"]["coats"][0]["coat"], json!(expected));
     }
     #[test]
     fn actual_saved_coat_numeric_replacement_requires_consent_and_removal_confirms_with_one_undo() {

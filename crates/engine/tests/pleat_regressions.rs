@@ -52,20 +52,15 @@ fn feature_errors(s: &Session) -> Vec<(String, String)> {
 
 /// #1669: a window and a lofted pleat mirrored to the far end of a case shelled 3.5 mm. The
 /// pleat's twisted faces were each meshed as two flat triangles (#1666), the joins were checked
-/// against those meshes, and the mirror failed ("boolean Union: no result").
-#[test]
-fn mirrored_pleat_joins_into_a_thick_case_wall() {
-    let s = replay(include_str!("../../../examples/regressions/battery_case_pleats.json"));
-    let errors = feature_errors(&s);
-    assert!(errors.is_empty(), "{errors:?}");
-}
-
-/// #1669: at 3 mm, the same window and pleat built directly at the far end of the finished case
-/// (a cut and a loft of their own, the mirror suppressed) failed to join as well: the end rounds
-/// they meet had folded faces (#1667).
+/// against those meshes, and the mirror failed ("boolean Union: no result"). Then at 3 mm, the
+/// same window and pleat built directly at the far end of the finished case (a cut and a loft of
+/// their own, the mirror suppressed) failed to join as well: the end rounds they meet had folded
+/// faces (#1667).
 #[test]
 fn pleat_built_at_the_far_end_joins_the_finished_case() {
     let mut s = replay(include_str!("../../../examples/regressions/battery_case_pleats.json"));
+    let errors = feature_errors(&s);
+    assert!(errors.is_empty(), "the mirrored pleat in the 3.5 mm wall: {errors:?}");
     s.execute("parameters.change", &json!({"name": "wall", "expression": "3 mm"})).unwrap();
     let errors = feature_errors(&s);
     assert!(errors.is_empty(), "{errors:?}");

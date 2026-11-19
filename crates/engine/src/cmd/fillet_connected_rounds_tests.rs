@@ -26,29 +26,34 @@ fn volume(s: &mut Session) -> f64 {
     value["total"]["volume_mm3"].as_f64().unwrap()
 }
 
+/// A vertical corner edge of a block whose bottom edges are rounded takes a round, picked alone or
+/// with the bottom round's edge the pick also selects (#1557's selection); the latter then
+/// recomputes through undo, redo, a parameter change and a reload.
 #[test]
 fn issue1557_fillet_recomputes_and_survives_undo_and_reload() {
-    for edges in [json!([[25, 0, 6]]), json!([[25, 0, 6], [24.287266336668306, 0.7127336633316916, 0.48266373325510686]])] {
-        let mut s = bottom_rounds();
-        let before = volume(&mut s);
-        let out = run(&mut s, "solid.fillet", json!({"edges":edges, "radius":"corner_radius"}));
-        let id = out["feature"].as_u64().unwrap();
-        let after = volume(&mut s);
-        assert!(after < before - 1.0);
-        assert_eq!(s.doc.features.len(), 4);
-        run(&mut s, "edit.undo", json!({}));
-        assert!((volume(&mut s) - before).abs() < 1e-6);
-        run(&mut s, "edit.redo", json!({}));
-        assert!((volume(&mut s) - after).abs() < 1e-6);
-        run(&mut s, "parameters.change", json!({"name":"corner_radius", "expression":"1 mm"}));
-        let smaller = volume(&mut s);
-        assert!(smaller > after && smaller < before);
-        assert!(run(&mut s, "timeline.inspect", json!({"feature":id}))["error"].is_null());
-        let bytes = crate::io::write_design_container(&s.doc).unwrap();
-        let mut reopened = Session::new(crate::io::read_design(&bytes).unwrap());
-        assert!((volume(&mut reopened) - smaller).abs() < 1e-6);
-        assert_eq!(reopened.doc.features.len(), 4);
-    }
+    let mut s = bottom_rounds();
+    let before = volume(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges":[[25, 0, 6]], "radius":"corner_radius"}));
+    assert!(volume(&mut s) < before - 1.0);
+    let edges = json!([[25, 0, 6], [24.287266336668306, 0.7127336633316916, 0.48266373325510686]]);
+    let mut s = bottom_rounds();
+    let out = run(&mut s, "solid.fillet", json!({"edges":edges, "radius":"corner_radius"}));
+    let id = out["feature"].as_u64().unwrap();
+    let after = volume(&mut s);
+    assert!(after < before - 1.0);
+    assert_eq!(s.doc.features.len(), 4);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&mut s) - before).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert!((volume(&mut s) - after).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name":"corner_radius", "expression":"1 mm"}));
+    let smaller = volume(&mut s);
+    assert!(smaller > after && smaller < before);
+    assert!(run(&mut s, "timeline.inspect", json!({"feature":id}))["error"].is_null());
+    let bytes = crate::io::write_design_container(&s.doc).unwrap();
+    let mut reopened = Session::new(crate::io::read_design(&bytes).unwrap());
+    assert!((volume(&mut reopened) - smaller).abs() < 1e-6);
+    assert_eq!(reopened.doc.features.len(), 4);
 }
 
 #[test]
