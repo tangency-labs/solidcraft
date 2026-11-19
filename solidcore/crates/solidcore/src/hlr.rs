@@ -291,11 +291,11 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
         let (mut lo, mut hi) = (trim.lo, trim.hi);
         // Curved faces can bulge past their boundary: bound them by the whole surface's
         // guaranteed box (spline hull, turned profile), clipped to nothing tighter.
-        if !matches!(surface, S3::Plane { .. })
-            && let Some((blo, bhi)) = surface.bound()
-        {
-            lo = lo.min(blo);
-            hi = hi.max(bhi);
+        if !matches!(surface, S3::Plane { .. }) {
+            if let Some((blo, bhi)) = surface.bound() {
+                lo = lo.min(blo);
+                hi = hi.max(bhi);
+            }
         }
         // Every face is padded, planes too: a plane record and its edges may disagree by
         // rounding, and a box flat along the normal would cull the plane's own hit. Rounding
@@ -657,10 +657,10 @@ impl Ctx<'_> {
                     Ok(r) => done.push((i, r)),
                     Err(e) => {
                         // The first failure is the cause; the workers it stops see `Cancelled`.
-                        if !self.stop.swap(true, Ordering::Relaxed)
-                            && let Ok(mut slot) = first.lock()
-                        {
-                            *slot = Some(e);
+                        if !self.stop.swap(true, Ordering::Relaxed) {
+                            if let Ok(mut slot) = first.lock() {
+                                *slot = Some(e);
+                            }
                         }
                         break;
                     }

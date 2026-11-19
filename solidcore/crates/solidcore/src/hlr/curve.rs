@@ -94,7 +94,7 @@ impl C3 {
                 Ok(exact(C3::Line { a: end(e.interval[0])?, b: end(e.interval[1])? }))
             }
             (Curve::Circle { .. } | Curve::Ellipse { .. }, _) => {
-                let angles = solidcore_ops::label::edge_curve_interval(e).ok_or(HlrError::Invalid("edge form"))?;
+                let angles = crate::eval::label::curve_interval(&e.curve, e.nurbs.as_ref(), e.interval).ok_or(HlrError::Invalid("edge form"))?;
                 Ok(exact(C3::bounded(&e.curve, angles)?))
             }
             (curve, _) => Ok(exact(C3::bounded(curve, e.interval)?)),

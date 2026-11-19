@@ -357,11 +357,10 @@ impl S3 {
                     return;
                 }
                 let lam = n.dot(self.point([0., 0.]) - p0) / nd;
-                if lam >= range[0]
-                    && lam <= range[1]
-                    && let Some(uv) = self.inverse(p0 + d * lam, None)
-                {
-                    out.push(Hit { lam, uv, grazing: nd.abs() < 1e-6 });
+                if lam >= range[0] && lam <= range[1] {
+                    if let Some(uv) = self.inverse(p0 + d * lam, None) {
+                        out.push(Hit { lam, uv, grazing: nd.abs() < 1e-6 });
+                    }
                 }
             }
             S3::Rev(r) => r.ray(p0, d, range, out),
@@ -473,10 +472,10 @@ pub(crate) fn torus_roots(w: Vec3, d: Vec3, a: Vec3, big: f64, small: f64, range
     }
     // Remove the inside of the inner radius, leaving up to two pieces.
     let mut pieces = vec![span];
-    if big > small + m
-        && let Some(inner) = within((big - small - m).powi(2))
-    {
-        pieces = vec![[span[0], span[1].min(inner[0])], [span[0].max(inner[1]), span[1]]];
+    if big > small + m {
+        if let Some(inner) = within((big - small - m).powi(2)) {
+            pieces = vec![[span[0], span[1].min(inner[0])], [span[0].max(inner[1]), span[1]]];
+        }
     }
     // |g| is 1-Lipschitz along the ray: two samples whose values share a sign and add up to
     // more than their distance cannot have a crossing between them. Other pairs are halved down
@@ -777,11 +776,10 @@ impl Rev {
             pairs.push((ss.len() - 2, 1));
         }
         for (i, sv) in vals.iter().enumerate() {
-            if zero(*sv)
-                && !(self.closed && i + 1 == vals.len())
-                && let Some(s0) = ss.get(i)
-            {
-                out.push(*s0);
+            if zero(*sv) && !(self.closed && i + 1 == vals.len()) {
+                if let Some(s0) = ss.get(i) {
+                    out.push(*s0);
+                }
             }
         }
         for (i, j) in pairs {
@@ -809,12 +807,12 @@ impl Rev {
         let span = self.dom[1] - self.dom[0];
         out.dedup_by(|x, y| (*x - *y).abs() <= 1e-9 * span);
         // A closed profile's start and end are one point: one root there, not two.
-        if self.closed
-            && let (Some(&first), Some(&last)) = (out.first(), out.last())
-            && out.len() > 1
-            && (first + span - last).abs() <= 1e-9 * span
-        {
-            out.pop();
+        if self.closed && out.len() > 1 {
+            if let (Some(&first), Some(&last)) = (out.first(), out.last()) {
+                if (first + span - last).abs() <= 1e-9 * span {
+                    out.pop();
+                }
+            }
         }
         out
     }
@@ -1055,10 +1053,10 @@ impl Rev {
                         }
                     }
                     let lam = 0.5 * (lo + hi);
-                    if lam >= range[0]
-                        && let Some(uv) = self.inverse(p0 + d * lam, None)
-                    {
-                        out.push(Hit { lam, uv, grazing: false });
+                    if lam >= range[0] {
+                        if let Some(uv) = self.inverse(p0 + d * lam, None) {
+                            out.push(Hit { lam, uv, grazing: false });
+                        }
                     }
                 }
                 _ => {}
@@ -1086,12 +1084,10 @@ impl Rev {
         // Near-tangent rays: a dip close to zero without a sign change.
         let tol = 1e-4 * (1. + self.rmax);
         for (lam, a) in minima {
-            if a < tol
-                && lam >= range[0]
-                && !out.iter().any(|h| (h.lam - lam).abs() < 2. * (range[1] - range[0]) / n as f64)
-                && let Some(uv) = self.inverse(p0 + d * lam, None)
-            {
-                out.push(Hit { lam, uv, grazing: true });
+            if a < tol && lam >= range[0] && !out.iter().any(|h| (h.lam - lam).abs() < 2. * (range[1] - range[0]) / n as f64) {
+                if let Some(uv) = self.inverse(p0 + d * lam, None) {
+                    out.push(Hit { lam, uv, grazing: true });
+                }
             }
         }
     }
