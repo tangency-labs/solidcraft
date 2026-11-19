@@ -63,7 +63,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value> {
     let cmd = "selection.delete";
     let model = || bad(cmd, "a drawing's objects are deleted apart from the model's: select one or the other");
-    if ["components", "occurrences", "canvases", "point_clouds", "joints"].iter().any(|key| p.get(*key).is_some_and(|v| !v.is_null())) {
+    // An empty list asks for nothing, as the app's Delete sends with only drawing objects selected.
+    let asks = |v: &Value| !v.is_null() && v.as_array().is_none_or(|list| !list.is_empty());
+    if ["components", "occurrences", "canvases", "point_clouds", "joints"].iter().any(|key| p.get(*key).is_some_and(asks)) {
         return Err(model());
     }
     let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected or cut from it")?;
@@ -596,6 +598,27 @@ mod tests {
         json!({"type": "drawing", "drawing": ids::encode(drawing), "object": ids::encode(object)})
     }
 
+    /// The app's Delete names a drawing's objects with empty component, canvas and joint lists:
+    /// an empty list asks for nothing, so they go; a list that names a model object is refused.
+    /// `select.all` takes what is on the sheet.
+    #[test]
+    fn empty_model_lists_beside_drawing_objects_ask_for_nothing() {
+        let (mut s, [_, _, top], dimension, _, drawing) = sheet_objects();
+        let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+        let all = run(&mut s, "select.all", json!({ "sheet": sheet }));
+        assert!(all["selected"].as_u64().is_some_and(|n| n >= 5), "{all}");
+        assert!(s.selection.iter().all(|x| matches!(x, Sel::Drawing { .. })));
+        let refused = s.execute("selection.delete", &json!({"items": [item(drawing, dimension)], "occurrences": [1], "canvases": [], "joints": []}));
+        assert!(refused.is_err());
+        let gone = run(
+            &mut s,
+            "selection.delete",
+            json!({"items": [item(drawing, top), item(drawing, dimension)], "occurrences": [], "canvases": [], "joints": []}),
+        );
+        assert_eq!(gone["views"], json!([ids::encode(top)]), "{gone}");
+        assert!(s.drawing("test").unwrap().dimension(dimension).is_none());
+    }
+
     /// A view, a dimension and a balloon are selected by their ids, as a view's own id reads in every
     /// reply, with no undo step and no change to the design or its export. Adding one keeps the rest.
     #[test]
@@ -829,7 +852,9 @@ mod tests {
             (json!({"items": [good, {"type": "feature", "id": 1}]}), "deleted apart from the model's"),
             (json!({"items": [good], "components": ["Part"]}), "deleted apart from the model's"),
             (json!({"items": [good], "occurrences": ["Part:1"]}), "deleted apart from the model's"),
-            (json!({"items": [good], "joints": []}), "deleted apart from the model's"),
+            // A list that names a joint mixes the model's into the drawing's; an empty one names
+            // nothing (the app's Delete sends one) and is tested apart.
+            (json!({"items": [good], "joints": ["Joint1"]}), "deleted apart from the model's"),
             (json!({}), "nothing to delete"),
             (json!({"items": []}), "nothing to delete"),
             (json!({"items": [{"type": "drawing", "drawing": ids::encode(drawing), "object": front}]}), "bad item"),

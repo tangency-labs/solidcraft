@@ -2108,10 +2108,15 @@ fn a_sketch_on_a_sheet_face_reports_a_lost_attachment_instead_of_moving_to_anoth
     assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Healthy { .. }));
 }
 
+/// The last design format without `sheet-face-names`, which 0.45.0-rc.4 folded into format 62
+/// (`crates/doc/src/format/v62/sheet-face-names.rs`). A fixed number, not `FORMAT - 1`, so the
+/// older design stays older when later changes are pending.
+const BEFORE_SHEET_FACE_NAMES: u32 = 61;
+
 /// A design saved before #6748 keeps a sketch on a base flange's sheet by the sheet's own name for
 /// its face, with no anchor: `sheet:Body1:base:top`, `sheet:Body1:base:bottom`. It opens with each
 /// sketch on that face by the model's name for it, `F<base flange>:top` and `:bottom` (format
-/// 62, sheet-face-names), and their holes cut the sheet as they did: the 100 x 60 x 2.5 plate,
+/// 62's sheet-face-names), and their holes cut the sheet as they did: the 100 x 60 x 2.5 plate,
 /// 15000 mm³, less two 4 mm holes through it, 2 · π · 2² · 2.5 = 20π ≈ 62.83 mm³.
 #[test]
 fn sketches_saved_on_a_base_flanges_faces_by_the_sheets_names_open_on_those_faces() {
@@ -2125,7 +2130,7 @@ fn sketches_saved_on_a_base_flanges_faces_by_the_sheets_names_open_on_those_face
     assert!((volume(&mut s) - want).abs() < 0.1, "{}", volume(&mut s));
     let b = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetBase { .. })).map_or(0, |f| f.id);
     // As a design from before saved them: by the sheet's names for the faces, with no anchor, at
-    // format 61, the last before sheet-face-names (folded into 62), whatever is pending since.
+    // the last format without sheet-face-names.
     let mut older: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     for (sketch, side) in [("Top", "top"), ("Bottom", "bottom")] {
         let f = older["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == sketch).unwrap();
@@ -2133,7 +2138,7 @@ fn sketches_saved_on_a_base_flanges_faces_by_the_sheets_names_open_on_those_face
         plane.remove("anchor");
         plane.insert("name".into(), json!(format!("sheet:Body1:base:{side}")));
     }
-    older["format"] = json!(solidcraft_doc::format::format_string(61));
+    older["format"] = json!(solidcraft_doc::format::format_string(BEFORE_SHEET_FACE_NAMES));
     older.as_object_mut().unwrap().remove("format_pending");
     let doc = solidcraft_doc::Document::from_json(&older.to_string()).unwrap();
     for (sketch, side) in [("Top", "top"), ("Bottom", "bottom")] {

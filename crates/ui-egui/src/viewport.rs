@@ -7756,7 +7756,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::sketch_cursor_readout::show(app, &painter, &proj, badge_at);
 }
 
-fn paint_box_selection(painter: &egui::Painter, bx: &BoxSel, sketch: bool) {
+pub(crate) fn paint_box_selection(painter: &egui::Painter, bx: &BoxSel, sketch: bool) {
     let t = Tokens::get();
     let col = if sketch {
         t.sketch_accent
