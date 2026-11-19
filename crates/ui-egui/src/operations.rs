@@ -96,6 +96,8 @@ enum Cancel {
     History,
     /// The `n`th history command waiting its turn (from 0).
     HistoryQueued(usize),
+    /// Cache catch-up after a sketch restores the complete model.
+    SketchRefresh,
     /// A delete's check.
     DeleteCheck,
     /// Opening a feature's editor.
@@ -234,6 +236,16 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
             ..Row::new("feature_edit".into(), solidcraft_ui_text::tr("operations.feature_edit").to_string())
         });
     }
+    if let Some(job) = app.sketch_refreshes.get(&app.session.uid) {
+        rows.push(Row {
+            steps: evaluation_steps(&job.progress),
+            cancelling: job.progress.is_cancelled(),
+            cancel: Some(Cancel::SketchRefresh),
+            ..Row::new("sketch_refresh".into(), command_name("sketch.finish"))
+        });
+    } else if app.session.needs_sketch_finish_evaluation() && !app.stopped_sketch_refreshes.contains(&app.session.uid) {
+        rows.push(Row { queued: true, cancel: Some(Cancel::SketchRefresh), ..Row::new("sketch_refresh".into(), command_name("sketch.finish")) });
+    }
     if let Some(check) = &app.delete_check {
         rows.push(Row {
             steps: evaluation_steps(&check.progress),
@@ -333,6 +345,7 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
                 edit.cancel();
             }
         }
+        Cancel::SketchRefresh => crate::sketch_view::cancel_refresh(app),
         Cancel::Agent => app.stop_agent_command(),
         // It says itself how it ended: a save already replacing the file goes through.
         Cancel::Save => {

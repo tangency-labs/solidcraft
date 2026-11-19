@@ -1399,7 +1399,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         None => {
                             tool.picks.push(id);
                             tool.point_picks.push(xy(p));
-                            app.set_status("Extend: Shift-click the second curve", false);
+                            app.set_tool_hint("Extend: Shift-click the second curve");
                         }
                         Some(first) if first != id => {
                             let first_pt = tool.point_picks.first().cloned();
@@ -1482,11 +1482,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         let b: Value = serde_json::from_str(&tool.picks[1]).unwrap_or(Value::Null);
                         // Done: the hint asks for the next pair again (a failure keeps its error).
                         if app.run(cmd, json!({"a": a, "b": b})).is_ok() {
-                            app.set_status(crate::tools::hint(cmd), false);
+                            app.set_tool_hint(crate::tools::hint(cmd));
                         }
                         tool.picks.clear();
                     } else {
-                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
+                        app.set_tool_hint(app.tr("ui.intersection_curve_second_pick").to_string());
                     }
                 }
             }
@@ -1659,7 +1659,7 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
         // Intersection Curve: the right-click starts the picks over (#11048).
         Mode::Steps if tool.cmd == "sketch.intersection_curve" && !tool.picks.is_empty() => {
             tool.picks.clear();
-            app.set_status(crate::tools::hint(tool.cmd), false);
+            app.set_tool_hint(crate::tools::hint(tool.cmd));
             true
         }
         Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {

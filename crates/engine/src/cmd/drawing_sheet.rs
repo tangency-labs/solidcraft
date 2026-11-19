@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              component: id (0 the design)}; excluded?: {count?, print?}; title_block_overrides?: {cell: text} (none of these unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
-    CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set))
+    CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("settings")
         .in_drawing()
         .doc_only()
@@ -293,10 +293,10 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "a drawing keeps at least one sheet"));
         }
         let Some(sheet) = d.sheets.get(at).cloned() else { return Ok(()) };
-        if editing.as_ref().is_some_and(|entry| entry.drawing == d.id && entry.sheet == sheet.id) {
+        let on = d.on_sheet(sheet.id);
+        if editing.as_ref().is_some_and(|entry| entry.goes_with(d.id, &on)) {
             return Err(bad(cmd, "finish or cancel the sheet sketch before deleting its sheet"));
         }
-        let on = d.on_sheet(sheet.id);
         if !on.is_empty() && !with_contents {
             let what = listed(&on);
             return Err(bad(cmd, format!("sheet `{}` has {what} on it: give `\"contents\": \"delete\"` to delete them with it", sheet.name)));

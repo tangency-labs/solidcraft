@@ -15,10 +15,10 @@ use crate::schema::output_schema_for;
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("drawing.sketch.fill", "Fill Sheet Sketch", crate::checked!("drawing.sketch.fill", create))
+    CommandSpec::new("drawing.sketch.fill", "Fill Sheet Sketch", crate::checked!("drawing.sketch.fill", create)).begins_edit()
         .in_drawing().doc_only().icon("sketch").contract(&contract::CREATE).output(output_schema_for::<contract::Readings>)
         .params("sketch: exact sheet-sketch id; boundary: complete canonical outer and holes curve identities; paint: {kind: solid} or {kind: hatch, pattern: exact pattern id, pen_width_mm}. Saves one fill in paper millimetres, in one drawing undo step."),
-    CommandSpec::new("drawing.fill.edit", "Edit Sheet Fill", crate::checked!("drawing.fill.edit", edit))
+    CommandSpec::new("drawing.fill.edit", "Edit Sheet Fill", crate::checked!("drawing.fill.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .in_drawing().doc_only().icon("sketch").contract(&contract::EDIT).output(output_schema_for::<contract::Readings>)
         .params("fill: exact fill id; boundary?, paint?: replacements. A replacement boundary must match one complete current profile. Unchanged edits add no undo step."),
     CommandSpec::new("drawing.fill.delete", "Delete Sheet Fill", crate::checked!("drawing.fill.delete", delete))
@@ -79,7 +79,8 @@ fn paint_reading(paint: &FillPaint) -> contract::Paint {
 
 fn admit_paint(drawing: &Drawing, id: u64, region: Region2, cmd: &str) -> Result<()> {
     let fill = drawing.sheet_fill(id).ok_or_else(|| bad(cmd, "the fill disappeared before paint admission"))?;
-    let sheet = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sheet sketch disappeared"))?.sheet;
+    let record = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sheet sketch disappeared"))?;
+    let sheet = drawing.sketch_sheet(record).ok_or_else(|| bad(cmd, "the owning sheet sketch's owner disappeared"))?;
     let resolved = ResolvedSketchFill {
         drawing: drawing.id,
         sheet,
@@ -194,7 +195,8 @@ fn readings(s: &Session, selected: Option<u64>, cmd: &str) -> Result<Value> {
             }
             Err(reason) => (contract::Status::Failed, Some(reason.clone())),
         };
-        let sheet = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sketch disappeared"))?.sheet;
+        let record = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sketch disappeared"))?;
+        let sheet = drawing.sketch_sheet(record).ok_or_else(|| bad(cmd, "the owning sketch's owner disappeared"))?;
         fills.push(contract::Reading {
             fill: ids::encode(fill.id),
             sheet: ids::encode(sheet),

@@ -18,6 +18,7 @@ pub(crate) fn focused(app: &SolveApp) -> bool {
 
 pub(crate) fn focus_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::render_workspace::active(app)
+        && !app.sketch_notices.has_for(app.session.uid, app.view_windows.current_window())
         && !ctx.text_edit_focused()
         && !ctx.egui_wants_keyboard_input()
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
