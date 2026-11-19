@@ -16,14 +16,11 @@ primitive.api_primitives	gen1157	0	1	loose	9.606523331597224e-06	1.4784277185377
 primitive.api_primitives	gen1157	0	3	loose	9.553306322666832e-06	1.47842775970254e-05
 primitive.api_primitives	gen1157	0	5	loose	9.512311216805827e-06	1.4784278276783123e-05
 primitive.api_primitives	gen1157	0	7	loose	9.663308249952102e-06	1.4784277855986652e-05
-blend.fillet_executive_p1	remove_topo_edges_mouse_two_struts	0	0	invalid-input	11.46	3.6303537369170957
-blend.fillet_executive_p1	remove_topo_edges_mouse_two_struts	0	v2	invalid-input	-	3.6303537369170957
 blend.fillet_executive_p3	stubs4-coons_01_03_29-e0-r0.5	0	19	blend-surface	9.171832023335658e-6	4e-5
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	0	42	blend-surface	3.728639867721419e-6	5.781816090334979e-5
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	0	47	blend-surface	2.8876436781797284e-5	5.781816090334979e-5
 blend.fillet_executive_p3	sweep5-letter_g-e1-r1.0	0	34	blend-surface	5.2504512674350856e-6	4e-5
 blend.fillet_executive_p3	sweep5-letter_g-e10-r1.0	0	32	blend-surface	3.2452175665360214e-6	4e-5
-topology.brep_mirror	mat0076	0	2	loose	3.5970248040829663e-3	3.682974974992383e-2
 offset.offset_geometry_creation	gen0642	2	0	UNCOVERED	5.6347765368526695e13	1.4892598495536596e-2
 offset.offset_geometry_creation	gen0642	2	v0	UNCOVERED	-	1.4892598495536596e-2
 offset.offset_geometry_creation	gen0642	3	0	UNCOVERED	-	1.4892598495536596e-2
