@@ -39,6 +39,7 @@ use crate::blend::fillet_section::station::{
     as_b_spline, knot, nurbs_partials, span, Nurbs, Partials,
 };
 use crate::curve::curve::Curve;
+use crate::curve::line::Line;
 use crate::kernel::Kernel;
 use crate::math::Point2;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -1098,39 +1099,82 @@ const TRIM_PROBES: usize = 9;
 /// The exact NURBS data of `c` as the kernel evaluates it, with the rounding by which its
 /// points can differ from that data's: a B-spline or an ellipse is its NURB (the kernel
 /// evaluates it there, so the slack is zero); a line is evaluated analytically, `P + s V`,
-/// and its NURB is the segment through its two end points, each rounded from that form.
+/// and its NURB is the segment through its two control points, the slack how far the two can
+/// be apart ([`line_nurb_slack`]).
 /// `None` for any other kind, or data that is not a valid NURBS net.
 fn exact_curve_data(c: &Curve, is_2d: bool) -> Result<Option<(NurbsCurve, f64)>> {
     use crate::curve::curve::CurveKind;
     use crate::surface::surface::exact_pieces::exact_nurbs_curve_data;
     let line_base;
     let (bs, line) = match c.kind() {
-        CurveKind::BSpline(bs) => (bs, false),
-        CurveKind::Ellipse(e) => (e.base(), false),
+        CurveKind::BSpline(bs) => (bs, None),
+        CurveKind::Ellipse(e) => (e.base(), None),
         CurveKind::Line(l) => {
             line_base = l.base_with_nurb()?;
-            (&*line_base, true)
+            (&*line_base, Some(l))
         }
         _ => return Ok(None),
     };
     let Ok((cn, _, _, _, _)) = exact_nurbs_curve_data(bs, is_2d) else {
         return Ok(None);
     };
-    if !line {
+    let Some(l) = line else {
         return Ok(Some((cn, 0.0)));
+    };
+    Ok(line_nurb_slack(l, &cn, is_2d).map(|slack| (cn, slack)))
+}
+
+/// Not upstream: [`line_nurb_slack`] of the line `l` and its NURB (made on a copy when it has
+/// none), a UV line when `is_2d`: how far its analytic point can be from its NURB's exact point
+/// at the same parameter. `None` where that NURB's data is not two control points of weight
+/// one, or a number is not finite.
+#[must_use]
+pub fn line_evaluation_slack(l: &Line, is_2d: bool) -> Option<f64> {
+    use crate::surface::surface::exact_pieces::exact_nurbs_curve_data;
+    let base = l.base_with_nurb().ok()?;
+    let (cn, _, _, _, _) = exact_nurbs_curve_data(&base, is_2d).ok()?;
+    line_nurb_slack(l, &cn, is_2d)
+}
+
+/// Not upstream: a bound on the distance between a line's analytic point (`P + s scale V`,
+/// [`Line::evaluate_point`]) at a NURB parameter `t` of the domain of `cn`, the line's NURB
+/// data (two control points `Q_0`, `Q_1` of weight one), and the exact point of that NURB at
+/// `t`. With `E(t)` the line's exact point (affine in `t`): the analytic point is within
+/// `e(t)` ([`Curve::point_error_bound`]) of `E(t)` in each coordinate, and `e` grows with `|s|`,
+/// affine in `t`, so it is at most its larger value at the domain's ends `t_0`, `t_1`. Each
+/// `Q_i` is within `|Q_i - A(t_i)| + e(t_i)` of `E(t_i)` in each coordinate (`A` the analytic
+/// point, the difference measured and rounded up), so the NURB's point, the blend of the `Q_i`
+/// by `1 - λ` and `λ` with `E` affine, is within the larger of those of `E(t)`. The sum of the
+/// two, per coordinate, times `√3` for the distance, rounded up. Unlike a bound in the size of
+/// the NURB's own points, this holds for a piece of a line far from its point `P`, and for a
+/// NURB that is not the line's (the difference is counted). `None` for data of another shape or
+/// numbers not finite.
+fn line_nurb_slack(l: &Line, cn: &NurbsCurve, is_2d: bool) -> Option<f64> {
+    if cn.p != 1 || cn.n != 2 {
+        return None;
     }
-    // A line's point `P + s V` (its STEP parameter `s` rounded from the NURB parameter, see
-    // `Line::step_param_enclosure`) and its NURB's point (two control points, each such a rounded
-    // point, blended by `1 - u` and `u`) each come within a few dozen roundings of the exact
-    // segment; every term is at most the largest coordinate `m` of the end points times 2 (the
-    // segment, `P` and `s V` lie within that box of the origin). `γ_32` of `8 m` covers both.
-    let m = cn
-        .pw
-        .chunks(4)
-        .flat_map(|c| c.iter().take(3))
-        .fold(0.0_f64, |a, &x| a.max(x.abs()));
-    let slack = (Ivl::from(crate::nurbs::math::gamma(32)) * Ivl::from(8.0) * Ivl::from(m)).hi;
-    Ok(slack.is_finite().then_some((cn, slack)))
+    let (t0, t1) = (*cn.u.get(1)?, *cn.u.get(2)?);
+    let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
+    let dims = if is_2d { 2 } else { 3 };
+    let mut e_max = 0.0_f64;
+    let mut q_max = 0.0_f64;
+    for (i, t) in [t0, t1].into_iter().enumerate() {
+        let q = cn.pw.get(4 * i..4 * i + 4)?;
+        if q.get(3) != Some(&1.0) {
+            return None;
+        }
+        let e = l.point_error(t)?;
+        let a = l.evaluate_point(t);
+        let off = [a.x, a.y, a.z]
+            .iter()
+            .zip(q)
+            .take(dims)
+            .fold(0.0_f64, |m, (a, q)| m.max(up((a - q).abs())));
+        e_max = e_max.max(e);
+        q_max = q_max.max(up(off + e));
+    }
+    let slack = up(up(e_max + q_max) * up(3.0_f64.sqrt()));
+    slack.is_finite().then_some(slack)
 }
 
 /// Newton steps toward the nearest curve parameter of each trim image point ([`reparametrisation`]):
@@ -2082,6 +2126,66 @@ mod tests {
         );
     }
 
+    /// A half-unit piece of a line whose point `P` is `1e8` away: the piece lies near the origin,
+    /// so its NURB's control points are small, but the analytic point `P + s V` rounds at the
+    /// scale of `P` (its STEP parameter `s` is near `-1e8`), about `1e-8`. The slack is at
+    /// least the measured distance between the analytic point and its NURB's point at every
+    /// sampled parameter (this shows the measured gap only; the bound itself is derived), and
+    /// a bound in the size of the control points alone (`γ_32` of `8 m`) falls short of it.
+    #[test]
+    fn a_line_piece_far_from_its_point_has_a_slack_at_the_point_scale() {
+        use crate::curve::line::BoundedLineOptions;
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::Vec3;
+        let far = 1e8;
+        for (dir, lo) in [
+            (Vec3::new(1.0, 0.0, 0.0), -far + 0.25),
+            (Vec3::new(3.0, 4.0, 12.0), -far + 0.1),
+        ] {
+            let unit = dir / dir.length();
+            let p = Point3::new(far * unit.x, far * unit.y, far * unit.z);
+            let mut line = Line::bounded(
+                p,
+                dir,
+                &Extent1d::from_min_max(lo, lo + 0.5),
+                &BoundedLineOptions::default(),
+            );
+            // (its NURB over `[0, 1]`: the STEP parameter is then computed from it, rounding
+            // at the scale of `P`; over the STEP interval itself the NURB parameter carries
+            // the same rounding and the two agree)
+            line.edit_parameterization(&Extent1d::from_min_max(0.0, 1.0))
+                .unwrap();
+            let slack = line_evaluation_slack(&line, false).unwrap();
+            let (cn, curve_slack) = exact_curve_data(&Curve::from(line.clone()), false)
+                .unwrap()
+                .unwrap();
+            assert_eq!(slack.to_bits(), curve_slack.to_bits());
+            let (t0, t1) = (cn.u[1], cn.u[2]);
+            let q = |i: usize| [cn.pw[4 * i], cn.pw[4 * i + 1], cn.pw[4 * i + 2]];
+            let (q0, q1) = (q(0), q(1));
+            let m = q0.iter().chain(&q1).fold(0.0_f64, |a, x| a.max(x.abs()));
+            assert!(m < 1.0, "the piece is near the origin: {m:e}");
+            let old = crate::nurbs::math::gamma(32) * 8.0 * m;
+            let mut measured = 0.0_f64;
+            for i in 0..=1000 {
+                let t = t0 + (t1 - t0) * f64::from(i) / 1000.0;
+                let lam = (t - t0) / (t1 - t0);
+                let a = line.evaluate_point(t);
+                let d = [a.x, a.y, a.z]
+                    .iter()
+                    .zip(q0.iter().zip(&q1))
+                    .map(|(a, (x0, x1))| a - ((1.0 - lam) * x0 + lam * x1))
+                    .fold(0.0_f64, |s, d| s + d * d)
+                    .sqrt();
+                measured = measured.max(d);
+            }
+            assert!(measured > old, "{measured:e} against the old {old:e}");
+            assert!(slack >= measured, "{slack:e} against {measured:e}");
+            // and of the order of the point's rounding, not far beyond it
+            assert!(slack < 1e-6, "{slack:e}");
+        }
+    }
+
     /// The top face (`z = 3`) of a 1 x 2 x 3 box: its surface, a plane with a net.
     fn top_plane(k: &mut Kernel) -> Surface {
         let b =
@@ -2122,7 +2226,7 @@ mod tests {
             Point3::new(0.7, 1.6, 3.0 + lift),
         );
         let line = Curve::from(
-            crate::curve::line::Line::create_line_segment(
+            Line::create_line_segment(
                 3,
                 a,
                 b,
@@ -2163,7 +2267,7 @@ mod tests {
     fn a_segment_against_a_point_is_bounded_by_its_farther_end() {
         let k = Kernel::default();
         let line = Curve::from(
-            crate::curve::line::Line::create_line_segment(
+            Line::create_line_segment(
                 3,
                 Point3::ZERO,
                 Point3::new(1.0, 0.0, 0.0),
@@ -2207,7 +2311,7 @@ mod tests {
             Point3::new(r * th.cos(), r * th.sin(), 0.0),
         );
         let chord = Curve::from(
-            crate::curve::line::Line::create_line_segment(
+            Line::create_line_segment(
                 3,
                 a,
                 b,
