@@ -1747,8 +1747,8 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// entry 14 moved with that PR's near-knot rail trim (WR-664: a rail's cut moves onto the
 /// rail's nearby knot, which moves this fillet's geometry within the zone tolerance; main's
 /// digest `0x6c4db4a115acc49e`). #18162's lazy UV trim raise moves it once more: the result's
-/// two edges at the fillet's end keep 4e-5 instead of upstream's raise to 9.6e-5, and one
-/// trim on face 16 is refit at that tolerance; that result is proved in
+/// two edges at the fillet's end keep 4e-5 instead of main's raise to 8.05e-5, and one trim
+/// on face 16 is refit at that tolerance; that result is proved in
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`].
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
@@ -1765,7 +1765,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0x6c4db4a115acc49e,
+    0xa20e4479c358841c,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -1850,18 +1850,18 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bccdfac28b0,
+            0x40408bcce08a27a7,
             0x402621896ddff26a,
             0x402621896ddff26a,
-            0x3f10d1d4e45e263c,
-            0x3f13efa0c2faa159,
+            0x3f10d1d4e45e31cd,
+            0x3f13efa0c2faa837,
             0x4000a10fe9b1ffdc,
             0x4050316570dd0323,
             0x4050a9c381d7a010,
-            0x40151aaab4b86a08,
-            0x3f6aed5192670272,
-            0x3f66b6ad970f2ece,
-            0xbf3c9879396462ce,
+            0x40151aaab4b86a07,
+            0x3f6aed5192670b82,
+            0x3f66b6ad970f3f0b,
+            0xbf3c98793964744e,
         ],
     ),
 ];
@@ -1905,18 +1905,19 @@ const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
 ];
 
 /// [`FILLETS`] entry 14 (`bottle` e8 r0.1) under #18162's lazy UV trim raise: the result's
-/// edges 42 and 47 keep 4e-5 where upstream raised them to 9.6e-5 (the drop's reported fit
-/// error), and edge use 190's trim (face 16, a B-spline) is refit at that tolerance; nothing
-/// else of the result moves (same counts, status, vertex points and edge curves; Level 2
-/// reports the same three lines). Proved here, on the result:
+/// edges 42 and 47 keep 4e-5 where main raises them to 8.05e-5 (the drop's reported fit
+/// error), their end vertices 26, 27 and 38 follow (4.07e-5, 4e-5, 4e-5 against main's
+/// 8.05e-5), and edge use 190's trim (face 16, a B-spline) is refit at that tolerance;
+/// nothing else of the result moves (same counts, status, vertex points and edge curves;
+/// Level 2 reports the same two lines as main). Proved here, on the result:
 /// - the two edges (found by their end points, [`BOTTLE_E8_MOVED_ENDS`], not by arena id)
 ///   are at 4e-5 and their trim on face 16 (a B-spline) is within it: `trim_image_gap_bound`,
 ///   a proved bound on the distance between the trim's image and the edge curve, is at most
-///   the tolerance (edge use 190's, the refit one, is 1.45e-5; edge use 170's 3.8e-6); their
+///   the tolerance (edge use 190's, the refit one, is 1.45e-5; edge use 170's 3.75e-6); their
 ///   other trim, on the procedural blend, has no exact net to enclose (goldens'
 ///   `certify::trim_tolerance` keeps those edges OPEN, `blend-surface`);
 /// - Level 2 reports exactly the two vertex/face gaps both kernels report (4.71e-5 against
-///   3.65e-5, unchanged by the raise) and the 2D curvature warning;
+///   3.65e-5, unchanged by the raise) and nothing else;
 /// - the mass properties, now and before ([`BOTTLE_E8_BEFORE`]), are each within the case's
 ///   accuracy (1e-4 of its scale: the area, the volume, `R` the box's half diagonal for a
 ///   centroid coordinate, `V R^2` for a moment, or the value's own where larger) of the exact
@@ -1995,14 +1996,10 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
         .lines();
     let gap = "Vertex/Face gap across Edgeuse {} larger than tol (offset=4.7135459e-05, \
                tolerance=3.6509706e-05)";
-    assert_eq!(lines.len(), 3, "{lines:#?}");
+    assert_eq!(lines.len(), 2, "{lines:#?}");
     for (line, end) in lines.iter().zip(["end", "start"]) {
         assert!(line.contains(&gap.replace("{}", end)), "{lines:#?}");
     }
-    assert!(
-        lines[2].contains("Bad CurveCusp: 2D BSplineCurve Warning"),
-        "{lines:#?}"
-    );
 
     let m = brep_mass_properties_default(&k, &mut b, ACCURACY, 1.0, Vec3::ZERO).unwrap();
     let mut now = vec![m.properties.area, m.properties.volume, m.properties.mass];
