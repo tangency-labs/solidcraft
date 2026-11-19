@@ -442,6 +442,33 @@ fn half_a_cylinders_side_moves_out_over_a_step() {
     moved_to(&b, &[[50.0, 0.0, 75.0]], 4.0, v, [5, 7, 4]);
 }
 
+/// [`half_a_cylinders_side_moves_out_over_a_step`] with only the upper band split along its
+/// rulings by the plane x = 0 and the whole lower band moved out 4: where such a ruling
+/// meets the circle at z = 50, the two kept upper pieces are one surface sharing a straight
+/// edge, and the third surface at the vertex is the move's own cylinder (a quadric, not a
+/// plane). Every two of the three coaxial cylinders are parallel, so they meet in no one
+/// point and the annulus at z = 50 closes the step, as the hinge's knuckle (a barrel piece
+/// beside the coaxial piece it was split from, plus a straight kept edge) needs.
+/// V = 2500 pi 50 + 2916 pi 50 = 850743.291, with the split's 9 faces, 17 edges and 10
+/// vertices (the same split body as `three_cylinder_faces_at_a_corner_move_out_over_a_step`,
+/// the whole lower band moved instead of the three upper pieces).
+#[test]
+fn a_cylinders_whole_band_moves_out_beside_its_split_kept_halves() {
+    all_fixes();
+    let halves = split_at_height(
+        &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+        [50.0, 0.0, 25.0],
+        50.0,
+    );
+    let b = split_by_plane(
+        &halves,
+        [-50.0, 0.0, 75.0],
+        ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let v = PI * 2500.0 * 50.0 + PI * 2916.0 * 50.0;
+    moved_to(&b, &[[50.0, 0.0, 25.0]], 4.0, v, [9, 17, 10]);
+}
+
 /// Both halves of that side moved out 4 together: one cylinder r 54, V = 2916 pi 100, with
 /// the split's 4 faces, 5 edges and 3 vertices.
 #[test]
