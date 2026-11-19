@@ -1,3 +1,6 @@
+#![allow(clippy::cast_lossless)] // small integer sample counts
+#![allow(clippy::manual_assert_eq)] // whole drawings compared: their Debug text is no diff to read
+
 use super::*;
 use crate::eval::form;
 use crate::eval::label::{curve_natural, form_turns, surface_natural};
@@ -28,12 +31,11 @@ impl V2 for Vec2 {
 /// The point at `t` of the rational Bézier with homogeneous control points `ctrl` (de Casteljau).
 fn bezier_point(ctrl: &[[f64; 4]], t: f64) -> Option<Vec3> {
     let mut h = ctrl.to_vec();
-    for n in (1..h.len()).rev() {
-        for i in 0..n {
-            for c in 0..4 {
-                h[i][c] += (h[i + 1][c] - h[i][c]) * t;
-            }
-        }
+    while h.len() > 1 {
+        h = h
+            .windows(2)
+            .map(|w| [0, 1, 2, 3].map(|c| w[0][c] + (w[1][c] - w[0][c]) * t))
+            .collect();
     }
     h.first().and_then(spline::project)
 }
@@ -574,7 +576,7 @@ fn cuboid(lo: [f64; 3], hi: [f64; 3]) -> Brep {
                     .find_map(|(i, &(x, y))| {
                         (x == a && y == b)
                             .then_some((i, true))
-                            .or((x == b && y == a).then_some((i, false)))
+                            .or_else(|| (x == b && y == a).then_some((i, false)))
                     })
                     .unwrap();
                 EdgeUse {
@@ -3797,7 +3799,7 @@ fn a_bent_quarter_in_a_knot_span_narrower_than_rounding_is_drawn() {
     let far = pieces(&d)
         .flat_map(|p| p.geometry.iter())
         .flat_map(|g| [g.point_at(0.), g.point_at(1.)])
-        .map(|q| q.len())
+        .map(V2::len)
         .fold(0., f64::max);
     assert!(far > 10.25, "the bulge reaches {far}");
 }
@@ -4726,6 +4728,7 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
         a: a + out,
         b: b + out,
     };
+    #[allow(clippy::items_after_statements)] // the track helper beside its one use
     fn track<'a>(view: &View, curve: &'a C3, range: [f64; 2], sag: f64) -> Track<'a> {
         let screen = |t: f64| view.screen(curve.at(t));
         Track {
@@ -5360,7 +5363,7 @@ fn mixed_scene(o: &Options) -> (Vec<Prepared>, Vec<Placement>) {
 /// one definition prepared per placement; and sixteen thin bars seen from above, crossing 8x8.
 /// The first of the four phases is grouping, silhouette tracing, tracks and screen sampling.
 #[test]
-#[ignore]
+#[ignore = "a timing run, not a check"]
 fn hlr_timing() {
     let n = std::env::var("SOLIDCRAFT_BENCH_HLR")
         .ok()
