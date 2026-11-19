@@ -2375,8 +2375,10 @@ mod tests {
     /// reconstruction. The surface and retained iso circle share one parameter map.
     #[test]
     fn reconstructed_torus_uses_final_generator_interval() {
-        let mut k = Kernel::default();
-        k.fixes = crate::kernel::UpstreamFixes::all();
+        let k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
         let frame = Axis2Placement::IDENTITY;
         let phase = 1e-9_f64.to_degrees();
         for swap in [false, true] {
