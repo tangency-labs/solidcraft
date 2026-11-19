@@ -5,6 +5,8 @@
 //! The triangle inequality excludes an earlier contact, and the normal witnesses
 //! attain that bound. Parallel lines retain their exact minimizing interval; other
 //! curve minima use the existing global curve solver, including its endpoint solves.
+//! Parallel families subtract exact closed corner-strip intervals before choosing a
+//! retained contact, preserving the midpoint whenever it clears those intervals.
 //! This module introduces no station sampling or retry builds.
 //!
 //! Deviations: endpoint witnesses are retained only at unblended planar caps that
@@ -12,6 +14,9 @@
 //! do not establish a constant kept domain and therefore name no size here. Interior
 //! witnesses must clear every incident selected planar straight-edge chamfer strip;
 //! unsupported moving corners name no size. All clearance products use expansions.
+
+mod family;
+mod interval;
 
 use super::SolverObject;
 use crate::blend::fillet_executive::FitKind;
@@ -40,6 +45,7 @@ pub(super) struct BandContact {
     pub edge: EdgeId,
     pub face: FaceId,
     pub at: Point3,
+    pub overlapping: bool,
 }
 
 /// A selected neighbor can trim an interior witness at either endpoint. Only a
@@ -230,6 +236,64 @@ pub(super) fn supports(
     Ok(a.face == b.face)
 }
 
+/// Select only native parallel lines whose infinite-line separation is already
+/// less than the requested total width. This necessary overlap condition avoids
+/// corner reconstruction and curve solves for unrelated or separated pairs.
+pub(super) fn parallel_overlap_candidate(
+    target: &Brep,
+    a: &SolverObject,
+    b: &SolverObject,
+    rail_a: usize,
+    rail_b: usize,
+) -> Result<bool> {
+    let (Some(a), Some(b)) = (band(target, a, rail_a)?, band(target, b, rail_b)?) else {
+        return Ok(false);
+    };
+    if a.face != b.face {
+        return Ok(false);
+    }
+    let (CurveKind::Line(line_a), CurveKind::Line(line_b)) = (a.curve.kind(), b.curve.kind())
+    else {
+        return Ok(false);
+    };
+    let tangent = line_a.line_vector();
+    let parallel = exact::cross(tangent, line_b.line_vector())
+        .ok_or_else(|| SolidError::invalid_input(OP, "line directions outside exact range"))?;
+    if !parallel.iter().all(|component| exact::is_zero(component)) {
+        return Ok(false);
+    }
+    let (pa, pb) = (line_a.line_point(), line_b.line_point());
+    let [dx, dy, dz] = [
+        interval::sub(&[pb.x], &[pa.x])?,
+        interval::sub(&[pb.y], &[pa.y])?,
+        interval::sub(&[pb.z], &[pa.z])?,
+    ];
+    let cross = [
+        interval::sub(
+            &interval::scale(&dy, tangent.z)?,
+            &interval::scale(&dz, tangent.y)?,
+        )?,
+        interval::sub(
+            &interval::scale(&dz, tangent.x)?,
+            &interval::scale(&dx, tangent.z)?,
+        )?,
+        interval::sub(
+            &interval::scale(&dx, tangent.y)?,
+            &interval::scale(&dy, tangent.x)?,
+        )?,
+    ];
+    let mut distance_numerator = Vec::new();
+    for component in cross {
+        distance_numerator =
+            interval::add(&distance_numerator, &interval::mul(&component, &component)?)?;
+    }
+    let widths = interval::add(&[a.width], &[b.width])?;
+    let tangent_squared = exact::dot(tangent, tangent)
+        .ok_or_else(|| SolidError::invalid_input(OP, "line direction outside exact range"))?;
+    let bound = interval::mul(&interval::mul(&widths, &widths)?, &tangent_squared)?;
+    Ok(exact::sign(&interval::sub(&distance_numerator, &bound)?) < 0)
+}
+
 pub(super) fn corner_band(
     target: &Brep,
     solver: &SolverObject,
@@ -263,54 +327,8 @@ pub(super) fn corner_band(
     }))
 }
 
-fn exact_range() -> SolidError {
-    SolidError::invalid_input(OP, "corner clearance outside exact arithmetic range")
-}
-
-fn expansion_product(a: &[f64], b: &[f64]) -> Result<Vec<f64>> {
-    let mut product = Vec::new();
-    for &factor in b {
-        product = exact::add(&product, &exact::scale(a, factor).ok_or_else(exact_range)?);
-    }
-    if !product.iter().all(|x| x.is_finite()) {
-        return Err(exact_range());
-    }
-    Ok(product)
-}
-
-/// Infinite-line distance bounds bounded-edge distance from below. The contact is
-/// (wb P + wa Q)/(wa+wb); eliminate that denominator against the common scale's
-/// denominator. Neither the contact point, scale, nor gap is rounded for this test.
 fn outside_corner_strip(witness: &ContactWitness, line: (Point3, Vec3, f64)) -> Result<bool> {
-    let (origin, tangent, width) = line;
-    let [p, q] = witness.feet;
-    let [wa, wb] = witness.widths;
-    let p_cross = exact::cross(p, tangent).ok_or_else(exact_range)?;
-    let q_cross = exact::cross(q, tangent).ok_or_else(exact_range)?;
-    let origin_cross = exact::cross(origin, tangent).ok_or_else(exact_range)?;
-    let mut distance = Vec::new();
-    for ((a, b), c) in p_cross.iter().zip(&q_cross).zip(&origin_cross) {
-        let from_p = exact::scale(&exact::sub(a, c), wb).ok_or_else(exact_range)?;
-        let from_q = exact::scale(&exact::sub(b, c), wa).ok_or_else(exact_range)?;
-        let component = exact::add(&from_p, &from_q);
-        distance = exact::add(&distance, &expansion_product(&component, &component)?);
-    }
-    let mut gap_squared = Vec::new();
-    for (a, b) in [(p.x, q.x), (p.y, q.y), (p.z, q.z)] {
-        let delta = exact::sub(&[b], &[a]);
-        gap_squared = exact::add(&gap_squared, &expansion_product(&delta, &delta)?);
-    }
-    let width_squared = exact::product(width, width).ok_or_else(exact_range)?;
-    let tangent_squared = exact::dot(tangent, tangent).ok_or_else(exact_range)?;
-    let bound = expansion_product(
-        &expansion_product(&gap_squared, &width_squared)?,
-        &tangent_squared,
-    )?;
-    let difference = exact::sub(&distance, &bound);
-    if !difference.iter().all(|x| x.is_finite()) {
-        return Err(exact_range());
-    }
-    Ok(exact::sign(&difference) > 0)
+    family::outside_corner_strip(witness, line)
 }
 
 fn inward(k: &Kernel, band: &Band, foot: Point3) -> Result<Vec3> {
@@ -431,41 +449,57 @@ fn kept_witness(
     Ok(true)
 }
 
-fn closest_feet(k: &Kernel, a: &Band, b: &Band, tolerance: f64) -> Result<Option<[Point3; 2]>> {
+fn normal_contact(
+    k: &Kernel,
+    a: &Band,
+    b: &Band,
+    feet: [Point3; 2],
+) -> Result<Option<(f64, Vec3, Vec3)>> {
+    let [foot_a, foot_b] = feet;
+    let between = foot_b - foot_a;
+    let gap = between.length();
+    if !(gap.is_finite() && gap > 0.0) {
+        return Ok(None);
+    }
+    let normal_a = inward(k, a, foot_a)?;
+    let normal_b = inward(k, b, foot_b)?;
+    let direction = between / gap;
+    let opposing = direction.dot(normal_a) > 0.0
+        && direction.dot(normal_b) < 0.0
+        && parallel_error_is_zero(direction.cross(normal_a).length())
+        && parallel_error_is_zero(direction.cross(normal_b).length());
+    if !opposing {
+        return Ok(None);
+    }
+    Ok(Some((gap, normal_a, normal_b)))
+}
+
+struct ClosestFeet {
+    points: [Point3; 2],
+    parallel_family: bool,
+}
+
+fn closest_feet(
+    k: &Kernel,
+    target: &Brep,
+    a: &Band,
+    b: &Band,
+    tolerance: f64,
+    blended: &[EdgeId],
+    corners: &[CornerBand],
+) -> Result<Option<ClosestFeet>> {
     if let (CurveKind::Line(line_a), CurveKind::Line(line_b)) = (a.curve.kind(), b.curve.kind()) {
         let cross = exact::cross(line_a.line_vector(), line_b.line_vector())
             .ok_or_else(|| SolidError::invalid_input(OP, "line directions outside exact range"))?;
-        let a0 = a.curve.evaluate_point(k, a.interval.min())?;
-        let a1 = a.curve.evaluate_point(k, a.interval.max())?;
-        let b0 = b.curve.evaluate_point(k, b.interval.min())?;
-        let b1 = b.curve.evaluate_point(k, b.interval.max())?;
-        let tangent = (a1 - a0).unitize()?;
         if cross.iter().all(|component| exact::is_zero(component)) {
-            // The minimizers form an interval. Its midpoint is a candidate; the
-            // retained-witness certificate below must also exclude corner strips.
-            let b_start = (b0 - a0).dot(tangent);
-            let b_end = (b1 - a0).dot(tangent);
-            let a_span = (a1 - a0).dot(tangent);
-            let b_span = b_end - b_start;
-            if !(a_span.is_finite() && a_span > 0.0 && b_span.is_finite() && b_span != 0.0) {
-                return Err(SolidError::invalid_input(
-                    OP,
-                    "invalid projected line spans",
-                ));
-            }
-            let lo = 0.0_f64.max(b_start.min(b_end));
-            let hi = a_span.min(b_start.max(b_end));
-            if lo > hi {
-                // Disjoint projections cannot have opposing normal witnesses.
-                return Ok(None);
-            }
-            let along = lo + (hi - lo) * 0.5;
-            return Ok(Some([
-                a.curve
-                    .evaluate_point(k, a.interval.evaluate(along / a_span))?,
-                b.curve
-                    .evaluate_point(k, b.interval.evaluate((along - b_start) / b_span))?,
-            ]));
+            return Ok(
+                family::feet(k, target, a, b, [line_a, line_b], blended, corners)?.map(|points| {
+                    ClosestFeet {
+                        points,
+                        parallel_family: true,
+                    }
+                }),
+            );
         }
     }
     let solutions = a.curve.global_curve_solve::<NoObject>(
@@ -481,16 +515,20 @@ fn closest_feet(k: &Kernel, a: &Band, b: &Band, tolerance: f64) -> Result<Option
     let solution = solutions
         .get(0)
         .ok_or_else(|| missing("the closest band feet"))?;
-    Ok(Some([
-        a.curve.evaluate_point(k, solution.start.param(0)?)?,
-        b.curve.evaluate_point(k, solution.start.param(1)?)?,
-    ]))
+    Ok(Some(ClosestFeet {
+        points: [
+            a.curve.evaluate_point(k, solution.start.param(0)?)?,
+            b.curve.evaluate_point(k, solution.start.param(1)?)?,
+        ],
+        parallel_family: false,
+    }))
 }
 
-/// Name the normal contact of two constant-width planar bands, including fixed caps.
-pub(super) fn contact(
+/// Construct the retained normal contact and classify its closed width event.
+/// The witness location is retained for the caller's trimmed-face classification.
+pub(super) fn retained_contact(
     k: &Kernel,
-    target: &mut Brep,
+    target: &Brep,
     a: &SolverObject,
     b: &SolverObject,
     rails: [usize; 2],
@@ -506,24 +544,14 @@ pub(super) fn contact(
         return Ok(None);
     }
     let tolerance = edge::tolerance(target, a.edge)?.max(edge::tolerance(target, b.edge)?);
-    let Some([foot_a, foot_b]) = closest_feet(k, &a, &b, tolerance)? else {
+    let Some(closest) = closest_feet(k, target, &a, &b, tolerance, blended, corners)? else {
+        return Ok(None);
+    };
+    let [foot_a, foot_b] = closest.points;
+    let Some((gap, normal_a, normal_b)) = normal_contact(k, &a, &b, closest.points)? else {
         return Ok(None);
     };
     let between = foot_b - foot_a;
-    let gap = between.length();
-    if !(gap.is_finite() && gap > 0.0) {
-        return Ok(None);
-    }
-    let normal_a = inward(k, &a, foot_a)?;
-    let normal_b = inward(k, &b, foot_b)?;
-    let direction = between / gap;
-    let opposing = direction.dot(normal_a) > 0.0
-        && direction.dot(normal_b) < 0.0
-        && parallel_error_is_zero(direction.cross(normal_a).length())
-        && parallel_error_is_zero(direction.cross(normal_b).length());
-    if !opposing {
-        return Ok(None);
-    }
     let widths = a.width + b.width;
     if !(widths.is_finite() && widths > 0.0) {
         return Err(SolidError::invalid_input(OP, "non-finite total band width"));
@@ -543,11 +571,28 @@ pub(super) fn contact(
     if !kept_witness(k, target, &a, foot_a, normal_a, blended, corners, &witness)?
         || !kept_witness(k, target, &b, foot_b, normal_b, blended, corners, &witness)?
     {
+        if closest.parallel_family {
+            return Err(SolidError::invalid_input(
+                OP,
+                "rounded parallel contact lost its exact clearance",
+            ));
+        }
         return Ok(None);
     }
-    if super::sample_off_face(k, target, a.face, contact_at)? {
-        return Ok(None);
+    let mut gap_squared = Vec::new();
+    for (p, q) in [
+        (foot_a.x, foot_b.x),
+        (foot_a.y, foot_b.y),
+        (foot_a.z, foot_b.z),
+    ] {
+        let delta = interval::sub(&[q], &[p])?;
+        gap_squared = interval::add(&gap_squared, &interval::mul(&delta, &delta)?)?;
     }
+    let exact_widths = interval::add(&[a.width], &[b.width])?;
+    let overlapping = exact::sign(&interval::sub(
+        &gap_squared,
+        &interval::mul(&exact_widths, &exact_widths)?,
+    )?) < 0;
     let rho = a
         .offsets
         .first()
@@ -578,6 +623,29 @@ pub(super) fn contact(
         kind,
         edge: a.edge,
         face: a.face,
-        at: crate::topology::face::p2::calculate_an_internal_point(k, target, a.face)?,
+        at: contact_at,
+        overlapping,
     }))
+}
+
+/// Name the normal contact of two constant-width planar bands, including fixed caps.
+pub(super) fn contact(
+    k: &Kernel,
+    target: &mut Brep,
+    a: &SolverObject,
+    b: &SolverObject,
+    rails: [usize; 2],
+    blended: &[EdgeId],
+    corners: &[CornerBand],
+    as_scale: bool,
+) -> Result<Option<BandContact>> {
+    let Some(mut contact) = retained_contact(k, target, a, b, rails, blended, corners, as_scale)?
+    else {
+        return Ok(None);
+    };
+    if super::sample_off_face(k, target, contact.face, contact.at)? {
+        return Ok(None);
+    }
+    contact.at = crate::topology::face::p2::calculate_an_internal_point(k, target, contact.face)?;
+    Ok(Some(contact))
 }

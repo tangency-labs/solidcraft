@@ -2743,7 +2743,7 @@ fn chamfer_sides_impl(
                         why,
                     },
                 ) => Error::TooLarge {
-                    size: distance * size,
+                    size: crate::import_geometry::scale_value(distance, size),
                     kind: FitKind::Distance,
                     at,
                     face,

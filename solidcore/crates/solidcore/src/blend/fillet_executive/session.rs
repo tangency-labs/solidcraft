@@ -455,6 +455,72 @@ impl SessionObjects<'_> {
             .and_then(Option::as_mut)
             .ok_or_else(|| invalid("solver is not live in this session"))
     }
+
+    /// An additional parallel-line overlap certificate, including when current
+    /// rails have passed completely beyond the opposite edges. A missing
+    /// certificate leaves the independent rail checks to decide their geometry.
+    fn planar_bands_overlap(
+        &mut self,
+        k: &Kernel,
+        pair: [FilletObject; 2],
+        face: FaceId,
+        blended: &[EdgeId],
+        solvers: &[FilletObject],
+    ) -> Result<bool> {
+        let [FilletObject::Solver(ia), FilletObject::Solver(ib)] = pair else {
+            return Err(invalid("object is not a solver"));
+        };
+        let contact = {
+            let (a, b) = (self.solver(ia)?, self.solver(ib)?);
+            let rail_on_face = |solver: &SolverObject| -> Result<Option<usize>> {
+                for rail in 0..2 {
+                    if let Some(use_) = solver.base().edgeuse(rail)? {
+                        if crate::topology::edgeuse::p1::face(self.target, use_)? == Some(face) {
+                            return Ok(Some(rail));
+                        }
+                    }
+                }
+                Ok(None)
+            };
+            let (Some(rail_a), Some(rail_b)) = (rail_on_face(a)?, rail_on_face(b)?) else {
+                return Ok(false);
+            };
+            if !planar_bands::parallel_overlap_candidate(self.target, a, b, rail_a, rail_b)? {
+                return Ok(false);
+            }
+            let mut corners = Vec::new();
+            for &object in solvers {
+                let FilletObject::Solver(id) = object else {
+                    return Err(invalid("object is not a solver"));
+                };
+                if id == ia || id == ib {
+                    continue;
+                }
+                if let Some(corner) =
+                    planar_bands::corner_band(self.target, self.solver(id)?, face)?
+                {
+                    corners.push(corner);
+                }
+            }
+            planar_bands::retained_contact(
+                k,
+                self.target,
+                a,
+                b,
+                [rail_a, rail_b],
+                blended,
+                &corners,
+                true,
+            )?
+        };
+        let Some(contact) = contact else {
+            return Ok(false);
+        };
+        if sample_off_face(k, self.target, contact.face, contact.at)? {
+            return Ok(false);
+        }
+        Ok(contact.overlapping)
+    }
     /// `pFilletSolver->CalcFilletGeom()`; the solver's `RecordFilletError` notes are
     /// replayed into the executive's record (`m_pExecutive->NoteFilletError`).
     fn calc_solver_geometry(
@@ -5930,6 +5996,19 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 "query::face::p1::point_3d_classify",
                             )?;
                             crate::topology::face::p2::tolerance(self.target, *face_a)?;
+                        }
+                        let (Some(&solver_a), Some(&solver_b)) = (solvers.get(a), solvers.get(b))
+                        else {
+                            return Err(invalid("band without its solver"));
+                        };
+                        if self.planar_bands_overlap(
+                            k,
+                            [solver_a, solver_b],
+                            *face_a,
+                            &edge_ids,
+                            solvers,
+                        )? {
+                            return Ok(false);
                         }
                         if let (Some(eb), Some(Some(box_a)), Some(Some(box_b))) = (
                             edge_box_b,

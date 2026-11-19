@@ -225,6 +225,89 @@ fn unequal_chamfers_with_selected_endpoint_corners_name_the_interior_contact() {
     run_top(1.5 * fit.size).0.unwrap();
 }
 
+/// The end strip reaches x = 16 at the long rims' closed scale 2/3, covering
+/// their midpoint x = 15. The minimizing interval still has retained points in
+/// (16, 30), or (0, 14) when the selected end is mirrored. Two selected end
+/// strips also leave (16, 18), or a gap (2/3) (21 - f64(20.999999999)),
+/// approximately 6.7e-10. Wall factors of two keep the top widths unchanged and
+/// exercise the band event; equal setbacks on all four rims instead meet the
+/// existing polygon-inradius event first. Neither depends on station spacing.
+#[test]
+fn parallel_chamfers_name_a_fit_beyond_a_selected_corner_strip() {
+    for (end_widths, wall_factor) in [
+        ([24.0, 0.0], 1.0),
+        ([0.0, 24.0], 1.0),
+        ([24.0, 18.0], 1.0),
+        ([24.0, 20.999_999_999], 1.0),
+        ([24.0, 18.0], 2.0),
+        ([24.0, 20.999_999_999], 2.0),
+    ] {
+        let run_three = |scale: f64| {
+            let mut k = kernel();
+            let mut b = create_box(&mut k, Point3::ZERO, 30.0, 2.0, 100.0).unwrap();
+            let mut edges = vec![
+                pick(&k, &b, [15.0, 0.0, 100.0]),
+                pick(&k, &b, [15.0, 2.0, 100.0]),
+            ];
+            let mut sizes =
+                vec![ChamferSize::Distances([1.5 * scale, 1.5 * scale * wall_factor]); 2];
+            for (end_x, width) in [0.0, 30.0].into_iter().zip(end_widths) {
+                if width > 0.0 {
+                    edges.push(pick(&k, &b, [end_x, 1.0, 100.0]));
+                    sizes.push(ChamferSize::Distances([
+                        width * scale,
+                        width * scale * wall_factor,
+                    ]));
+                }
+            }
+            let tol = edges
+                .iter()
+                .map(|&e| edge::tolerance(&b, e).unwrap())
+                .fold(0.0_f64, f64::max);
+            let top = edge::faces(&b, edges[0], None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+                .unwrap();
+            let references = vec![top; edges.len()];
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_chamfers_along(&k, &edges, &sizes, &references)
+                .unwrap();
+            s.create_corners(&k, None).unwrap();
+            for corner in s.fillet_corners().unwrap() {
+                s.set_corner_bevel(corner, true).unwrap();
+            }
+            let result = s.do_filleting(&mut k, None);
+            (result, s.fit_size(), tol)
+        };
+        let (result, fit, tol) = run_three(1.0);
+        assert!(result.is_err());
+        let fit = fit.expect("the long rims retain a contact beyond the end strip");
+        let scaled = if wall_factor == 1.0 && end_widths.iter().all(|&width| width > 0.0) {
+            // With all four equal-distance rims selected, the existing polygon
+            // event precedes band contact: its inradius is 2/2=1, open by 1000 tol.
+            assert_eq!(
+                fit.kind,
+                FitKind::Radius,
+                "{end_widths:?}, factor {wall_factor}"
+            );
+            let want = 1.0 - 1000.0 * tol;
+            assert!((fit.size - want).abs() < 1e-9, "{} vs {want}", fit.size);
+            fit.size / 1.5
+        } else {
+            assert_eq!(
+                fit.kind,
+                FitKind::Scale,
+                "{end_widths:?}, factor {wall_factor}"
+            );
+            let want = (2.0 - 1000.0 * tol) / 3.0;
+            assert!((fit.size - want).abs() < 1e-9, "{} vs {want}", fit.size);
+            fit.size
+        };
+        run_three(scaled).0.unwrap();
+    }
+}
+
 /// Equal chamfers on a narrow top still need an open scale when another selected
 /// edge has unequal setbacks. A closed radius converted afterward would leave no top.
 #[test]
