@@ -2909,7 +2909,7 @@ pub fn stitch_and_orient_with_identity(
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<()> {
-    stitch_and_orient_searching(k, b, options, identity, None)
+    stitch_and_orient_searching(k, b, options, identity, None, true)
 }
 
 /// [`stitch_and_orient_with_identity`] of the faces of one solid, in a B-rep that held
@@ -2932,15 +2932,39 @@ pub(crate) fn stitch_and_orient_one_solid(
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
     outside: FaceuseId,
 ) -> Result<()> {
-    stitch_and_orient_searching(k, b, options, identity, Some(outside))
+    stitch_and_orient_searching(k, b, options, identity, Some(outside), true)
 }
 
+/// [`stitch_and_orient_with_identity`] of faces whose lamina edges are the body's open
+/// boundary by construction: the first pass only. The second pass is for lamina edges the
+/// first left open, at ten or twenty times its tolerance, and squeezes out every lamina
+/// edge shorter than that (`squeeze_small_edges`). Where the open boundary is meant, as
+/// for the walls an uncapped sweep builds to meet at its profile's shared curve ends, the
+/// first pass's lamina count says nothing about a gap, and the second pass only removes
+/// boundary edges longer than the body's tolerance, leaving their faces' loops open. Not
+/// upstream; the caller answers for the premise.
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub(crate) fn stitch_and_orient_open(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, None, false)
+}
+
+/// The stitch passes and the orientation; with `second_pass`, a second pass at the larger
+/// tolerance when the first leaves more than one lamina edge.
 fn stitch_and_orient_searching(
     k: &mut Kernel,
     b: &mut Brep,
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
     outside: Option<FaceuseId>,
+    second_pass: bool,
 ) -> Result<()> {
     k.check_cancelled(OP)?;
     let mut lamina = 0;
@@ -2954,7 +2978,7 @@ fn stitch_and_orient_searching(
         identity,
         outside,
     )?;
-    if lamina > 1 {
+    if second_pass && lamina > 1 {
         tolerance = if options.stitch_tolerance <= 0.0 {
             tolerance * 20.0
         } else {
