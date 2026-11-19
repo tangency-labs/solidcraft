@@ -7727,8 +7727,9 @@ fn feature_tools_with_constructor(
             // running along the extrusion (where the profile's shadow on it is long and thin), it
             // still starts at that level, and the feature's warning says so.
             let slanted_from = from_face.filter(|_| !extent.from_level).and_then(|face| slanted_plane(&tst, face, n));
-            // A design kept on the level start with To Object (saved before From + To on flat
-            // faces ran between them) still says why it starts at the level, as it did then.
+            // A design kept on the level start with To Object still says why it starts at the
+            // level: one saved before From + To on flat faces ran between them, or before format
+            // 58, when every From started at the level.
             let kept_slope = from_face.filter(|_| extent.from_level && extent.to.is_some()).and_then(|face| slanted_plane(&tst, face, n));
             let tapered = match &extent.taper {
                 Some(tp) => val(vals, tp, Kind::Angle)? != 0.0,
@@ -7746,7 +7747,9 @@ fn feature_tools_with_constructor(
             };
             let level_because = match (&slanted_from, &kept_slope) {
                 (Some(slope), _) => level_start_reason(slope, n, &ends),
-                (None, Some(slope)) => Some(level_start_reason(slope, n, &ends).unwrap_or("the design was saved when To Object kept it there")),
+                (None, Some(slope)) => {
+                    Some(level_start_reason(slope, n, &ends).unwrap_or("the design was saved before the start followed the slanted face"))
+                }
                 (None, None) => None,
             };
             if let Some(why) = level_because {

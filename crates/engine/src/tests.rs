@@ -5255,8 +5255,8 @@ fn extrude_from_a_slanted_face_with_to_and_a_second_side_crossing_planes_or_to_t
     run(&mut s, "timeline.edit", json!({"feature": "FT", "set": {"extent": {"from_level": true}}}));
     let (lo, _, _) = x_span_and_volume(&mut s, "Fill");
     assert!((lo - 20.0 / 7.0).abs() < 1e-6, "{lo}");
-    // Kept on the level start, it still says why, as it did before.
-    assert!(warning(&s).contains("From Object starts on a plane parallel"), "{:?}", warning(&s));
+    // Kept on the level start, it still says why.
+    assert!(warning(&s).contains("because the design was saved before the start followed the slanted face"), "{:?}", warning(&s));
     run(&mut s, "timeline.edit", json!({"feature": "FT", "set": {"extent": {"to": null, "distance": "3"}}}));
     let (lo, hi, v) = x_span_and_volume(&mut s, "Fill");
     assert!((lo - 32.0 / 7.0).abs() < 1e-6 && (hi - (40.0 / 7.0 + 3.0)).abs() < 1e-6 && rel(v, 12.0) < 1e-9, "{lo} {hi} {v}");
