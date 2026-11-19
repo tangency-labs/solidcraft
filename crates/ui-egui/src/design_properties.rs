@@ -271,7 +271,7 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
         }
         None => app.tr("ui.properties.measuring").to_string(),
     };
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "ui.close", None).show(ctx, true, |ui| {
         ui.horizontal(|ui| {
             ui.spinner();
             ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));
@@ -466,7 +466,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let copy_hint = app.tr("ui.properties.copy_value").to_string();
     let mut copied = false;
     let heading = window_title(&title, &v);
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "ui.close", None).show(ctx, true, |ui| {
         // Each value copies itself as shown, unit and all, when clicked (#12218).
         for (label, value) in &rows {
             let label = solidcraft_ui_text::tr_label(label);
