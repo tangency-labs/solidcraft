@@ -36,6 +36,7 @@ use solidcore::nurbs::math::{gamma, CPoint};
 use solidcore::query::curve_surface_gap::{
     curve_face_gap_bound, line_evaluation_slack, trim_image_gap_bound,
 };
+use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
@@ -1118,9 +1119,10 @@ const MAIN: &str = include_str!("trim_tolerance_main.tsv");
 /// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
 /// parsed and written again, so the digest is of the values, not of their spelling), with
 /// each moved value of `rows` (`key[index]` of its case, bit for bit its `n`) put back to its
-/// `o`. An `Err` names a moved value the file does not hold as the row has it, or a row whose
-/// case the file does not have.
-fn expected_digest(text: &str, rows: &[Row]) -> Result<u64, String> {
+/// `o`, and each case of `whole` put back to main's line whole. An `Err` names a moved value
+/// the file does not hold as the row has it, a row or whole case the file does not have, a
+/// case in both, or a whole case whose line is main's (a stale entry).
+fn expected_digest(text: &str, rows: &[Row], whole: &[WholeCase]) -> Result<u64, String> {
     use crate::json::{num, num_of, to_canonical_string};
     let mut canonical = String::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -1128,6 +1130,19 @@ fn expected_digest(text: &str, rows: &[Row]) -> Result<u64, String> {
         let mut v: serde_json::Value =
             serde_json::from_str(line).map_err(|e| format!("a line: {e}"))?;
         let case = v["case"].as_str().map(str::to_string);
+        if let Some(w) = whole.iter().find(|w| Some(&w.case) == case.as_ref()) {
+            if rows.iter().any(|r| r.case == w.case) {
+                return Err(format!("{}: both a row and a whole case", w.case));
+            }
+            if to_canonical_string(&v) == to_canonical_string(&w.main) {
+                return Err(format!(
+                    "{}: main's line, drop its whole-case entry",
+                    w.case
+                ));
+            }
+            seen.insert(w.case.clone());
+            v = w.main.clone();
+        }
         if let Some(row) = case.and_then(|c| rows.iter().find(|r| r.case == c)) {
             seen.insert(row.case.clone());
             for (key, index, old, new) in &row.moved {
@@ -1147,7 +1162,263 @@ fn expected_digest(text: &str, rows: &[Row]) -> Result<u64, String> {
     if let Some(row) = rows.iter().find(|r| !seen.contains(&r.case)) {
         return Err(format!("{}: not in the expected file", row.case));
     }
+    if let Some(w) = whole.iter().find(|w| !seen.contains(&w.case)) {
+        return Err(format!("{}: not in the expected file", w.case));
+    }
     Ok(crate::rng::fnv1a64(&canonical))
+}
+
+/// The cases that changed as a whole, not value by value, one JSON object per line: `unit`,
+/// `case`, `main`, the case's line in main's expected file, and `open`, the gaps the
+/// certificate cannot enclose ([`WholeCase::open`]). A whole case's result is not
+/// main's with some tolerances lowered: its B-rep came out with its entities in another order
+/// and other geometry, so the rows cannot pair its values with main's.
+/// [`whole_cases_are_certified`] certifies the new result on its own instead.
+///
+/// - `blend.fillet_executive_p3` `stubs4-sphere_plane-e3-r0.5`: the fillet's three new edges
+///   come out with tolerance 1.3507e-4, 1.4249e-4 on main. The lower tolerance comes from a
+///   raise whose bound used to run out of pieces and fall back to upstream's twice the fit
+///   error. The early cutoff of the bound (`trim_image_gap_bound_within`) now leaves pieces
+///   for it, so it proves its bound. The fillet's curves are then fitted to the lower
+///   tolerance: the same vertices, the edges in another order, the spring-line curves on the
+///   same circles but parametrised differently.
+const CASES: &str = include_str!("trim_tolerance_cases.jsonl");
+
+/// One entry of [`CASES`].
+struct WholeCase {
+    unit: String,
+    case: String,
+    /// The case's line in main's expected file.
+    main: serde_json::Value,
+    /// The gaps this certificate has no enclosure for: `(body, edge, edge use, class)`, the
+    /// class `blend-surface` (a trim on a procedural blend surface, which has no exact NURBS
+    /// net) or `line-off-plane` (a UV line trim on a surface other than a plane, see
+    /// [`use_bound`]).
+    open: Vec<(usize, u32, u32, String)>,
+}
+
+/// [`CASES`] of `unit`, or of every unit for `None`.
+fn whole_cases(unit: Option<&str>) -> Vec<WholeCase> {
+    CASES
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).expect("a whole case");
+            let id = |d: &serde_json::Value| {
+                u32::try_from(d.as_u64().expect("an index")).expect("an index")
+            };
+            let open = v["open"]
+                .as_array()
+                .expect("open gaps")
+                .iter()
+                .map(|o| {
+                    (
+                        usize::try_from(o[0].as_u64().expect("a body")).expect("a body"),
+                        id(&o[1]),
+                        id(&o[2]),
+                        o[3].as_str().expect("a class").to_string(),
+                    )
+                })
+                .collect();
+            WholeCase {
+                unit: v["unit"].as_str().expect("unit").to_string(),
+                case: v["case"].as_str().expect("case").to_string(),
+                main: v["main"].clone(),
+                open,
+            }
+        })
+        .filter(|w| unit.is_none_or(|u| w.unit == u))
+        .collect()
+}
+
+/// Each case of [`CASES`] gives a result that is valid on its own:
+/// - the same error, deferral, statuses and counts as main (every integer array main's
+///   expected line writes out in full, e.g. the vertex, edge and face counts and the mass
+///   status);
+/// - every B-rep the runner writes passes `check_brep` level 2 with no line;
+/// - every edge's tolerance covers each of its trims by a proved bound, and its curve's
+///   distance to each face where it holds no trim (as a row's moved edge, [`edge_bounds`]),
+///   but for the entry's `open` gaps, exactly those, each of its class (checked here), whose
+///   edges' sampled gaps ([`super::tolerance_covers`]) must be within the tolerance
+///   (MEASURED, not proved: counted open, as [`OPEN`]'s);
+/// - every vertex's tolerance covers the ends of its edges ([`vertex_covers_its_ends`]).
+///
+/// So every tolerance of the new result is proved, not only the moved ones, but for the
+/// listed gaps.
+#[test]
+fn whole_cases_are_certified() {
+    let ctx = CaseContext {
+        root: repo_root(),
+        seeds: 16,
+    };
+    let whole = whole_cases(None);
+    assert!(
+        !whole.is_empty(),
+        "no whole cases: drop this test with them"
+    );
+    let mut failures = Vec::new();
+    for w in &whole {
+        let runner = crate::registry()
+            .into_iter()
+            .find(|u| u.id() == w.unit)
+            .expect("the unit");
+        let cases = runner.cases(&ctx).expect("cases");
+        let case = cases
+            .iter()
+            .find(|c| c.name == w.case)
+            .unwrap_or_else(|| panic!("{}: no case {}", w.unit, w.case));
+        super::watch_written();
+        let out = runner.run_rust(case);
+        let mut bodies = super::take_written();
+        let at = format!("{} {}", w.unit, w.case);
+        let out = out.unwrap_or_else(|e| panic!("{at}: {e:?}"));
+        assert_eq!(
+            out.error.as_deref(),
+            w.main["error"].as_str(),
+            "{at}: error"
+        );
+        assert!(
+            out.deferred.is_none() && w.main["deferred"].is_null(),
+            "{at}: deferred"
+        );
+        let main_ints = w.main["ints"].as_object().expect("main's ints");
+        let mut compared = 0;
+        for (key, want) in main_ints {
+            let Some(want) = want.as_array() else {
+                continue; // a digest block, not the array itself
+            };
+            let want: Vec<i64> = want.iter().map(|x| x.as_i64().expect("an int")).collect();
+            assert_eq!(out.ints.get(key), Some(&want), "{at}: {key}");
+            compared += 1;
+        }
+        assert!(compared > 0, "{at}: no integer array compared with main");
+        assert!(!bodies.is_empty(), "{at}: no B-rep written");
+        let mut k = Kernel::default();
+        let mut open_seen = std::collections::BTreeSet::new();
+        for (i, b) in bodies.iter_mut().enumerate() {
+            let lines = solidcore::topology::brep::validation::soundness(&mut k, b)
+                .expect("soundness")
+                .check
+                .lines();
+            if !lines.is_empty() {
+                failures.push(format!("{at} body {i}: check_brep level 2: {lines:?}"));
+            }
+            let (mut edges, mut trims, mut worst) = (0, 0, 0.0_f64);
+            let covers = super::tolerance_covers(&k, b).0;
+            for (e, rec) in b.edges().iter() {
+                let tol = rec.tolerance;
+                let mut open_here = false;
+                for f in edge::faces(b, e, None).expect("faces") {
+                    let mut trimmed = false;
+                    for &eu in &rec.edgeuses {
+                        if eu1::face(b, eu).expect("face") != Some(f) {
+                            continue;
+                        }
+                        let x = match use_bound(&k, b, e, eu) {
+                            UseBound::NoTrim => continue,
+                            UseBound::Bound(x) if x <= tol => {
+                                worst = worst.max(x / tol);
+                                trims += 1;
+                                trimmed = true;
+                                continue;
+                            }
+                            x => x,
+                        };
+                        trimmed = true;
+                        // not enclosed: open only for a listed gap of an enclosure this
+                        // certificate does not have (the class checked here)
+                        let entry = (i, e.index(), eu.index());
+                        let class = w.open.iter().find(|o| (o.0, o.1, o.2) == entry);
+                        let surface = b.face(f).expect("face").surface.as_ref();
+                        let trim = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref();
+                        let holds = match class.map(|o| o.3.as_str()) {
+                            Some("blend-surface") => surface.is_some_and(|s| {
+                                matches!(s.kind(), SurfaceKind::ProceduralBlend(_))
+                            }),
+                            Some("line-off-plane") => {
+                                trim.is_some_and(|c| matches!(c.kind(), CurveKind::Line(_)))
+                                    && surface
+                                        .is_some_and(|s| !matches!(s.kind(), SurfaceKind::Plane(_)))
+                            }
+                            _ => false,
+                        };
+                        if holds {
+                            open_seen.insert(entry);
+                            open_here = true;
+                        } else {
+                            failures.push(format!(
+                                "{at} body {i} edge {} use {}: B {x:?} over {tol:e}",
+                                e.index(),
+                                eu.index()
+                            ));
+                        }
+                    }
+                    if !trimmed {
+                        match face_bound(&k, b, e, f, tol) {
+                            Some(x) if x <= tol => {
+                                worst = worst.max(x / tol);
+                                trims += 1;
+                            }
+                            x => failures.push(format!(
+                                "{at} body {i} edge {} face {}: B {x:?} over {tol:e}",
+                                e.index(),
+                                f.index()
+                            )),
+                        }
+                    }
+                }
+                if open_here {
+                    // an open gap's edge: its sampled gaps (`CalcMaxEdgeFaceGap`'s 20
+                    // samples per face, each enclosed) within its tolerance. Measured, not
+                    // proved: the entry stays open
+                    match covers.iter().find(|c| c.edge == e) {
+                        Some(c) if c.needed_hi <= tol => {
+                            println!(
+                                "{at} body {i} edge {}: open, sampled gap at most {:e} of {tol:e}",
+                                e.index(),
+                                c.needed_hi
+                            );
+                        }
+                        c => failures.push(format!(
+                            "{at} body {i} edge {}: open, sampled gap {:?} over {tol:e}",
+                            e.index(),
+                            c.map(|c| c.needed_hi)
+                        )),
+                    }
+                }
+                edges += 1;
+            }
+            let mut vertices = 0;
+            for (v, rec) in b.vertices().iter() {
+                if !vertex_covers_its_ends(&k, b, v, rec.tolerance) {
+                    failures.push(format!(
+                        "{at} body {i} vertex {}: an edge end past {:e}",
+                        v.index(),
+                        rec.tolerance
+                    ));
+                }
+                vertices += 1;
+            }
+            println!(
+                "{at} body {i}: {edges} edges ({trims} gaps bounded, worst B/tol {worst:.3}), \
+                 {vertices} vertices, level 2 {} lines",
+                lines.len()
+            );
+            assert!(
+                edges > 0 && vertices > 0,
+                "{at} body {i}: no edges or vertices"
+            );
+        }
+        let listed: std::collections::BTreeSet<_> =
+            w.open.iter().map(|o| (o.0, o.1, o.2)).collect();
+        assert_eq!(open_seen, listed, "{at}: open gaps not reached");
+    }
+    assert!(
+        failures.is_empty(),
+        "{} not certified:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 /// The units of [`ROWS`].
@@ -1162,9 +1433,10 @@ fn row_units() -> std::collections::BTreeSet<String> {
 }
 
 /// The ledger is the whole golden diff from main: every expected file, with each moved value
-/// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
-/// unit's expected file on main). So no unit, case, moved value or other change is left out
-/// of the rows, and each row's new value is the expected one.
+/// of [`ROWS`] put back to its old value and each case of [`CASES`] to main's line, is main's
+/// file ([`MAIN`] holds the digest of every unit's expected file on main). So no unit, case,
+/// moved value or other change is left out of the rows and whole cases, and each row's new
+/// value is the expected one.
 #[test]
 fn the_rows_are_the_whole_golden_diff_from_main() {
     let main: std::collections::BTreeMap<String, u64> = MAIN
@@ -1187,15 +1459,20 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         units,
         "the expected units here and on main"
     );
-    let missing: Vec<_> = row_units().difference(&units).cloned().collect();
+    let missing: Vec<_> = row_units()
+        .into_iter()
+        .chain(whole_cases(None).into_iter().map(|w| w.unit))
+        .filter(|u| !units.contains(u))
+        .collect();
     assert!(
         missing.is_empty(),
-        "ROWS units with no expected file: {missing:?}"
+        "ROWS or CASES units with no expected file: {missing:?}"
     );
     for (unit, want) in &main {
         let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
             .unwrap_or_else(|e| panic!("{unit}: {e}"));
-        let got = expected_digest(&text, &rows(unit)).unwrap_or_else(|e| panic!("{unit}: {e}"));
+        let got = expected_digest(&text, &rows(unit), &whole_cases(Some(unit)))
+            .unwrap_or_else(|e| panic!("{unit}: {e}"));
         assert_eq!(got, *want, "{unit}: {got:016x}, main {want:016x}");
     }
 }
@@ -1227,7 +1504,7 @@ fn main_expected_digests() {
         let text =
             std::fs::read_to_string(std::path::Path::new(&dir).join(format!("{unit}.jsonl")))
                 .unwrap_or_else(|e| panic!("{unit}: {e}"));
-        let digest = expected_digest(&text, &[]).expect("main's file");
+        let digest = expected_digest(&text, &[], &[]).expect("main's file");
         out.push_str(&format!("{unit}\t{digest:016x}\n"));
     }
     std::fs::write(
