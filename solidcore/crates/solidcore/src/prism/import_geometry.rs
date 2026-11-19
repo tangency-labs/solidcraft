@@ -8,7 +8,7 @@ pub fn scale_point(point: Vec2, scale: f64) -> Vec2 {
 }
 /// Express a planar point in units of an axis-aligned chord, with its nose at x = 0.
 /// The same divisor scales both coordinates, preserving the section's aspect ratio.
-/// This is the affine map ((x - leading_x) / c, y / c), c = trailing_x - leading_x.
+/// This is the affine map ((x - `leading_x`) / c, y / c), c = `trailing_x` - `leading_x`.
 ///
 /// # Errors
 /// Non-finite coordinates, a non-positive or non-finite chord, or an unrepresentable result.
