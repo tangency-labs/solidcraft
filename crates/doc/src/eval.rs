@@ -64,6 +64,10 @@ pub struct ModelBody {
     faces: Arc<std::sync::Mutex<MeasuredFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
+    /// The mesh a cam's profile is read from: the body's edges at the cam's own tolerance. Made
+    /// once and kept, so a solve that works the cam's table out again does not mesh the body
+    /// again (#3389).
+    cam_mesh: Arc<OnceLock<Arc<Mesh>>>,
     /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
     /// [`placed_mesh::OppositeHand`]. Display only: the model reads the copy's own triangles.
     mirrored_mesh: Option<Arc<placed_mesh::PlacedMesh>>,
@@ -98,6 +102,10 @@ pub struct ModelBody {
     pub split_from: Option<String>,
     /// The look it was imported with, carried through later features.
     pub imported: Option<Arc<crate::appearance::ImportedLook>>,
+    /// A component's envelope (a Bounding Solid of its contents): a stand-in for checks, never
+    /// one of the bodies a feature works on unless the feature names it (not by `*`, nor by
+    /// naming none).
+    pub envelope: bool,
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
     /// measured), so the evaluation cache's budget does not walk every body after every feature.
     bytes: usize,
@@ -217,6 +225,7 @@ impl ModelBody {
             joint_faces: Arc::new(OnceLock::new()),
             faces: Default::default(),
             mesh_placement: None,
+            cam_mesh: Arc::new(OnceLock::new()),
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
@@ -230,6 +239,7 @@ impl ModelBody {
             transferred: false,
             split_from: None,
             imported: None,
+            envelope: false,
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
@@ -252,6 +262,12 @@ impl ModelBody {
             // The body was replaced in this cell's holder since: measure it again.
             _ => measure(),
         }
+    }
+
+    /// Whether a feature `f` that names no bodies works on this one: a body of its component
+    /// (not the component's envelope), or one `f` made itself.
+    pub fn in_default_scope(&self, f: &Feature) -> bool {
+        (self.component == f.component && !self.envelope) || self.feature == f.id
     }
 
     /// The frame a sketch on flat face `face` is drawn in, where what built the body gives the
@@ -640,6 +656,23 @@ impl ModelBody {
     /// Already computed display geometry; saving must not trigger cold tessellation.
     pub fn cached_mesh(&self) -> Option<Arc<Mesh>> {
         self.mesh.get().cloned()
+    }
+
+    /// The mesh a cam's profile is read from: the body's edges at the cam's own tolerance (finer
+    /// than the display mesh, as the profile follows the body's outline). The cam reads its
+    /// profile from it, and it is kept with the body, so that a solve which works the cam's
+    /// table out again does not mesh the body again (#3389). `make` meshes the body: the
+    /// profile is a decision made on a mesh (`xtask/mesh-decisions.txt`), so the meshing stays
+    /// with the cam.
+    pub(crate) fn cam_mesh(&self, make: impl FnOnce() -> kernel::Result<Mesh>) -> Result<Arc<Mesh>> {
+        if let Some(mesh) = self.cam_mesh.get() {
+            return Ok(mesh.clone());
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.cam_meshes += 1);
+        let mesh = Arc::new(make()?);
+        // Another thread may have made it first: the mesh is the same either way.
+        Ok(self.cam_mesh.get_or_init(|| mesh).clone())
     }
 
     /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way, evenly
@@ -1109,6 +1142,53 @@ impl KeptSeparate {
 }
 
 impl ModelState {
+    /// This state with `bodies` in place of its own, the rest copied: a picture of some of a
+    /// model's bodies (the bodies of a design being opened that are meshed so far) without
+    /// copying every body of the model first and then dropping them.
+    pub fn with_bodies(&self, bodies: Vec<ModelBody>) -> ModelState {
+        // Every field named, so a new one is not left out.
+        let ModelState {
+            frame_bodies,
+            origin_frames,
+            threads,
+            bodies: _,
+            sketches,
+            body_counter,
+            reserved_body_names,
+            surface_sheets,
+            construct,
+            sketch_keys,
+            blend_edges,
+            named_faces,
+            fitted,
+            tapered,
+            kept_separate,
+            pattern_left_out,
+            legacy_picks,
+            cut_extents,
+        } = self;
+        ModelState {
+            frame_bodies: frame_bodies.clone(),
+            origin_frames: origin_frames.clone(),
+            threads: threads.clone(),
+            bodies,
+            sketches: sketches.clone(),
+            body_counter: *body_counter,
+            reserved_body_names: reserved_body_names.clone(),
+            surface_sheets: surface_sheets.clone(),
+            construct: construct.clone(),
+            sketch_keys: sketch_keys.clone(),
+            blend_edges: blend_edges.clone(),
+            named_faces: named_faces.clone(),
+            fitted: fitted.clone(),
+            tapered: tapered.clone(),
+            kept_separate: kept_separate.clone(),
+            pattern_left_out: pattern_left_out.clone(),
+            legacy_picks: legacy_picks.clone(),
+            cut_extents: cut_extents.clone(),
+        }
+    }
+
     /// How many joint origins have been resolved from the bodies of this model (and its copies),
     /// not taken from the frames kept ([`OriginFrames`]).
     pub fn origin_resolutions(&self) -> usize {
@@ -2492,7 +2572,7 @@ impl PlacementReads {
         let names = if targets.is_empty() { &f.participants } else { &targets };
         let all = names.len() == 1 && names.first().is_some_and(|n| n == "*");
         if all || names.is_empty() {
-            self.bodies.extend(st.bodies.iter().filter(|b| all || b.component == f.component || b.feature == f.id).map(|b| b.name.clone()));
+            self.bodies.extend(st.bodies.iter().filter(|b| if all { !b.envelope } else { b.in_default_scope(f) }).map(|b| b.name.clone()));
         } else {
             for name in names {
                 self.placed_body(Some(st), name);
@@ -2563,7 +2643,16 @@ struct EvalKey {
 }
 
 impl EvalKey {
-    fn new(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, fp: u64, ctx: u64, st: &ModelState, steps: &ImportDigests) -> EvalKey {
+    fn new(
+        doc: &Document,
+        vals: &BTreeMap<String, Value>,
+        f: &Feature,
+        fp: u64,
+        ctx: u64,
+        st: &ModelState,
+        steps: &ImportDigests,
+        geo: u64,
+    ) -> EvalKey {
         let local = fingerprint(doc, 0, f, vals, false, steps) ^ placement_digest(doc, f, Some(st)) ^ construct_digest(doc, vals, f, Some(st));
         let whole = cache_key(f, fp, local, ctx, st);
         let reads = f.reads(doc, st).map(|read| {
@@ -2572,6 +2661,13 @@ impl EvalKey {
             local.hash(&mut h);
             ctx.hash(&mut h);
             f.id.hash(&mut h);
+            // An import reads the file it names and nothing of the model, so it keeps its result
+            // while the features before it are the same: a part that moves leaves the file
+            // unread (#17310). The features' own inputs, without where they are placed, are in
+            // the key: a change to them (a new length) reads the file again.
+            if matches!(f.kind, FeatureKind::Import { .. }) {
+                geo.hash(&mut h);
+            }
             // A pattern replays its features' definitions.
             if let FeatureKind::Pattern { features, .. } = &f.kind {
                 for id in features {
@@ -2731,7 +2827,8 @@ impl Feature {
     /// numbers or a construction plane (its projections reading the bodies and sketches they
     /// name), an extrude or revolve from a sketch of its component on the bodies it names or its
     /// component's bodies (no To / From Object, through all or taper), a fillet or chamfer of
-    /// the body its edges lie on (#6183). Construction geometry it names is in its key already
+    /// the body its edges lie on (#6183), an import (the file it names, and nothing of the
+    /// model). Construction geometry it names is in its key already
     /// ([`construct_digest`]). Never with a face picked by name, or an edge picked by name outside
     /// a fillet or chamfer; everything else may read anything (faces, To Object, `*` for every
     /// body).
@@ -2771,6 +2868,11 @@ impl Feature {
         match &self.kind {
             // A cylinder placed by reference edges reads the faces they lie on.
             k if numeric_tool(k) && hole_references(self).is_empty() => bodies(operated(feature_op(self))?),
+            // An import reads the file it names (in its own fingerprint) and nothing of the
+            // model: its bodies are its own, and their names follow the names the model
+            // already has (in the key of what it reads). A part that moves elsewhere in the
+            // timeline leaves it as it was, and the file is not read again (#17310).
+            FeatureKind::Import { .. } => Some(Reads::default()),
             FeatureKind::Pattern { bodies: copied, pattern, .. } if !copied.is_empty() && fixed_pattern(pattern) => {
                 bodies(named(&crate::plain::<String, _>(copied))?)
             }
@@ -3286,6 +3388,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // fold in here, each relative to the reading component, as `reads.paths` does.
             return mirror_placements_digest(doc, f, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
         }
+        // A component's envelope bounds what is placed inside it, where it stands in its frame:
+        // moving a part inside it builds it again, moving the component does not.
+        FeatureKind::BoundingSolid { contents: true, .. } => return contents_digest(doc, f, st),
         // A combine moves tools placed differently from its target into the target's frame (#3383).
         FeatureKind::Combine { target, tools, .. } => {
             frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
@@ -3443,6 +3548,23 @@ fn hash_placed_bodies(doc: &Document, st: Option<&ModelState>, names: &std::coll
             None => u8::MAX.hash(h),
         }
     }
+}
+
+/// [`placement_digest`] of a component's envelope: each placement inside its component, relative
+/// to that component, and the bodies each holds with their offsets. Never 0.
+fn contents_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 {
+    let Some(st) = st else { return placements_hash(doc) | 1 };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    match crate::envelope::placed_contents(doc, st, f.component) {
+        Ok(placed) => {
+            for (b, m) in placed {
+                b.name.hash(&mut h);
+                hash_placement(&m, &mut h);
+            }
+        }
+        Err(e) => e.to_string().hash(&mut h),
+    }
+    h.finish() | 1
 }
 
 /// Every occurrence's placement and every body offset (a feature read from a frame that cannot
@@ -3825,6 +3947,11 @@ impl Model {
         // read once: the context, the fingerprints and the model's record agree
         let heal = kernel::heals_tolerance_defects();
         self.heal_off = !heal;
+        // The features' own inputs, without where they are placed: a part that moves leaves them
+        // as they were. An import keeps its result while they are the same, so a move of a part
+        // does not read the file again (#17310). Only a design with an import needs the digest.
+        let with_import = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Import { .. }));
+        let mut geo = 0u64;
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
@@ -3837,6 +3964,9 @@ impl Model {
         for f in &doc.features {
             feature_component.entry(f.id).or_insert(f.component);
         }
+        // The component envelopes' features: the bodies they made are marked after every feature.
+        let envelopes: std::collections::HashSet<u64> =
+            doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
         let watched = crate::progress::begin(doc.features.len());
         let mut poses = std::collections::HashMap::new();
         // Pose-only features evaluated again for a pose change alone: their new bodies, which
@@ -3860,6 +3990,7 @@ impl Model {
                 out.truncate(s.out_len);
                 reuse = s.reuse;
                 prev_fp = s.prev_fp;
+                geo = s.geo;
                 recomputed = s.recomputed;
                 restored = s.restored;
                 poses = s.poses;
@@ -3874,6 +4005,8 @@ impl Model {
                     continue 'pass;
                 }
                 let (reuse_in, prev_fp_in) = (reuse, prev_fp);
+                // The digest of the features before this one, for an import's key (#17310).
+                let geo_in = geo;
                 if let Some(r) = out.last()
                     && let Some(e) = &r.error
                 {
@@ -3899,6 +4032,11 @@ impl Model {
                 let cancelled = watched.step(i);
                 let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
                 prev_fp = fp;
+                if with_import {
+                    // This feature's own inputs, without where it is placed: the digest of the
+                    // features before an import says whether the model around it changed (#17310).
+                    geo ^= fingerprint(doc, 0, f, &vals, rolled_back, &self.import_digests);
+                }
                 let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
                 if let Some(pose) = pose {
                     poses.insert(f.id, pose);
@@ -3993,7 +4131,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests);
+                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests, geo_in);
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
                 if !self.no_cache
                     && let Some(c) = self
@@ -4166,6 +4304,7 @@ impl Model {
                         out_len: out.len(),
                         reuse: reuse_in,
                         prev_fp: prev_fp_in,
+                        geo: geo_in,
                         recomputed: recomputed - 1,
                         restored,
                         poses: poses.clone(),
@@ -4254,6 +4393,7 @@ impl Model {
                             }
                         }
                         for b in &mut next.bodies {
+                            b.envelope = envelopes.contains(&b.feature);
                             if !b.transferred {
                                 b.component = match doc.body_components.get(&b.name) {
                                     Some(c) => *c,
@@ -5083,7 +5223,13 @@ fn apply_beside_sheet_cut(
         .filter(|b| {
             !handled.contains(&b.name)
                 && (!skip_surfaces || !b.is_surface())
-                && (all || if effective.is_empty() { b.component == f.component || b.feature == f.id } else { effective.contains(&b.name) })
+                && (if all {
+                    !b.envelope
+                } else if effective.is_empty() {
+                    b.in_default_scope(f)
+                } else {
+                    effective.contains(&b.name)
+                })
         })
         .map(|b| b.name.clone())
         .collect();
@@ -5377,7 +5523,15 @@ pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String])
     let names = state
         .bodies
         .iter()
-        .filter(|b| all || if effective.is_empty() { b.component == f.component || b.feature == f.id } else { effective.contains(&b.name) })
+        .filter(|b| {
+            if all {
+                !b.envelope
+            } else if effective.is_empty() {
+                b.in_default_scope(f)
+            } else {
+                effective.contains(&b.name)
+            }
+        })
         .map(|b| b.name.clone())
         .collect();
     (!all && !effective.is_empty(), names)
@@ -5457,9 +5611,9 @@ fn apply_traced_with(
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     let named = !all && !targets.is_empty();
     let mut target_idx: Vec<usize> = if all {
-        (0..state.bodies.len()).collect()
+        (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| !b.envelope)).collect()
     } else if targets.is_empty() {
-        (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| b.component == f.component || b.feature == f.id)).collect()
+        (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| b.in_default_scope(f))).collect()
     } else {
         let mut v = Vec::new();
         for t in targets {
@@ -8633,24 +8787,20 @@ fn feature_tools_with_constructor(
                 let ctl = sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                 return regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect();
             }
-            let ps =
-                st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
-            let profile;
-            let ss = if !ps.sketch.wires.is_empty() {
-                profile = profile_in_frame(doc, ss, f.component)?;
-                &profile
-            } else {
-                ss
-            };
-            let mapped = path_in_frame(doc, ps, f.component)?;
-            let ps = mapped.as_ref();
+            // Each path curve in the sketch it is in, mapped into the feature's frame: the path
+            // may join the curves of several sketches (#16168).
+            let curves = path_curves(doc, st, path, *path_sketch, f.component)?;
+            // The profile joins the path in the feature's frame, whatever sketch each is drawn
+            // in (identity when a sketch shares the feature's component).
+            let profile = profile_in_frame(doc, ss, f.component)?;
+            let ss = &profile;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
             let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
             let tool = |r: &Region2, body: Body| crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None);
-            let points = path_points(ps, path, start)?;
+            let points = path_points(&curves, start)?;
             let segs = match points {
                 Some(_) => Vec::new(),
-                None => path_segments_at(ps, path, start, Some(&ss.plane))?,
+                None => path_segments_at(&curves, start, Some(&ss.plane))?,
             };
             let path_start =
                 points.as_ref().and_then(|p| p.points().first().copied()).or_else(|| segs.first().map(kernel::PathSeg::start)).unwrap_or(start);
@@ -8674,7 +8824,7 @@ fn feature_tools_with_constructor(
             let region = pipe_region(vals, r, wall)?;
             // Its faces are named as a sweep's caps and a cylinder's wall are (#14897).
             let tool = |body: Body| crate::lineage::pipe_tool(body, region.outer.segs.len());
-            if let Some(along) = path_points(ps, path, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+            if let Some(along) = path_points(&curves_in(ps, path), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 let pts = along.points();
                 let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied()) else { return Err(DocError::Invalid("empty path".into())) };
                 let t = (b - a).normalized().ok_or_else(|| DocError::Invalid("path direction".into()))?;
@@ -8773,7 +8923,7 @@ pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::Sw
                 .ok_or_else(|| DocError::Unknown(format!("rail sketch {} (it must come earlier in the timeline)", rail.sketch)))?;
             let mapped = path_in_frame(doc, rs, consumer)?;
             let rs = mapped.as_ref();
-            match path_points(rs, &rail.curves, start)? {
+            match path_points(&curves_in(rs, &rail.curves), start)? {
                 Some(path) => Ok(path.points()),
                 None => Ok(kernel::path_polyline(&path_segments(rs, &rail.curves, start)?)?),
             }
@@ -8837,12 +8987,10 @@ fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<Solve
     Ok(mapped)
 }
 
-/// Stored wire coordinates are converted once into the feature consumer frame.
+/// Stored coordinates are converted once into the feature consumer frame: the sketch's plane
+/// (its planar curves are read through it, #16168) and its 3D wires.
 fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) -> Result<std::borrow::Cow<'a, SolvedSketch>> {
     use std::borrow::Cow;
-    if sketch.sketch.wires.is_empty() {
-        return Ok(Cow::Borrowed(sketch));
-    }
     let owner = doc.feature(sketch.feature).map(|f| f.component).unwrap_or(0);
     let inverse =
         crate::mat_inverse(&doc.component_transform(consumer)).ok_or_else(|| DocError::Invalid("path consumer frame is not invertible".into()))?;
@@ -8861,22 +9009,58 @@ fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) ->
     Ok(Cow::Owned(mapped))
 }
 
-/// A path that uses 3D sketch curves (wires), as one chain of pieces from the end nearest
-/// `start` (no start: the first curve runs toward the second): each drawn 3D spline as its fit
-/// points (the kernel has its exact curve), each curve held exactly (a planar sketch curve, a
-/// linked curve with [`solidcraft_sketch::Wire::exact`]) as its path segments, and a linked
-/// curve known only as points as those points. `None` when the path is all planar curves.
-fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<kernel::PointPath>> {
-    if !ids.iter().any(|id| ps.sketch.wire_index(id).is_some()) {
+/// One curve of a path: the sketch it is in (already in the feature's frame) and the curve's id.
+/// A path may join the curves of several sketches (#16168); the sketches are shared, one each.
+pub(crate) struct PathCurve {
+    ss: std::rc::Rc<SolvedSketch>,
+    id: String,
+}
+
+/// Every id as a curve of the one sketch `ps`, for the path helpers' callers whose path is the
+/// curves of a single sketch.
+fn curves_in(ps: &SolvedSketch, ids: &[String]) -> Vec<PathCurve> {
+    let ss = std::rc::Rc::new(ps.clone());
+    ids.iter().map(|id| PathCurve { ss: ss.clone(), id: id.clone() }).collect()
+}
+
+/// A sweep's path curves resolved: each entry's curve in its own sketch, each sketch mapped into
+/// the feature's frame (#16168). An entry without a sketch of its own is a curve of the path's
+/// sketch, as designs before cross-sketch paths saved.
+fn path_curves(doc: &Document, st: &ModelState, path: &[crate::PathEntry], path_sketch: crate::SketchId, component: u64) -> Result<Vec<PathCurve>> {
+    let mut mapped: Vec<(u64, std::rc::Rc<SolvedSketch>)> = Vec::new();
+    for entry in path {
+        let (sid, _) = entry.split(path_sketch);
+        if !mapped.iter().any(|(s, _)| *s == sid.0) {
+            let sk = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid} (it must come earlier in the timeline)")))?;
+            let sketch = std::rc::Rc::new(path_in_frame(doc, sk, component)?.into_owned());
+            mapped.push((sid.0, sketch));
+        }
+    }
+    let mut curves: Vec<PathCurve> = Vec::with_capacity(path.len());
+    for entry in path {
+        let (sid, id) = entry.split(path_sketch);
+        let (_, ss) = mapped.iter().find(|(s, _)| *s == sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
+        curves.push(PathCurve { ss: ss.clone(), id: id.to_string() });
+    }
+    Ok(curves)
+}
+
+/// A path that uses 3D sketch curves (wires), as one chain of pieces put in order from the end
+/// nearest `start` (no start: the first curve runs toward the second): each drawn 3D spline as
+/// its fit points (the kernel has its exact curve), each curve held exactly (a planar sketch
+/// curve, a linked curve with [`solidcraft_sketch::Wire::exact`]) as its path segments, and a
+/// linked curve known only as points as those points. `None` when the path is all planar curves.
+fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::PointPath>> {
+    if !curves.iter().any(|c| c.ss.sketch.wire_index(&c.id).is_some()) {
         return Ok(None);
     }
-    if ids.len() > 1000 {
+    if curves.is_empty() || curves.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
-    let mut pieces: Vec<kernel::PathPiece> = Vec::with_capacity(ids.len());
-    for id in ids {
-        if let Some(wi) = ps.sketch.wire_index(id) {
-            pieces.push(match ps.sketch.wires.get(wi) {
+    let mut pieces: Vec<kernel::PathPiece> = Vec::with_capacity(curves.len());
+    for c in curves {
+        if let Some(wi) = c.ss.sketch.wire_index(&c.id) {
+            pieces.push(match c.ss.sketch.wires.get(wi) {
                 // A drawn 3D arc is its circle, from its start counter-clockwise about its normal
                 // (its three fit points define it; a spline through them is not the arc).
                 Some(solidcraft_sketch::Wire { arc: Some(arc), .. }) => {
@@ -8897,20 +9081,47 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
                 w => kernel::PathPiece::Polyline(w.map(|w| w.pts.clone()).unwrap_or_default()),
             });
         } else {
-            let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-            let segs = ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci));
-            pieces.push(kernel::PathPiece::Segs(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect()));
+            let ci = c.ss.sketch.curve_index(&c.id).ok_or_else(|| DocError::Unknown(format!("path curve `{}`", c.id)))?;
+            let segs = c.ss.sketch.exact_segs(ci).unwrap_or_else(|| c.ss.sketch.segs(ci));
+            pieces.push(kernel::PathPiece::Segs(segs.iter().map(|s| kernel::PathSeg::of_sketch(&c.ss.plane, s)).collect()));
         }
     }
-    // Pieces meet within the sketch's tolerance (projected curves are only that close).
+    // Pieces are put end to end from the end nearest `start`, whatever order they were picked
+    // in (#16168); they must meet within the sketches' tolerance (projected curves are only
+    // that close).
     let tol = 1e-3;
     let ends = |p: &kernel::PathPiece| {
         let pts = p.points();
         (pts.first().copied().unwrap_or_default(), pts.last().copied().unwrap_or_default())
     };
-    let mut pieces = pieces.into_iter();
-    let Some(first) = pieces.next() else { return Ok(None) };
-    let rest: Vec<kernel::PathPiece> = pieces.collect();
+    let mut rest: Vec<kernel::PathPiece> = pieces;
+    // The chain starts at a free end of the run, the one nearest `start`: a middle pick would
+    // otherwise chain only onward from it and refuse the other side (#16168). A ring has no
+    // free end; its first piece stays first.
+    let near_start = |p: Vec3| if start.is_finite() { p.dist(start) } else { 0.0 };
+    if rest.len() > 1 {
+        let touches = |i: usize, p: Vec3| {
+            rest.iter().enumerate().any(|(j, q)| {
+                j != i && {
+                    let (x, y) = ends(q);
+                    x.dist(p) <= tol || y.dist(p) <= tol
+                }
+            })
+        };
+        let free = |i: usize| {
+            let (a, b) = ends(&rest[i]);
+            (!touches(i, a) || !touches(i, b)).then_some(i)
+        };
+        let end_dist = |i: usize| {
+            let (a, b) = ends(&rest[i]);
+            near_start(a).min(near_start(b))
+        };
+        if let Some(i) = (0..rest.len()).filter_map(free).min_by(|&x, &y| end_dist(x).total_cmp(&end_dist(y))) {
+            rest.swap(0, i);
+        }
+    }
+    let Some(first) = rest.first().cloned() else { return Ok(None) };
+    rest.remove(0);
     let (a, b) = ends(&first);
     let flip = if start.is_finite() {
         b.dist(start) < a.dist(start)
@@ -8921,22 +9132,35 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
         })
     };
     let first = if flip { first.reversed() } else { first };
-    let mut last = ends(&first).1;
     let mut chain = vec![first];
-    for p in rest {
-        let (a, b) = ends(&p);
-        let (p, a, b) = if b.dist(last) < a.dist(last) { (p.reversed(), b, a) } else { (p, a, b) };
-        if a.dist(last) > tol {
+    let mut last = ends(&chain[0]).1;
+    while !rest.is_empty() {
+        // The unused piece with the end nearest where the chain stands, reversed where the
+        // chain runs against it.
+        let mut best: Option<(usize, bool, f64)> = None;
+        for (i, p) in rest.iter().enumerate() {
+            let (a, b) = ends(p);
+            let (da, db) = (a.dist(last), b.dist(last));
+            if best.is_none_or(|(_, _, bd)| da.min(db) < bd) {
+                best = Some((i, db < da, da.min(db)));
+            }
+        }
+        let Some((i, reverse, d)) = best else { break };
+        if d > tol {
             return Err(DocError::Invalid("the path curves are not connected end to end".into()));
         }
+        let mut p = rest.swap_remove(i);
+        if reverse {
+            p = p.reversed();
+        }
+        last = ends(&p).1;
         chain.push(p);
-        last = b;
     }
     Ok(Some(kernel::PointPath { pieces: chain }))
 }
 
 fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
-    path_segments_at(ps, ids, start, None)
+    path_segments_at(&curves_in(ps, ids), start, None)
 }
 
 /// The path segments of a sweep's path on a body's edges (#2216): the chain the picked edges
@@ -9095,71 +9319,87 @@ fn closest_on_curve(c: &solidcore_record::brep::Curve, [t0, t1]: [f64; 2], p: Ve
 /// profile's plane crosses it nearest `start`, the curve there split in two, when that is not
 /// already where the chain starts (#3345). Swept from anywhere else, the profile would stand
 /// off the path by the distance between the two.
-pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, profile: Option<&Plane>) -> Result<Vec<kernel::PathSeg>> {
-    if ids.is_empty() || ids.len() > 1000 {
+pub(crate) fn path_segments_at(curves: &[PathCurve], start: Vec3, profile: Option<&Plane>) -> Result<Vec<kernel::PathSeg>> {
+    if curves.is_empty() || curves.len() > 1000 {
         return Err(DocError::Invalid("the path needs 1…1000 curves".into()));
     }
     // A path through 3D sketch curves is followed as a 3D polyline.
-    if let Some(path) = path_points(ps, ids, start)? {
+    if let Some(path) = path_points(curves, start)? {
         return Ok(path.points().windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
     }
-    // Each curve as its exact pieces (Béziers, conics) where it has them, in its own direction
-    // of travel. A curve is turned round whole: its pieces stay one run.
-    let mut curves: Vec<Vec<solidcore_record::Seg2>> = Vec::with_capacity(ids.len());
-    for id in ids {
-        let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-        curves.push(ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci)));
-    }
-    curves.retain(|c| !c.is_empty());
-    let ends = |c: &[solidcore_record::Seg2]| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()));
-    let reversed = |c: Vec<solidcore_record::Seg2>| c.into_iter().rev().map(|s| s.reversed()).collect::<Vec<_>>();
+    // Each curve as its exact pieces (Béziers, conics) where it has them, on the plane of the
+    // sketch it is in: the path may join curves of several sketches, whose planes differ
+    // (#16168). A curve is turned round whole: its pieces stay one run.
+    let mut curves: Vec<(Plane, Vec<solidcore_record::Seg2>)> = curves
+        .iter()
+        .map(|c| {
+            let ci = c.ss.sketch.curve_index(&c.id).ok_or_else(|| DocError::Unknown(format!("path curve `{}`", c.id)))?;
+            Ok((c.ss.plane, c.ss.sketch.exact_segs(ci).unwrap_or_else(|| c.ss.sketch.segs(ci))))
+        })
+        .collect::<Result<_>>()?;
+    curves.retain(|(_, c)| !c.is_empty());
+    let ends = |(plane, c): &(Plane, Vec<solidcore_record::Seg2>)| {
+        c.first().zip(c.last()).map(|(f, l)| (plane.to_world(f.start()), plane.to_world(l.end())))
+    };
     // Where two curves meet: one tolerance for telling which ends touch and for the joint.
     const JOINT: f64 = 1e-5;
-    // Curves listed out of chain order are one chain all the same (#12199): when the list is
-    // not already end to end, put each next curve where one of its ends meets the chain's end.
-    curves = chain_order(curves, JOINT);
+    // Curves listed out of chain order are one chain all the same (#12199, #16168): when the
+    // list is not already end to end, put each next curve where one of its ends meets the
+    // chain's end.
+    curves = chain_order(curves, JOINT, ends);
     // Orient the first curve: it runs toward the second where it meets it at one end only;
     // otherwise (one curve, or a second meeting it at both ends) from the end nearest `start`
     // (no start given, a pipe: as drawn).
-    let w = |p: Vec2| ps.plane.to_world(p);
-    if let Some((a, b)) = curves.first().and_then(|c| ends(c)) {
-        let touches = |p: Vec2| curves.get(1).and_then(|n| ends(n)).is_some_and(|(na, nb)| na.dist(p) <= JOINT || nb.dist(p) <= JOINT);
+    if let Some((a, b)) = curves.first().and_then(ends) {
+        let touches = |p: Vec3| curves.get(1).and_then(ends).is_some_and(|(na, nb)| na.dist(p) <= JOINT || nb.dist(p) <= JOINT);
         let flip = match (touches(a), touches(b)) {
             (true, false) => true,
             (false, true) => false,
-            _ => start.is_finite() && w(b).dist(start) < w(a).dist(start),
+            _ => start.is_finite() && b.dist(start) < a.dist(start),
         };
         if flip && let Some(first) = curves.first_mut() {
-            *first = reversed(std::mem::take(first));
+            first.1 = std::mem::take(&mut first.1).into_iter().rev().map(|s| s.reversed()).collect();
         }
     }
-    // Each next curve starts where the previous one ended.
-    let mut segs: Vec<solidcore_record::Seg2> = Vec::new();
-    for curve in curves {
-        let (Some(prev_end), Some((a, b))) = (segs.last().map(solidcore_record::Seg2::end), ends(&curve)) else {
-            segs.extend(curve);
-            continue;
-        };
-        let curve = if b.dist(prev_end) < a.dist(prev_end) { reversed(curve) } else { curve };
-        segs.extend(curve);
+    // Each next curve starts where the previous one ended; the curves are carried onto their
+    // own sketch's plane as they join the chain, and the reversal is kept on the curve so the
+    // closed-path split below reads the run as it is ordered here.
+    let mut segs: Vec<kernel::PathSeg> = Vec::new();
+    for (plane, curve) in &mut curves {
+        let ends = |c: &[solidcore_record::Seg2]| c.first().zip(c.last()).map(|(f, l)| (plane.to_world(f.start()), plane.to_world(l.end())));
+        if let Some(prev_end) = segs.last().map(kernel::PathSeg::end)
+            && let Some((a, b)) = ends(curve)
+            && b.dist(prev_end) < a.dist(prev_end)
+        {
+            *curve = std::mem::take(curve).into_iter().rev().map(|s| s.reversed()).collect();
+        }
+        segs.extend(curve.iter().map(|s| kernel::PathSeg::of_sketch(plane, s)));
     }
     if segs.windows(2).any(|pair| pair[1].start().dist(pair[0].end()) > JOINT) {
         return Err(DocError::Invalid("the path curves are not connected end to end".into()));
     }
-    if let Some(profile) = profile {
-        segs = from_profile_on_closed_path(segs, &ps.plane, profile, start);
+    // The closed-path split works on the curves of one plane; a path across sketches that
+    // closes is followed as listed.
+    if let Some(profile) = profile
+        && let Some((plane, _)) = curves.first()
+        && curves.iter().all(|(p, _)| p == plane)
+    {
+        let flat: Vec<solidcore_record::Seg2> = curves.iter().flat_map(|(_, c)| c.iter().copied()).collect();
+        let split = from_profile_on_closed_path(flat, plane, profile, start);
+        return Ok(split.iter().map(|s| kernel::PathSeg::of_sketch(plane, s)).collect());
     }
-    Ok(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect())
+    Ok(segs)
 }
 
 /// `curves` (each a run of segments) put into one chain, when they are not end to end as listed.
 /// The chain starts at the first listed curve with an end that touches no other curve (the first
 /// curve when they close into a ring) and goes on with the first listed unused curve that meets
 /// its end. Curves that meet nothing keep their listed order after the chain, so a real gap is
-/// still reported by the caller.
-fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<solidcore_record::Seg2>> {
-    let ends: Vec<Option<(Vec2, Vec2)>> = curves.iter().map(|c| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()))).collect();
-    let meets = |p: Vec2, q: Vec2| p.dist(q) <= joint;
+/// still reported by the caller. `ends` gives each curve's two ends, in space (curves of
+/// different sketches sit in different planes, #16168).
+fn chain_order<T: Clone>(curves: Vec<T>, joint: f64, ends: impl Fn(&T) -> Option<(Vec3, Vec3)>) -> Vec<T> {
+    let ends: Vec<Option<(Vec3, Vec3)>> = curves.iter().map(ends).collect();
+    let meets = |p: Vec3, q: Vec3| p.dist(q) <= joint;
     // Already end to end as listed: nothing to do.
     let connected = ends.windows(2).all(|w| match (w[0], w[1]) {
         (Some((a, b)), Some((c, d))) => meets(a, c) || meets(a, d) || meets(b, c) || meets(b, d),
@@ -9170,7 +9410,7 @@ fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<
     }
     let n = curves.len();
     // Whether end `p` of curve `i` meets an end of any other curve.
-    let shared = |i: usize, p: Vec2| (0..n).any(|j| j != i && ends[j].is_some_and(|(a, b)| meets(a, p) || meets(b, p)));
+    let shared = |i: usize, p: Vec3| (0..n).any(|j| j != i && ends[j].is_some_and(|(a, b)| meets(a, p) || meets(b, p)));
     let head = (0..n).find(|&i| ends[i].is_some_and(|(a, b)| !shared(i, a) || !shared(i, b))).or_else(|| (0..n).find(|&i| ends[i].is_some()));
     let Some(head) = head else { return curves };
     let mut used = vec![false; n];
@@ -9189,7 +9429,7 @@ fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<
         order.push(next);
     }
     order.extend((0..n).filter(|&j| !used[j]));
-    let mut slots: Vec<Option<Vec<solidcore_record::Seg2>>> = curves.into_iter().map(Some).collect();
+    let mut slots: Vec<Option<T>> = curves.into_iter().map(Some).collect();
     order.into_iter().filter_map(|i| slots.get_mut(i).and_then(Option::take)).collect()
 }
 
@@ -9690,7 +9930,15 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
     let all = f.participants.len() == 1 && f.participants.first().is_some_and(|t| t == "*");
     st.bodies
         .iter()
-        .filter(|b| all || if f.participants.is_empty() { b.component == f.component || b.feature == f.id } else { f.participants.contains(&b.name) })
+        .filter(|b| {
+            if all {
+                !b.envelope
+            } else if f.participants.is_empty() {
+                b.in_default_scope(f)
+            } else {
+                f.participants.contains(&b.name)
+            }
+        })
         .collect()
 }
 
@@ -9717,9 +9965,15 @@ fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
 fn miss_scope<'a>(st: &'a ModelState, f: &'a Feature, targets: &'a [String]) -> impl Iterator<Item = &'a ModelBody> + 'a {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
-    st.bodies
-        .iter()
-        .filter(move |b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
+    st.bodies.iter().filter(move |b| {
+        if all {
+            !b.envelope
+        } else if targets.is_empty() {
+            b.in_default_scope(f)
+        } else {
+            targets.contains(&b.name)
+        }
+    })
 }
 
 /// Whether a copy has no material to cut in any of its eligible targets.
@@ -9734,6 +9988,79 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
     })
 }
 
+/// The most faces the tools of the copies of a pattern may have for the kernel's union to join
+/// them ([`one_body_of`]): a union of a body with many faces costs more than the copies it
+/// would replace.
+const MAX_JOINED_FACES: usize = 16_384;
+
+/// The tools of `copies` as one body, so the kernel is asked about all of them at once (#18396).
+///
+/// Bodies that are apart join without any intersection work ([`kernel::union_apart`]); the rest
+/// are joined by the kernel's union, when they are not too many ([`MAX_JOINED_FACES`]). `None`
+/// when they cannot be one body (a mesh body, a union that fails): the copies are then asked
+/// about one by one, as before.
+fn one_body_of(copies: &[&[Traced]]) -> Option<Body> {
+    let bodies: Vec<Body> = copies.iter().flat_map(|c| c.iter().map(|t| t.body.clone())).collect();
+    match bodies.len() {
+        0 => None,
+        1 => Some(bodies[0].clone()),
+        _ => {
+            if let Some(one) = kernel::union_apart(&bodies).ok().flatten() {
+                return Some(one);
+            }
+            if bodies.iter().map(|b| b.face_count()).sum::<usize>() > MAX_JOINED_FACES {
+                return None;
+            }
+            let operands: Vec<&Body> = bodies.iter().collect();
+            kernel::union_all(&operands).ok()
+        }
+    }
+}
+
+/// The copies that the point test cannot place, as the bodies the kernel is asked about: each
+/// body holds the tools of some of the copies, so the kernel is asked about many copies at once
+/// instead of one copy at a time (#18396). A body with many faces makes every boolean cost
+/// seconds, and a design of many patterns pays that a copy at a time.
+///
+/// The bodies of a group are joined in groups of at most [`joined_tools_limit`] tools, as the
+/// tools of a cut are: the kernel's boolean takes far longer for a tool of many pieces than for
+/// several of fewer. The copies whose tools cannot be one body (a mesh body, a union that fails)
+/// are returned apart: they are asked about one by one, as before.
+fn copies_as_bodies<'a>(copies: &[&'a [Traced]]) -> (Vec<(Body, Vec<&'a [Traced]>)>, Vec<&'a [Traced]>) {
+    let limit = joined_tools_limit().max(1);
+    let mut groups: Vec<(Body, Vec<&'a [Traced]>)> = Vec::new();
+    let mut one_by_one: Vec<&'a [Traced]> = Vec::new();
+    let mut group: Vec<&'a [Traced]> = Vec::new();
+    let mut tools = 0;
+    for copy in copies {
+        let n = copy.len();
+        if n > limit {
+            // More tools than a probe may hold: the copy is asked about one tool at a time, as
+            // before.
+            one_by_one.push(*copy);
+            continue;
+        }
+        if !group.is_empty() && tools + n > limit {
+            let taken = std::mem::take(&mut group);
+            match one_body_of(&taken) {
+                Some(body) => groups.push((body, taken)),
+                None => one_by_one.extend(taken),
+            }
+            tools = 0;
+        }
+        group.push(*copy);
+        tools += n;
+    }
+    if !group.is_empty() {
+        let taken = std::mem::take(&mut group);
+        match one_body_of(&taken) {
+            Some(body) => groups.push((body, taken)),
+            None => one_by_one.extend(taken),
+        }
+    }
+    (groups, one_by_one)
+}
+
 /// How many of a pattern's cut copies (`instances`, ranges of `copies`) remove no material, and
 /// how many copies there are. [`copy_misses`] intersects a copy with every target, which on a
 /// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
@@ -9742,6 +10069,13 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
 /// intersected. The targets don't change while their copies are counted, so each one's exact box
 /// is worked out once, not once for every copy, and each copy's tool box once, not once for every
 /// target (#7942).
+///
+/// The copies that are intersected are asked about together (#18396): the tools of all of them
+/// are one body, and the kernel is asked about that body once a target, instead of once a copy.
+/// A body with many faces makes every boolean cost seconds, and a design of many patterns pays
+/// that a copy at a time. What is counted does not change: a copy that removes no material still
+/// counts as one, and the copies that do remove material are still found (the targets that take
+/// material from a copy are asked about copy by copy, as before).
 fn count_copy_misses(
     st: &ModelState,
     f: &Feature,
@@ -9753,6 +10087,8 @@ fn count_copy_misses(
     let scope: Vec<(&ModelBody, Option<solidcraft_geom::Aabb3>)> =
         miss_scope(st, f, targets).map(|b| (b, (!b.body.is_mesh()).then(|| more::exact_box(&b.body)).flatten())).collect();
     let (mut missed, mut total) = (0, 0);
+    // The copies the point test cannot place: they are asked about together.
+    let mut unsure: Vec<&[Traced]> = Vec::new();
     for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
         total += 1;
         let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
@@ -9760,8 +10096,54 @@ fn count_copy_misses(
             let tool_box = (!t.body.is_mesh()).then(|| more::exact_box(&t.body)).flatten();
             scope.iter().any(|(b, target_box)| shares_material(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), lines))
         });
-        if !takes && copy_misses(st, f, targets, tools) {
+        if !takes {
+            unsure.push(tools);
+        }
+    }
+    if unsure.is_empty() {
+        return (missed, total);
+    }
+    let (groups, one_by_one) = copies_as_bodies(&unsure);
+    // The targets that take material from the copies of a group: those copies are asked about
+    // one by one, as before.
+    let mut taking: Vec<Vec<usize>> = Vec::with_capacity(groups.len());
+    for (group, _) in &groups {
+        let mut hits = Vec::new();
+        for (i, (b, _)) in scope.iter().enumerate() {
+            #[cfg(test)]
+            cost_tests::count(|c| c.miss_intersects += 1);
+            if !matches!(kernel::boolean(&b.body, group, BoolOp::Intersect), Ok(None)) {
+                hits.push(i);
+            }
+        }
+        taking.push(hits);
+    }
+    // No target takes material from any of the copies: they all remove no material.
+    if taking.iter().all(|t| t.is_empty()) && one_by_one.is_empty() {
+        return (missed + unsure.len(), total);
+    }
+    // The copies whose tools could not be one body are asked about one by one, as before.
+    for tools in one_by_one {
+        if copy_misses(st, f, targets, tools) {
             missed += 1;
+        }
+    }
+    // Some target takes material from the copies of a group: they are asked about one by one,
+    // for those targets only.
+    for ((_, group), hits) in groups.iter().zip(&taking) {
+        for tools in group {
+            let removes = hits.iter().all(|&i| {
+                let (b, _) = scope[i];
+                tools.iter().all(|t| {
+                    #[cfg(test)]
+                    cost_tests::count(|c| c.miss_intersects += 1);
+                    // An inconclusive probe is not a miss: it must not reject an otherwise valid cut.
+                    matches!(kernel::boolean(&b.body, &t.body, BoolOp::Intersect), Ok(None))
+                })
+            });
+            if removes {
+                missed += 1;
+            }
         }
     }
     (missed, total)
@@ -10380,7 +10762,7 @@ fn replay(
             && targets.is_empty()
             && f.participants.is_empty()
             && src.component != f.component
-            && !st.bodies.iter().any(|b| b.component == f.component || b.feature == f.id)
+            && !st.bodies.iter().any(|b| b.in_default_scope(f))
         {
             scoped = Feature { component: src.component, ..f.clone() };
             &scoped
@@ -11711,10 +12093,23 @@ fn eval_feature_kind(
             }
             let tb: Vec<ModelBody> =
                 tools.iter().map(|t| st.body(t).cloned().ok_or_else(|| DocError::Unknown(format!("body `{t}`")))).collect::<Result<_>>()?;
+            // This construction combines solid interiors; open sheets do not define one.
+            if tb.iter().any(|b| b.body.is_mesh() || b.body.is_surface()) {
+                return Err(DocError::Invalid("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported".into()));
+            }
             let mut made = Vec::new();
             for p in cells {
                 // The cell: inside the tools that hold the point, outside the others.
-                let inside: Vec<bool> = tb.iter().map(|b| b.mesh().contains(p.0)).collect();
+                let inside: Vec<bool> = tb
+                    .iter()
+                    .map(|b| match b.body.classify_point(p.0)? {
+                        kernel::PointClass::Inside => Ok(true),
+                        kernel::PointClass::Outside => Ok(false),
+                        kernel::PointClass::OnBoundary => {
+                            Err(DocError::Invalid("Boundary Fill cell points must be away from tool boundaries".into()))
+                        }
+                    })
+                    .collect::<Result<_>>()?;
                 let mut acc: Option<Traced> = None;
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| **i) {
                     acc = match acc {
@@ -11728,6 +12123,9 @@ fn eval_feature_kind(
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
                     let cut = kernel::boolean(&cell.body, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
                     cell = Traced::step(cut, &[&cell, &b.traced()]);
+                }
+                if cell.body.is_surface() {
+                    return Err(DocError::Invalid("Boundary Fill did not produce a closed solid cell".into()));
                 }
                 made.push(cell);
             }
@@ -12269,16 +12667,27 @@ fn eval_feature_kind(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::BoundingSolid { bodies, margin, margins } => {
+        FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
             let m = val(vals, margin, Kind::Length)?;
             let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
             let (lo, hi) = (Vec3::new(side(0)?, side(2)?, side(4)?), Vec3::new(side(1)?, side(3)?, side(5)?));
-            let mut bb = solidcraft_geom::Aabb3::EMPTY;
-            for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
-                bb = bb.union(&b.mesh().bounds());
+            // An envelope smaller than its contents could miss a contact the parts make.
+            if *contents && [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z].iter().any(|v| *v < 0.0) {
+                return Err(DocError::Invalid("an envelope's margin cannot be negative".into()));
             }
+            let bb = if *contents {
+                crate::envelope::contents_bounds(doc, st, f.component)?
+            } else {
+                // The bodies' display meshes, as before envelopes: a saved Bounding Solid builds
+                // the same box it always did.
+                let mut bb = solidcraft_geom::Aabb3::EMPTY;
+                for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
+                    bb = bb.union(&b.mesh().bounds());
+                }
+                bb
+            };
             if bb.is_empty() {
-                return Err(DocError::Invalid("no bodies to bound".into()));
+                return Err(DocError::Invalid(if *contents { "the component holds no bodies to bound".into() } else { "no bodies to bound".into() }));
             }
             let (min, max) = (bb.min - lo, bb.max + hi);
             if !(min.x < max.x && min.y < max.y && min.z < max.z) {
@@ -12286,7 +12695,9 @@ fn eval_feature_kind(
             }
             let b = crate::lineage::numbered_tool(kernel::box_solid(min, max)?);
             let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
-            st.bodies.push(ModelBody::traced_new(name, b, f.id));
+            let mut envelope = ModelBody::traced_new(name, b, f.id);
+            envelope.envelope = *contents;
+            st.bodies.push(envelope);
             Ok(())
         }
         FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, copy_frames } => {
@@ -12383,6 +12794,8 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Import { step, skip, records, .. } => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.imports_read += 1);
             let (imp, digest) = match records {
                 Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),

@@ -4887,3 +4887,52 @@ fn report(graded: &[Graded], listed: &BTreeMap<String, Listed>, not_run: usize) 
     }
     s
 }
+
+/// solidcraft#2992 (#17896): the disk joined with its 36 twisted lofted blades passes
+/// solidcore's own check. Where a blade's lofted (free-form) face meets the disk, the edge
+/// keeps the intersector's UV curve on that face, the curve its 3D curve was fitted from.
+/// `MakeFace`'s drop of the edge onto the loft, a second fit, gave nine trims whose radii
+/// of curvature were under the check's bound (Test #13, offsets 2.9e-5 to 9.6e-5 against
+/// tolerances 1.0e-4 to 1.2e-4), and the join was refused.
+#[test]
+fn the_disk_joined_with_its_lofted_blades_passes_the_check() {
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("crashes/2992-join-disk-and-36-twisted-loft-blades.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let recs = records(&entry, &e);
+    // each union_all input is a tagged copy of a copy of an operand record
+    let mut from: HashMap<String, String> = HashMap::new();
+    let mut inputs = Vec::new();
+    for call in e["calls"].as_array().unwrap() {
+        let input = call["inputs"][0].as_str().unwrap().to_owned();
+        match call["op"].as_str().unwrap() {
+            "union_all" => {
+                inputs = call["inputs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_owned())
+                    .collect();
+            }
+            _ => {
+                from.insert(call["outputs"][0].as_str().unwrap().to_owned(), input);
+            }
+        }
+    }
+    let bodies: Vec<Body> = inputs
+        .iter()
+        .map(|name| {
+            let mut name = name.clone();
+            while let Some(up) = from.get(&name) {
+                name.clone_from(up);
+            }
+            let record: Record = serde_json::from_value(recs[&name].clone()).unwrap();
+            let trusted = e["bodies"][&name]["trusted"].as_bool().unwrap_or(true);
+            Body::from_record(&record, trusted).unwrap().0
+        })
+        .collect();
+    assert_eq!(bodies.len(), 37);
+    let joined = union_all(bodies).unwrap();
+    let report = joined.check(solidcore_ops::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+}

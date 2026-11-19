@@ -60,6 +60,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
+use crate::topology::brep::p6::InfiniteHalf;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, RegionId, ShellId, VertexId};
 use crate::{Result, SolidError};
@@ -1233,6 +1234,9 @@ impl Stitch<'_> {
                         orientation,
                         dist_to_curve,
                         self.do_region_nesting,
+                        // (one solid with a known outside: no ray at its closing glue)
+                        self.outside
+                            .map_or(InfiniteHalf::Searched, InfiniteHalf::Of),
                         delete,
                         None, // header default pInsideFaceuses = NULL
                     ) {

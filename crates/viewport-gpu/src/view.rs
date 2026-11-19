@@ -557,19 +557,37 @@ impl InstancedMesh {
     /// colour, appended to `lines` (and to `hidden`, in its hidden edge colour, when `hidden`
     /// is given): the lines the GPU draws from [`InstancedMesh::edges`], at full detail.
     pub fn expand_edges_into(&self, lines: &mut Vec<u8>, mut hidden: Option<&mut Vec<u8>>) {
+        self.each_edge_segment(|[edge, hide], a, b| {
+            lines.extend_from_slice(&line_record(a, b, PaletteIndex(edge), EDGE_WIDTH.to_bits()));
+            if let Some(h) = hidden.as_deref_mut() {
+                h.extend_from_slice(&line_record(a, b, PaletteIndex(hide), HIDDEN_EDGE_WIDTH.to_bits()));
+            }
+        });
+    }
+
+    /// A lit mesh's edges ([`GpuScene::lit_instanced_edges`]) at every placement as line
+    /// records, in the placement's first lit style (its edge index: the halo, or the hidden
+    /// edges' style) or, with `second`, its second (its hidden edge index: the line over the
+    /// halo), appended to `out`: the lines the GPU draws from them (`edge_lit`), at full detail.
+    pub fn expand_lit_edges_into(&self, out: &mut Vec<u8>, second: bool) {
+        self.each_edge_segment(|[first, other], a, b| {
+            let (c, width) = lit_style_line(if second { other } else { first });
+            out.extend_from_slice(&line_record(a, b, c, width));
+        });
+    }
+
+    /// Each segment of its edges' full detail at each placement: the placement's edge and hidden
+    /// edge indices, and the segment's ends moved there.
+    fn each_edge_segment(&self, mut f: impl FnMut([u32; 2], [f32; 3], [f32; 3])) {
         let Some((records, _)) = self.edges.as_ref().and_then(|e| e.levels.first()) else { return };
-        let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
+        let fl = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
         let u = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0, u32::from_le_bytes);
         for inst in self.instances.as_chunks::<INSTANCE_SIZE>().0 {
-            let rows = [0, 1, 2].map(|r| [f(inst, 16 * r), f(inst, 16 * r + 4), f(inst, 16 * r + 8), f(inst, 16 * r + 12)]);
+            let rows = [0, 1, 2].map(|r| [fl(inst, 16 * r), fl(inst, 16 * r + 4), fl(inst, 16 * r + 8), fl(inst, 16 * r + 12)]);
             let moved = |p: [f32; 3]| rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
-            let (edge, hide) = (PaletteIndex(u(inst, 52)), PaletteIndex(u(inst, 56)));
+            let indices = [u(inst, 52), u(inst, 56)];
             for seg in records.as_chunks::<EDGE_SEG_SIZE>().0 {
-                let (a, b) = (moved([f(seg, 0), f(seg, 4), f(seg, 8)]), moved([f(seg, 16), f(seg, 20), f(seg, 24)]));
-                lines.extend_from_slice(&line_record(a, b, edge, EDGE_WIDTH.to_bits()));
-                if let Some(h) = hidden.as_deref_mut() {
-                    h.extend_from_slice(&line_record(a, b, hide, HIDDEN_EDGE_WIDTH.to_bits()));
-                }
+                f(indices, moved([fl(seg, 0), fl(seg, 4), fl(seg, 8)]), moved([fl(seg, 16), fl(seg, 20), fl(seg, 24)]));
             }
         }
     }
@@ -607,17 +625,8 @@ impl InstancedMesh {
 /// | 0..12 | `a`: one end (3 × f32) |
 /// | 12..16 | `flags` (u32): bit 0, a vertex marker (a = b); the rest are free (hover, selection, visibility) |
 /// | 16..28 | `b`: the other end (3 × f32) |
-/// | 28..32 | `edge` (u32): the B-rep edge's index in its mesh's `edges` |
-/// | 32..48 | `side[0]`: the unit direction (3 × f32) across the segment into the triangle of the face on that side, then that triangle's height from the segment (f32, mm): how far the face surely reaches; 0 when there is no face on that side |
-/// | 48..64 | `side[1]`: the same for the face on the other side |
-/// | 64..72 | `faces` (2 × u32): the B-rep faces on the two sides, [`NO_FACE`] for none |
-/// | 72..80 | spare (2 × u32) |
-///
-/// Made from the same triangles the placement is drawn from ([`SharedEdges::new`]), so the
-/// sides describe the faces as drawn.
-pub const EDGE_SEG_SIZE: usize = 80;
-/// [`EDGE_SEG_SIZE`]'s face id for no face.
-pub const NO_FACE: u32 = u32::MAX;
+/// | 28..32 | `edge` (u32): the B-rep edge's index in its mesh's `edges` (`u32::MAX` in a coarser level) |
+pub const EDGE_SEG_SIZE: usize = 32;
 
 /// A part's model edges for drawing at each of its placements ([`InstancedMesh::edges`]):
 /// segment records ([`EDGE_SEG_SIZE`]) in the part's frame, full detail first, then coarser
@@ -634,39 +643,13 @@ pub const EDGE_PX: f32 = 0.25;
 
 impl SharedEdges {
     /// The edges of `mesh` (`shown`: which of its `edges` are drawn), each polyline's segments
-    /// with the faces beside them found in `mesh`'s own triangles, and `levels` coarser copies:
-    /// `(tolerance, simplified polylines)` from a caller that knows how it simplifies (their
-    /// segments carry no faces).
+    /// with the B-rep edge they are on, and `levels` coarser copies: `(tolerance, simplified
+    /// polylines)` from a caller that knows how it simplifies.
     pub fn new(mesh: &solidcore_tess::Mesh, shown: impl Fn(usize) -> bool, levels: Vec<(f32, Vec<Vec<[f32; 3]>>)>) -> SharedEdges {
-        // Each triangle edge by its two ends' positions, with the triangle's third corner and
-        // its face: a segment of a model edge finds the triangle of each face beside it there.
-        let key = |p: [f32; 3]| p.map(|x| (x + 0.0).to_bits());
-        let mut sides: std::collections::HashMap<([u32; 3], [u32; 3]), Vec<([f32; 3], u32)>> = std::collections::HashMap::new();
-        for (t, tri) in mesh.triangles.iter().enumerate() {
-            let p = tri.map(|i| mesh.positions.get(i as usize).map_or([0.0; 3], |v| v.to_f32()));
-            let face = mesh.tri_face.get(t).copied().unwrap_or(NO_FACE);
-            for k in 0..3 {
-                let (a, b, c) = (p[k], p[(k + 1) % 3], p[(k + 2) % 3]);
-                let (ka, kb) = (key(a), key(b));
-                let pair = if ka <= kb { (ka, kb) } else { (kb, ka) };
-                sides.entry(pair).or_default().push((c, face));
-            }
-        }
         let mut full = Vec::new();
         for (i, polyline) in mesh.edges.iter().enumerate().filter(|(i, _)| shown(*i)) {
-            let faces = mesh.edge_faces.get(i).map(Vec::as_slice).unwrap_or_default();
             for w in polyline.windows(2) {
-                let [a, b] = [w[0].to_f32(), w[1].to_f32()];
-                let (ka, kb) = (key(a), key(b));
-                let found = sides.get(&if ka <= kb { (ka, kb) } else { (kb, ka) });
-                let side = |face: Option<&u32>| -> ([f32; 4], u32) {
-                    let Some(&face) = face else { return ([0.0; 4], NO_FACE) };
-                    let Some((c, _)) = found.into_iter().flatten().find(|(_, f)| *f == face) else { return ([0.0; 4], face) };
-                    inward(a, b, *c).map_or(([0.0; 4], face), |s| (s, face))
-                };
-                let (s0, f0) = side(faces.first());
-                let (s1, f1) = side(faces.get(1));
-                push_edge_seg(&mut full, a, b, 0, u32::try_from(i).unwrap_or(u32::MAX), [s0, s1], [f0, f1]);
+                push_edge_seg(&mut full, w[0].to_f32(), w[1].to_f32(), 0, u32::try_from(i).unwrap_or(u32::MAX));
             }
         }
         let mut out = SharedEdges { levels: vec![(full, 0.0)] };
@@ -674,7 +657,7 @@ impl SharedEdges {
             let mut records = Vec::new();
             for polyline in &polylines {
                 for w in polyline.windows(2) {
-                    push_edge_seg(&mut records, w[0], w[1], 0, u32::MAX, [[0.0; 4]; 2], [NO_FACE; 2]);
+                    push_edge_seg(&mut records, w[0], w[1], 0, u32::MAX);
                 }
             }
             out.levels.push((records, tolerance));
@@ -688,25 +671,9 @@ impl SharedEdges {
     }
 }
 
-/// The side of segment `a`–`b` toward `c`: the unit direction across the segment toward `c` and
-/// `c`'s distance from the segment's line; `None` when `c` is on that line.
-fn inward(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> Option<[f32; 4]> {
-    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-    let len2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-    if len2 <= f32::EPSILON {
-        return None;
-    }
-    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-    let t = (ac[0] * d[0] + ac[1] * d[1] + ac[2] * d[2]) / len2;
-    let across = [ac[0] - t * d[0], ac[1] - t * d[1], ac[2] - t * d[2]];
-    let h = (across[0] * across[0] + across[1] * across[1] + across[2] * across[2]).sqrt();
-    (h > 1e-9 && h.is_finite()).then(|| [across[0] / h, across[1] / h, across[2] / h, h])
-}
-
 /// One [`EDGE_SEG_SIZE`] record onto `out`.
-fn push_edge_seg(out: &mut Vec<u8>, a: [f32; 3], b: [f32; 3], flags: u32, edge: u32, sides: [[f32; 4]; 2], faces: [u32; 2]) {
+fn push_edge_seg(out: &mut Vec<u8>, a: [f32; 3], b: [f32; 3], flags: u32, edge: u32) {
     let words = a.into_iter().map(f32::to_bits).chain([flags]).chain(b.into_iter().map(f32::to_bits)).chain([edge]);
-    let words = words.chain(sides.into_iter().flatten().map(f32::to_bits)).chain(faces).chain([0, 0]);
     for w in words {
         out.extend_from_slice(&w.to_le_bytes());
     }
@@ -922,6 +889,15 @@ pub fn lit_line_style(c: PaletteIndex, width: f32, lifted: bool) -> Option<u32> 
     }
     let eighths = if width.is_finite() { (width * 8.0).round().clamp(1.0, 127.0) as u32 } else { 8 };
     Some((c.0 << 8) | (u32::from(lifted) << 7) | eighths)
+}
+
+/// A lit line style ([`lit_line_style`]) as a line record's palette index and width word, as
+/// `vs_line_lit` and `edge_lit` read it: a lifted line's width is [`lifted_width`]'s with the
+/// faces beside it unknown.
+fn lit_style_line(style: u32) -> (PaletteIndex, u32) {
+    let eighths = style & 127;
+    let width = if style & 128 != 0 { 0x8000_0000 | (eighths << 24) } else { (eighths as f32 / 8.0).to_bits() };
+    (PaletteIndex(style >> 8), width)
 }
 
 /// How a built triangle is drawn: opaque, see-through (glass), faded context, or (in the
@@ -1619,9 +1595,35 @@ pub const LOD_PX: f32 = 0.75;
 /// `size` pixels. Infinite when a corner of it is at or behind the eye, or for a box that is not
 /// finite: such a placement is drawn in full.
 pub fn placement_scale(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> f32 {
+    let Some(axes) = placement_axes(rows, bounds, vp, size) else { return f32::INFINITY };
+    let scale = axes.iter().map(|[x, y]| (x * x + y * y).sqrt()).fold(0.0f32, f32::max);
+    if scale.is_finite() { scale } else { f32::INFINITY }
+}
+
+/// [`placement_scale`] along whichever direction shows largest, not only the box's axes: the
+/// most pixels a millimetre of the part covers there (a step across the axes, seen from along
+/// a diagonal, shows larger than any one axis). Infinite where [`placement_scale`] is.
+pub fn placement_stretch(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> f32 {
+    let Some(axes) = placement_axes(rows, bounds, vp, size) else { return f32::INFINITY };
+    // The largest singular value of the map from the part's millimetres to pixels: the square
+    // root of the larger eigenvalue of its 2 × 2 Gram matrix.
+    let (mut a, mut b, mut c) = (0.0f32, 0.0f32, 0.0f32);
+    for [x, y] in axes {
+        a += x * x;
+        b += x * y;
+        c += y * y;
+    }
+    let half = (a - c) * 0.5;
+    let stretch = ((a + c) * 0.5 + (half * half + b * b).sqrt()).sqrt();
+    if stretch.is_finite() { stretch } else { f32::INFINITY }
+}
+
+/// Pixels a millimetre along each axis of a placement's box covers where it is nearest the eye
+/// (see [`placement_scale`]); `None` when it is drawn in full.
+fn placement_axes(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32; 4]; 4], size: [f32; 2]) -> Option<[[f32; 2]; 3]> {
     let [lo, hi] = bounds;
     if !lo.iter().chain(hi).all(|x| x.is_finite()) {
-        return f32::INFINITY;
+        return None;
     }
     let clip = |p: [f32; 3]| -> [f32; 4] {
         let w = rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
@@ -1634,7 +1636,7 @@ pub fn placement_scale(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32;
     for c in corners {
         let w = clip(c)[3];
         if !(w > 1e-6) {
-            return f32::INFINITY;
+            return None;
         }
         if w < nearest.0 {
             nearest = (w, c);
@@ -1643,20 +1645,20 @@ pub fn placement_scale(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f32;
     let screen = |c: [f32; 4]| [c[0] / c[3] * size[0] * 0.5, c[1] / c[3] * size[1] * 0.5];
     let (_, c) = nearest;
     let at = screen(clip(c));
-    let mut scale = 0.0f32;
-    for k in 0..3 {
+    let mut axes = [[0.0f32; 2]; 3];
+    for (k, axis) in axes.iter_mut().enumerate() {
         // A step of a hundredth of the box (at least a micrometre) along each axis.
         let step = ((hi[k] - lo[k]) * 0.01).max(1e-3);
         let mut q = c;
         q[k] += step;
         let qc = clip(q);
         if !(qc[3] > 1e-6) {
-            return f32::INFINITY;
+            return None;
         }
         let s = screen(qc);
-        scale = scale.max(((s[0] - at[0]).powi(2) + (s[1] - at[1]).powi(2)).sqrt() / step);
+        *axis = [(s[0] - at[0]) / step, (s[1] - at[1]) / step];
     }
-    if scale.is_finite() { scale } else { f32::INFINITY }
+    Some(axes)
 }
 
 /// The coarsest level whose error (mm; level 0, the full triangles, has none) stays under
@@ -2267,14 +2269,15 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
     ) -> Result<(), String> {
-        self.take_sharing(device, queue, uniform, bgl, key, slot, tess, oit_available, None)
+        self.take_sharing(device, queue, uniform, bgl, key, slot, tess, oit_available, None, None)
     }
 
     /// [`Batches::take`], taking over the blocks, evaluated chunks and instanced triangles the
     /// scene shares with `donor` (another scene drawn in the same frame) instead of uploading and
     /// evaluating them again: a dragged component's bodies move between the model scene and the
     /// moving layer. `uniform` is the one the scene's palette is bound with (the layer has its
-    /// own). The donor gives them up only when the upload succeeded.
+    /// own). The donor gives them up only when the upload succeeded. The scene's lit instanced
+    /// edges are drawn from `edges_from`'s segment buffer (the model's) where it holds them.
     fn take_sharing(
         &mut self,
         device: &wgpu::Device,
@@ -2286,6 +2289,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         donor: Option<&mut Batches>,
+        edges_from: Option<&edges::Edges>,
     ) -> Result<(), String> {
         if self.key == Some(key) {
             return Ok(());
@@ -2294,7 +2298,7 @@ impl Batches {
         let _ = take_upload_failure();
         let mut next = self.clone();
         let mut taken = donor.as_deref().cloned();
-        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut());
+        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available, taken.as_mut(), edges_from);
         match take_upload_failure() {
             None => {
                 next.upload_failed = false;
@@ -2330,6 +2334,7 @@ impl Batches {
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
         mut donor: Option<&mut Batches>,
+        edges_from: Option<&edges::Edges>,
     ) {
         {
             self.uploads = UploadStats::default();
@@ -2358,16 +2363,27 @@ impl Batches {
             self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
             self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
             // The instanced edges, and the lit ones drawn again over them, from one segment
-            // buffer: a lit part's edges are the model's, uploaded once.
+            // buffer: a lit part's edges are the model's (this scene's, or the model scene's for
+            // the highlight), uploaded once.
             let mut uploaded = 0;
             let mut shared_edges = |parts: &[edges::Part<'_>], before: Option<&edges::Edges>| {
                 let (e, up) = edges::Edges::new(device, queue, bgl.edges.as_ref()?, parts, before)?;
                 uploaded += up;
                 Some(e)
             };
-            self.edges = shared_edges(&edges::Part::of_draws(&self.instanced), self.edges.as_ref());
-            self.lit_shared_edges = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_edges), self.edges.as_ref());
-            self.lit_shared_hidden = shared_edges(&edges::Part::of_meshes(&sc.lit_instanced_hidden), self.edges.as_ref());
+            let parts = edges::Part::of_draws(&self.instanced);
+            self.edges = shared_edges(&parts, self.edges.as_ref());
+            let lit_from = self.edges.as_ref().or(edges_from);
+            let lit_parts = edges::Part::of_meshes(&sc.lit_instanced_edges);
+            self.lit_shared_edges = shared_edges(&lit_parts, lit_from);
+            let lit_hidden_parts = edges::Part::of_meshes(&sc.lit_instanced_hidden);
+            self.lit_shared_hidden = shared_edges(&lit_hidden_parts, lit_from);
+            let spill = Spill {
+                instanced: self.edges.is_none() && !parts.is_empty(),
+                lit: self.lit_shared_edges.is_none() && !lit_parts.is_empty(),
+                lit_hidden: self.lit_shared_hidden.is_none() && !lit_hidden_parts.is_empty(),
+            };
+            let spilled = spilled_lines(sc, spill);
             self.uploads.geometry += uploaded;
             self.hidden_edges = sc.instanced_hidden_edges;
             self.hover_planned = sc.hover_planned.clone();
@@ -2412,8 +2428,8 @@ impl Batches {
             self.pbr = own("sc_pbr", &sc.pbr, PBR_SIZE);
             self.trans = own("sc_trans", &sc.trans, TRI_SIZE);
             self.shadow = own("sc_shadow", &sc.shadow, TRI_SIZE);
-            let own_lines = own("sc_lines", &sc.lines, LINE_SIZE);
-            let own_hidden = own("sc_hidden", &sc.hidden, LINE_SIZE);
+            let own_lines = own("sc_lines", spilled.as_ref().map_or(&sc.lines, |(l, _)| l), LINE_SIZE);
+            let own_hidden = own("sc_hidden", spilled.as_ref().map_or(&sc.hidden, |(_, h)| h), LINE_SIZE);
             self.overlays = own("sc_overlay", &sc.overlay, LINE_SIZE);
             self.ghost = own("sc_ghost", &sc.ghost, TRI_SIZE);
             self.xray = own("sc_xray", &sc.xray, TRI_SIZE);
@@ -2461,7 +2477,7 @@ impl Batches {
             self.blocks_culled_for = None;
             // Last: the palette texture is shared with the picture on screen, which a refused
             // upload above must leave as it was.
-            if UPLOAD_FAILURE.with(|f| f.borrow().is_some()) {
+            if upload_refused() {
                 return;
             }
             let mut written = 0;
@@ -4208,6 +4224,55 @@ fn take_upload_failure() -> Option<String> {
     UPLOAD_FAILURE.with(|f| f.borrow_mut().take())
 }
 
+/// Whether the device refused a buffer of the scene upload under way: the upload fails and the
+/// previous picture stays ([`Batches::take`]).
+fn upload_refused() -> bool {
+    UPLOAD_FAILURE.with(|f| f.borrow().is_some())
+}
+
+/// Which of a scene's instanced edges have no segment buffer to be drawn from: more than the
+/// device binds at once, or a device that cannot draw them that way.
+#[derive(Clone, Copy, Debug, Default)]
+struct Spill {
+    /// The model's ([`GpuScene::instanced`]).
+    instanced: bool,
+    /// The lit ones ([`GpuScene::lit_instanced_edges`]).
+    lit: bool,
+    /// The lit hidden ones ([`GpuScene::lit_instanced_hidden`]).
+    lit_hidden: bool,
+}
+
+/// The scene's own lines and hidden lines with `spill`'s edges added, every placement's, as they
+/// were drawn before there was a segment buffer: the model's in their edge colours, the lit ones
+/// in their styles (all halos, then the lines over them, as the GPU draws them). `None` when
+/// nothing spills, or when the device refused a buffer of this upload: the upload fails and keeps
+/// the previous picture, so expanding every placement's edges (hundreds of megabytes for a large
+/// assembly) would only be thrown away.
+fn spilled_lines(sc: &GpuScene, spill: Spill) -> Option<(Vec<u8>, Vec<u8>)> {
+    if !(spill.instanced || spill.lit || spill.lit_hidden) || upload_refused() {
+        return None;
+    }
+    let (mut lines, mut hidden) = (sc.lines.clone(), sc.hidden.clone());
+    if spill.instanced {
+        for m in &sc.instanced {
+            m.expand_edges_into(&mut lines, sc.instanced_hidden_edges.then_some(&mut hidden));
+        }
+    }
+    if spill.lit {
+        for second in [false, true] {
+            for m in &sc.lit_instanced_edges {
+                m.expand_lit_edges_into(&mut lines, second);
+            }
+        }
+    }
+    if spill.lit_hidden {
+        for m in &sc.lit_instanced_hidden {
+            m.expand_lit_edges_into(&mut hidden, false);
+        }
+    }
+    Some((lines, hidden))
+}
+
 /// [`crate::buffer_init`] for the scene uploads: `None` (as an empty upload) when the device
 /// refused the buffer, with the reason kept for [`take_upload_failure`] so the whole scene's
 /// upload can fail and leave the previous picture in place.
@@ -4215,13 +4280,18 @@ fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu:
     match crate::buffer_init(device, label, contents, usage) {
         Ok(buffer) => Some(buffer),
         Err(error) => {
-            let reason = error.to_string();
-            UPLOAD_FAILURE.with(|f| {
-                f.borrow_mut().get_or_insert(reason);
-            });
+            refused(error.to_string());
             None
         }
     }
+}
+
+/// Note that the device refused a buffer (or a bind group) of the scene upload under way, for
+/// [`take_upload_failure`]: the first reason is kept.
+fn refused(reason: String) {
+    UPLOAD_FAILURE.with(|f| {
+        f.borrow_mut().get_or_insert(reason);
+    });
 }
 
 /// Bytes per GPU buffer for vertices of `stride` bytes: within the device's limit and a
@@ -4520,11 +4590,12 @@ impl Renderer {
                 tess,
                 oit,
                 Some(&mut res.model),
+                None,
             ));
         }
         res.uniform_bgl.environment.upload(queue);
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        uploads.push(res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving)));
+        uploads.push(res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving), None));
         match &cb.moving {
             Some(mv) => {
                 res.moving.sort_glass(queue, local_direction(&mv.transform, cb.back));
@@ -4542,7 +4613,19 @@ impl Renderer {
         // The highlight evaluates plans of its own where the model has none to draw again (in
         // Wireframe, a whole lit body's faces).
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
-        uploads.push(res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, tess, oit));
+        // Its lit instanced edges are drawn from the model's segment buffer, not uploaded again.
+        uploads.push(res.highlight.take_sharing(
+            device,
+            queue,
+            &res.uniform,
+            &res.uniform_bgl,
+            cb.hl_key,
+            &cb.hl_slot,
+            tess,
+            oit,
+            None,
+            res.model.edges.as_ref(),
+        ));
         uploads.push(res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit));
         // A refused scene leaves the previous picture; a capture must not pass it off as the new one.
         res.refused_upload = uploads.into_iter().find_map(Result::err);
@@ -4682,6 +4765,11 @@ impl Renderer {
     /// What the model scene's last change uploaded ([`UploadStats`]).
     pub fn uploads(&self) -> UploadStats {
         self.model.uploads
+    }
+
+    /// What the highlight scene's last change uploaded.
+    pub fn highlight_uploads(&self) -> UploadStats {
+        self.highlight.uploads
     }
 
     fn publish(&self, drawn: DrawStats) {
@@ -5699,6 +5787,19 @@ mod tests {
         assert!(far < near / 9.0 && far > 0.0, "{far} vs {near}");
         assert!(placement_scale(&at(0.0, 0.0, 0.5), &unit, &persp, size).is_infinite(), "a corner behind the eye");
         assert!(placement_scale(&at(0.0, 0.0, -10.0), &[[f32::NAN; 3], [1.0; 3]], &persp, size).is_infinite());
+        // Seen along the part's (1, 1, 1): each axis shows at 0.816 of the view's 10 px/mm, a step
+        // across them, in the picture's plane, at the whole 10.
+        let diagonal = [
+            [std::f32::consts::FRAC_1_SQRT_2, -std::f32::consts::FRAC_1_SQRT_2, 0.0, 0.0],
+            [1.0 / 6f32.sqrt(), 1.0 / 6f32.sqrt(), -2.0 / 6f32.sqrt(), 0.0],
+            [1.0 / 3f32.sqrt(), 1.0 / 3f32.sqrt(), 1.0 / 3f32.sqrt(), 0.0],
+        ];
+        let axis = placement_scale(&diagonal, &unit, &ortho, size);
+        assert!((axis - 10.0 * (2.0f32 / 3.0).sqrt()).abs() < 1e-2, "{axis}");
+        let stretch = super::placement_stretch(&diagonal, &unit, &ortho, size);
+        assert!((stretch - 10.0).abs() < 1e-2, "{stretch}");
+        assert!((super::placement_stretch(&at(5.0, -3.0, 0.0), &unit, &ortho, size) - 10.0).abs() < 1e-3, "an axis in the picture");
+        assert!(super::placement_stretch(&at(0.0, 0.0, 0.5), &unit, &persp, size).is_infinite(), "a corner behind the eye");
         // The coarsest level within LOD_PX: errors 0 (full), 0.05, 0.2, 1.0 mm.
         let errors = [0.0, 0.05, 0.2, 1.0];
         assert_eq!(level_for(&errors, f32::INFINITY), 0);
@@ -7460,11 +7561,10 @@ mod glass_tests {
         assert_eq!(f32::from_le_bytes(sorted[8..12].try_into().unwrap()), 5.0);
     }
 
-    /// A model edge's segment record carries, for each of the two faces beside it, the unit
-    /// direction across the segment into that face's triangle, how far the triangle reaches from
-    /// the segment, and the face: found in the triangles the part is drawn from.
+    /// A model edge's segment record holds its two ends in the part's frame and the B-rep edge
+    /// it is on, one record per segment of each edge drawn.
     #[test]
-    fn an_edge_segment_records_the_faces_on_both_sides() {
+    fn an_edge_segment_records_its_ends_and_its_edge() {
         let mesh = solidcore_tess::Mesh {
             positions: vec![Vec3::ZERO, Vec3::X, Vec3::new(0.0, 2.0, 0.0), Vec3::new(0.0, 0.0, 3.0)],
             normals: vec![Vec3::Z; 4],
@@ -7477,19 +7577,14 @@ mod glass_tests {
         let e = SharedEdges::new(&mesh, |_| true, Vec::new());
         assert_eq!(e.segments(), 2);
         let (records, _) = &e.levels[0];
+        assert_eq!(records.len(), 2 * EDGE_SEG_SIZE);
         let f = |at: usize| f32::from_le_bytes(records[at..at + 4].try_into().unwrap());
         let u = |at: usize| u32::from_le_bytes(records[at..at + 4].try_into().unwrap());
-        // The shared edge: face 4 lies toward +y (2 mm), face 7 toward +z (3 mm).
         assert_eq!([f(0), f(4), f(8), f(16), f(20), f(24)], [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        assert_eq!(u(28), 0, "the B-rep edge's index");
-        assert_eq!([f(32), f(36), f(40), f(44)], [0.0, 1.0, 0.0, 2.0]);
-        assert_eq!([f(48), f(52), f(56), f(60)], [0.0, 0.0, 1.0, 3.0]);
-        assert_eq!([u(64), u(68)], [4, 7]);
-        // The open edge has a face on one side only.
+        assert_eq!([u(12), u(28)], [0, 0], "no flags; the first B-rep edge");
         let second = EDGE_SEG_SIZE;
-        assert!(f(second + 44) > 0.0, "face 4 is beside it");
-        assert_eq!([f(second + 48), f(second + 60)], [0.0, 0.0], "no face on the other side");
-        assert_eq!([u(second + 64), u(second + 68)], [4, NO_FACE]);
+        assert_eq!([f(second), f(second + 16), f(second + 20)], [1.0, 0.0, 2.0]);
+        assert_eq!(u(second + 28), 1, "the second B-rep edge");
     }
 
     /// `GpuScene::merged` keeps every triangle the scene holds: the blocks' PBR runs as well as
@@ -7519,5 +7614,85 @@ mod glass_tests {
         let merged = scene.merged();
         // The opaque and PBR block triangles, then the PBR placement's one triangle.
         assert_eq!(merged.tris.len(), 2 * 3 * TRI_SIZE + 3 * TRI_SIZE, "merged drops no triangle the scene holds");
+    }
+
+    /// A part with one edge segment (0,0,0)-(1,0,0), placed at x = 0 and x = 10 with edge and
+    /// hidden edge indices `a` and `b`.
+    fn two_placed_edges(a: u32, b: u32) -> InstancedMesh {
+        let mesh = solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y],
+            normals: vec![Vec3::Z; 3],
+            triangles: vec![[0, 1, 2]],
+            tri_face: vec![0],
+            edges: vec![vec![Vec3::ZERO, Vec3::X]],
+            edge_faces: vec![vec![0]],
+            ..Default::default()
+        };
+        let mut m = InstancedMesh {
+            key: 1,
+            tris: Arc::new(SharedTris::default()),
+            instances: Vec::new(),
+            look: InstanceLook::Opaque,
+            levels: Vec::new(),
+            closed: true,
+            edges: Some(Arc::new(SharedEdges::new(&mesh, |_| true, Vec::new()))),
+        };
+        for x in [0.0, 10.0] {
+            m.place_edged([[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], PaletteIndex(0), PaletteIndex(a), PaletteIndex(b));
+        }
+        m
+    }
+
+    /// Each line record's start x, palette index and width word.
+    fn line_words(bytes: &[u8]) -> Vec<(f32, u32, u32)> {
+        let u = |l: &[u8], at: usize| u32::from_le_bytes([l[at], l[at + 1], l[at + 2], l[at + 3]]);
+        bytes.as_chunks::<LINE_SIZE>().0.iter().map(|l| (f32::from_bits(u(l, 0)), u(l, 24), u(l, 28))).collect()
+    }
+
+    /// Instanced edges with no segment buffer are drawn as the scene's own lines, every
+    /// placement's; but after the device refused a buffer of the same upload (which fails and
+    /// keeps the previous picture) they are not expanded at all: for a large assembly that was
+    /// hundreds of megabytes thrown away with the upload.
+    #[test]
+    fn a_refused_upload_does_not_expand_instanced_edges() {
+        let _ = take_upload_failure();
+        let sc = GpuScene { instanced: vec![two_placed_edges(3, 4)], instanced_hidden_edges: true, ..GpuScene::default() };
+        let spill = Spill { instanced: true, ..Spill::default() };
+        let (lines, hidden) = spilled_lines(&sc, spill).expect("an overflow draws them as lines");
+        assert_eq!(line_words(&lines), vec![(0.0, 3, EDGE_WIDTH.to_bits()), (10.0, 3, EDGE_WIDTH.to_bits())]);
+        assert_eq!(line_words(&hidden), vec![(0.0, 4, HIDDEN_EDGE_WIDTH.to_bits()), (10.0, 4, HIDDEN_EDGE_WIDTH.to_bits())]);
+        assert!(spilled_lines(&sc, Spill::default()).is_none(), "nothing spills");
+        refused("out of memory".to_string());
+        assert!(spilled_lines(&sc, spill).is_none(), "a refused upload expands nothing");
+        assert_eq!(take_upload_failure().as_deref(), Some("out of memory"));
+    }
+
+    /// A highlight's lit instanced edges that do not fit a segment buffer (a whole large assembly
+    /// lit) are drawn as the highlight's own lines in their styles, as the GPU draws them from
+    /// the segments: every halo, then every line over one, and the lit hidden edges in their
+    /// style among the hidden lines. Without this they vanished.
+    #[test]
+    fn lit_instanced_edges_past_the_segment_buffer_keep_their_styles() {
+        let _ = take_upload_failure();
+        let halo = lit_line_style(PaletteIndex(5), 6.0, true).expect("a small palette index");
+        let core = lit_line_style(PaletteIndex(6), 2.0, false).expect("a small palette index");
+        let dim = lit_line_style(PaletteIndex(7), 1.0, false).expect("a small palette index");
+        let sc = GpuScene {
+            lines: vec![0; LINE_SIZE],
+            lit_instanced_edges: vec![two_placed_edges(halo, core)],
+            lit_instanced_hidden: vec![two_placed_edges(dim, 0)],
+            ..GpuScene::default()
+        };
+        let (lines, hidden) = spilled_lines(&sc, Spill { lit: true, lit_hidden: true, ..Spill::default() }).expect("they spill");
+        let (h, c) = (0x8000_0000 | (48 << 24), 2.0f32.to_bits());
+        assert_eq!(
+            line_words(&lines),
+            vec![(0.0, 0, 0), (0.0, 5, h), (10.0, 5, h), (0.0, 6, c), (10.0, 6, c)],
+            "the scene's own line, the halos, then the lines over them"
+        );
+        assert_eq!(line_words(&hidden), vec![(0.0, 7, 1.0f32.to_bits()), (10.0, 7, 1.0f32.to_bits())]);
+        assert_eq!(lit_style_line(halo), (PaletteIndex(5), lifted_width(6.0, [[0.0; 3]; 2])), "a lifted halo, faces unknown");
+        let only_lit = spilled_lines(&sc, Spill { lit: true, ..Spill::default() }).expect("they spill");
+        assert!(only_lit.1.is_empty(), "lit hidden edges that fit stay in their segment buffer");
     }
 }

@@ -3110,7 +3110,6 @@
   "prefs.blur_off": "オフ",
   "prefs.blur_reduce_transparency": "システムの透明度を下げる設定により無効です",
   "prefs.blur_software": "ソフトウェア描画では利用できません (gpu-software)",
-  "prefs.blur_source": "このワークスペース表示では利用できません",
   "prefs.blur_web": "このウェブ描画経路では利用できません",
   "prefs.bodies_folders": "ボディフォルダー",
   "prefs.bodies_folders_always": "常に表示",

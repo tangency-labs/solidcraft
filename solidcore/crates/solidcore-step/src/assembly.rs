@@ -25,7 +25,7 @@
 //! outer loop runs counter-clockwise), and whether the face's side is that normal.
 
 use crate::vec::Vec3Geom as _;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f64::consts::TAU;
 
 use crate::kernel::{CurveEval, SurfaceEval, face_flux};
@@ -586,11 +586,11 @@ impl<'t> Assembly<'t> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
-        // A face on a torus that is the rest of it round a patch its loop bounds gets the
-        // torus's seams, its loop a hole in it.
+        // A face on a sphere or torus that is the rest of it round a patch its loop bounds gets
+        // the surface's seams, its loop a hole in it.
         let outsides = self.complete_outsides()?;
         if outsides > 0 {
-            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+            notes.push(format!("{outsides} faces on a sphere or torus that are the outside of their loops given the surface's seams"));
         }
         // A torus face's seams where its torus starts, so its (u, v) box is read whole.
         self.seat_torus_seams()?;
@@ -713,20 +713,30 @@ impl<'t> Assembly<'t> {
         if flipped > 0 {
             notes.push(format!("{flipped} faces turned over: their loops disagree with their same_sense"));
         }
-        let shells: Vec<Vec<(u32, bool)>> = shells
+        let mut shells: Vec<Vec<(u32, bool)>> = shells
             .into_iter()
             .map(|s| s.into_iter().map(|(f, fwd)| (f, if turned.get(f as usize).copied().unwrap_or(false) { !fwd } else { fwd })).collect())
             .collect();
 
         // Regions: which shells are closed (every edge used at least twice among its faces).
         let closed: Vec<bool> = shells.iter().map(|s| self.closed(s)).collect();
+        // A closed solid's edge sides must cancel. Local loop normalization alone can
+        // preserve an exporter's inconsistent shell sides (#17149).
+        let mut reoriented = false;
+        if matches!(kind, Kind::Solid | Kind::Voids) {
+            for (shell, closed) in shells.iter_mut().zip(&closed) {
+                if *closed {
+                    reoriented |= self.orient_shell(shell)?;
+                }
+            }
+        }
         // A void's faces face into the cavity, out of the material: it encloses volume of the
         // opposite sign to the outer shell's. The ORIENTED_CLOSED_SHELL flag alone doesn't say
         // so: some exporters write .F. over a shell already facing into the cavity (#3730),
         // SolidCraft .T.; read by the flag, such a void added its cavity's volume to the solid's.
         // A void enclosing volume of the outer shell's sign is turned inside out, the signs the
         // faces' own surfaces and pcurves give (`face_flux` of p / 3, the divergence theorem).
-        let shells = if kind == Kind::Voids && closed.iter().all(|c| *c) {
+        let shells = if !reoriented && kind == Kind::Voids && closed.iter().all(|c| *c) {
             let volume = |s: &[(u32, bool)]| -> Option<f64> {
                 let mut sum = 0.0;
                 for &(f, forward) in s {
@@ -962,7 +972,45 @@ impl<'t> Assembly<'t> {
             }
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
         }
-        let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        // The file lists faces, not their radial order. At an edge more than two
+        // faces use, order their inward directions on the actual shared segment.
+        // Keep two-use edges in their existing order, including periodic seams.
+        for edge in &mut edges {
+            if edge.uses.len() <= 2 {
+                continue;
+            }
+            let radial_faces = edge
+                .uses
+                .iter()
+                .map(|u| {
+                    let face = faces.get(u.face as usize).ok_or("radial face reference")?;
+                    let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {
+                        return Err("radial loop reference");
+                    };
+                    let oriented = edges.get(u.position as usize).ok_or("radial edge use reference")?;
+                    Ok((face.parameters(), &oriented.pcurve, oriented.forward))
+                })
+                .collect::<Result<Vec<_>, &str>>()?;
+            let order = crate::kernel::radial_order(edge.parameters(), edge.interval, &radial_faces)?;
+            edge.uses = order.into_iter().map(|i| edge.uses.get(i).copied().ok_or("radial edge use reference")).collect::<Result<Vec<_>, &str>>()?;
+        }
+        let mut brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
+        if reoriented {
+            // Parity fixes relative sides only. Certify every shell's absolute side,
+            // including cavities: the traversal's starting face may itself be reversed.
+            for shell in 0..brep.shells.len() {
+                let positive = crate::kernel::shell_volume_positive(&brep, shell)?;
+                let cavity = kind == Kind::Voids && shell > 0;
+                if positive == cavity {
+                    let Some(Shell::Faces { faces, .. }) = brep.shells.get_mut(shell) else { return Err("shell reference".into()) };
+                    for side in faces {
+                        side.forward = !side.forward;
+                    }
+                }
+            }
+            // Face order is unchanged; shell sides also determine the edge/vertex walk.
+            brep = brep.canonical().map_err(|e| e.to_string())?.brep;
+        }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
@@ -1018,6 +1066,68 @@ impl<'t> Assembly<'t> {
             }
         }
         Ok(redirect.len())
+    }
+
+    /// Orient a closed manifold shell by exact shared-edge parity. Across an edge,
+    /// the two physical traversals oppose: equal directions require opposite flips.
+    /// An already coherent shell keeps its sides, including a nonmanifold shell;
+    /// an inconsistent nonmanifold or disconnected shell has no supported repair.
+    fn orient_shell(&self, shell: &mut [(u32, bool)]) -> R<bool> {
+        let mut uses: BTreeMap<u32, Vec<(usize, bool)>> = BTreeMap::new();
+        for (side, &(f, forward)) in shell.iter().enumerate() {
+            let face = self.faces.get(f as usize).ok_or("face reference")?;
+            for bound in &face.loops {
+                if let Bound::Edges(edges) = bound {
+                    for &(edge, along) in edges {
+                        uses.entry(edge).or_default().push((side, along == forward));
+                    }
+                }
+            }
+        }
+        if uses.values().all(|sides| {
+            let along = sides.iter().filter(|(_, forward)| *forward).count();
+            sides.len().checked_sub(along) == Some(along)
+        }) {
+            return Ok(false);
+        }
+        let mut adjacent: BTreeMap<usize, Vec<(usize, bool)>> = BTreeMap::new();
+        for sides in uses.values() {
+            let [(a, along_a), (b, along_b)] = sides.as_slice() else {
+                return Err(unsupported("orienting an inconsistent shell with a nonmanifold edge"));
+            };
+            let opposite = along_a == along_b;
+            adjacent.entry(*a).or_default().push((*b, opposite));
+            adjacent.entry(*b).or_default().push((*a, opposite));
+        }
+        let mut flips = BTreeMap::new();
+        let mut started = false;
+        for seed in 0..shell.len() {
+            if flips.contains_key(&seed) {
+                continue;
+            }
+            if started {
+                return Err(unsupported("orienting an inconsistent shell with disconnected faces"));
+            }
+            started = true;
+            let mut pending = vec![(seed, false)];
+            while let Some((side, flip)) = pending.pop() {
+                if let Some(&known) = flips.get(&side) {
+                    if known != flip {
+                        return Err(unsupported("a shell with contradictory edge orientations"));
+                    }
+                    continue;
+                }
+                flips.insert(side, flip);
+                for &(next, opposite) in adjacent.get(&side).into_iter().flatten() {
+                    pending.push((next, flip != opposite));
+                }
+            }
+        }
+        for (side, (_, forward)) in shell.iter_mut().enumerate() {
+            let flip = flips.get(&side).ok_or("face side reference")?;
+            *forward ^= *flip;
+        }
+        Ok(true)
     }
 
     /// Every edge of the shell's faces used at least twice among them.
