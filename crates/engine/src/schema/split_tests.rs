@@ -271,7 +271,7 @@ fn split_body_cuts_with_picked_faces_or_the_whole_surface_body() {
         let id = s.execute("solid.split_body", &p).unwrap_or_else(|e| panic!("{p}: {e}"))["feature"].as_u64().unwrap();
         assert!(near(&cube_parts(&s), [437.5, 562.5]), "{p}: {:?}", cube_parts(&s));
         let saved = s.doc.to_json();
-        assert!(saved.contains(&format!("\"tool_sheet\":\"{sheet}\"")), "{saved}");
+        assert!(saved.contains(&format!("\"tool_sheet\": \"{sheet}\"")), "{saved}");
         let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
         assert!(reopened.model.result(id).unwrap().error.is_none(), "{p}");
         assert!(near(&cube_parts(&reopened), [437.5, 562.5]), "{p}: {:?}", cube_parts(&reopened));
