@@ -683,6 +683,9 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     let made = run(&mut s, "sheet.manage_rules", json!({"name": "SS", "material": "stainless steel 304", "gauge": "16", "k_factor": 0.42}));
     assert_eq!(made["rule"]["k_factor"], "0.42", "{made}");
     assert!(made.get("notes").is_none(), "a K-factor given is no estimate: {made}");
+    // A metric thickness is picked as a gauge is.
+    let metric = run(&mut s, "sheet.manage_rules", json!({"name": "SS2", "material": "Stainless steel 304", "gauge": "2 mm"}));
+    assert_eq!(metric["rule"]["thickness"], "2 mm", "{metric}");
     // Bottoming at R = T reads the hard column's 0.48.
     let bottomed =
         run(&mut s, "sheet.manage_rules", json!({"name": "SSB", "material": "Stainless steel 304", "gauge": "16", "bend_method": "bottoming"}));
@@ -721,7 +724,8 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     assert!(!plain.doc.to_json().contains("\"material\""));
     let lib = run(&mut s, "sheet.rule_library", json!({"material": "copper c110"}));
     let rules = lib["rules"].as_array().cloned().unwrap_or_default();
-    assert_eq!(rules.len(), 8, "{lib}");
+    // 8 Brown & Sharpe gauges and the 12 metric thicknesses.
+    assert_eq!(rules.len(), 8 + 12, "{lib}");
     assert!(rules.iter().all(|r| r["material"] == "Copper C110" && r["sources"].as_array().is_some_and(|s| !s.is_empty())), "{lib}");
     assert!(lib["sources"].as_array().is_some_and(|s| s.len() >= 5), "{lib}");
     assert!(s.execute("sheet.rule_library", &json!({"material": "unobtainium"})).is_err());
