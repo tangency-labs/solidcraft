@@ -2388,8 +2388,9 @@ fn digest_nets(d: &mut Digest, b: &Brep) {
 /// tolerances; each edge's tolerance, interval and 17 curve points; each vertex's tolerance
 /// and point; each edge use's UV trim ([`digest_uv`], on its grid for `rebuild`), as read
 /// and again after the lazy trims are made; and the surface nets on their grid
-/// ([`digest_nets`]).
-fn read_without_surface_points(name: &str, rebuild: bool) -> u64 {
+/// ([`digest_nets`]). Each vertex in `main_tolerances` (index, tolerance) is digested with
+/// that tolerance instead of its own.
+fn read_without_surface_points(name: &str, rebuild: bool, main_tolerances: &[(u32, f64)]) -> u64 {
     use solidcore::topology::edgeuse::p3 as eu3;
     let mut k = Kernel::default();
     let mut b = read_corpus(&mut k, name, rebuild);
@@ -2402,8 +2403,12 @@ fn read_without_surface_points(name: &str, rebuild: bool) -> u64 {
         d.f64(b.edge(e).unwrap().tolerance);
         digest_curve(&mut d, &k, &b, e);
     }
-    for (_, v) in b.vertices().iter() {
-        d.f64(v.tolerance);
+    for (id, v) in b.vertices().iter() {
+        let tolerance = main_tolerances
+            .iter()
+            .find(|&&(i, _)| i == id.index())
+            .map_or(v.tolerance, |&(_, t)| t);
+        d.f64(tolerance);
         for c in [v.point.x, v.point.y, v.point.z] {
             d.f64(c);
         }
@@ -2425,19 +2430,50 @@ fn read_without_surface_points(name: &str, rebuild: bool) -> u64 {
     d.0
 }
 
+/// Vertex `index` of `name`'s read, which #17739 raises: asserts that its tolerance is
+/// `zone_tol3d(gain * 2 * gap)` for its largest gap and over its largest edge tolerance,
+/// and returns that edge tolerance, the value #18230's vertex step gives it on main.
+fn floored_vertex_main_tolerance(name: &str, rebuild: bool, index: u32) -> f64 {
+    use solidcore::geom::tol::{gap_gain, zone_tol3d};
+    use solidcore::topology::vertex;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, rebuild);
+    let v = b
+        .vertices()
+        .iter()
+        .map(|(id, _)| id)
+        .find(|v| v.index() == index)
+        .unwrap();
+    let tol = b.vertex(v).unwrap().tolerance;
+    let largest = vertex::edges(&b, v, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| b.edge(e).unwrap().tolerance)
+        .fold(0.0f64, f64::max);
+    let cover = zone_tol3d(&k, gap_gain(&k) * 2.0 * vertex_gap(&k, &mut b, v));
+    assert!(
+        largest < cover && tol.to_bits() == cover.to_bits(),
+        "{name} v{index}: tolerance {tol:e}, largest edge {largest:e}, cover {cover:e}"
+    );
+    largest
+}
+
 /// #17896 moves `Fillet/bottle.smb`'s digests in [`MAIN`] only through face 15's net:
 /// every face, edge and vertex tolerance, edge curve, vertex and UV trim of the read is main
 /// f760fd440's bit for bit. The net and the rebuilding read's trims agree with main's on
 /// the grid of [`feed_on_grid`]: the rebuilt trims differ in one coordinate by 8e-31, and
 /// 105 control points of face 15 differ by at most 1.86e-17 of their magnitude (MEASURED,
-/// a dump of both nets).
+/// a dump of both nets). #17739 raises the read's vertex 22 to cover twice its gap (the
+/// rebuilding read keeps it, [`corpus_reads_change_only_the_covered_tolerances`]); the
+/// digest checks that raise and takes main's value there.
 #[test]
 fn bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding() {
-    for (rebuild, main) in [
-        (false, 0xa600_8eab_0d09_6dd5),
-        (true, 0x57fd_ee59_a641_5de8),
+    let v22 = floored_vertex_main_tolerance("Fillet/bottle.smb", false, 22);
+    for (rebuild, main, main_tolerances) in [
+        (false, 0xa600_8eab_0d09_6dd5, &[(22, v22)][..]),
+        (true, 0x57fd_ee59_a641_5de8, &[][..]),
     ] {
-        let got = read_without_surface_points("Fillet/bottle.smb", rebuild);
+        let got = read_without_surface_points("Fillet/bottle.smb", rebuild, main_tolerances);
         assert_eq!(got, main, "bottle read (rebuild {rebuild}) is not main's");
     }
 }
