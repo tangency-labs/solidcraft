@@ -91,7 +91,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
-            FeatureKind::Emboss { .. } => &["face"],
+            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
             FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
@@ -106,6 +106,7 @@ impl FeatureKind {
     pub fn face_body(&self) -> Option<&str> {
         match self {
             FeatureKind::Shell { body, .. }
+            | FeatureKind::Dome { body, .. }
             | FeatureKind::Draft { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }

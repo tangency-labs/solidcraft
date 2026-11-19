@@ -35,6 +35,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+mod dome;
 mod draft_corners;
 mod emboss;
 #[cfg(test)]
@@ -192,6 +193,7 @@ pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
+pub use dome::dome;
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
@@ -225,6 +227,7 @@ pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, MAX_CHAIN_POINTS, SurfSpec, sew, sew_touching, sew_touching_traced};
+pub use solidcore_ops::dome::{DomeRefusal, DomeShape};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
@@ -287,6 +290,9 @@ pub enum KernelError {
     /// run ([`heal_tolerance_defects`]).
     #[error("the operation failed: {0}")]
     Heal(#[from] HealFailure),
+    /// A dome the face or the height cannot take.
+    #[error("the operation failed: {0}")]
+    Dome(#[from] DomeRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
