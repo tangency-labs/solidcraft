@@ -695,7 +695,7 @@ impl FlangeEdge {
 
 /// One segment of an edge flange's edge: a stretch of the edge as fractions of the stretch the
 /// sheet still has (`from`, `to`, 0…1), with its own angle, height and side where given (the
-/// edge's, then the feature's, where left out). See `sheet::SheetBody::add_flanges_each`.
+/// edge's, then the feature's, where left out). See `eval_more::segment_runs`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(deny_unknown_fields)]
 pub struct FlangeSegment {
@@ -813,6 +813,27 @@ impl AlignFrame {
     }
 }
 
+/// The side of a fold's line that stays put: left or right of the line as drawn (from its first
+/// point to its second, or along its sketch line), seen from the sheet's surface (the oriented
+/// sheet's outward side). A fold decides it once, when it is made, and keeps it: every rebuild
+/// folds the other side, wherever the line has moved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FoldSide {
+    Left,
+    Right,
+}
+
+impl FoldSide {
+    /// The other side.
+    pub fn other(self) -> FoldSide {
+        match self {
+            FoldSide::Left => FoldSide::Right,
+            FoldSide::Right => FoldSide::Left,
+        }
+    }
+}
+
 /// Feature definitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -906,6 +927,12 @@ pub enum FeatureKind {
         /// smoothly at its ends, as far as they go), or only the picked edges.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         tangent_chain: bool,
+        /// Each picked edge's own radius, in the order of `edges`, all rounded in one blend
+        /// (`radius` is then the first edge's). Empty, the default: every edge takes `radius`.
+        /// A constant-radius, exact, rolling-corner, mitred fillet of the picked edges alone.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = |_i: usize, _n: usize| "Edge radius")]
+        edge_radii: Vec<Expr>,
     },
     Chamfer {
         edges: Vec<Position>,
@@ -1640,7 +1667,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Bend radius")]
         radius: Option<Expr>,
-        /// inside | outside | middle | material_outside | tangent (`sheet::SheetBody::add_flanges_each`).
+        /// inside | outside | middle | material_outside | tangent (`SurfaceSheet::flange_on`).
         #[serde(default = "inside_str")]
         position: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1718,9 +1745,17 @@ pub enum FeatureKind {
         position: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
-        /// A point on the side that stays put (default: the larger side).
+        /// The point the side that stays was picked by, kept as it was given: the fold made
+        /// with it stores that side in `stays` (and a design saved before `stays` gets it when
+        /// opened), so the point no longer decides; a point off the sheet is still said.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fixed: Option<Position>,
+        /// The side of the line that stays put (see [`FoldSide`]), decided once when the fold is
+        /// made: by `fixed`, else the side with more of the sheet joined to it (on a panel bent
+        /// from another, the side toward that bend). Every rebuild keeps it. None only until a
+        /// design saved before it was kept is opened.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stays: Option<FoldSide>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
@@ -1744,18 +1779,76 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         refold: bool,
     },
-    /// Convert a body to sheet metal from its fixed face at `face`: a plate of constant
-    /// thickness or, with `bends`, a solid or shelled body whose faces reached from the fixed
-    /// face across those edges become the sheet.
+    /// Convert to sheet metal, of picked faces (#6748): the sheet is the faces picked at `face` and
+    /// `faces`, and every face a bend joins to them, each a panel of the rule's thickness, however
+    /// thin the body. The sharp edges at `bends` become bends and every other edge between two
+    /// faces of the sheet is cut open; cylinders and cones become rolls. A bend modelled with its
+    /// radius is picked on its roll. The faces at `engrave` are engravings of the panels round
+    /// them.
     SheetConvert {
         body: BodyName,
-        #[walk(pick_if = !bends.is_empty())]
         face: FacePick,
+        /// The faces picked after the first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
+        /// Points on the sharp edges that become bends, or on the rolls of bends modelled with
+        /// their radius.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bends: Vec<Position>,
+        /// The faces of recesses kept as engravings of the panels round them, not as panels.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        engrave: Vec<FacePick>,
+        /// inside (default) | outside: the side of the faces the material lies on.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        direction: String,
+    },
+    /// Convert a body to sheet metal (#6748): every face of the body, a solid's or a surface
+    /// body's, less the faces at `skip`, each a panel of the rule's thickness, however thin the
+    /// body (Recognize reads a body that is sheet metal already). The sharp edges at `bends`
+    /// become bends and every other sharp edge between two faces of the sheet is cut open; a
+    /// cylinder modelled between two planes, its inside radius short of 10^0.7 (about 5) of the
+    /// rule's thicknesses, is a bend of the rule's radius at the planes' virtual sharp, and from
+    /// there a roll that keeps its radius (see `sheet_surface_convert`'s `ROLL_FROM`); other
+    /// cylinders and cones are rolls. The faces at `engrave` are engravings of the panels round
+    /// them. No face is fixed. The body becomes the folded sheet and the model keeps its flat
+    /// pattern.
+    SheetSurfaceConvert {
+        body: BodyName,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<String>,
         /// Points on the sharp edges that become bends.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         bends: Vec<Position>,
+        /// The faces left out of the sheet.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<FacePick>,
+        /// The faces of recesses kept as engravings of the panels round them, not as panels.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        engrave: Vec<FacePick>,
+        /// inside (default) | outside: the side of the faces the material lies on.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        direction: String,
+    },
+    /// Recognize sheet metal (#6748): a body that is sheet metal already (a shell, a plate, an
+    /// imported part) becomes the rule's sheet. Its surface is the side of the face at `face`, or
+    /// of the body's largest face, less the faces at `skip`; a cylinder modelled between two
+    /// planes is a bend, other cylinders and cones are rolls, and the sharp edges are cut open but
+    /// the ones at `bends`. A body of walls of more than one thickness is refused.
+    SheetRecognize {
+        body: BodyName,
+        /// A face whose side is the sheet's surface.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<FacePick>,
+        /// The faces left out of the sheet.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<FacePick>,
+        /// Points on the sharp edges that become bends.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bends: Vec<Position>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
     },
     /// Plastic boss: a round post on a face (draft, root fillet, hole, ribs).
     Boss {
@@ -2255,8 +2348,9 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         copy_frames: Vec<crate::Mat>,
     },
-    /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
-    /// in the design (it is the B-rep), so the design reopens without the original file.
+    /// A non-parametric base feature: bodies imported from a STEP file, or from a file read
+    /// through cadmpeg as B-rep records. The STEP text or the records are kept in the design
+    /// (they are the B-rep), so the design reopens without the original file.
     Import {
         /// Source file name (display only).
         file: String,
@@ -2271,6 +2365,11 @@ pub enum FeatureKind {
         /// component (#1386). Empty in designs from before format 22: every body is built.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skip: Vec<u64>,
+        /// The import kept as B-rep records instead of STEP text (a FreeCAD or Rhino file read
+        /// through cadmpeg's neutral model), `step` then empty; shared like `step`. Designs
+        /// from before `format/v60/import-records.rs` have none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
     /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
     /// constant-section part, planar facets for any other closed mesh.
@@ -2343,6 +2442,12 @@ pub enum FilletTurn {
 /// constant rounds of one radius, at its own corners only.
 pub const SWEPT_TAKES: &str = "a swept corner turns two constant rounds of one radius: `turn: swept` takes `type: constant`, \
 `corner: rolling`, no `setbacks` and `fit: exact` or `reduce`";
+
+/// Why per-edge radii are refused with a fillet's other options: the kernel rounds each picked
+/// edge at its own constant radius, exactly, rolling and mitred at the corners, and the radii
+/// follow the picks one for one.
+pub const EDGE_RADII_TAKE: &str = "each edge at its own radius (`edge_radii`) is a constant round of the picked edges alone: \
+it takes `type: constant`, `fit: exact`, `corner: rolling`, no `setbacks`, `turn: mitre` and `tangent_chain: false`";
 
 impl FilletTurn {
     pub fn is_mitre(&self) -> bool {
@@ -2987,6 +3092,8 @@ impl FeatureKind {
                 | FeatureKind::SheetPath { .. }
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
+                | FeatureKind::SheetSurfaceConvert { .. }
+                | FeatureKind::SheetRecognize { .. }
         )
     }
 
@@ -3047,6 +3154,8 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
+            FeatureKind::SheetSurfaceConvert { .. } => "ConvertBodyToSheetMetalFeature",
+            FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::CellGrid { .. } => "CellGridFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
@@ -3129,6 +3238,8 @@ impl FeatureKind {
             FeatureKind::SheetPath { .. } => "sheet_path",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
+            FeatureKind::SheetSurfaceConvert { .. } => "sheet_surface_convert",
+            FeatureKind::SheetRecognize { .. } => "sheet_recognize",
             FeatureKind::Boss { .. } => "boss",
             FeatureKind::Lip { .. } => "lip",
             FeatureKind::SnapFit { .. } => "snap_fit",
@@ -3215,6 +3326,8 @@ impl FeatureKind {
             "PathFlangeFeature" => "sheet_path",
             "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
             "ConvertToSheetMetalFeature" => "sheet_convert",
+            "ConvertBodyToSheetMetalFeature" => "sheet_surface_convert",
+            "RecognizeSheetMetalFeature" => "sheet_recognize",
             "CoilFeature" => "coil",
             "CellGridFeature" => "cell_grid",
             "RibFeature" | "WebFeature" => "rib",
@@ -3301,7 +3414,8 @@ impl FeatureKind {
             FeatureKind::SheetPath { .. } => "PathFlange",
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
-            FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
+            FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetal",
+            FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::CellGrid { .. } => "CellGrid",
             FeatureKind::Rib { web: false, .. } => "Rib",
@@ -3738,8 +3852,9 @@ pub struct Document {
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
+    /// Shared, so an edit that copies the design does not copy a plugin's large files.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
-    pub plugin_data: std::collections::BTreeMap<String, String>,
+    pub plugin_data: std::collections::BTreeMap<String, std::sync::Arc<str>>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -5068,7 +5183,9 @@ impl Document {
                             Self::eval_in(vals, y, Kind::Length)?,
                             Self::eval_in(vals, z, Kind::Length)?,
                         );
-                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
+                        // Up to and including 1e9 mm, the largest number a design file holds: an
+                        // origin saved at exactly that distance rebuilt before this check existed.
+                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() <= 1e9) {
                             return Err(DocError::Invalid("the plane's axis origin is out of range".into()));
                         }
                         (o, *axis_dir)

@@ -142,23 +142,21 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
 }
 
-/// Skin aligned sections and continue the first section to an apex. Each section has the
-/// same segment order. This preserves correspondence even when the section rotates.
-pub fn loft_aligned_to_point(sections: &[(Plane, Loop2)], apex: Vec3) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "loft_aligned_to_point");
+/// Skin aligned sections, optionally continuing the first section to an apex.
+/// Each section has the same segment order, even when it rotates.
+pub fn loft_aligned(sections: &[(Plane, Loop2)], apex: Option<Vec3>) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_aligned");
     let Some((_, first)) = sections.first() else {
         return Err(KernelError::Invalid("a pointed loft needs sections".into()));
     };
     let count = first.segs.len();
-    if !apex.is_finite()
-        || sections.len() < 4
-        || count == 0
-        || sections.len().saturating_mul(count) > solidcraft_smlib::sweeps::MAX_CURVES
-        || sections.iter().any(|(_, lp)| lp.segs.len() != count)
-    {
-        return Err(KernelError::Invalid("a pointed loft needs aligned sections within the kernel's curve limit".into()));
+    if apex.is_some_and(|p| !p.is_finite()) || sections.len() < 4 || count == 0 || sections.iter().any(|(_, lp)| lp.segs.len() != count) {
+        return Err(KernelError::Invalid("a loft needs aligned sections".into()));
     }
-    crate::smlib_sweeps::loft_aligned_to_point(sections, apex)
+    if sections.len().saturating_mul(count) > solidcraft_smlib::sweeps::MAX_CURVES {
+        return Err(KernelError::Invalid("the loft has too many section curves for the kernel; shorten the thread".into()));
+    }
+    crate::smlib_sweeps::loft_aligned(sections, apex)
 }
 
 #[cfg(test)]

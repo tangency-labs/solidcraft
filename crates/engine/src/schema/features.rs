@@ -830,6 +830,11 @@ pub struct FilletParams {
     /// picked edges.
     #[serde(default)]
     pub tangent_chain: Option<bool>,
+    /// Each picked edge's own radius, one per edge in the order of `edges`, all rounded in one
+    /// fillet (`radius` is then the nominal one, usually the first). Takes a constant, exact, rolling-corner,
+    /// mitred round with `tangent_chain: false`.
+    #[serde(default)]
+    pub edge_radii: Option<Vec<LengthExpr>>,
     #[serde(default, rename = "type")]
     pub kind: Option<FilletTypeParam>,
     /// `type: variable`: the radius at the end away from `start`; it or `radius` may be 0, where

@@ -224,14 +224,18 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
             .filter_map(|(i, b)| {
                 #[cfg(test)]
                 super::cost_tests::count(|c| c.cylinder_search += 1);
-                if ask.allow_cone || ask.point == ThreadPoint::Follow {
-                    let (dist, face) = kernel::thread_face_at(&b.body, p)?;
-                    return Some((dist, i, face.axis, Some(face)));
+                let exact = || kernel::thread_face_at(&b.body, p);
+                if ask.point == ThreadPoint::Follow {
+                    return exact().map(|(dist, face)| (dist, i, face.axis, Some(face)));
                 }
-                let cyl = kernel::cylinder_face_at(&b.body, p)?;
-                let v = p - cyl.axis_point;
-                let dist = ((v - cyl.axis * v.dot(cyl.axis)).len() - cyl.radius).abs();
-                Some((dist, i, cyl, None))
+                // Keep the cylinder's established extent, including oblique
+                // trims, when rebuilding an ordinary thread.
+                if let Some(cyl) = kernel::cylinder_face_at(&b.body, p) {
+                    let v = p - cyl.axis_point;
+                    let dist = ((v - cyl.axis * v.dot(cyl.axis)).len() - cyl.radius).abs();
+                    return Some((dist, i, cyl, None));
+                }
+                ask.allow_cone.then(exact).flatten().filter(|(_, face)| face.slope != 0.0).map(|(dist, face)| (dist, i, face.axis, Some(face)))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
     };
@@ -897,6 +901,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         if on.cone.is_some() && *tip != ThreadTip::None {
             return Err(DocError::Invalid("a conical thread cannot also chamfer the tip".into()));
         }
+        if on.cone.is_some_and(|cone| cone.point_depth.is_none()) && ease_out.is_some() {
+            return Err(DocError::Invalid("a thread on a directly selected cone cannot have a runout".into()));
+        }
         // Resolve against the starting model, before a modelled thread removes a picked surface.
         if !selected.iter().any(|old| old.info.body == on.info.body && old.cyl == on.cyl && old.cone == on.cone) {
             selected.push(on);
@@ -1036,13 +1043,13 @@ fn point_groove_section(root: f64, outer: f64, low: [f64; 2], high: [f64; 2]) ->
     }
 }
 
-/// At a sharp point a full-size meridian cutter would pass through the axis.
+/// Near the axis a full-size meridian cutter would pass through the axis.
 /// Build the groove from sections normal to the axis instead. Each tooth
 /// keeps its angular opening as its radial height approaches zero.
-fn sharp_point_grooves(
+fn narrow_point_grooves(
     t: &ThreadInfo,
     cone: ConeThread,
-    radius: f64,
+    (radius, tip_radius): (f64, f64),
     (depth, flat, flank_lo, flank_hi): (f64, f64, f64, f64),
     shank: &[RootSpan],
     end: End,
@@ -1061,10 +1068,12 @@ fn sharp_point_grooves(
     let lead = pitch * f64::from(starts);
     // Keep the end of the ruled apex cap large enough for its trimmed
     // faces to tessellate on fine pitches as well.
-    let first = (0.012 * pitch).max(0.015);
+    let sharp = tip_radius <= 1e-6;
+    let fade = cone.point_depth == Some(ThreadPointDepth::Fade);
+    let first = if sharp { (0.012 * pitch).max(0.015) } else { 0.0 };
     let finish = end_at + if end == End::Free { 0.016 * pitch } else { 0.0 };
     if height <= first || finish <= height || (finish - first) / lead > 190.0 || radius <= depth {
-        return Err(invalid("the screw point or its thread length does not fit a sharp-point groove"));
+        return Err(invalid("the screw point or its thread length does not fit the groove near the axis"));
     }
     let steps = |a: f64, b: f64| (((b - a) / lead * 24.0).ceil() as u32).max(3);
     let stations = |a, b, first_index| {
@@ -1095,8 +1104,8 @@ fn sharp_point_grooves(
                     let phase = scale * (hand * (z - cone.wide) + f64::from(start) * pitch);
                     let u = x * phase.cos() + y * phase.sin();
                     let fraction = point_rim_blend(h, height, span) / height;
-                    let stock = radius * fraction;
-                    let d = depth * fraction;
+                    let stock = if sharp { radius * fraction } else { tip_radius + (radius - tip_radius) * fraction };
+                    let d = if fade { depth * fraction } else { depth };
                     let runout = if rest.is_empty() {
                         1.0
                     } else {
@@ -1104,15 +1113,16 @@ fn sharp_point_grooves(
                         let fade = h - point_rim_blend(h, fixed_end, (0.12 * pitch).min(length * 0.25));
                         (1.0 - fade / length).clamp(0.0, 1.0)
                     };
-                    // The overrun outside the crest does not cut the part. It tapers
-                    // with the radius so the whole section fits onto the apex.
-                    let overshoot = clearance * (1.0 - (-10.0 * d).exp());
+                    // The cutter stays open outside a flat tip where its depth
+                    // reaches zero. A sharp tip's cutter collapses onto the pole.
+                    let open = if sharp { d } else { d + tip_radius.min(depth) * (1.0 - fraction).max(0.0) };
+                    let overshoot = clearance * (1.0 - (-10.0 * open).exp());
                     let extents = |tan| [(flat + (depth * runout - d * runout) * tan) * scale, (flat + (depth * runout + overshoot) * tan) * scale];
                     let section = point_groove_section(stock - d * runout, stock + overshoot, extents(lo), extents(hi));
                     (Plane { origin: axis_at(z), x: u, y: k.cross(u) }, section)
                 })
                 .collect::<Vec<_>>();
-            tools.push(kernel::loft_aligned_to_point(&sections, axis_at(tip))?);
+            tools.push(kernel::loft_aligned(&sections, sharp.then(|| axis_at(tip)))?);
         }
     }
     Ok(tools)
@@ -1179,14 +1189,18 @@ fn conical_groove_tools(
     };
     let slope = cone.slope.abs();
     let width = left + right;
-    // The cutter has to collapse to the pole with the stock. A truncated
-    // point can use the radial sweep and revolved root instead.
-    let sharp = cone.point_depth == Some(ThreadPointDepth::Fade) && r(tip).abs() <= 1e-6;
+    let slope_of = |s: &RootSpan| (s.root_high - s.root_low) / (s.high - s.low);
+    let bite = 1.02 * spans.iter().map(|span| slope_of(span).abs()).fold(slope, f64::max) * flat + 0.001 * pitch;
+    let fade = cone.point_depth == Some(ThreadPointDepth::Fade);
     let exact_root = cone.point_depth.is_some();
-    if sharp {
+    // A transverse cutter can stay clear of the axis even where the
+    // wider swept cutter would extend into it across a flank.
+    let tip_root = r(tip) - depth;
+    let sweep_clearance = bite.max(slope * width + 2e-6);
+    if exact_root && tip_root <= sweep_clearance && (fade || tip_root > 2e-6) {
         let end = if cone.wide == t.start { ends[1] } else { ends[0] };
-        return sharp_point_grooves(t, cone, cyl.radius, (depth, flat, flank_lo, flank_hi), &spans, end);
-    } else if cone.point_depth == Some(ThreadPointDepth::Fade) {
+        return narrow_point_grooves(t, cone, (cyl.radius, r(tip)), (depth, flat, flank_lo, flank_hi), &spans, end);
+    } else if fade {
         let root = r(base) - depth;
         if !(root > 0.0) {
             return Err(invalid("there is not enough material around the shank's axis for the thread"));
@@ -1213,14 +1227,7 @@ fn conical_groove_tools(
 
     let (begin, finish) = (first.low - right - 0.001 * pitch, last.high + left + 0.001 * pitch);
     let turns = (finish - begin) / lead;
-    let slope_of = |s: &RootSpan| (s.root_high - s.root_low) / (s.high - s.low);
-    let bite = 1.02 * spans.iter().map(|span| slope_of(span).abs()).fold(slope, f64::max) * flat + 0.001 * pitch;
-    // The outer profile sets the crest width. Follow the same envelope as a
-    // full-depth cutter when it clears the axis, then protect the shallow root
-    // with the core below. Lifting the cutter as the depth fades would close
-    // the groove at the surface and leave a broad, flat crest.
-    let keep_crest = cone.point_depth == Some(ThreadPointDepth::Fade) && r(tip) - depth > bite;
-    let tool_root = |z, root: f64| if keep_crest && z == tip { r(z) - depth } else { root.max(2e-6) };
+    let tool_root = |z, root: f64| if fade && z == tip { r(z) - depth } else { root.max(2e-6) };
     let (root, shear, law) = if cone.point_depth.is_some() {
         // One continuous sweep for the shank and point. Its root follows the
         // piecewise-linear radius at the centre of the profile's root flat.

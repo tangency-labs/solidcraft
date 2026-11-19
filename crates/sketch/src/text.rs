@@ -17,7 +17,7 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::Ring;
 use solidcraft_geom::prelude::*;
 
-use crate::fonts::{FontData, font_data_styled};
+use crate::fonts::{FontData, font_data_saved, font_data_styled};
 use crate::link::{LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES};
 use crate::model::{Result, Sketch, SketchError};
 
@@ -526,17 +526,54 @@ pub fn text_geometry_styled(
     style: &TextStyle,
     path: Option<&[Vec2]>,
 ) -> Result<Vec<LinkGeom>> {
+    check_text(text, at, height, angle, style)?;
+    let (data, slant) = font_data_styled(font, style.bold, style.italic)?;
+    lay_text(&data, slant, text, at, height, angle, style, path)
+}
+
+/// [`text_geometry_styled`] for a text saved in a design: when this computer lacks its font or
+/// its bold face, it is set in what is here instead, with a note saying so ([`font_data_saved`],
+/// #19230).
+pub fn saved_text_geometry(
+    font: Option<&str>,
+    text: &str,
+    at: Vec2,
+    height: f64,
+    angle: f64,
+    style: &TextStyle,
+    path: Option<&[Vec2]>,
+) -> Result<(Vec<LinkGeom>, Option<String>)> {
+    check_text(text, at, height, angle, style)?;
+    let ((data, slant), note) = font_data_saved(font, style.bold, style.italic)?;
+    Ok((lay_text(&data, slant, text, at, height, angle, style, path)?, note))
+}
+
+/// The numbers of a text, checked before its font is looked for: finding an installed font can
+/// mean reading its folders.
+fn check_text(text: &str, at: Vec2, height: f64, angle: f64, style: &TextStyle) -> Result<()> {
     if text.chars().count() > MAX_TEXT_CHARS {
         return Err(SketchError::TooLarge);
     }
-    // The numbers first: finding an installed font can mean reading its folders.
     check_height(height)?;
     if !(angle.is_finite() && at.is_finite()) {
         return Err(SketchError::Invalid("the text's place and angle must be finite".into()));
     }
-    check_spacing(style)?;
-    let (data, slant) = font_data_styled(font, style.bold, style.italic)?;
-    let metrics = TextMetrics::new(&data, style)?;
+    check_spacing(style)
+}
+
+/// The outlines of `text` set in the face `data` (`slant`: slanted, as the font has no italic).
+#[allow(clippy::too_many_arguments)]
+fn lay_text(
+    data: &FontData,
+    slant: bool,
+    text: &str,
+    at: Vec2,
+    height: f64,
+    angle: f64,
+    style: &TextStyle,
+    path: Option<&[Vec2]>,
+) -> Result<Vec<LinkGeom>> {
+    let metrics = TextMetrics::new(data, style)?;
     let (k, pitch) = (metrics.scale(height)?, metrics.line_pitch(height)?);
     let shear = if slant { SLANT_DEG.to_radians().tan() } else { 0.0 };
     let along = path.map(|pts| Path::new(pts, style.reverse)).transpose()?;
@@ -693,7 +730,23 @@ impl Sketch {
         let LinkSource::Text { text, at, height, angle, font, style, .. } = src else {
             return Err(SketchError::Invalid("not a text".into()));
         };
-        let path = match &style.path {
+        let path = self.text_path(style)?;
+        text_geometry_styled(font.as_deref(), text, *at, *height, *angle, style, path.as_deref())
+    }
+
+    /// [`Sketch::text_source_geometry`] for a text saved in the design: set in what this computer
+    /// has when it lacks the text's font, with a note saying so ([`saved_text_geometry`], #19230).
+    pub fn saved_text_source_geometry(&self, src: &LinkSource) -> Result<(Vec<LinkGeom>, Option<String>)> {
+        let LinkSource::Text { text, at, height, angle, font, style, .. } = src else {
+            return Err(SketchError::Invalid("not a text".into()));
+        };
+        let path = self.text_path(style)?;
+        saved_text_geometry(font.as_deref(), text, *at, *height, *angle, style, path.as_deref())
+    }
+
+    /// The points of the curve a text runs along, if it runs along one.
+    fn text_path(&self, style: &TextStyle) -> Result<Option<Vec<Vec2>>> {
+        Ok(match &style.path {
             None => None,
             Some(id) => {
                 let ci = self.curve_index(id).ok_or_else(|| SketchError::Invalid(format!("the text's path `{id}` is not a curve of this sketch")))?;
@@ -704,8 +757,7 @@ impl Sketch {
                 }
                 Some(self.polyline(ci))
             }
-        };
-        text_geometry_styled(font.as_deref(), text, *at, *height, *angle, style, path.as_deref())
+        })
     }
 }
 

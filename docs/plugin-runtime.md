@@ -27,7 +27,9 @@ supplies an owned scratch session and adopts its edits only after a successful c
    stored grants. See [Installing](plugins.md#installing).
 2. `plugin.inspect` reads bounded bytes through the caller's existing file scope and returns
    the manifest and content approval hash. It neither instantiates the component nor invokes
-   a manifest function. Metadata can therefore be reviewed before code runs.
+   a manifest function. Metadata can therefore be reviewed before code runs. The package folder
+   must be named after the plugin's `id`, as Install names it; `plugin.check` accepts any folder
+   name and says when it differs.
 3. The user reviews the package and explicitly calls `plugin.run` with that exact hash, an
    exported entry and JSON parameters. The package is read once for this call; the bytes whose
    hash was checked are the bytes compiled and executed. Changing the files afterward cannot
@@ -155,8 +157,9 @@ the bindings by the version the component's imports and exports name, so plugins
 A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design
 (`plugin_data` in the design, base64 by `<plugin-id>/<path>` in a plain JSON design). SolidCraft
 keeps those files and saves them back byte for byte whether or not the plugin is installed;
-opening a design never needs, loads or runs a plugin. Plugins cannot read or write this data yet:
-the `storage` capability adds that.
+opening a design never needs, loads or runs a plugin. A plugin with the `storage@0.1` capability
+reads and writes its own folder through the `storage.*` commands (see
+[Plugins](plugins.md#plugin-data-in-a-design)); nothing else changes it.
 
 `model.mesh {body, tolerance?}` is a general read-only input boundary. Tolerance is a finite positive
 number in millimetres (default 0.05). It returns `body`, its owning `component`,
@@ -287,8 +290,8 @@ model data or package paths.
 Plugins install from a `.zip` with `plugin.install` (see [Plugins](plugins.md#installing)).
 There is no compiled-code cache, unsafe deserialization, WASI filesystem/clock/socket/process API,
 network integration, persistent guest store, signed index, custom panels or plugin-supplied icons.
-The WIT has no persistent store interface yet (`storage` arrives later; designs already keep
-`plugins/<plugin-id>/` data untouched). `manifest()` is not used.
+A plugin keeps data in a design through the `storage.*` commands, not a WIT interface of its own.
+`manifest()` is not used.
 
 ## Author an original plugin
 

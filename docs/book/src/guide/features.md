@@ -231,13 +231,41 @@ The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Bot
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
 
-For a modeled external thread, you can select a conical face to cut a groove that follows its
-taper. To thread a screw's shank and point together, select the shank, turn on **Modeled**, and
-choose **Follow point**. **Fade** makes the groove shallower toward the end of the point and
-keeps the tooth crests narrow. **Full depth** keeps the depth constant when there is enough
-material around the axis. Length and Up To limit the run along the shank, measured from the
-point's rim. Scripts use `point: "follow"` with
-`point_depth: "fade"` or `"full"` on `solid.thread`.
+**Model a pointed screw**
+
+1. Make a cylindrical shank and a cone that narrows away from it. Give the cone and shank the
+   same axis and match their diameters where they meet. Choose **Join** when you add the cone so
+   they form one solid with a shared rim. For example, make a cylinder at the origin with an
+   8 mm diameter and a 3 mm height. Make a cone at the same origin with an 8 mm base diameter,
+   a zero top diameter, and a height of `-8 mm`.
+2. For a slotted head, add a wider cylinder at the other end with **Join**. Use **Cut** to
+   remove a shallow rectangular slot across the head's top.
+3. Open **Thread** and select the shank's cylindrical side. Choose the size and pitch, such
+   as `M8x1.25` for this example. Turn on **Modeled** and choose **Follow point** under **Point**.
+   If both ends have a cone, use **Start end (optional)** to pick the rim of the one to follow.
+4. Leave **Point depth** at **Fade** and apply the thread. The groove continues across the rim,
+   then gets shallower toward the tip and keeps the tooth crests narrow. **Length** and **Up to**
+   limit the run along the shank, measured from the point's rim.
+
+Choose **Full depth** for a point with enough material around its axis to keep the full groove
+depth. A sharp point needs **Fade**. To cut a constant-depth groove on a cone alone, select its
+conical face directly, turn on **Modeled**, and leave **Point** set to **None**. Use **Length**
+to limit the cut to the part of the cone where the groove clears the axis. Leave **Runout**
+off for a directly selected cone.
+
+The [pointed screw example](https://github.com/tangency-labs/solidcraft/blob/main/examples/pointed-screw.json)
+builds the shank, cone, slotted head, and thread with the built-in tools. Run it from the
+repository root, then open the saved design or import the STL into a slicer.
+
+```sh
+solidcraft-cli run examples/pointed-screw.json --save pointed-screw.sc --out pointed-screw.stl --quality fine
+```
+
+Scripts use `point: "follow"` and `point_depth: "fade"` or `"full"` on `solid.thread`.
+For standard hardware, use **Insert Fastener** or the separately installed **Screw** plugin.
+Use **Follow point** when you need to model threads on the point of a custom screw blank.
+The example uses nominal thread geometry. For a printed part, check the fit with the intended
+printer and material.
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
@@ -258,6 +286,15 @@ Scripts and MCP use the same command, for example on a 20 mm box:
 {"command": "solid.fillet", "params": {"edges": [[20, 0, 10]], "radius": 2, "type": "curvature"}}
 ```
 `type: "g2"` is an alias. Existing fillets still default to circular, constant-radius G1 blends.
+
+To round several edges at different radii in one fillet (where rounding them one after another
+cannot meet at their shared corners), scripts give `edge_radii`: one radius per picked edge, in
+the order of `edges`. `radius` stays the nominal radius (usually the first). It takes a constant,
+exact, rolling-corner, mitred fillet of the picked edges alone (`tangent_chain: false`); with any
+other option, or a count that does not match the edges, the command is refused, saying why:
+```json
+{"command": "solid.fillet", "params": {"edges": [[20, 0, 10], [40, 15, 10]], "radius": 1, "edge_radii": [1, "3 mm"], "tangent_chain": false}}
+```
 
 Where three or more rounded edges meet at a corner, the Fillet dialog shows **Corners**: **Ball**
 (the default, a piece of the rolling ball's sphere, tangent (G1) to each round) or **Smooth
@@ -422,7 +459,7 @@ still be added through `set`. The fields of the common features:
 |---|---|
 | Extrude | `extent`: {`distance`, `direction`: positive\|negative\|symmetric, `distance2`, `start_offset`, `through_all`, `taper`, `to`, `to_offset`, `from`}; `operation`: new_body\|join\|cut\|intersect; `targets`; `profiles`; `sketch`; `thin`: {`curves`, `thickness`, `side`: center\|inside\|outside\|two_sides, `thickness2`} |
 | Revolve | `angle`, `angle2`, `symmetric`, `axis`, `to`, `operation`, `targets`, `profiles`, `sketch` |
-| Fillet | `radius`, `edges` (a point on each edge), `body`, `style` |
+| Fillet | `radius`, `edges` (a point on each edge), `body`, `style`, `edge_radii` (one radius per edge) |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |
 | Box | `length`, `width`, `height`, `corner`, `operation` |
 | Cylinder | `radius`, `height`, `base`, `axis`, `operation`, `references` (an `edge` point and a `distance` each, as a hole's) |

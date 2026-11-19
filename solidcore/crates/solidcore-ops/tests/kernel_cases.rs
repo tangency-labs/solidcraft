@@ -54,6 +54,9 @@
     clippy::cast_precision_loss
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::io::Read as _;
@@ -1383,8 +1386,18 @@ fn run_case_with_records(
             // A handled refusal is an attempt, not the case's outcome. Keep checking the
             // later operations and final geometry; an unmarked refusal still ends the case.
             (Err(_), Some(_)) if continued => {}
-            (Err(_), Some(_)) => {
+            (Err(x), Some(_)) => {
                 write_smb(e, &ins);
+                // An entry may name the refusal it expects (`refused_as`, a part of the
+                // error's text): any other error, such as a blend that fails inside instead of
+                // being refused, does not stand for it.
+                if let Some(kind) = c.get("refused_as").and_then(Value::as_str) {
+                    if !x.contains(kind) {
+                        return Err(Stop::Fail(format!(
+                            "call {i} ({op}) failed where the rig's was refused as \"{kind}\": {x}"
+                        )));
+                    }
+                }
                 return Ok(None);
             }
             (Err(x), None) => {
@@ -1944,6 +1957,21 @@ fn handled_refusal_case() -> Value {
         "expected": {"body_count": 1, "volume_mm3": 4.0 * std::f64::consts::PI / 3.0,
                      "tolerance": {"rel": 1e-9}}
     })
+}
+
+#[test]
+fn a_named_refusal_kind_must_match_the_replayed_error() {
+    let mut e = handled_refusal_case();
+    let calls = e["calls"].as_array_mut().unwrap();
+    calls.truncate(1);
+    calls[0].as_object_mut().unwrap().remove("continued");
+    e["result"] = serde_json::json!([]);
+    // without a kind, any error stands for the traced refusal
+    assert!(matches!(run_case(Path::new("unused.json"), &e), Ok(None)));
+    e["calls"][0]["refused_as"] = serde_json::json!("no room");
+    assert!(
+        matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
+    );
 }
 
 #[test]
@@ -3128,10 +3156,7 @@ fn union_all_replays_an_odd_operand_list_without_consuming_inputs() {
 #[test]
 #[ignore = "the 17 captured unions are slow; also covered by the full kernel rig"]
 fn union_all_replays_captured_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let mut files = Vec::new();
     entries(&corpus(), &mut files);
     files.sort();
@@ -3169,10 +3194,7 @@ fn union_all_replays_captured_cases() {
 #[test]
 #[ignore = "replays corpus cases with the rig's fixes; run with the kernel rig (--ignored)"]
 fn turn_cases_replay_their_traced_turn() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     for (case, refused) in [
         ("cov-fillet-turn-mitre-boss-base-r1", false),
@@ -4305,10 +4327,7 @@ fn extend_sheet_metadata_and_refusal_are_distinct() {
 #[test]
 #[ignore = "the whole corpus is slow; run it with --ignored, KERNEL_CASES_AREA shards it"]
 fn kernel_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     let areas: Option<Vec<String>> = std::env::var("KERNEL_CASES_AREA").ok().map(|a| {
         a.split(',')

@@ -676,40 +676,34 @@ fn up_to(inputs: &[SelInput]) -> Option<Value> {
     }
 }
 
+fn sizing_target(s: &Session, picks: &[Sel]) -> Option<(solidcraft_engine::doc::ModelState, solidcore_record::Vec3)> {
+    let Sel::Face { body, point, .. } = picks.first()? else { return None };
+    let world = crate::open_meshing::session_world(s);
+    let mut state = solidcraft_engine::doc::ModelState::default();
+    state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
+    Some((state, *point))
+}
+
 /// The face's size in the dialog's form, for an automatic size.
 pub(crate) fn suggested(s: &Session, picks: &[Sel], o: &Options, modeled: bool) -> Option<String> {
-    picks.first().and_then(|sel| match sel {
-        Sel::Face { body, point, .. } => {
-            let world = crate::open_meshing::session_world(s);
-            let mut state = solidcraft_engine::doc::ModelState::default();
-            state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
-            if modeled {
-                solidcraft_engine::doc::suggested_modeled_thread_in(&state, *point, o.form).ok()
-            } else {
-                solidcraft_engine::doc::suggested_thread_in(&state, *point, o.form).ok()
-            }
-        }
-        _ => None,
-    })
+    let (state, point) = sizing_target(s, picks)?;
+    if modeled {
+        solidcraft_engine::doc::suggested_modeled_thread_in(&state, point, o.form).ok()
+    } else {
+        solidcraft_engine::doc::suggested_thread_in(&state, point, o.form).ok()
+    }
 }
 
 /// The size to fill in for a face automatic sizing has none for: a metric cylinder past the coarse
 /// table (a Ø150 shaft) takes a size with its pitch (`M150x4`), which the Size and Pitch rows then
 /// offer to change. The dialog records it as filled in, apart from the suggestion, so a new face
 /// replaces it but an authored size stays.
-pub(crate) fn large_size(s: &Session, picks: &[Sel], o: &Options) -> Option<String> {
+pub(crate) fn large_size(s: &Session, picks: &[Sel], o: &Options, modeled: bool) -> Option<String> {
     if o.form != ThreadForm::Metric {
         return None;
     }
-    picks.first().and_then(|sel| match sel {
-        Sel::Face { body, point, .. } => {
-            let world = crate::open_meshing::session_world(s);
-            let mut state = solidcraft_engine::doc::ModelState::default();
-            state.bodies = world.bodies.iter().filter(|candidate| candidate.name == *body).cloned().collect();
-            solidcraft_engine::cmd::large_thread_size(&state, *point)
-        }
-        _ => None,
-    })
+    let (state, point) = sizing_target(s, picks)?;
+    solidcraft_engine::cmd::large_thread_size(&state, point, modeled)
 }
 
 /// A saved thread's dialog: every option as saved, with its picks.

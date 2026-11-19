@@ -585,7 +585,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         let plane = solidcore_record::Plane::from_normal(base, n)?;
         reference_height(app, d, "To Object", &plane, base)
     });
-    let all_span = if matches!(d.kind, Kind::Extrude { all: true, .. }) {
+    let all_on = matches!(d.kind, Kind::Extrude { all: true, .. });
+    let all_span = if all_on {
         dir.and_then(|n| {
             let state = crate::open_meshing::session_world(&app.session);
             let plane = match d.inputs.first()?.items.first()? {
@@ -874,6 +875,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         _ => Vec::new(),
     };
     let section = matches!(d.kind, Kind::Section { .. });
+    // With To Object picked the box holds To Offset, which is used, whatever All says: the
+    // engine takes To Object first.
+    let names_all = all_on && !d.inputs.iter().any(|input| input.label == "To Object");
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -951,8 +955,22 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     };
     let box_at = clear_of_dialog(rect, place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
-    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), BoxPlace { dialog: None, ..place });
-    if *value != before
+    // Extent Type All (#18765): the depth of the Distance kept from before is not what the
+    // extrude reaches, so the field is empty and its hint names the extent. Text typed there is
+    // the new Distance. Like any empty box it has no number to step (Up, Down, the wheel).
+    let shows_all = names_all && *value == before;
+    let select_all = focus || *value != before;
+    let mut typed = String::new();
+    let shown = if shows_all { &mut typed } else { &mut *value };
+    let hint = if shows_all { "All" } else { "" };
+    value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
+    // Spaces alone are not an entry: the field has the keyboard as the dialog opens.
+    let entered = !typed.trim().is_empty();
+    if entered {
+        value.clone_from(&typed);
+    }
+    // A text typed that equals the kept Distance ends All too.
+    if (*value != before || entered)
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
@@ -1029,10 +1047,11 @@ fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, 
     value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);
 }
 
-/// [`value_box`] with a note after the field (a pull's step size).
-fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>, place: BoxPlace) {
+/// [`value_box`] with a note after the field (a pull's step size) and a `hint` for the empty
+/// field (`""` for none).
+fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, hint: &str, note: Option<&str>, place: BoxPlace) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
-    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note, place);
+    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), (hint, note), place);
 }
 
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
@@ -1048,10 +1067,11 @@ pub(crate) fn value_box_in(
     keep_tab: bool,
     place: BoxPlace,
 ) -> Option<egui::Rect> {
-    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), None, place)
+    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), ("", None), place)
 }
 
-/// [`value_box_in`] with a short dimmed note after the field (a pull's step size).
+/// [`value_box_in`] with a short dimmed note after the field (a pull's step size) and a hint
+/// shown in the field while it is empty.
 fn value_box_full(
     ui: &mut egui::Ui,
     (area, id): (egui::Id, egui::Id),
@@ -1059,7 +1079,7 @@ fn value_box_full(
     value: &mut String,
     (at, pivot): (Pos2, egui::Align2),
     (select_all, keep_tab): (bool, bool),
-    note: Option<&str>,
+    (hint, note): (&str, Option<&str>),
     place: BoxPlace,
 ) -> Option<egui::Rect> {
     // Off in Preferences: the value is typed in the command window only (#9479).
@@ -1078,7 +1098,9 @@ fn value_box_full(
     // #6608: the box moves out of the command window it would otherwise cover, and out of the
     // manipulator's handles: it keeps its place by its geometry, but a box that would cover
     // either of them moves out of it.
-    let at = if place.dialog.is_some() || place.handles.is_some() {
+    // Always inside the drawing area too: a box hung from a handle that has left the window
+    // (a far drag) would be cut off at its edge, out of reach (#18722).
+    let at = if place.dialog.is_some() || place.handles.is_some() || place.view.is_some() {
         let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), place);
         pivot.pos_in_rect(&kept)
     } else {
@@ -1094,7 +1116,7 @@ fn value_box_full(
                 ui.label(
                     egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption),
                 );
-                let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
+                let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab, hint);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
                     r.request_focus();
@@ -1120,10 +1142,12 @@ const DIALOG_GAP: f32 = 4.0;
 /// handles: whole, beside what it would cover (leaving a gap of `DIALOG_GAP`), and inside the
 /// drawing area (`view`), like a box kept in view (#6608). The sides of the command window
 /// are tried first, then the sides of the handles, and the first side that leaves the box
-/// clear of both wins. A box that misses them keeps its place, and one that no side clears
-/// keeps it too, unless a side leaves the handles free: a box over a handle takes the press
-/// the user meant for the handle.
+/// clear of both wins. A box that misses them keeps its place (inside the drawing area), and
+/// one that no side clears keeps it too, unless a side leaves the handles free: a box over a
+/// handle takes the press the user meant for the handle.
 fn clear_of_dialog(rect: egui::Rect, place: BoxPlace) -> egui::Rect {
+    // A box beyond the drawing area comes back inside it before anything else (#18722).
+    let rect = keep_in_view(rect, place.view);
     let mut obstacles: Vec<egui::Rect> = Vec::new();
     if let Some(dialog) = place.dialog {
         obstacles.push(dialog);
@@ -2425,6 +2449,22 @@ mod tests {
         let clear = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(140.0, 24.0));
         let place = BoxPlace { dialog: Some(dialog), view: Some(view), handles: None };
         assert_eq!(clear_of_dialog(clear, place), clear, "a box that misses the window stays");
+    }
+
+    /// #18722: a value box hung from a handle that left the drawing area is brought back inside
+    /// it, whole, with no command window or handles to clear; one already inside stays.
+    #[test]
+    fn a_value_box_beyond_the_drawing_area_comes_back_inside() {
+        let view = egui::Rect::from_min_size(egui::pos2(100.0, 40.0), egui::vec2(1000.0, 700.0));
+        let place = BoxPlace { dialog: None, view: Some(view), handles: None };
+        let size = egui::vec2(140.0, 24.0);
+        for far in [egui::pos2(5000.0, 3000.0), egui::pos2(-900.0, -400.0), egui::pos2(1050.0, 300.0), egui::pos2(300.0, 735.0)] {
+            let kept = clear_of_dialog(egui::Rect::from_min_size(far, size), place);
+            assert!(view.contains_rect(kept), "the box at {far:?} stayed at {kept:?}, outside {view:?}");
+            assert_eq!(kept.size(), size, "the box keeps its size");
+        }
+        let inside = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), size);
+        assert_eq!(clear_of_dialog(inside, place), inside, "a box inside stays where it is");
     }
 
     /// Canvas value boxes sit under Preferences and Report a bug (#9016).

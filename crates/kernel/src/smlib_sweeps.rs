@@ -79,7 +79,7 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_aligned_to_point, loft_curves, loft_to_point, path_curve,
+    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_aligned, loft_curves, loft_to_point, path_curve,
     project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
@@ -2230,11 +2230,14 @@ mod imp {
         loft_through(sections, first, &curves, degree)
     }
 
-    pub(crate) fn loft_aligned_to_point(sections: &[(Plane, Loop2)], apex: Vec3) -> Result<Body> {
+    pub(crate) fn loft_aligned(sections: &[(Plane, Loop2)], apex: Option<Vec3>) -> Result<Body> {
         let curves =
             sections.iter().map(|(plane, lp)| lp.segs.iter().map(|seg| curve(plane, seg)).collect::<Result<Vec<_>>>()).collect::<Result<Vec<_>>>()?;
+        let loft = body_of(Brep::loft(&curves, 3, true).map_err(|e| failed("aligned loft", e))?, "aligned loft")?;
+        let Some(apex) = apex else {
+            return Ok(loft);
+        };
         let section = curves.first().ok_or_else(|| KernelError::Invalid("a pointed loft needs sections".into()))?;
-        let loft = body_of(Brep::loft(&curves, 3, true).map_err(|e| failed("pointed loft", e))?, "pointed loft")?;
         let cap = body_of(Brep::loft_to_point(section, p(apex)).map_err(|e| failed("pointed loft cap", e))?, "pointed loft cap")?;
         crate::boolean(&loft, &cap, crate::BoolOp::Union)?.ok_or_else(|| KernelError::Failed("a pointed loft has no volume".into()))
     }
