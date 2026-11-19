@@ -658,6 +658,8 @@ pub struct SurfaceIntersector<'s> {
     /// repeat its UV, and the end-point and loop checks, which compare UV too, do not
     /// see it close. Off by default.
     pub extension_stops_on_closure: bool,
+    /// Not upstream (#17218): each surface's `[u, v]` period, for a through point a period away.
+    pub uv_periods: [[Option<f64>; 2]; 2],
     /// Not upstream (#2500): while an extension runs with
     /// [`Self::extension_stops_on_closure`], the traced curve's point it must not pass:
     /// the start for the extension after the end, the end for the one back from the
@@ -912,6 +914,7 @@ impl<'s> SurfaceIntersector<'s> {
             extension_distance: 0.0,
             doing_extension_clipping: false,
             extension_stops_on_closure: false,
+            uv_periods: [[None; 2]; 2],
             extension_closes_at: None,
             extension_left_closure: false,
             extension_closed: false,

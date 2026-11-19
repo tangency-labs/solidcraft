@@ -2493,6 +2493,52 @@ mod tests {
         assert!(si.clipped_by_through_point);
     }
 
+    /// A through point at v 0.03 against a span at v 0.98..1.08: (matched, next v, stored v).
+    fn through_point_one_period_away(period: Option<f64>) -> (bool, f64, f64) {
+        let k = &Kernel::default();
+        let (a, b) = two_planes();
+        let mut si = intersector(k, &a, &b);
+        si.uv_periods[1][1] = period;
+        let with_v = |mut p: TsectPnt, u: f64, v: f64| {
+            *p.uv_pos_mut(SrfIndex::Second) = Point2::new(u, v);
+            p
+        };
+        let p0 = si.alloc_point(with_v(crossing(&si, 0.2, 0.0), 0.2, 0.98));
+        let th = si.alloc_point(with_v(crossing(&si, 0.4, -1.0), 0.4, 0.03));
+        let next = si.alloc_point(with_v(crossing(&si, 0.6, 0.4), 0.6, 1.08));
+        si.add_point_to_curve(p0).expect("curve");
+        si.add_through_point(th).expect("through");
+        si.test_point(k, next).expect("test");
+        let matched = si.through_points().is_empty();
+        let next_v = si.point(next).expect("next").uv_pos(SrfIndex::Second).y;
+        let through_v = si
+            .point(th)
+            .expect("through point")
+            .uv_pos(SrfIndex::Second)
+            .y;
+        (matched, next_v, through_v)
+    }
+
+    /// #17218: a through point a period away in v matches once shifted; the stored one keeps its v.
+    #[test]
+    fn a_through_point_a_period_away_in_v_matches_once_shifted() {
+        let (matched, next_v, through_v) = through_point_one_period_away(Some(1.0));
+        assert!(matched, "the shifted through point lies on the span");
+        assert!((next_v - 1.03).abs() < 1e-9, "next v {next_v}");
+        assert!(
+            (through_v - 0.03).abs() < 1e-12,
+            "stored through v {through_v}"
+        );
+    }
+
+    /// Without a period nothing is shifted, so the same through point is not matched.
+    #[test]
+    fn a_through_point_is_not_shifted_without_a_period() {
+        let (matched, _, through_v) = through_point_one_period_away(None);
+        assert!(!matched);
+        assert!((through_v - 0.03).abs() < 1e-12);
+    }
+
     #[test]
     fn test_point_needs_a_previous_point() {
         let k = &Kernel::default();
