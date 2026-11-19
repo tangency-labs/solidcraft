@@ -724,7 +724,8 @@ pub struct ManageRulesParams {
     /// the rule; empty clears it. With `gauge`, a material of the standard library
     /// (`sheet.rule_library`). Ignored when deleting.
     pub material: Option<String>,
-    /// A gauge of `material` in the standard library (`16`, `16 ga`): the rule takes its
+    /// A gauge or metric thickness of `material` in the standard library (`16`, `16 ga`,
+    /// `1.5 mm`): the rule takes its
     /// thickness and keeps its own bend radius; its K-factor is the bend model's estimate, unless
     /// `k_factor` is given. Needs `material`. Ignored when deleting.
     pub gauge: Option<String>,
