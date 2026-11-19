@@ -42,28 +42,18 @@ fn out_of_memory_is_reported_before_secondary_validation_errors() {
     assert_eq!(buffer.map(|b| b.size()).map_err(|e| e.to_string()), Ok(wgpu::COPY_BUFFER_ALIGNMENT));
 }
 
-/// A pick that finds a GPU among the backends other than GL never lists GL. A GL listing leaves
-/// an OpenGL context alive for as long as the picked adapter, and with Mesa's radeonsi (25.2)
-/// threads that created and dropped those contexts together hung: the GPU tests stopped at random.
+/// A pick and a survey list GL in an instance of its own. Listed in the same instance as Vulkan,
+/// GL left an OpenGL context alive for as long as the picked Vulkan adapter, and with Mesa's
+/// radeonsi (25.2) threads that created and dropped those contexts together hung: the GPU tests
+/// stopped at random. The adapters and their order are those one instance gives.
 #[test]
-fn a_pick_that_finds_a_gpu_without_gl_never_lists_gl() {
-    let first = select::native_backends() - wgpu::Backends::GL;
-    let gpu_without_gl = !first.is_empty()
-        && pollster::block_on(
-            wgpu::Instance::new(wgpu::InstanceDescriptor { backends: first, ..instance_descriptor_from_env() }).enumerate_adapters(first),
-        )
-        .iter()
-        .any(|a| select::tier_of(a.get_info().device_type) == select::Tier::Hardware);
-    if !gpu_without_gl {
-        eprintln!("skipped: no GPU outside GL here");
-        return;
-    }
-    let before = select::GL_LISTINGS.with(std::cell::Cell::get);
-    for policy in [select::Policy::Auto, select::Policy::Hardware] {
-        let picked = select::pick(policy).map(|(a, _)| a.get_info().backend);
-        assert!(picked.is_some_and(|b| b != wgpu::Backend::Gl), "{policy:?} picked {picked:?}");
-    }
-    assert_eq!(select::GL_LISTINGS.with(std::cell::Cell::get), before, "a pick listed GL beside a GPU it did not need GL for");
+fn a_pick_and_a_survey_list_gl_in_an_instance_of_its_own() {
+    let before = select::MIXED_INSTANCES.with(std::cell::Cell::get);
+    let picked = select::pick(test_env::policy()).map(|(_, r)| (r.name, r.backend));
+    let survey = select::survey(test_env::policy());
+    assert_eq!(select::MIXED_INSTANCES.with(std::cell::Cell::get), before, "GL was listed in an instance with another backend");
+    let chosen = survey.chosen.and_then(|i| survey.adapters.get(i)).map(|r| (r.name.clone(), r.backend.clone()));
+    assert_eq!(picked, chosen, "the survey names the adapter a pick takes");
 }
 
 #[test]
