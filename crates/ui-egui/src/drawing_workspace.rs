@@ -31,6 +31,7 @@ pub struct State {
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
     dimension: Option<dimension::Draft>,
+    dimension_hover: Option<dimension::Hover>,
     dimension_edit: Option<panels::DimensionEdit>,
     /// The object whose options the panel shows because it was selected (it alone), and the one
     /// thing selected when that was last looked at: see [`follow_selection`].
@@ -80,6 +81,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.note = None;
         app.drawing_workspace.view_edit = None;
         app.drawing_workspace.dimension = None;
+        app.drawing_workspace.dimension_hover = None;
         app.drawing_workspace.dimension_edit = None;
         app.drawing_workspace.shown_for = None;
         app.drawing_workspace.selection_seen = None;
@@ -181,6 +183,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
     app.drawing_workspace.dimension = None;
+    app.drawing_workspace.dimension_hover = None;
     app.drawing_workspace.dimension_edit = None;
     app.drawing_workspace.shown_for = None;
     app.drawing_workspace.add_sheet = None;

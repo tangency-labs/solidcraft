@@ -368,6 +368,34 @@ fn added_dimension(h: &mut Harness, before: &[u64]) -> Value {
     h.app.run("drawing.dimension.inspect", json!({"dimension": solidcraft_engine::doc::ids::encode(id)})).unwrap()
 }
 
+/// With the Dimension tool in hand, the edge under the pointer is found before any click, to be
+/// shaded as a sketch shades the curve under the pointer: a straight edge, a circle, nothing over
+/// empty paper. It is the edge a click then picks, and it goes when the tool is put down.
+#[test]
+fn dimension_tool_shades_the_edge_under_the_pointer_before_the_click() {
+    use crate::drawing_workspace::dimension::{Shape, hovered_shape, picked_shapes};
+    let (mut h, _) = holed_plate_dimensioning();
+    let hover = |h: &mut Harness, x: f32, y: f32| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        h.step(&json!({"move": [paper.left() + paper.width() * x / 420.0, paper.bottom() - paper.height() * y / 297.0]})).unwrap();
+        h.frames(2);
+        hovered_shape(&h.app)
+    };
+    assert!(matches!(hover(&mut h, 125.0, 175.0), Some(Shape::Straight(_))), "the plate's bottom edge");
+    assert!(picked_shapes(&h.app).is_empty(), "shaded, not picked");
+    assert!(matches!(hover(&mut h, 143.0, 180.0), Some(Shape::Round(_))), "the hole's circle");
+    assert_eq!(hover(&mut h, 128.0, 180.0), None, "empty paper inside the view");
+    assert_eq!(hover(&mut h, 60.0, 60.0), None, "empty paper off the view");
+
+    let shaded = hover(&mut h, 125.0, 175.0);
+    click_paper(&mut h, 125.0, 175.0);
+    assert_eq!(picked_shapes(&h.app).first().copied(), shaded, "a click picks the edge that was shaded");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert_eq!(hovered_shape(&h.app), None, "nothing stays shaded once the tool is down");
+}
+
 /// Two edges picked one after the other dimension the distance between them, as in a sketch: the
 /// plate's bottom and top edges, parallel, read its 20 mm height, measured square to them
 /// (vertical), with the line through the third click.
