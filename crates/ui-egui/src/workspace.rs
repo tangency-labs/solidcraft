@@ -342,7 +342,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
     },
-    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -667,7 +667,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.check.planned", "Check Drawing"),
     ("drawing.dimension", "Dimension"),
     ("drawing.dimension.from_model.planned", "Model Dims."),
-    ("drawing.export.planned", "Export"),
+    ("drawing.export", "Export"),
     ("drawing.hole_callout", "Hole Callout"),
     ("drawing.image", "Image"),
     ("drawing.leader", "Leader Note"),
