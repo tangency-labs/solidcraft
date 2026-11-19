@@ -1180,8 +1180,10 @@ fn expected_digest(text: &str, rows: &[Row], whole: &[WholeCase]) -> Result<u64,
 ///   raise whose bound used to run out of pieces and fall back to upstream's twice the fit
 ///   error. The early cutoff of the bound (`trim_image_gap_bound_within`) now leaves pieces
 ///   for it, so it proves its bound. The fillet's curves are then fitted to the lower
-///   tolerance: the same vertices, the edges in another order, the spring-line curves on the
-///   same circles but parametrised differently.
+///   tolerance: the same vertices (bit for bit), the edges in another order, the blend's
+///   curves refitted (237 control points, 264 on main) and its length parameter 17.675, 17.690
+///   on main. Its blend lies within 3.3e-6 of the exact rolling ball of radius 0.5 (`changed`:
+///   the topology and geometry digests; `rolling_ball`: 0.5).
 const CASES: &str = include_str!("trim_tolerance_cases.jsonl");
 
 /// One entry of [`CASES`].
@@ -1195,6 +1197,12 @@ struct WholeCase {
     /// net) or `line-off-plane` (a UV line trim on a surface other than a plane, see
     /// [`use_bound`]).
     open: Vec<(usize, u32, u32, String)>,
+    /// The keys of main's line the new result changes (`ints.<key>` or `values.<key>`); every
+    /// other key of the line is main's exactly.
+    changed: Vec<String>,
+    /// The radius of the rolling-ball fillet between the body's sphere and plane that each of
+    /// its procedural blend faces must lie on ([`rolling_ball_deviation`]), if any.
+    rolling_ball: Option<f64>,
 }
 
 /// [`CASES`] of `unit`, or of every unit for `None`.
@@ -1225,10 +1233,142 @@ fn whole_cases(unit: Option<&str>) -> Vec<WholeCase> {
                 case: v["case"].as_str().expect("case").to_string(),
                 main: v["main"].clone(),
                 open,
+                changed: v["changed"]
+                    .as_array()
+                    .expect("changed keys")
+                    .iter()
+                    .map(|k| k.as_str().expect("a key").to_string())
+                    .collect(),
+                rolling_ball: v.get("rolling_ball").map(|r| r.as_f64().expect("a radius")),
             }
         })
         .filter(|w| unit.is_none_or(|u| w.unit == u))
         .collect()
+}
+
+/// The largest distance, over a 21 by 21 grid of each procedural blend face's surface and 21
+/// samples of each of its edges' curves, from the rolling-ball fillet of radius `r` between
+/// the body's one sphere face and one plane face: the torus of tube radius `r` around the
+/// circle of ball centres (each `r` from the plane and `R ± r` from the sphere's centre `C`),
+/// of the four such circles the one the samples lie closest to. The sphere's centre and
+/// radius come from four of its points, the plane from three of its points; `None` where the
+/// body does not have exactly one face of each, no blend face, or the supports are not a
+/// sphere and a plane to 1e-9 of their size. With it, the least tolerance of the blend
+/// faces' edges.
+fn rolling_ball_deviation(k: &Kernel, b: &Brep, r: f64) -> Option<(f64, f64)> {
+    use solidcore::geom::vector2d::Point2;
+    use solidcore::geom::vector3d::Vec3;
+    let faces = solidcore::topology::brep::p1::faces(b, None).ok()?;
+    let surface_of = |f: FaceId| b.face(f).ok().and_then(|x| x.surface.as_ref());
+    let of_kind = |pick: fn(&SurfaceKind) -> bool| -> Vec<FaceId> {
+        faces
+            .iter()
+            .copied()
+            .filter(|&f| surface_of(f).is_some_and(|s| pick(s.kind())))
+            .collect()
+    };
+    let spheres = of_kind(|s| matches!(s, SurfaceKind::Sphere(_)));
+    let planes = of_kind(|s| matches!(s, SurfaceKind::Plane(_)));
+    let blends = of_kind(|s| matches!(s, SurfaceKind::ProceduralBlend(_)));
+    let ([sphere], [plane]) = (spheres.as_slice(), planes.as_slice()) else {
+        return None;
+    };
+    if blends.is_empty() {
+        return None;
+    }
+    let grid = |f: FaceId, n: u32| -> Option<Vec<Vec3>> {
+        let s = surface_of(f)?;
+        let d = s.natural_uv_domain_if_built();
+        let (a, z) = (d.min(), d.max());
+        let mut out = Vec::new();
+        for i in 0..=n {
+            for j in 0..=n {
+                let uv = Point2::new(
+                    a.x + (z.x - a.x) * f64::from(i) / f64::from(n),
+                    a.y + (z.y - a.y) * f64::from(j) / f64::from(n),
+                );
+                out.push(s.evaluate_point(k, uv).ok()?);
+            }
+        }
+        Some(out)
+    };
+    // the sphere: the centre equidistant from four of its points (three linear equations)
+    let sp = grid(*sphere, 4)?;
+    let pick = [sp.get(6)?, sp.get(8)?, sp.get(16)?, sp.get(12)?].map(|p| *p);
+    let [p0, p1, p2, p3] = pick;
+    let rows = [p1 - p0, p2 - p0, p3 - p0].map(|d| d * 2.0);
+    let rhs = [p1, p2, p3].map(|p| p.length_squared() - p0.length_squared());
+    let det = rows[0].triple_product(rows[1], rows[2]);
+    if det == 0.0 {
+        return None;
+    }
+    // Cramer's rule
+    let col = |i: usize| {
+        let mut m = rows;
+        for (row, &h) in m.iter_mut().zip(&rhs) {
+            match i {
+                0 => row.x = h,
+                1 => row.y = h,
+                _ => row.z = h,
+            }
+        }
+        m[0].triple_product(m[1], m[2]) / det
+    };
+    let c = Vec3::new(col(0), col(1), col(2));
+    let big_r = c.distance(p0);
+    if sp
+        .iter()
+        .any(|p| (p.distance(c) - big_r).abs() > 1e-9 * big_r)
+    {
+        return None;
+    }
+    // the plane: a point and the unit normal of three of its points
+    let pp = grid(*plane, 2)?;
+    let (q0, q1, q2) = (*pp.first()?, *pp.get(2)?, *pp.get(6)?);
+    let n = (q1 - q0).cross(q2 - q0).unitize().ok()?;
+    let size = q0.distance(q1).max(q0.distance(q2));
+    if pp.iter().any(|p| (*p - q0).dot(n).abs() > 1e-9 * size) {
+        return None;
+    }
+    // the blend faces' samples, and the least tolerance of their edges
+    let mut samples = Vec::new();
+    let mut least = f64::INFINITY;
+    for &f in &blends {
+        samples.extend(grid(f, 20)?);
+        for (e, rec) in b.edges().iter() {
+            if !edge::faces(b, e, None).ok()?.contains(&f) {
+                continue;
+            }
+            least = least.min(rec.tolerance);
+            let curve = rec.curve.as_ref()?;
+            for i in 0..=20 {
+                let t = rec.interval.evaluate(f64::from(i) / 20.0);
+                samples.push(curve.evaluate_point(k, t).ok()?);
+            }
+        }
+    }
+    let mut best = f64::INFINITY;
+    for side in [-1.0, 1.0] {
+        for reach in [big_r - r, big_r + r] {
+            // the circle of ball centres: in the plane `r` off the support plane, around the
+            // foot of `C`, at `reach` from `C`
+            let o = c - n * ((c - q0).dot(n) - side * r);
+            let h = c.distance(o);
+            let rho2 = reach * reach - h * h;
+            if rho2 <= 0.0 {
+                continue;
+            }
+            let rho = rho2.sqrt();
+            let worst = samples.iter().fold(0.0_f64, |w, p| {
+                let d = *p - o;
+                let along = d.dot(n);
+                let radial = (d - n * along).length() - rho;
+                w.max(((radial * radial + along * along).sqrt() - r).abs())
+            });
+            best = best.min(worst);
+        }
+    }
+    (best.is_finite() && least.is_finite()).then_some((best, least))
 }
 
 /// Each case of [`CASES`] gives a result that is valid on its own:
@@ -1241,10 +1381,15 @@ fn whole_cases(unit: Option<&str>) -> Vec<WholeCase> {
 ///   but for the entry's `open` gaps, exactly those, each of its class (checked here), whose
 ///   edges' sampled gaps ([`super::tolerance_covers`]) must be within the tolerance
 ///   (MEASURED, not proved: counted open, as [`OPEN`]'s);
-/// - every vertex's tolerance covers the ends of its edges ([`vertex_covers_its_ends`]).
+/// - every vertex's tolerance covers the ends of its edges ([`vertex_covers_its_ends`]);
+/// - every key of main's line but the entry's `changed` ones is main's exactly (statuses,
+///   counts, the selected edge, the mass record), and each `changed` one did change;
+/// - with `rolling_ball`, the result's blend lies on the exact rolling-ball fillet between its
+///   sphere and plane within its edges' tolerance ([`rolling_ball_deviation`]), so the changed
+///   geometry is the fillet asked for, not only a surface its own tolerances fit.
 ///
 /// So every tolerance of the new result is proved, not only the moved ones, but for the
-/// listed gaps.
+/// listed gaps, and the result is the operation's.
 #[test]
 fn whole_cases_are_certified() {
     let ctx = CaseContext {
@@ -1257,7 +1402,14 @@ fn whole_cases_are_certified() {
         "no whole cases: drop this test with them"
     );
     let mut failures = Vec::new();
+    let mut ids = std::collections::BTreeSet::new();
     for w in &whole {
+        assert!(
+            ids.insert((w.unit.clone(), w.case.clone())),
+            "{} {}: listed twice",
+            w.unit,
+            w.case
+        );
         let runner = crate::registry()
             .into_iter()
             .find(|u| u.id() == w.unit)
@@ -1292,6 +1444,37 @@ fn whole_cases_are_certified() {
             compared += 1;
         }
         assert!(compared > 0, "{at}: no integer array compared with main");
+        // every key of main's line but the listed changed ones is main's exactly, and each
+        // listed one did change
+        let now = crate::golden::encode(&w.case, &out);
+        let canonical = crate::json::to_canonical_string;
+        for top in ["case", "error", "deferred", "topology", "rejected"] {
+            assert_eq!(canonical(&now[top]), canonical(&w.main[top]), "{at}: {top}");
+        }
+        for section in ["ints", "values"] {
+            let keys = |v: &serde_json::Value| -> std::collections::BTreeSet<String> {
+                v[section]
+                    .as_object()
+                    .expect("a section")
+                    .keys()
+                    .cloned()
+                    .collect()
+            };
+            assert_eq!(keys(&now), keys(&w.main), "{at}: {section} keys");
+            for key in keys(&now) {
+                let same = canonical(&now[section][&key]) == canonical(&w.main[section][&key]);
+                let listed = w.changed.contains(&format!("{section}.{key}"));
+                assert!(
+                    same != listed,
+                    "{at}: {section}.{key} {}",
+                    if listed {
+                        "listed as changed but main's"
+                    } else {
+                        "changed but not listed"
+                    }
+                );
+            }
+        }
         assert!(!bodies.is_empty(), "{at}: no B-rep written");
         let mut k = Kernel::default();
         let mut open_seen = std::collections::BTreeSet::new();
@@ -1302,6 +1485,18 @@ fn whole_cases_are_certified() {
                 .lines();
             if !lines.is_empty() {
                 failures.push(format!("{at} body {i}: check_brep level 2: {lines:?}"));
+            }
+            if let Some(r) = w.rolling_ball {
+                // the blend is the rolling-ball fillet itself, not only a surface its
+                // tolerances fit: its every sample within its edges' tolerance of the exact
+                // torus
+                match rolling_ball_deviation(&k, b, r) {
+                    Some((dev, tol)) if dev <= tol => println!(
+                        "{at} body {i}: the blend within {dev:e} of the rolling ball (r {r}, \
+                         edge tolerance {tol:e})"
+                    ),
+                    x => failures.push(format!("{at} body {i}: rolling ball r {r}: {x:?}")),
+                }
             }
             let (mut edges, mut trims, mut worst) = (0, 0, 0.0_f64);
             let covers = super::tolerance_covers(&k, b).0;
@@ -1322,7 +1517,17 @@ fn whole_cases_are_certified() {
                                 trimmed = true;
                                 continue;
                             }
-                            x => x,
+                            UseBound::Bound(x) => {
+                                // a proved gap past the tolerance is never open
+                                failures.push(format!(
+                                    "{at} body {i} edge {} use {}: B {x:e} over {tol:e}",
+                                    e.index(),
+                                    eu.index()
+                                ));
+                                trimmed = true;
+                                continue;
+                            }
+                            x @ UseBound::Open => x,
                         };
                         trimmed = true;
                         // not enclosed: open only for a listed gap of an enclosure this
@@ -1543,6 +1748,13 @@ fn an_edge_face_without_a_trim_is_bounded_against_its_surface() {
             .expect("a trim")
             .status
             .expect("a trim");
+        }
+    }
+    // (the box's own trims, or a trim made with its mate's, are dropped from the second face:
+    // the edge must lie on one face without a trim)
+    for &eu in &uses {
+        if eu1::face(&b, eu).expect("face") == Some(faces[1]) {
+            b.edgeuse_mut(eu).expect("use").uv_trim_curve = None;
         }
     }
     let on_second = |b: &Brep| {
