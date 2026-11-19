@@ -397,8 +397,12 @@ fn frame_canvas(s: &mut Session, i: usize, name: Option<&str>, cmd: &str) -> Res
             // or a face's edges projected into it): the image fills that outline, its corners tied
             // to the outline's corners, rather than getting a rectangle of its own.
             if let Some((bottom_left, bottom_right, top_left)) = fill_outline(s, open, corners) {
-                let anchor =
-                    CanvasAnchor { sketch: open, bottom_left: bottom_left.clone(), bottom_right: bottom_right.clone(), top_left: Some(top_left.clone()) };
+                let anchor = CanvasAnchor {
+                    sketch: open,
+                    bottom_left: bottom_left.clone(),
+                    bottom_right: bottom_right.clone(),
+                    top_left: Some(top_left.clone()),
+                };
                 s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?.anchor = Some(anchor);
                 return Ok(CanvasFrame { sketch: open, name, bottom_left, bottom_right, top_left });
             }
@@ -460,7 +464,7 @@ fn fill_outline(s: &Session, sketch: u64, [bl, br, tl]: [Vec2; 3]) -> Option<(St
     let state = s.model.state();
     let solved = state.sketch(sketch)?;
     let sk = &solved.sketch;
-    let dist =|a: Vec2, b: Vec2| ((a.x - b.x).powi(2) + (a.y - b.y).powi(2)).sqrt();
+    let dist = |a: Vec2, b: Vec2| ((a.x - b.x).powi(2) + (a.y - b.y).powi(2)).sqrt();
     let cross = |o: Vec2, a: Vec2, b: Vec2| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
     let centre = Vec2::new((br.x + tl.x) / 2.0, (br.y + tl.y) / 2.0);
     let tolerance = 1e-6 * dist(bl, br).max(dist(bl, tl)).max(1.0);
