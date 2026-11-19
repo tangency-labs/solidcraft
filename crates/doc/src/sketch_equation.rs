@@ -200,14 +200,19 @@ fn bezier_distance(b: &[Vec2; 4], q: Vec2) -> f64 {
 }
 
 /// How far the spline through `points` strays from the formulas: the largest distance from the
-/// formulas' points a quarter, a half and three quarters of the way between two samples to the
-/// spline's piece between them.
+/// formulas' points to the spline's piece between two samples, a quarter, a half and three
+/// quarters of the way along, and at one more place that moves by the golden ratio from span to
+/// span. A wave in step with the samples is zero at the first three in every span, so the spline
+/// through its zeros was taken for a flat line 1 mm off it (#10404); the fourth falls on a
+/// different part of the wave in each span.
 fn deviation(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f64), points: &[Vec2], closed: bool, d: Defaults) -> Result<f64> {
+    const GOLDEN: f64 = 0.618_033_988_749_895;
     let pieces = fit_beziers_mode(points, closed).map_err(|e| DocError::Invalid(e.to_string()))?;
     let step = (b - a) / points.len().saturating_sub(1).max(1) as f64;
     let mut worst: f64 = 0.0;
     for (i, piece) in pieces.iter().enumerate() {
-        for k in [0.25, 0.5, 0.75] {
+        let moving = ((i + 1) as f64 * GOLDEN).fract();
+        for k in [0.25, 0.5, 0.75, moving] {
             let q = point_at(vals, eq, a + step * (i as f64 + k), d)?;
             worst = worst.max(bezier_distance(piece, q));
         }
@@ -369,6 +374,68 @@ mod tests {
         let tight = fit(&vals, &e).unwrap();
         assert!(tight.points.len() > loose.points.len(), "{} vs {}", tight.points.len(), loose.points.len());
         assert!(tight.deviation <= 0.005 && loose.deviation <= 0.1);
+    }
+
+    /// A wave in step with the samples is zero at a quarter, a half and three quarters of every
+    /// span, and was drawn as a flat line 1 mm off it at 9 points (#10404). Now each is drawn
+    /// following its wave, measured densely within twice its tolerance, or refused. Near-miss
+    /// frequencies keep the moving spot from being tuned to the issue's.
+    #[test]
+    fn a_wave_in_step_with_the_samples_is_not_drawn_flat() {
+        let vals = BTreeMap::new();
+        for (y, tol) in [
+            ("sin(64 * pi * x)", 0.0001),
+            ("sin(64 * pi * x)", 0.01),
+            ("sin(800 * pi * x)", 0.01),
+            ("sin(2048 * pi * x)", 0.0001),
+            ("sin(63 * pi * x)", 0.01),
+            ("sin(96 * pi * x)", 0.01),
+            ("sin(799 * pi * x)", 0.01),
+        ] {
+            let mut e = eq(None, y, "0", "1");
+            e.tolerance = tol;
+            let Ok(f) = fit(&vals, &e) else { continue };
+            let pieces = fit_beziers_mode(&f.points, f.closed).unwrap();
+            let far = (0..=20_000)
+                .map(|k| {
+                    let x = k as f64 / 20_000.0;
+                    let q = point_at(&vals, &e, x, defaults(&vals)).unwrap();
+                    // The pieces about x; a distance to a point of them is never less than to
+                    // the whole spline, so this is never kinder than the truth.
+                    let j = ((x * pieces.len() as f64) as usize).min(pieces.len() - 1);
+                    pieces[j.saturating_sub(1)..=(j + 1).min(pieces.len() - 1)].iter().map(|p| nearest(p, q)).fold(f64::INFINITY, f64::min)
+                })
+                .fold(0.0, f64::max);
+            assert!(far <= 2.0 * tol, "{y} at {tol} mm: {} points, {far} mm off at worst", f.points.len());
+        }
+    }
+
+    /// The distance from `q` to a point of the cubic Bézier `p` near the nearest: Newton's method
+    /// from 33 starts along it. A distance to a point of `p`, so never less than the true one.
+    fn nearest(p: &[Vec2; 4], q: Vec2) -> f64 {
+        let at = |s: f64| {
+            let r = 1.0 - s;
+            p[0] * (r * r * r) + p[1] * (3.0 * s * r * r) + p[2] * (3.0 * s * s * r) + p[3] * (s * s * s)
+        };
+        let d1 = |s: f64| {
+            let r = 1.0 - s;
+            (p[1] - p[0]) * (3.0 * r * r) + (p[2] - p[1]) * (6.0 * s * r) + (p[3] - p[2]) * (3.0 * s * s)
+        };
+        let d2 = |s: f64| (p[2] - p[1] * 2.0 + p[0]) * (6.0 * (1.0 - s)) + (p[3] - p[2] * 2.0 + p[1]) * (6.0 * s);
+        let mut best = f64::INFINITY;
+        for k in 0..=32 {
+            let mut s = k as f64 / 32.0;
+            for _ in 0..6 {
+                let (o, v) = (at(s) - q, d1(s));
+                let h = v.dot(v) + o.dot(d2(s));
+                if !(h > 0.0) {
+                    break;
+                }
+                s = (s - o.dot(v) / h).clamp(0.0, 1.0);
+            }
+            best = best.min(at(s).dist(q));
+        }
+        best
     }
 
     #[test]
