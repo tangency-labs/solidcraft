@@ -863,14 +863,18 @@ mod local_operation {
     include!("operand_trim_rows/local_operation.rs");
 
     /// Every `topology.brep_local_operation` row the copy moves (65): certified as the
-    /// module docs say; none farther.
+    /// module docs say; none farther. The rows were recorded before the kept-trim cover
+    /// (#19295), which can raise these reads' edge tolerances. Each case runs with any
+    /// such raise put back, so the certificate is of the copy's moves alone (the cover's
+    /// are proved by `tolsub`'s replay).
     #[test]
     fn local_operation_rows_are_certified() {
         let (mut closer, mut equal) = (0, 0);
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
-            let out = Runner.run_rust(&case).unwrap();
-            let (_, mut bodies) = result_breps(&case).unwrap();
+            let out = crate::tolsub::with_trim_cover_put_back(|| Runner.run_rust(&case).unwrap());
+            let (_, mut bodies) =
+                crate::tolsub::with_trim_cover_put_back(|| result_breps(&case).unwrap());
             let (_, b) = &mut bodies[0];
             for c in certify_row(row.case, &out, b, row.main, row.new, row.moved) {
                 match c {

@@ -262,7 +262,11 @@ fn corpus_key(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
 }
 
 /// Reads a corpus file as `corpus.parity` does (`rebuild` false), or with the UV trims
-/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows).
+/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows), with the
+/// tolerances the read's kept-trim cover raised after the healer put back as the healer
+/// left them ([`undo_trim_cover`]): the replay is of the healer's gap cover, against
+/// main's reads before the kept-trim cover (tangency-labs/solidcraft#19295), whose own
+/// raises are replayed by goldens' `tolsub::replay`.
 fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles")
@@ -279,7 +283,25 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
         next_key: 1 << 62,
     };
     read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
+    undo_trim_cover(&mut b);
     b
+}
+
+/// Puts back every edge and vertex tolerance the read's kept-trim cover raised
+/// ([`Brep::trim_cover_raises`]) to the value the read had made before it, checking each
+/// still holds the raised value.
+fn undo_trim_cover(b: &mut Brep) {
+    let raises = b.trim_cover_raises().clone();
+    for (e, (before, after)) in raises.edges {
+        let r = b.edge_mut(e).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{e:?}");
+        r.tolerance = before;
+    }
+    for (v, (before, after)) in raises.vertices {
+        let r = b.vertex_mut(v).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{v:?}");
+        r.tolerance = before;
+    }
 }
 
 /// FNV-1a over the bits of the values fed to it.
