@@ -117,7 +117,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     if !block_magnitudes_ok(&block) {
         return Err(harness("B-rep value above 1e150 (HANG-29)"));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let conv = &Conventions::EDGEUSE_GRAPH;
     match build_any(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)? {
         Built::Brep(b) => {
@@ -136,6 +136,20 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
         }
         Built::Failed(e) => Ok(Err(failed_output(&e))),
     }
+}
+
+/// The scene a case's op runs on: the B-rep exactly as [`Runner`]'s Rust side builds it,
+/// and the selected edge use, before the op; `None` when the build fails or selects no
+/// edge use. For certificate tests that must check a premise on the replayed model
+/// rather than on a dump of it (`tests/issue_18325_moved_rows.rs`).
+///
+/// # Errors
+///
+/// A case that does not parse, or the build's harness error.
+pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    Ok(setup(&case.parse::<Inputs>()?)?
+        .ok()
+        .map(|s| (s.brep, s.eu)))
 }
 
 /// The output of an op body (after the build status), as both sides build it.
@@ -220,7 +234,7 @@ fn put_created_lift(
 /// upstream status (unported, null dereference).
 #[allow(clippy::too_many_lines)]
 fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     // a failing upstream status is reported with the state, like the shim
     let finish = |b: &Brep, mut v: Vec<f64>| -> Result<Vec<f64>, SolidError> {
         put_states(&k, &mut v, b, eu)?;

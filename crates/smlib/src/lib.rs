@@ -96,6 +96,9 @@ pub enum Error {
     /// (an offset refused with its reason, [`solidcore_ops::Error::OffsetRefused`]; a fillet or
     /// chamfer failed with the kernel's statement of why, [`solidcore_ops::Error::BlendFailed`]).
     Refused(solidcore_ops::Error),
+    /// A typed refusal together with the kernel's complete diagnostic, including its
+    /// operation, entities and nested causes. The refusal remains available as data.
+    RefusedWithDiagnostic { refusal: solidcore_ops::Error, diagnostic: String },
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
@@ -180,6 +183,7 @@ impl std::fmt::Display for Error {
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
             Error::Refused(e) => write!(f, "{e}"),
+            Error::RefusedWithDiagnostic { refusal, diagnostic } => write!(f, "{refusal}: {diagnostic}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unported(what) => write!(f, "not supported yet: {what}"),
             Error::Cancelled(call) => write!(f, "{call}: cancelled"),
@@ -190,6 +194,14 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Names this crate's fix set ([`trace::fixes`]) to solidcore-ops' session, so the calls the
+/// app makes through solidcore-ops run with the fixes its modelling runs with. An application
+/// calls it once as it starts; it is also done before this crate's first kernel call. Calling
+/// it again does nothing.
+pub fn start() {
+    core::start();
+}
 
 /// Where failing calls leave their inputs for replay ([`core::dump`]); `None` turns that off.
 pub fn set_dump_dir(dir: Option<&Path>) {

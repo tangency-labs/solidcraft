@@ -80,7 +80,7 @@ impl Capturer {
         let samples =
             if samples > 1 && flags(FORMAT).sample_count_supported(samples) && flags(depth).sample_count_supported(samples) { samples } else { 1 };
         let scopes = error_scopes(&device);
-        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false }, None);
+        let renderer = Renderer::new(&device, GpuTarget { format: FORMAT, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         let background = background_pipeline(&device, samples, depth);
         caught(scopes).map_or(Ok(()), |e| Err(GpuError::Pipeline(e)))?;
         let max_side = device.limits().max_texture_dimension_2d.min(MAX_SIDE);
@@ -191,17 +191,30 @@ impl Capturer {
     /// [`Capturer::rgba`] with `highlight` drawn as the viewport draws its highlight scene
     /// (selection and hover feedback), over the model scene.
     pub fn rgba_highlighted(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
-        self.draw(scene, highlight, cam, width, height).map(|(rgba, _)| rgba)
+        self.draw(scene, highlight, cam, [width, height], 0.0).map(|(rgba, _)| rgba)
+    }
+
+    /// [`Capturer::rgba`] with ambient occlusion of `radius` (world units), as the viewport
+    /// shades with it on.
+    pub fn rgba_occluded(&self, scene: &Scene, cam: &Camera, width: u32, height: u32, radius: f32) -> Result<Vec<u8>> {
+        self.draw(scene, None, cam, [width, height], radius).map(|(rgba, _)| rgba)
     }
 
     /// [`Capturer::rgba`] and what the picture drew ([`DrawStats`]). Both come from the same
     /// turn on the device, so another thread's picture can't put its counts in their place.
     pub fn rgba_with_stats(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
-        self.draw(scene, None, cam, width, height)
+        self.draw(scene, None, cam, [width, height], 0.0)
     }
 
     /// The picture and what it drew, both read while this call has the device to itself.
-    fn draw(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
+    fn draw(
+        &self,
+        scene: &Scene,
+        highlight: Option<GpuScene>,
+        cam: &Camera,
+        [width, height]: [u32; 2],
+        ao_radius: f32,
+    ) -> Result<(Vec<u8>, DrawStats)> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
@@ -220,6 +233,7 @@ impl Capturer {
             _ => None,
         };
         let mut frame = frame(scene, cam, [width, height], state.key, access);
+        frame.ao_radius = ao_radius;
         // Always a highlight scene of the picture's own, empty without one: the renderer keeps
         // its last highlight scene while the slot is empty (as the viewport does until the next
         // is built), so the previous picture's highlight would show in this one.
@@ -447,7 +461,8 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
-        clip: scene.clip.map_or([0.0; 4], |(n, d)| [n.x as f32, n.y as f32, n.z as f32, d as f32]),
+        clip: crate::view::clip_planes(&scene.clip),
+        clip_hatch: crate::view::clip_hatches(&(0..scene.clip.len()).map(|k| scene.clip_hatch.get(k).copied().unwrap_or(k)).collect::<Vec<_>>()),
         cap: [f32::from(cap.0) / 255.0, f32::from(cap.1) / 255.0, f32::from(cap.2) / 255.0, if scene.plain_cap { 0.0 } else { 1.0 }],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -475,7 +490,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
 /// of its own, carrying its hatch.
 pub fn scene_geometry(scene: &Scene) -> GpuScene {
-    let by_part = scene.part_hatch.is_some() && scene.clip.is_some();
+    let by_part = scene.part_hatch.is_some() && !scene.clip.is_empty();
     // Per body, its colours' stable entries (by part), and the stable palette they make.
     let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
     let mut stable: Vec<[u8; 4]> = Vec::new();
@@ -823,6 +838,7 @@ mod tests {
                     look: crate::view::InstanceLook::Opaque,
                     levels: Vec::new(),
                     closed: true,
+                    edges: None,
                 };
                 let mut sc = GpuScene::default();
                 let red = sc.color([200, 30, 30, 255]);

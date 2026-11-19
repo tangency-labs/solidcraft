@@ -60,10 +60,10 @@ use solidcore::topology::{edge, Brep, EdgeId};
 use solidcore::Kernel;
 use std::f64::consts::FRAC_PI_4;
 
-/// SolidCraft's whole preset (`kernel_cases/fixes.json`). That includes the 5d2635d36 bump's other
-/// fixes (tangency-labs/solidcraft#11875: `face_swap_uv_transposes_trims`,
-/// `closed_smooth_pole_tangent_limit` and `fillet_chamfer_corner`), and since the file matches
-/// `core::fixes()`, `brep_ray_classifies_current_trims`. Every value here is unchanged under it.
+/// SolidCraft's whole preset (`support/solidcraft_fixes.rs`). That includes the 5d2635d36 bump's
+/// other fixes (tangency-labs/solidcraft#11875: `closed_smooth_pole_tangent_limit` and
+/// `fillet_chamfer_corner`; its `face_swap_uv_transposes_trims` is no longer a flag), and
+/// since the preset is `core::fixes()`, `brep_ray_classifies_current_trims`. Every value here is unchanged under it.
 fn solidcraft_kernel() -> Kernel {
     Kernel {
         fixes: solidcraft_fixes::solidcraft_fixes(),
@@ -334,7 +334,9 @@ fn upright_runs_on_into_the_earlier_round() {
 /// second rounds run on into the first ones' end arcs as before smlib#124: the plate 8
 /// faces, SolidCraft's closed form 1681.903758348 (to 1e-5 there); the notched block 13
 /// faces, 10198.718249 (the fork's two passes, 9822462; its closed form 10198.718039, 2.1e-8
-/// off). Capped (#2364): 10 and 15 faces.
+/// off) until `brep_volume` closed tolerant edges' gaps (#16735): the 2.1e-8 was the
+/// integrator's leak, and the block is now the closed form 10198.718038816 to 5.8e-12
+/// (MEASURED). Capped (#2364): 10 and 15 faces.
 #[test]
 fn second_pass_runs_on_into_the_first_without_its_faces() {
     let mut k = solidcraft_kernel();
@@ -359,7 +361,7 @@ fn second_pass_runs_on_into_the_first_without_its_faces() {
     blend(&mut k, &mut b, Kind::Round, &second, 8.0).unwrap();
     let ((faces, _, _), v) = measured(&mut k, &mut b);
     assert_eq!(faces, 13, "1080");
-    assert_rel(v, 10_198.718_249, 1e-9, "1080");
+    assert_rel(v, 10_198.718_038_816, 1e-10, "1080");
 }
 
 /// fillets/every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain:
@@ -543,16 +545,13 @@ fn block_cylinder_both_pieces_round_the_half_circle() {
 }
 
 /// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope and the
-/// split at radius corners) with every fix but
-/// `geometric_g2_continuity`, as the blend's other End tests: the same torus, valid at level
+/// split at radius corners) with every fix, as the blend's other End tests: the same torus, valid at level
 /// 2 and a manifold solid, its volume at 1e-12.
 #[test]
 fn block_cylinder_both_pieces_round_through_do_fillet() {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
     let mut b = block_cylinder(&mut k);
     let pieces: Vec<EdgeId> = ARC_PIECES.iter().map(|&(p, _)| pick(&k, &b, p)).collect();

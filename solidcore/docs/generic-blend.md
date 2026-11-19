@@ -415,18 +415,6 @@ with the cliff faces continued, so it never passes the cliff, the default of T-F
 [52]. This is the Roll-over's trim (§3.2), and the Roll-over build provides it; until it lands, no
 concave overflow is trimmed this way. Convex overflow still moves the sharp edge.
 
-A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
-`fillet_round_ends_on_outline`, WR-730). This applies where the round on the continued wall
-would pass inside the wall's rim, cutting into the material beyond the face it leaves. The
-ball then touches the rim and stays tangent to the face it keeps. It rolls on the surface
-tangent to it along the rim: the wall's plane turned about the rim, or its cylinder leaned
-into a cone. Where the kept face is too narrow as well, the ball touches both rims.
-
-This is built for a lone round along a straight edge between planes, or along a circular
-edge between a plane square to its axis and a coaxial cylinder
-(`crate::blend::fillet_outline`). A round that passes the rim within the tolerance, or
-whose rail stays on its wall, is trimmed at its crease as above.
-
 ### 3.5 Refusals name the size that fits
 
 ![Left: offsets of a concave face collapse at its curvature radius. Right: a ball in a slot fits up to half the width.](generic-blend/refusal-size.svg)
@@ -450,8 +438,12 @@ Each cause is decided from its own geometry, before the construction that it wou
 - **A collapsed offset.** A ball as wide as a face it rolls on (a cylinder or sphere of its radius,
   with the ball inside) has its offset of that face collapsed onto the axis or centre, so its centre
   is fixed. The zone it sweeps ends in a section of the ball only where the plane through an end of
-  the edge, square to it, holds that centre. A tray's seam and a cornered block's rim hold it at
-  both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
+  the edge, square to it, holds that centre. Where the edge ends on a side face it crosses and that
+  face holds the ball's one touch point on the other face, the round's end runs down to that point
+  on the other face's edge with the side: its rail there is a point on the face's boundary and it
+  takes the whole face, so that end is open too (a notch's floor rounded at the notch's radius,
+  ending on a curved side through the notch's axis). A tray's seam and a cornered block's rim hold
+  it at both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
   does not: refused, naming that radius, open. A larger ball that does not fit that face names it
   open the same way. An end where the chain runs on into another blended edge closes the zone:
   the Join there places the next round's section through the centre,

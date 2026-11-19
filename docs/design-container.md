@@ -1,6 +1,6 @@
 # Design containers, version 1
 
-New designs use `.sc`; `.solidcraft` and `.solvecraft` remain supported legacy extensions. Opening detects the ZIP
+New designs use `.sc`; `.solidcraft` remains a supported legacy extension. Opening detects the ZIP
 local-header signature (`50 4b 03 04`) independently of the name; otherwise it uses
 the existing JSON design reader and migrations. Plain JSON remains a fully supported,
 self-contained input/output format. `io::write_design` keeps its JSON contract;
@@ -126,8 +126,9 @@ the final state fits.
 
 The model is the whole evaluation: every feature's result (warning, boolean
 diagnostics, whether it was skipped, its fingerprint) and the state after it
-(bodies, solved sketches, construction geometry, sheet metal bodies, threads and
-the blend records later features read), and the body check mode it was evaluated
+(bodies, solved sketches, construction geometry, sheet metal bodies, threads,
+the blend records later features read, and the bodies each body pattern left out,
+whose copies keep their stored names), and the body check mode it was evaluated
 under (`each_step`, `each_feature` or `off`): a design opened under another mode is
 evaluated again. A body made by constant-radius rounds is recorded with the edges they
 rounded and their radii, and the body they were made on (stored like any other body,
@@ -198,7 +199,9 @@ repeat for longest), each while what it adds still fits: the bodies no state kep
 so far holds (a body is stored once however many states hold it) and the records
 of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
 written once and named by place in the states (most features leave the sheets as they were); a
-thinned cache keeps all of them. So are the tap markings (cosmetic threads): a state lists the
+thinned cache keeps all of them. Sheets made from surfaces are written the same way, in a
+list of their own (`surface_sheets`; format 9 wrote them out again in every state). So are the
+tap markings (cosmetic threads): a state lists the
 markings of every feature before it, so writing them with each state grew with the square of the
 features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written once and a state
 names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each

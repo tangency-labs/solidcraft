@@ -1,9 +1,9 @@
 //! WR-605 (the fork's tangency-labs/smlib 52bfef0): `SmBrep::DeleteFilletFace` takes a
 //! four-sided fillet only (`SmFilletRemoval::CollectFilletTopology`), so a round all the
 //! way round a boss's foot, whose rails are closed edges with one vertex each and no
-//! ends, cannot be removed. With `UpstreamFixes::fillet_removal_takes_ring_fillets` the
-//! fork's `SmRingFilletRemoval` removes it: the sharp edge is the intersection of the
-//! plate's top and the boss's wall (the circle r 10), and the body is the plate and the
+//! ends, cannot be removed. The fork's `SmRingFilletRemoval` (formerly the opt-in
+//! `UpstreamFixes::fillet_removal_takes_ring_fillets`, now the only path) removes it: the
+//! sharp edge is the intersection of the plate's top and the boss's wall (the circle r 10), and the body is the plate and the
 //! boss again, 24000 + 1000 pi = 27141.592653590, eight faces, check clean. The fork's
 //! probe gave the same. As 661f79c (WR-607), the shells are joined by the glue instead of
 //! `JoinShellsAtVertex`. A copy its caller names (`NamingScheme::Caller`) gives the same, check clean.
@@ -109,10 +109,9 @@ fn vertex_heights(b: &Brep, f: FaceId) -> Vec<f64> {
     out
 }
 
-/// `DeleteFilletFace` of the boss's foot round, with the ring fix as given.
-fn remove_round(ring: bool) -> (Kernel, Brep, solidcore::Result<()>, usize) {
+/// `DeleteFilletFace` of the boss's foot round.
+fn remove_round() -> (Kernel, Brep, solidcore::Result<()>, usize) {
     let mut k = Kernel::default();
-    k.fixes.fillet_removal_takes_ring_fillets = ring;
     let mut b = boss_with_foot_round(&mut k);
     let faces_before = b.face_list().len();
     let f = round(&b);
@@ -135,21 +134,8 @@ fn assert_plate_and_boss(k: &mut Kernel, b: &mut Brep) {
 }
 
 #[test]
-fn ring_fillet_removal_is_off_by_default() {
-    let k = Kernel::default();
-    assert!(!k.fixes.fillet_removal_takes_ring_fillets);
-}
-
-#[test]
-fn upstream_refuses_a_ring_fillet() {
-    let (_, b, r, faces_before) = remove_round(false);
-    assert!(r.is_err(), "upstream removes four-sided fillets only");
-    assert_eq!(b.face_list().len(), faces_before, "left as it was");
-}
-
-#[test]
 fn ring_fillet_is_removed_to_the_sharp_edge() {
-    let (mut k, mut b, r, _) = remove_round(true);
+    let (mut k, mut b, r, _) = remove_round();
     r.unwrap();
     assert_plate_and_boss(&mut k, &mut b);
 }
@@ -159,7 +145,6 @@ fn ring_fillet_is_removed_to_the_sharp_edge() {
 #[test]
 fn ring_fillet_is_removed_on_a_body_its_caller_names() {
     let mut k = Kernel::default();
-    k.fixes.fillet_removal_takes_ring_fillets = true;
     let rounded = boss_with_foot_round(&mut k);
     let mut b = caller_named_copy(&mut k, &rounded, 100_000_000);
     let f = round(&b);

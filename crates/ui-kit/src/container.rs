@@ -72,6 +72,17 @@ pub(super) fn show_combo<R>(
 pub struct BackingPopup<'a>(egui::Popup<'a>);
 
 impl<'a> BackingPopup<'a> {
+    pub fn get_id(&self) -> Id {
+        self.0.get_id()
+    }
+    pub fn open_bool(mut self, value: &'a mut bool) -> Self {
+        self.0 = self.0.open_bool(value);
+        self
+    }
+    pub fn at_position(mut self, value: egui::Pos2) -> Self {
+        self.0 = self.0.at_position(value);
+        self
+    }
     pub fn frame(mut self, frame: Frame) -> Self {
         self.0 = self.0.frame(frame);
         self
@@ -566,6 +577,7 @@ pub struct Container {
     surface: Surface,
     layout: LayoutMode,
     joined: Option<DockEdges>,
+    see_through: bool,
 }
 
 impl Container {
@@ -574,7 +586,7 @@ impl Container {
     }
 
     pub fn for_layout(layout: LayoutMode, surface: Surface) -> Self {
-        Self { surface, layout, joined: None }
+        Self { surface, layout, joined: None, see_through: false }
     }
 
     /// Floating workspace cards retain their shared chrome even in compact ribbon layouts.
@@ -706,6 +718,19 @@ impl Container {
         self
     }
 
+    /// This surface is translucent only so the model shows through it, or because a host is
+    /// fading it (a dimmed bar, a Browser the user made see-through), never as a glass
+    /// material: it must not blur what is behind it. The theme's blur radius is untouched.
+    pub fn see_through(mut self) -> Self {
+        self.see_through = true;
+        self
+    }
+
+    /// Whether this adaptive surface is a glass material that blurs its backdrop.
+    pub fn blurs(self) -> bool {
+        self.adaptive() && !self.see_through
+    }
+
     /// Shell-owned placement policy, shared by current and future adaptive panels.
     pub fn floating(self) -> bool {
         matches!(self.surface, Surface::Panel | Surface::Feature | Surface::Palette | Surface::Chrome) && self.layout == LayoutMode::Floating
@@ -795,8 +820,7 @@ impl Container {
     /// Stock Frame path for backing cards; no additional inset chrome is introduced.
     pub fn show_backing<R>(ui: &mut egui::Ui, frame: Frame, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
         if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
+            || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible())
             || ui.ctx().viewport_id() != egui::ViewportId::ROOT
         {
             return frame.show(ui, body);
@@ -821,8 +845,7 @@ impl Container {
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<R> {
         if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
+            || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible())
             || ui.ctx().viewport_id() != egui::ViewportId::ROOT
         {
             return panel.frame(frame).show(ui, body);
@@ -836,7 +859,11 @@ impl Container {
 
     fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
+        if crate::blur::enabled() && !self.see_through && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 {
+            Some(crate::blur::decorate)
+        } else {
+            None
+        }
     }
 
     pub(super) fn show_frame_background<R>(
@@ -916,7 +943,7 @@ impl Container {
     /// Semantic manually painted workspace surface; HUDs keep `paint_frame`.
     pub fn paint_background(self, painter: &egui::Painter, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.add(if crate::blur::enabled() && !self.see_through { crate::blur::decorate(painter, frame, content, shape) } else { shape });
     }
 
     pub fn paint_panel_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {

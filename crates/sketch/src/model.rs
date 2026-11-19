@@ -56,6 +56,9 @@ pub enum SketchError {
         crate::limits::CEILING_POINTS
     )]
     TooLarge,
+    /// Fonts this text falls back to are being looked for beside the window: ask again.
+    #[error("the fonts for this text are still being looked for")]
+    FontPending,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, SketchError>;
@@ -832,6 +835,10 @@ pub struct Sketch {
     /// New certified normal offsets; legacy sampled output splines remain independent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub freeform_offsets: Vec<crate::freeform_offset::FreeformOffset>,
+    /// Trimmed offsets of chains that include a free-form curve: ordinary curves rebuilt
+    /// from their sources when the distance that drives them changes (#12294).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub freeform_chain_offsets: Vec<crate::freeform_offset::FreeformChainOffset>,
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
@@ -874,6 +881,7 @@ impl Sketch {
             links: Vec::new(),
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
+            freeform_chain_offsets: Vec::new(),
             wires: Vec::new(),
             wire_constraints: Vec::new(),
             wires_joined: false,
@@ -1634,7 +1642,12 @@ impl Sketch {
             ConstraintKind::Pierce { .. } => true,
             ref k => k.is_dimension() && !k.is_angle() && !c.driven,
         });
-        sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty()
+        sizes
+            || !self.patterns.is_empty()
+            || !self.offsets.is_empty()
+            || !self.freeform_offsets.is_empty()
+            || !self.freeform_chain_offsets.is_empty()
+            || !self.wires.is_empty()
     }
 
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a

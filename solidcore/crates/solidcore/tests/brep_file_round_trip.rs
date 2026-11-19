@@ -17,7 +17,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_with_options};
+use solidcore::boolean::merge::MergeOptions;
+use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::heal::face_props::HealerOpType;
@@ -37,9 +39,12 @@ use solidcore::topology::brep::p9::find_infinite_region;
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::loopuse::notify_ref;
+use solidcore::topology::proto_topology::p1::api_transform::{
+    api_rotate, api_translate, TransformObject,
+};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{EdgeId, EdgeuseId, FaceId, RegionId};
-use solidcore::{Brep, EntityRef, Kernel, Point2, Point3, SolidError};
+use solidcore::{Brep, EntityRef, Kernel, Point2, Point3, SolidError, Vec3};
 
 /// A caller's naming unrelated to the B-rep's owner identities (the C API glue's).
 fn caller_named(entity: EntityRef) -> ObjectRef {
@@ -196,7 +201,33 @@ fn bodies(k: &mut Kernel) -> Vec<(&'static str, Brep)> {
     let mut holed = boolean_difference(k, block, drill).unwrap();
     holed.refresh_cached_topology();
     out.push(("box less cylinder", holed));
+    out.push(("crossing creases union", crossing_creases_union(k)));
     out
+}
+
+/// `boolean.api_brep`'s `crossing_creases_union_d1e-05`: box [0,10]^3 united (post-process
+/// only) with a 10 x 10 x 20 box turned 45 degrees about z, then x, whose crease crosses the
+/// first box's edge y = z = 10 at depth 1e-5. The Boolean drops a 1.4e-5 edge onto a face
+/// point by point and finds only two points for its UV trim.
+fn crossing_creases_union(k: &mut Kernel) -> Brep {
+    let o = Point3::new(0.0, 0.0, 0.0);
+    let a = primitives::create_box(k, o, 10.0, 10.0, 10.0).unwrap();
+    let mut b = primitives::create_box(k, Point3::new(0.0, 0.0, -10.0), 10.0, 10.0, 20.0).unwrap();
+    for axis in [Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)] {
+        api_rotate(k, Some(TransformObject::Brep(&mut b)), o, axis, 45.0).unwrap();
+    }
+    let s = 10.0 - 1e-5 / 2.0_f64.sqrt();
+    api_translate(k, Some(TransformObject::Brep(&mut b)), Vec3::new(5.0, s, s)).unwrap();
+    let flags = MergeOptions::new(false, false, true, false, false);
+    let mut u = boolean_with_options(k, a, b, BooleanOperation::Union, flags)
+        .unwrap()
+        .result;
+    u.refresh_cached_topology();
+    // the union that reaches the two-point drop: 3000 less a speck where the creases cross
+    assert_eq!(counts(&u), [12, 26, 17]);
+    let volume = measure(k, &mut u).2.map(|p| p.0);
+    assert!(volume.is_some_and(|v| close_props(v, 3000.0)), "{volume:?}");
+    u
 }
 
 fn round_trip(naming: Naming) {
@@ -320,21 +351,15 @@ fn a_read_refuses_identities_that_name_no_object() {
         ),
         (&shared, "two objects share one identity"),
     ];
-    for pass_on in [false, true] {
-        for (key_of, expected) in cases {
-            let mut k = Kernel::default();
-            k.fixes.brep_edit_statuses_pass_on = pass_on;
-            let (r, _) = read_box(&mut k, key_of);
-            match r {
-                Err(SolidError::InvalidInput { operation, reason }) => {
-                    assert_eq!(
-                        operation, "topology::brep::p10::make_topology_from_data",
-                        "pass_on {pass_on}"
-                    );
-                    assert_eq!(reason, expected, "pass_on {pass_on}");
-                }
-                r => panic!("pass_on {pass_on}: expected {expected:?}, got {r:?}"),
+    for (key_of, expected) in cases {
+        let mut k = Kernel::default();
+        let (r, _) = read_box(&mut k, key_of);
+        match r {
+            Err(SolidError::InvalidInput { operation, reason }) => {
+                assert_eq!(operation, "topology::brep::p10::make_topology_from_data");
+                assert_eq!(reason, expected);
             }
+            r => panic!("expected {expected:?}, got {r:?}"),
         }
     }
 }
@@ -345,7 +370,6 @@ fn a_read_refuses_identities_that_name_no_object() {
 #[test]
 fn a_box_read_heals_and_its_rays_find_the_infinite_region() {
     let mut k = Kernel::default();
-    k.fixes.brep_edit_statuses_pass_on = true;
     let (r, mut b) = read_box(&mut k, &notify_ref);
     r.unwrap();
     assert_eq!(b.naming(), solidcore::topology::NamingScheme::Caller);

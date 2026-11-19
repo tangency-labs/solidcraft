@@ -1546,7 +1546,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     run(&mut s, "timeline.rename", json!({"feature": "Shelf", "name": "Ledge"}));
     run(&mut s, "timeline.rename", json!({"feature": "Guide", "name": "Rail"}));
     assert_eq!(plane_link(&s), "Ledge");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(s.selection, [Sel::Plane { name: "Ledge".into() }]);
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
@@ -1559,7 +1559,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(plane_link(&s), "Shelf");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Guide"], "the hidden plane stays hidden");
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
     assert!((projected_z(&mut s) - 20.0).abs() < 1e-9);
@@ -1629,6 +1629,57 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
     assert_eq!(history, (s.undo.len(), s.redo.len(), s.evaluations));
+}
+
+/// #18105: Select Sharp Edges takes the edges whose faces turn by more than the threshold,
+/// judged on the exact faces. A 20 mm box with one edge rounded keeps its 11 other edges and gains
+/// the round's two end arcs, all at 90°; the round's two tangent edges are never taken.
+#[test]
+fn select_sharp_edges_takes_creases_over_the_angle_and_never_a_rounds_tangent_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":20,"width":20,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 10, 20]], "radius": 4}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 30}))["selected"], 13);
+    for sel in &s.selection {
+        let Sel::Edge { body, point, .. } = sel else { panic!("not an edge: {sel:?}") };
+        assert_eq!(body, "Block");
+        let tangent = |x: f64, z: f64| (point.x - x).abs() < 1e-6 && (point.z - z).abs() < 1e-6;
+        assert!(!tangent(16.0, 20.0) && !tangent(20.0, 16.0), "a tangent edge is taken at {point:?}");
+    }
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 89, "body": "Block"}))["selected"], 13);
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 91}))["selected"], 0);
+    // With no angle (command search, a key, the menu) it takes 30°.
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({}))["selected"], 13);
+    assert_eq!(run(&mut s, "select.sharp_edges", Value::Null)["selected"], 13);
+    // An edge already picked, at another point than the analysis's, is not added twice.
+    let Some(Sel::Edge { body, index, .. }) = s.selection.first().cloned() else { panic!("no edge: {:?}", s.selection) };
+    s.selection = vec![Sel::Edge { body, index, point: Default::default() }];
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"add": true}))["selected"], 13);
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
+    // A surface body (an open tube with square corners) is not searched, and refused by name.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Square", "distance": "10 mm", "name": "Tube", "body_name": "Tube"}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({}))["selected"], 13);
+    assert!(s.execute("select.sharp_edges", &json!({"body": "Tube"})).is_err());
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
+    let history = (s.undo.len(), s.redo.len());
+    let selected = s.selection.clone();
+    for params in [
+        json!({"angle_deg": 0}),
+        json!({"angle_deg": 180}),
+        json!({"angle_deg": "30"}),
+        json!({"angle_deg": 30, "body": "missing"}),
+        json!({"angle_deg": 30, "extra": 1}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.sharp_edges", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected);
+    }
+    assert_eq!(history, (s.undo.len(), s.redo.len()));
 }
 
 /// A body changed by a few hundred features in a row whose names nothing asks for, then
@@ -1818,6 +1869,12 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.toggle_visibility").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("V"), "", false));
+    // Dialog OK likewise (#17416): it has no default key; the user binds one.
+    let error = s.execute("ui.dialog_ok", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.dialog_ok").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (None, "", false));
 }
 
 #[test]
@@ -2433,6 +2490,45 @@ fn sketch_entities_name_their_sketch() {
     assert_eq!(it["sketch"], json!(s.active_sketch.unwrap()), "{it}");
 }
 
+/// #18233: Select All takes every shown body; in an open sketch, every curve of the sketch
+/// (construction ones too) and its points on no curve, not projected geometry or the origin.
+/// It replaces the selection and is no undo step.
+#[test]
+fn select_all_takes_the_shown_bodies_or_the_open_sketchs_own_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "solid.box", json!({"body_name": "Stowed", "corner": [60, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "browser.visibility", json!({"items": ["Stowed"], "visible": false}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "index": 0}]}));
+    let undo = s.undo.len();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 2);
+    assert_eq!(s.selection, ["Block", "Spare"].map(|name| Sel::Body { name: name.into() }));
+    assert_eq!(s.undo.len(), undo, "no undo step");
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 0], "body": "Block"}]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20], [40, 20]], "ids": ["rail"], "connect": false}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 30], [40, 30]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [50, 50], "id": "pin", "connect": false}));
+    let undo = s.undo.len();
+    let doc = s.doc.to_json();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 3);
+    let mut got: Vec<String> = s.selection.iter().map(|x| format!("{x:?}")).collect();
+    got.sort();
+    let mut want: Vec<String> = [
+        Sel::SketchCurve { id: "guide".into(), sketch: None },
+        Sel::SketchCurve { id: "rail".into(), sketch: None },
+        Sel::SketchPoint { id: "pin".into() },
+    ]
+    .iter()
+    .map(|x| format!("{x:?}"))
+    .collect();
+    want.sort();
+    assert_eq!(got, want, "the projected edge and the origin stay out");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo), "selecting edits nothing");
+}
+
 #[test]
 fn construction_points_report_their_position() {
     let mut s = Session::default();
@@ -2497,4 +2593,32 @@ fn hostile_params_and_stale_selections_never_fail_badly() {
     for v in [json!(null), json!([]), json!("x"), json!(f64::MAX), json!({"detail": null})] {
         assert!(s.execute("selection.get", &v).is_ok(), "{v}");
     }
+}
+
+/// A feature's or a folder's name is 1…128 characters, as the refusal says, not 128 bytes of its
+/// UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn feature_and_folder_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let group = run(&mut s, "timeline.group", json!({"name": "Housing", "features": [base]}))["group"].as_u64().unwrap();
+    let long = "ł".repeat(100);
+    run(&mut s, "timeline.rename", json!({"feature": base, "name": long}));
+    assert_eq!(s.doc.features.iter().find(|f| f.id == base).map(|f| f.name.as_str()), Some(long.as_str()));
+    run(&mut s, "timeline.rename_group", json!({"group": group, "name": long}));
+    assert_eq!(s.doc.timeline_groups[0].name, long);
+    let too_long = "ł".repeat(129);
+    for (command, params) in
+        [("timeline.rename", json!({"feature": base, "name": too_long})), ("timeline.rename_group", json!({"group": group, "name": too_long}))]
+    {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("1…128 characters"), "{command}: {error}");
+    }
+    // A new folder is given such a name too.
+    let made = run(&mut s, "timeline.group", json!({"name": too_long.chars().skip(1).collect::<String>()}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups.iter().find(|g| g.id == made).map(|g| g.name.chars().count()), Some(128));
+    // A design with such names is saved and opens again.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
+    assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }
