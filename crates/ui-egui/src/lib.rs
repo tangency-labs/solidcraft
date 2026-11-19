@@ -18,6 +18,7 @@ pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
+mod browser_defects;
 pub mod browser_prompts;
 pub mod browser_search;
 #[cfg(test)]
@@ -2562,7 +2563,7 @@ impl SolveApp {
             // Like Insert SVG it asks the host for its own kind of file (on the web a file dialog,
             // not the window that also opens and downloads designs), so the file comes straight
             // back here and nothing has to remember which command asked.
-            self.pick_open_for(&["3mf", "stl", "obj", "ply", "glb", "gltf"], |app, path| {
+            self.pick_open_for(&["3mf", "stl", "obj", "ply", "glb", "gltf", "usd", "usda", "usdc", "usdz"], |app, path| {
                 if let Some(path) = path
                     && !mesh_units::ask_ply_as_mesh(app, &path)
                 {

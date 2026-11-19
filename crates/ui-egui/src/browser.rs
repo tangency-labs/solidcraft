@@ -821,7 +821,7 @@ fn row_rect(ui: &egui::Ui) -> Rect {
 }
 
 /// One row's look.
-pub(crate) use crate::ui_kit::{Mark, Row};
+pub(crate) use crate::ui_kit::{Mark, Row, Status};
 
 fn compact_tree(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_compact_tree"))).unwrap_or(false)
@@ -1783,6 +1783,8 @@ fn component_rows_inner(
         count: &appearance.count,
         // The design holds everything the tree lists.
         mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
+        status: cache.defects.get(&id).map(|_| Status::Warning),
+        status_tip: cache.defects.get(&id),
         ..Default::default()
     };
     // Bodies and sketches dropped on a component move into it; a placement dropped on it moves
@@ -1958,6 +1960,8 @@ fn occurrence_rows_inner(
         badges,
         emphasis,
         mark: acts.lit.placement(&app.session.doc, path, placement.component),
+        status: cache.defects.get(&placement.component).map(|_| Status::Warning),
+        status_tip: cache.defects.get(&placement.component),
         ..Default::default()
     };
     // The top of a sibling's row puts the dragged placement before it; the rest of the row, and
@@ -2767,6 +2771,8 @@ struct Entry {
     target: Option<Target>,
     /// Bodies lit when the row is hovered.
     bodies: Vec<String>,
+    /// A body whose import found flaws in its part: the row's warning mark says what they are.
+    defect: Option<crate::ui_kit::StatusTip>,
 }
 
 impl Entry {
@@ -2801,6 +2807,7 @@ impl Entry {
             sel: Some(Sel::Body { name: world.clone() }),
             target: Some(Target::Body { name: world.clone() }),
             bodies: vec![world],
+            defect: crate::browser_defects::body_tip(&app.session.model, b),
         }
     }
 
@@ -2832,6 +2839,7 @@ impl Entry {
             sel: Some(Sel::Feature { id: f.id }),
             target: Some(Target::Sketch { id: f.id }),
             bodies: Vec::new(),
+            defect: None,
         }
     }
 
@@ -2858,6 +2866,7 @@ impl Entry {
             sel: Some(sel),
             target: Some(Target::Plane { id: f.id }),
             bodies: Vec::new(),
+            defect: None,
         }
     }
 
@@ -3447,6 +3456,8 @@ fn entry_row(
             badges,
             mark,
             emphasis,
+            status: e.defect.as_ref().map(|_| Status::Warning),
+            status_tip: e.defect.as_ref(),
             ..Default::default()
         },
     );
