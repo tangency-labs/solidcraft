@@ -2,7 +2,7 @@
 
 # Failure codes and reproduction
 
-Status: step 1 (3.1, the failure code) is built; the rest is design. The application side is RFC 0016 in SolidCraft's `docs/rfcs/`; the ticket side is `docs/failure-signatures.md` in tangency-labs/tickets.
+Status: steps 1 (3.1, the failure code) and 3 (3.4, single-entry replay) are built; the rest is design. The application side is RFC 0016 in SolidCraft's `docs/rfcs/`; the ticket side is `docs/failure-signatures.md` in tangency-labs/tickets.
 
 When a kernel operation fails for a user, three things must reach whoever fixes it: **which failure it is** (so reports of the same failure are grouped without anyone reading them), **the call that failed** (so it replays on the kernel alone), and **the smallest geometry that still fails** (so the cause can be seen and a clean case written). This page is solidcore's part: a stable failure code on every ops error, the call's arguments with its bodies, a single-entry replay, and a reducer.
 
@@ -60,6 +60,8 @@ Each `Failed` error built where the routine knows its entity (an edge being blen
 ### 3.4 Replaying one entry
 
 The rig runner takes `KERNEL_CASES_ENTRY=<path>`: one entry file, its `<case>.bodies.json.gz` beside it, outside the corpus and outside the manifest. The run reports the outcome and the failing call's `FailureCode`, and checks that code against the entry's (`same failure`, `other failure`, `builds now`).
+
+Built: `KERNEL_CASES_ENTRY=<entry.json> cargo test -p solidcore-ops --test kernel_cases -- --ignored kernel_case_entry` prints one JSON line, `{"case", "outcome", "code", "expected", "note"}`. The expected code is the `code` of the entry's last failing call that is not `continued`. The outcome is `same failure`, `other failure`, `builds now` or `unsupported`. The test fails unless it is `same failure`, or `KERNEL_CASES_REPORT_ONLY` is set; `KERNEL_CASES_REPORT` writes the line to a file too.
 
 ### 3.5 The reducer
 
