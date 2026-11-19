@@ -1959,3 +1959,99 @@ fn a_box_face_past_a_spheres_poles_does_not_touch_them() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// A box (x -5..12, y -6..6, z -4..0) and a cone laid on its top face along one of its
+/// generators. The cone runs from radius R at its base to radius r at height h, turned by an
+/// angle about its axis, and its generator at that angle runs along g = ((r - R) e + h z) / L
+/// (e the radial direction there), where its outward normal is n = (h e + (R - r) z) / L. Placed
+/// so that g runs along x from the origin and n points down into the box, the cone touches the
+/// box along that line and nowhere else: the box less the cone is the box, 17 x 12 x 4 = 816;
+/// the cone less the box is the cone, pi h (R^2 + R r + r^2) / 3; and the union is both.
+///
+/// The plane and the cone meet along the generator in closed form. Traced through the
+/// tangency, a pointed cone's line (apex on the face) came back as a curve with repeated
+/// control points and a cusp, unless the line was the cone's seam: the check refused the
+/// result, a difference failed with "no radial sector of the edge takes the new edge use", and
+/// at a zone tolerance of 1e-7 (a part read with that uncertainty) a union dropped the cone.
+#[test]
+fn a_cone_lying_on_a_face_along_a_generator_touches_it_along_that_line() {
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    // the kernel's default tolerances, and a zone of 1e-7 with the rest derived from it
+    let make = |tight: bool| {
+        if !tight {
+            return Kernel::default();
+        }
+        let zone = 1e-7;
+        Kernel::new(&solidcore::KernelOptions {
+            tolerances: solidcore::Tolerances {
+                zone_tol_3d: zone,
+                xsect_tol_3d: 2.0 * zone,
+                approx_tol_3d: zone / 2.0,
+                ..solidcore::Tolerances::default()
+            },
+            ..solidcore::KernelOptions::default()
+        })
+    };
+    for (kname, tight) in [("default", false), ("zone 1e-7", true)] {
+        for (big, small, h, turn) in [
+            (3.0_f64, 0.0_f64, 6.0_f64, 0.0_f64),
+            (3.0, 0.0, 6.0, 30.0),
+            (3.0, 0.0, 6.0, 90.0),
+            (3.0, 0.0, 6.0, 137.0),
+            (3.0, 0.0, 6.0, 200.0),
+            (2.0, 0.0, 7.0, 61.0),
+            (4.0, 2.0, 6.0, 0.0),
+            (4.0, 2.0, 6.0, 137.0),
+        ] {
+            let l = ((small - big).powi(2) + h * h).sqrt();
+            let (c, s) = (turn.to_radians().cos(), turn.to_radians().sin());
+            // the radial direction at the turn goes to e, the tangent there to y
+            let e = Vec3::new((small - big) / l, 0.0, -h / l);
+            let place = Axis2Placement::new(
+                Point3::new(big * (big - small) / l, 0.0, big * h / l),
+                c * e - s * Vec3::new(0.0, 1.0, 0.0),
+                s * e + c * Vec3::new(0.0, 1.0, 0.0),
+            );
+            let cone_volume = PI * h * (big * big + big * small + small * small) / 3.0;
+            for (name, op, want, cone_first) in [
+                ("box less cone", Op::Difference, 816.0, false),
+                ("cone less box", Op::Difference, cone_volume, true),
+                ("union", Op::Union, 816.0 + cone_volume, false),
+            ] {
+                let case = format!("{kname}: R {big}, r {small}, turned {turn}: {name}");
+                let mut k = make(tight);
+                let block = api::create_box(&mut k, Point3::new(-5.0, -6.0, -4.0), 17.0, 12.0, 4.0)
+                    .unwrap();
+                let mut cone =
+                    api::create_cone(&mut k, Point3::new(0.0, 0.0, 0.0), big, small, h).unwrap();
+                solidcore::topology::brep::p5::transform(&mut k, &mut cone, &place, None, false)
+                    .unwrap();
+                let (a, b) = if cone_first {
+                    (cone, block)
+                } else {
+                    (block, cone)
+                };
+                let mut out = match op {
+                    Op::Union => boolean_union(&mut k, a, b),
+                    Op::Difference => boolean_difference(&mut k, a, b),
+                    Op::Intersection => boolean_intersection(&mut k, a, b),
+                }
+                .unwrap_or_else(|e| panic!("{case}: {e}"));
+                let lines = check_brep(&mut k, &mut out, CheckLevel::Level2)
+                    .unwrap()
+                    .lines();
+                assert!(lines.is_empty(), "{case}: {lines:?}");
+                let v = brep_volume(&k, &mut out, 1e-7, &attrs).unwrap();
+                assert!(
+                    (v - want).abs() <= VOLUME_REL_TOL * want,
+                    "{case}: {v} against {want}"
+                );
+            }
+        }
+    }
+}
