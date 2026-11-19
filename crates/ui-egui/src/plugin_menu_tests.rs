@@ -268,6 +268,23 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
 }
 
 #[test]
+fn a_numeric_plugin_editor_interrupts_external_joint_drive() {
+    use crate::control::tests::{assert_local_editor_interrupts_joint_drive, joint_drive_design};
+
+    let (mut h, arm, _) = joint_drive_design();
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema = json!({"type":"object","properties":{"length":{"type":"number","default":20}}});
+    h.app.plugin_menu.listed = vec![listed("boxes", vec![make])];
+    h.app.plugin_menu.loaded = true;
+    assert_local_editor_interrupts_joint_drive(&mut h, arm, |app| {
+        open_entry(app, 0, 0);
+        assert!(app.dialog.is_none(), "the editor has no viewport pick field");
+        assert_eq!(app.plugin_menu.dialog().unwrap().ready(app), Ok(json!({"length":20.0})));
+        assert!(preview_commands(app).is_some());
+    });
+}
+
+#[test]
 fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     use crate::app_bar::FileRow;
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -846,7 +863,8 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// A package with `home` (a box, then view.home), `edit` (a box and no view command) and `fail`.
+    /// A package with `home` (a box, then view.home), `edit` (a box and no view command), `fail`
+    /// and `place` (a component with a box in it, moved 100 mm along X).
     fn view_package(tag: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("solidcraft-plugin-view-{}-{tag}", std::process::id()));
         let dir = root.join("frames");
@@ -857,10 +875,46 @@ mod native {
         let entry = |entry_name: &str, label: &str| json!({"name": entry_name, "effect": "edit", "input_schema": {"type": "object"}, "slots": [{"kind": "menu", "name": label}]});
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail")],
-            "commands":["solid.box", "view.home"]}});
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place")],
+            "commands":["solid.box", "view.home", "component.create", "occurrence.move"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
+    }
+
+    /// A run that makes a component and moves it is previewed where the run leaves it, also in
+    /// a design where nothing was placed before: the preview used to show it on the origin
+    /// then, and where it goes only once the design had a moved component.
+    #[test]
+    fn a_component_a_run_makes_and_moves_is_previewed_where_it_goes() {
+        let root = view_package("place");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        assert!(!solidcraft_engine::frames::placed(&h.app.session), "a design with nothing placed");
+        open_entry(&mut h.app, 0, 3);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the moved box is drawn: {:?}", h.app.preview.error);
+        let b = h.app.preview.bounds;
+        assert_eq!((b.min.x.round(), b.max.x.round()), (100.0, 110.0), "where the run moved it, not on the origin");
+        // The triangles the preview draws are the box there, not only the bounds it reports.
+        let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+        let mut scratch = h.app.session.scratch();
+        dry_run(&mut scratch, &id);
+        let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+        let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+        let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(rest.is_empty() && !vertices.is_empty(), "the box is drawn");
+        let xs = vertices.iter().map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]));
+        let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        assert_eq!((lo.round(), hi.round()), (100.0, 110.0), "drawn where the run moved it");
+        // Run leaves it there too.
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        use solidcraft_engine::geom::MeshGeom as _;
+        let world = h.app.session.world_state().unwrap();
+        let placed = world.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |acc, body| acc.union(&body.mesh().bounds()));
+        assert_eq!((placed.min.x.round(), placed.max.x.round()), (100.0, 110.0));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn same_camera(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {

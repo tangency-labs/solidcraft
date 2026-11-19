@@ -29,7 +29,7 @@ use super::p2::OffsetNotifications;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::offset::OffsetFailure;
-use crate::error::{EntityRef, Failure, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, Site, SolidError, TargetEdge, TargetFace};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -60,11 +60,18 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// `SM_ERR`: a stage of the gap search failed with no reason the kernel names
-/// ([`OffsetFailure::StageFailed`], a defect).
+/// `SM_ERR`: a failed stage of the gap search, keeping the condition that stopped it.
+/// The stage's class and status stay unchanged; its cause names the failed check.
 #[track_caller]
-fn sm_err() -> SolidError {
-    SolidError::offset_stage_failed(OP, crate::error::SM_ERR)
+fn sm_err(reason: &'static str, site: Site) -> SolidError {
+    Failure::new(OP, OffsetFailure::StageFailed)
+        .or_at(site)
+        .caused_by(
+            Failure::new(OP, OffsetFailure::Failed(reason))
+                .or_at(site)
+                .into_error(),
+        )
+        .into_error()
 }
 
 /// The mate of an edge use.
@@ -393,7 +400,10 @@ impl OffsetExecutive {
                 closed = false;
                 passes += 1;
                 if passes > MAX_GAP_PASSES {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "the offset face's loop-gap search exhausted its pass limit",
+                        self.gap_site(original, b, f, None, None),
+                    ));
                 }
                 let fu =
                     face2::upward_faceuse(b, f)?.ok_or_else(|| null("face without face use"))?;
@@ -470,7 +480,10 @@ impl OffsetExecutive {
                                 closed_edges,
                             )?
                         } else {
-                            return Err(sm_err());
+                            return Err(sm_err(
+                                "an offset loop gap has no unique end at its shared vertex",
+                                self.gap_site(original, b, f, Some(next), Some(sv)),
+                            ));
                         };
                         if let Some((from, to)) = segment {
                             segments.push(GapSegment {
@@ -711,7 +724,12 @@ impl OffsetExecutive {
         // Where they join: the parameter of the gap end on the joined curve.
         let joined = curve.natural_interval();
         let joint = closest_on(kernel, &curve, &joined, gap_end, tol)?
-            .ok_or_else(sm_err)?
+            .ok_or_else(|| {
+                sm_err(
+                    "the gap bridge joint could not be located on the joined offset edge",
+                    self.gap_site(original, b, f, Some(u), Some(gap_end)),
+                )
+            })?
             .0;
 
         // The edge takes the joined curve and is split at the joint.
@@ -732,7 +750,10 @@ impl OffsetExecutive {
             notifications.result_curve_ref,
         )?;
         if !output.split {
-            return Err(sm_err());
+            return Err(sm_err(
+                "the joined offset edge could not be split at the gap bridge joint",
+                self.gap_site(original, b, f, Some(u), Some(gap_end)),
+            ));
         }
         output.vertex.ok_or_else(|| null("split without vertex"))?;
         // the segment as the face's loop runs: from the vertex to the gap where the gap is
@@ -878,7 +899,10 @@ impl OffsetExecutive {
                     notifications.result_curve_ref,
                 )?;
                 if !output.split {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "an offset edge could not be split at a step corner",
+                        Site::point(p),
+                    ));
                 }
             }
         }
@@ -1537,14 +1561,43 @@ impl OffsetExecutive {
         Ok(())
     }
 
+    /// The caller's topology identified by the executive's provenance. A lookup that
+    /// fails or has no unique source leaves that slot empty: diagnostic context never
+    /// changes the operation's outcome or names an intermediate body's ids.
+    fn gap_site(
+        &self,
+        original: &Brep,
+        offset: &Brep,
+        face: FaceId,
+        edgeuse: Option<EdgeuseId>,
+        at: Option<Point3>,
+    ) -> Site {
+        Site {
+            edge: edgeuse.and_then(|u| TargetEdge::of_offset_edgeuse(self, original, offset, u)),
+            face: TargetFace::of_offset_face(self, original, face),
+            at,
+            ..Site::default()
+        }
+    }
+
+    /// The original face offset face `face` was made from, where it maps to one.
+    /// This is diagnostic context only: an unreadable source names no caller face.
+    pub(crate) fn original_face(&self, original: &Brep, face: FaceId) -> Option<FaceId> {
+        match self.faceuse_to_faces.firsts(face).as_slice() {
+            [faceuse] => eu::faceuse_face(original, *faceuse).ok().flatten(),
+            _ => None,
+        }
+    }
+
     /// The refusal of an offset that moves a vertex of an edge of offset face `f` to or
     /// past the edge's other end ([`crate::error::offset::OffsetFailure::EdgeVanishes`]), naming `edge` of
     /// `original`, else the face of `original` that `f` comes from (error context only:
     /// a lookup that fails names nothing).
     fn edge_vanishes(&self, original: &Brep, f: FaceId, edge: Option<EdgeId>) -> SolidError {
-        let face = match (edge, self.faceuse_to_faces.firsts(f).as_slice()) {
-            (None, [fu]) => eu::faceuse_face(original, *fu).ok().flatten(),
-            _ => None,
+        let face = if edge.is_none() {
+            self.original_face(original, f)
+        } else {
+            None
         };
         Failure::new(OP, OffsetFailure::EdgeVanishes { edge, face }).into_error()
     }
@@ -1554,16 +1607,18 @@ impl OffsetExecutive {
     /// face of `original` that `f` comes from (error context only: a lookup that fails or
     /// gives no single face names nothing).
     fn loop_gap_uncertified(&self, original: &Brep, f: FaceId) -> SolidError {
-        let face = match self.faceuse_to_faces.firsts(f).as_slice() {
-            [fu] => eu::faceuse_face(original, *fu).ok().flatten(),
-            _ => None,
-        };
+        let face = self.original_face(original, f);
         Failure::new(OP, OffsetFailure::LoopGapUncertified { face }).into_error()
     }
 
     /// The original edge offset edge use `u` (or its mate) was made from, where it maps
     /// to one.
-    fn original_edge(&self, original: &Brep, b: &Brep, u: EdgeuseId) -> Result<Option<EdgeId>> {
+    pub(crate) fn original_edge(
+        &self,
+        original: &Brep,
+        b: &Brep,
+        u: EdgeuseId,
+    ) -> Result<Option<EdgeId>> {
         let mut orig = self.edgeuse_to_edgeuses.firsts(u);
         if orig.is_empty() {
             let mate = eu::mate(b, u)?.ok_or_else(|| null("edge use without mate"))?;
@@ -1609,14 +1664,136 @@ fn set_edge_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::topology::{Edgeuse, EdgeuseOwner, Faceuse};
+
+    fn mapped_gap() -> (
+        OffsetExecutive,
+        Brep,
+        Brep,
+        FaceId,
+        EdgeuseId,
+        FaceId,
+        EdgeId,
+    ) {
+        let mut original = Brep::new();
+        let shell = original.add_shell().unwrap();
+        original.add_face(shell).unwrap();
+        let input_face = original.add_face(shell).unwrap();
+        let input_faceuse = original
+            .add_faceuse_record(Faceuse {
+                face: Some(input_face),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        let vertex = original.add_vertex(Vec3::ZERO).unwrap();
+        original.add_edge(vertex, vertex).unwrap();
+        let input_edge = original.add_edge(vertex, vertex).unwrap();
+        original.add_edgeuse_record(Edgeuse::default()).unwrap();
+        let input_edgeuse = original
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(input_edge),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+
+        let mut offset = Brep::new();
+        let shell = offset.add_shell().unwrap();
+        let face = offset.add_face(shell).unwrap();
+        let vertex = offset.add_vertex(Vec3::ZERO).unwrap();
+        let edge = offset.add_edge(vertex, vertex).unwrap();
+        let first = offset
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(edge),
+                owner: EdgeuseOwner::Shell(Some(shell)),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        let mate = offset
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(edge),
+                owner: EdgeuseOwner::Shell(Some(shell)),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        offset.edge_mut(edge).unwrap().edgeuses = vec![first, mate];
+        // Input and intermediate ids deliberately differ, so copying the intermediate
+        // entity into Site fails the regression.
+        assert_ne!(face, input_face);
+        assert_ne!(edge, input_edge);
+        assert_ne!(first, input_edgeuse);
+        let mut executive =
+            OffsetExecutive::new(OffsetOperation::SolidOffset, 1.0, original.tolerance());
+        executive.relate_faceuse(input_faceuse, face);
+        executive.relate_edgeuses(input_edgeuse, first);
+        (
+            executive, original, offset, face, first, input_face, input_edge,
+        )
+    }
 
     #[test]
     fn a_gap_search_that_cannot_continue_is_a_stage_failure() {
-        let e = sm_err();
+        let (executive, original, offset, face, edgeuse, input_face, input_edge) = mapped_gap();
+        let point = Point3::new(1.0, 2.0, 3.0);
+        let site = executive.gap_site(&original, &offset, face, Some(edgeuse), Some(point));
+        let reason = "an offset loop gap has no unique end at its shared vertex";
+        let e = sm_err(reason, site);
         assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
+        assert_eq!(
+            e.root_cause().offset_failure(),
+            Some(&OffsetFailure::Failed(reason))
+        );
+        assert!(e.to_string().contains(reason));
         assert!(e.is_defect());
         assert_eq!(e.operation(), OP);
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert!(e.is_status_answer());
+        for failure in [&e, e.root_cause()] {
+            let site = failure.site().unwrap();
+            assert_eq!(site.edge.map(TargetEdge::id), Some(input_edge));
+            assert_eq!(site.face.map(TargetFace::id), Some(input_face));
+            assert_eq!(site.at, Some(point));
+        }
+    }
+
+    #[test]
+    fn a_gap_failure_maps_an_edgeuse_mate_to_the_input_edge() {
+        let (mut executive, original, offset, face, edgeuse, _, input_edge) = mapped_gap();
+        let source = executive.edgeuse_to_edgeuses.firsts(edgeuse)[0];
+        executive
+            .edgeuse_to_edgeuses
+            .remove_pair(source, edgeuse)
+            .unwrap();
+        let mate = required_mate(&offset, edgeuse).unwrap();
+        executive.relate_edgeuses(source, mate);
+        let site = executive.gap_site(&original, &offset, face, Some(edgeuse), None);
+        assert_eq!(site.edge.map(TargetEdge::id), Some(input_edge));
+    }
+
+    #[test]
+    fn a_gap_failure_never_guesses_among_input_entities() {
+        let (mut executive, mut original, offset, face, edgeuse, _, _) = mapped_gap();
+        let shell = original.add_shell().unwrap();
+        let other_face = original.add_face(shell).unwrap();
+        let other_faceuse = original
+            .add_faceuse_record(Faceuse {
+                face: Some(other_face),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        executive.relate_faceuse(other_faceuse, face);
+        let vertex = original.add_vertex(Vec3::ZERO).unwrap();
+        let other_edge = original.add_edge(vertex, vertex).unwrap();
+        let other_edgeuse = original
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(other_edge),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        executive.relate_edgeuses(other_edgeuse, edgeuse);
+        let point = Point3::new(1.0, 2.0, 3.0);
+        let site = executive.gap_site(&original, &offset, face, Some(edgeuse), Some(point));
+        assert!(site.edge.is_none());
+        assert!(site.face.is_none());
+        assert_eq!(site.at, Some(point));
     }
 }

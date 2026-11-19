@@ -19,6 +19,9 @@
     clippy::indexing_slicing
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use std::f64::consts::PI;
@@ -33,13 +36,9 @@ use solidcore_ops::{
 
 const LENGTH: f64 = 10.0;
 
-/// The corpus's fix set (`kernel_cases/fixes.json`, the set SolidCraft runs).
+/// SolidCraft's fix set (`solidcraft_fixes.rs`, the set SolidCraft runs).
 fn fixes() {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// The L step with a strip `w` wide.
@@ -2662,4 +2661,292 @@ fn pocket_rim_rounds_meeting_another_round_build_valid_or_are_refused() {
             assert!(report.is_valid(), "{points:?}: {report}");
         }
     }
+}
+
+/// The hole's radius, the slots' width and the heights of the hole's floor and the block's
+/// top in [`slotted_hole`].
+const HOLE_R: f64 = 2.94;
+const SLOT_W: f64 = 1.0;
+const HOLE_FLOOR: f64 = 4.4;
+const BLOCK_TOP: f64 = 8.0;
+
+/// SolidCraft #18830's part: a block 20 x 20 x 8 with a blind hole of radius 2.94 down to
+/// z = 4.4 (a magnet pocket; its cylinder's seam runs along x > 0), and a radial slot 1 wide
+/// cut to the hole's floor at each angle of `slots` (degrees from x), each reaching 0.5 past
+/// the hole with a round end. A slot at 14.8 degrees has its sides at 5 and 24.6 degrees on
+/// the hole's wall, so the seam leaves a strip of wall 0.26 wide (5 degrees) beside the slot.
+fn slotted_hole(slots: &[f64]) -> Body {
+    use solidcore_ops::make_cylinder;
+    use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
+    let block = make_box([-10.0, -10.0, 0.0], [20.0, 20.0, BLOCK_TOP]).unwrap();
+    let hole = make_cylinder([0.0, 0.0, HOLE_FLOOR], HOLE_R, 4.0).unwrap();
+    let mut b = boolean(block, hole, BooleanOp::Subtract).unwrap().unwrap();
+    for &deg in slots {
+        let (s, c) = deg.to_radians().sin_cos();
+        let at =
+            |along: f64, across: f64| [along * c - across * s, along * s + across * c, HOLE_FLOOR];
+        let reach = HOLE_R + 0.5;
+        let outline = [
+            Curve::Line {
+                start: at(0.0, -SLOT_W / 2.0),
+                end: at(reach, -SLOT_W / 2.0),
+            },
+            Curve::Arc {
+                center: at(reach, 0.0),
+                axis: [0.0, 0.0, 1.0],
+                reference: [s, -c, 0.0],
+                radius: SLOT_W / 2.0,
+                start: 0.0,
+                end: PI,
+            },
+            Curve::Line {
+                start: at(reach, SLOT_W / 2.0),
+                end: at(0.0, SLOT_W / 2.0),
+            },
+            Curve::Line {
+                start: at(0.0, SLOT_W / 2.0),
+                end: at(0.0, -SLOT_W / 2.0),
+            },
+        ];
+        let slot = extrude(
+            &outline,
+            [0.0, 0.0, 1.0],
+            4.0,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap();
+        b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    b
+}
+
+/// The edges where the slot at `deg` meets the hole's wall, on its side at `+0.5` across and
+/// at `-0.5`, as `(side, edge index)`.
+fn slot_roots(b: &Body, deg: f64) -> [usize; 2] {
+    let (s, c) = deg.to_radians().sin_cos();
+    let along = (HOLE_R * HOLE_R - SLOT_W * SLOT_W / 4.0).sqrt();
+    let mid = (HOLE_FLOOR + BLOCK_TOP) / 2.0;
+    [SLOT_W / 2.0, -SLOT_W / 2.0]
+        .map(|across| edge_at(b, [along * c - across * s, along * s + across * c, mid]))
+}
+
+/// The section area a round `r` takes where a slot's side (a plane `h` from the slot's middle)
+/// meets the hole's wall (a circle of radius `R`, the material outside it): the ball's centre
+/// is `r` from the side, into the material, and `R + r` from the hole's axis; the area is the
+/// triangle of the corner and the ball's two contacts, less the ball's segment and the hole's
+/// segment between them.
+fn root_area(big_r: f64, r: f64, h: f64) -> f64 {
+    let corner = ((big_r * big_r - h * h).sqrt(), h);
+    let centre = (((big_r + r).powi(2) - (h + r).powi(2)).sqrt(), h + r);
+    let on_side = (centre.0, h);
+    let on_hole = (
+        centre.0 * big_r / (big_r + r),
+        centre.1 * big_r / (big_r + r),
+    );
+    let triangle = ((on_side.0 - corner.0) * (on_hole.1 - corner.1)
+        - (on_hole.0 - corner.0) * (on_side.1 - corner.1))
+        .abs()
+        / 2.0;
+    let segment = |rad: f64, p: (f64, f64), q: (f64, f64)| {
+        let chord = (p.0 - q.0).hypot(p.1 - q.1);
+        let angle = 2.0 * (chord / (2.0 * rad)).asin();
+        rad * rad / 2.0 * (angle - angle.sin())
+    };
+    triangle - segment(r, on_side, on_hole) - segment(big_r, on_hole, corner)
+}
+
+/// SolidCraft #18830: R0.5 on both edges where a slot meets the hole, in one fillet, the slot's
+/// side at 5 degrees past the hole's seam. The 0.26 wide strip of wall between that side and
+/// the seam is narrower than the ball reaches, so that round rolls over the seam onto the rest
+/// of the wall, the whole length. Each edge alone builds (a lone round, decided in closed form);
+/// both together were refused ("Corner Edge Computation Failure"), because the other round's
+/// edge is an edge of the wall it rolls onto, which sent it to the ball's sections, and they do
+/// not roll a rail over a seam onto its own surface.
+///
+/// Closed form: the rounds are apart (the slot's two sides), each takes `root_area` along the
+/// hole's depth, and each is a cylinder of radius 0.5 along z about its ball's centre.
+#[test]
+fn slot_roots_beside_a_hole_s_seam_round_in_one_fillet() {
+    use solidcore::surface::surface::SurfaceKind;
+    let r = 0.5;
+    fixes();
+    for deg in [14.8, -14.8] {
+        let b = slotted_hole(&[deg]);
+        let before = b.volume(1e-9).unwrap();
+        let roots = slot_roots(&b, deg);
+        blend(&b, Blend::Round, &roots, &[r; 2], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("slot at {deg}: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "slot at {deg}: {report}");
+        let expected = before - 2.0 * (BLOCK_TOP - HOLE_FLOOR) * root_area(HOLE_R, r, SLOT_W / 2.0);
+        let v = b.volume(1e-9).unwrap();
+        assert!(
+            (v - expected).abs() < 1e-6,
+            "slot at {deg}: volume {v}, expected {expected}"
+        );
+        let (_, brep) = common::kernel_copy(&b);
+        let centre_along = ((HOLE_R + r).powi(2) - (SLOT_W / 2.0 + r).powi(2)).sqrt();
+        let (s, c) = f64::to_radians(deg).sin_cos();
+        for across in [SLOT_W / 2.0 + r, -(SLOT_W / 2.0 + r)] {
+            let (x, y) = (centre_along * c - across * s, centre_along * s + across * c);
+            let rounds = brep
+                .face_list()
+                .iter()
+                .filter(|&&f| {
+                    let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+                    match surface.kind() {
+                        SurfaceKind::Cone(cone)
+                            if cone.is_cylinder() && (cone.bot_radius() - r).abs() < 1e-9 =>
+                        {
+                            let place = cone.rev().position();
+                            let (o, a) = (place.origin(), place.z_axis());
+                            (o.x - x).hypot(o.y - y) < 1e-9 && a.x.hypot(a.y) < 1e-9 * a.length()
+                        }
+                        _ => false,
+                    }
+                })
+                .count();
+            assert_eq!(rounds, 1, "slot at {deg}: the round about ({x}, {y})");
+        }
+    }
+}
+
+/// The angle on the hole's wall between a slot's middle and its side, in degrees: the side
+/// is the line `SLOT_W / 2` from the slot's middle.
+fn slot_half_angle() -> f64 {
+    (SLOT_W / 2.0 / HOLE_R).asin().to_degrees()
+}
+
+/// Controls for #18830: a second slot on the far side of the hole's seam, all four roots of
+/// both slots rounded R0.5 in one fillet. The first slot (at 14.8 degrees, a side 5 degrees
+/// past the seam) rolls one round over the seam onto the wall the second slot's near side
+/// stands on. With that side `past` degrees the other way from the seam, the round on it
+/// takes about 7.1 degrees of wall (its ball touches the wall 0.36 from its edge) and the
+/// rolled round about 2.1 degrees past the seam, so the bands overlap below about 9.2 degrees:
+/// at 8 and 9 degrees the fillet is refused as having no room; at 12 and 20 degrees all four
+/// rounds build, each its exact [`root_area`] along the hole's depth. At 5 degrees (slots at
+/// 14.8 and -14.8) both near sides roll over the seam, from opposite sides, and their bands
+/// overlap: [`slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart`].
+#[test]
+fn slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping() {
+    let r = 0.5;
+    fixes();
+    let area = root_area(HOLE_R, r, SLOT_W / 2.0);
+    for past in [8.0, 9.0, 12.0, 20.0] {
+        let slots = [14.8, -(past + slot_half_angle())];
+        let b = slotted_hole(&slots);
+        let before = b.volume(1e-9).unwrap();
+        let mut edges = slot_roots(&b, slots[0]).to_vec();
+        edges.extend(slot_roots(&b, slots[1]));
+        let result = blend(&b, Blend::Round, &edges, &[r; 4], &[], Corners::Filled);
+        if past < 10.0 {
+            assert!(
+                matches!(result, Err(Error::NoRoom)),
+                "side {past} degrees past the seam: {result:?}"
+            );
+            continue;
+        }
+        result.unwrap_or_else(|err| panic!("side {past} degrees past the seam: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(
+            report.is_valid(),
+            "side {past} degrees past the seam: {report}"
+        );
+        let expected = before - 4.0 * (BLOCK_TOP - HOLE_FLOOR) * area;
+        let v = b.volume(1e-9).unwrap();
+        assert!(
+            (v - expected).abs() < 1e-6,
+            "side {past} degrees past the seam: volume {v}, expected {expected}"
+        );
+    }
+}
+
+/// Controls for #18830: slots at 14.8 and -14.8 degrees put a side 5 degrees either side of
+/// the hole's seam, and both those rounds roll over the seam, from opposite sides, so their
+/// bands overlap. Each round's closed form rolls over the seam, so neither is apart from the
+/// other: both go to the ball's sections, as on main, and the fillet is refused there with the
+/// corner error, in either order of the edges. (Taken as apart, each would roll in closed form
+/// and the overlap would surface later, as an edge of the fillet that maps back to no edge.)
+#[test]
+fn slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart() {
+    fixes();
+    let slots = [14.8, -14.8];
+    for reversed in [false, true] {
+        let b = slotted_hole(&slots);
+        let mut edges = slot_roots(&b, slots[0]).to_vec();
+        edges.extend(slot_roots(&b, slots[1]));
+        if reversed {
+            edges.reverse();
+        }
+        match blend(&b, Blend::Round, &edges, &[0.5; 4], &[], Corners::Filled) {
+            Err(Error::BlendFailed { phrase, .. })
+                if phrase.contains("Corner Edge Computation Failure") => {}
+            other => panic!("edges reversed {reversed}: {other:?}"),
+        }
+    }
+}
+
+/// #19242: the slots of [`slot_roots_beside_a_hole_s_seam_round_in_one_fillet`] and
+/// [`slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping`] with
+/// SolidCraft's fixes less `fillet_refuse_overlapping_bands`, as a solidcore caller that never
+/// turns it on runs them. The round that rolls over the seam is taken as apart although
+/// another round stands on the wall it rolls onto, so only the bands' check compares the two;
+/// it runs without its fix too. Where the bands overlap (the second slot's near side 8 or 9
+/// degrees past the seam) the fillet is refused as having no room, as with the fix on (with
+/// the check skipped, the overlap surfaced later as "no fillet B-rep edge matches the fillet
+/// edge"). Where they don't, the fillet builds, valid, the same volume as with the fix on to
+/// 1e-9.
+#[test]
+fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked_without_the_bands_fix() {
+    let r = 0.5;
+    let with_fix_off = || {
+        let names = solidcraft_fixes::solidcraft_fix_names()
+            .into_iter()
+            .filter(|&name| name != "fillet_refuse_overlapping_bands");
+        session::set_thread_fixes(names).unwrap();
+    };
+    let one_slot = |deg: f64| (vec![deg], 2, true);
+    let two_slots = |past: f64| (vec![14.8, -(past + slot_half_angle())], 4, past > 10.0);
+    for (slots, n, builds) in [
+        one_slot(14.8),
+        one_slot(-14.8),
+        two_slots(8.0),
+        two_slots(9.0),
+        two_slots(12.0),
+        two_slots(20.0),
+    ] {
+        let run = |fix_on: bool| {
+            if fix_on {
+                fixes();
+            } else {
+                with_fix_off();
+            }
+            let b = slotted_hole(&slots);
+            let mut edges = Vec::new();
+            for &deg in &slots {
+                edges.extend(slot_roots(&b, deg));
+            }
+            blend(&b, Blend::Round, &edges, &vec![r; n], &[], Corners::Filled).map(|_| {
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "slots {slots:?}, fix on {fix_on}: {report}"
+                );
+                b.volume(1e-9).unwrap()
+            })
+        };
+        let on = run(true);
+        let off = run(false);
+        match (on, off) {
+            (Err(Error::NoRoom), Err(Error::NoRoom)) if !builds => {}
+            (Ok(on), Ok(off)) if builds => assert!(
+                (on - off).abs() <= 1e-9 * on,
+                "slots {slots:?}: volume {off} with the fix off, {on} with it on"
+            ),
+            (on, off) => panic!("slots {slots:?}: fix on {on:?}, fix off {off:?}"),
+        }
+    }
+    fixes();
 }

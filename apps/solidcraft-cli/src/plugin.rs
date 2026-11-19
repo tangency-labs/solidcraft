@@ -27,8 +27,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("check") => check(&args[1..]),
         Some("test") => test(&args[1..]),
-        Some(other) => Err(format!("plugin: unknown action `{other}`; use plugin check or plugin test\n{}", crate::command_usage("plugin"))),
-        None => Err(crate::command_usage("plugin")),
+        Some(other) => Err(format!("plugin: unknown action `{other}`; use plugin check or plugin test\n{}", crate::plugin_usage(None))),
+        None => Err(crate::plugin_usage(None)),
     }
 }
 
@@ -46,7 +46,7 @@ fn package_path<'a>(action: &str, args: &'a [String], valued: &[&str]) -> Result
         }
         i += 1;
     }
-    found.ok_or_else(|| format!("plugin {action} needs a package folder or .zip\n{}", crate::command_usage("plugin")))
+    found.ok_or_else(|| format!("plugin {action} needs a package folder or .zip\n{}", crate::plugin_usage(Some(action))))
 }
 
 fn check(args: &[String]) -> Result<(), String> {
@@ -187,9 +187,11 @@ struct Outcome {
 }
 
 fn test(args: &[String]) -> Result<(), String> {
-    crate::known_args("plugin test", args, &["--out"], &["--json"], true)?;
+    crate::known_args("plugin test", args, &["--out"], &["--json", "--require-cases"], true)?;
     let path = package_path("test", args, &["--out"])?;
     let json_out = args.iter().any(|a| a == "--json");
+    // For CI: an entry no case covers fails the run instead of being skipped.
+    let require_cases = args.iter().any(|a| a == "--require-cases");
     let out = crate::flag(args, "--out").map(PathBuf::from);
     // The same checks as `plugin check`: a package that would not install is not tested.
     let report = Session::default().execute("plugin.check", &json!({"path": path})).map_err(|e| e.to_string())?;
@@ -233,7 +235,7 @@ fn test(args: &[String]) -> Result<(), String> {
                 None => outcomes.push(Outcome {
                     name: entry.name.clone(),
                     entry: entry.name.clone(),
-                    status: "skipped",
+                    status: if require_cases { "failed" } else { "skipped" },
                     message: match entry.kind {
                         EntryKind::Importer => format!("no test case: add tests/{}.json with a \"file\" to open", entry.name),
                         EntryKind::Command => format!("no test case, and its inputs need values: add tests/{}.json with \"params\"", entry.name),
@@ -313,12 +315,26 @@ fn test(args: &[String]) -> Result<(), String> {
 
 /// The test cases in `tests`, by file name, each parsed or with why it could not be.
 fn read_cases(tests: &Path) -> Result<Vec<(String, Result<Case, String>)>, String> {
-    let Ok(entries) = std::fs::read_dir(tests) else { return Ok(Vec::new()) };
-    let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json") && p.is_file()).collect();
-    files.sort();
-    if files.len() > MAX_CASES {
-        return Err(format!("{} holds more than {MAX_CASES} test cases", tests.display()));
+    // No tests folder is no cases; one that can't be read, or an entry in it that can't, is an
+    // error, so a run never passes on the cases it happened to see.
+    let entries = match std::fs::read_dir(tests) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("could not read the tests folder {}: {e}", tests.display())),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| format!("could not read the tests folder {}: {e}", tests.display()))?.path();
+        if path.extension().is_some_and(|e| e == "json")
+            && std::fs::metadata(&path).map_err(|e| format!("could not check the test case {}: {e}", path.display()))?.is_file()
+        {
+            files.push(path);
+            if files.len() > MAX_CASES {
+                return Err(format!("{} holds more than {MAX_CASES} test cases", tests.display()));
+            }
+        }
     }
+    files.sort();
     Ok(files
         .into_iter()
         .map(|file| {
@@ -377,13 +393,18 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         memory_mib: Some(runtime.limits.memory_mib),
     };
     let wanted = case.grants.as_ref().unwrap_or(&asked);
+    // Every name is one the manifest asks for (a plain lowercase id) before any folder is made, so
+    // a case's grants never reach outside its own folder.
+    for folder in &wanted.folders {
+        if !runtime.permissions.files.iter().any(|f| f.name == folder.name) {
+            let asked: Vec<&str> = runtime.permissions.files.iter().map(|f| f.name.as_str()).collect();
+            return Err(format!("grants: the plugin asks for no folder `{}`; it asks for [{}]", folder.name, asked.join(", ")));
+        }
+    }
     let mut folders = Vec::new();
     for folder in &wanted.folders {
         let path = work.join("folders").join(&folder.name);
         std::fs::create_dir_all(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        if let Some(from) = &folder.from {
-            copy_tree(&in_tests(tests, from, "from")?, &path)?;
-        }
         folders.push(FileGrant { name: folder.name.clone(), folder: path, read: folder.read, write: folder.write });
     }
     let grants = Grants {
@@ -394,7 +415,32 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         input_folder: wanted.input_folder,
     };
     solidcraft_engine::plugin::validate_grants(manifest, &grants).map_err(|e| format!("grants: {e}"))?;
+    // Only a grant the app accepts is seeded from its fixture.
+    for (folder, grant) in wanted.folders.iter().zip(&grants.folders) {
+        if let Some(from) = &folder.from {
+            copy_tree(&unlinked_in_tests(tests, from)?, &grant.folder)?;
+        }
+    }
     Ok(grants)
+}
+
+/// A folder in the tests folder to copy from, refused when it or a folder on the way to it is a
+/// link: a link could reach outside the tests folder, so its files would be copied into a grant.
+fn unlinked_in_tests(tests: &Path, from: &str) -> Result<PathBuf, String> {
+    let path = in_tests(tests, from, "from")?;
+    let mut at = tests.to_path_buf();
+    let meta = std::fs::symlink_metadata(&at).map_err(|e| format!("from `{from}`: {}: {e}", at.display()))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("from `{from}`: {} is a link; copy the files into the tests folder instead", at.display()));
+    }
+    for part in Path::new(from).components() {
+        at.push(part);
+        let meta = std::fs::symlink_metadata(&at).map_err(|e| format!("from `{from}`: {}: {e}", at.display()))?;
+        if meta.file_type().is_symlink() {
+            return Err(format!("from `{from}`: {} is a link; copy the files into the tests folder instead", at.display()));
+        }
+    }
+    Ok(path)
 }
 
 /// Copies the files of `from` into `to`, folders and all; links are left out.

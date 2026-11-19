@@ -586,6 +586,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     }
     // Clicks on the panel are its own, not the view's.
     let _ = ui.interact(panel, egui::Id::unique("sc_operations"), Sense::click());
+    // The first surface outside the container hosts to ask for a blurred backdrop: the running-operations card.
+    painter.add(crate::blur::Backdrop::new(panel).corners(t.radius_sm).shape(&painter));
     painter.rect(panel, t.radius_sm, t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_rect("operations:panel", panel);
     app.operations.rect = Some(panel);

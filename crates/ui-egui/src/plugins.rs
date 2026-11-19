@@ -118,7 +118,10 @@ fn plain(text: &str, max: usize) -> bool {
 
 fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
     if m.id != folder {
-        return Err(format!("plugin.json id `{}` does not match the folder `{folder}`", m.id));
+        return Err(format!(
+            "plugin.json id `{}` does not match the folder `{folder}`: a package folder is named after its plugin's id, so rename the folder to `{}`",
+            m.id, m.id
+        ));
     }
     if !valid_id(&m.id) {
         return Err("the id must be 1 to 64 lowercase letters, digits and hyphens".into());
