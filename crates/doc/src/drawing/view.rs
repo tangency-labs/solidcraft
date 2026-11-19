@@ -33,7 +33,8 @@
 //! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`]; at most
 //! [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fmt;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -50,7 +51,7 @@ use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
     Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
-    ViewDirection, ViewOverrides, ViewSettings,
+    ViewDirection, ViewOverrides, ViewSettings, looking,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
@@ -246,6 +247,17 @@ impl ViewKind {
             ViewKind::Pictorial { .. } => "pictorial",
             ViewKind::Auxiliary { .. } => "auxiliary",
             ViewKind::Flat { .. } => "flat",
+        }
+    }
+
+    /// This kind made from view `parent` instead: itself for a kind with none ([`ViewKind::parent`]).
+    pub fn with_parent(&self, parent: u64) -> ViewKind {
+        match self {
+            ViewKind::Base { .. } | ViewKind::Flat { .. } => self.clone(),
+            ViewKind::Projected { side, .. } => ViewKind::Projected { parent, side: *side },
+            ViewKind::Section { line, .. } => ViewKind::Section { parent, line: line.clone() },
+            ViewKind::Pictorial { diagonal, .. } => ViewKind::Pictorial { parent, diagonal: *diagonal },
+            ViewKind::Auxiliary { toward, .. } => ViewKind::Auxiliary { parent, toward: *toward },
         }
     }
 
@@ -537,6 +549,169 @@ pub fn check_pose(pose: &Pose) -> Result<()> {
     })?;
     let listed: BTreeSet<u64> = joints.iter().map(|j| j.joint).collect();
     require(listed.len() == joints.len(), || "a position lists each joint once".into())
+}
+
+/// Whether a body placed by `path` is drawn: under a `source` path (`[]` only for the design's own
+/// bodies) and under no `hide` path. Each of the path's heads is one look-up, so a body costs at
+/// most 64 of them however many paths there are. Asked through [`Shows`].
+fn chosen(path: &[u64], source: Option<&HashSet<&[u64]>>, hide: &HashSet<&[u64]>) -> bool {
+    let heads = || (1..=path.len()).filter_map(|n| path.get(..n));
+    let wanted = source.is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads().any(|h| set.contains(h)) });
+    wanted && !heads().any(|h| hide.contains(h))
+}
+
+/// Why a saved view doesn't draw what an occurrence path places ([`Shows::left_out`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeftOut {
+    /// A `hide` path covers it: that path, and the view that set it.
+    Hidden { by: Vec<u64>, set_by: SetBy },
+    /// No `source` path takes it: the view that set the source.
+    NotChosen { set_by: SetBy },
+}
+
+/// Why, in words: what leaves it out, and where that was set when not on the view itself.
+impl fmt::Display for LeftOut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let set_by = match self {
+            LeftOut::Hidden { by, set_by } => {
+                write!(f, "its hide leaves out occurrence path {by:?}")?;
+                set_by
+            }
+            LeftOut::NotChosen { set_by } => {
+                write!(f, "its source draws only the occurrences it chose")?;
+                set_by
+            }
+        };
+        // Hide and the chosen occurrences come from a view's chain today, but a sheet and a drawing
+        // can set other settings (its line group), so each says where.
+        match set_by {
+            SetBy::Parent(parent) => write!(f, " (set on view {})", ids::encode(*parent)),
+            SetBy::Sheet => write!(f, " (set on its sheet)"),
+            SetBy::Drawing => write!(f, " (set on the drawing)"),
+            SetBy::This | SetBy::Default => Ok(()),
+        }
+    }
+}
+
+impl LeftOut {
+    /// What an annotation on view `view` says when the view was set to leave its part out after it
+    /// was added: it stays, and isn't drawn. The inspect warning and the sheet say it alike.
+    pub fn warning(&self, view: u64) -> String {
+        format!("view {} doesn't draw this part now: {self}", ids::encode(view))
+    }
+}
+
+/// What a view draws of the bodies a design places, by their occurrence paths: its `source` and
+/// `hide` paths, each made a set once ([`ResolvedView::shows`]), asked about any number of paths.
+/// No model is read.
+pub struct Shows<'a> {
+    source: Option<HashSet<&'a [u64]>>,
+    hide: HashSet<&'a [u64]>,
+    /// Where the source and the hide were set, for [`LeftOut`]'s words.
+    set_by: (SetBy, SetBy),
+}
+
+impl<'a> Shows<'a> {
+    /// The bodies under one of the `source` paths (all of them when there is none; `[]` takes the
+    /// design's own bodies) and under no `hide` path, as one view sets them itself.
+    pub fn new(source: Option<&'a [Vec<u64>]>, hide: &'a [Vec<u64>]) -> Shows<'a> {
+        Shows::set_by(source, hide, (SetBy::This, SetBy::This))
+    }
+
+    fn set_by(source: Option<&'a [Vec<u64>]>, hide: &'a [Vec<u64>], set_by: (SetBy, SetBy)) -> Shows<'a> {
+        let source = source.map(|paths| paths.iter().map(Vec::as_slice).collect());
+        Shows { source, hide: hide.iter().map(Vec::as_slice).collect(), set_by }
+    }
+
+    /// Whether the body occurrence path `path` places is drawn.
+    pub fn draws(&self, path: &[u64]) -> bool {
+        chosen(path, self.source.as_ref(), &self.hide)
+    }
+
+    /// Why the body occurrence path `path` places isn't drawn, if it isn't: the `hide` path that
+    /// covers it, else the source that doesn't take it.
+    pub fn left_out(&self, path: &[u64]) -> Option<LeftOut> {
+        if self.draws(path) {
+            return None;
+        }
+        let by = (1..=path.len()).filter_map(|n| path.get(..n)).find(|head| self.hide.contains(head));
+        Some(match by {
+            Some(by) => LeftOut::Hidden { by: by.to_vec(), set_by: self.set_by.1 },
+            None => LeftOut::NotChosen { set_by: self.set_by.0 },
+        })
+    }
+
+    /// Why the first of `paths` it doesn't draw is left out: what an annotation pointing through
+    /// them asks.
+    pub fn first_left_out<'p>(&self, paths: impl IntoIterator<Item = &'p [u64]>) -> Option<LeftOut> {
+        paths.into_iter().find_map(|path| self.left_out(path))
+    }
+}
+
+impl ResolvedView {
+    /// What this view draws ([`Shows`]), by the source and hide it resolves to.
+    pub fn shows(&self) -> Shows<'_> {
+        let (source, hide) = (self.occurrences.value.as_deref(), self.hide.value.as_deref().unwrap_or_default());
+        Shows::set_by(source, hide, (self.occurrences.set_by, self.hide.set_by))
+    }
+}
+
+/// `view`'s place moved by `by`: a point moves, and a place lined up with a parent moves along
+/// its free axis, so the views lined up with a moved view stay where they were beside it.
+pub fn shifted(view: &View, by: Vec2) -> ViewPlace {
+    match (view.place, &view.kind) {
+        (ViewPlace::At([x, y]), _) => ViewPlace::At([x + by.x, y + by.y]),
+        (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => ViewPlace::Aligned(along + side.along(by)),
+        // Only a projected view is saved lined up ([`Drawing::view_centre`]): nothing to move.
+        (
+            ViewPlace::Aligned(_),
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. },
+        ) => view.place,
+    }
+}
+
+impl View {
+    /// This view made a base view of `source` that looks the way `resolved` says it did, with the
+    /// settings it had as its own, centred at `at`: a copy follows none of the views it came from.
+    /// Its line group is its own only when its chain gave it: else it follows its new sheet, as a
+    /// base view copied does. A state of the assembly it drew (exploded, posed, a row of the
+    /// configuration table) is its own when it isn't the default. Every setting is named, so a new
+    /// one must say whether a copy keeps it.
+    pub fn as_base(self, resolved: &ResolvedView, source: u64, at: Vec2) -> View {
+        let settings = ViewOverrides {
+            scale: Some(resolved.scale.value),
+            visual_style: Some(resolved.visual_style.value),
+            reference_style: Some(resolved.reference_style.value),
+            reference_hides_model: Some(resolved.reference_hides_model.value),
+            tangent_edges: Some(resolved.tangent_edges.value),
+            occurrences: resolved.occurrences.value.clone(),
+            hide: resolved.hide.value.clone(),
+            line_group: matches!(resolved.line_group.set_by, SetBy::This | SetBy::Parent(_)).then_some(resolved.line_group.value),
+            exploded: Some(resolved.exploded.value).filter(|exploded| *exploded != Exploded::Assembled),
+            pose: Some(resolved.pose.value.clone()).filter(|pose| *pose != Pose::Designed),
+            configuration: Some(resolved.configuration.value).filter(|row| *row != ViewConfiguration::Active),
+        };
+        View { kind: ViewKind::Base { source, view: looking(&resolved.basis) }, settings, place: ViewPlace::At([at.x, at.y]), ..self }
+    }
+}
+
+impl Drawing {
+    /// Why view `view` doesn't draw the first of `paths` it leaves out ([`Shows::first_left_out`]):
+    /// the one rule an annotation pointing through them is drawn by. Nothing when it draws them
+    /// all, or for a view that can't be resolved, which its own reply reports.
+    pub fn left_out<'p>(&self, view: u64, paths: impl IntoIterator<Item = &'p [u64]>) -> Option<LeftOut> {
+        self.resolve_view(view).ok()?.shows().first_left_out(paths)
+    }
+
+    /// [`Drawing::left_out`] for each of `annotations` (its view, and the paths it points through),
+    /// in their order: each view is resolved once, however many annotations it has.
+    pub fn left_out_each<'p, P: IntoIterator<Item = &'p [u64]>>(&self, annotations: impl IntoIterator<Item = (u64, P)>) -> Vec<Option<LeftOut>> {
+        let mut views: BTreeMap<u64, Option<ResolvedView>> = BTreeMap::new();
+        annotations
+            .into_iter()
+            .map(|(view, paths)| views.entry(view).or_insert_with(|| self.resolve_view(view).ok()).as_ref()?.shows().first_left_out(paths))
+            .collect()
+    }
 }
 
 /// The views from `id` up to its base view, nearest first, each found by `find`: refused when a
@@ -832,10 +1007,7 @@ impl Drawing {
     /// places for a view and its line-up put on another sheet, or copied there.
     pub fn places_beside(&self, id: u64, to: Vec2) -> Result<Vec<(u64, ViewPlace)>> {
         let by = to - self.view_centre(id)?;
-        let lined = self.lined_up_with(id).into_iter().filter_map(|v| match self.view(v).map(|view| (view.place, &view.kind)) {
-            Some((ViewPlace::Aligned(along), ViewKind::Projected { side, .. })) => Some((v, ViewPlace::Aligned(along + side.along(by)))),
-            _ => None,
-        });
+        let lined = self.lined_up_with(id).into_iter().filter_map(|v| self.view(v).map(|view| (v, shifted(view, by))));
         Ok(std::iter::once((id, ViewPlace::At([to.x, to.y]))).chain(lined).collect())
     }
 

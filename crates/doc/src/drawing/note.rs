@@ -33,6 +33,7 @@ use solidcraft_geom::paper::MAX_SIDE_MM;
 use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, ModelPoint, Reference, Status, check_edge, check_point};
 use super::{Drawing, require};
+use crate::feature_pairs::FeaturePairs;
 use crate::{DocError, Document, Model, Result, ids};
 
 /// The most notes a drawing may have.
@@ -168,6 +169,25 @@ impl Note {
     /// Whether one of its leaders points at the model ([`Note::references`]).
     pub fn on_model(&self) -> bool {
         self.references().next().is_some()
+    }
+
+    /// This note with its anchor's reference and every branch's moved through the feature pairs,
+    /// from the component placed through occurrence path `from` to the one placed through `to`
+    /// ([`FeaturePairs::edge`], `point`); `None` when one has no pair. Every field and every anchor
+    /// in full, beside [`Note::references`]: a new one must say how it moves.
+    pub fn moved(&self, pairs: &FeaturePairs, from: &[u64], to: &[u64]) -> Option<Note> {
+        let Note { id, anchor, at, content, cap_mm, branches } = self;
+        let anchor = match anchor {
+            Anchor::Sheet(_) | Anchor::View(_) => anchor.clone(),
+            Anchor::Edge { view, edge } => Anchor::Edge { view: *view, edge: pairs.edge(edge, from, to)? },
+            Anchor::Corner { view, point } => Anchor::Corner { view: *view, point: pairs.point(point, from, to)? },
+        };
+        let branch = |branch: &Branch| match branch {
+            Branch::Edge(edge) => pairs.edge(edge, from, to).map(Branch::Edge),
+            Branch::Corner(point) => pairs.point(point, from, to).map(Branch::Corner),
+        };
+        let branches = branches.iter().map(branch).collect::<Option<Vec<Branch>>>()?;
+        Some(Note { id: *id, anchor, at: *at, content: content.clone(), cap_mm: *cap_mm, branches })
     }
 }
 

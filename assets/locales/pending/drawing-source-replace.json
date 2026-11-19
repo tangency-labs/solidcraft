@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_source_replace": "Replace Model"
+  },
+  "ar": {
+    "cmd.drawing_source_replace": "استبدال النموذج"
+  },
+  "de": {
+    "cmd.drawing_source_replace": "Modell ersetzen"
+  },
+  "he": {
+    "cmd.drawing_source_replace": "החלפת מודל"
+  },
+  "ja": {
+    "cmd.drawing_source_replace": "モデルを置換"
+  },
+  "ko": {
+    "cmd.drawing_source_replace": "모델 바꾸기"
+  },
+  "vi": {
+    "cmd.drawing_source_replace": "Thay thế mô hình"
+  },
+  "zh": {
+    "cmd.drawing_source_replace": "替换模型"
+  }
+}

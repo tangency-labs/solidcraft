@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use solidcore_record::Plane;
+use solidcraft_geom::Vec3Geom;
 use solidcraft_geom::drawing_view::{Invalid, NamedView, Scale, basis_looking};
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
@@ -67,6 +68,21 @@ impl ViewDirection {
             ViewDirection::Looking(Looking { direction, up, origin }) => basis_looking(direction.into(), up.into(), origin.into()),
         }
     }
+}
+
+/// The named view that is exactly `basis`, if one is.
+pub fn named(basis: &Plane) -> Option<NamedView> {
+    NamedView::ALL.iter().copied().find(|v| v.basis() == *basis)
+}
+
+/// `basis` as a base view saves it ([`ViewDirection::basis`] gives it back): by name when it is
+/// exactly a named view's, so nothing rounds; else its line of sight and up, which give the same
+/// basis back to within rounding.
+pub fn looking(basis: &Plane) -> ViewDirection {
+    named(basis).map_or_else(
+        || ViewDirection::Looking(Looking { direction: basis.y.cross(basis.x).into(), up: basis.y.into(), origin: basis.origin.into() }),
+        ViewDirection::Named,
+    )
 }
 
 /// Tangent edges, where faces meet smoothly: left out (the default) or drawn.

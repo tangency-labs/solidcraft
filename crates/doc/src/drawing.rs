@@ -77,6 +77,7 @@ mod fill;
 pub mod fold;
 pub mod image;
 pub mod note;
+pub mod paste;
 mod sketch;
 pub mod symbol;
 pub mod table;
@@ -632,6 +633,25 @@ impl Drawing {
         id_source.next(&self.ids().collect())
     }
 
+    /// `count` ids for new objects, as [`Drawing::allocate_id`] gives one, with the drawing's ids
+    /// gathered once for all of them, not once each.
+    pub fn allocate_ids(&self, count: usize, id_source: &mut IdSource) -> Result<Vec<u64>> {
+        let mut taken: BTreeSet<u64> = self.ids().collect();
+        (0..count)
+            .map(|_| {
+                let id = id_source.next(&taken)?;
+                taken.insert(id);
+                Ok(id)
+            })
+            .collect()
+    }
+
+    /// The name a new sheet gets: the first `Sheet N` no sheet has, counting from one past the
+    /// number of sheets.
+    pub fn free_sheet_name(&self) -> String {
+        (self.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| self.sheets.iter().all(|s| s.name != *name)).unwrap_or_default()
+    }
+
     /// The position of the sheet `named` names: by id, else by a name only one sheet has.
     pub fn sheet_index(&self, named: &str) -> Result<usize> {
         if let Some(i) = ids::decode(named).and_then(|id| self.sheets.iter().position(|s| s.id == id)) {
@@ -817,6 +837,12 @@ impl Drawing {
     /// The source that is the design the drawing is in, if it draws it.
     pub fn own_source(&self) -> Option<u64> {
         self.sources.iter().find(|s| s.path.is_none()).map(|s| s.id)
+    }
+
+    /// The source a new base view, parts list or sheet names: the design the drawing is in, else its
+    /// first source. The one rule every command that adds or pastes one takes.
+    pub fn design_source(&self) -> Option<u64> {
+        self.own_source().or_else(|| self.sources.first().map(|source| source.id))
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.

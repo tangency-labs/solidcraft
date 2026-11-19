@@ -201,7 +201,7 @@ fn warning_word(warning: Warning) -> &'static str {
 /// drawing is in, else the first it draws; a design `s` can read ([`Session::drawn`]).
 fn new_list(s: &Session, d: &Drawing, sheet: u64) -> Result<PartsList> {
     let documents = d.sheets.iter().find(|s| s.id == sheet).and_then(|s| s.documents);
-    let design = || d.own_source().or_else(|| d.sources.first().map(|source| source.id)).map(|source| SheetComponent { source, component: 0 });
+    let design = || d.design_source().map(|source| SheetComponent { source, component: 0 });
     let of = documents.or_else(design).ok_or_else(|| bad(ADD, "the drawing draws no design to list"))?;
     s.drawn(d, of.source).map_err(|why| bad(ADD, why.to_string()))?;
     Ok(PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() })

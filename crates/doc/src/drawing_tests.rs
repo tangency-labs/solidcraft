@@ -1603,7 +1603,7 @@ fn staged_sheet_sketch_edit_refuses_an_invalid_original_before_running_the_callb
     assert_eq!(d, before);
 }
 
-fn w38d_record_fixture(hole: bool) -> (crate::Document, u64, crate::WholeProfileBoundary) {
+pub(crate) fn w38d_record_fixture(hole: bool) -> (crate::Document, u64, crate::WholeProfileBoundary) {
     let (mut doc, id) = sheet_edit_design();
     let mut drawing = (**doc.drawing(id).unwrap()).clone();
     if hole {

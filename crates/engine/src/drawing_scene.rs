@@ -850,6 +850,16 @@ impl Annotation {
         }
     }
 
+    /// The occurrence paths of the model references it points through, which its view must draw
+    /// for it to be drawn ([`Drawing::left_out_each`]).
+    fn paths(&self) -> Vec<&[u64]> {
+        match self {
+            Annotation::Dimension(record) => record.kind.paths(),
+            Annotation::Note(note, _) => note.paths().collect(),
+            Annotation::Balloon(balloon) => vec![balloon.occurrence()],
+        }
+    }
+
     /// Whether what it shows reads the document as well as the model, so it is read again after any
     /// change to it: a note's text with a field reads the drawing's and the design's fields, and a
     /// balloon's number its parts list and the design's parts.
@@ -1118,17 +1128,24 @@ fn draw_dimensions(
             }
         }
     };
+    // One whose view was set to leave out a part it points at, after it was added, keeps its status
+    // but draws nothing and says why: one rule for every kind, each view resolved once.
+    let left_out = d.left_out_each(wanted.iter().map(|record| (record.view(), record.paths())));
     // Each dimension by its place among the dimensions read, each note and balloon in turn.
     let (mut lines, mut at) = (Vec::with_capacity(wanted.len()), 0);
-    for record in wanted {
-        match record {
+    for (record, left) in wanted.iter().zip(left_out) {
+        let drawn = match record {
             Annotation::Dimension(record) => {
-                lines.push(one(at, record));
                 at += 1;
+                Some(one(at - 1, record))
             }
-            Annotation::Note(..) => lines.extend(noted.next()),
-            Annotation::Balloon(_) => lines.extend(ballooned.next()),
-        }
+            Annotation::Note(..) => noted.next(),
+            Annotation::Balloon(_) => ballooned.next(),
+        };
+        lines.extend(drawn.map(|drawn| match left {
+            Some(left) => DrawnDimension { group: None, fonts: Vec::new(), why: Some(left.warning(drawn.view)), pending: false, ..drawn },
+            None => drawn,
+        }));
     }
     lines
 }
