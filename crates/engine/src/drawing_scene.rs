@@ -1796,12 +1796,15 @@ fn reason(e: EngineError) -> String {
     }
 }
 
-/// The provider's cache: per view, the lines it was last drawn with. The session holds one, for
-/// the drawing open.
+/// The provider's active drawing cache and the parked caches of drawings shown in other Sheet
+/// tiles. Views share their drawing's lines and request tokens across display cameras.
 #[derive(Default)]
 pub struct Cache {
     /// The drawing it is for.
     drawing: Option<u64>,
+    /// Other drawings displayed by live Sheet tiles. Only this root owns the map; parked
+    /// entries have no nested caches or kept lines. The host's bounded view registry caps it.
+    parked: BTreeMap<u64, Box<Cache>>,
     /// The sheet last extracted: the one [`step`] brings up to date.
     sheet: Option<u64>,
     /// Each view's last drawing, by id.
@@ -2121,13 +2124,15 @@ impl Cache {
     /// kept for other drawings, the last answer or a request in flight, which only the session's own
     /// page uses; the drawing and sheet are set by the read.
     pub(crate) fn shown_copy(&self, open: Option<u64>) -> Cache {
+        let source = if self.drawing == open { Some(self) } else { open.and_then(|id| self.parked.get(&id).map(Box::as_ref)) };
+        let Some(source) = source else { return Cache { kept: self.kept.copy_of(open), ..Cache::default() } };
         Cache {
-            views: self.views.clone(),
-            dimensions: self.dimensions.clone(),
-            sketches: self.sketches.clone(),
-            fills: self.fills.clone(),
-            updated: self.updated.clone(),
-            serial: self.serial,
+            views: source.views.clone(),
+            dimensions: source.dimensions.clone(),
+            sketches: source.sketches.clone(),
+            fills: source.fills.clone(),
+            updated: source.updated.clone(),
+            serial: source.serial,
             kept: self.kept.copy_of(open),
             ..Cache::default()
         }
@@ -2683,6 +2688,7 @@ struct ViewJob {
 /// revision and the drawing's lettering then.
 struct Ticket {
     request: u64,
+    drawing: u64,
     view: u64,
     resolved: ResolvedView,
     state: Arc<ModelState>,
@@ -2787,8 +2793,8 @@ pub(crate) mod copy_panics {
 /// Asks for the work [`step`] would do next that takes long, to do beside the window: the first view
 /// out of date on the sheet last extracted or, once its dimensions are read too, the setup of the
 /// first picture out of date. None when nothing such is waiting (a picture set up draws its bands in
-/// [`step`]), or while a deferred drawing holds. One at a time: asking again replaces the earlier
-/// request.
+/// [`step`]), or while a deferred drawing holds. One request per drawing: asking for that drawing
+/// again replaces its earlier request, without cancelling another visible drawing's work.
 pub fn begin(s: &mut Session) -> Option<Job> {
     let (d, on, state) = drawable(s)?;
     if let Some((id, view, _)) = on.iter().find(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).cloned() {
@@ -2820,7 +2826,7 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
             Err(why) => (designed(s), Some(why), None, None),
         }
     };
-    let ticket = Ticket { request, view: id, resolved: view, state, revision: s.revision, lettering };
+    let ticket = Ticket { request, drawing: d.id, view: id, resolved: view, state, revision: s.revision, lettering };
     ViewJob { copy, refused, later, placed, drawing: d.clone(), ticket, shown }
 }
 
@@ -2828,10 +2834,27 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
 /// has changed since. Otherwise it is dropped and nothing changes. Says whether it was taken.
 pub fn finish(s: &mut Session, done: Done) -> bool {
     forget_closed(s);
-    match done.0 {
+    let drawing = match &done.0 {
+        Worked::View(done) => done.ticket.drawing,
+        Worked::Picture(done) => done.ticket.drawing,
+    };
+    let previous = s.open_drawing;
+    if previous != Some(drawing) {
+        if !s.drawing_scenes.parked.contains_key(&drawing) {
+            return false;
+        }
+        s.open_drawing = Some(drawing);
+        forget_closed(s);
+    }
+    let accepted = match done.0 {
         Worked::View(done) => finish_view(s, *done),
         Worked::Picture(done) => finish_picture(s, *done),
+    };
+    if previous != Some(drawing) {
+        s.open_drawing = previous;
+        forget_closed(s);
     }
+    accepted
 }
 
 /// [`finish`] for a view's lines: nothing they were asked from has changed, the drawing, the model
@@ -2868,8 +2891,10 @@ fn finish_view(s: &mut Session, done: ViewDone) -> bool {
     true
 }
 
-/// Forgets the request [`begin`] made: its lines, when they come, are dropped.
+/// Forgets the current drawing's request: its lines, when they come, are dropped. Another live
+/// drawing's request remains independent.
 pub fn cancel(s: &mut Session) {
+    forget_closed(s);
     s.drawing_scenes.requested = None;
 }
 
@@ -3129,6 +3154,7 @@ struct PictureJob {
 /// and the session's world state and revision then.
 struct PictureTicket {
     request: u64,
+    drawing: u64,
     revision: u64,
     state: Arc<ModelState>,
     view: u64,
@@ -3182,7 +3208,7 @@ fn picture_job(s: &mut Session, waiting: (u64, Picture, DrawnFrom), state: &Arc<
     let scene = bodies(s, state).0;
     let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     s.drawing_scenes.requested = Some(request);
-    let ticket = PictureTicket { request, revision: s.revision, state: state.clone(), view, picture, from };
+    let ticket = PictureTicket { request, drawing: s.open_drawing?, revision: s.revision, state: state.clone(), view, picture, from };
     Some(PictureJob { copy: designed(s), ticket, resolved, grid, scene, others })
 }
 
@@ -3255,29 +3281,86 @@ fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)]
     (pictures.into(), waiting)
 }
 
-/// Drops the cache once its drawing isn't the one open: closing a drawing (or opening another) ends
-/// its scenes, and the world states they hold. Its views' and dimensions' lines are kept, for when
-/// it opens again, and forgotten with the drawing. [`Session::execute`] calls it after every command.
+/// Drawings with real, still-open Sheet tiles retain their live scenes and request tokens.
+/// Legacy inline drawing sessions retain only their current cache, as before.
+fn live_scene_drawings(s: &Session) -> BTreeSet<u64> {
+    s.view_context
+        .descriptors()
+        .iter()
+        .take(solidcraft_views::MAX_VIEWS)
+        .filter_map(|view| {
+            if view.kind != solidcraft_views::ViewKind::Sheet {
+                return None;
+            }
+            let subject = view.subject.as_deref()?;
+            if let Some((drawing, sheet)) = subject.split_once('/') {
+                let (drawing, sheet) = (ids::decode(drawing)?, ids::decode(sheet)?);
+                return s.doc.drawing(drawing)?.sheets.iter().any(|record| record.id == sheet).then_some(drawing);
+            }
+            let sheet = ids::decode(subject)?;
+            let mut owners = s.doc.drawings.iter().filter(|drawing| drawing.sheets.iter().any(|record| record.id == sheet));
+            let drawing = owners.next()?;
+            owners.next().is_none().then_some(drawing.id)
+        })
+        .collect()
+}
+
+/// Release a closed tile's world states and in-flight work, keeping the existing bounded
+/// last-line/picture fallback used when a drawing is reopened.
+fn keep_closed_cache(kept: &mut KeptLines, drawing: u64, cache: Cache) {
+    let views = cache
+        .views
+        .into_iter()
+        .map(|(id, entry)| (id, KeptView { view: entry.view, drawn: entry.drawn, shows: entry.shows, pixels: entry.pixels }))
+        .collect();
+    let dimensions = cache
+        .dimensions
+        .into_iter()
+        .map(|(id, entry)| {
+            (id, KeptDimension { record: entry.record, view_serial: entry.view_serial, lettering: entry.lettering, drawn: entry.drawn })
+        })
+        .collect();
+    let sketches =
+        cache.sketches.into_iter().map(|(id, entry)| (id, KeptSketch { source: entry.source, context: entry.context, drawn: entry.drawn })).collect();
+    let fills =
+        cache.fills.into_iter().map(|(id, entry)| (id, KeptFill { source: entry.source, context: entry.context, drawn: entry.drawn })).collect();
+    kept.keep(drawing, Kept { views, dimensions, sketches, fills });
+}
+
+/// Select the current drawing's cache without cancelling work on another visible Sheet.
+/// At most MAX_VIEWS drawings can be parked. Closed/deleted tiles release their live caches;
+/// authored data and the focused command receiver are untouched.
 pub(crate) fn forget_closed(s: &mut Session) {
-    let cache = &mut s.drawing_scenes;
-    if let Some(drawing) = cache.drawing.filter(|d| s.open_drawing != Some(*d)) {
-        let mut kept = std::mem::take(&mut cache.kept);
-        let views = std::mem::take(&mut cache.views)
-            .into_iter()
-            .map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows, pixels: e.pixels }));
-        let dimensions = std::mem::take(&mut cache.dimensions)
-            .into_iter()
-            .map(|(id, e)| (id, KeptDimension { record: e.record, view_serial: e.view_serial, lettering: e.lettering, drawn: e.drawn }));
-        let sketches = std::mem::take(&mut cache.sketches)
-            .into_iter()
-            .map(|(id, entry)| (id, KeptSketch { source: entry.source, context: entry.context, drawn: entry.drawn }));
-        let fills = std::mem::take(&mut cache.fills)
-            .into_iter()
-            .map(|(id, entry)| (id, KeptFill { source: entry.source, context: entry.context, drawn: entry.drawn }));
-        kept.keep(drawing, Kept { views: views.collect(), dimensions: dimensions.collect(), sketches: sketches.collect(), fills: fills.collect() });
-        *cache = Cache { kept, ..Cache::default() };
+    let live = live_scene_drawings(s);
+    let mut current = std::mem::take(&mut s.drawing_scenes);
+    let mut parked = std::mem::take(&mut current.parked);
+    let mut kept = std::mem::take(&mut current.kept);
+    let retired: Vec<_> = parked.keys().copied().filter(|id| !live.contains(id) || s.doc.drawing(*id).is_none()).collect();
+    for drawing in retired {
+        if let Some(cache) = parked.remove(&drawing)
+            && s.doc.drawing(drawing).is_some()
+        {
+            keep_closed_cache(&mut kept, drawing, *cache);
+        }
     }
-    cache.kept.retain(|drawing| s.doc.drawings.iter().any(|d| d.id == drawing));
+    let switches = current.drawing.is_some_and(|drawing| s.open_drawing != Some(drawing) || s.doc.drawing(drawing).is_none())
+        || (current.drawing.is_none() && s.open_drawing.is_some_and(|drawing| parked.contains_key(&drawing)));
+    if switches {
+        if let Some(drawing) = current.drawing
+            && s.doc.drawing(drawing).is_some()
+        {
+            if live.contains(&drawing) {
+                parked.insert(drawing, Box::new(current));
+            } else {
+                keep_closed_cache(&mut kept, drawing, current);
+            }
+        }
+        current = s.open_drawing.and_then(|drawing| parked.remove(&drawing)).map(|cache| *cache).unwrap_or_default();
+    }
+    kept.retain(|drawing| s.doc.drawings.iter().any(|record| record.id == drawing));
+    current.parked = parked;
+    current.kept = kept;
+    s.drawing_scenes = current;
 }
 
 #[cfg(test)]

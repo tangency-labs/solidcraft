@@ -52,6 +52,13 @@ pub struct State {
     selection_is_drawings: bool,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
+    /// Camera and paint caches follow stable view identities, including hidden and moved views.
+    pub(crate) pages: std::collections::HashMap<u64, crate::drawing_sheet_page::Page>,
+    pub(crate) page_view: u64,
+    /// Drawing-view selection belongs to a sheet, independently of its display cameras.
+    pub(crate) sheet_selection: std::collections::HashMap<(u64, u64), u64>,
+    pub(crate) sheet_picks: std::collections::HashMap<(u64, u64), Vec<solidcraft_engine::Sel>>,
+    selection_sheet: Option<(u64, u64)>,
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -122,9 +129,12 @@ pub(crate) fn swap_selection(app: &mut SolveApp) {
 
 pub(crate) fn select_receiver(app: &mut SolveApp, drawings: bool) {
     if app.drawing_workspace.selection_is_drawings == drawings {
+        focus_sheet_selection(app);
         return;
     }
+    remember_sheet_selection(app);
     app.drawing_workspace.selection_is_drawings = drawings;
+    app.drawing_workspace.selection_sheet = None;
     let mut back = std::mem::take(&mut app.drawing_workspace.selection_away);
     let session = &app.session;
     back.retain(|item| match item {
@@ -134,6 +144,84 @@ pub(crate) fn select_receiver(app: &mut SolveApp, drawings: bool) {
         _ => true,
     });
     app.drawing_workspace.selection_away = std::mem::replace(&mut app.session.selection, back);
+    focus_sheet_selection(app);
+}
+
+fn remember_sheet_selection(app: &mut SolveApp) {
+    if app.drawing_workspace.selection_is_drawings
+        && let Some(owner) = app.drawing_workspace.selection_sheet
+    {
+        let mut picks = app.session.selection.clone();
+        crate::sheet_views::filter_selection(&app.session, owner, &mut picks);
+        if picks.is_empty() {
+            app.drawing_workspace.sheet_picks.remove(&owner);
+        } else {
+            app.drawing_workspace.sheet_picks.insert(owner, picks);
+        }
+    }
+}
+
+/// A committed Sheet focus restores that sheet's picks; Model selection stays in its own slot.
+pub(crate) fn focus_sheet_selection(app: &mut SolveApp) {
+    if !app.drawing_workspace.selection_is_drawings {
+        return;
+    }
+    let Some(owner) = app.session.open_drawing.zip(crate::drawing_sheet_page::active_sheet(app)) else { return };
+    if app.drawing_workspace.selection_sheet != Some(owner) {
+        remember_sheet_selection(app);
+        let mut picks =
+            app.drawing_workspace.sheet_picks.remove(&owner).unwrap_or_else(|| {
+                app.session.selection.iter().filter(|pick| matches!(pick, solidcraft_engine::Sel::Drawing { .. })).cloned().collect()
+            });
+        crate::sheet_views::filter_selection(&app.session, owner, &mut picks);
+        app.session.selection = picks;
+        app.drawing_workspace.selection_sheet = Some(owner);
+    } else {
+        let mut picks = std::mem::take(&mut app.session.selection);
+        crate::sheet_views::filter_selection(&app.session, owner, &mut picks);
+        app.session.selection = picks;
+    }
+}
+
+/// Receiver state borrowed by an inactive native host or a command in another window.
+pub(crate) struct ReceiverScope {
+    uid: u64,
+    drawing: Option<u64>,
+    model_focus: bool,
+    selection: Vec<solidcraft_engine::Sel>,
+    away: Vec<solidcraft_engine::Sel>,
+    drawings: bool,
+    sheet: Option<(u64, u64)>,
+    page: u64,
+}
+
+impl ReceiverScope {
+    pub(crate) fn capture(app: &SolveApp) -> Self {
+        Self {
+            uid: app.session.uid,
+            drawing: app.session.open_drawing,
+            model_focus: app.session.model_focus,
+            selection: app.session.selection.clone(),
+            away: app.drawing_workspace.selection_away.clone(),
+            drawings: app.drawing_workspace.selection_is_drawings,
+            sheet: app.drawing_workspace.selection_sheet,
+            page: app.drawing_workspace.page_view,
+        }
+    }
+
+    pub(crate) fn restore(self, app: &mut SolveApp) {
+        if app.session.uid != self.uid {
+            return;
+        }
+        remember_sheet_selection(app);
+        app.session.open_drawing = self.drawing;
+        app.session.model_focus = self.model_focus;
+        app.session.selection = self.selection;
+        app.drawing_workspace.selection_away = self.away;
+        app.drawing_workspace.selection_is_drawings = self.drawings;
+        app.drawing_workspace.selection_sheet = self.sheet;
+        crate::drawing_sheet_page::activate_view(app, self.page);
+    }
 }
 
 /// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the
@@ -513,6 +601,25 @@ pub(crate) fn sheets_visibility_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Add a Sheet from this window's view menu without visiting another window's Sheet.
+pub(crate) fn new_sheet_from_view_menu(app: &mut SolveApp) -> Result<(), String> {
+    if !crate::workspace::switcher_available(app) {
+        return Err(solidcraft_ui_text::tr("workspace_focus.finish_operation").into());
+    }
+    let drawing = (app.docs.views.active().kind == solidcraft_views::ViewKind::Sheet)
+        .then(|| crate::sheet_views::resolve(app, app.docs.views.active().subject.as_deref()).ok().map(|(drawing, _)| drawing))
+        .flatten()
+        .or(app.session.open_drawing.filter(|drawing| app.session.doc.drawing(*drawing).is_some()))
+        .or_else(|| app.session.doc.drawings.first().map(|drawing| drawing.id));
+    let Some(drawing) = drawing else { return crate::workspace::enter(app, "drawing") };
+    let previous = app.session.open_drawing.replace(drawing);
+    if prepare_editor(app, "drawing.sheet.add") {
+        open_add_sheet(app);
+    }
+    app.session.open_drawing = previous;
+    Ok(())
+}
+
 fn open_add_sheet(app: &mut SolveApp) {
     if let Some(form) = panels::AddSheet::open(app) {
         close_panel(app);
@@ -684,6 +791,7 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 use ui_kit::Item;
                 ui_kit::Menu::heading(ui, &sheet.name);
                 let items = [
+                    Item::action("open_new", app.tr("sheet_views.open_new"), "sheet"),
                     Item::action("settings", app.tr("cmd.drawing_sheet_set"), "settings"),
                     Item::action("rename", app.tr_label("Rename"), "rename"),
                     Item::action("duplicate", app.tr("ui.drawing_sheets.duplicate"), "copy")
@@ -705,6 +813,11 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
         });
     if let Some(action) = popup.inner {
         match action.id.as_str() {
+            "open_new" => {
+                if let Err(error) = crate::sheet_views::open_in(app, drawing_id, sheet_id, true) {
+                    app.set_status(error, true);
+                }
+            }
             "settings" | "rename" => {
                 select_sheet(app, sheet_id);
                 start(app, "drawing.sheet.set");
@@ -943,10 +1056,24 @@ pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
     first_sheet::show_picker(app, ctx);
     show_sheet_menu(app, ctx);
     show_delete_sheet(app, ctx);
-    if active(app)
+    if app
+        .drawing_workspace
+        .add_sheet
+        .as_ref()
+        .is_some_and(|form| form.document != app.session.uid || app.session.doc.drawing(form.drawing).is_none())
+    {
+        app.drawing_workspace.add_sheet = None;
+    }
+    if app.drawing_workspace.add_sheet.as_ref().is_some_and(|form| form.window == app.view_windows.current_window())
         && let Some(form) = app.drawing_workspace.add_sheet.take()
     {
+        let previous = app.session.open_drawing.replace(form.drawing);
+        let revision = app.session.revision;
         app.drawing_workspace.add_sheet = panels::add_window(app, ctx, form);
+        if app.session.revision == revision {
+            // Merely painting or cancelling a form cannot change the window's receiver.
+            app.session.open_drawing = previous;
+        }
     }
 }
 
@@ -2039,5 +2166,120 @@ mod tests {
             );
             assert_eq!(h.app.preferences.drawing_sheet_dock, "top");
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn new_sheet_view_menu_keeps_its_model_window_when_existing_sheets_are_elsewhere() {
+        fn paint(h: &mut Harness, window: u32, events: Vec<egui::Event>) {
+            let ctx = h.ctx.clone();
+            let output = crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+                Ok(ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+                        focused: true,
+                        events,
+                        ..Default::default()
+                    },
+                    |_ui| show_add_sheet(app, &ctx),
+                ))
+            })
+            .unwrap();
+            h.output = output.platform_output;
+            h.shapes = output.shapes;
+        }
+        fn click(h: &mut Harness, window: u32, label: &str) {
+            let point = h.widget(label).unwrap_or_else(|| panic!("missing actual Add Sheet form control: {label}"));
+            let pos = egui::pos2(point[0] as f32, point[1] as f32);
+            paint(h, window, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                paint(
+                    h,
+                    window,
+                    vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }],
+                );
+            }
+        }
+        for origin_is_child in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("solid.box", serde_json::json!({"length":40,"width":30,"height":5})).unwrap();
+            let root_model = h.app.docs.views.active().id;
+            let drawing = h.app.run("drawing.create", serde_json::json!({})).unwrap();
+            let drawing_id = h.app.session.open_drawing.unwrap();
+            let original_sheet = solidcraft_engine::doc::ids::decode(drawing["sheets"][0]["id"].as_str().unwrap()).unwrap();
+            let foreign_sheet = h.app.docs.views.active().id;
+            let moved = if origin_is_child { crate::documents::view_duplicate(&mut h.app, root_model).unwrap() } else { foreign_sheet };
+            h.app.run("tab.view.move_to_window", serde_json::json!({"view":moved})).unwrap();
+            let child = h.app.docs.views.window_of(moved).unwrap();
+            let (origin, model, foreign) = if origin_is_child { (child, moved, 0) } else { (0, root_model, child) };
+            crate::view_windows::focus_view(&mut h.app, model, Some(origin)).unwrap();
+            crate::sketch_view::sync(&mut h.app).unwrap();
+            crate::view_windows::with_strip(&mut h.app, Some(child), |app| {
+                crate::documents::keep_look(app);
+                Ok(())
+            })
+            .unwrap();
+            crate::view_windows::with_strip(&mut h.app, Some(origin), |app| {
+                crate::documents::keep_look(app);
+                Ok(())
+            })
+            .unwrap();
+            let before_views = h.app.docs.views.views_of(origin).unwrap().views().to_vec();
+            let before_layout = h.app.docs.views.views_of(origin).unwrap().tiles().cloned();
+            let before_revision = h.app.session.revision;
+            let camera = h.app.cam;
+            let title = h.app.tr("ui.drawing_sheets.add").to_owned();
+            for commit in [false, true] {
+                crate::view_windows::with_strip(&mut h.app, Some(origin), |app| {
+                    assert!(crate::sheet_views::menu_action(app, "sheet.new"));
+                    let form = app.drawing_workspace.add_sheet.as_ref().expect("the existing Add Sheet form opens from Model");
+                    assert_eq!((form.window, form.drawing, form.document), (origin, drawing_id, app.session.uid));
+                    assert_eq!(app.docs.views.active().id, model);
+                    assert_eq!(app.ui.tab, "MODEL", "opening a form does not project a foreign Drawing ribbon");
+                    Ok(())
+                })
+                .unwrap();
+                assert_eq!(crate::view_windows::focused_view(&h.app), model);
+                assert_eq!(h.app.docs.views.views_of(origin).unwrap().views(), before_views.as_slice());
+                assert_eq!(h.app.docs.views.views_of(origin).unwrap().tiles(), before_layout.as_ref());
+                assert_eq!(h.app.cam, camera);
+                paint(&mut h, foreign, Vec::new());
+                assert!(h.widget(&title).is_none(), "the Add Sheet form cannot paint in a foreign window");
+                for _ in 0..3 {
+                    paint(&mut h, origin, Vec::new());
+                }
+                assert!(h.widget(&title).is_some(), "the actual Add Sheet form paints on its Model host");
+                let button = if commit { title.clone() } else { h.app.tr("ui.cancel").to_owned() };
+                click(&mut h, origin, &button);
+                assert!(h.app.drawing_workspace.add_sheet.is_none());
+                if !commit {
+                    assert_eq!(h.app.session.revision, before_revision);
+                    assert_eq!(crate::view_windows::focused_view(&h.app), model);
+                    assert_eq!(h.app.docs.views.views_of(origin).unwrap().views(), before_views.as_slice());
+                    assert_eq!(h.app.docs.views.views_of(origin).unwrap().tiles(), before_layout.as_ref());
+                    assert_eq!(h.app.cam, camera);
+                }
+            }
+            let record = h.app.session.doc.drawing(drawing_id).unwrap();
+            assert_eq!(record.sheets.len(), 2);
+            let new_sheet = record.sheets.iter().find(|sheet| sheet.id != original_sheet).unwrap().id;
+            let active = h.app.docs.views.views_of(origin).unwrap().active();
+            assert_eq!(active.kind, solidcraft_views::ViewKind::Sheet);
+            assert_eq!(active.subject.as_deref(), Some(crate::sheet_views::subject(drawing_id, new_sheet).as_str()));
+            assert!(h.app.docs.views.views_of(origin).unwrap().get(model).is_some());
+            assert_eq!(h.app.docs.views.window_of(foreign_sheet), Some(foreign));
+            assert_eq!(crate::view_windows::focused_view(&h.app), active.id);
+        }
+        let mut first = Harness::new();
+        first.app.home.open = false;
+        first.app.run("solid.box", serde_json::json!({"length":40,"width":30,"height":5})).unwrap();
+        assert!(first.app.session.doc.drawings.is_empty());
+        assert!(crate::sheet_views::menu_action(&mut first.app, "sheet.new"));
+        first.frames(2);
+        assert!(active(&first.app), "a design with no Drawings retains the existing first-Sheet entry flow");
+        assert!(first.app.session.open_drawing.is_none());
+        assert!(first.app.session.doc.drawings.is_empty(), "no Drawing or Sheet is created before confirmation");
+        assert!(first.app.drawing_workspace.add_sheet.is_none());
     }
 }

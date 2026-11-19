@@ -1000,6 +1000,47 @@ fn render_grid_fallback_fills_an_empty_cell_without_moving_the_ground() {
     assert!(app.docs.views.tiles().unwrap().contains(ground));
 }
 
+#[test]
+fn model_sketch_fallback_parks_one_card_in_a_full_sheet_or_render_layout() {
+    use solidcraft_views::{Preset, ViewKind};
+    for kind in [ViewKind::Sheet, ViewKind::Render] {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let model = app.docs.views.active().id;
+        let ground = app.docs.views.open(kind, None, false);
+        assert!(app.docs.views.close(model));
+        for _ in 1..solidcraft_views::MAX_TILES {
+            app.docs.views.open(kind, None, false);
+        }
+        app.docs.views.activate(ground);
+        app.docs.views.set_layout(Preset::Grid);
+        let before = app.docs.views.tiles().unwrap().views();
+        for id in &before {
+            app.docs.views.set_spec(*id, solidcraft_viewport::ViewSpec::new(app.cam));
+        }
+        let records = app.docs.views.views().to_vec();
+        let camera = app.cam;
+        assert_eq!(before.len(), solidcraft_views::MAX_TILES);
+        assert!(!records.iter().any(|view| view.kind == ViewKind::Model));
+        let target = crate::sketch_view::prepare_start(&mut app, None).unwrap();
+        let after = app.docs.views.tiles().unwrap().views();
+        assert_eq!(app.docs.views.active().id, ground);
+        assert_eq!(app.cam, camera);
+        assert_eq!(after.len(), solidcraft_views::MAX_TILES);
+        assert!(after.contains(&ground) && after.contains(&target));
+        assert_eq!(app.docs.views.get(target).unwrap().kind, ViewKind::Model);
+        let parked: Vec<_> = before.iter().copied().filter(|id| !after.contains(id)).collect();
+        assert_eq!(parked.len(), 1);
+        assert_ne!(parked[0], ground);
+        assert!(app.docs.views.get(parked[0]).is_some(), "the parked card stays open in the tab strip");
+        for record in records {
+            assert_eq!(app.docs.views.get(record.id), Some(&record), "existing view state is untouched");
+            assert_eq!(after.contains(&record.id), record.id != parked[0], "every other card stays in the layout");
+        }
+        assert_eq!(app.docs.views.len(), solidcraft_views::MAX_TILES + 1);
+        assert!(app.session.view_context.descriptors().iter().any(|view| view.id == target));
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn refused_new_edit_finishes_and_notifies_the_original_window_exactly_once() {

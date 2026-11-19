@@ -31,9 +31,18 @@ pub(crate) fn prepare_start(app: &mut SolveApp, explicit: Option<u64>) -> Result
         let previous = next.active().id;
         let id = next.open(ViewKind::Model, None, false);
         next.activate(previous);
-        if !next.get(id).is_some_and(|view| view.kind == ViewKind::Model)
-            || !(next.fill_empty(0, id) || next.show_beside(id, solidcraft_views::Edge::Right))
-        {
+        if !next.get(id).is_some_and(|view| view.kind == ViewKind::Model) {
+            return Err(app.tr("sketch_mode.model_card_unavailable").into());
+        }
+        let placed = next.fill_empty(0, id) || next.show_beside(id, solidcraft_views::Edge::Right);
+        let placed = placed || {
+            let park = next
+                .tiles()
+                .filter(|tiles| tiles.len() >= solidcraft_views::MAX_TILES)
+                .and_then(|tiles| tiles.views().into_iter().rev().find(|other| *other != previous && *other != solidcraft_views::EMPTY));
+            park.is_some_and(|park| next.unshow(park) && next.show_beside(id, solidcraft_views::Edge::Right))
+        };
+        if !placed {
             return Err(app.tr("sketch_mode.model_card_unavailable").into());
         }
         crate::documents::change_views(app, |views| *views = next);
