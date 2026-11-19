@@ -2107,11 +2107,13 @@ impl Sphere {
     /// The sphere `IsNurbSurfaceSphere` fits to `test` as upstream returns it: its NURB
     /// the one made from the fitted circles (reparameterised to `test`'s NURB domain),
     /// ~1e-11 off `test`'s, where [`Self::is_nurb_surface_sphere`] keeps `test`'s own
-    /// (WR-493). The tests take it to replay rows against the fitted NURB.
+    /// (WR-493). Public only for the goldens' replays of rows against the fitted NURB
+    /// (hidden from the docs); the kernel itself does not call it.
     ///
     /// # Errors
     ///
     /// As [`Self::is_nurb_surface_sphere`].
+    #[doc(hidden)]
     pub fn fitted_nurb_surface_sphere(
         k: &Kernel,
         test: &BSplineSurface,

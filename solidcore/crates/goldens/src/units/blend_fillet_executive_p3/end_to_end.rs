@@ -2817,7 +2817,7 @@ mod wr56_certificates {
 /// The round face's net and its contact edges on the plane and on the sphere are each
 /// closer to it than before (CLOSER against the closed form, enclosed over every rational
 /// Bezier piece: at most 2.3e-6, 8.8e-12 and 2.1e-6 here, at least 4.1e-6, 3.5e-11 and
-/// 4.1e-6 on #18230's tree), and each lies within its own tolerance (4e-5).
+/// 4.1e-6 on main), and each lies within its own tolerance (4e-5).
 #[cfg(test)]
 mod wr493_certificates {
     use super::{apply, build, eu, face, loopuse, RealSolid};
@@ -2840,8 +2840,9 @@ mod wr493_certificates {
         inputs.real_solid.expect("a real_solid case")
     }
 
-    /// The round on `NAME`'s body, as is or with the refit (#18230's tree: the file's
-    /// sphere given upstream's fitted NURB before its topology is made).
+    /// The round on `NAME`'s body, as is or with the refit (the fitted-NURB (seam) build:
+    /// the file's sphere given upstream's fitted NURB before its topology is made; its
+    /// result geometry is main's run's, bit for bit, [`the_round_is_closer_to_its_torus`]).
     fn round(refit: bool) -> (Kernel, Brep) {
         if refit {
             state::set(Some(Refit::default()));
@@ -3171,31 +3172,35 @@ mod wr493_certificates {
     /// The `sphere_plane` round against its exact torus (about the x axis, centre circle
     /// `x = -3.5`, `y^2 + z^2 = 8`, tube 0.5: the ball of radius 0.5 touching the plane
     /// `x = -4` and, inside, the sphere of radius 5 about the origin), here and replayed
-    /// on #18230's tree ([`round`]: the file's sphere given upstream's fitted NURB).
+    /// in the fitted-NURB (seam) build ([`round`]: the file's sphere given upstream's fitted
+    /// NURB). That build is main's: its `result_geometry` is main's run's bit for bit (its
+    /// block, pinned, measured on main at 0b321cbaa4; main's committed line differs from
+    /// main's own run by 3.6e-14 in the block's sum, within the goldens' comparator, and
+    /// that is asserted too).
     ///
     /// - The contact edges' curves and the round face's net (rational Bezier pieces): each
     ///   piece's distance from the torus is enclosed ([`torus_bound`]), and the largest
-    ///   bound here is below a proved lower bound of #18230's largest distance (its pieces
+    ///   bound here is below a proved lower bound of main's largest distance (its pieces
     ///   at 65 parameters for the edges, 17 each way for the net,
     ///   [`torus_distance_below`]): CLOSER. The seam (a circle
     ///   of the torus, one piece) is within `1e-12` in both.
     /// - Topology: the same up to the edges' labels and the order an edge's uses are
-    ///   listed in ([`canonical`]). #18230's tree replaced the sphere's NURB, made its
+    ///   listed in ([`canonical`]). Main replaced the sphere's NURB, made its
     ///   contact edge last (`EdgeId(8)` after the seam's 7; the plane's is 6), listing
     ///   its uses the other way round; here it is made first (`EdgeId(5)`), so the
-    ///   record lists the round's edges sphere, plane, seam where #18230's listed plane,
+    ///   record lists the round's edges sphere, plane, seam where main's listed plane,
     ///   seam, sphere: the `result_topology` blocks' sum is unchanged and their weighted
     ///   sum moves.
     /// - Geometry (`util::primitive::append`, entity by entity, matched by role): the
     ///   file's edges, the plane face and the two pole vertices are bit for bit
-    ///   #18230's. What moves: the round's tolerance and its edges' (`1.4249e-4` to
+    ///   main's. What moves: the round's tolerance and its edges' (`1.4249e-4` to
     ///   `4e-5`, the tolerance the net and curves are made to), the contact edges'
     ///   parameter spans and samples (on the closer curves), the round face's domain and
     ///   samples, the sphere face's samples (the same fractions of the same domain of
-    ///   the file's NURB here, of upstream's fitted NURB on #18230's tree), and the
+    ///   the file's NURB here, of upstream's fitted NURB on main), and the
     ///   two round vertices, both closer to their exact contact circles (proved). The one
     ///   on the plane is `2.4e-15` from its circle where the fitted NURB's is `4.3e-15`
-    ///   (main's row has that vertex, bit for bit), both a few units in the last place of
+    ///   (main's run has that vertex, bit for bit), both a few units in the last place of
     ///   `sqrt(8)`; its certified upper bound, below `2.5e-15`, is pinned, and is far inside
     ///   the vertex's tolerance (`4e-5`), which is asserted.
     #[test]
@@ -3216,8 +3221,8 @@ mod wr493_certificates {
             let before = largest_below(&edge_pieces(&old, eo), 64);
             let now = largest_above(&edge_pieces(&new, en), 8);
             let tol = new.edge(en).expect("edge").tolerance;
-            eprintln!("{NAME}: {what} at most {now:e} off the torus (tol {tol:e}), #18230 at least {before:e}");
-            assert!(now < before, "{NAME}: {what} {now:e}, #18230 {before:e}");
+            eprintln!("{NAME}: {what} at most {now:e} off the torus (tol {tol:e}), main at least {before:e}");
+            assert!(now < before, "{NAME}: {what} {now:e}, main {before:e}");
             assert!(now <= tol, "{NAME}: {what} {now:e} beyond its tolerance {tol:e}");
         }
         for b in [&old, &new] {
@@ -3230,8 +3235,8 @@ mod wr493_certificates {
         let before = largest_below(&old_net, 16);
         let now = largest_above(&new_net, 3);
         let tol = new.face(pn.face).expect("face").tolerance;
-        eprintln!("{NAME}: net at most {now:e} off the torus, from its definition {net_bound:e} (tol {tol:e}), #18230 at least {before:e}");
-        assert!(now < before, "{NAME}: the net {now:e}, #18230 {before:e}");
+        eprintln!("{NAME}: net at most {now:e} off the torus, from its definition {net_bound:e} (tol {tol:e}), main at least {before:e}");
+        assert!(now < before, "{NAME}: the net {now:e}, main {before:e}");
         assert!(now + net_bound <= tol, "{NAME}: the net beyond the face's tolerance");
 
         // topology
@@ -3276,6 +3281,24 @@ mod wr493_certificates {
             let faces: Vec<Vec<f64>> = g[124..].chunks(18).map(<[f64]>::to_vec).collect();
             (vertices, by_role, faces)
         };
+        // the refit build is main's: its record is main's run's (the block pinned, measured
+        // on main), and agrees with main's committed block within 1e-13 of its scale
+        {
+            let mut g = Vec::new();
+            crate::util::primitive::append(&Kernel::default(), &old, &mut g).expect("geometry");
+            let (mut sum, mut abs, mut weighted) = (0.0f64, 0.0f64, 0.0f64);
+            for (j, &x) in g.iter().enumerate() {
+                sum += x;
+                abs += x.abs();
+                weighted += (j as f64 + 1.0) * x;
+            }
+            let run = [41.492_010_499_717_864, 331.960_110_824_691_47, 4_079.178_130_064_164_6];
+            assert_eq!([sum, abs, weighted], run, "{NAME}: the refit build is not main's run");
+            let committed = [41.492_010_499_717_83, 331.960_110_824_691_4, 4_079.178_130_064_161];
+            for (a, b) in run.iter().zip(committed) {
+                assert!((a - b).abs() <= 1e-13 * run[2], "{NAME}: main's committed block");
+            }
+        }
         let (vo, eo, fo) = entities(&old, &ro);
         let (vn, en, fnn) = entities(&new, &rn);
         let moved = |a: &[f64], b: &[f64]| -> Vec<usize> {
@@ -3310,7 +3333,7 @@ mod wr493_certificates {
         assert_eq!((fo[2][0], fnn[2][0]), (old_tol, new_tol));
         assert_eq!(moved(&fo[2], &fnn[2]), [0, 3, 8, 9, 11, 12, 13, 15, 16, 17]);
         // the sphere face: its samples at the same fractions of the same domain, of the
-        // file's NURB here and of upstream's fitted NURB on #18230's tree (one sphere, two
+        // file's NURB here and of upstream's fitted NURB on main (one sphere, two
         // parametrisations)
         assert_eq!(moved(&fo[0], &fnn[0]), [7, 8, 9, 11, 12, 13, 15, 16, 17]);
         // the round's vertices: tolerance and position
@@ -3323,16 +3346,16 @@ mod wr493_certificates {
             off_circle(point(&vo[2]), -4.0, 1.0, 8.0, 1.0),
             off_circle(point(&vn[2]), -4.0, 1.0, 8.0, 1.0),
         );
-        eprintln!("{NAME}: plane vertex {now:?} off its circle, #18230 {before:?}");
+        eprintln!("{NAME}: plane vertex {now:?} off its circle, main {before:?}");
         // CLOSER, by a few units in the last place: pinned, and within the vertex's tolerance
-        assert!(now.hi < before.lo && now.hi < 2.5e-15, "{NAME}: plane vertex {now:?}, #18230 {before:?}");
+        assert!(now.hi < before.lo && now.hi < 2.5e-15, "{NAME}: plane vertex {now:?}, main {before:?}");
         assert!(now.hi <= vn[2][3], "{NAME}: plane vertex {now:?} beyond its tolerance");
         let (before, now) = (
             off_circle(point(&vo[3]), -35.0, 9.0, 800.0, 81.0),
             off_circle(point(&vn[3]), -35.0, 9.0, 800.0, 81.0),
         );
-        eprintln!("{NAME}: sphere vertex {now:?} off its circle, #18230 {before:?}");
-        assert!(now.hi < before.lo, "{NAME}: sphere vertex {now:?}, #18230 {before:?}");
+        eprintln!("{NAME}: sphere vertex {now:?} off its circle, main {before:?}");
+        assert!(now.hi < before.lo, "{NAME}: sphere vertex {now:?}, main {before:?}");
     }
 }
 

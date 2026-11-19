@@ -20,9 +20,21 @@
 //! moves by less than the goldens' comparator keeps main's committed line, so it is not
 //! listed (its run is not that line to the bit). Of `blend.fillet_executive_p3`'s moved rows
 //! only the ten `sphere_diff_3cylinders` rows are listed (`REFIT_UNITS` that unit alone,
-//! these rows kept): the seam does not rebuild main's `source-file-box_w_slot-all-edges`
-//! or `stubs4-sphere_plane-e3-r0.5`, which are proved on their own (`wr493_class_proofs`,
+//! these rows kept). Its other two moved rows, `source-file-box_w_slot-all-edges` and
+//! `stubs4-sphere_plane-e3-r0.5`, are not listed: there the seam rebuilds main's run of the
+//! case bit for bit (measured on main at 0b321cbaa4), but main's committed lines are not
+//! main's own run to the bit (`mass_properties` up to 1.7e-10 relative off in the first,
+//! `result_geometry`'s block 3.6e-14 off in the second, both within the goldens'
+//! comparator). They are held entity by entity against the seam build instead, its record
+//! checked against main's (`wr493_rows`' `box_w_slot_geometry_moves_only_on_the_found_spheres`,
 //! `wr493_certificates`).
+//!
+//! Tori: the read's recognisers (`CopyAndAddAnalytics`) find no torus, so the seam has none
+//! to replace. Tori (and spheres) are found later only by the fillet's exact-round
+//! recognisers (`blend::fillet_exact`) and the implicit support recognisers
+//! (`surface::implicit`); a probe on main with those keeping the tested NURB left every
+//! `blend.fillet_executive_p3` row within the comparator and these two rows' records bit for
+//! bit (measured, not replayed here).
 
 use std::collections::BTreeMap;
 

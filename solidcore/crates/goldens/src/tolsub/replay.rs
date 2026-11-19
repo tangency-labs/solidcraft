@@ -55,18 +55,23 @@
 //! main) by less than the goldens' comparator: the committed line stays main's, the run
 //! agrees with it under the comparator, and with the fitted NURB put back the run is that
 //! line to the bit (three `nurb_fillet` mirrors, whose committed line is not main's own run
-//! to the bit, under the comparator: [`TRIM_COVER_MAIN_RUN_NOT_COMMITTED`]). Nine rows are deleted, as above:
-//! - `corpus.parity`'s five part-file reads (`Solids/boolean_trees.smp`,
-//!   `ss_plane_sph1..4.smp`): the part read (`part_file::read_part_from_db`) has no refit
-//!   seam, so main's read cannot be rebuilt. `ss_plane_sph1..4` move beyond the comparator
-//!   and are proved with the WR-493 rows (their area enclosure, `solidcore`'s
-//!   `tests/wr493_class_proofs.rs`); here the retirement leaves the cover nothing to raise.
-//!   `boolean_trees.smp` agrees with its committed line (main's) under the comparator.
-//! - `topology.brep_mirror`'s `gen0050`, `gen0061`, `gen0079` and `gen0111` (mirrors of
-//!   `Solids/nurb_fillet.smb`): with the raises put back, with or without the fitted NURB,
-//!   their geometry blocks' sums are one to three units in the last place off main's run;
-//!   each run agrees with its committed line (main's) under the comparator (`gen0061` to the
-//!   bit).
+//! to the bit, under the comparator: [`TRIM_COVER_MAIN_RUN_NOT_COMMITTED`]).
+//!
+//! `corpus.parity`'s five part-file reads (`Solids/boolean_trees.smp`,
+//! `ss_plane_sph1..4.smp`) are not replayed: the part read (`part_file::read_part_from_db`)
+//! has no refit seam, so main's read cannot be rebuilt. `ss_plane_sph1..4` move beyond the
+//! comparator and are proved with the WR-493 rows (their area enclosure, `solidcore`'s
+//! `tests/wr493_class_proofs.rs`); the cover raises nothing on them here, and
+//! `boolean_trees.smp` agrees with its committed line (main's) under the comparator
+//! ([`part_reads_the_retirement_moves`]).
+//!
+//! `topology.brep_mirror`'s `gen0050`, `gen0061`, `gen0079` and `gen0111` (mirrors of
+//! `Solids/nurb_fillet.smb`): with the raises put back, with or without the fitted NURB,
+//! their geometry blocks' sums are one to three units in the last place off main's
+//! put-back run (measured once on main), so they are not held to main's hash: put back,
+//! each is asserted off main's hash and moved by the cover beyond the comparator; as is,
+//! each agrees with its committed line (main's) under the comparator
+//! ([`TRIM_COVER_PUT_BACK_OFF_MAIN_RUN`]).
 
 use std::collections::BTreeMap;
 
@@ -307,11 +312,32 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         if reads == 0 || undone == 0 || !f.is_empty() {
             failures.push(format!("{name}: {reads} reads, {undone} put back, {f:?}"));
         }
+        let committed = golden.get(name);
+        if TRIM_COVER_PUT_BACK_OFF_MAIN_RUN.contains(&(unit_id, name)) {
+            // (put back, the row is not main's put-back row to the bit, and the cover's
+            // raises move it beyond the comparator; as is it agrees with the committed
+            // line, main's, under the comparator)
+            if hash(&line) == main_hash {
+                failures.push(format!("{name}: the row put back is main's row to the bit"));
+            }
+            if committed.is_some_and(|g| diff(g, &line, u.abs_floors()).is_none()) {
+                failures.push(format!(
+                    "{name}: the row put back agrees with the committed line: the cover \
+                     moved nothing"
+                ));
+            }
+            let as_is = run(u.as_ref(), case);
+            if !committed.is_some_and(|g| diff(g, &as_is, u.abs_floors()).is_none()) {
+                failures.push(format!(
+                    "{name}: the row as is does not agree with the committed line"
+                ));
+            }
+            continue;
+        }
         if hash(&line) != main_hash {
             failures.push(format!("{name}: the row put back is not main's row"));
         }
         let line = run(u.as_ref(), case);
-        let committed = golden.get(name);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
             // (the committed line is main's: the run agrees with it, not to the bit, and
             // with the fitted NURB put back it is the line)
@@ -410,9 +436,23 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
     ("topology.face_p3", "own_reader_sphere_plane_uv_trim_f8"),
 ];
 
+/// The [`TRIM_COVER`] rows (mirrors of `Solids/nurb_fillet.smb`) that, with the cover's
+/// raises put back, with or without the fitted NURB, are one to three units in the last
+/// place off main's put-back run in their geometry blocks' sums (measured once on main at
+/// 0b321cbaa4, not replayed here). Held here: put back, the row is not main's put-back row
+/// to the bit, and it does not agree with the committed line under the goldens' comparator
+/// (the cover's raises move it beyond that); as is, it agrees with its committed line
+/// (main's) under the comparator (`gen0061` to the bit).
+const TRIM_COVER_PUT_BACK_OFF_MAIN_RUN: &[(&str, &str)] = &[
+    ("topology.brep_mirror", "gen0050"),
+    ("topology.brep_mirror", "gen0061"),
+    ("topology.brep_mirror", "gen0079"),
+    ("topology.brep_mirror", "gen0111"),
+];
+
 /// The [`TRIM_COVER_WITHIN_COMPARATOR`] rows whose committed line (main's) is not main's own
-/// run of the case to the bit (measured on main: its run agrees with the line under the
-/// goldens' comparator only). For these the run with the fitted NURB put back is held to
+/// run of the case to the bit (measured once on main's run at 0b321cbaa4, not replayed
+/// here: that run agrees with the line under the goldens' comparator only). For these the run with the fitted NURB put back is held to
 /// the committed line under the comparator, not to the bit.
 const TRIM_COVER_MAIN_RUN_NOT_COMMITTED: &[(&str, &str)] = &[
     ("topology.brep_mirror", "Solids_nurb_fillet_smb_xz_at_y3"),
@@ -518,6 +558,60 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ),
 ];
 
+/// `corpus.parity`'s part-file reads the retirement moves, which have no refit seam (see
+/// the module docs): `ss_plane_sph1..4` read with nothing for the cover to raise and are
+/// their committed lines (proved in `solidcore`'s `tests/wr493_class_proofs.rs`), and
+/// `Solids__boolean_trees.smp` agrees with its committed line, main's, under the comparator.
+#[test]
+fn part_reads_the_retirement_moves() {
+    let u = unit("corpus.parity");
+    let all = cases(u.as_ref());
+    let golden = read(&default_dir(), "corpus.parity").unwrap();
+    for name in [
+        "ss_plane_sph1.smp",
+        "ss_plane_sph2.smp",
+        "ss_plane_sph3.smp",
+        "ss_plane_sph4.smp",
+        "Solids__boolean_trees.smp",
+    ] {
+        let case = &all[name];
+        state::set(Some(Mode::Substitute {
+            subs: Vec::new(),
+            reads: 0,
+            applied: 0,
+            already: 0,
+            undone: 0,
+            failures: Vec::new(),
+        }));
+        let put_back = run(u.as_ref(), case);
+        let Some(Mode::Substitute {
+            reads,
+            undone,
+            failures,
+            ..
+        }) = state::take()
+        else {
+            panic!("mode lost");
+        };
+        assert!(
+            reads > 0 && failures.is_empty(),
+            "{name}: {reads} reads, {failures:?}"
+        );
+        let line = run(u.as_ref(), case);
+        let committed = golden.get(name).expect("a committed line");
+        if name.starts_with("ss_plane_sph") {
+            assert_eq!(undone, 0, "{name}: the cover raised {undone} tolerances");
+            assert_eq!(put_back, line, "{name}");
+            assert_eq!(committed, &line, "{name}: not the committed line");
+        } else {
+            assert!(
+                diff(committed, &line, u.abs_floors()).is_none(),
+                "{name}: does not agree with the committed line"
+            );
+        }
+    }
+}
+
 macro_rules! replay_tests {
     ($($test:ident: $unit:literal, $rows:literal;)*) => {$(
         #[test]
@@ -558,7 +652,7 @@ replay_trim_cover_tests! {
     topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;
     topology_brep_cutting_rows_move_only_through_the_trim_cover: "topology.brep_cutting", 2;
     topology_brep_local_operation_rows_move_only_through_the_trim_cover: "topology.brep_local_operation", 28;
-    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 16;
+    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 20;
     topology_brep_p2_rows_move_only_through_the_trim_cover: "topology.brep_p2", 11;
     topology_brep_p9_rows_move_only_through_the_trim_cover: "topology.brep_p9", 4;
     topology_edgeuse_p3_rows_move_only_through_the_trim_cover: "topology.edgeuse_p3", 16;

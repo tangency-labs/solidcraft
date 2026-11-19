@@ -401,6 +401,16 @@ fn gaps(name: &str, refit: bool) -> std::collections::BTreeMap<u32, Gap> {
 ///
 /// Every trim out of tolerance on this branch is one of the file's UV curves, bit for bit.
 ///
+/// The metric is the same-parameter gap: the surface at the trim's point for `t` against
+/// the edge's curve at the same `t`. It is stricter than what an edge tolerance bounds,
+/// the distance of the trim's image from the edge's curve, which the read's kept-trim cover
+/// (tangency-labs/solidcraft#19295, `topology::brep::p2::cover_kept_uv_trim_curves`)
+/// encloses for every kept trim, raising the edge's tolerance to it where it is farther.
+/// "Out of tolerance" here is by the same-parameter metric only: a trim pinned out below
+/// can lie within its edge's tolerance as a curve (`LShape_I.smb`'s trims of edge uses 242
+/// and 246 lie on their edges, 1.1e-5 apart at equal parameters); its geometric distance is
+/// the cover's, not re-derived here.
+///
 /// Counts are of edge uses: mated uses share one trim (`uv_trim_curve` returns the owner's),
 /// so each pair below (0/1, 8/9, ...) is one trim seen from both of its uses.
 #[test]

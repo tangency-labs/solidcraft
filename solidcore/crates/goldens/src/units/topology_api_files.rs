@@ -1185,7 +1185,7 @@ mod tests {
     /// UV trims (the same NURBs, bit for bit; a polyline trim can be written as the line over
     /// that NURB) but those the read remade (counted; as on any surface, the healer remakes
     /// a trim that misses its edge, see `wr493_class_proofs`): the retirement moved these rows only
-    /// by writing the file's own surface and trims where #18230's tree wrote the NURB
+    /// by writing the file's own surface and trims where main wrote the NURB
     /// made from the fitted circles and the trims rebuilt on it.
     #[test]
     fn wr493_written_found_faces_are_the_source_files() {

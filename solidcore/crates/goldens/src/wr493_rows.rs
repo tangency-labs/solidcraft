@@ -507,7 +507,8 @@ const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.
 
 /// The result-geometry blocks of `case` that move beyond their sums' rounding bounds: the
 /// blocks holding the moved round edge (`e1-r0.5` block 3; `e4-r0.5` blocks 2 and 3) and,
-/// in `e4-r0.5`, block 0 with that edge's end vertex, whose tolerance shrinks.
+/// in `e4-r0.5`, block 0, the vertex records' block (measured; not attributed entry by
+/// entry).
 fn geometry_beyond_rounding(case: &str) -> &'static [usize] {
     if case == E1_R05.0 {
         &[3]
@@ -519,19 +520,20 @@ fn geometry_beyond_rounding(case: &str) -> &'static [usize] {
 }
 
 /// `blend.fillet_executive_p3` `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5` and
-/// `-e4-r0.5` (rounds of 0.5 on two edges that are mirror images): one PROVEN FARTHER, the
-/// other PROVEN CLOSER, by the same amount, both far inside tolerance. Both rows move only
-/// through the kept NURB (the refit replay reproduces main's rows bit for bit), but in each
-/// one round edge's interval end moves beyond rounding, between 70.64830969562033 and
+/// `-e4-r0.5` (rounds of 0.5 on two edges that are mirror images): one FARTHER, the other
+/// CLOSER, by the same amount, both far inside tolerance (ARGUED: the gaps are float
+/// evaluations, not enclosures). Both rows move only through the kept NURB (the refit
+/// replay reproduces main's rows bit for bit, so the refit build here is main's), but in
+/// each one round edge's interval end moves beyond rounding, between 70.64830969562033 and
 /// 70.6483087419461. At the first value the curve's end lies 2.11e-8 from its end vertex,
 /// at the second 9.85e-7. Main has the near end in `e1-r0.5` and the far end in `e4-r0.5`;
 /// this branch has them the other way round. So `e1-r0.5`'s edge 37 is FARTHER from its
 /// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 36 CLOSER (2.11e-8 against
-/// 9.85e-7, its end vertex's tolerance shrinking from 4.0985e-5 to 4.0021e-5). Every gap is
-/// inside the edge's tolerance (4e-5) and the vertex's. The gaps are evaluated in floating
-/// point, good to about 1e-13 here, so each ranking holds with a margin above 1e5. The
-/// edges' starts do not move beyond rounding. The FARTHER one is a defect of the retirement,
-/// disclosed in the PR.
+/// 9.85e-7). Every gap is inside the edge's tolerance (4e-5) and the end vertex's
+/// (asserted on both sides). The gaps are evaluated in floating point, good to
+/// about 1e-13 here (argued from the curve's size, not derived), so each ranking holds with
+/// a margin above 1e5. The edges' starts do not move beyond rounding. The FARTHER one is a
+/// defect of the retirement, disclosed in the PR and the WR-493 addendum.
 #[test]
 fn sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases() {
     use solidcore::topology::brep::p1;
@@ -587,9 +589,8 @@ fn sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases() {
         assert!(end_now < 4e-5 && end_main < 4e-5);
         ends.push((near(t_now, end_now), far(t_now, end_now)));
         ends.push((near(t_main, end_main), far(t_main, end_main)));
-        if case == E4_R05.0 {
-            assert!(tol_now < tol_main, "{case}: the end vertex's tolerance");
-        }
+        // the gap is inside the end vertex's tolerance on both sides
+        assert!(end_now < tol_now && end_main < tol_main, "{case}");
     }
     // e1-r0.5: FARTHER (now far, main near); e4-r0.5: CLOSER (now near, main far)
     assert_eq!(
@@ -691,17 +692,24 @@ fn sphere_point_rows_are_closer_to_the_sphere() {
 /// which are held to their references:
 /// - `Fillet__sphere_plane.smb`: the sphere of radius 5 between z = +-h (h the file's pole
 ///   vertices' height) less its cap beyond the plane x = -4, plus the disk of radius 3
-///   in that plane, in closed form: the row is 6.4e-7 from it, main's 309.8222156047109
-///   is 1.4e-5 (CLOSER);
+///   in that plane, in closed form: the row (area and round trip alike) is 6.4e-7 from it;
+///   main's committed area, 309.8222156047131, is 1.4e-5 from it and its round trip's,
+///   309.8221903199704, 1.2e-5 (both CLOSER, by a margin far beyond the closed form's
+///   rounding);
 /// - `Solids__revolution_mold.smb`: its committed line stays main's (the run agrees with
 ///   it to the goldens' `1e-9`); the values the run gives are pinned here, and its moved
 ///   entries are classified against certified enclosures in
 ///   `heal_edge_tolerance_covers_edge_face_gap.rs`;
 /// - `ss_plane_sph1..4`: the plane face is the square of side 5, area 25 exactly: the row
-///   is 25 (CLOSER: main's is 25.000000000000004); the sphere face's row,
+///   is 25, as main's committed row (unmoved); the sphere face's row,
 ///   25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3), is in the face
 ///   area's certified enclosure and main's is outside it (CLOSER, proved by
-///   `wr493_class_proofs`' `ss_plane_sph_area_is_the_area_its_edges_bound`).
+///   `wr493_class_proofs`' `ss_plane_sph_area_is_the_area_its_edges_bound`, ARGUED). Their
+///   level-2 checks (`check`, `rt_check`) find nothing on the sphere's B-rep, where main's
+///   found 11 lines (measured on main at 0b321cbaa4): four edges and six vertices whose
+///   tolerance, about 0.016 after the trims were rebuilt on the fitted NURB, exceeds the
+///   B-rep's 0.01 (`check_brep` tests 59 and 82), and the line saying that `AssertValid` was
+///   skipped because `ValidatePointers` failed. Kept, the file's trims need no such growth.
 #[test]
 fn corpus_parity_rows_are_closer() {
     use crate::units::corpus_parity::{run_in_process, Runner};
@@ -755,14 +763,153 @@ fn corpus_parity_rows_are_closer() {
         }
     }
     assert!(moved.is_empty(), "{moved:#?}");
+    // ss_plane_sph1..4: the level-2 checks find nothing (main's: 11 lines on the sphere)
+    for i in 1..=4 {
+        let case = format!("ss_plane_sph{i}.smp");
+        let out = run_in_process(&regression_case(&Runner, &case)).unwrap();
+        for key in ["check", "rt_check"] {
+            assert_eq!(out.ints[key], [0, 0], "{case}: {key}");
+        }
+    }
     // sphere_plane against its closed form (h: the file's pole vertices, z = +-h)
     let h = 4.980_973_490_458_730_2;
     let exact = 2.0 * PI * 5.0 * 2.0 * h - 2.0 * PI * 5.0 * 1.0 + PI * 9.0;
-    let (now, before) = (309.822_201_209_352_7_f64, 309.822_215_604_710_9_f64);
-    assert!(
-        (now - exact).abs() < (before - exact).abs() && (now - exact).abs() < 1e-6,
-        "sphere_plane: row {now}, main {before}, closed form {exact}"
+    let now = 309.822_201_209_352_7_f64;
+    // main's committed area and round-trip area
+    for before in [309.822_215_604_713_1_f64, 309.822_190_319_970_4] {
+        assert!(
+            (now - exact).abs() < 1e-6 && (before - exact).abs() > 1e-5,
+            "sphere_plane: row {now}, main {before}, closed form {exact}"
+        );
+    }
+}
+
+/// `blend.fillet_executive_p3` `source-file-box_w_slot-all-edges`: its result geometry moves
+/// only on the found spheres, entity by entity (`util::primitive::append`'s record). The
+/// refit build (the file's spheres given upstream's fitted NURB) is main's: its record's
+/// blocks are main's committed blocks bit for bit. Against it:
+/// - every vertex is the same, bit for bit;
+/// - 24 edges, each with a use on a found sphere, count two UV trims where main counted one:
+///   the file's trim on the sphere is kept (main dropped it on the fitted NURB, to be made
+///   again when asked for); nothing else of an edge moves;
+/// - the found sphere faces keep their tolerance and domain; only their samples move (the
+///   same fractions of the same domain of the file's NURB here, of the fitted NURB on main:
+///   one sphere, two parameterisations), and every sample of both lies on the sphere to
+///   `1e-12` of its radius;
+/// - every other face is the same, bit for bit.
+#[test]
+fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::edgeuse::p1::face as face_of;
+    const CASE: &str = "source-file-box_w_slot-all-edges";
+    // main's committed `result_geometry` blocks (expected/blend.fillet_executive_p3.jsonl)
+    const MAIN: [[f64; 3]; 6] = [
+        [144.20814395045426, 233.4204725538878, 19932.70763647065],
+        [157.51043968890355, 253.98374739842555, 20754.459396448365],
+        [190.23010568688935, 238.8713400597793, 24560.059827425757],
+        [188.25075109345423, 240.5245724234976, 25146.63250432756],
+        [124.10466015492509, 174.21526575428467, 15854.92371453973],
+        [96.1129828979684, 154.29581589814254, 11030.81247736941],
+    ];
+    let runner = blend_fillet_executive_p3::Runner;
+    let now = run(&runner, CASE).values["result_geometry"].clone();
+    let (main, replaced) =
+        crate::refit::with_fitted_spheres(|| run(&runner, CASE).values["result_geometry"].clone());
+    assert!(replaced > 0, "{CASE}: no sphere refit");
+    let blocks: Vec<[f64; 3]> = main
+        .chunks(BLOCK)
+        .map(|b| {
+            let (mut sum, mut abs, mut weighted) = (0.0f64, 0.0f64, 0.0f64);
+            for (j, &x) in b.iter().enumerate() {
+                sum += x;
+                abs += x.abs();
+                weighted += (j as f64 + 1.0) * x;
+            }
+            [sum, abs, weighted]
+        })
+        .collect();
+    assert_eq!(blocks, MAIN, "{CASE}: the refit build is not main's");
+
+    let mut k = solidcore::Kernel::default();
+    let body = blend_fillet_executive_p3::result_body_of(&mut k, CASE);
+    let (vertices, edges, faces) = (
+        p1::vertices(&body, None).unwrap(),
+        p1::edges(&body, None).unwrap(),
+        p1::faces(&body, None).unwrap(),
     );
-    // the planes: 25 exactly, main's 25.000000000000004
-    assert!((25.0_f64 - 25.0).abs() < (25.000_000_000_000_004_f64 - 25.0).abs());
+    let at_edges = 4 * vertices.len();
+    let at_faces = at_edges + 18 * edges.len();
+    assert_eq!(
+        now.len(),
+        at_faces + 18 * faces.len(),
+        "{CASE}: record length"
+    );
+    assert_eq!(main.len(), now.len());
+    let moved = |range: std::ops::Range<usize>| -> Vec<usize> {
+        range
+            .clone()
+            .filter(|&i| now[i].to_bits() != main[i].to_bits())
+            .map(|i| i - range.start)
+            .collect()
+    };
+    let sphere = |f| match body.face(f).unwrap().surface.as_ref().unwrap().kind() {
+        SurfaceKind::Sphere(s) => Some((s.base().position().origin(), s.radius())),
+        _ => None,
+    };
+    // vertices
+    assert_eq!(moved(0..at_edges), [0_usize; 0], "{CASE}: vertices");
+    // edges: the trim count only, 1 to 2, on edges with a use on a found sphere
+    let mut trims = 0;
+    for (i, &e) in edges.iter().enumerate() {
+        let at = at_edges + 18 * i;
+        let m = moved(at..at + 18);
+        if m.is_empty() {
+            continue;
+        }
+        assert_eq!(m, [17], "{CASE}: edge {i}");
+        assert_eq!(
+            (main[at + 17], now[at + 17]),
+            (1.0, 2.0),
+            "{CASE}: edge {i}"
+        );
+        let on_sphere = body.edge(e).unwrap().edgeuses.iter().any(|&eu| {
+            face_of(&body, eu)
+                .unwrap()
+                .is_some_and(|f| sphere(f).is_some())
+        });
+        assert!(on_sphere, "{CASE}: edge {i} has no use on a found sphere");
+        trims += 1;
+    }
+    assert_eq!(trims, 24, "{CASE}: edges with a kept trim");
+    // faces: the found spheres' samples only, each on the sphere in both
+    let mut sampled = 0;
+    for (i, &f) in faces.iter().enumerate() {
+        let at = at_faces + 18 * i;
+        let m = moved(at..at + 18);
+        if m.is_empty() {
+            continue;
+        }
+        let Some((centre, radius)) = sphere(f) else {
+            panic!("{CASE}: face {i} moved and is not a found sphere: {m:?}");
+        };
+        assert!(
+            m.iter().all(|&j| j >= 7 && j % 4 != 2),
+            "{CASE}: face {i} {m:?}"
+        );
+        for g in [&now, &main] {
+            for s in 0..3 {
+                let p = &g[at + 7 + 4 * s..at + 10 + 4 * s];
+                assert_eq!(g[at + 6 + 4 * s], 0.0, "{CASE}: face {i} sample {s} status");
+                let d = (solidcore::math::Vec3::new(p[0], p[1], p[2]) - centre).length();
+                assert!(
+                    (d - radius).abs() <= 1e-12 * radius,
+                    "{CASE}: face {i} sample {s} {:e} off the sphere",
+                    d - radius
+                );
+            }
+        }
+        sampled += 1;
+    }
+    assert!(sampled > 0, "{CASE}: no sphere face moved");
 }

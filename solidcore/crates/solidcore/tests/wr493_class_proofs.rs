@@ -402,15 +402,20 @@ fn loop_area(k: &Kernel, b: &Brep, centre: Vec3, radius: f64, inside: Vec3, n: u
     radius * radius * total.abs()
 }
 
-/// `corpus.parity` `ss_plane_sph1..4`: the sphere face's row moved from 25.21534728577917
-/// (refit sphere, trims rebuilt) to 25.14456696301113 (sph1, sph4) and 25.144566963011123
-/// (sph2, sph3). PROVEN CLOSER: the face's area is certified
-/// ([`enclose_face_area_relative`], 1e-10 of itself wide, about 2.5e-9): the new row is in
-/// the enclosure and the old row is more than 1e3 widths outside it. Cross-checks (not the
-/// proof): the area the face's UV trims bound (Green's theorem in UV) is the row to 1e-12,
-/// and the face's edge loop bounds 25.1445668449 on the sphere (Gauss-Bonnet along the
-/// edges, n = 16 against 32), 4.7e-9 relative off, the trims' gap to their edges. The plane
-/// face's row moved from 25.000000000000004 to 25, the area of its square of side 5.
+/// `corpus.parity` `ss_plane_sph1..4`: the sphere face's row moved from main's committed
+/// 25.215347285779345 (sph1, sph4) and 25.215347285779387 (sph2, sph3) (refit sphere, trims
+/// rebuilt) to 25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3).
+/// - PROVEN: the row is its face's area. The face's area is certified
+///   ([`enclose_face_area_relative`], 1e-10 of itself wide, about 2.5e-9) and the row is in
+///   the enclosure. The enclosure is of this branch's face, so it ranks nothing by itself
+///   (main's rows, more than 1e3 widths outside it, measure main's face).
+/// - CLOSER, ARGUED: the reference is the area the face's edge loop bounds on the sphere
+///   (Gauss-Bonnet along the edges, by quadrature: n = 16 agrees with n = 32 to 1e-12,
+///   not certified). The row is 4.7e-9 relative off it (the trims' gap to their edges),
+///   main's rows 2.8e-3 relative, more than 1e3 times farther. Cross-check: the area the
+///   face's UV trims bound (Green's theorem in UV) is the row to 1e-12.
+///
+/// The plane face's row is 25, the area of its square of side 5, as main's committed row.
 #[test]
 fn ss_plane_sph_area_is_the_area_its_edges_bound() {
     let mut rows = Vec::new();
@@ -443,7 +448,7 @@ fn ss_plane_sph_area_is_the_area_its_edges_bound() {
             e.lo,
             e.hi
         );
-        for old in [25.215_347_285_779_17, 25.215_347_285_779_21] {
+        for old in [25.215_347_285_779_345, 25.215_347_285_779_387] {
             assert!(old - e.hi > 1e3 * width, "{name}: old {old} not ranked");
         }
         let s = b.face(f).unwrap().surface.as_ref().unwrap();
@@ -479,13 +484,14 @@ fn ss_plane_sph_area_is_the_area_its_edges_bound() {
             (area - cert).abs() <= 1e-6 * cert,
             "{name}: row {area}, edges bound {cert}"
         );
-        // the earlier row, 25.21534728577917 (sph1, sph4) or 25.21534728577921 (sph2, sph3)
-        let old = 25.215_347_285_779_17;
-        assert!((old - cert).abs() > 1e3 * (area - cert).abs(), "{name}");
-        // the plane: its square of side 5 (the earlier row 25.000000000000004)
+        // main's committed rows (CLOSER, ARGUED: `cert` is a quadrature)
+        for old in [25.215_347_285_779_345, 25.215_347_285_779_387] {
+            assert!((old - cert).abs() > 1e3 * (area - cert).abs(), "{name}");
+        }
+        // the plane: its square of side 5, as main's committed row
         let square = plane_polygon_area(&breps[1]);
         assert_eq!(square, 25.0, "{name}: plane square {square}");
-        assert!((plane - square).abs() < (25.000_000_000_000_004_f64 - square).abs());
+        assert_eq!(plane, square, "{name}: plane {plane}");
     }
     assert!(rows.is_empty(), "{rows:#?}");
 }
@@ -530,8 +536,9 @@ fn plane_polygon_area(b: &Brep) -> f64 {
 
 /// `corpus.parity` `Fillet__sphere_plane.smb`: a sphere of radius 5 between z = +-h
 /// (h = 4.98097..., the height of the file's two vertices on the sphere) less its cap beyond the plane x = -4, plus
-/// the disk of radius 3 in that plane. The committed row moved from the earlier
-/// 309.8222156047109 (1.4e-5 off the closed form) to 309.8222012093527 (6.4e-7 off).
+/// the disk of radius 3 in that plane. The committed row moved from main's 309.8222156047131
+/// (1.4e-5 off the closed form; its round trip's 309.8221903199704, 1.2e-5 off) to
+/// 309.8222012093527 (6.4e-7 off, the round trip's alike).
 #[test]
 fn sphere_plane_area_is_closed_form() {
     use std::f64::consts::PI;
@@ -551,11 +558,12 @@ fn sphere_plane_area_is_closed_form() {
     let row = 309.822_201_209_352_7;
     let area = parity_area(&mut k, &mut b);
     assert_eq!(area.to_bits(), f64::to_bits(row), "area {area}");
-    let old = 309.822_215_604_710_9;
-    assert!(
-        (row - exact).abs() < (old - exact).abs(),
-        "row {row}, earlier {old}, closed form {exact}"
-    );
+    for old in [309.822_215_604_713_1, 309.822_190_319_970_4] {
+        assert!(
+            (row - exact).abs() < (old - exact).abs(),
+            "row {row}, main's {old}, closed form {exact}"
+        );
+    }
     assert!(
         (row - exact).abs() <= 1e-6,
         "row {row}, closed form {exact}"
