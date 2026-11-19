@@ -29,7 +29,7 @@ const SNAP_FIT_CONTRACT: TypedContract<SnapFitParams> = TypedContract::new();
 const REST_CONTRACT: TypedContract<RestParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss))
+    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("boss")
         .contract(&BOSS_CONTRACT)
@@ -38,7 +38,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
              draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
         ),
-    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip))
+    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("lip")
         .contract(&LIP_CONTRACT)
@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
         ),
-    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit))
+    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("snap_fit")
         .contract(&SNAP_FIT_CONTRACT)
@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; \
              base_height? (extends the base below the face); new_body?: bool (make a separate body instead of joining); body?",
         ),
-    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest))
+    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest)).begins_edit()
         .at("PLASTIC", "CREATE")
         .icon("rest")
         .contract(&REST_CONTRACT)

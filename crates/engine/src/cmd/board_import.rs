@@ -40,7 +40,7 @@ const CONTRACT: TypedContract<InsertGerberParams> = TypedContract::new();
 const FILES_CMD: &str = "file.gerber_files";
 const FILES_CONTRACT: TypedContract<GerberFilesParams> = TypedContract::new();
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("file.insert_gerber", "Insert PCB (Gerber)", crate::checked!("file.insert_gerber", insert_gerber))
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("file.insert_gerber", "Insert PCB (Gerber)", crate::checked!("file.insert_gerber", insert_gerber)).begins_edit()
     .at("SOLID", "INSERT")
     .icon("import")
     .contract(&CONTRACT)

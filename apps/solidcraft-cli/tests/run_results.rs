@@ -659,6 +659,9 @@ fn snapshot_runs_its_script_on_the_in_design() {
 /// `drawing.open`) may follow it.
 #[test]
 fn unknown_command_suggests_the_closest_id() {
+    let misspelled_window = cli().args(["exec", "tab.window.clsoe"]).output().unwrap();
+    assert_eq!(misspelled_window.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&misspelled_window.stderr).contains("did you mean `tab.window.close`"));
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(
