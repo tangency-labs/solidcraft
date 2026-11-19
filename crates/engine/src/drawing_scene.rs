@@ -2643,6 +2643,14 @@ enum Worked {
 }
 
 impl Job {
+    /// The view whose lines this works out, or none for a picture's setup: for a log line.
+    pub fn view(&self) -> Option<u64> {
+        match &self.0 {
+            Work::View(job) => Some(job.ticket.view),
+            Work::Picture(_) => None,
+        }
+    }
+
     /// Does the job's work: the one long piece of it, on any thread.
     pub fn run(self) -> Done {
         Done(match self.0 {

@@ -316,6 +316,34 @@ fn double_click_edits_a_title_block_cells_text_in_place() {
     assert!(!crate::dim_view::editing(), "the projection symbol has no text");
 }
 
+/// A view just placed says so before its lines arrive: it is listed as waiting and shows its box
+/// with Projecting…, and that goes once it is drawn. Placing the standard views and drawing them
+/// evaluates the model no more times than it was evaluated before.
+#[test]
+fn a_view_waiting_for_its_first_lines_says_projecting() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 100, "width": 80, "height": 20, "body_name": "Plate"})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    h.frames(2);
+    let evaluations = h.app.session.evaluation_count();
+    h.app.run("drawing.create", json!({"standard_views": true})).unwrap();
+    let placed: Vec<String> =
+        h.app.session.drawing("drawing.inspect").unwrap().views.iter().map(|view| solidcraft_engine::doc::ids::encode(view.id)).collect();
+    assert_eq!(placed.len(), 4);
+    // The first frame: one view's job has only just been asked for, so none is drawn yet.
+    h.frame();
+    let first = crate::drawing_sheet_page::inspect(&h.app);
+    let waiting: Vec<&str> = first["waiting_views"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(waiting.len(), 4, "every placed view is waiting: {first}");
+    for view in &placed {
+        assert!(crate::scenario::rect_of(&format!("sheet:view:{view}:state")).is_some(), "view {view} says Projecting…");
+    }
+    settle(&mut h);
+    assert_eq!(page(&mut h)["waiting_views"], json!([]), "none waits once they are drawn");
+    assert_eq!(h.app.session.evaluation_count(), evaluations, "placing and drawing the views evaluates the model no further");
+}
+
 #[test]
 fn dimension_tool_places_a_view_edge_length() {
     let (mut h, front) = plate_sheet();
