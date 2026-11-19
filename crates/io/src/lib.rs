@@ -96,7 +96,7 @@ pub use native_cad::native_cad_design;
 pub use native_cad::native_cad_records;
 pub use native_cad::native_cad_to_step;
 pub use native_cad::read_usd;
-pub use native_cad::usd_from_step;
+pub use native_cad::usd_from_design;
 pub use native_cad::usd_records;
 pub mod paper;
 mod pat;
@@ -891,7 +891,8 @@ pub enum Format {
     /// and decal images; written by the engine, since it is several files.
     Sdf,
     /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
-    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    /// file's extension ([`usd_from_design`]); written from the design, which holds the
+    /// components and looks.
     Usd,
 }
 

@@ -11,7 +11,8 @@
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
-//! records or the OpenUSD bytes plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! records or the OpenUSD bytes plus warnings; an OpenUSD export writes the design into cadmpeg's
+//! model directly (`cadir_out`). A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
@@ -492,16 +493,28 @@ pub use design::NativeDesign;
 mod usd;
 pub use usd::{USD_EXTS, is_usd_path};
 
-/// `step` (STEP text SolidCraft wrote for the bodies to export) as an OpenUSD file called `file`:
-/// `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package. Returns the file's bytes and what
-/// it could not carry. Panics inside cadmpeg become errors.
-pub fn usd_from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), String> {
-    solidcraft_kernel::guard("cadmpeg USD export", || usd::from_step(step, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
-        |e| match e {
-            solidcraft_kernel::KernelError::Invalid(m) => m,
-            e => e.to_string(),
-        },
-    )
+mod cadir_out;
+
+/// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
+/// empty) as an OpenUSD file called `file`: `.usda` text, `.usdc` or `.usd` binary, or a `.usdz`
+/// package. With no bodies chosen, a design with components keeps them: `model`, the model before
+/// placing, holds each component's bodies. Meshes are made at `quality`. Returns the file's bytes
+/// and what it could not carry. Panics inside cadmpeg become errors.
+pub fn usd_from_design(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    file: &str,
+    quality: crate::MeshQuality,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    solidcraft_kernel::guard("cadmpeg USD export", || {
+        usd::from_design(doc, model, world, bodies, file, quality).map_err(solidcraft_kernel::KernelError::Invalid)
+    })
+    .map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => m,
+        e => e.to_string(),
+    })
 }
 
 /// An OpenUSD file (`file` is its name) read for an import of its exact geometry, kept as records
