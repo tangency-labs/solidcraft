@@ -9654,6 +9654,26 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
 }
 
+/// Where the axes navigator may paint, its hovered end's label included: the view, less any panel
+/// beside the navigator at its height (the Browser docks right of it in a right-to-left layout), so
+/// the label grows the other way instead of over the panel.
+fn label_room(app: &SolveApp, rect: Rect) -> Rect {
+    let nav = axis_rect(app, rect);
+    let c = nav.center();
+    let mut room = rect;
+    for r in crate::shell::covered_rects(app) {
+        if r.max.y < nav.min.y || r.min.y > nav.max.y || r.contains(c) {
+            continue;
+        }
+        if r.min.x >= c.x {
+            room.max.x = room.max.x.min(r.min.x);
+        } else if r.max.x <= c.x {
+            room.min.x = room.min.x.max(r.max.x);
+        }
+    }
+    room
+}
+
 /// `p` is on one of the axes navigator's roll arrows, which take it from the axis tips and the drag.
 fn on_axes_arrow(app: &SolveApp, rect: Rect, p: Pos2) -> bool {
     navigator_controls::on_axes_roll_arrow(axis_center(app, rect), p)
@@ -9668,7 +9688,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     crate::scenario::publish_rect("axis_view:outer", axis_rect(app, rect));
     let orbiting = axis_view_orbit(app, ui, rect);
     let compass = crate::view_compass::Compass {
-        clip: rect,
+        clip: label_room(app, rect),
         centre: axis_center(app, rect),
         axes: view_axes(&app.cam),
         hover: ui
@@ -17077,6 +17097,24 @@ mod tests {
         for side in ["left", "right", "up", "down"] {
             assert!(crate::scenario::handle_at(&format!("navigator:control:{side}")).is_none(), "no {side} orbit arrow");
         }
+    }
+
+    /// A hovered end's label never covers a panel: in a right-to-left layout the Browser docks
+    /// right of the navigator, and the label grows left of it instead.
+    #[test]
+    fn the_axes_label_stays_off_the_panels_in_a_right_to_left_layout() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes", "language":"he", "look_at_anim":false}));
+        h.call("ui.view", json!({"view":"iso"}));
+        h.frames(3);
+        let tip = crate::scenario::handle_at("axis_view:x").unwrap();
+        h.call("ui.move", json!({"x": tip.x, "y": tip.y}));
+        h.frames(2);
+        let label = crate::scenario::rect_of("axis_view:label").expect("the hovered end is labelled");
+        for panel in crate::shell::covered_rects(&h.app) {
+            assert!(!panel.intersects(label.shrink(0.5)), "the label {label:?} covers a panel {panel:?}");
+        }
+        assert!(h.app.viewport.rect.unwrap().contains_rect(label));
     }
 
     /// #10091: an axis tip turns the view in place by default; with Preferences › Navigation
