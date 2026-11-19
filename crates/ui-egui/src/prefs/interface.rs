@@ -438,13 +438,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
-                app.tr("prefs.design_sub_tab_sketches"),
-                app.tr("prefs.design_sub_tab_sketches_note"),
-                &mut app.preferences.design_sub_tab_sketches,
-                "design_sub_tab_sketches",
-            );
-            layout_check(
-                ui,
                 app.tr("prefs.design_sub_tab_render"),
                 app.tr("prefs.design_sub_tab_render_note"),
                 &mut app.preferences.design_sub_tab_render,

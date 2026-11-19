@@ -11,7 +11,7 @@ use std::sync::Mutex;
 const TEAR_OFF_DISTANCE: f32 = 40.0;
 
 /// The view names `--view` accepts, one per `ViewKind`.
-const VIEWS: [&str; 5] = ["model", "sketch", "sheet", "render", "animation"];
+const VIEWS: [&str; 4] = ["model", "sheet", "render", "animation"];
 
 /// The view the process was asked to start on, until the window takes it.
 static START_VIEW: Mutex<Option<String>> = Mutex::new(None);
@@ -133,7 +133,8 @@ mod tests {
         for name in VIEWS {
             assert_eq!(parse_view(&name.to_uppercase()), Some(name));
         }
-        assert_eq!(parse_view(" sketch "), Some("sketch"));
+        assert_eq!(parse_view(" sheet "), Some("sheet"));
+        assert_eq!(parse_view("sketch"), None);
         assert_eq!(parse_view(""), None);
         assert_eq!(parse_view("sketch2"), None);
     }

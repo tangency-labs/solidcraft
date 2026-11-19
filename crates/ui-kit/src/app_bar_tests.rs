@@ -273,7 +273,7 @@ const VIEW_MENU: [TabMenuRow<'static>; 4] = [
 ];
 const PLUS_MENU: [TabMenuRow<'static>; 4] = [
     TabMenuRow::heading("Open as a view"),
-    TabMenuRow::new("plus_sketch", "Sketch", "").with_icon("sketch", Some(egui::Color32::GREEN)),
+    TabMenuRow::new("plus_render", "Render", "").with_icon("render", Some(egui::Color32::GREEN)),
     TabMenuRow::new("plus_dup", "Duplicate this view", "").with_icon("duplicate", None).separated(),
     TabMenuRow::new("plus_reopen", "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
 ];
@@ -307,8 +307,8 @@ const VIEWS: [ViewTab<'static>; 3] = [
     },
     ViewTab {
         compass: None,
-        name: "Sketch 2",
-        icon: "sketch",
+        name: "Render 2",
+        icon: "render",
         accent: egui::Color32::GREEN,
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
@@ -317,7 +317,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         window_name: None,
         window_number: None,
         to_window: None,
-        tip: "Sketch 2",
+        tip: "Render 2",
     },
     ViewTab {
         compass: None,
@@ -818,15 +818,15 @@ fn the_plus_menu_stays_open_after_its_click() {
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
-    let row = solidcraft_ui_registry::handle_at("t:menu:plus_sketch").expect("the menu's row is drawn");
+    let row = solidcraft_ui_registry::handle_at("t:menu:plus_render").expect("the menu's row is drawn");
     assert!(row.y > HEIGHT && row.x >= plus.left(), "the menu opens under the + at {row:?}");
-    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_sketch".into() }]);
+    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_render".into() }]);
     // A press and release in one frame (a click driven by a script) leaves the menu open too.
     let at = rig.at("t:vnew");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
     rig.frame(vec![button(true), button(false)]);
     rig.frame(Vec::new());
-    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_sketch").is_some());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_render").is_some());
 }
 
 /// The + menu's header is drawn but never chosen, every row (with a glyph or without) returns its
@@ -838,8 +838,8 @@ fn the_plus_menu_has_a_header_icon_rows_and_a_separator() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::handle_at("t:menu:Open as a view").is_none(), "the header is not a row");
-    let (sketch, dup) = (rig.at("t:menu:plus_sketch"), rig.at("t:menu:plus_dup"));
-    assert!(dup.y - sketch.y > 32.0, "a separator sits above Duplicate: {sketch:?} {dup:?}");
+    let (render, dup) = (rig.at("t:menu:plus_render"), rig.at("t:menu:plus_dup"));
+    assert!(dup.y - render.y > 32.0, "a separator sits above Duplicate: {render:?} {dup:?}");
     assert_eq!(rig.press(dup, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_dup".into() }]);
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
@@ -856,7 +856,7 @@ fn menu_row_builders_and_glyphs() {
     assert!(head.heading && head.id == "H" && head.label == "H");
     let row = plain.separated().needing_others().with_icon("close", None);
     assert!(row.separator_before && row.needs_others && row.icon == "close");
-    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
+    for glyph in ["model", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
 }
