@@ -512,6 +512,43 @@ fn fully_valid_saved_record_restores_without_a_notice() {
 }
 
 #[test]
+fn saved_production_layout_retries_small_startup_without_a_recovery_notice() {
+    for keep_status in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
+        let saved = h.app.prefs();
+        h.call("ui.resize", serde_json::json!({"width":200,"height":100}));
+        h.app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        h.app.load_prefs(&saved);
+        let recovery = h.app.tr("prefs.panel_layout.recovery").to_string();
+        h.frame();
+        let runtime = h.app.panel_runtime.as_ref().unwrap();
+        assert_eq!(runtime.last_error().unwrap().rule, Rule::NoSpace);
+        assert!(runtime.preferences.as_ref().unwrap().pending.is_some());
+        if keep_status {
+            h.app.set_status("An unrelated message", false);
+        }
+        h.frames(3);
+        h.call("ui.resize", serde_json::json!({"width":1600,"height":1000}));
+        h.frames(3);
+        let runtime = h.app.panel_runtime.as_ref().unwrap();
+        let state = runtime.preferences.as_ref().unwrap();
+        assert!(state.pending.is_none() && !state.failed && state.rejected.is_none());
+        assert!(state.reset.is_empty() && state.unread.is_empty());
+        assert_eq!(runtime.runtime().layout().layout(), &layout);
+        assert!(
+            !h.app.messages.iter().any(|message| message.text == recovery),
+            "valid saved layouts must not be reported as unreadable while startup bounds settle"
+        );
+        if keep_status {
+            assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some("An unrelated message"));
+        } else {
+            assert!(h.app.status.is_none());
+        }
+    }
+}
+
+#[test]
 fn native_window_placement_falls_back_to_a_portable_one_without_native_windows() {
     use commands::LayoutCatalogue as _;
     let mut service = fixture_service(true).unwrap();
@@ -3169,6 +3206,41 @@ fn raw_host_shared_move_menu_is_a_pointer_independent_alternative_to_drag() {
         assert_eq!((state.applies, state.cancels, state.finishes), (0, 0, 0));
         assert_eq!(raw.content.commands.calls, 0);
     }
+}
+
+#[test]
+fn raw_host_move_entries_say_they_move_only_the_tab_in_a_section_with_tabs() {
+    // History joined with the Browser: "Bottom" read as moving both tabs (#17217).
+    let mut h = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut h);
+    let mut raw = RawPanelHost::new(h, 1.0);
+    raw.frame(Vec::new(), false);
+    let label = |raw: &RawPanelHost, zone: Zone| {
+        let frame = raw.host.frame().unwrap();
+        let target = HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(zone) };
+        frame.controls.iter().find(|control| control.target == target).map(|control| control.accessible_name.clone())
+    };
+    raw.menu(id("editor"));
+    assert_eq!(label(&raw, Zone::Bottom).as_deref(), Some("Bottom"), "a panel alone moves as a whole");
+    raw.content
+        .dispatch(vec![
+            fixture_open("fixture.log", "landing", "landing-section", Zone::Left, 1).unwrap(),
+            Mutation::Move { instance: id("editor"), destination: Destination::JoinTab { section: section("landing-section"), index: 1 } },
+            Mutation::Activate { instance: id("editor") },
+        ])
+        .unwrap();
+    raw.frame(Vec::new(), false);
+    raw.frame(Vec::new(), false);
+    if raw.host.frame().unwrap().menu_bounds.is_none() {
+        raw.menu(id("editor"));
+    }
+    assert_eq!(label(&raw, Zone::Bottom).as_deref(), Some("Move tab to bottom"));
+    assert_eq!(label(&raw, Zone::Floating).as_deref(), Some("Float tab"));
+    let before = raw.content.runtime.layout().inspect().revision;
+    raw.click(HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(Zone::Bottom) }, true);
+    assert_eq!(raw.content.runtime.layout().inspect().revision, before + 1);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().location.zone(), Zone::Bottom);
+    assert_eq!(raw.content.runtime.layout().layout().containing(&id("landing")).unwrap().location.zone(), Zone::Left, "the other tab stays");
 }
 
 #[test]
@@ -10676,6 +10748,13 @@ fn raw_full_envelope_reservations_skip_quarantine_and_native_return_ids_and_canc
     assert!(!raw.host.interaction().is_captured());
     assert!(raw.host.frame().unwrap().preview.is_none());
     assert_eq!(raw.content.runtime.layout().inspect(), before);
+    raw.frame(Vec::new(), false);
+    let reservations = &raw.host.frame().unwrap().layout.geometry_policy.identity_reservations;
+    assert!(
+        reservations.columns.contains(&ColumnId::new("review.changed.return.column").unwrap()),
+        "the identities of a layout remembered anew are read again"
+    );
+    assert!(!reservations.columns.contains(&reserved_column), "and the ones read from the layout it replaced are let go");
 }
 
 #[test]
@@ -14158,5 +14237,60 @@ fn production_history_resize_paints_and_commits_each_width_above_regular_minimum
             let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
             assert_eq!(history.outer.size.width, width);
         }
+    }
+}
+
+/// A lone panel can put its own content in its title's place (the Browser's search field, #1634):
+/// after the grip and before the header's actions, mirrored right to left and kept while folded.
+/// Content wider than the header moves the actions to a row below; a group keeps its tabs there.
+#[test]
+fn header_content_takes_the_titles_place_after_the_grip() {
+    for direction in [Direction::Ltr, Direction::Rtl] {
+        let (mut h, _) = review_cohort_host(|_| {});
+        h.dispatch(vec![
+            fixture_open("fixture.editor", "lone", "side", Zone::Right, 0).unwrap(),
+            Mutation::SetSize { section: section("side"), size: Size { width: 320.0, height: 300.0 } },
+        ])
+        .unwrap();
+        let mut environment = h.runtime.environment().clone();
+        environment.direction = direction;
+        h.runtime.set_environment(environment, &mut h.local).unwrap();
+        let mut raw = RawPanelHost::new(h, 1.0);
+        let card = |raw: &mut RawPanelHost| {
+            raw.frame(Vec::new(), false);
+            raw.frame(Vec::new(), false);
+            assert_host_geometry(&raw.content, &raw.host.frame().unwrap().layout);
+            raw.host.frame().unwrap().layout.sections[0].clone()
+        };
+        assert!(card(&mut raw).header_content.is_none(), "only a panel that asks gets it");
+        raw.host.set_header_content(id("lone"), Some(60.0));
+        let c = card(&mut raw);
+        assert!(c.action_bar.is_none(), "60 wide fits beside the actions");
+        let order = [c.title.unwrap(), c.header_content.unwrap(), c.actions[0].1, c.menu];
+        for pair in order.windows(2) {
+            let (first, second) = if direction == Direction::Ltr { (pair[0], pair[1]) } else { (pair[1], pair[0]) };
+            assert!(first.origin.x + first.size.width <= second.origin.x + 0.01, "{direction:?}: {order:?}");
+        }
+        raw.host.set_header_content(id("lone"), Some(10_000.0));
+        let c = card(&mut raw);
+        assert!(c.action_bar.is_some() && c.header_content.is_some(), "too wide: the actions go to a row below");
+        raw.host.set_header_content(id("lone"), Some(60.0));
+        raw.content.dispatch(vec![Mutation::Collapse { section: section("side"), collapsed: true }]).unwrap();
+        let c = card(&mut raw);
+        assert!(c.collapsed && c.header_content.is_some(), "a folded panel keeps it");
+        raw.content
+            .dispatch(vec![
+                Mutation::Collapse { section: section("side"), collapsed: false },
+                Mutation::Open {
+                    kind: PanelKind::new("fixture.log").unwrap(),
+                    instance: id("peer"),
+                    destination: Some(Destination::JoinTab { section: section("side"), index: 1 }),
+                },
+                Mutation::Activate { instance: id("lone") },
+            ])
+            .unwrap();
+        let c = card(&mut raw);
+        assert!(c.tab_strip.is_some() && c.header_content.is_none(), "a group keeps its tabs in the header");
+        raw.host.set_header_content(id("lone"), None);
     }
 }

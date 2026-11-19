@@ -38,6 +38,10 @@ required-features = ["solver-profiling"]
 [dependencies]
 craft-plugin = { workspace = true }
 solidcraft-viewport = { workspace = true }
+# The printed look of an inserted circuit board (src/cmd/board_layers.rs): its layers drawn
+# into an image; both already in the tree (ui-egui, render).
+tiny-skia = { workspace = true }
+png = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
@@ -49,8 +53,13 @@ solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+# the app-neutral panel placement core (engine::panels re-exports it)
+solidcraft-panel-layout = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
+# an SVG canvas or decal image, drawn into a PNG as it is inserted (src/cmd/canvas_svg.rs)
+resvg = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -65,9 +74,11 @@ web-time = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
-solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
+solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+# Sheet metal tests read the joints of a sheet made from surfaces.
+solidcraft-develop = { workspace = true }
 
 [[example]]
 name = "render_resource_workflow"

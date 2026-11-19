@@ -362,6 +362,9 @@ pub struct BrowserState {
     keys: Vec<KeyRow>,
     cursor: Option<NodeId>,
     focused: bool,
+    /// With [`Browser::events_per_row`]: the keyboard's events this frame, each handed to its row
+    /// as the row is drawn (the host reacts to rows, not to the frame).
+    held: Vec<Event>,
 }
 
 impl BrowserState {
@@ -602,6 +605,9 @@ impl<'s> Browser<'s> {
             state.previous = std::mem::take(&mut state.order);
         }
         let mut events = if keyboard { keys(ui, state) } else { Vec::new() };
+        if per_row {
+            state.held = std::mem::take(&mut events);
+        }
         let eye_before = ui.data(|d| d.get_temp::<bool>(eye_drag_id())).is_some();
         let eye_foreign = eye_before && !state.eye_gesture;
         let (now, mods, pressed) = ui.input(|i| (i.time, i.modifiers, i.pointer.any_pressed()));
@@ -922,7 +928,16 @@ impl Rows<'_> {
         if editing {
             self.editor(id, &out, handle);
         }
-        let events = if self.per_row { self.done.events.split_off(first_event.min(self.done.events.len())) } else { Vec::new() };
+        let mut events = if self.per_row { self.done.events.split_off(first_event.min(self.done.events.len())) } else { Vec::new() };
+        if self.per_row {
+            let target = |event: &Event| match event {
+                Event::Select { id: to, .. } | Event::Fold { id: to, .. } | Event::Open(to) | Event::RenameRequested(to) => *to == id,
+                _ => false,
+            };
+            let (mine, rest): (Vec<Event>, Vec<Event>) = std::mem::take(&mut self.state.held).into_iter().partition(target);
+            self.state.held = rest;
+            events.extend(mine);
+        }
         RowOut {
             rect: out.rect,
             label_rect: out.label_rect,

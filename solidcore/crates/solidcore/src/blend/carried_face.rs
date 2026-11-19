@@ -9,9 +9,15 @@
 //! round the kernel would build on an unbounded face, and measures the slab: the edge is a
 //! straight line between two vertices ([`crate::curve::curve::Curve::is_linear`]), concave
 //! ([`is_concave_edge`]), a face of it is planar, and at each end of the edge a planar face
-//! square to it (other than the edge's own) ends the round, so the slab's square ends add
-//! nothing the round could run into. The directions are evaluated at the edge's middle
-//! ([`outward`]); the squareness is compared at [`SQUARE`].
+//! (other than the edge's own) ends the round: one whose plane holds the carried face's
+//! normal and crosses the edge no flatter than [`LEAN`]. The slab is what lies behind the
+//! face's plane between those two planes, so each of its ends lies in the plane of the face
+//! that ends the round there and adds nothing the round could run into. A face square to
+//! the edge is such a face for both faces of the edge, and the slab's outline is then a
+//! rectangle; a face that leans (the edge ends on a sloped cut) is one for the face of the
+//! edge whose normal its plane holds, and the outline's end follows its trace
+//! ([`slab_outline`]). The directions are evaluated at the edge's middle ([`outward`]); the
+//! squareness is compared at [`SQUARE`].
 
 use crate::blend::chamfer_side::outward;
 use crate::blend::fillet_solver::p5::is_concave_edge;
@@ -22,9 +28,15 @@ use crate::{Brep, Kernel, Point3, Result, SolidError, Vec3};
 
 const OP: &str = "blend::carried_face::carried_faces";
 
-/// How far from 1 the cosine between a face's normal and the edge may be for the face to be
-/// square to the edge, and from 0 for the edge to lie in a face's plane.
+/// How far from 0 the cosine between two directions may be for them to be square to each
+/// other: the edge and the normal of a face it lies in, the carried face's normal and that
+/// of a face whose plane holds it.
 pub const SQUARE: f64 = 1e-9;
+
+/// The least cosine between the edge and the normal of a face that ends the round: such a
+/// face leans at most 60 degrees from square to the edge, so its trace in the carried face's
+/// plane runs at most √3 along the edge for each unit across it.
+pub const LEAN: f64 = 0.5;
 
 /// A flat face of a concave straight edge and the slab that carries it on.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,8 +50,10 @@ pub struct CarriedFace {
     /// The unit direction in the face's plane square to the edge, with
     /// `along` × `across` the face's outward normal.
     pub across: Vec3,
-    /// The slab's rectangle in (`along`, `across`) from `origin`: the edge's length along,
-    /// `reach` to either side across.
+    /// The slab's outline in (`along`, `across`) from `origin` ([`slab_outline`]): the edge
+    /// from the first side to the second, `reach` to either side across it (less on a side
+    /// where the ends' traces close on each other), each end along the trace of the face
+    /// that ends the round there. A rectangle between square ends.
     pub outline: [[f64; 2]; 4],
     /// The slab's extent along the outward normal: from `-reach` to the face's plane.
     pub depth: [f64; 2],
@@ -66,11 +80,99 @@ fn plane_normal(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<Option<V
     Ok(Some(planar.normal * (1.0 / len)))
 }
 
+/// The outline of the slab that carries a face on past an edge of length `length`, in the
+/// face's plane: (`along`, `across`) from the edge's start, as
+/// [`CarriedFace::outline`] lists it (the start's side at `-across`, the end's, the end's
+/// at `+across`, the start's). The slab's start follows the trace `along = start · across`
+/// of the face that ends the round there and its end `along = length + end · across`
+/// (`start` and `end` are 0 for faces square to the edge), out to `reach` on either side.
+///
+/// Where the traces close on each other on a side they cross `length / |end - start|` from
+/// the edge's line, and the slab has nothing past there. On that side it reaches half way
+/// from `need` (how far from the edge's line the blend touches the face) to the crossing,
+/// so it is past the blend's contact line and short of the crossing by as much. `None`
+/// where the crossing is no further than `need`: the blend's contact line has no room
+/// between the two faces.
+#[must_use]
+pub fn slab_outline(
+    length: f64,
+    start: f64,
+    end: f64,
+    need: f64,
+    reach: f64,
+) -> Option<[[f64; 2]; 4]> {
+    let closing = end - start;
+    // how far the slab reaches at -across and at +across
+    let mut sides = [reach, reach];
+    if closing != 0.0 {
+        let crossing = length / closing.abs();
+        if crossing <= need {
+            return None;
+        }
+        let side = usize::from(closing < 0.0);
+        if let Some(s) = sides.get_mut(side) {
+            *s = reach.min(0.5 * (need + crossing));
+        }
+    }
+    let [low, high] = sides;
+    // between square ends (both traces 0) these are exactly 0 and `length`
+    let from = |across: f64| 0.0 + start * across;
+    let to = |across: f64| length + end * across;
+    Some([
+        [from(-low), -low],
+        [to(-low), -low],
+        [to(high), high],
+        [from(high), high],
+    ])
+}
+
+/// How far `along` a trace runs for each unit `across`, for the planar face at the vertex
+/// `v` that ends a round carried on past the face of normal `normal`: a face other than
+/// `own` whose plane holds `normal` ([`SQUARE`]) and crosses the edge no flatter than
+/// [`LEAN`]; of several, the nearest to square. A face square to the edge ([`SQUARE`]) has
+/// the trace 0 exactly, not its normal's rounding, so the slab between square ends is the
+/// rectangle to the last bit. `None` without one.
+fn end_trace(
+    k: &Kernel,
+    b: &Brep,
+    v: crate::topology::VertexId,
+    own: [FaceId; 2],
+    frame: [Vec3; 3],
+    tol: f64,
+) -> Result<Option<f64>> {
+    let [along, across, normal] = frame;
+    let mut best: Option<f64> = None;
+    for f in vertex::faces(b, v)? {
+        if own.contains(&f) {
+            continue;
+        }
+        let Some(n) = plane_normal(k, b, f, tol)? else {
+            continue;
+        };
+        let lean = n.dot(along);
+        if lean.abs() > 1.0 - SQUARE {
+            return Ok(Some(0.0));
+        }
+        if n.dot(normal).abs() > SQUARE || lean.abs() < LEAN {
+            continue;
+        }
+        let trace = -n.dot(across) / lean;
+        if best.is_none_or(|least| trace.abs() < least.abs()) {
+            best = Some(trace);
+        }
+    }
+    Ok(best)
+}
+
 /// The flat faces of the straight concave edge `e` that a round of radius `radius` can be
 /// carried on past, each with its slab: the face of the edge's blend edge use first. None
 /// where the construction does not apply: an edge that is not a straight line between two
 /// vertices, not between two faces, or not concave; a face of it that is not planar; an end
-/// of the edge without a planar face square to it.
+/// of the edge without a planar face that ends the round for that face ([`end_trace`]); ends
+/// whose traces cross within the round's contact line ([`slab_outline`]). `radius` is how
+/// far the blend reaches from the edge: the contact line of a round lies `radius` times the
+/// tangent of half the angle between the two faces' normals from it, and no blend is taken
+/// to touch the face further off than the larger of the two.
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for a radius that is not finite and positive; the
@@ -122,22 +224,6 @@ pub fn carried_faces(k: &Kernel, b: &mut Brep, e: EdgeId, radius: f64) -> Result
     let t = b.edge(e)?.interval.evaluate(0.5);
     let sides = [outward(k, b, u0, t)?, outward(k, b, u1, t)?];
     let own = [sides[0].0, sides[1].0];
-    // a planar face square to the edge, other than its own, at each end
-    for v in [start, end] {
-        let mut squared = false;
-        for f in vertex::faces(b, v)? {
-            if own.contains(&f) {
-                continue;
-            }
-            if plane_normal(k, b, f, tol)?.is_some_and(|n| n.dot(along).abs() > 1.0 - SQUARE) {
-                squared = true;
-                break;
-            }
-        }
-        if !squared {
-            return Ok(Vec::new());
-        }
-    }
     let reach = 4.0 * (size + radius);
     let mut out = Vec::new();
     let [first, second] = sides;
@@ -147,17 +233,28 @@ pub fn carried_faces(k: &Kernel, b: &mut Brep, e: EdgeId, radius: f64) -> Result
         if plane_normal(k, b, face, tol)?.is_none() || normal.dot(along).abs() > SQUARE {
             continue;
         }
+        // the face that ends the round at each end of the edge, for this face
+        let frame = [along, across, normal];
+        let (Some(at_start), Some(at_end)) = (
+            end_trace(k, b, start, own, frame, tol)?,
+            end_trace(k, b, end, own, frame, tol)?,
+        ) else {
+            continue;
+        };
+        // the contact line of a round between faces whose normals are an angle apart lies
+        // the radius times the tangent of half that angle from the edge
+        let cos = normal.dot(other).clamp(-1.0, 1.0);
+        let half_tan = ((1.0 - cos) / (1.0 + cos).max(f64::MIN_POSITIVE)).sqrt();
+        let need = radius * half_tan.max(1.0);
+        let Some(outline) = slab_outline(length, at_start, at_end, need, reach) else {
+            continue;
+        };
         out.push(CarriedFace {
             face,
             origin,
             along,
             across,
-            outline: [
-                [0.0, -reach],
-                [length, -reach],
-                [length, reach],
-                [0.0, reach],
-            ],
+            outline,
             depth: [-reach, 0.0],
             reach,
             other_side,
@@ -256,6 +353,53 @@ mod tests {
             normals.iter().any(|&n| is(n, 1.0, 0.0)) && normals.iter().any(|&n| is(n, 0.0, 1.0)),
             "{normals:?}"
         );
+    }
+
+    /// The slab's outline between square ends is the rectangle of the edge's length and the
+    /// reach to either side. Between ends that lean alike (0.5 along for each unit across)
+    /// it is a parallelogram as wide. Where only the end leans, by 0.25, the traces close on
+    /// the side across is negative and cross 10 / 0.25 = 40 from the edge's line: a blend
+    /// that touches the face 6 from the edge has its slab reach (6 + 40) / 2 = 23 there,
+    /// where the end's trace has come back 0.25 x 23 = 5.75, and the full reach on the other
+    /// side. Leaning the other way the short side is the other one. A blend that touches the
+    /// face as far off as the traces cross, or further, has no slab.
+    #[test]
+    fn the_slabs_outline_follows_its_ends_traces() {
+        let reach = 500.0;
+        assert_eq!(
+            slab_outline(10.0, 0.0, 0.0, 6.0, reach),
+            Some([[0.0, -reach], [10.0, -reach], [10.0, reach], [0.0, reach]])
+        );
+        assert_eq!(
+            slab_outline(10.0, 0.5, 0.5, 6.0, reach),
+            Some([
+                [-250.0, -reach],
+                [-240.0, -reach],
+                [260.0, reach],
+                [250.0, reach]
+            ])
+        );
+        assert_eq!(
+            slab_outline(10.0, 0.0, 0.25, 6.0, reach),
+            Some([[0.0, -23.0], [4.25, -23.0], [135.0, reach], [0.0, reach]])
+        );
+        assert_eq!(
+            slab_outline(10.0, 0.0, -0.25, 6.0, reach),
+            Some([[0.0, -reach], [135.0, -reach], [4.25, 23.0], [0.0, 23.0]])
+        );
+        // the start leaning toward the end closes the same side as the end leaning back
+        assert_eq!(
+            slab_outline(10.0, 0.25, 0.0, 6.0, reach),
+            Some([[-125.0, -reach], [10.0, -reach], [10.0, 23.0], [5.75, 23.0]])
+        );
+        // a reach short of the half-way point is the reach
+        assert_eq!(
+            slab_outline(10.0, 0.0, 0.25, 6.0, 20.0),
+            Some([[0.0, -20.0], [5.0, -20.0], [15.0, 20.0], [0.0, 20.0]])
+        );
+        assert!(slab_outline(10.0, 0.0, 0.25, 39.0, reach).is_some());
+        assert_eq!(slab_outline(10.0, 0.0, 0.25, 40.0, reach), None);
+        assert_eq!(slab_outline(10.0, 0.0, -0.25, 41.0, reach), None);
     }
 
     /// A convex edge of the same L has nothing to carry on, and neither has a concave edge

@@ -276,7 +276,7 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
 | **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
-| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | one Roll-over event runs the convex pass, then the concave pass: the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (`crease.rs` of the Roll-over build). Until that build lands, this corner is refused with `CornerUnsupported` (`FilletErrorType`, from `session/trim_at_creases.rs`: "a corner's face between blends that add and blends that take off material"; `tests/fork_smlib125_open_setbacks.rs`) |
+| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | one Roll-over event runs the convex pass, then the concave pass: the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (`crease.rs` of the Roll-over build). Until that build lands, this corner is refused with `CornerUnsupported` (`FilletErrorType`, from `session/trim_at_creases.rs`: "a corner's face between blends that add and blends that take off material"; `tests/fork_smlib125_open_setbacks.rs`) The second pass asked on its own also takes a concave round along the foot of a cylinder that stands through its end face (a tube above a fin's top whose root is rounded tangent into the tube): the cylinder is in B1's place, and the round has a cliff at each end (#19476). |
 | **Setback** | every corner not named above: unequal radii, four or more blends, mixed convexity with every edge rounded, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch. A marked corner beside a curved face keeps that patch too until the curved Setback is the default; the design makes it a Setback, and the curved Setback of `blend_setback/curved.rs` is that step) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
@@ -415,18 +415,6 @@ with the cliff faces continued, so it never passes the cliff, the default of T-F
 [52]. This is the Roll-over's trim (§3.2), and the Roll-over build provides it; until it lands, no
 concave overflow is trimmed this way. Convex overflow still moves the sharp edge.
 
-A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
-`fillet_round_ends_on_outline`, WR-730). This applies where the round on the continued wall
-would pass inside the wall's rim, cutting into the material beyond the face it leaves. The
-ball then touches the rim and stays tangent to the face it keeps. It rolls on the surface
-tangent to it along the rim: the wall's plane turned about the rim, or its cylinder leaned
-into a cone. Where the kept face is too narrow as well, the ball touches both rims.
-
-This is built for a lone round along a straight edge between planes, or along a circular
-edge between a plane square to its axis and a coaxial cylinder
-(`crate::blend::fillet_outline`). A round that passes the rim within the tolerance, or
-whose rail stays on its wall, is trimmed at its crease as above.
-
 ### 3.5 Refusals name the size that fits
 
 ![Left: offsets of a concave face collapse at its curvature radius. Right: a ball in a slot fits up to half the width.](generic-blend/refusal-size.svg)
@@ -450,8 +438,12 @@ Each cause is decided from its own geometry, before the construction that it wou
 - **A collapsed offset.** A ball as wide as a face it rolls on (a cylinder or sphere of its radius,
   with the ball inside) has its offset of that face collapsed onto the axis or centre, so its centre
   is fixed. The zone it sweeps ends in a section of the ball only where the plane through an end of
-  the edge, square to it, holds that centre. A tray's seam and a cornered block's rim hold it at
-  both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
+  the edge, square to it, holds that centre. Where the edge ends on a side face it crosses and that
+  face holds the ball's one touch point on the other face, the round's end runs down to that point
+  on the other face's edge with the side: its rail there is a point on the face's boundary and it
+  takes the whole face, so that end is open too (a notch's floor rounded at the notch's radius,
+  ending on a curved side through the notch's axis). A tray's seam and a cornered block's rim hold
+  it at both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
   does not: refused, naming that radius, open. A larger ball that does not fit that face names it
   open the same way. An end where the chain runs on into another blended edge closes the zone:
   the Join there places the next round's section through the centre,
@@ -521,7 +513,11 @@ given.
 - **A boss or cut standing inside a round's band is kept** (its walls carried down to the round),
   as the "keep features" option of common practice; letting the round take it is a future option.
 - **A partly selected tangent chain** rounds exactly the selected edges and ends at the smooth vertex
-  with a real End.
+  with a real End. A vertex where the edge bends, within the tangency tolerance, is smooth. Where
+  the edge it runs on into turns towards the blend, the blend runs on past the vertex and out of the
+  part instead, ending on the end face. Not where the bend first takes that edge to the far side of
+  the blended edge continued, deeper than the face's zone tolerance: the part there stands across
+  the blend run on, which ends at the vertex (`blend_corner::end`, `run_on_leaves_the_part`).
 - **Folds are refused, never trimmed**, naming the radius.
 - **The user's geometry is never changed without consent**: no silent shrink, no auto-fit.
 - **The round is stored as its definition** with a certified net.

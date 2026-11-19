@@ -18,8 +18,12 @@
 //! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
-//! | [`BlendFailure::StageFailed`]          | [`ErrorKind::StageFailed`] (127)              |
+//! | [`BlendFailure::StageFailed`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
+//! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
+//! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
+//! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
+//! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -29,10 +33,10 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
-//! | [`BlendFailure::Missing`]              | `SM_ERR_NULL_POINTER`             |
-//! | [`BlendFailure::InvalidValue`]         | `SM_ERR_INVALID_INPUT`            |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
@@ -83,14 +87,14 @@ pub enum BlendFailure {
     StationDidNotConverge {
         /// The station: the blend's parameter along its spine.
         s: f64,
-        /// The residual the solve stopped at.
-        residual: f64,
+        /// The residual the solve stopped at (`None` where the solve does not report it).
+        residual: Option<f64>,
         /// The tolerance it had to reach.
         tolerance: f64,
-        /// The last step it took.
-        step: f64,
-        /// The iterations it took.
-        iterations: u32,
+        /// The last step it took (`None` where the solve does not report it).
+        step: Option<f64>,
+        /// The iterations it took (`None` where the solve does not report them).
+        iterations: Option<u32>,
     },
     /// The boundary loop of the faces the rails enclose is open: the failure's site vertex
     /// is where. A defect ([`ErrorKind::TrimLeaks`]).
@@ -102,6 +106,56 @@ pub enum BlendFailure {
     /// holds the operation, the status (for the goldens only) and where in solidcore's source
     /// it was built ([`Failure::origin`]).
     StageFailed,
+    /// A variable round's skin of balls' touch circles was still measured farther than
+    /// `asked` from its balls when its refinement reached its most rounds or stations
+    /// (#15256): the worst distance measured was `reached` (infinite where a span's section
+    /// could not be placed on the skin to be measured), with `stations` stations after
+    /// `rounds` rounds. Not within the tolerance ([`ErrorKind::NotWithinTolerance`]): no
+    /// tolerance is loosened and the skin is not kept.
+    SkinPastStationCap {
+        /// The tolerance asked: the solver's approximation tolerance.
+        asked: f64,
+        /// The largest distance measured from the skin to its balls at the cap.
+        reached: f64,
+        /// The stations the skin had at the cap.
+        stations: usize,
+        /// The refinement rounds run.
+        rounds: usize,
+    },
+    /// A quantity a variable round's skin check computes (a distance from the skin to its
+    /// balls, or the balls' radius rate and centre speed at a section) was still not a finite
+    /// number, last at the section at `s` along the trace, when the refinement reached its
+    /// most rounds or stations (#15256): a defect ([`ErrorKind::StageFailed`]). A value that
+    /// is not finite before the cap splits its span instead.
+    SkinMeasureNotFinite {
+        /// The section's parameter along the trace.
+        s: f64,
+    },
+    /// At the section at `s` along the trace a variable round's balls change their radius at
+    /// least as fast as their centres move (`|r'| = rate >= |c'| = speed`): each ball holds
+    /// the next, so no rolling-ball surface exists there (#15256). A refusal
+    /// ([`ErrorKind::BallsFold`]).
+    BallsNest {
+        /// The section's parameter along the trace.
+        s: f64,
+        /// `|r'|`: how fast the balls' radius changes along the trace.
+        rate: f64,
+        /// `|c'|`: how fast the balls' centres move along the trace.
+        speed: f64,
+    },
+    /// The crease trim (#17673) has no construction to end a crease piece of curve kind
+    /// `kind` exactly on the meet at its start or end (`at_end`), at parameter `t` of the
+    /// crease: a curve with no control polygon (an offset, projected, composite, ...
+    /// curve). Unsupported
+    /// ([`ErrorKind::Unsupported`]): never a piece left ending short of its meet.
+    CreasePieceEndUnbuildable {
+        /// The piece's curve kind.
+        kind: &'static str,
+        /// True for the piece's end, false for its start.
+        at_end: bool,
+        /// The end's parameter on the crease.
+        t: f64,
+    },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -162,6 +216,77 @@ pub enum BlendFailure {
         /// The certificate's stations when it was refused.
         stations: usize,
     },
+    /// An input the planar-band contact query reads is not there (a support, an edge use, an
+    /// offset, a foot of a drop, ...): the input named. Status `SM_ERR_NULL_POINTER` and the
+    /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
+    /// so not a phrase cause ([`BlendFailure::is_phrase`]).
+    BandInputMissing(BandInput),
+}
+
+/// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BandInput {
+    /// The extrusion's control point in its stored net.
+    ExtrusionControlPoint,
+    /// The exact product of the extrusion's translation.
+    ExtrusionTranslationProduct,
+    /// A solver's edge use.
+    EdgeUse,
+    /// The face the two bands share.
+    SharedFace,
+    /// The planar support.
+    PlanarSupport,
+    /// The support on the other side of the blended edge.
+    OtherSupport,
+    /// The chamfer's setback.
+    ChamferSetback,
+    /// The other offset of the chamfer.
+    OtherOffset,
+    /// The first offset of the chamfer.
+    FirstOffset,
+    /// The blended edge.
+    BlendedEdge,
+    /// The blended edge's curve.
+    BlendedEdgeCurve,
+    /// The selected edge.
+    SelectedEdge,
+    /// The foot of a drop on the other support.
+    FootOnOtherSupport,
+    /// An endpoint of the blended edge.
+    BlendedEdgeEndpoint,
+    /// The closest feet of the two bands.
+    ClosestBandFeet,
+    /// An endpoint of the line.
+    LineEndpoint,
+    /// The edge of an edge use.
+    EdgeUseEdge,
+}
+
+impl BandInput {
+    /// What is missing, as a phrase ("the shared face").
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::ExtrusionControlPoint => "the extrusion control point",
+            Self::ExtrusionTranslationProduct => "the exact extrusion translation product",
+            Self::EdgeUse => "the edge use",
+            Self::SharedFace => "the shared face",
+            Self::PlanarSupport => "the planar support",
+            Self::OtherSupport => "the other support",
+            Self::ChamferSetback => "the chamfer setback",
+            Self::OtherOffset => "the other offset",
+            Self::FirstOffset => "the first offset",
+            Self::BlendedEdge => "the blended edge",
+            Self::BlendedEdgeCurve => "the blended edge's curve",
+            Self::SelectedEdge => "the selected edge",
+            Self::FootOnOtherSupport => "the foot on the other support",
+            Self::BlendedEdgeEndpoint => "the blended edge's endpoint",
+            Self::ClosestBandFeet => "the closest band feet",
+            Self::LineEndpoint => "the line endpoint",
+            Self::EdgeUseEdge => "the edge use's edge",
+        }
+    }
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -173,7 +298,9 @@ pub enum BlendFailure {
 pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
     use NoRoomReason as R;
     match reason {
-        R::BallDoesNotFit => ErrorKind::BallDoesNotFit,
+        // a Join's: the round's ball does not fit its face where its contact line must cross
+        // the edge between the rounds' faces
+        R::BallDoesNotFit | R::JoinRailMissesSideEdge => ErrorKind::BallDoesNotFit,
         R::RailLeavesFace | R::ConcaveOverflow => ErrorKind::RailLeavesFace,
         R::FaceConsumed => ErrorKind::FaceConsumed,
         R::BandsOverlap => ErrorKind::BandsOverlap,
@@ -313,9 +440,13 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::SkinPastStationCap { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::BandInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -330,9 +461,12 @@ impl BlendFailure {
     /// class for [`BlendFailure::NoRoom`] ([`no_room_class`]) and
     /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
-    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`], and
-    /// [`ErrorKind::NotWithinTolerance`] for a surface not certified within its tolerance in
-    /// its work budget ([`BlendFailure::NotCertified`]). A phrase
+    /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`] and
+    /// [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
+    /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
+    /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
+    /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`], and
+    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -342,8 +476,13 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed => ErrorKind::StageFailed,
-            Self::NotCertified { .. } => ErrorKind::NotWithinTolerance,
+            Self::StageFailed | Self::SkinMeasureNotFinite { .. } => ErrorKind::StageFailed,
+            Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
+                ErrorKind::NotWithinTolerance
+            }
+            Self::BallsNest { .. } => ErrorKind::BallsFold,
+            Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
+            Self::BandInputMissing(_) => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -370,6 +509,11 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::SkinPastStationCap { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
+            | Self::BandInputMissing(_)
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -399,6 +543,11 @@ impl BlendFailure {
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
             | Self::StageFailed
+            | Self::SkinPastStationCap { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::BallsNest { .. }
+            | Self::CreasePieceEndUnbuildable { .. }
+            | Self::BandInputMissing(_)
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -425,16 +574,48 @@ impl core::fmt::Display for BlendFailure {
                 tolerance,
                 step,
                 iterations,
-            } => write!(
-                f,
-                "{}: the station at s = {s} did not converge: residual {residual} > {tolerance} after {iterations} iterations (last step {step})",
-                self.class()
-            ),
+            } => {
+                let shown = |x: Option<String>| x.unwrap_or_else(|| "unreported".into());
+                write!(
+                    f,
+                    "{}: the station at s = {s} did not converge: residual {} > {tolerance} after {} iterations (last step {})",
+                    self.class(),
+                    shown(residual.map(|r| r.to_string())),
+                    shown(iterations.map(|n| n.to_string())),
+                    shown(step.map(|d| d.to_string())),
+                )
+            }
             Self::TrimLoopOpen => write!(f, "{}: the trim loop is open", self.class()),
             Self::TrimLoopDoesNotSeparate => {
                 write!(f, "{}: the trim loop does not separate", self.class())
             }
             Self::StageFailed => write!(f, "{}", self.class()),
+            Self::SkinPastStationCap {
+                asked,
+                reached,
+                stations,
+                rounds,
+            } => write!(
+                f,
+                "{}: the round's skin is {reached} from its balls, past {asked}, with {stations} stations after {rounds} rounds",
+                self.class()
+            ),
+            Self::SkinMeasureNotFinite { s } => write!(
+                f,
+                "{}: the skin check computed a value that is not finite at s = {s}",
+                self.class()
+            ),
+            Self::BallsNest { s, rate, speed } => write!(
+                f,
+                "{}: at s = {s} the balls' radius changes at {rate}, as fast as their centres move ({speed}): no rolling-ball surface exists there",
+                self.class()
+            ),
+            Self::CreasePieceEndUnbuildable { kind, at_end, t } => write!(
+                f,
+                "{}: the crease piece's {} at t = {t} cannot be ended on its meet: no construction for a {kind} curve there",
+                self.class(),
+                if *at_end { "end" } else { "start" },
+            ),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -443,6 +624,7 @@ impl core::fmt::Display for BlendFailure {
             | Self::NotWithinTolerance(what)
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -489,6 +671,14 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn blend_missing(operation: &'static str, what: &'static str) -> Self {
         Self::blend(operation, BlendFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for an input of the planar-band contact query that is
+    /// not there ([`BlendFailure::BandInputMissing`]), with status [`SM_ERR_NULL_POINTER`].
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn blend_band_input_missing(operation: &'static str, input: BandInput) -> Self {
+        Self::blend(operation, BlendFailure::BandInputMissing(input))
     }
 
     /// [`crate::SolidError::Failed`] for a value a blend routine is given or computes with
@@ -761,6 +951,10 @@ mod tests {
                 ErrorKind::JoinOffsetsDiffer,
             ),
             (
+                BlendFailure::NoRoom(R::JoinRailMissesSideEdge),
+                ErrorKind::BallDoesNotFit,
+            ),
+            (
                 BlendFailure::NoRoom(R::StripBelowResolution),
                 ErrorKind::StripBelowResolution,
             ),
@@ -791,10 +985,10 @@ mod tests {
             (
                 BlendFailure::StationDidNotConverge {
                     s: 0.42,
-                    residual: 3e-6,
+                    residual: Some(3e-6),
                     tolerance: 1e-9,
-                    step: 1e-4,
-                    iterations: 50,
+                    step: Some(1e-4),
+                    iterations: Some(50),
                 },
                 ErrorKind::StationDidNotConverge,
             ),
@@ -900,15 +1094,30 @@ mod tests {
             "blend::op",
             BlendFailure::StationDidNotConverge {
                 s: 0.42,
-                residual: 3e-6,
+                residual: Some(3e-6),
                 tolerance: 1e-9,
-                step: 0.0001,
-                iterations: 50,
+                step: Some(0.0001),
+                iterations: Some(50),
             },
         );
         assert_eq!(
             station.to_string(),
             "blend::op: station_did_not_converge: the station at s = 0.42 did not converge: residual 0.000003 > 0.000000001 after 50 iterations (last step 0.0001)"
+        );
+        // a solve that reports only whether it converged (#15256's skin check)
+        let unreported = SolidError::blend(
+            "blend::op",
+            BlendFailure::StationDidNotConverge {
+                s: 0.5,
+                residual: None,
+                tolerance: 1e-9,
+                step: None,
+                iterations: None,
+            },
+        );
+        assert_eq!(
+            unreported.to_string(),
+            "blend::op: station_did_not_converge: the station at s = 0.5 did not converge: residual unreported > 0.000000001 after unreported iterations (last step unreported)"
         );
         assert_eq!(
             SolidError::blend("blend::op", BlendFailure::NoRoom(R::OverflowWithRollover))
@@ -947,8 +1156,10 @@ mod tests {
             Failure::new("blend::op", BlendFailure::StageFailed).with_status(SM_ERR_NULL_POINTER);
         let after = line!();
         assert!((before..after).contains(&f.origin().line()));
+        // the path is written with the host's separator (`\` on Windows), so compare its
+        // components, not its text
         assert!(
-            f.origin().file().ends_with("error/blend.rs"),
+            std::path::Path::new(f.origin().file()).ends_with("error/blend.rs"),
             "{}",
             f.origin().file()
         );
@@ -1091,6 +1302,11 @@ mod tests {
             | BlendFailure::TrimLoopDoesNotSeparate
             | BlendFailure::RemovalRefused(_)
             | BlendFailure::StageFailed
+            | BlendFailure::SkinPastStationCap { .. }
+            | BlendFailure::SkinMeasureNotFinite { .. }
+            | BlendFailure::BallsNest { .. }
+            | BlendFailure::CreasePieceEndUnbuildable { .. }
+            | BlendFailure::BandInputMissing(_)
             | BlendFailure::NotCertified { .. } => None,
             BlendFailure::Failed(_) => Some("BlendFailure::Failed("),
             BlendFailure::Missing(_) => Some("BlendFailure::Missing("),
@@ -1111,17 +1327,35 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1402;
+        const PHRASE_CAUSE_SITES: usize = 992;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
             BlendFailure::StationDidNotConverge {
                 s: 0.0,
-                residual: 0.0,
+                residual: Some(0.0),
                 tolerance: 0.0,
-                step: 0.0,
-                iterations: 0,
+                step: Some(0.0),
+                iterations: Some(0),
             },
+            BlendFailure::SkinPastStationCap {
+                asked: 0.0,
+                reached: 0.0,
+                stations: 0,
+                rounds: 0,
+            },
+            BlendFailure::SkinMeasureNotFinite { s: 0.0 },
+            BlendFailure::BallsNest {
+                s: 0.0,
+                rate: 0.0,
+                speed: 0.0,
+            },
+            BlendFailure::CreasePieceEndUnbuildable {
+                kind: "offset",
+                at_end: true,
+                t: 0.0,
+            },
+            BlendFailure::BandInputMissing(BandInput::SharedFace),
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),

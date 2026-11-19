@@ -64,8 +64,8 @@ pub use host::{
 };
 pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
 pub use image::{
-    Admission, BodyRole, ImageTask, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample, TaskPoll,
-    admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+    Admission, BodyRole, ImageTask, MAX_PICTURE_PIXEL_TESTS, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow,
+    Projection, Supersample, TaskPoll, admit, admit_geometry, admit_geometry_with_limits, admit_picture,
 };
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};
@@ -82,6 +82,12 @@ pub use quality::{
 pub const GPU_PATH_LIMITS: crate::RenderLimits =
     crate::RenderLimits { max_dimension: 8192, max_pixels: 33_554_432, max_scratch_bytes: 128 * 1024 * 1024 * 1024 };
 pub const MAX_GPU_PATH_TRIANGLES: u64 = 8_000_000;
+/// The longest body name a render target takes, in bytes of UTF-8. A rename gives a body at most
+/// 128 characters, which is at most 512 bytes, so every such name is taken. The check counts
+/// bytes, not characters: a longer name made another way (a ` (n)` added to a long name, a long
+/// `body_name` given to a command) is taken while it is at most 512 bytes (a 132-character ASCII
+/// name is) and refused as a target above that.
+pub const MAX_BODY_NAME_BYTES: usize = 128 * 4;
 pub const MAX_GPU_PATH_BODIES: usize = 65_536;
 /// Optical target count is independent of simultaneous containment and ray depth.
 pub const MAX_OPTICAL_TARGETS: usize = 128;
@@ -545,11 +551,11 @@ impl ReflectionOptions {
         }
         for (index, body) in self.bodies.iter().enumerate() {
             if body.body.is_empty()
-                || body.body.len() > 128
-                || body.body.capacity() > 128
+                || body.body.len() > MAX_BODY_NAME_BYTES
+                || body.body.capacity() > MAX_BODY_NAME_BYTES
                 || self.bodies.iter().take(index).any(|other| other.body == body.body)
             {
-                return Err(JobError::new(ErrorCode::InvalidRequest, "reflection body names must be unique, nonempty and bounded to128 bytes"));
+                return Err(JobError::new(ErrorCode::InvalidRequest, "reflection body names must be unique, nonempty and bounded to 512 bytes"));
             }
         }
         Ok(())
@@ -685,10 +691,10 @@ fn bounded_emission_body<'de, D: serde::Deserializer<'de>>(d: D) -> std::result:
     impl<'de> serde::de::Visitor<'de> for Name {
         type Value = String;
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("a nonempty captured body name of at most 256 bytes")
+            f.write_str("a nonempty captured body name of at most 512 bytes")
         }
         fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<String, E> {
-            if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+            if value.is_empty() || value.len() > MAX_BODY_NAME_BYTES || value.chars().any(char::is_control) {
                 return Err(E::custom("invalid surface emission body name"));
             }
             let mut name = String::new();
@@ -703,8 +709,8 @@ fn bounded_emission_body<'de, D: serde::Deserializer<'de>>(d: D) -> std::result:
 impl SurfaceEmission {
     pub fn validate(&self) -> Result<()> {
         if self.body.is_empty()
-            || self.body.len() > 256
-            || self.body.capacity() > 256
+            || self.body.len() > MAX_BODY_NAME_BYTES
+            || self.body.capacity() > MAX_BODY_NAME_BYTES
             || self.body.chars().any(char::is_control)
             || !self.color.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
             || !self.strength.is_finite()

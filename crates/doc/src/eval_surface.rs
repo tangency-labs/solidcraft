@@ -58,6 +58,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let refs: Vec<&kernel::Body> = idx.iter().filter_map(|i| st.bodies.get(*i).map(|b| &b.body)).collect();
             let sewn = kernel::stitch(&refs, tol)?;
             let Some(mb) = st.bodies.get(first).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let open = sewn.open_edge_count()?;
+            if open > 0 {
+                append_warning(warning, format!("Stitch result `{}` remains open (boundary edges: {open}).", mb.name));
+            }
             if let Some(slot) = st.bodies.get_mut(first) {
                 *slot = ModelBody::new(mb.name, sewn, mb.feature);
             }
@@ -392,6 +396,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             scale,
             rails,
             rail_fit,
+            spline_as_samples,
         } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             // The path is a chain of a body's edges (#2216) or the curves of a sketch.
@@ -425,15 +430,19 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // The path runs on from the end nearest the middle of the curves.
             let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
             let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
-            let body = match path_points(ps, path, start)? {
+            let body = match path_points(&curves_in(ps, path), start)? {
                 Some(path) => {
                     let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
-                    kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    if *spline_as_samples {
+                        kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    } else {
+                        kernel::sweep_sheet_point_path_with(&ss.plane, &chains, &path, &ctl)?
+                    }
                 }
                 None => {
-                    let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
+                    let segs = path_segments_at(&curves_in(ps, path), start, Some(&ss.plane))?;
                     let path_start = segs.first().map_or(start, kernel::PathSeg::start);
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
@@ -445,12 +454,17 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit } => {
-            // A loft with edge chains for sections, or one that has to leave its ends a particular
-            // way, is built through `loft_blend` from the frames of every section; the plain one
-            // (sketch chains only, both ends G0) is the loft of old.
-            if *continuity != [kernel::Continuity::G0, kernel::Continuity::G0] || sections.iter().any(|s| s.body.is_some()) {
+            // A loft with edge chains or 3D sketch curves for sections, or one that has to leave its
+            // ends a particular way, is built through `loft_blend` from the frames of every
+            // section; the plain one (planar sketch chains only, both ends G0) is the loft of old.
+            let in_space = sections.iter().any(|s| section_in_space(st, s));
+            if *continuity != [kernel::Continuity::G0, kernel::Continuity::G0] || sections.iter().any(|s| s.body.is_some()) || in_space {
                 if !rails.is_empty() {
-                    return Err(DocError::Invalid("not supported yet: guide rails on a loft with edge sections or end continuity".into()));
+                    return Err(DocError::Invalid(if in_space {
+                        "not supported yet: guide rails on a loft through 3D sketch curves".into()
+                    } else {
+                        "not supported yet: guide rails on a loft with edge sections or end continuity".into()
+                    }));
                 }
                 return loft_blend(st, f, sections, *continuity, *crown, doc);
             }
@@ -664,7 +678,7 @@ fn network_sources(
             let raw = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
             // 3D sketch curves are followed through their points; planar ones exactly.
             let mapped = path_in_frame(doc, raw, f.component)?;
-            match path_points(&mapped, &c.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
+            match path_points(&curves_in(mapped.as_ref(), &c.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
                 Some(path) => NetSource::Points(path.points()),
                 None => {
                     let ss = sketch_in_feature_frame(doc, raw, f.component)?;
@@ -868,6 +882,11 @@ pub(super) fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<
     Ok(chains)
 }
 
+/// Whether a loft section names a curve of a 3D sketch (a wire), not only planar curves.
+fn section_in_space(st: &ModelState, sec: &SheetSection) -> bool {
+    sec.body.is_none() && st.sketch(sec.sketch.0).is_some_and(|ss| sec.curves.iter().any(|id| ss.sketch.wire_index(id).is_some()))
+}
+
 /// A multi-section blend: every section as frames, the body ones read off the face their edge
 /// chain bounds, and the first and last leaving with `continuity` where the caller asks for it.
 fn loft_blend(
@@ -878,9 +897,10 @@ fn loft_blend(
     crown: [f64; 2],
     doc: &Document,
 ) -> Result<()> {
-    /// One section: a chain of sketch curves in its plane, or a body's edge chain.
+    /// One section: a chain of sketch curves (in its plane, or of a 3D sketch) as its points in
+    /// space, or a body's edge chain.
     enum Piece {
-        Sketch(solidcore_record::Plane, Vec<solidcore_record::Seg2>),
+        Points(Vec<solidcore_record::Vec3>),
         Body(String, Vec<solidcore_record::Vec3>),
     }
     let mut pieces = Vec::with_capacity(sections.len());
@@ -895,28 +915,36 @@ fn loft_blend(
             pieces.push(Piece::Body(name.to_string(), crate::plain(&sec.edges)));
             continue;
         }
-        let ss = sketch_in_feature_frame(
-            doc,
-            st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?,
-            f.component,
-        )?;
-        let profiles = match (&sec.profiles, sec.curves.is_empty()) {
-            (None, true) => Some(&ProfileSel::All),
-            (p, _) => p.as_ref(),
+        let raw =
+            st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
+        let one_chain = || DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into());
+        let pts: Vec<Vec3> = if section_in_space(st, sec) {
+            // 3D sketch curves are followed through their points, as a boundary surface's u and v
+            // curves are.
+            if sec.profiles.is_some() {
+                return Err(one_chain());
+            }
+            let mapped = path_in_frame(doc, raw, f.component)?;
+            path_points(&curves_in(mapped.as_ref(), &sec.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))?.ok_or_else(one_chain)?.points()
+        } else {
+            let ss = sketch_in_feature_frame(doc, raw, f.component)?;
+            let profiles = match (&sec.profiles, sec.curves.is_empty()) {
+                (None, true) => Some(&ProfileSel::All),
+                (p, _) => p.as_ref(),
+            };
+            let mut chains = sheet_chains(&ss, profiles, &sec.curves)?.into_iter();
+            let (Some(chain), None) = (chains.next(), chains.next()) else {
+                return Err(one_chain());
+            };
+            chain.iter().flat_map(|s| s.polyline(1e-2)).map(|p| ss.plane.to_world(p)).collect()
         };
-        let mut chains = sheet_chains(&ss, profiles, &sec.curves)?.into_iter();
-        let (Some(chain), None) = (chains.next(), chains.next()) else {
-            return Err(DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into()));
-        };
-        let pts: Vec<Vec2> = chain.iter().flat_map(|s| s.polyline(1e-2)).collect();
-        let centre = pts.iter().fold(solidcore_record::Vec3::ZERO, |a, p| a + ss.plane.to_world(*p)) * (1.0 / pts.len().max(1) as f64);
-        centres.push(centre);
-        pieces.push(Piece::Sketch(ss.plane, chain));
+        centres.push(pts.iter().fold(solidcore_record::Vec3::ZERO, |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
+        pieces.push(Piece::Points(pts));
     }
     // Each section leaves towards the one after it; the last one leaves back into the blend.
     let stations = BLEND_STATIONS;
     let last = pieces.len().saturating_sub(1);
-    let mut frames = Vec::with_capacity(pieces.len());
+    let mut frames: Vec<Vec<kernel::Frame>> = Vec::with_capacity(pieces.len());
     for (i, piece) in pieces.iter().enumerate() {
         let (from, to) = if i < last { (i, i + 1) } else { (last, last.saturating_sub(1)) };
         let leave = match (centres.get(from), centres.get(to)) {
@@ -928,7 +956,27 @@ fn loft_blend(
                 let b = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?.body.clone();
                 frames.push(kernel::loft_blend::section_frames(&b, edges, leave, stations)?);
             }
-            Piece::Sketch(plane, chain) => frames.push(chain_frames(plane, chain, leave, stations)),
+            Piece::Points(pts) => frames.push(point_frames(pts, leave, stations)?),
+        }
+    }
+    // A 3D sketch chain runs the way its curves are listed and joined, not the way a sketch
+    // section of the plain loft is drawn, so in a loft through one each open section (a body's
+    // edge chain too) is turned to run the way the section before it does, as the plain loft
+    // turns its open sections; a closed one would need its winding and seam matched, as the
+    // plain loft does.
+    if sections.iter().any(|s| section_in_space(st, s)) {
+        let end = |f: Option<&kernel::Frame>| f.map_or([f64::NAN; 3], |f| f.p.into());
+        let ends: Vec<[[f64; 3]; 2]> = frames.iter().map(|s| [end(s.first()), end(s.last())]).collect();
+        let turns = solidcore_ops::sweep::railed::open_section_turns(&ends).map_err(|e| match e {
+            solidcore_ops::Error::Unsupported(_) => {
+                DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into())
+            }
+            e => DocError::Invalid(e.to_string()),
+        })?;
+        for (these, turn) in frames.iter_mut().zip(turns) {
+            if turn {
+                these.reverse();
+            }
         }
     }
     let body = kernel::loft_blend(&frames, continuity, crown, stations)?;
@@ -937,53 +985,14 @@ fn loft_blend(
     Ok(())
 }
 
-/// The frames of one sketch chain, sampled by arclength at `stations` stations: a sketch has no
-/// face behind it, so the surface leaves along the run with no curvature to repeat there.
-fn chain_frames(
-    plane: &solidcore_record::Plane,
-    chain: &[solidcore_record::Seg2],
-    leave: solidcore_record::Vec3,
-    stations: usize,
-) -> Vec<kernel::Frame> {
-    let mut pts: Vec<Vec2> = Vec::new();
-    for seg in chain {
-        for p in seg.polyline(1e-2) {
-            if pts.last().is_none_or(|l: &Vec2| (*l - p).len() > 1e-12) {
-                pts.push(p);
-            }
-        }
-    }
-    if pts.len() < 2 || stations < 2 {
-        return Vec::new();
-    }
-    let total: f64 = pts.windows(2).map(|w| (w[1] - w[0]).len()).sum();
-    if !(total > 1e-12) {
-        return Vec::new();
-    }
-    let step = total / (stations - 1) as f64;
-    let (mut walked, mut k) = (0.0f64, 0usize);
-    let mut out = Vec::with_capacity(stations);
-    for i in 0..stations {
-        let want = step * i as f64;
-        while k + 1 < pts.len() && walked + (pts[k + 1] - pts[k]).len() < want {
-            walked += (pts[k + 1] - pts[k]).len();
-            k += 1;
-        }
-        let (Some(a), Some(b)) = (pts.get(k).copied(), pts.get(k + 1).copied()) else {
-            if let Some(p) = pts.get(k).copied() {
-                out.push(kernel::Frame {
-                    p: plane.to_world(p),
-                    leave,
-                    bend: solidcore_record::Vec3::ZERO,
-                    bend_change: solidcore_record::Vec3::ZERO,
-                });
-            }
-            continue;
-        };
-        let span = (b - a).len();
-        let t = if span > 1e-12 { ((want - walked) / span).clamp(0.0, 1.0) } else { 0.0 };
-        let p = a * (1.0 - t) + b * t;
-        out.push(kernel::Frame { p: plane.to_world(p), leave, bend: solidcore_record::Vec3::ZERO, bend_change: solidcore_record::Vec3::ZERO });
-    }
-    out
+/// The frames of a chain given by its points in space, at `stations` stations of even arc
+/// length (solidcore's `point_frames`): a sketch has no face behind it, so the surface leaves
+/// along the run with no curvature to repeat there.
+fn point_frames(pts: &[Vec3], leave: Vec3, stations: usize) -> Result<Vec<kernel::Frame>> {
+    let pts: Vec<[f64; 3]> = pts.iter().map(|&p| p.into()).collect();
+    let frames = solidcore_ops::sweep::railed::point_frames(&pts, leave.into(), stations).map_err(|e| DocError::Invalid(e.to_string()))?;
+    Ok(frames
+        .into_iter()
+        .map(|f| kernel::Frame { p: f.p.into(), leave: f.leave.into(), bend: f.bend.into(), bend_change: f.bend_change.into() })
+        .collect())
 }

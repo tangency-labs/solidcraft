@@ -1,16 +1,20 @@
-//! Exact radial embossing of orthogonal profiles on complete cylindrical walls, outside or
-//! inside (a bore, where raised is towards the axis), built on the body's schema 4 record: the
-//! wall's face loses the profiles' footprints, and each profile adds its walls (planes, along
-//! the axis or square to it) and its raised or sunk cap (the wall's cylinder at the new radius).
+//! Radial embossing of profiles wrapped round complete cylindrical walls, outside or inside (a
+//! bore, where raised is towards the axis), built on the body's schema 4 record: the wall's face
+//! loses the profiles' footprints, and each profile adds its walls and its raised or sunk cap
+//! (the wall's cylinder at the new radius). A segment along the axis or round the wall keeps an
+//! exact line or arc and a planar wall; any other (a curve, a diagonal) is fitted: cubic
+//! B-spline edges and a ruled spline wall within a quarter of the body's tolerance of the true
+//! wrap, with fitted pcurves on the wall's and the cap's forms (the record's pcurve routine
+//! makes only exact ones).
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
 use crate::history::Change;
-use crate::numbered::NumberedRegion;
+use crate::numbered::{NumberedLoop, NumberedRegion};
 use crate::offset::{Surf, face_edges, surf_of};
 use crate::{KernelError, Result, guard};
-use solidcore_record::brep::{Brep, Curve, Frame, Loop, Surface};
+use solidcore_record::brep::{Brep, Curve, Curve2, Frame, Loop, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::form;
 use solidcraft_geom::prelude::*;
 
@@ -90,7 +94,7 @@ pub fn cylinder_emboss_anchor(body: &Body, face: usize, at: Vec3) -> Result<Vec3
 }
 
 /// Wrap sketch arc length around a cylindrical wall (outside, or a bore), retaining exact radial depth.
-/// Profiles must contain orthogonal lines and lie inside one uninterrupted wall face.
+/// Profiles of any segments must lie inside one uninterrupted wall face.
 pub fn emboss_cylinder(body: &Body, plane: &Plane, regions: &[Region2], depth: f64) -> Result<Body> {
     emboss_impl(body, None, plane, regions, depth, false).and_then(EmbossOutcome::body)
 }
@@ -298,7 +302,6 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         }
         let z0 = (plane.origin - o).dot(axis);
         let s0 = (plane.origin - o).dot(tangent);
-        let map2 = |p: Vec2| Vec2::new(s0 + plane.dir_to_world(p).dot(tangent), z0 + plane.dir_to_world(p).dot(axis));
         let mut count = 0usize;
         // The regions mapped onto the wall as given (their loops' turning may differ from the
         // sketch's): profile numbering follows them.
@@ -310,43 +313,36 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                 if count > 4096 {
                     return Err(fail("profile geometry budget"));
                 }
-                if lp.segs.iter().any(|segment| !matches!(segment, Seg2::Line { .. })) {
-                    return Err(fail("only orthogonal line profiles are supported on cylinders"));
-                }
-                if lp.segs.len() < 4 || !lp.is_closed(tol) {
+                if lp.segs.is_empty() || !lp.is_closed(tol) {
                     return Err(fail("profile geometry budget or open loop"));
                 }
                 let mut segs = Vec::new();
                 for s in &lp.segs {
-                    let Seg2::Line { a, b } = *s else {
-                        return Err(fail("only orthogonal line profiles are supported on cylinders"));
-                    };
-                    if !a.is_finite() || !b.is_finite() || a.len() > 1e7 || b.len() > 1e7 {
-                        return Err(fail("nonfinite or excessive profile coordinates"));
+                    s.check(1e7).map_err(|e| fail(&format!("profile geometry: {e}")))?;
+                    let s = on_wall(s, plane, s0, z0, tangent, axis).ok_or_else(|| fail("sketch must lie flat on the cylindrical wall"))?;
+                    if s.start().dist(s.end()) < tol && s.length() < tol {
+                        return Err(fail("a profile edge of no length"));
                     }
-                    let (a, b) = (map2(a), map2(b));
-                    let d = b - a;
-                    if d.len() < tol || (d.x.abs() > tol && d.y.abs() > tol) {
-                        return Err(fail("profile edges must follow the cylinder axis or circumference"));
+                    // The whole curve, not only its ends, stays clear of the seam and endcaps.
+                    let (xlo, xhi) = (alo * r + tol, ahi * r - tol);
+                    if !clear_within(s, Vec2::new(xlo, lo + tol), Vec2::new(xhi, hi - tol), tol, &mut 256) {
+                        return Err(fail("profile crosses a cylinder seam or endcap boundary"));
                     }
-                    for p in [a, b] {
-                        if p.x / r <= alo + tol / r || p.x / r >= ahi - tol / r || p.y <= lo + tol || p.y >= hi - tol {
-                            return Err(fail("profile crosses a cylinder seam or endcap boundary"));
-                        }
-                    }
-                    segs.push(Seg2::Line { a, b });
+                    segs.push(s);
                 }
                 loops.push(Loop2 { segs });
             }
             let mut given = loops.into_iter();
             unoriented.push(Region2 { outer: given.next().ok_or_else(|| fail("profile"))?, holes: given.collect() });
         }
-        let numbered: Vec<NumberedRegion> = crate::numbered::number_regions(&unoriented).iter().map(NumberedRegion::oriented).collect();
+        // A loop of one closed curve (a circle) is split in two, so each wall has two corners.
+        let numbered: Vec<NumberedRegion> =
+            crate::numbered::number_regions(&unoriented).iter().map(|r| r.oriented().map_loops(split_single)).collect();
         let mapped: Vec<Region2> = numbered.iter().map(NumberedRegion::region).collect();
         validate_profiles(&mapped, tol)?;
         if qualify {
             let segment = mapped.first().and_then(|region| region.outer.segs.first()).ok_or_else(|| fail("empty profile"))?;
-            let p = (segment.start() + segment.end()) * 0.5;
+            let p = segment.point_at(0.5);
             let at = o + axis * p.y + (radial * (p.x / r).cos() + tangent * (p.x / r).sin()) * r;
             return Ok(EmbossOutcome::Anchor(fi, at));
         }
@@ -355,7 +351,27 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         // The footprint's arcs lie on the wall face and are labelled on its frame, so their NURBS
         // forms run on the face's own quarter grid and their pcurves there are exact.
         let label = form::frame_of(&selected.surface);
-        let wall = Wrap { o, axis, radial, tangent, r, label, tol };
+        // Curved and slanted edges, and their pcurves, are fitted within a quarter of the body's
+        // tolerance each.
+        let wall_form = label.as_ref().and_then(|f| OnForm::of(f, o, axis, radial, tangent));
+        let wall_form = wall_form.zip(selected.nurbs.as_ref()).zip(label.as_ref()).and_then(|((on, n), f)| on.on(n, f));
+        let cap_form = OnForm { delta: 0.0, sigma: 1.0, u0: 0.0, k: 1.0, v0: 0.0, vk: axis.dot(radial.cross(tangent)) };
+        let wall = Wrap {
+            o,
+            axis,
+            radial,
+            tangent,
+            r,
+            label,
+            tol,
+            fit: asm.tolerance * 0.25,
+            wall_form,
+            cap_form,
+            spans: std::cell::Cell::new(MAX_TOTAL_SPANS),
+        };
+        if mapped.iter().flat_map(|m| m.loops()).flat_map(|l| &l.segs).any(|seg| !wall.exact(seg)) {
+            wall.check_wall_form(&selected, mapped.iter().flat_map(|m| m.loops()).flat_map(|l| &l.segs).find(|seg| !wall.exact(seg)))?;
+        }
         // The cap's normal, out of the material, is away from the axis outside and towards it in a
         // bore, raised or sunk.
         let cap_out = outside;
@@ -386,7 +402,15 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                 cap.push(top);
                 added.extend(walls);
             }
-            added.push(AFace { surface: wall.cylinder(rr), nurbs: None, natural_out: cap_out, loops: cap, shell: selected.shell, domain: None });
+            // A cap bounded by fitted edges carries their fitted pcurves, so it is put on its form
+            // here (the cap's frame's quarter grid, as the pcurves are) over the region's box.
+            let (nurbs, domain) = if reg.loops().flat_map(|l| &l.lp.segs).any(|seg| !wall.exact(seg)) {
+                let (n, d) = wall.cap_form(&reg.region(), rr)?;
+                (Some(n), Some(d))
+            } else {
+                (None, None)
+            };
+            added.push(AFace { surface: wall.cylinder(rr), nurbs, natural_out: cap_out, loops: cap, shell: selected.shell, domain });
             added_history.push(crate::record::cap(true));
         }
         // An island inside a profile hole cuts that hole's original-radius patch,
@@ -434,7 +458,7 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
 
 /// A loop's uses the other way round.
 fn reversed(l: &[AUse]) -> Vec<AUse> {
-    l.iter().rev().map(|u| AUse { edge: u.edge, forward: !u.forward, given: None }).collect()
+    l.iter().rev().map(|u| AUse { edge: u.edge, forward: !u.forward, given: u.given.clone() }).collect()
 }
 
 /// The wall a profile wraps onto: its axis, the sketch's radial and tangent directions there,
@@ -448,6 +472,151 @@ struct Wrap {
     /// The wall face's own frame, which the arcs at its radius are labelled on.
     label: Option<Frame>,
     tol: f64,
+    /// How far a fitted edge or side wall may stray from the true wrap.
+    fit: f64,
+    /// Where the wall face's form puts a wrapped point, when its label has a frame.
+    wall_form: Option<OnForm>,
+    /// Where the cap's form (on its own frame, [`Wrap::cylinder`]) puts a wrapped point.
+    cap_form: OnForm,
+    /// The spans fitted edges and pcurves may still take ([`MAX_TOTAL_SPANS`]).
+    spans: std::cell::Cell<usize>,
+}
+
+/// How a cylinder's form parameterises the wall: wrapped coordinates (arc length `s` at the
+/// wall's radius `r`, height `z`) lie at the angle `delta + sigma s / r` from where the form's
+/// quarter arcs start, and at the height `v0 + vk z` along its frame's z axis. The form's u is
+/// `u0 + k` times that angle's parameter on the quarter grid ([`form::param`]): its quarters are
+/// `k` long (1 on [`form::surface`]'s forms, `r π/2` on a primitive's); its v is the height.
+#[derive(Clone, Copy, Debug)]
+struct OnForm {
+    delta: f64,
+    sigma: f64,
+    u0: f64,
+    k: f64,
+    v0: f64,
+    vk: f64,
+}
+
+impl OnForm {
+    /// The form of a cylinder labelled on `frame`, about the wall's axis.
+    fn of(frame: &Frame, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3) -> Option<OnForm> {
+        let (fo, fx, fy) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let fz = fx.cross(fy).normalized()?;
+        if fz.dot(axis).abs() < 1.0 - 1e-9 {
+            return None;
+        }
+        Some(OnForm {
+            delta: radial.dot(fy).atan2(radial.dot(fx)),
+            sigma: fz.dot(radial.cross(tangent)).signum(),
+            u0: 0.0,
+            k: 1.0,
+            v0: (o - fo).dot(fz),
+            vk: axis.dot(fz),
+        })
+    }
+
+    /// The same, on the face form `nurbs` labelled on `frame`: its quarters as long as its first
+    /// knot interval, starting where its first knot lies on the frame. [`Wrap::check_wall_form`]
+    /// confirms it.
+    fn on(self, nurbs: &Surface, frame: &Frame) -> Option<OnForm> {
+        let Surface::RationalSpline { u_knots, v_knots, .. } = nurbs else { return None };
+        let (&u0, &v_lo, &v_hi) = (u_knots.first()?, v_knots.first()?, v_knots.last()?);
+        let next = *u_knots.iter().find(|x| **x > u0)?;
+        let p = SurfaceEval::new(nurbs).ok()?.point([u0, 0.5 * (v_lo + v_hi)])?;
+        let (fo, fx, fy) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let start = (p - fo).dot(fy).atan2((p - fo).dot(fx));
+        Some(OnForm { delta: self.delta - start, u0, k: next - u0, ..self })
+    }
+}
+
+/// tan(π/8): the quarter arcs' parameter is `tan((ψ − π/4)/2) = tan(π/8)(2u − 1)`.
+const TAN_PI_8: f64 = 0.414_213_562_373_095_03;
+
+/// The form parameter's rate of change with the angle at `theta` ([`form::param`]): on its
+/// quarter, `sec²(ψ/2 − π/8) / (4 tan(π/8))`, the same at both ends of a quarter (so the
+/// parameter is C1 across quarter lines; its second derivative is not).
+fn param_rate(theta: f64) -> f64 {
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let q = (theta / quarter + 1e-12).floor();
+    let psi = (theta - q * quarter).clamp(0.0, quarter);
+    let c = (0.5 * psi - std::f64::consts::FRAC_PI_8).cos();
+    1.0 / (4.0 * TAN_PI_8 * c * c)
+}
+
+/// Bounds on the form parameter's derivatives 1 to 4 with the angle, within a quarter: those of
+/// `tan(x)/(2 tan(π/8)) / 2^k` at `|x| = π/8`, where each is largest.
+const PARAM_BOUNDS: [f64; 4] = [std::f64::consts::FRAC_1_SQRT_2, 0.292_894, 0.535_535, 0.736_549];
+
+/// The most the angle changes per unit of the form parameter: `4 tan(π/8)`, at a quarter's middle.
+const ANGLE_RATE: f64 = 4.0 * TAN_PI_8;
+
+/// The parameters in (0, 1) where segment `seg`'s first coordinate is `x`: exactly for a line
+/// and an arc, by halving the Bernstein form (polynomial, or a conic's numerator less `x` times
+/// its denominator) to 1e-13 for the rest.
+fn crossings(seg: &Seg2, x: f64) -> Vec<f64> {
+    let mut out = Vec::new();
+    match *seg {
+        Seg2::Line { a, b } => {
+            if (b.x - a.x).abs() > 0.0 {
+                out.push((x - a.x) / (b.x - a.x));
+            }
+        }
+        Seg2::Arc { center, radius, start, sweep } => {
+            let k = (x - center.x) / radius;
+            if k.abs() <= 1.0 && sweep != 0.0 {
+                let phi = k.acos();
+                let tau = std::f64::consts::TAU;
+                let (lo, hi) = if sweep > 0.0 { (start, start + sweep) } else { (start + sweep, start) };
+                for base in [phi, -phi] {
+                    let mut m = ((lo - base) / tau).floor();
+                    while base + m * tau <= hi && out.len() < 8 {
+                        out.push((base + m * tau - start) / sweep);
+                        m += 1.0;
+                    }
+                }
+            }
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => bernstein_roots(&[p0.x - x, p1.x - x, p2.x - x, p3.x - x], 0.0, 1.0, &mut 4096, &mut out),
+        Seg2::Bezier { n, ref p } => {
+            let c: Vec<f64> = p.iter().take(usize::from(n) + 1).map(|q| q.x - x).collect();
+            bernstein_roots(&c, 0.0, 1.0, &mut 4096, &mut out)
+        }
+        Seg2::Conic { a, apex, b, w } => bernstein_roots(&[a.x - x, w * (apex.x - x), b.x - x], 0.0, 1.0, &mut 4096, &mut out),
+    }
+    out.retain(|t| t.is_finite() && *t > 1e-12 && *t < 1.0 - 1e-12);
+    out
+}
+
+/// The roots in (`lo`, `hi`) of the polynomial with Bernstein coefficients `c` there, by halving
+/// wherever the coefficients change sign, to 1e-13 (or out of `budget` halvings).
+fn bernstein_roots(c: &[f64], lo: f64, hi: f64, budget: &mut usize, out: &mut Vec<f64>) {
+    if c.iter().all(|x| *x > 0.0) || c.iter().all(|x| *x < 0.0) || c.is_empty() {
+        return;
+    }
+    if hi - lo < 1e-13 || *budget == 0 {
+        let t = 0.5 * (lo + hi);
+        if out.last().is_none_or(|l| t - l > 1e-10) {
+            out.push(t);
+        }
+        return;
+    }
+    *budget -= 1;
+    // de Casteljau at the middle: the left half's coefficients are the first of each row, the
+    // right half's the last, read back.
+    let mut row = c.to_vec();
+    let (mut left, mut right) = (vec![0.0; c.len()], vec![0.0; c.len()]);
+    for k in 0..c.len() {
+        if let (Some(l), Some(f)) = (left.get_mut(k), row.first()) {
+            *l = *f;
+        }
+        if let (Some(r), Some(b)) = (right.get_mut(c.len() - 1 - k), row.last()) {
+            *r = *b;
+        }
+        row = row.windows(2).map(|w| 0.5 * (w[0] + w[1])).collect();
+    }
+    let mid = 0.5 * (lo + hi);
+    bernstein_roots(&left, lo, mid, budget, out);
+    bernstein_roots(&right, mid, hi, budget, out);
 }
 
 impl Wrap {
@@ -482,8 +651,9 @@ impl Wrap {
     }
 
     /// A profile loop wrapped onto the wall: its footprint at the wall's radius and its cap's
-    /// loop at `rr`, both running as the loop does, and one planar wall per segment between
-    /// them (each loop seen from outside the body).
+    /// loop at `rr`, both running as the loop does, and one side wall per segment between them
+    /// (each loop seen from outside the body). A segment along the axis or round the wall keeps
+    /// its exact line or arc and a planar wall; any other is fitted ([`Wrap::fitted`]).
     fn wrapped_loop(&self, asm: &mut Assembly, lp: &Loop2, rr: f64, shell: usize) -> Result<(Vec<AUse>, Vec<AUse>, Vec<AFace>)> {
         let corners: Vec<Vec2> = lp.segs.iter().map(Seg2::start).collect();
         let base: Vec<u32> = corners.iter().map(|p| asm.vertex(self.at(*p, self.r))).collect::<Result<_>>()?;
@@ -491,34 +661,440 @@ impl Wrap {
         let radial: Vec<u32> = base.iter().zip(&top).map(|(a, b)| asm.line(*a, *b)).collect::<Result<_>>()?;
         let n = corners.len();
         let (mut be, mut te, mut walls) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
-        for i in 0..n {
+        for (i, seg) in lp.segs.iter().enumerate() {
             let j = (i + 1) % n;
             let (Some(&p), Some(&q), Some(&ba), Some(&bb), Some(&ta), Some(&tb), Some(&ra), Some(&rb)) =
                 (corners.get(i), corners.get(j), base.get(i), base.get(j), top.get(i), top.get(j), radial.get(i), radial.get(j))
             else {
                 return Err(fail("loop topology"));
             };
-            let eb = self.edge(asm, ba, bb, p, q, self.r)?;
-            let et = self.edge(asm, ta, tb, p, q, rr)?;
-            // The wall's plane, its natural normal along the loop's turning: out of the
-            // material whether the cap is raised or sunk.
-            let mid = (p + q) * 0.5;
-            let ring = [self.at(p, self.r), self.at(mid, self.r), self.at(q, self.r), self.at(q, rr), self.at(mid, rr), self.at(p, rr)];
-            let normal = newell(&ring).ok_or_else(|| fail("a wall of no area"))?;
-            let u = (ring[2] - ring[0]).normalized().ok_or_else(|| fail("a wall of no width"))?;
-            let u = (u - normal * u.dot(normal)).normalized().ok_or_else(|| fail("a wall of no width"))?;
-            let surface = Surface::Plane { origin: arr(ring[0]), u_axis: arr(u), v_axis: arr(normal.cross(u)) };
-            let lp = vec![
-                eb.clone(),
-                AUse { edge: rb, forward: true, given: None },
-                AUse { edge: et.edge, forward: !et.forward, given: None },
-                AUse { edge: ra, forward: false, given: None },
-            ];
-            walls.push(AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None });
+            let (eb, et, wall) = if self.exact(seg) {
+                let eb = self.edge(asm, ba, bb, p, q, self.r)?;
+                let et = self.edge(asm, ta, tb, p, q, rr)?;
+                // The wall's plane, its natural normal along the loop's turning: out of the
+                // material whether the cap is raised or sunk.
+                let mid = (p + q) * 0.5;
+                let ring = [self.at(p, self.r), self.at(mid, self.r), self.at(q, self.r), self.at(q, rr), self.at(mid, rr), self.at(p, rr)];
+                let normal = newell(&ring).ok_or_else(|| fail("a wall of no area"))?;
+                let u = (ring[2] - ring[0]).normalized().ok_or_else(|| fail("a wall of no width"))?;
+                let u = (u - normal * u.dot(normal)).normalized().ok_or_else(|| fail("a wall of no width"))?;
+                let surface = Surface::Plane { origin: arr(ring[0]), u_axis: arr(u), v_axis: arr(normal.cross(u)) };
+                let lp = vec![
+                    eb.clone(),
+                    AUse { edge: rb, forward: true, given: None },
+                    AUse { edge: et.edge, forward: !et.forward, given: None },
+                    AUse { edge: ra, forward: false, given: None },
+                ];
+                (eb, et, AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None })
+            } else {
+                self.fitted(asm, seg, q, rr, [ba, bb, ta, tb, ra, rb], shell)?
+            };
+            walls.push(wall);
             be.push(eb);
             te.push(et);
         }
         Ok((be, te, walls))
+    }
+
+    /// Take `n` spans from the emboss's budget, or refuse it as too detailed.
+    fn take_spans(&self, n: usize) -> Result<()> {
+        let left = self.spans.get().checked_sub(n).ok_or_else(|| fail("the profiles are too detailed to wrap"))?;
+        self.spans.set(left);
+        Ok(())
+    }
+
+    /// Whether segment `seg` (wall coordinates) wraps exactly: a line along the axis or round
+    /// the wall. Any other is fitted.
+    fn exact(&self, seg: &Seg2) -> bool {
+        let d = seg.end() - seg.start();
+        matches!(seg, Seg2::Line { .. }) && (d.x.abs() <= self.tol || d.y.abs() <= self.tol)
+    }
+
+    /// That the wall face's form is the one [`OnForm`] describes (its frame's quarter grid), at
+    /// the start of the fitted segment `seg`: its pcurves are fitted on that form.
+    fn check_wall_form(&self, selected: &AFace, seg: Option<&Seg2>) -> Result<()> {
+        let refuse = || fail("the wall's surface form is not on its frame's quarter grid");
+        let (Some(on), Some(nurbs), Some(seg)) = (self.wall_form, selected.nurbs.as_ref(), seg) else { return Err(refuse()) };
+        let eval = SurfaceEval::new(nurbs).map_err(|_| refuse())?;
+        let c = seg.start();
+        let (mut u, v) = (on.u0 + on.k * form::param(on.delta + on.sigma * c.x / self.r), on.v0 + on.vk * c.y);
+        // Onto the face's own turn of the form (four quarters to a turn).
+        if let Some([[u0, _], _]) = selected.domain {
+            u -= ((u - u0) / (4.0 * on.k)).floor() * 4.0 * on.k;
+        }
+        let hit = eval.point([u, v]).ok_or_else(refuse)?;
+        if hit.dist(self.at(c, self.r)) > self.fit {
+            return Err(refuse());
+        }
+        Ok(())
+    }
+
+    /// The cap's form over region `region`'s box (wall coordinates) at `rr`, and its domain.
+    fn cap_form(&self, region: &Region2, rr: f64) -> Result<(Surface, [[f64; 2]; 2])> {
+        let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        for seg in region.loops().flat_map(|l| &l.segs) {
+            let (l, h) = seg_box(seg);
+            lo = Vec2::new(lo.x.min(l.x), lo.y.min(l.y));
+            hi = Vec2::new(hi.x.max(h.x), hi.y.max(h.y));
+        }
+        let pad = self.tol * 100.0;
+        let on = self.cap_form;
+        let (v0, v1) = (on.v0 + on.vk * lo.y, on.v0 + on.vk * hi.y);
+        // The angle padding keeps the domain short of a whole turn: a padded domain of a turn
+        // would take the form of a whole turn from the quarter its padded start lies in, which
+        // can end before the boundary's own angles (a footprint near a whole turn).
+        let (a0, a1) = (lo.x / self.r, hi.x / self.r);
+        let pad_u = (pad / self.r).min(0.5 * (std::f64::consts::TAU * (1.0 - 1e-8) - (a1 - a0)));
+        if pad_u.is_nan() || pad_u <= 0.0 {
+            return Err(fail("profile wraps a whole turn"));
+        }
+        let domain = [[a0 - pad_u, a1 + pad_u], [v0.min(v1) - pad, v0.max(v1) + pad]];
+        form::surface(&self.cylinder(rr), domain).ok_or_else(|| fail("cap form"))
+    }
+
+    /// The pcurve of the wrap of segment `seg` (ending at the next corner `q`) on the form `on`
+    /// of a cylinder of `radius`, in the edge's parameter t in [0, 1] (the segment's own): the
+    /// cubic Hermite spline through the form parameters and their rates at breaks that include
+    /// every quarter line it crosses (where the parameter is only C1), with enough breaks
+    /// between them that it lifts within `fit` of the wrap. Lifted, an error `du` in u moves at
+    /// most `radius · 4tan(π/8) · du` and one in v as much; the parameter's fourth derivative
+    /// in t is bounded from [`PARAM_BOUNDS`] and the segment's [`derivative_bounds`] by Faà di
+    /// Bruno's formula, as in [`fit_spans`].
+    fn pcurve(&self, seg: &Seg2, q: Vec2, on: OnForm, radius: f64) -> Result<Curve2> {
+        let b = derivative_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
+        let across = across_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
+        let th: Vec<f64> = across.iter().map(|x| x / self.r).collect();
+        let (Some(&t1), Some(&t2), Some(&t3), Some(&t4)) = (th.first(), th.get(1), th.get(2), th.get(3)) else { return Err(fail("bounds")) };
+        let [g1, g2, g3, g4] = PARAM_BOUNDS;
+        let u4 = g1 * t4 + g2 * (4.0 * t1 * t3 + 3.0 * t2 * t2) + 6.0 * g3 * t1 * t1 * t2 + g4 * t1.powi(4);
+        let m = radius * ANGLE_RATE * u4 + b[3];
+        let room = self.fit - seg.end().dist(q) * (radius / self.r).max(1.0);
+        if room.is_nan() || room <= 0.0 {
+            return Err(fail("a profile curve is too detailed to wrap"));
+        }
+        // The quarter lines the segment crosses, as values of its first coordinate.
+        let (lo, hi) = seg_box(seg);
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let angle = |x: f64| on.delta + on.sigma * x / self.r;
+        let (a0, a1) = (angle(lo.x).min(angle(hi.x)), angle(lo.x).max(angle(hi.x)));
+        let mut cuts = vec![0.0, 1.0];
+        let mut k = (a0 / quarter).ceil();
+        while k * quarter <= a1 && cuts.len() < 64 {
+            cuts.extend(crossings(seg, (k * quarter - on.delta) * self.r / on.sigma));
+            k += 1.0;
+        }
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-10);
+        let mut breaks = vec![0.0];
+        for w in cuts.windows(2) {
+            let (a, z) = (w[0], w[1]);
+            let n = ((z - a) * (3f64.sqrt() * m / (384.0 * room)).powf(0.25)).ceil().max(1.0);
+            if !n.is_finite() || n > MAX_SPANS as f64 {
+                return Err(fail("a profile curve is too detailed to wrap"));
+            }
+            let n = n as usize;
+            breaks.extend((1..=n).map(|i| if i == n { z } else { a + (z - a) * i as f64 / n as f64 }));
+        }
+        self.take_spans(breaks.len())?;
+        let mut knots = vec![0.0; 4];
+        let mut points: Vec<[f64; 2]> = Vec::with_capacity(2 * breaks.len());
+        let last = breaks.len() - 1;
+        for (i, &t) in breaks.iter().enumerate() {
+            let c = if i == last { q } else { seg.point_at(t) };
+            let d = seg.derivative(t);
+            let theta = angle(c.x);
+            let (u, du) = (on.u0 + on.k * form::param(theta), on.k * param_rate(theta) * on.sigma * d.x / self.r);
+            let (v, dv) = (on.v0 + on.vk * c.y, on.vk * d.y);
+            if ![u, du, v, dv].iter().all(|x| x.is_finite()) {
+                return Err(fail("a profile curve that does not evaluate"));
+            }
+            let before = i.checked_sub(1).and_then(|k| breaks.get(k)).map_or(0.0, |b| (t - b) / 3.0);
+            let after = breaks.get(i + 1).map_or(0.0, |b| (b - t) / 3.0);
+            if i > 0 {
+                points.push([u - du * before, v - dv * before]);
+            }
+            if i == 0 || i == last {
+                points.push([u, v]);
+            }
+            if i < last {
+                points.push([u + du * after, v + dv * after]);
+                if i > 0 {
+                    knots.extend([t, t]);
+                }
+            }
+        }
+        knots.extend([1.0; 4]);
+        Ok(Curve2::Spline { knots, points })
+    }
+
+    /// The wrap of a curved or slanted segment `seg` (wall coordinates; it ends at the next
+    /// corner `q`): its base edge on the wall, a cubic B-spline through the wrap's points and
+    /// tangents at even steps (Hermite, so C1 with double knots), with enough steps that it
+    /// strays at most `fit` from the wrap ([`fit_spans`]); its top edge, the base's control points
+    /// moved out radially to `rr`, which is the wrap at `rr` within `fit` too (the move is affine
+    /// and scales errors by at most `max(1, rr / r)`, which the fit allows for); and the side wall
+    /// between them, the ruled spline surface through both, whose ends are the radial edges.
+    /// `v` holds the base corners, the top corners and the radial edges at the start and end.
+    /// Every use on the side wall carries its exact pcurve (u along the segment, v from base to
+    /// top).
+    fn fitted(&self, asm: &mut Assembly, seg: &Seg2, q: Vec2, rr: f64, v: [u32; 6], shell: usize) -> Result<(AUse, AUse, AFace)> {
+        let [ba, bb, ta, tb, ra, rb] = v;
+        let scale = (rr / self.r).max(1.0);
+        // Where the next corner is not exactly where this segment ends, the spline goes to the
+        // corner: the gap counts against the fit.
+        let room = self.fit / scale - seg.end().dist(q);
+        let bounds = derivative_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
+        let across = across_bounds(seg).ok_or_else(|| fail("a profile curve whose shape cannot be bounded"))?;
+        let n = fit_spans(bounds, across, self.r, room).ok_or_else(|| fail("a profile curve is too detailed to wrap"))?;
+        self.take_spans(n)?;
+        let h = 1.0 / n as f64;
+        // The B-spline's control points: each span's Bézier points, the point shared by two
+        // spans left out (the double knot puts it halfway between its neighbours, where it is).
+        let mut knots = vec![0.0; 4];
+        let mut lower: Vec<Vec3> = Vec::with_capacity(2 * n + 2);
+        for i in 0..=n {
+            let t = i as f64 * h;
+            let c = if i == n { q } else { seg.point_at(t) };
+            let d = seg.derivative(t);
+            if !c.is_finite() || !d.is_finite() {
+                return Err(fail("a profile curve that does not evaluate"));
+            }
+            let w = self.at(c, self.r);
+            let theta = c.x / self.r;
+            let dw = (self.axis * d.y + (self.tangent * theta.cos() - self.radial * theta.sin()) * d.x) * (h / 3.0);
+            if i == 0 {
+                lower.extend([w, w + dw]);
+            } else if i == n {
+                lower.extend([w - dw, w]);
+            } else {
+                lower.extend([w - dw, w + dw]);
+                knots.extend([t, t]);
+            }
+        }
+        knots.extend([1.0; 4]);
+        let (Some(pa), Some(pb), Some(qa), Some(qb)) = (asm.point(ba), asm.point(bb), asm.point(ta), asm.point(tb)) else {
+            return Err(fail("vertex reference"));
+        };
+        let out = |p: Vec3| {
+            let along = self.axis * (p - self.o).dot(self.axis);
+            self.o + along + (p - self.o - along) * (rr / self.r)
+        };
+        let mut upper: Vec<Vec3> = lower.iter().map(|p| out(*p)).collect();
+        // The ends are the corners' vertices exactly.
+        for (row, a, b) in [(&mut lower, pa, pb), (&mut upper, qa, qb)] {
+            if let Some(first) = row.first_mut() {
+                *first = a;
+            }
+            if let Some(last) = row.last_mut() {
+                *last = b;
+            }
+        }
+        let spline = |row: &[Vec3]| Curve::Spline { knots: knots.clone(), points: row.iter().map(|p| arr(*p)).collect() };
+        let eb = asm.edge(spline(&lower), [0.0, 1.0], ba, bb)?;
+        let et = asm.edge(spline(&upper), [0.0, 1.0], ta, tb)?;
+        let surface = Surface::Spline {
+            u_knots: knots.clone(),
+            v_knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: lower.iter().zip(&upper).map(|(a, b)| vec![arr(*a), arr(*b)]).collect(),
+        };
+        let line = |a: [f64; 2], b: [f64; 2]| Some(Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![a, b] });
+        let lp = vec![
+            AUse { edge: eb, forward: true, given: line([0.0, 0.0], [1.0, 0.0]) },
+            AUse { edge: rb, forward: true, given: line([1.0, 0.0], [1.0, 1.0]) },
+            AUse { edge: et, forward: false, given: line([0.0, 1.0], [1.0, 1.0]) },
+            AUse { edge: ra, forward: false, given: line([0.0, 0.0], [0.0, 1.0]) },
+        ];
+        let face = AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None };
+        let on_wall = self.wall_form.ok_or_else(|| fail("the wall's surface form is not on its frame's quarter grid"))?;
+        let below = self.pcurve(seg, q, on_wall, self.r)?;
+        let above = self.pcurve(seg, q, self.cap_form, rr)?;
+        Ok((AUse { edge: eb, forward: true, given: Some(below) }, AUse { edge: et, forward: true, given: Some(above) }, face))
+    }
+}
+
+/// The most cubic spans one fitted edge or pcurve takes, and all of one emboss's together: past
+/// them a profile is refused as too detailed rather than built slowly.
+const MAX_SPANS: usize = 512;
+const MAX_TOTAL_SPANS: usize = 50_000;
+
+/// Bounds on the size of a segment's derivatives 1 to 4 in its own parameter over [0, 1]: a
+/// line's and an arc's exactly, a polynomial Bézier's from its derivatives' control points (a
+/// Bézier lies in their hull), a conic's from its rational form (`C d = N` differentiated by
+/// Leibniz's rule, `d` at least its least value on [0, 1]). `None` for a shape that does not
+/// bound (a conic weight that is not positive).
+fn derivative_bounds(seg: &Seg2) -> Option<[f64; 4]> {
+    let b = match *seg {
+        Seg2::Line { a, b } => [b.dist(a), 0.0, 0.0, 0.0],
+        Seg2::Arc { radius, sweep, .. } => {
+            let s = sweep.abs();
+            [radius * s, radius * s * s, radius * s.powi(3), radius * s.powi(4)]
+        }
+        Seg2::Cubic { p0, p1, p2, p3 } => polynomial_bounds(&[p0, p1, p2, p3]),
+        Seg2::Bezier { n, ref p } => polynomial_bounds(p.get(..=usize::from(n))?),
+        Seg2::Conic { a, apex, b, w } => {
+            if !w.is_finite() || w <= 0.0 {
+                return None;
+            }
+            // About `a`: N = 2w(apex - a)t(1 - t) + (b - a)t², d = 1 + 2(w - 1)t(1 - t), whose
+            // Bernstein coefficients are (0, w(apex - a), b - a) and (1, w, 1).
+            let (q1, q2) = ((apex - a) * w, b - a);
+            let b0 = (apex - a).len().max(q2.len());
+            let n1 = (q1 * 2.0).len().max(((q2 - q1) * 2.0).len());
+            let n2 = ((q2 - q1 * 2.0) * 2.0).len();
+            let (d1, d2) = (2.0 * (w - 1.0).abs(), 4.0 * (w - 1.0).abs());
+            let dmin = (0.5 * (1.0 + w)).min(1.0);
+            let b1 = (n1 + d1 * b0) / dmin;
+            let b2 = (n2 + 2.0 * d1 * b1 + d2 * b0) / dmin;
+            let b3 = (3.0 * d1 * b2 + 3.0 * d2 * b1) / dmin;
+            let b4 = (4.0 * d1 * b3 + 6.0 * d2 * b2) / dmin;
+            [b1, b2, b3, b4]
+        }
+    };
+    b.iter().all(|x| x.is_finite()).then_some(b)
+}
+
+/// [`derivative_bounds`] of a segment's first coordinate alone (in wall coordinates, the way
+/// round the wall; the height runs straight and does not turn the wrap): those of its shadow on
+/// that axis, its control points' first coordinates (a Bézier or conic's shadow is the Bézier
+/// or conic of its controls' shadows); an arc's are its own.
+fn across_bounds(seg: &Seg2) -> Option<[f64; 4]> {
+    match seg {
+        Seg2::Arc { .. } => derivative_bounds(seg),
+        _ => derivative_bounds(&seg.map_controls(|p| Vec2::new(p.x, 0.0))),
+    }
+}
+
+/// [`derivative_bounds`] of the polynomial Bézier with control points `p`.
+fn polynomial_bounds(p: &[Vec2]) -> [f64; 4] {
+    let mut out = [0.0; 4];
+    let mut diffs: Vec<Vec2> = p.to_vec();
+    let mut factor = 1.0;
+    for slot in &mut out {
+        let degree = diffs.len().saturating_sub(1);
+        if degree == 0 {
+            break;
+        }
+        factor *= degree as f64;
+        diffs = diffs.windows(2).map(|w| w[1] - w[0]).collect();
+        *slot = factor * diffs.iter().map(|d| d.len()).fold(0.0, f64::max);
+    }
+    out
+}
+
+/// How many even spans a cubic Hermite fit of the wrap of a segment needs to stay within `room`
+/// of it, from the segment's [`derivative_bounds`] `b`, those of its first coordinate alone
+/// `across` ([`across_bounds`]: only the way round the wall bends the wrap) and the wall radius `r`. The wrap is
+/// `axis z + r (radial cos(s/r) + tangent sin(s/r))`; Faà di Bruno's formula bounds its fourth
+/// derivative by `M = |z''''| + |s''''| + (4|s'||s'''| + 3|s''|²)/r + 6|s'|²|s''|/r² + |s'|⁴/r³`,
+/// and a Hermite cubic on a span of length h misses a function by at most `h⁴/384` of its
+/// fourth derivative, in each of the three coordinates. `None` past [`MAX_SPANS`] or without room.
+fn fit_spans(b: [f64; 4], across: [f64; 4], r: f64, room: f64) -> Option<usize> {
+    let [s1, s2, s3, _] = across;
+    if room.is_nan() || room <= 0.0 || r.is_nan() || r <= 0.0 {
+        return None;
+    }
+    let m = 2.0 * b[3] + (4.0 * s1 * s3 + 3.0 * s2 * s2) / r + 6.0 * s1 * s1 * s2 / (r * r) + s1.powi(4) / r.powi(3);
+    let n = (3f64.sqrt() * m / (384.0 * room)).powf(0.25).ceil().max(1.0);
+    (n.is_finite() && n <= MAX_SPANS as f64).then_some(n as usize)
+}
+
+/// `seg` (sketch coordinates) in the wall's coordinates (arc length round the wall from the
+/// sketch's radial, height along the axis): the sketch plane is tangent to the wall, so the map
+/// is a rigid motion of the plane, which keeps every kind of segment (an arc turns, or runs the
+/// other way round where the map mirrors). `None` for an arc where the frame is not tangent.
+fn on_wall(seg: &Seg2, plane: &Plane, s0: f64, z0: f64, tangent: Vec3, axis: Vec3) -> Option<Seg2> {
+    let m = |p: Vec2| Vec2::new(plane.dir_to_world(p).dot(tangent), plane.dir_to_world(p).dot(axis));
+    let map = |p: Vec2| m(p) + Vec2::new(s0, z0);
+    Some(match *seg {
+        Seg2::Arc { center, radius, start, sweep } => {
+            let (cx, cy) = (m(Vec2::new(1.0, 0.0)), m(Vec2::new(0.0, 1.0)));
+            if (cx.len() - 1.0).abs() > 1e-9 || (cy.len() - 1.0).abs() > 1e-9 || cx.dot(cy).abs() > 1e-9 {
+                return None;
+            }
+            let det = cx.x * cy.y - cx.y * cy.x;
+            let dir = m(Vec2::new(start.cos(), start.sin()));
+            Seg2::Arc { center: map(center), radius, start: dir.y.atan2(dir.x), sweep: sweep * det.signum() }
+        }
+        _ => seg.map_controls(map),
+    })
+}
+
+/// A box round a segment: a line's ends, a polynomial or conic Bézier's control points (it lies
+/// in their hull; a conic's weight is positive), an arc's ends and the extremes it sweeps over.
+fn seg_box(seg: &Seg2) -> (Vec2, Vec2) {
+    let points: Vec<Vec2> = match *seg {
+        Seg2::Line { a, b } => vec![a, b],
+        Seg2::Cubic { p0, p1, p2, p3 } => vec![p0, p1, p2, p3],
+        Seg2::Conic { a, apex, b, .. } => vec![a, apex, b],
+        Seg2::Bezier { n, ref p } => p.iter().take(usize::from(n) + 1).copied().collect(),
+        Seg2::Arc { center, radius, start, sweep } => {
+            let mut v = vec![seg.start(), seg.end()];
+            let (lo, hi) = if sweep >= 0.0 { (start, start + sweep) } else { (start + sweep, start) };
+            let quarter = std::f64::consts::FRAC_PI_2;
+            let mut k = (lo / quarter).ceil();
+            while k * quarter <= hi && v.len() < 8 {
+                v.push(center + Vec2::from_angle(k * quarter) * radius);
+                k += 1.0;
+            }
+            v
+        }
+    };
+    let first = points.first().copied().unwrap_or_default();
+    points.iter().fold((first, first), |(l, h), p| (Vec2::new(l.x.min(p.x), l.y.min(p.y)), Vec2::new(h.x.max(p.x), h.y.max(p.y))))
+}
+
+/// Whether segments `s` and `t` cross or come within `tol`: their boxes ([`seg_box`]) are
+/// halved (exactly, [`Seg2Geom::split_half`]) until they part, or both are under `tol` across
+/// where they meet. Out of `budget` halvings it answers that they meet, which refuses the
+/// profile rather than build a body that crosses itself.
+fn segs_meet(s: Seg2, t: Seg2, tol: f64, budget: &mut usize) -> bool {
+    let ((sl, sh), (tl, th)) = (seg_box(&s), seg_box(&t));
+    if sl.x > th.x + tol || tl.x > sh.x + tol || sl.y > th.y + tol || tl.y > sh.y + tol {
+        return false;
+    }
+    let (ss, ts) = ((sh - sl).len(), (th - tl).len());
+    if ss <= tol && ts <= tol {
+        return true;
+    }
+    if *budget == 0 {
+        return true;
+    }
+    *budget -= 1;
+    if ss >= ts {
+        let (a, b) = s.split_half();
+        segs_meet(a, t, tol, budget) || segs_meet(b, t, tol, budget)
+    } else {
+        let (a, b) = t.split_half();
+        segs_meet(s, a, tol, budget) || segs_meet(s, b, tol, budget)
+    }
+}
+
+/// Whether segment `s` lies strictly inside the box from `lo` to `hi`: its [`seg_box`] does, or
+/// each half does (halved exactly, as in [`segs_meet`]), so control points past a limit that the
+/// curve itself stays short of do not refuse it. A piece under `tol` across that still reaches a
+/// limit, or running out of `budget` halvings, answers no, which refuses the profile.
+fn clear_within(s: Seg2, lo: Vec2, hi: Vec2, tol: f64, budget: &mut usize) -> bool {
+    let (sl, sh) = seg_box(&s);
+    if sl.x > lo.x && sh.x < hi.x && sl.y > lo.y && sh.y < hi.y {
+        return true;
+    }
+    if sh.x <= lo.x || sl.x >= hi.x || sh.y <= lo.y || sl.y >= hi.y || (sh - sl).len() <= tol || *budget == 0 {
+        return false;
+    }
+    *budget -= 1;
+    let (a, b) = s.split_half();
+    clear_within(a, lo, hi, tol, budget) && clear_within(b, lo, hi, tol, budget)
+}
+
+/// A loop of one closed segment split into its two halves (both over the segment); any other
+/// loop as it is.
+fn split_single(l: &NumberedLoop) -> NumberedLoop {
+    match (l.lp.segs.as_slice(), l.from.as_slice()) {
+        ([seg], [from]) => {
+            let (a, b) = seg.split_half();
+            NumberedLoop { lp: Loop2 { segs: vec![a, b] }, from: vec![from.clone(), from.clone()] }
+        }
+        _ => l.clone(),
     }
 }
 
@@ -658,12 +1234,18 @@ fn validate_profiles(regions: &[Region2], tol: f64) -> Result<()> {
             let ab = b - a;
             let cd = d - c;
             let cross = ab.cross(cd);
-            let intersects = if cross.abs() > tol * tol {
-                let u = (c - a).cross(cd) / cross;
-                let v = (c - a).cross(ab) / cross;
-                (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v)
-            } else {
-                false
+            let intersects = match (s, t) {
+                (Seg2::Line { .. }, Seg2::Line { .. }) if cross.abs() > tol * tol => {
+                    let u = (c - a).cross(cd) / cross;
+                    let v = (c - a).cross(ab) / cross;
+                    (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v)
+                }
+                (Seg2::Line { .. }, Seg2::Line { .. }) => false,
+                // A curve's chord is not the curve: halve both until their boxes part or meet.
+                _ => {
+                    let mut budget = 20_000usize;
+                    segs_meet(*s, *t, tol, &mut budget)
+                }
             };
             if intersects
                 || [a, b].iter().any(|p| t.point_at(t.closest_param(*p)).dist(*p) < tol)
@@ -708,6 +1290,9 @@ mod tests {
     }
     fn plane() -> Plane {
         Plane::new(Vec3::Y * 10., -Vec3::X, Vec3::Z).unwrap()
+    }
+    fn volume(b: &Body) -> f64 {
+        crate::measure(b).unwrap().volume
     }
     #[test]
     fn inference_uses_finite_wall_footprint_and_an_interior_profile_anchor() {
@@ -857,17 +1442,12 @@ mod tests {
         let before = crate::step_export(&[&sleeve], "unchanged").unwrap();
         let mut cap = profile();
         cap.outer = Loop2::polygon(&[Vec2::new(-2., 19.), Vec2::new(2., 19.), Vec2::new(2., 21.), Vec2::new(-2., 21.)]);
+        // A circle wraps (#5358); a profile crossing itself does not.
         let circle = Region2 { outer: Loop2::circle(Vec2::new(0., 7.5), 1.), holes: vec![] };
+        assert_eq!(emboss_cylinder(&sleeve, &plane(), &[circle], 1.).unwrap().shell_count(), 1);
         let mut crossing = profile();
         crossing.outer = Loop2::polygon(&[Vec2::new(-2., 5.), Vec2::new(2., 10.), Vec2::new(-2., 10.), Vec2::new(2., 5.)]);
-        for (profiles, d) in [
-            (vec![profile()], -2.),
-            (vec![cap], 1.),
-            (vec![circle], 1.),
-            (vec![crossing], 1.),
-            (vec![profile()], f64::NAN),
-            (vec![profile(); 65], 1.),
-        ] {
+        for (profiles, d) in [(vec![profile()], -2.), (vec![cap], 1.), (vec![crossing], 1.), (vec![profile()], f64::NAN), (vec![profile(); 65], 1.)] {
             assert!(emboss_cylinder(&sleeve, &plane(), &profiles, d).is_err());
         }
         // A pick anywhere on the exterior wall identifies it (#3782); one on the bore does not.
@@ -920,5 +1500,169 @@ mod tests {
         // The sketch's side of the tangent plane does not matter in a bore.
         let flipped = Plane::new(Vec3::Y * 8., Vec3::X, Vec3::Z).unwrap();
         assert!(infer_cylinder_emboss(&tube, &flipped, &[rect], 1.).unwrap().is_some());
+    }
+
+    /// Curved and slanted profiles wrapped on a full outside wall and in a bore: the body stays
+    /// one valid shell and changes by the wrapped region's exact volume, the profile's area times
+    /// `|rr² - r²| / 2r`; every fitted edge lies on its cylinder within the fit.
+    /// Profiles a looser bound refused wrap (#19229 review): a long slant that barely turns round
+    /// a thin wall needs few spans (only the way round bends the wrap), and a curve whose control
+    /// points pass the top endcap while the curve stays short of it is clear of the endcap.
+    #[test]
+    fn long_slants_and_curves_near_an_endcap_wrap() {
+        let thin = crate::cylinder(Vec3::ZERO, Vec3::Z, 1., 200.).unwrap();
+        let on_thin = Plane::new(Vec3::Y, -Vec3::X, Vec3::Z).unwrap();
+        let slant = Loop2::polygon(&[Vec2::new(-0.25, 1.), Vec2::new(0.25, 1.), Vec2::new(0.45, 199.), Vec2::new(-0.05, 199.)]);
+        // Endpoints at height 18, controls at 20: the curve peaks at 19.5 on a wall 20 high.
+        let dome = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(2., 18.), b: Vec2::new(-2., 18.) },
+                Seg2::Cubic { p0: Vec2::new(-2., 18.), p1: Vec2::new(-1., 20.), p2: Vec2::new(1., 20.), p3: Vec2::new(2., 18.) },
+            ],
+        };
+        let outside = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        for (body, sketch, outer, r) in [(&thin, on_thin, slant, 1.), (&outside, plane(), dome, 10.)] {
+            let region = Region2 { outer, holes: vec![] };
+            let before = volume(body);
+            for depth in [0.2, -0.2] {
+                let rr: f64 = r + depth;
+                let result = emboss_cylinder(body, &sketch, std::slice::from_ref(&region), depth).unwrap();
+                assert_eq!(result.shell_count(), 1);
+                assert!(result.validity().is_empty());
+                let want = depth.signum() * region.area() * (rr * rr - r * r).abs() / (2. * r);
+                let change = volume(&result) - before;
+                assert!((change - want).abs() < 1e-6 * region.area(), "r {r} depth {depth}: {change} vs {want}");
+            }
+        }
+        // A curve that does cross the endcap is still refused.
+        let past = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(2., 18.), b: Vec2::new(-2., 18.) },
+                Seg2::Cubic { p0: Vec2::new(-2., 18.), p1: Vec2::new(-1., 21.), p2: Vec2::new(1., 21.), p3: Vec2::new(2., 18.) },
+            ],
+        };
+        let e = emboss_cylinder(&outside, &plane(), &[Region2 { outer: past, holes: vec![] }], 0.2).unwrap_err();
+        assert!(e.to_string().contains("seam or endcap"), "{e}");
+    }
+
+    #[test]
+    fn curved_and_slanted_profiles_wrap_to_the_analytic_volume() {
+        let circle = |c: Vec2, r: f64| Loop2::circle(c, r);
+        let quarter = std::f64::consts::FRAC_1_SQRT_2;
+        // A circle of four conic quarters, a lens of two parabolic conics, a blob of cubics.
+        let conics = |c: Vec2, r: f64| Loop2 {
+            segs: [(1., 0., 1., 1., 0., 1.), (0., 1., -1., 1., -1., 0.), (-1., 0., -1., -1., 0., -1.), (0., -1., 1., -1., 1., 0.)]
+                .iter()
+                .map(|&(ax, ay, px, py, bx, by)| Seg2::Conic {
+                    a: c + Vec2::new(ax, ay) * r,
+                    apex: c + Vec2::new(px, py) * r,
+                    b: c + Vec2::new(bx, by) * r,
+                    w: quarter,
+                })
+                .collect(),
+        };
+        let lens = Loop2 {
+            segs: vec![
+                Seg2::Conic { a: Vec2::new(-2., 7.5), apex: Vec2::new(0., 5.), b: Vec2::new(2., 7.5), w: 1. },
+                Seg2::Conic { a: Vec2::new(2., 7.5), apex: Vec2::new(0., 10.), b: Vec2::new(-2., 7.5), w: 1. },
+            ],
+        };
+        let k = 0.552_284_75 * 2.;
+        let blob = Loop2 {
+            segs: vec![
+                Seg2::Cubic { p0: Vec2::new(2., 7.5), p1: Vec2::new(2., 7.5 + k), p2: Vec2::new(k, 9.5), p3: Vec2::new(0., 9.5) },
+                Seg2::Cubic { p0: Vec2::new(0., 9.5), p1: Vec2::new(-k, 9.5), p2: Vec2::new(-2.5, 7.5 + k), p3: Vec2::new(-2.5, 7.5) },
+                Seg2::Cubic { p0: Vec2::new(-2.5, 7.5), p1: Vec2::new(-2.5, 7.5 - k), p2: Vec2::new(-k, 5.5), p3: Vec2::new(0., 5.5) },
+                Seg2::Cubic { p0: Vec2::new(0., 5.5), p1: Vec2::new(k, 5.5), p2: Vec2::new(2., 7.5 - k), p3: Vec2::new(2., 7.5) },
+            ],
+        };
+        let slanted = Loop2::polygon(&[Vec2::new(-2., 5.), Vec2::new(1., 5.), Vec2::new(2., 10.), Vec2::new(-1., 10.)]);
+        let profiles = [
+            Region2 { outer: circle(Vec2::new(0., 7.5), 2.), holes: vec![] },
+            Region2 { outer: slanted, holes: vec![] },
+            Region2 { outer: circle(Vec2::new(0., 10.), 3.), holes: vec![circle(Vec2::new(0., 10.), 1.)] },
+            Region2 { outer: conics(Vec2::new(0., 10.), 2.5), holes: vec![] },
+            Region2 { outer: lens, holes: vec![] },
+            Region2 { outer: blob, holes: vec![] },
+        ];
+        let outside = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        let hole = crate::cylinder(-Vec3::Z, Vec3::Z, 8., 22.).unwrap();
+        let tube = crate::boolean(&crate::cylinder(Vec3::ZERO, Vec3::Z, 12., 20.).unwrap(), &hole, crate::BoolOp::Cut).unwrap().unwrap();
+        let bore = Plane::new(Vec3::Y * 8., -Vec3::X, Vec3::Z).unwrap();
+        for (body, sketch, r, inward) in [(&outside, plane(), 10., false), (&tube, bore, 8., true)] {
+            let before = volume(body);
+            for region in &profiles {
+                let area = region.area();
+                for depth in [1., -1.] {
+                    let rr: f64 = if inward { r - depth } else { r + depth };
+                    let result = emboss_cylinder(body, &sketch, std::slice::from_ref(region), depth).unwrap();
+                    assert_eq!(result.shell_count(), 1);
+                    assert!(result.validity().is_empty());
+                    let want = depth.signum() * area * (rr * rr - r * r).abs() / (2. * r);
+                    let change = volume(&result) - before;
+                    assert!((change - want).abs() < 1e-6 * area, "{area} at {depth}: {change} vs {want}");
+                    let rec = record(&result).unwrap();
+                    let fit = rec.tolerance * 0.25;
+                    for e in rec.edges.iter().filter(|e| matches!(e.curve, Curve::Spline { .. })) {
+                        let c = CurveEval::new(&e.curve).unwrap();
+                        let off = (0..=200)
+                            .map(|i| c.point(i as f64 / 200.).unwrap())
+                            .map(|p| ((p.x.hypot(p.y) - r).abs()).min((p.x.hypot(p.y) - rr).abs()))
+                            .fold(0.0, f64::max);
+                        assert!(off <= fit, "an edge {off} off its cylinder");
+                    }
+                }
+            }
+        }
+        // Inference finds the wall for a circle, and anchors on the profile.
+        let (_, at) = infer_cylinder_emboss(&outside, &plane(), &profiles[..1], 1.).unwrap().unwrap();
+        assert!((at.x.hypot(at.y) - 10.).abs() < 1e-9);
+        // A curve still may not cross the endcap, even where its ends do not.
+        let over = Region2 { outer: circle(Vec2::new(0., 18.5), 2.), holes: vec![] };
+        let e = emboss_cylinder(&outside, &plane(), &[over], 1.).unwrap_err();
+        assert!(e.to_string().contains("seam or endcap"), "{e}");
+    }
+
+    /// Two curved profiles whose chords cross without the curves meeting are wrapped; two
+    /// circles that overlap are refused.
+    #[test]
+    fn wrapped_curves_are_checked_as_curves_not_chords() {
+        let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
+        let apart = [
+            Region2 { outer: Loop2::circle(Vec2::new(-2., 8.), 1.5), holes: vec![] },
+            Region2 { outer: Loop2::circle(Vec2::new(2., 8.), 1.5), holes: vec![] },
+        ];
+        assert!(emboss_cylinder(&body, &plane(), &apart, 1.).is_ok());
+        let overlapping = [
+            Region2 { outer: Loop2::circle(Vec2::new(-1., 8.), 1.5), holes: vec![] },
+            Region2 { outer: Loop2::circle(Vec2::new(1., 8.), 1.5), holes: vec![] },
+        ];
+        assert!(emboss_cylinder(&body, &plane(), &overlapping, 1.).is_err());
+    }
+
+    /// A fitted wrap survives the boolean after it, on small and large walls, shallow and deep: a
+    /// box cut through half of a wrapped circle leaves half the body and half the wrap, and a pin
+    /// joined across the circle leaves one valid shell.
+    #[test]
+    fn a_fitted_wrap_takes_a_boolean_after_it() {
+        let circle = Region2 { outer: Loop2::circle(Vec2::new(0., 10.), 2.5), holes: vec![] };
+        for r in [4., 10., 100.] {
+            let body = crate::cylinder(Vec3::ZERO, Vec3::Z, r, 20.).unwrap();
+            let sketch = Plane::new(Vec3::Y * r, -Vec3::X, Vec3::Z).unwrap();
+            for depth in [0.2, 2., -0.2, -2.] {
+                let wrapped = emboss_cylinder(&body, &sketch, std::slice::from_ref(&circle), depth).unwrap();
+                let v = volume(&wrapped);
+                let top = crate::box_solid(Vec3::new(-2. * r, -2. * r, 10.), Vec3::new(2. * r, 2. * r, 30.)).unwrap();
+                let cut = crate::boolean(&wrapped, &top, crate::BoolOp::Cut).unwrap().unwrap();
+                assert_eq!(cut.shell_count(), 1);
+                assert!(cut.validity().is_empty());
+                let want = 0.5 * v;
+                assert!((volume(&cut) - want).abs() < 1e-6 * v, "{r} {depth}: {} vs {want}", volume(&cut));
+                let pin = crate::cylinder(Vec3::new(0., 0., 10.), Vec3::Y, 1., r + 4.).unwrap();
+                let joined = crate::boolean(&wrapped, &pin, crate::BoolOp::Union).unwrap().unwrap();
+                assert_eq!(joined.shell_count(), 1, "{r} {depth}");
+                assert!(joined.validity().is_empty(), "{r} {depth}");
+            }
+        }
     }
 }

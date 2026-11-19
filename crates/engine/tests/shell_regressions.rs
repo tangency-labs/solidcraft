@@ -113,6 +113,25 @@ fn a_shell_that_opens_no_face_seals_its_void() {
     }
 }
 
+/// #17158: a box with a round pocket cut into its top through two of its sides, and the two
+/// edges where the pocket's wall meets those sides rounded, so each round is tangent to the
+/// pocket's wall. An outside shell moves the round and the wall out together: they stay
+/// tangent along a line and meet the pocket's floor there. The shell was refused (`how far its
+/// neighbours extend to meet it has no certified bound`); it builds one closed sound body.
+#[test]
+fn an_outside_shell_of_a_round_tangent_to_a_pocket_wall_builds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.circle.center", json!({"center": [35, 5], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 4, "direction": "negative", "operation": "cut"}));
+    // where the pocket's wall (radius 10 about (35, 5)) leaves the sides x = 40 and y = 0
+    run(&mut s, "solid.fillet", json!({"edges": [[40.0, 13.660254037844387, 8.0], [26.339745962155614, 0.0, 8.0]], "radius": 2}));
+    run(&mut s, "solid.shell", json!({"faces": [[10, 10, 0]], "thickness": 1.5, "direction": "outside"}));
+    sound(&s);
+}
+
 /// #17210: a disc with two circles swept down slanting lines onto it from either side, both
 /// ending on one circle on the disc's top (oblique cylinders, mirror images, tangent to each
 /// other where their crossing curve meets the disc). Shelled with the bottom open, the two
@@ -165,4 +184,35 @@ fn a_shell_of_two_sweeps_from_one_circle_meets_past_their_tangent_point() {
     );
     run(&mut s, "solid.shell", json!({"body": "Body1", "faces": [[10.0, -10.0, 0.0]], "thickness": "1.5 mm", "tangent_chain": true}));
     sound(&s);
+}
+
+/// A box with a curved tunnel lofted through it (from a circle on its side, through a tilted
+/// circle, to a circle on its bottom), shelled 2 mm with its top open. The shell builds but
+/// SMLib's check refuses it ("Face Near missing Seam": an edge close to the seam of the tunnel's
+/// wall) ([T-202](https://tickets.solidcraft.io/t/202), solidcore#3318). It must give a valid
+/// body that weighs less than the solid.
+#[test]
+fn shell_of_a_box_with_a_lofted_tunnel() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30, "corner": [-30, -25, 0], "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [50, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "A"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 15], "radius": 8}));
+    run(&mut s, "sketch.finish", json!({}));
+    let tilt = std::f64::consts::FRAC_1_SQRT_2;
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [25, 0, 18], "x_dir": [0, 1, 0], "y_dir": [tilt, 0, tilt]}, "name": "B"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 9}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    let sections = json!([{"sketch": "A", "profiles": [0]}, {"sketch": "B", "profiles": [0]}, {"sketch": "C", "profiles": [0]}]);
+    run(&mut s, "solid.loft", json!({"sections": sections, "operation": "cut", "targets": ["Body1"]}));
+    let solid = volume(&s);
+    run(&mut s, "solid.shell", json!({"body": "Body1", "faces": [[-20, 20, 30]], "thickness": "2 mm"}));
+    let state = s.model.state();
+    for b in &state.bodies {
+        assert!(b.body.validity().is_empty(), "{:?}", b.body.validity());
+    }
+    let shelled = volume(&s);
+    assert!(shelled > 0.0 && shelled < solid, "{shelled} vs {solid}");
 }

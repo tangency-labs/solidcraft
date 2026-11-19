@@ -22,7 +22,7 @@ const MAX_STARTS: usize = 64;
 /// typed joints that close a loop. `None` when the origins or finite values can't be found.
 pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec<f64>> {
     let world = |occ: u64| if occ == 0 { IDENTITY } else { occurrence_world(doc, occ) };
-    let fa = mat_mul(&world(j.a.occurrence), &resolve_origin(doc, st, &j.a).ok()?);
+    let fa = mat_mul(&world(j.a.occurrence), &j.offset_frame_a(resolve_origin(doc, st, &j.a).ok()?));
     let fb = mat_mul(&world(j.b.occurrence), &resolve_origin(doc, st, &j.b).ok()?);
     // B's joint frame in A's as it is.
     let now = mat_mul(&mat_inverse(&fa)?, &fb);
@@ -93,6 +93,7 @@ mod tests {
             angle: 0.6,
             suppressed: false,
             exprs: Default::default(),
+            offset_xy: [0.0; 2],
             captured: None,
             constraint: None,
         }

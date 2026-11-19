@@ -289,6 +289,18 @@ pub struct WorkspacePanelHost {
     last_capacity: Option<LogicalRect>,
     last_domain: Option<LogicalRect>,
     last_chrome: Vec<LogicalRect>,
+    remembered_reservations: Option<RememberedReservations>,
+}
+
+/// The identities a workspace's remembered layout reserves, kept with the saved
+/// bytes, workspace and registry they were read from. Every frame captures the
+/// reservations, and reading them again means decoding the saved layout's JSON,
+/// so they are read again only when one of those changes.
+struct RememberedReservations {
+    bytes: std::sync::Arc<[u8]>,
+    workspace: WorkspaceId,
+    registry: PanelRegistry,
+    reservations: HostIdentityReservations,
 }
 
 fn validate_requested_opacity(opacity: Option<f32>) -> PanelResult<()> {
@@ -319,6 +331,19 @@ impl WorkspacePanelHost {
             hidden.entry(instance).or_default().insert(action)
         };
         hidden.retain(|_, actions| !actions.is_empty());
+        if changed {
+            self.invalidate_geometry();
+        }
+    }
+
+    /// Puts the panel's `ContentSlot::Title` in its title's place, `min_width` wide at least
+    /// (narrower headers move their actions to a row below), or gives the title back (`None`).
+    pub(crate) fn set_header_content(&mut self, instance: InstanceId, min_width: Option<f32>) {
+        let slots = &mut self.options.geometry.header_content;
+        let changed = match min_width {
+            Some(width) => slots.insert(instance, width) != Some(width),
+            None => slots.remove(&instance).is_some(),
+        };
         if changed {
             self.invalidate_geometry();
         }
@@ -398,6 +423,7 @@ impl WorkspacePanelHost {
             last_capacity: None,
             last_domain: None,
             last_chrome: Vec::new(),
+            remembered_reservations: None,
         })
     }
     pub(crate) fn set_keyboard_shortcuts(&mut self, shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>) {
@@ -559,8 +585,26 @@ impl WorkspacePanelHost {
     /// reservations, before either widget or pointer identity generation.
     pub(crate) fn capture_reservations(&mut self, runtime: &PanelRuntime, catalogue: &dyn commands::LayoutCatalogue) -> PanelResult<()> {
         let service = runtime.layout();
-        let envelope = commands::current_envelope_snapshot(catalogue, &service.inspect(), service.registry())?;
-        let mut reservations = host_identity_reservations(&envelope)?;
+        let state = service.inspect();
+        let workspace = &state.layout.workspace;
+        let remembered = catalogue.state().remembered(workspace);
+        let made = self.remembered_reservations.as_ref().filter(|made| {
+            remembered.is_some_and(|stored| *made.bytes == *stored.bytes()) && made.workspace == *workspace && made.registry == *service.registry()
+        });
+        let mut reservations = match made {
+            Some(made) => made.reservations.clone(),
+            None => {
+                let envelope = commands::current_envelope_snapshot(catalogue, &state, service.registry())?;
+                let reservations = host_identity_reservations(&envelope)?;
+                self.remembered_reservations = remembered.map(|stored| RememberedReservations {
+                    bytes: stored.bytes().into(),
+                    workspace: workspace.clone(),
+                    registry: service.registry().clone(),
+                    reservations: reservations.clone(),
+                });
+                reservations
+            }
+        };
         reservations.include_layout(service.layout())?;
         if self.options.geometry.identity_reservations != reservations {
             self.invalidate_geometry();
@@ -2539,7 +2583,10 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 drag: matches!(target, HostPointerTarget::Header { .. } | HostPointerTarget::Tab { .. }),
                                 title: matches!(target, HostPointerTarget::Header { .. }),
                                 grip_only: matches!(target, HostPointerTarget::Header { .. })
-                                    && (paint_section.side_strip || tab_drop.is_some() || section.tabs.len() + section.hidden_tabs.len() > 1),
+                                    && (paint_section.side_strip
+                                        || paint_section.header_content.is_some()
+                                        || tab_drop.is_some()
+                                        || section.tabs.len() + section.hidden_tabs.len() > 1),
                                 rtl: self.layout.direction == Direction::Rtl,
                             },
                             if matches!(target, HostPointerTarget::Header { instance } | HostPointerTarget::Tab { instance }
@@ -2574,11 +2621,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                         _ => {}
                     });
+                    // Each panel's header actions as `<panel>:<action>` (`history:play`, `browser:magnifier`).
                     if let HostPointerTarget::HeaderAction { instance, action } = target
-                        && instance.0 == "history"
                         && response.interact_rect.is_positive()
                     {
-                        crate::scenario::publish_target(&format!("history:{}", action.0), response.interact_rect);
+                        crate::scenario::publish_target(&format!("{}:{}", instance.0, action.0), response.interact_rect);
                     }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();
@@ -2669,6 +2716,20 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 let mut content_ui = ui.new_child(egui::UiBuilder::new().id_salt("content_clip").max_rect(paint_bounds));
                 content_ui.set_clip_rect(content_clip);
                 let content_ui = &mut content_ui;
+                if let Some(title) = paint_section.header_content {
+                    render_slot(
+                        content_ui,
+                        ContentSlot::Title,
+                        title,
+                        content_context,
+                        content,
+                        services,
+                        self.frame_content,
+                        self.content_reports,
+                        wanted_focus,
+                        &mut failure,
+                    );
+                }
                 if !section.collapsed && section.inline {
                     if let Some(body) = paint_section.inline_content {
                         render_slot(
@@ -3435,20 +3496,24 @@ fn shared_label(
             .unwrap_or_else(|| locale.text("ui.panel_host.tab"));
         return locale.format("ui.panel_host.join_target", &[("title", title)]);
     }
+    // In a section with several tabs, moving takes only this tab, not the whole panel (#17217).
+    let one_of_tabs = runtime.layout().layout().containing(instance).is_ok_and(|section| section.tabs.len() > 1);
+    let side = |zone: &Zone| matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left));
     locale
         .text(match action {
             HostSharedAction::Focus => "ui.panel_host.focus",
             HostSharedAction::Close => "ui.panel_host.close",
             HostSharedAction::Collapse => "ui.panel_host.collapse",
             HostSharedAction::ResetHeight => "ui.panel_host.reset_height",
-            HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => {
-                if matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left)) {
-                    "ui.panel_host.left"
-                } else {
-                    "ui.panel_host.right"
-                }
-            }
+            HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => match (side(zone), one_of_tabs) {
+                (true, false) => "ui.panel_host.left",
+                (false, false) => "ui.panel_host.right",
+                (true, true) => "ui.panel_host.move_tab_left",
+                (false, true) => "ui.panel_host.move_tab_right",
+            },
+            HostSharedAction::Move(Zone::Bottom) if one_of_tabs => "ui.panel_host.move_tab_bottom",
             HostSharedAction::Move(Zone::Bottom) => "ui.panel_host.bottom",
+            HostSharedAction::Move(Zone::Floating) if one_of_tabs => "ui.panel_host.move_tab_floating",
             HostSharedAction::Move(Zone::Floating) => "ui.panel_host.floating",
             HostSharedAction::Move(Zone::Window) | HostSharedAction::Popout => "ui.panel_host.popout",
             HostSharedAction::Join(_) => "ui.panel_host.join",
