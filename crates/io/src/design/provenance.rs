@@ -1289,7 +1289,7 @@ mod tests {
         let id = drawing.allocate_id(&mut ids).unwrap();
         drawing.sources.push(Source { id, path: None });
         doc.drawings.push(std::sync::Arc::new(drawing));
-        doc.plugin_data.insert("demo/state.bin".into(), solidcraft_doc::canvas::base64_encode(b"state"));
+        doc.plugin_data.insert("demo/state.bin".into(), solidcraft_doc::canvas::base64_encode(b"state").into());
         let bytes = signed(&doc, &TestSigner::new(7), &ProvenanceChain::default());
         assert_eq!(report(&bytes).unwrap().status, ProvenanceStatus::Valid);
         let entries = read_entries(&bytes);

@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ExportScriptResult>)
         .params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
-         steps, omitted: what the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face assignments); components and assemblies \
+         steps, path (the file written, made absolute), bytes (with path: the size of the file written), omitted: what the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face assignments); components and assemblies \
          are not supported yet",
     ),
 ];
@@ -199,14 +199,20 @@ fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
         commands,
     };
     let path = str_(p, "path");
+    let mut bytes = None;
     if let Some(path) = path {
         let text = serde_json::to_string_pretty(&script).map_err(|e| EngineError::Other(e.to_string()))?;
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        bytes = Some(text.len());
     } else if p.get("path").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`path` must be a file path"));
     }
-    let path = path.map(str::to_string);
-    serde_json::to_value(ExportScriptResult { omitted, path, script, steps, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    // The file written, as an absolute path: a relative one resolves against this process's
+    // folder, which an agent talking to the app over MCP can't see. Where there is no such
+    // folder (browser storage) the path stays as given. A ".." stays in it: taking it out by
+    // the text alone names another file when the folder before it is a link.
+    let path = path.map(|p| std::path::absolute(p).ok().and_then(|a| a.to_str().map(str::to_string)).unwrap_or_else(|| p.to_string()));
+    serde_json::to_value(ExportScriptResult { omitted, path, bytes, script, steps, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn step(command: &str, params: Value) -> Value {

@@ -434,6 +434,57 @@ impl JsonSchema for StringList {
     }
 }
 
+/// A sweep's path (#16168): curve ids of the path's sketch, or `{"sketch", "curve"}` entries for
+/// curves of other sketches. Accepted exactly when the handler reads it; kept as the raw values.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PathList(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for PathList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let fail = || D::Error::custom("must be a curve id or a list of path entries");
+        let entries = match Value::deserialize(d)? {
+            Value::String(s) => vec![Value::String(s)],
+            Value::Array(a) if a.len() > 1000 => return Err(D::Error::custom("must have at most 1000 items")),
+            Value::Array(a) => a,
+            _ => return Err(fail()),
+        };
+        for v in &entries {
+            match v {
+                Value::String(_) => {}
+                Value::Object(o) => {
+                    if !o.get("curve").is_some_and(Value::is_string) {
+                        return Err(D::Error::custom("each path entry must be a curve id or {\"sketch\", \"curve\"}"));
+                    }
+                    if crate::cmd::sketch_key(o.get("sketch")).is_none() {
+                        return Err(D::Error::custom("a path entry's `sketch` must be a sketch id or name"));
+                    }
+                }
+                _ => return Err(D::Error::custom("each path entry must be a curve id or {\"sketch\", \"curve\"}")),
+            }
+        }
+        Ok(PathList(entries))
+    }
+}
+
+impl JsonSchema for PathList {
+    fn schema_name() -> Cow<'static, str> {
+        "PathList".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let entry = json!({"anyOf": [
+            {"type": "string"},
+            {"type": "object", "required": ["sketch", "curve"], "properties": {
+                "sketch": {"description": "The sketch the curve is in.", "type": ["number", "string"]},
+                "curve": {"type": "string"}
+            }}
+        ]});
+        json_schema!({
+            "description": "A curve id of the path's sketch, or a list of path entries; an entry is a curve id or {\"sketch\": <sketch>, \"curve\": <id>} for a curve of another sketch.",
+            "anyOf": [{"type": "string"}, {"type": "array", "items": entry, "maxItems": 1000}]
+        })
+    }
+}
+
 /// The spellings `Operation::parse` accepts, canonical ones first (it also ignores case, spaces,
 /// '_' and '-', which an enum can't say).
 const OPERATIONS: &[&str] = &[

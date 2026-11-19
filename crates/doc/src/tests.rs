@@ -10,6 +10,47 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 #[test]
+fn boundary_fill_classifies_cells_on_exact_surfaces() {
+    let mut doc = Document::new("Boundary Fill");
+    let cylinder = serde_json::from_value(serde_json::json!({
+        "type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "5", "height": "10", "operation": "new_body"
+    }))
+    .unwrap();
+    doc.add_feature(cylinder, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let tool = model.state().bodies.first().unwrap().name.clone();
+    // The cylinder axis at half height is strictly inside every bounding surface.
+    let fill = doc
+        .add_feature(
+            FeatureKind::BoundaryFill {
+                tools: vec![BodyName(tool)],
+                cells: vec![Position(Vec3::new(0.0, 0.0, 5.0))],
+                operation: Operation::NewBody,
+                remove_tools: true,
+            },
+            None,
+        )
+        .unwrap();
+    model.evaluate(&doc);
+    assert!(model.result(fill).unwrap().error.is_none(), "{:?}", model.results);
+    assert_eq!(model.state().bodies.len(), 1);
+    // A single solid tool is the entire cell: V = πr²h = 250π mm³.
+    let state = model.state();
+    let body = &state.bodies.first().unwrap().body;
+    assert!(!body.is_surface());
+    assert!(rel(measure(body).unwrap().volume, 250.0 * std::f64::consts::PI) < 1e-9);
+    let FeatureKind::BoundaryFill { cells, .. } = &mut doc.feature_mut(fill).unwrap().kind else { panic!("Boundary Fill") };
+    // 3² + 4² = 5²: a point on the tool cannot identify either adjacent cell.
+    *cells = vec![Position(Vec3::new(3.0, 4.0, 5.0))];
+    model.evaluate(&doc);
+    let error = model.result(fill).unwrap().error.as_ref().unwrap();
+    assert!(error.contains("Boundary Fill cell points must be away from tool boundaries"), "{error}");
+    assert_eq!(model.state().bodies.len(), 1, "the original tool is kept on failure");
+}
+
+#[test]
 fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     let mut doc = Document::new("A");
     let first = doc.add_component(Some("A"), 0).unwrap();
@@ -916,6 +957,7 @@ fn box_fillet_cut_timeline() {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain: true,
+            edge_radii: Vec::new(),
         },
         None,
     )
@@ -996,6 +1038,7 @@ fn errors_are_reported_not_fatal() {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain: true,
+            edge_radii: Vec::new(),
         },
         None,
     )
@@ -1772,6 +1815,7 @@ fn fillet_setbacks_default_to_none_and_round_trip() {
         setbacks: vec![CornerSetback { vertex: Position(Vec3::new(60.0, 40.0, 20.0)), distance: "8 mm".into() }],
         turn: Default::default(),
         tangent_chain: true,
+        edge_radii: Vec::new(),
     };
     let back: FeatureKind = serde_json::from_value(serde_json::to_value(&set).unwrap()).unwrap();
     assert_eq!(back, set);
@@ -1801,6 +1845,72 @@ fn fillet_turn_defaults_to_mitre_round_trips_and_refuses_unknown_turns() {
     unknown["turn"] = serde_json::json!("round");
     let e = serde_json::from_value::<FeatureKind>(unknown).unwrap_err().to_string();
     assert!(e.contains("unknown variant `round`") && e.contains("mitre") && e.contains("swept"), "{e}");
+}
+
+/// A fillet saved before per-edge radii reads with none and writes no `edge_radii`; one with them
+/// keeps them through a save and an open, each an expression, and evaluates each picked edge at its
+/// own radius. A file whose radii do not match its edges, or that asks for them with another
+/// option, is refused at evaluation, saying why.
+#[test]
+fn fillet_edge_radii_default_to_none_round_trip_and_are_checked() {
+    let old = serde_json::json!({"type": "fillet", "edges": [[20.0, 0.0, 10.0]], "radius": "1"});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::Fillet { edge_radii, .. } = &kind else { panic!("{kind:?}") };
+    assert!(edge_radii.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("edge_radii").is_none());
+    let fillet = |radii: &[&str], tangent_chain: bool, fit: crate::FilletFit| FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(20.0, 0.0, 10.0)), Position(Vec3::new(20.0, 30.0, 10.0))],
+        radius: "1".into(),
+        body: None,
+        style: Default::default(),
+        fit,
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain,
+        edge_radii: radii.iter().map(|r| (*r).into()).collect(),
+    };
+    let each = fillet(&["1", "2 mm"], false, Default::default());
+    let mut doc = Document::new("edge radii");
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::ZERO),
+            length: "40".into(),
+            width: "30".into(),
+            height: "10".into(),
+            centred: false,
+            operation: Operation::NewBody,
+        },
+        None,
+    )
+    .unwrap();
+    let mut at = doc.clone();
+    at.add_feature(each.clone(), None).unwrap();
+    let saved = at.to_json();
+    assert!(saved.contains("\"edge_radii\""), "{saved}");
+    let opened = Document::from_json(&saved).unwrap();
+    assert_eq!(opened.features.last().map(|f| &f.kind), Some(&each));
+    assert_eq!(opened.to_json(), saved);
+    let mut m = Model::new();
+    m.evaluate(&opened);
+    assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let v = measure(&m.state().bodies[0].body).unwrap().volume;
+    // A 40 x 30 x 10 block, two 40-long edges rounded at 1 and 2: each round of radius r on a
+    // 90 deg edge of length L removes (1 - pi/4) r^2 L, so 12000 - 40 (1 - pi/4) (1 + 4).
+    let want = 11957.07963267949;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    for (bad, says) in [
+        (fillet(&["1"], false, Default::default()), "gives 1 radii for 2 picked edges"),
+        (fillet(&["1", "2"], true, Default::default()), crate::EDGE_RADII_TAKE),
+        (fillet(&["1", "2"], false, crate::FilletFit::Reduce), crate::EDGE_RADII_TAKE),
+    ] {
+        let mut d = doc.clone();
+        d.add_feature(bad, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&d);
+        let e = m.results.last().and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(e.contains(says), "{e}");
+    }
 }
 
 #[test]
@@ -2003,6 +2113,17 @@ fn feature_kind_key_and_type_name_mappings() {
     assert_eq!(FeatureKind::type_name_to_kind_key("BaseFeature"), Some("import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
+    // Convert of picked faces, Convert of a whole body and Recognize: each its own type name,
+    // which leads back to its kind.
+    for kind in [
+        serde_json::json!({"type": "sheet_convert", "body": "B", "face": [0, 0, 0]}),
+        serde_json::json!({"type": "sheet_surface_convert", "body": "B"}),
+        serde_json::json!({"type": "sheet_recognize", "body": "B"}),
+    ] {
+        let key = kind["type"].as_str().unwrap_or_default().to_string();
+        let kind = serde_json::from_value::<FeatureKind>(kind).unwrap();
+        assert_eq!(FeatureKind::type_name_to_kind_key(kind.type_name()), Some(key.as_str()), "{key}");
+    }
 }
 
 /// An extruded ellipse has one side face, and a spline in a profile one wall, each named by its

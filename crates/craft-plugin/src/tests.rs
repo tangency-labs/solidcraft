@@ -75,7 +75,7 @@ fn named_files_permissions_require_access_and_unique_names() {
 fn hostile_manifest_fields_return_errors() {
     assert!(matches!(
         parse_manifest(&serde_json::to_vec(&manifest()).unwrap(), "another-folder"),
-        Err(HostError::InvalidManifest { field, reason }) if field == "id" && reason.contains("does not match")
+        Err(HostError::InvalidManifest { field, reason }) if field == "id" && reason.contains("does not match") && reason.contains("rename the folder to")
     ));
     for change in [
         |value: &mut Value| value["runtime"]["module"] = json!("../plugin.wasm"),
@@ -287,6 +287,33 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
     command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
     command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
+}
+
+#[test]
+fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
+    let mut keeps = manifest();
+    keeps["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
+    keeps["runtime"]["data_format"] = json!(3);
+    assert_eq!(parse(&keeps).unwrap().runtime.unwrap().data_format, Some(3));
+    let refused = |change: &dyn Fn(&mut Value), field: &str| {
+        let mut value = keeps.clone();
+        change(&mut value);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field: f, .. }) if f == field), "{field}");
+    };
+    refused(
+        &|v| {
+            v["runtime"].as_object_mut().unwrap().remove("data_format");
+        },
+        "runtime.data_format",
+    );
+    refused(&|v| v["runtime"]["data_format"] = json!(0), "runtime.data_format");
+    refused(&|v| v["runtime"]["data_format"] = json!(MAX_DATA_FORMAT + 1), "runtime.data_format");
+    refused(&|v| v["capabilities"] = json!(["commands@0.1"]), "runtime.data_format");
+    // An importer keeps nothing in the open design.
+    let mut importing = importer();
+    importing["capabilities"] = json!(["formats@0.1", "storage@0.1"]);
+    importing["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
 }
 
 fn empty_item() -> LossItem {

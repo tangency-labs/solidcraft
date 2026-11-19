@@ -122,6 +122,11 @@ pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";
 
+/// The tangency within which the band check takes two blended edges for one tangent chain
+/// (`chains_among`), radians: 10 degrees, as a chamfer's chain (`two_offsets`) and an
+/// edge's continuation (`edge_refusals`) take it.
+const BAND_CHAIN_TANGENCY: f64 = 10.0 * (crate::math::PI / 180.0);
+
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -4343,12 +4348,62 @@ fn band_rails(
                                 continue;
                             };
                             let corner = CornerLookup::table(&this.corners).corner(id)?;
-                            let (Some(cap), Some(vertex)) =
-                                (corner.end_cap.as_ref(), corner.filleted_vertex())
-                            else {
+                            let Some(vertex) = corner.filleted_vertex() else {
                                 continue;
                             };
                             let near = crate::topology::vertex::point(this.target, vertex)?;
+                            // Not the fork's (#18823): a rail that ends where it crosses a
+                            // side edge continued past the vertex (an End of mixed
+                            // convexity, as where a window's top edge meets its side wall)
+                            // has its end placed in that pass too: the rail's crossing
+                            // with the side face's surface, the face beside the side edge
+                            // that is not the rail's
+                            let side_face = match (fv.fillet_vertex_type(), fv.point_class_object())
+                            {
+                                (
+                                    FilletVertexType::RailXExtendedEdgeuse,
+                                    Some(EntityRef::Edgeuse(side)),
+                                ) => {
+                                    let mut across = None;
+                                    for u in [Some(side), eu::radial(this.target, side)?]
+                                        .into_iter()
+                                        .flatten()
+                                    {
+                                        if let Some(f) = eu::face(this.target, u)? {
+                                            if f != face {
+                                                across = Some(f);
+                                            }
+                                        }
+                                    }
+                                    match across {
+                                        // its plane continued past the face (a crossing
+                                        // with a curved side face is left to that pass)
+                                        Some(f) => match crate::topology::face::p2::surface(
+                                            this.target,
+                                            f,
+                                        )?
+                                        .map(Surface::kind)
+                                        {
+                                            Some(crate::surface::surface::SurfaceKind::Plane(
+                                                pl,
+                                            )) => {
+                                                let (origin, normal, _) = pl.is_planar();
+                                                Some(Surface::from(
+                                                    crate::surface::plane::Plane::from_normal(
+                                                        origin, normal,
+                                                    ),
+                                                ))
+                                            }
+                                            _ => None,
+                                        },
+                                        None => None,
+                                    }
+                                }
+                                _ => None,
+                            };
+                            let Some(cap) = corner.end_cap.as_ref().or(side_face.as_ref()) else {
+                                continue;
+                            };
                             if let Some((t, _)) =
                                 rail_crossing_nearest(k, &curve, cap, near, base.approx_tol_3d)?
                             {
@@ -4405,16 +4460,16 @@ fn band_rails(
 /// Named only where that is exact, decided from the geometry's kinds, not from the points:
 /// both blends chamfers, their shared face a plane, both edges lines, parallel (a band between
 /// planes along a line has one width, and scales with the chamfer, so the feet's distances
-/// scale and `W` stays); elsewhere `None`, as before. The check refuses only bands overlapping
-/// by more than its `apart` (ten of the solvers' tolerances), so between this size and the
-/// size the check refuses, `(W + apart) / (|p - f| + |e - r|)`, lie the margin and `apart`,
-/// about 1010 tolerances: this is the bound section 3.5 names, the check the fork's.
+/// scale and `W` stays); elsewhere `None`, as before. The check refuses bands overlapping by
+/// more than the solvers' tolerance (#18823; ten tolerances, its `apart`, before), so between
+/// this size and the size the check refuses, `(W + tol) / (|p - f| + |e - r|)`, lie the margin
+/// and that tolerance, about 1001 tolerances: this is the bound section 3.5 names.
 ///
 /// `lambda` is rounded down by `gamma_7`: its three operations (a difference, a sum and a
 /// quotient) and the three a check of the chamfers scaled by it adds (each setback scaled, their
 /// sum, and the width less the margin), so the scaled chamfers' sum stays within `W - margin`
-/// through the rounding; the feet's own accuracy (the drops') lies within the margin and
-/// `apart` between this size and the check's.
+/// through the rounding; the feet's own accuracy (the drops') lies within the margin and the
+/// tolerance between this size and the check's.
 fn band_scale(
     objects: &SessionObjects<'_>,
     k: &Kernel,
@@ -5226,6 +5281,13 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
             .copied()
             .map(FilletObject::Geometry))
     }
+    fn faces_bound_open_ends(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<FilletObject>,
+    ) -> Result<()> {
+        self.bound_open_fillet_ends(k, executive)
+    }
     fn faces_make_face(
         &mut self,
         k: &mut Kernel,
@@ -5763,6 +5825,35 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         use crate::geom::global_solver::SolverOperation;
         let (rails, edges, tol) = band_rails(self, k, solvers)?;
         let apart = 10.0 * tol;
+        // Not the fork's (#18823): a band lies beside its edge and, past the edge's ends, beside
+        // the edges its edge runs on into tangentially, up to the sections its corners placed.
+        // Where a tangent chain's blends meet, their shared section crosses the chain where a
+        // rail crosses the seam between the faces, which can lie well before the edges'
+        // common vertex, so the next blend's band starts beside the end of this blend's edge.
+        // So each band is judged against its edge's run: the blended edges on its tangent
+        // chain (`chains_among`), its ends being the run's, and it ends where its rail's kept
+        // part ends.
+        let edge_ids: Vec<EdgeId> = edges.iter().map(|&(e, _)| e).collect();
+        let chains = crate::blend::blend_refusal::chains_among(
+            k,
+            self.target,
+            &edge_ids,
+            BAND_CHAIN_TANGENCY,
+        )?;
+        let mut edge_curves = Vec::new();
+        for &e in &edge_ids {
+            let edge = self.target.edge(e)?;
+            let ivl = edge.interval;
+            let curve = edge
+                .curve
+                .clone()
+                .ok_or_else(|| invalid("filleted edge without curve"))?;
+            let ends = [
+                curve.evaluate_point(k, ivl.min())?,
+                curve.evaluate_point(k, ivl.max())?,
+            ];
+            edge_curves.push((curve, ivl, ends));
+        }
         // Pruning by boxes (#16645: the pair loop is quadratic in the blends). A pair
         // `(a, b)` can refuse only through a sample `p` of rail `a`'s kept part for which,
         // with `e` on edge `b` and `r` on rail `b`, `|p - e| < |e - r|`. So `p` lies
@@ -5808,16 +5899,52 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 {
                     continue;
                 }
-                let edge_box_b = edge_boxes.get(b).and_then(|x| x.as_ref());
-                let edge_curve_b = self
-                    .target
-                    .edge(edge_b)?
-                    .curve
-                    .clone()
-                    .ok_or_else(|| invalid("filleted edge without curve"))?;
-                let edge_ivl_b = self.target.edge(edge_b)?.interval;
-                let edge_start_b = edge_curve_b.evaluate_point(k, edge_ivl_b.min())?;
-                let edge_end_b = edge_curve_b.evaluate_point(k, edge_ivl_b.max())?;
+                // band `b`'s run: its edge and the edges of its tangent chain that it meets
+                // (its band reaches past its ends only as far as the sections its corners
+                // placed), not edge `a`; an end of an edge of the run that no other edge of
+                // the run shares is an end of the run
+                let run: Vec<usize> = (0..edges.len())
+                    .filter(|&j| {
+                        j == b
+                            || (j != a
+                                && chains.get(j).is_some()
+                                && chains.get(j) == chains.get(b)
+                                && edges.get(j).is_some_and(|&(_, ends_j)| {
+                                    ends_j.iter().flatten().any(|v| ends_b.contains(&Some(*v)))
+                                }))
+                    })
+                    .collect();
+                let mut run_ends: Vec<(usize, [bool; 2])> = Vec::new();
+                for &j in &run {
+                    let Some(&(_, ends_j)) = edges.get(j) else {
+                        continue;
+                    };
+                    let mut at_end = [true, true];
+                    for (slot, v) in at_end.iter_mut().zip(ends_j) {
+                        *slot = v.is_none()
+                            || !run.iter().any(|&o| {
+                                o != j
+                                    && edges.get(o).is_some_and(|&(_, ends_o)| ends_o.contains(&v))
+                            });
+                    }
+                    run_ends.push((j, at_end));
+                }
+                // the run's box, where every edge of it has one
+                let mut run_box: Option<Extent3d> = None;
+                let mut every_box = true;
+                for &j in &run {
+                    match edge_boxes.get(j).and_then(|x| x.as_ref()) {
+                        Some(bx) => {
+                            run_box = Some(match run_box {
+                                Some(acc) => acc.union(bx),
+                                None => *bx,
+                            });
+                        }
+                        None => every_box = false,
+                    }
+                }
+                let edge_box_b = if every_box { run_box } else { None };
+                let edge_box_b = edge_box_b.as_ref();
                 for (ia, (face_a, curve_a, kept_a)) in rails_a.iter().enumerate() {
                     for (ib, (face_b, curve_b, kept_b)) in rails_b.iter().enumerate() {
                         if face_a != face_b {
@@ -5851,6 +5978,27 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                         }
                         let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
+                        // Not the fork's (#18823): rail `b`'s band ends where its kept part
+                        // ends, at the sections its corners placed, not at its edge's ends.
+                        // Where a tangent chain's blends meet, the shared section crosses the
+                        // chain where the rail crosses the seam between the faces, which can
+                        // lie well before the edges' common vertex: the next blend's band
+                        // then runs on beside the end of this blend's edge. A sample whose
+                        // nearest point of rail `b` is an end of its kept part lies past that
+                        // section, beside the band. A closed rail (both ends one point) has
+                        // no such end.
+                        let band_ends_b = [
+                            curve_b.evaluate_point(k, kept_b.min())?,
+                            curve_b.evaluate_point(k, kept_b.max())?,
+                        ];
+                        let band_has_ends = (band_ends_b[0] - band_ends_b[1]).length() > tol;
+                        // a rail whose kept part is one point (a round as wide as the
+                        // corner it turns, its rail on the face collapsed onto the corner's
+                        // centre) takes no band off this face
+                        let middle_b = curve_b.evaluate_point(k, kept_b.evaluate(0.5))?;
+                        if !band_has_ends && (middle_b - band_ends_b[0]).length() <= tol {
+                            continue;
+                        }
                         // Not the fork's (#18178): where the kept rails cross on the face they
                         // share. The samples alone can step over a short overlap (two chamfers
                         // at a narrow place, where one's corner mitre reaches a few hundredths
@@ -5858,8 +6006,9 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                         // intersection within the solvers' tolerance, cut rail `a` into pieces
                         // that each lie wholly on one side of rail `b`, so the middle of each
                         // piece is judged too, by the same band test as the samples: a piece
-                        // inside the band refuses, and rails that only touch (bands meeting at
-                        // their fit, closer than `apart`) do not.
+                        // inside the band by more than the solvers' tolerance refuses, and rails
+                        // that only touch (bands meeting at their fit, within that tolerance) do
+                        // not.
                         let mut at: Vec<f64> = (1..16_u32)
                             .map(|s| ivl_a.evaluate(f64::from(s) / 16.0))
                             .collect();
@@ -5875,7 +6024,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 _ => None,
                             }));
                         }
-                        for t_a in at {
+                        'sample: for t_a in at {
                             let p = curve_a.evaluate_point(k, t_a)?;
                             // Main classifies the sample first and drops a sample off its
                             // face before any of the geometry below. The classification is
@@ -5883,23 +6032,59 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             // (an error main would only reach for a sample on the face),
                             // the sample is classified at once, as main did: off the face
                             // it is dropped, on it the error is main's.
-                            let on_edge = match edge_curve_b.drop_point(
-                                k,
-                                &edge_ivl_b,
-                                p,
-                                None,
-                                crate::math::BIG_DOUBLE,
-                                None,
-                                SolverOperation::Minimize,
-                            ) {
-                                Ok(v) => v,
-                                Err(error) => {
-                                    if sample_off_face(k, self.target, *face_a, p)? {
-                                        continue;
+                            // the sample's foot on band `b`'s run: the nearest of its edges'
+                            let mut foot: Option<(f64, crate::math::Point3, bool)> = None;
+                            for &(j, [end0, end1]) in &run_ends {
+                                let Some((curve_j, ivl_j, [start_j, stop_j])) = edge_curves.get(j)
+                                else {
+                                    continue;
+                                };
+                                let on_edge = match curve_j.drop_point(
+                                    k,
+                                    ivl_j,
+                                    p,
+                                    None,
+                                    crate::math::BIG_DOUBLE,
+                                    None,
+                                    SolverOperation::Minimize,
+                                ) {
+                                    Ok(v) => v,
+                                    Err(error) => {
+                                        if sample_off_face(k, self.target, *face_a, p)? {
+                                            continue 'sample;
+                                        }
+                                        return Err(error);
                                     }
-                                    return Err(error);
+                                };
+                                if !on_edge.success {
+                                    continue;
                                 }
-                            };
+                                let t = on_edge.parameter;
+                                let e = match curve_j.evaluate_point(k, t) {
+                                    Ok(e) => e,
+                                    Err(error) => {
+                                        if sample_off_face(k, self.target, *face_a, p)? {
+                                            continue 'sample;
+                                        }
+                                        return Err(error);
+                                    }
+                                };
+                                // A constrained closest point can return an endpoint one
+                                // parameter ulp inside the interval. It is still beside
+                                // the band: testing only t would extend the band's chord
+                                // across the face and falsely catch a distant rail (#2903).
+                                // Use the existing solver tolerance in geometric space,
+                                // independent of the edge curve's parameterization. An end
+                                // the run's next edge continues from is no end of the band.
+                                let at_run_end = (end0
+                                    && (t <= ivl_j.min() || (e - *start_j).length() <= tol))
+                                    || (end1
+                                        && (t >= ivl_j.max() || (e - *stop_j).length() <= tol));
+                                let dist = (p - e).length();
+                                if foot.is_none_or(|(best, _, _)| dist < best) {
+                                    foot = Some((dist, e, at_run_end));
+                                }
+                            }
                             let on_rail = match curve_b.drop_point(
                                 k,
                                 &ivl_b,
@@ -5917,37 +6102,61 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     return Err(error);
                                 }
                             };
-                            let t = on_edge.parameter;
-                            if !on_edge.success
-                                || !on_rail.success
-                                || t <= edge_ivl_b.min()
-                                || t >= edge_ivl_b.max()
-                            {
+                            let Some((_, e, at_run_end)) = foot else {
+                                continue; // beside the band, not across it
+                            };
+                            if at_run_end || !on_rail.success {
                                 continue; // beside the band, not across it
                             }
-                            let (e, r) = match (
-                                edge_curve_b.evaluate_point(k, t),
-                                curve_b.evaluate_point(k, on_rail.parameter),
-                            ) {
-                                (Ok(e), Ok(r)) => (e, r),
-                                (Err(error), _) | (_, Err(error)) => {
+                            let r = match curve_b.evaluate_point(k, on_rail.parameter) {
+                                Ok(r) => r,
+                                Err(error) => {
                                     if sample_off_face(k, self.target, *face_a, p)? {
                                         continue;
                                     }
                                     return Err(error);
                                 }
                             };
-                            // A constrained closest point can return an endpoint one
-                            // parameter ulp inside the interval. It is still beside
-                            // the band: testing only t would extend the band's chord
-                            // across the face and falsely catch a distant rail (#2903).
-                            // Use the existing solver tolerance in geometric space,
-                            // independent of the edge curve's parameterization.
-                            if (e - edge_start_b).length() <= tol
-                                || (e - edge_end_b).length() <= tol
+                            if band_has_ends
+                                && (on_rail.parameter <= kept_b.min()
+                                    || on_rail.parameter >= kept_b.max()
+                                    || band_ends_b.iter().any(|&q| (r - q).length() <= tol))
                             {
-                                continue;
+                                continue; // past the section that ends the band
                             }
+                            // Not the fork's (#18823): the band's section through `r` reaches
+                            // the run at `r`'s own foot there, which is `p`'s where `p` lies in
+                            // the band. On a run of several edges `p`'s foot can lie on another
+                            // edge of it, across the face from the band (a tube's joint), so the
+                            // chord is taken to `r`'s foot.
+                            let mut foot_r: Option<(f64, crate::math::Point3)> = None;
+                            for &(j, _) in &run_ends {
+                                let Some((curve_j, ivl_j, _)) = edge_curves.get(j) else {
+                                    continue;
+                                };
+                                let Ok(on) = curve_j.drop_point(
+                                    k,
+                                    ivl_j,
+                                    r,
+                                    None,
+                                    crate::math::BIG_DOUBLE,
+                                    None,
+                                    SolverOperation::Minimize,
+                                ) else {
+                                    continue;
+                                };
+                                if !on.success {
+                                    continue;
+                                }
+                                let Ok(q) = curve_j.evaluate_point(k, on.parameter) else {
+                                    continue;
+                                };
+                                let dist = (r - q).length();
+                                if foot_r.is_none_or(|(best, _)| dist < best) {
+                                    foot_r = Some((dist, q));
+                                }
+                            }
+                            let e = foot_r.map_or(e, |(_, q)| q);
                             let mut chord = e - r;
                             let width = chord.length();
                             // Not the fork's (#16654): the rail's point nearest `p` is the
@@ -5990,7 +6199,12 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             // direction alone also takes a point far off across a curved
                             // face, whose offset happens to fall inside it: #2907)
                             let from_rail = (p - r).dot(chord);
-                            if from_rail > apart
+                            // Not the fork's (#18823): a rail inside the band by more than
+                            // the solvers' tolerance refuses. Bands overlapping by less than
+                            // `apart` (ten tolerances) are not bands that only touch: the
+                            // trim of their faces leaks there, so only an overlap within the
+                            // tolerance passes.
+                            if from_rail > tol
                                 && from_rail < width - apart
                                 && (p - e).length() < width
                                 && !sample_off_face(k, self.target, *face_a, p)?
@@ -6334,11 +6548,13 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
         Ok(crate::topology::edge::blend_edgeuse(k, self.target, id)?
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(id))))
     }
-    fn parameters_edge_tolerance(&self, edge: FilletObject) -> Result<f64> {
+    fn parameters_edge_tolerance(&mut self, k: &Kernel, edge: FilletObject) -> Result<f64> {
         let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) = edge else {
             return Err(invalid("edge is not in the target"));
         };
-        crate::topology::edge::tolerance(self.target, id)
+        // not upstream: the fit tolerance (the edge tolerance unless that only covers the
+        // edge's edge/face gap)
+        crate::topology::edgeuse::p3::fit_tolerance(k, self.target, id)
     }
     fn parameters_new_solver(
         &mut self,
