@@ -1743,8 +1743,11 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// `0x30d463838d7fca03` and `0x7442b43a428ea1ca`) through the bottle's read alone (see
 /// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
 /// edge and tolerance of the read is bit for bit main's
-/// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]); entry 14's mass
-/// is bit for bit main's (MEASURED).
+/// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]). #18162's lazy
+/// UV trim raise moves entry 14 once more (main's was `0x902afd170f1e23a9`): the result's
+/// edges 42 and 47 keep 4e-5 instead of upstream's raise to 9.6e-5, and edge use 190's trim
+/// is refit at that tolerance; that result is proved in
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`].
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1760,7 +1763,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0x902afd170f1e23a9,
+    0x23e5313059fb265c,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -1782,11 +1785,12 @@ const FILLET_MAIN: [u64; 29] = [
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
 /// since; its entries are classified against a certified enclosure in goldens'
-/// `mass_knot_line_moved_rows_are_classified`. #18162's lazy UV trim raise refits that
-/// body's trims at lower edge tolerances, which moves two of its values once more: the
-/// volume (index 0) by 8.2e-15 and index 11 by 1.6e-14 relative, the faces' quadrature
-/// summed in another order (goldens' `certify::trim_tolerance`, class `quadrature`, at most
-/// 1e-13 relative); entry 14 holds those bits.
+/// `mass_knot_line_moved_rows_are_classified`. #18162's lazy UV trim raise refits edge use
+/// 190's trim at a lower edge tolerance, which moves every value of entry 14 (the area by
+/// 3.2e-9 relative, the rest by at most 1e-12 of their scale: the integrator fits the trims
+/// it integrates over to the edges' tolerances); [`BOTTLE_E8_BEFORE`] holds the bits before
+/// and [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
+/// within the case's accuracy of a certified enclosure of the exact properties.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1842,28 +1846,205 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce093b3e1,
-            0x402621896ddff25f,
-            0x402621896ddff25f,
-            0x3f10d1d4e45e4676,
-            0x3f13efa0c2fbe9dc,
-            0x4000a10fe9b1ffd5,
-            0x4050316570dd030e,
-            0x4050a9c381d79ffa,
-            0x40151aaab4b869fc,
-            0x3f6aed519268bff5,
-            0x3f66b6ad970f60ae,
-            0xbf3c98793964b1c2,
+            0x40408bcce171b2d7,
+            0x402621896ddff25e,
+            0x402621896ddff25e,
+            0x3f10d1d4e45e537a,
+            0x3f13efa0c2fbf003,
+            0x4000a10fe9b1ffd4,
+            0x4050316570dd030c,
+            0x4050a9c381d79ff8,
+            0x40151aaab4b869fb,
+            0x3f6aed519268c879,
+            0x3f66b6ad970f71c2,
+            0xbf3c98793964c2c2,
         ],
     ),
 ];
+
+/// [`FILLETS`] entry 14's mass bits before #18162's lazy UV trim raise (see
+/// [`FILLET_MAIN_MASS`]).
+const BOTTLE_E8_BEFORE: [u64; 12] = [
+    0x40408bcce093b3e1,
+    0x402621896ddff25f,
+    0x402621896ddff25f,
+    0x3f10d1d4e45e4676,
+    0x3f13efa0c2fbe9dc,
+    0x4000a10fe9b1ffd5,
+    0x4050316570dd030e,
+    0x4050a9c381d79ffa,
+    0x40151aaab4b869fc,
+    0x3f6aed519268bff5,
+    0x3f66b6ad970f60ae,
+    0xbf3c98793964b1c2,
+];
+
+/// The end points of the two edges of [`FILLETS`] entry 14's result whose tolerance
+/// #18162's lazy UV trim raise lowers: its vertices 26, 38 and 27 (each edge curve ends
+/// within 1e-4 of two of them; they are at least 0.03 apart).
+const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
+    [
+        -7.61836356003545e-7,
+        -6.412140332612071e-1,
+        3.937830788008653,
+    ],
+    [
+        -9.695404181326284e-1,
+        -5.125539440709455e-1,
+        3.9377557534353658,
+    ],
+    [
+        -9.995634517364296e-1,
+        -5.038566395810731e-1,
+        3.937831742378171,
+    ],
+];
+
+/// [`FILLETS`] entry 14 (`bottle` e8 r0.1) under #18162's lazy UV trim raise: the result's
+/// edges 42 and 47 keep 4e-5 where upstream raised them to 9.6e-5 (the drop's reported fit
+/// error), and edge use 190's trim (face 16, a B-spline) is refit at that tolerance; nothing
+/// else of the result moves (same counts, status, vertex points and edge curves; Level 2
+/// reports the same three lines). Proved here, on the result:
+/// - the two edges (found by their end points, [`BOTTLE_E8_MOVED_ENDS`], not by arena id)
+///   are at 4e-5 and their trim on face 16 (a B-spline) is within it: `trim_image_gap_bound`,
+///   a proved bound on the distance between the trim's image and the edge curve, is at most
+///   the tolerance (edge use 190's, the refit one, is 1.45e-5; edge use 170's 3.8e-6); their
+///   other trim, on the procedural blend, has no exact net to enclose (goldens'
+///   `certify::trim_tolerance` keeps those edges OPEN, `blend-surface`);
+/// - Level 2 reports exactly the two vertex/face gaps both kernels report (4.71e-5 against
+///   3.65e-5, unchanged by the raise) and the 2D curvature warning;
+/// - the mass properties, now and before ([`BOTTLE_E8_BEFORE`]), are each within the case's
+///   accuracy (1e-4 of its scale: the area, the volume, `R` the box's half diagonal for a
+///   centroid coordinate, `V R^2` for a moment, or the value's own where larger) of the exact
+///   property: of every point of a certified enclosure of it
+///   (`mass::enclosure::enclose_mass_properties`), so of the exact value wherever it lies in
+///   it. Both are valid estimates at the asked accuracy; the move is the integration's, not
+///   the body's.
+#[test]
+fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::mass::integrator::properties::brep_mass_properties_default;
+    use solidcore::math::Vec3;
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    use solidcore::query::curve_surface_gap::trim_image_gap_bound_up_to;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::topology::brep::p1 as bl;
+    use solidcore::topology::edgeuse::p1 as eu1;
+    const ACCURACY: f64 = 1e-4;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, "Fillet/bottle.smb", false);
+    let e = bl::edges(&b, None).unwrap()[8];
+    fillet_edges(&mut k, &mut b, &[e], 0.1, 1, 1, 1.0).unwrap();
+    let counts = [
+        bl::faces(&b, None).unwrap().len(),
+        bl::edges(&b, None).unwrap().len(),
+        bl::vertices(&b, None).unwrap().len(),
+    ];
+    assert_eq!(counts, [18, 47, 31]);
+
+    let mut failures = Vec::new();
+    let (mut moved, mut bounded, mut blend) = (0, 0, 0);
+    for e in bl::edges(&b, None).unwrap() {
+        let rec = b.edge(e).unwrap();
+        let (tol, ivl) = (rec.tolerance, rec.interval);
+        let curve = rec.curve.clone().unwrap();
+        let at_moved_end = |t: f64| {
+            let p = curve.evaluate_point(&k, t).unwrap();
+            BOTTLE_E8_MOVED_ENDS
+                .iter()
+                .any(|&[x, y, z]| p.distance(Vec3::new(x, y, z)) <= 1e-4)
+        };
+        if !(at_moved_end(ivl.min()) && at_moved_end(ivl.max())) {
+            continue;
+        }
+        moved += 1;
+        assert_eq!(tol, 4e-5, "{e:?}");
+        for eu in rec.edgeuses.clone() {
+            let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.clone() else {
+                continue;
+            };
+            let face = eu1::face(&b, eu).unwrap().unwrap();
+            let surface = b.face(face).unwrap().surface.as_ref().unwrap();
+            let is_blend = matches!(surface.kind(), SurfaceKind::ProceduralBlend(_));
+            // (as the raise bounds it: an owner-less copy, the edge's interval)
+            let mut surface = surface.clone_for_evaluation().unwrap();
+            let _ = surface.set_owner(None);
+            let range = [ivl.min(), ivl.max()];
+            match trim_image_gap_bound_up_to(&k, &surface, &curve, &trim, range, 1e-3 * tol, tol)
+                .unwrap()
+            {
+                Some(bound) if bound <= tol => bounded += 1,
+                None if is_blend => blend += 1,
+                other => failures.push(format!("{e:?} {eu:?}: {other:?} against {tol:e}")),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(
+        [moved, bounded, blend],
+        [2, 2, 2],
+        "moved edges, bounded and blend trims"
+    );
+
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let gap = "Vertex/Face gap across Edgeuse {} larger than tol (offset=4.7135459e-05, \
+               tolerance=3.6509706e-05)";
+    assert_eq!(lines.len(), 3, "{lines:#?}");
+    for (line, end) in lines.iter().zip(["end", "start"]) {
+        assert!(line.contains(&gap.replace("{}", end)), "{lines:#?}");
+    }
+    assert!(
+        lines[2].contains("Bad CurveCusp: 2D BSplineCurve Warning"),
+        "{lines:#?}"
+    );
+
+    let m = brep_mass_properties_default(&k, &mut b, ACCURACY, 1.0, Vec3::ZERO).unwrap();
+    let mut now = vec![m.properties.area, m.properties.volume, m.properties.mass];
+    for v in [m.centroid, m.inertia, m.products] {
+        now.extend([v.x, v.y, v.z]);
+    }
+    let r = 0.5
+        * calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default())
+            .unwrap()
+            .size()
+            .length();
+    let x =
+        solidcore::mass::enclosure::enclose_mass_properties(&k, &mut b, 0.1 * ACCURACY).unwrap();
+    let vr2 = x.volume.hi * r * r;
+    let band = |i: usize| match i {
+        0 => (x.area, x.area.hi),
+        1 | 2 => (x.volume, x.volume.hi),
+        3..=5 => (x.centroid[i - 3], r),
+        6..=8 => (x.inertia[i - 6], vr2),
+        _ => (x.products[i - 9], vr2),
+    };
+    let before = BOTTLE_E8_BEFORE.map(f64::from_bits);
+    for (i, (&now, &before)) in now.iter().zip(&before).enumerate() {
+        let (band, scale) = band(i);
+        for (what, value) in [("now", now), ("before", before)] {
+            let accuracy = ACCURACY * scale.max(value.abs());
+            // (the farthest the exact value can be; written so a NaN fails)
+            let far = (value - band.lo).max(band.hi - value);
+            assert!(
+                far <= accuracy,
+                "{i} {what}: {value:e} is up to {far:e} off [{:e}, {:e}] (accuracy {accuracy:e})",
+                band.lo,
+                band.hi
+            );
+        }
+    }
+}
 
 /// The fillets behind `blend.fillet_executive_p3`'s moved rows make main's geometry and
 /// mass bit for bit: the rows moved only in the edge and vertex tolerances the result
 /// carries from the read. The four rows whose mass moved in the expectations
 /// (`source-file-corner_box-edge4`, `-edge8`, `-edge9`,
 /// `stubs4-delete-edge-bottle-e8-r0.1`) have main's mass bit for bit: main's committed rows were older than main's own output, and the bless
-/// rewrote the whole row when the result's tolerances moved.
+/// rewrote the whole row when the result's tolerances moved. Entry 14's digest and mass are
+/// #18162's since its lazy UV trim raise
+/// ([`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]).
 #[test]
 fn moved_fillet_rows_keep_main_geometry_and_mass() {
     let mut failures = Vec::new();
