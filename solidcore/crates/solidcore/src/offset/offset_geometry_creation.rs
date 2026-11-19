@@ -416,6 +416,26 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
     }
 }
 
+/// A trim miss can leave an edge for the later merge. A failed proof of which
+/// branch to retain cannot: preserve its reason before the unmated-edge path.
+fn mating_result<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Err(e)
+            if matches!(
+                e.failure().map(|f| &f.reason),
+                Some(Reason::Offset(
+                    OffsetFailure::ExactCurveUncut
+                        | OffsetFailure::TangentBranchUncertified
+                        | OffsetFailure::PeriodicBranchAmbiguous
+                ))
+            ) || is_tangent_end_off_curve(&e) =>
+        {
+            Err(e)
+        }
+        r => ignore_soft(r),
+    }
+}
+
 /// Whether `e` is the refusal of an end beside a crossing tangent edge
 /// ([`OffsetFailure::TangentEndOffCurve`]).
 fn is_tangent_end_off_curve(e: &SolidError) -> bool {
@@ -3886,6 +3906,8 @@ impl OffsetGeometryCreation {
     /// A disappearing chart seam is not a material constraint. The genuine
     /// supports at the opposite end and beyond the seam bound the active SSI
     /// interval. Chart crossings outside this interval do not retain the seam.
+    /// Without genuine supports on both sides, a chart miss does not establish
+    /// seam removal: ordinary endpoint trimming still supplies the constraint.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn periodic_boundary_end<O: ClassObject + SolutionObject>(
         k: &Kernel,
@@ -3908,7 +3930,7 @@ impl OffsetGeometryCreation {
         let tolerance = brep.brep_tolerance(base)?;
         let mut events = Vec::new();
         let mut root: Option<(f64, Point3)> = None;
-        let mut retained_seam = false;
+        let mut ordinary_end = false;
         'seams: for (index, &seam) in neighbours.iter().enumerate() {
             let e = brep
                 .edgeuse_edge(seam)?
@@ -3924,24 +3946,21 @@ impl OffsetGeometryCreation {
             {
                 continue;
             }
+            let boundaries = Self::boundaries_beyond_seam(k, brep, seam, vertex)?;
+            let opposite = Self::opposite_end_boundaries(k, brep, edgeuse, vertex)?;
+            if boundaries.is_empty() || opposite.is_empty() {
+                // This seam-removal construction requires a support-bounded
+                // interval. Its absence leaves the ordinary trim applicable,
+                // including when the candidate misses this chart line. As for
+                // a retained seam, it cannot also emit a replacement root.
+                ordinary_end = true;
+                continue;
+            }
             let uv = uvs
                 .get(index)
                 .copied()
                 .flatten()
                 .ok_or(dangling("SSI without UV curve"))?;
-            let boundaries = Self::boundaries_beyond_seam(k, brep, seam, vertex)?;
-            let opposite = Self::opposite_end_boundaries(k, brep, edgeuse, vertex)?;
-            if boundaries.is_empty() || opposite.is_empty() {
-                // With no material end on one side, the whole component is its
-                // active interval. A chart crossing retains the seam; without a
-                // crossing there is no proved replacement endpoint.
-                let interval = curve_of(brep, curve)?.natural_interval();
-                if Self::intersects_periodic_chart(k, brep, executive, seam, uv, &interval)? {
-                    retained_seam = true;
-                    continue;
-                }
-                return Ok(PeriodicEnd::Unresolved);
-            }
             let mut seam_root: Option<(f64, Point3)> = None;
             for &across in &boundaries {
                 let candidate =
@@ -3956,7 +3975,7 @@ impl OffsetGeometryCreation {
                             if Self::intersects_periodic_chart(
                                 k, brep, executive, seam, uv, &interval,
                             )? {
-                                retained_seam = true;
+                                ordinary_end = true;
                                 continue 'seams;
                             }
                             return Ok(PeriodicEnd::Unresolved);
@@ -3997,7 +4016,7 @@ impl OffsetGeometryCreation {
             };
             let active = Extent1d::from_min_max(parameter, far_parameter);
             if Self::intersects_periodic_chart(k, brep, executive, seam, uv, &active)? {
-                retained_seam = true;
+                ordinary_end = true;
                 continue;
             }
             let mut owned_branch = false;
@@ -4028,7 +4047,7 @@ impl OffsetGeometryCreation {
                 });
             }
         }
-        if retained_seam && root.is_some() {
+        if ordinary_end && root.is_some() {
             return Ok(PeriodicEnd::Unresolved);
         }
         match root {
@@ -5652,6 +5671,8 @@ impl OffsetGeometryCreation {
     /// whose faces were tangent in the input and whose new surfaces, a plane and a curved
     /// surface, cross in a local operation (`OffsetExecutive::crosses_at`), only the curves
     /// on the curved face's side of the edge are candidates.
+    /// A disappearing periodic seam instead requires the unique branch incident
+    /// to its already mated opposite boundary; midpoint distance does not select it.
     ///
     /// With [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`] (the SolidCraft
     /// fork's tangency-labs/smlib@fddc366 and @98ab1b0), each marched intersection
@@ -5663,6 +5684,8 @@ impl OffsetGeometryCreation {
     /// `SM_ERR_NULL_POINTER` for a null edge use or a missing UV curve; `SM_ERR`
     /// [`OffsetFailure::TangentBranchUncertified`] where tangent curved neighbours now cross
     /// without a proof of the retained intersection branch or a unique physical circle;
+    /// [`OffsetFailure::PeriodicBranchAmbiguous`] where multiple SSI branches claim
+    /// the same periodic boundary event;
     /// when no intersection curve can be trimmed ([`OffsetFailure::TangentEndOffCurve`]
     /// where a curve was refused for it); `SER` of the geometry calls
     /// (`GetCreateExtendedSurface` included); [`SolidError::Unported`] for the callees
@@ -5993,10 +6016,10 @@ impl OffsetGeometryCreation {
             {
                 if !my_periodic_ends.is_empty() {
                     if periodic_curve.is_some() {
-                        return Err(SolidError::Unsupported {
-                            operation: OP_MATE,
-                            reason: "more than one SSI branch owns the periodic boundary event",
-                        });
+                        return Err(SolidError::offset(
+                            OP_MATE,
+                            OffsetFailure::PeriodicBranchAmbiguous,
+                        ));
                     }
                     periodic_curve = Some(ii);
                     min_curve = Some(ii);
@@ -6393,6 +6416,7 @@ impl OffsetGeometryCreation {
     ///
     /// `SM_ERR` for a tangent sector with gaps, or rails whose intervals do not line up;
     /// `SM_ERR_NULL_POINTER` for missing curves; `SER` of the geometry calls;
+    /// [`OffsetFailure::PeriodicBranchAmbiguous`] from mating is propagated;
     /// [`SolidError::Unported`] for the callees listed in the module header;
     /// [`SolidError::InvalidInput`] for null objects upstream dereferences.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -6499,8 +6523,8 @@ impl OffsetGeometryCreation {
             // Mate a couple of edges by extension and intersection (a problem is only
             // reported; not upstream: a port invariant (through `ignore_soft`), and an
             // exact intersection curve that cannot be cut into its pieces and an
-            // uncertified retained intersection branch, are passed on)
-            let mated = match self.mate_edges(
+            // uncertified or ambiguous retained intersection branch, are passed on)
+            let mated = mating_result(self.mate_edges(
                 k,
                 brep,
                 executive,
@@ -6509,20 +6533,7 @@ impl OffsetGeometryCreation {
                 offset_edgeuse,
                 other_offset_edgeuse,
                 mark,
-            ) {
-                Err(e)
-                    if matches!(
-                        e.failure().map(|f| &f.reason),
-                        Some(Reason::Offset(
-                            OffsetFailure::ExactCurveUncut
-                                | OffsetFailure::TangentBranchUncertified
-                        ))
-                    ) || is_tangent_end_off_curve(&e) =>
-                {
-                    return Err(e)
-                }
-                r => ignore_soft(r)?,
-            };
+            ))?;
             // Not upstream (WR-344 refinement, #1795): the merge must still intersect the
             // offsets of an edge that could not be mated
             if mated.is_none() {
@@ -7881,6 +7892,33 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
 mod tests {
     use super::*;
     use crate::nurbs::math::CPoint;
+
+    #[test]
+    fn periodic_branch_ambiguity_is_not_an_unmated_edge() {
+        let error = mating_result::<()>(Err(SolidError::offset(
+            OP_MATE,
+            OffsetFailure::PeriodicBranchAmbiguous,
+        )))
+        .unwrap_err();
+        let failure = error.failure().unwrap();
+        assert_eq!(failure.operation, OP_MATE);
+        assert_eq!(failure.kind(), crate::error::ErrorKind::Unsupported);
+        assert!(!error.is_defect());
+        assert_eq!(
+            failure.reason,
+            Reason::Offset(OffsetFailure::PeriodicBranchAmbiguous)
+        );
+        assert_eq!(
+            mating_result::<()>(Err(SolidError::Unsupported {
+                operation: OP_MATE,
+                reason: "ordinary trim miss",
+            }))
+            .unwrap(),
+            None
+        );
+        assert_eq!(mating_result::<()>(Err(sm_err(OP_MATE))).unwrap(), None);
+        assert_eq!(mating_result(Ok(())).unwrap(), Some(()));
+    }
 
     /// The cubic of the joint-knot tests (simple knot `1`, ends `0` and `2.5`), moved by
     /// `offset` along every axis, cut at `cut` and joined back: the joint knot `cut` at

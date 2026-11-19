@@ -936,6 +936,75 @@ pub fn hidden_lines(
     Ok(Drawing { lines, unsupported, stats })
 }
 
+/// One curved face's silhouette on screen, as [`silhouettes`] gives it.
+#[derive(Clone, Debug)]
+pub struct Silhouette {
+    /// The first face of the faces on its surface, as [`Source::Silhouette`] names it.
+    pub face: usize,
+    /// Lines and conic arcs where the curve is exact, chords between `points` otherwise.
+    pub geometry: Vec<Seg2>,
+    pub accuracy: CurveAccuracy,
+    /// Exact points along it, from its start to its end.
+    pub points: Vec<[f64; 2]>,
+}
+
+/// The silhouettes of `def`'s curved faces placed by `p` and seen in `view`, every one whole and
+/// trimmed to its faces: the curves [`hidden_lines`] traces and draws, without asking which
+/// parts are hidden, and not split where other curves cross them. Faces left out of the
+/// supported subset ([`PrepareReport::freeform_faces`] unless [`Options::freeform`],
+/// [`PrepareReport::unsupported_trims`]) have none.
+///
+/// # Errors
+/// An invalid placement or view, or a budget of `opts` exceeded.
+pub fn silhouettes(def: &Prepared, p: &Placement, view: &View, opts: &Options) -> Result<Vec<Silhouette>, HlrError> {
+    let defs = std::slice::from_ref(def);
+    let given = [Placement { body: 0, ..*p }];
+    // Worked in a frame centred on the body, as hidden_lines works.
+    let origin = scene_centre(defs, &given)?;
+    let local = [Placement { body: 0, rotation: p.rotation, translation: p.apply(def.offset) - origin }];
+    let shift = view.screen(origin);
+    let never = || false;
+    let ctx = context(defs, &local, view, opts, &never)?;
+    let Some(placed) = local.first() else { return Ok(Vec::new()) };
+    let sets = body_silhouettes(def, placed.local_dir(view.d), opts, &ctx)?;
+    let mut out = Vec::new();
+    for (face, _, sils) in &sets {
+        for s in sils {
+            for r in &s.ranges {
+                if out.len() >= opts.max_tracks {
+                    return Err(HlrError::Budget("curve"));
+                }
+                let mut track = Track {
+                    placement: 0,
+                    curve: &s.curve,
+                    range: *r,
+                    source: Source::Silhouette { face: *face },
+                    acc: s.acc,
+                    own: Vec::new(),
+                    own_eps: 0.,
+                    samples: Vec::new(),
+                    sags: Vec::new(),
+                    splits: Vec::new(),
+                };
+                let (samples, sags) = screen_samples(&track, &ctx)?;
+                track.samples = samples;
+                track.sags = sags;
+                let points: Vec<[f64; 2]> = track.samples.iter().map(|(_, q)| *q).collect();
+                let sag = track.sags.iter().copied().fold(0., f64::max);
+                let piece = Piece { t: *r, visibility: Visibility::Visible, covered: false, geometry: Vec::new(), accuracy: s.acc, points, sag };
+                let (geometry, accuracy) = piece_geometry(&track, &piece, placed, view);
+                out.push(Silhouette {
+                    face: *face,
+                    geometry: geometry.into_iter().map(|g| shift_seg(g, shift)).collect(),
+                    accuracy,
+                    points: piece.points.iter().map(|q| [q[0] + shift[0], q[1] + shift[1]]).collect(),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// A body's silhouettes seen along `dl` (the direction of sight in its own frame), per set of
 /// supported curved faces on one surface: the set's first face, its largest face and the
 /// traced curves. Cancellation is polled every 256 faces while the sets are formed and before

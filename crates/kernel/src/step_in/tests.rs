@@ -336,6 +336,73 @@ fn a_torus_written_as_a_patch_and_the_rest_round_it_imports_whole() {
     }
 }
 
+/// A 5 mm ball written as two faces on its sphere that share one loop off the sphere's axis
+/// (#15046): a cap beyond the circle x = 3 (radius 4 about +x) and the rest of the sphere round
+/// it, as some exporters write a ball (SolidCraft 0.30.1 re-exporting an inserted one among
+/// them). The rest runs clockwise round the cap: it is the outside of its loop, and was read as
+/// the cap turned over, both faces on the cap, no mass, and the cap drawn twice. Also with the
+/// loop's senses the other way round (the face named Cap is then the outside), and with the rest
+/// on a sphere of its own about +y. Each reads as the closed ball: two faces; the loop's circle
+/// and the rest's seam from it to the pole the rest covers as its edges; the circle's vertex and
+/// that pole; one shell.
+/// Its area is 4πr² and its volume 4πr³/3, and each face's display mesh covers its own zone of
+/// the ball: inscribed within a chord deviation δ, a zone's mesh area is short of its exact
+/// area by at most a factor (1 − δ/r)².
+#[test]
+fn a_ball_written_as_a_cap_and_the_rest_round_it_imports_whole() {
+    use std::f64::consts::PI;
+    let r = 5.0_f64;
+    let (area, volume) = (4.0 * PI * r * r, 4.0 / 3.0 * PI * r * r * r);
+    let own =
+        "#24=DIRECTION('',(0.,1.,0.));\n#25=DIRECTION('',(0.,0.,1.));\n#26=AXIS2_PLACEMENT_3D('',#1,#24,#25);\n#27=SPHERICAL_SURFACE('',#26,5.);\n";
+    for (what, cap, rest, rest_on, extra) in [
+        ("as the issue writes it", ".T.", ".F.", "#5", ""),
+        ("the loop's senses the other way round", ".F.", ".T.", "#5", ""),
+        ("the rest on its own sphere about +y", ".T.", ".F.", "#27", own),
+    ] {
+        let mut t = String::from(HEAD);
+        t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#5=SPHERICAL_SURFACE('',#4,5.);\n";
+        t += "#6=CARTESIAN_POINT('',(3.,0.,0.));\n#7=DIRECTION('',(0.,1.,0.));\n#8=AXIS2_PLACEMENT_3D('',#6,#3,#7);\n#9=CIRCLE('',#8,4.);\n";
+        t += "#10=CARTESIAN_POINT('',(3.,4.,0.));\n#11=VERTEX_POINT('',#10);\n#12=EDGE_CURVE('',#11,#11,#9,.T.);\n";
+        t += &format!(
+            "#13=ORIENTED_EDGE('',*,*,#12,{cap});\n#14=EDGE_LOOP('',(#13));\n#15=FACE_OUTER_BOUND('',#14,.T.);\n#16=ADVANCED_FACE('Cap',(#15),#5,.T.);\n"
+        );
+        t += &format!(
+            "#17=ORIENTED_EDGE('',*,*,#12,{rest});\n#18=EDGE_LOOP('',(#17));\n#19=FACE_OUTER_BOUND('',#18,.T.);\n#20=ADVANCED_FACE('Rest',(#19),{rest_on},.T.);\n"
+        );
+        t += extra;
+        t += "#21=CLOSED_SHELL('',(#16,#20));\n#22=MANIFOLD_SOLID_BREP('Ball',#21);\n#23=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#22),#70);\n";
+        t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        let imp = step_import(&t).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("turned over") || w.contains("left out") || w.contains("surfaces")),
+            "{what}: {:?}",
+            imp.warnings
+        );
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!((m.faces, m.edges, m.vertices, m.shells), (2, 2, 2, 1), "{what}");
+        assert!(rel(m.area, area) < 1e-6, "{what}: area {} vs {area}", m.area);
+        assert!(rel(m.volume, volume) < 1e-6, "{what}: volume {} vs {volume}", m.volume);
+        // Each face's own triangles: the cap's zone of height r − 3 has area 2πr·2, the rest the
+        // other 2πr·8 (whichever face the file names Cap).
+        let chord = 0.01;
+        let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(chord)).unwrap();
+        let mut shown = [0.0_f64; 2];
+        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+            shown[*f as usize] += 0.5 * (b - a).cross(c - a).len();
+        }
+        shown.sort_by(f64::total_cmp);
+        for (s, exact) in shown.into_iter().zip([2.0 * PI * r * 2.0, 2.0 * PI * r * 8.0]) {
+            let floor = exact * (1.0 - chord / r).powi(2);
+            assert!(s >= floor && s <= exact * (1.0 + 1e-9), "{what}: a face's display mesh area {s}, its zone's {exact}");
+        }
+    }
+}
+
 /// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
 /// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
 /// a rational circle, which got no pcurves, so the block came in open. The round reads as a

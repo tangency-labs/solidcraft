@@ -141,6 +141,39 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
         rel(actual, 47.498_020_998_403_7) < 1e-9,
         "shell volume {actual:.17}"
     );
+    let (record, _) = body.to_record().unwrap();
+    let cavity_faces: Vec<_> = record
+        .faces
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| {
+            matches!(
+                f.surface,
+                solidcore_record::brep::Surface::Torus { minor_radius, .. } if minor_radius < 8.0
+            )
+            .then_some(i)
+        })
+        .collect();
+    assert_eq!(cavity_faces.len(), 1, "one inset torus face");
+    let cavity = cavity_faces[0];
+    let query = crate::query::Query::new(&record);
+    // The short seam has two distinct ends beyond the drill centre, x = 37.
+    // The other meridian ends on the cap at x < 37; the outer rim is closed.
+    let seam_edges: Vec<_> = record
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| {
+            query.edge_faces(*i).contains(&cavity)
+                && e.vertices[0] != e.vertices[1]
+                && e.vertices
+                    .iter()
+                    .all(|&v| record.vertices[v as usize].point[0] > 37.0)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(seam_edges.len(), 1, "one retained outer-rim seam");
+    assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
 }
 
 /// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than
@@ -188,18 +221,7 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
 #[test]
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_basin_shells_past_its_rim_to_its_closed_form() {
-    session::set_thread_fixes(
-        solidcore::kernel::UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| {
-                !matches!(
-                    *n,
-                    "fillet_refuse_rounds_breaking_through" | "fillet_round_ends_on_outline"
-                )
-            }),
-    )
-    .unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64, z: f64| {
         let p = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
         (0..4)

@@ -302,7 +302,7 @@ const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (
 /// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
 /// Computation Failure"). The piece is now the crease line continued: the rounds build valid
 /// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
-/// application's fix set (every fix less `kernel_cases/held_back.json`).
+/// application's fix set (every fix on).
 #[test]
 fn rounds_overflowing_a_shallow_concave_crease_build() {
     for (r, mitre) in CREASE_PLATE_MITRE {
@@ -3514,6 +3514,131 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     }
 }
 
+/// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
+/// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
+#[test]
+fn both_flat_face_loops_of_a_notched_half_torus_round() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    let reopen = |body: Body| {
+        let (record, _) = body.to_record().unwrap();
+        Body::from_record(&record, true).unwrap().0
+    };
+    let cylinder = |base, radius, height| {
+        let (s, c) = 0.6131_f64.sin_cos();
+        extrude(
+            &[Curve::Arc {
+                center: base,
+                axis: [0.0, 0.0, 1.0],
+                reference: [c, s, 0.0],
+                radius,
+                start: 0.0,
+                end: 2.0 * PI,
+            }],
+            [0.0, 0.0, 1.0],
+            height,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    };
+    let ring = revolve(
+        &[Curve::Arc {
+            center: [30.0, 0.0, 0.0],
+            axis: [0.0, -1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 8.0,
+            start: 0.0,
+            end: 2.0 * PI,
+        }],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        2.0 * PI,
+        true,
+    )
+    .unwrap();
+    let below = make_box([-100.0; 3], [200.0, 200.0, 100.0]).unwrap();
+    let half = reopen(
+        boolean(reopen(ring), below, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let boss = cylinder([29.984954243751982, 0.95001, -1.9], 0.95, 1.9);
+    let joined = reopen(boolean(half, boss, BooleanOp::Union).unwrap().unwrap());
+    let notch = cylinder([0.0, 38.0, -1.0], 0.7, 4.0);
+    let body = reopen(
+        boolean(joined, notch, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap(),
+    );
+    let edges: Vec<_> = [[-38.0, 0.0, 0.0], [0.0, 37.3, 0.0], [-22.0, 0.0, 0.0]]
+        .into_iter()
+        .map(|point| nearest_edge(&body, point))
+        .collect();
+    // solid.fillet propagates the picks across tangent joins by default (2 degrees).
+    let edges = tangent_chain(&body, None, &edges, &[], 2.0 * PI / 180.0)
+        .unwrap()
+        .members;
+    let run = || blend(&body, Blend::Round, &edges, &[0.8], &[], Corners::Filled);
+    #[cfg(feature = "profile")]
+    let (result, profiles) = solidcore_ops::session::profiled(run);
+    #[cfg(not(feature = "profile"))]
+    let result = run();
+    let result = result.unwrap();
+    #[cfg(feature = "profile")]
+    for call in profiles {
+        let certificates: u64 = call
+            .profile
+            .summary
+            .iter()
+            .filter(|s| s.name == "blend::certificate::gn_certify_span")
+            .map(|s| s.count)
+            .sum();
+        assert_eq!(
+            certificates, 0,
+            "circular spines need no generic span certificates"
+        );
+    }
+    assert!(result.dropped.iter().all(|dropped| !dropped));
+    assert!(body.is_manifold_solid().unwrap());
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(body.solid_count().unwrap(), 1);
+    // At z=0.1 the rounded rims are at radii 22.4573 and 37.5427;
+    // the notch's radius is 1.1127. The boss and notch roof stay intact.
+    for (inside, outside) in [
+        ([-37.4, 0.0, 0.1], [-37.8, 0.0, 0.1]),
+        ([-22.6, 0.0, 0.1], [-22.3, 0.0, 0.1]),
+        ([0.0, 36.8, 0.1], [0.0, 37.2, 0.1]),
+        ([0.0, 37.35, 3.1], [0.0, 37.35, 2.9]),
+    ] {
+        assert_eq!(
+            body.classify_point(inside).unwrap(),
+            solidcore_ops::measure::PointClass::Inside,
+            "{inside:?}"
+        );
+        assert_eq!(
+            body.classify_point(outside).unwrap(),
+            solidcore_ops::measure::PointClass::Outside,
+            "{outside:?}"
+        );
+    }
+    assert_eq!(
+        body.classify_point([29.984954243751982, 0.95001, -0.95])
+            .unwrap(),
+        solidcore_ops::measure::PointClass::Inside
+    );
+    // Meridian-area and circle-intersection integration, independently derived in
+    // plan/findings/acid1-half-torus-flat-rim-round.md.
+    let expected = 18892.19338975647;
+    let actual = body.volume(1e-10).unwrap();
+    assert!(rel(actual, expected) < 1e-8, "{actual} vs {expected}");
+}
+
 /// A revolved r8 corner, clipped on x = +/-10. Its torus support must survive the
 /// round's definition record and reload, including the partial generator's parameters.
 #[test]
@@ -3891,8 +4016,7 @@ fn issue_13911_rails(
 /// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
-    // SolidCraft's fix set when it traced the case: its preset, which has every flag on but the
-    // held-back ones
+    // SolidCraft's fix set: every flag on
     solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (input, _) = issue_13911_body();
     let before = input.check(CheckLevel::All).unwrap();

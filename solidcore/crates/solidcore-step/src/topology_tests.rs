@@ -1400,6 +1400,125 @@ fn a_quarter_elbow_gets_a_seam_round_the_axis() {
     assert!((t1 - t0 - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{t0} {t1}");
 }
 
+/// A tube of radius 1.8 swept down the z axis from z = 15, round a corner of radius 2.5 at the
+/// origin, and on along `leg` in the xy plane, written as a sweep writes it: a cylinder, the bend
+/// on a torus, a cylinder and two end disks, each round face with one seam. The seams line up
+/// with the first leg's seam, at x = −1.8, so the torus's seam round its axis lies at the tube
+/// angle of that point, a quarter line only when `leg` runs along an axis.
+fn swept_tube(leg: [f64; 2]) -> (p21::Exchange, f64, f64) {
+    let (r, big) = (1.8, 2.5);
+    let length = (leg[0] * leg[0] + leg[1] * leg[1]).sqrt();
+    let d = [leg[0] / length, leg[1] / length, 0.0];
+    let at = |o: V, k: f64, v: V| [o[0] + k * v[0], o[1] + k * v[1], o[2] + k * v[2]];
+    let dot = |a: V, b: V| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: V, b: V| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let down = [0.0, 0.0, -1.0];
+    let (top, corner, start, end) = ([0.0, 0.0, 15.0], [0.0, 0.0, big], [big * d[0], big * d[1], 0.0], [leg[0], leg[1], 0.0]);
+    // The torus: centred where the bend's arc is, its axis normal to the bend's plane, its
+    // longitude zero at the first leg's end.
+    let centre = at(corner, big, d);
+    let axis = [d[1], -d[0], 0.0];
+    // The seam vertices: on the first leg's seam, and the same point turned a quarter round the
+    // torus's axis.
+    let p0 = [-r, 0.0, big];
+    let seam_centre = at(centre, dot(sub3(p0, centre), axis), axis);
+    let seam_radius = len3(sub3(p0, seam_centre));
+    let x = sub3(p0, seam_centre).map(|c| c / seam_radius);
+    let p1 = at(seam_centre, seam_radius, cross(axis, x));
+    let out = sub3(p1, start).map(|c| c / r);
+    let (pt, pe) = ([-r, 0.0, 15.0], at(p1, length - big, d));
+    let mut w = W::default();
+    let (vt, v0, v1, ve) = (w.vertex(pt), w.vertex(p0), w.vertex(p1), w.vertex(pe));
+    let ring = |w: &mut W, v: u64, c: V, n: V, x: V| {
+        let k = w.circle(c, n, x, r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let top_ring = ring(&mut w, vt, top, down, [-1.0, 0.0, 0.0]);
+    let corner_ring = ring(&mut w, v0, corner, down, [-1.0, 0.0, 0.0]);
+    let start_ring = ring(&mut w, v1, start, neg(d), down);
+    let end_ring = ring(&mut w, ve, end, d, out);
+    let seam_top = w.line_edge((vt, pt), (v0, p0), true, 1.0);
+    let k = w.circle(seam_centre, axis, x, seam_radius);
+    let seam_bend = w.add(format!("EDGE_CURVE('',#{v0},#{v1},#{k},.T.)"));
+    let seam_end = w.line_edge((v1, p1), (ve, pe), true, 1.0);
+    let mut faces = Vec::new();
+    let mut side = |w: &mut W, surface: u64, uses: [(u64, bool); 4]| {
+        let uses: Vec<u64> = uses.into_iter().map(|(e, o)| w.oe(e, o)).collect();
+        let bound = w.bound(&uses, false, true);
+        faces.push(w.face(&[bound], surface, true));
+    };
+    let a = w.axis(top, down, [-1.0, 0.0, 0.0]);
+    let first = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    side(&mut w, first, [(seam_top, true), (corner_ring, false), (seam_top, false), (top_ring, true)]);
+    let a = w.axis(centre, axis, neg(d));
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(big), real(r)));
+    side(&mut w, torus, [(seam_bend, true), (start_ring, true), (seam_bend, false), (corner_ring, true)]);
+    let a = w.axis(start, d, out);
+    let second = w.add(format!("CYLINDRICAL_SURFACE('',#{a},{})", real(r)));
+    side(&mut w, second, [(seam_end, true), (end_ring, false), (seam_end, false), (start_ring, false)]);
+    for (o, n, x, ring, sense) in [(top, down, [-1.0, 0.0, 0.0], top_ring, false), (end, d, axis, end_ring, true)] {
+        let plane = w.plane(o, n, x);
+        let x = w.oe(ring, true);
+        let bound = w.bound(&[x], false, sense);
+        faces.push(w.face(&[bound], plane, sense));
+    }
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('tube',#{shell})"));
+    // Straight runs of 15 − 2.5 and |leg| − 2.5, and a quarter of a torus.
+    let run = 15.0 - big + length - big;
+    let pi = std::f64::consts::PI;
+    let volume = pi * r * r * (run + big * pi / 2.0);
+    let area = 2.0 * pi * r * run + pi * pi * big * r + 2.0 * pi * r * r;
+    (w.file(&[solid]), volume, area)
+}
+
+/// A swept tube's bend reads with every edge on its torus whatever the direction of its second
+/// leg: along −y its torus's seam round the axis lies on a quarter line of the tube; along the
+/// legs off the axes (the seam in each quarter of the tube) and 1e-6 off −y it does not; 1e-8 off
+/// −y it does, to within the file's uncertainty. The bend stays a torus, and the quarter grid of
+/// its tube runs through the seam (#18778).
+#[test]
+fn a_tube_swept_round_a_corner_reads_closed_whatever_its_second_legs_direction() {
+    let legs = [[0.0, -11.24], [-3.75, -10.6], [3.75, -10.6], [-3.75, 10.6], [3.75, 10.6], [1e-8, -11.24], [1e-6, -11.24]];
+    for leg in legs {
+        let (file, volume, area) = swept_tube(leg);
+        let r = read_solids(&file);
+        assert!(r.failures.is_empty(), "{leg:?}: {:?}", r.failures);
+        let s = r.solids.into_iter().next().unwrap();
+        assert!(!s.sheet, "{leg:?}: {:?}", s.notes);
+        solidcore_ops::record_check::validate(&s.brep).unwrap();
+        solidcore_ops::record_check::agreement(&s.brep).unwrap();
+        // The file's 5 faces, 7 edges (3 seams, 4 rings) and 4 vertices, inside and outside.
+        assert_eq!(counts(&s.brep), [2, 1, 5, 7, 4], "{leg:?}: {:?}", s.notes);
+        // One torus, the tube angle of the seam vertex (−1.8, 0, 2.5) on it a whole number of
+        // quarters from its tube start, to within the angle the file's uncertainty (1e-7 mm)
+        // makes round the tube (the start a face within it of a quarter line keeps).
+        let tori: Vec<_> = s
+            .brep
+            .faces
+            .iter()
+            .filter_map(|f| match &f.surface {
+                BSurface::Torus { frame, major_radius, tube_start, .. } => Some((frame.clone(), *major_radius, *tube_start)),
+                _ => None,
+            })
+            .collect();
+        let [(frame, major, tube_start)] = tori.as_slice() else { panic!("{leg:?}: {} tori", tori.len()) };
+        let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let d = Vec3::from([-1.8, 0.0, 2.5]) - Vec3::from(frame.origin);
+        let h = d.dot(z);
+        let angle = h.atan2((d - z * h).len() - major);
+        let off = angle - tube_start;
+        let off = off - (off / std::f64::consts::FRAC_PI_2).round() * std::f64::consts::FRAC_PI_2;
+        assert!(off.abs() <= 1e-7 / 1.8, "{leg:?}: seam at {angle}, tube start {tube_start}");
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        assert!(body.is_manifold_solid().unwrap());
+        let mass = body.mass_properties(1e-9).unwrap();
+        assert!((mass.volume - volume).abs() < 1e-6 * volume, "{leg:?}: {mass:?}, {volume} expected");
+        assert!((mass.area - area).abs() < 1e-6 * area, "{leg:?}: {mass:?}, {area} expected");
+    }
+}
+
 /// A ball whose one face is bounded by two vertex loops, at its poles: the whole sphere, closed
 /// by a meridian seam from pole to pole.
 #[test]

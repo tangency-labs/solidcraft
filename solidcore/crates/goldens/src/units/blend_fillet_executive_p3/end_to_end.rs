@@ -2687,6 +2687,52 @@ mod wr455_certificates {
     }
 }
 
+/// #18930: with the tangent curve tracer on, the round of edge 8 of `bottle.smb` at r 0.1
+/// (`stubs4-delete-edge-bottle-e8-r0.1`) failed (status 1001). In two intersections of a
+/// round with its support face the tracer reported 16 and 11 touching points, all on the
+/// rail, on the edge of the round's domain, where the marcher returns a tangent curve:
+/// contacts on that one curve, taken for nodes where crossing branches meet. The round
+/// builds a manifold body of 31 vertices, 47 edges and 18 faces, the counts the row
+/// records (the row holds the rest of the body).
+#[cfg(test)]
+mod wr75_rail_contacts {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+
+    const NAME: &str = "stubs4-delete-edge-bottle-e8-r0.1";
+
+    #[test]
+    fn a_round_touching_its_face_along_the_rail_builds_with_the_tracer() {
+        let case = crate::case::regression_case(&super::super::Runner, NAME);
+        let inputs: super::super::Inputs = case.parse().expect("inputs");
+        let input: RealSolid = inputs.real_solid.expect("a real_solid case");
+        let mut k = Kernel::default();
+        k.fixes.ssi_tangent_curve_tracer = true;
+        let mut body = build(&mut k, &input).expect("fixture").expect("bottle");
+        let edges = p1::edges(&body, None).expect("edges");
+        let selected: Vec<_> = input
+            .edge_indices()
+            .expect("edge indices")
+            .iter()
+            .map(|&i| *edges.get(i).expect("selected edge"))
+            .collect();
+        apply(&mut k, &mut body, &selected, &input)
+            .unwrap_or_else(|e| panic!("{NAME}: the round failed: {e:?}"));
+        assert!(
+            is_manifold_solid(&body).expect("manifold check"),
+            "{NAME}: not a manifold solid"
+        );
+        let counts = [
+            p1::vertices(&body, None).expect("vertices").len(),
+            p1::edges(&body, None).expect("edges").len(),
+            p1::faces(&body, None).expect("faces").len(),
+        ];
+        assert_eq!(counts, [31, 47, 18], "{NAME}: vertices, edges, faces");
+    }
+}
+
 /// WR-56 (#17467): the two rows it moved, `source-file-6_sided_corner-all-edges` and
 /// `source-file-nurb_box-all-edges`, round every edge of a B-spline body. Their mass
 /// properties did not move (bit for bit), and their topology and geometry records hold the
