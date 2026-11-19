@@ -17587,7 +17587,11 @@ mod tests {
         let at = from + vec2(300.0, 120.0);
         let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed, modifiers: egui::Modifiers::NONE };
         h.frame_with(vec![egui::Event::PointerMoved(at), press(true)]);
-        assert!((h.app.cam.yaw - start.yaw).abs() < 1e-9 && (h.app.cam.pitch - start.pitch).abs() < 1e-9, "the press turned the view: {:?}", h.app.cam);
+        assert!(
+            (h.app.cam.yaw - start.yaw).abs() < 1e-9 && (h.app.cam.pitch - start.pitch).abs() < 1e-9,
+            "the press turned the view: {:?}",
+            h.app.cam
+        );
         h.frame_with(vec![egui::Event::PointerMoved(at + vec2(4.0, 0.0))]);
         let mut expected = start;
         expected.orbit(4.0, 0.0);
