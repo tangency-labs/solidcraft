@@ -1069,6 +1069,48 @@ pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], poi
     })
 }
 
+/// Moves drawn 3D picks along the plane as `f` moves plane geometry, keeping their height off it.
+pub(super) fn move_drawn(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    picks: &[(String, Option<usize>)],
+    f: &dyn Fn(Vec2) -> Vec2,
+) -> Result<(usize, Value)> {
+    let id = sketch_store::target(s, p, cmd)?;
+    let world = s.world_state()?.sketch(id).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let component = solidcore_record::Plane {
+        origin: solidcraft_doc::apply_point(&inverse, world.origin),
+        x: solidcraft_doc::apply_vector(&inverse, world.x),
+        y: solidcraft_doc::apply_vector(&inverse, world.y),
+    };
+    edit(s, p, cmd, false, |sk, _| {
+        let mut moves = Vec::new();
+        for (wire, index) in picks {
+            let drawn = sk
+                .wire_index(wire)
+                .and_then(|w| sk.wires.get(w))
+                .filter(|w| !w.fit.is_empty() && w.link.is_none())
+                .ok_or_else(|| bad(cmd, format!("`{wire}` is not an editable drawn 3D curve")))?;
+            let plane = if drawn.space == WireSpace::Component { component } else { world };
+            let which: Vec<usize> = match index {
+                Some(i) if *i < drawn.fit.len() => vec![*i],
+                Some(i) => return Err(bad(cmd, format!("`{wire}` has no drawn point {i}"))),
+                None => (0..drawn.fit.len()).collect(),
+            };
+            let moved: Vec<(usize, Vec3)> = which
+                .into_iter()
+                .filter_map(|i| drawn.fit.get(i).map(|q| (i, *q)))
+                .map(|(i, q)| (i, plane.to_world(f(plane.to_local(q))) + plane.normal() * plane.height(q)))
+                .collect();
+            moves.extend(moved.into_iter().map(|(i, to)| (wire.clone(), i, to)));
+        }
+        sk.move_drawn_points(&moves)?;
+        Ok(moves.len())
+    })
+}
+
 #[cfg(test)]
 #[path = "sketch_3d_frame_tests.rs"]
 mod frame_tests;
