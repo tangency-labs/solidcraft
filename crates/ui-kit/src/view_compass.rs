@@ -12,7 +12,7 @@ const AXIS_LENGTH: f64 = 38.0;
 /// The artwork sits inside the pointer reach so the compass keeps breathing room in its circle.
 const ART_SCALE: f64 = 0.84;
 /// The compass circle's radius: anywhere inside drags the view.
-const RADIUS: f32 = 49.5;
+pub const RADIUS: f32 = 49.5;
 
 /// The six signed world axes, by name.
 pub const AXES: [(&str, [f64; 3]); 6] = [

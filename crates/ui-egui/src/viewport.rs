@@ -9652,15 +9652,14 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     }
 }
 
-/// Where the axes navigator's roll arrows go: its centre and the arrows' scale (the custom
-/// navigator's design units fitted to the axes navigator's box), when they are shown.
-fn axes_arrows(app: &SolveApp, rect: Rect) -> Option<(Pos2, f32)> {
-    app.preferences.axes_navigator_arrows.then(|| (axis_center(app, rect), axis_rect(app, rect).width() / navigator_controls::DESIGN_SIZE))
+/// The axes navigator's centre, when its roll arrows are shown.
+fn axes_arrows(app: &SolveApp, rect: Rect) -> Option<Pos2> {
+    app.preferences.axes_navigator_arrows.then(|| axis_center(app, rect))
 }
 
 /// `p` is on one of the axes navigator's roll arrows, which take it from the axis tips and the drag.
 fn on_axes_arrow(app: &SolveApp, rect: Rect, p: Pos2) -> bool {
-    axes_arrows(app, rect).is_some_and(|(c, scale)| navigator_controls::on_roll_arrow(c, scale, p))
+    axes_arrows(app, rect).is_some_and(|c| navigator_controls::on_axes_roll_arrow(c, p))
 }
 
 fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
@@ -9684,12 +9683,13 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     };
     // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
     let action = crate::view_compass::show(ui, &compass);
-    // The two curved roll arrows at the top right, as the custom navigator has them, drawn over
-    // the compass's circle; shown while the pointer is over the navigator or it is orbiting.
-    if let Some((c, scale)) = axes_arrows(app, rect) {
-        let active = orbiting || ui.rect_contains_pointer(axis_rect(app, rect));
-        let painter = ui.painter_at(rect);
-        navigator_controls::roll_arrows(app, ui, &painter, c, scale, active, Tokens::get().navigator(active));
+    // The two roll arrows round the compass's upper-right edge, inside the navigator's box; shown
+    // while the pointer is over the navigator or it is orbiting.
+    if let Some(c) = axes_arrows(app, rect) {
+        let outer = axis_rect(app, rect);
+        let active = orbiting || ui.rect_contains_pointer(outer);
+        let painter = ui.painter_at(outer);
+        navigator_controls::axes_roll_arrows(app, ui, &painter, c, active, Tokens::get().navigator(active));
     }
     match action {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
@@ -17062,6 +17062,12 @@ mod tests {
         h.frames(2);
         assert!(h.app.preferences.axes_navigator_arrows, "on by default");
         let rect = h.app.viewport.rect.unwrap();
+        let outer = axis_rect(&h.app, rect);
+        for spin in ["clockwise", "counterclockwise"] {
+            let p = crate::scenario::handle_at(&format!("navigator:control:{spin}")).unwrap();
+            assert!(outer.shrink(4.0).contains(p), "the {spin} arrow stays inside the navigator's box");
+            assert!(p.distance(axis_center(&h.app, rect)) > crate::view_compass::RADIUS, "and outside the compass circle");
+        }
         for (axis, _) in crate::view_compass::AXES {
             let tip = crate::scenario::handle_at(&format!("axis_view:{axis}")).unwrap();
             assert!(!on_axes_arrow(&h.app, rect, tip), "the {axis} tip is clear of the arrows");
