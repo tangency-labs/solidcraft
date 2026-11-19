@@ -144,6 +144,16 @@ fn plain_text(text: &str, max: usize) -> bool {
     text.len() <= max && !text.chars().any(char::is_control)
 }
 
+/// A label of at most `max` characters (not bytes) on one line.
+fn plain_label(text: &str, max: usize) -> bool {
+    text.chars().count() <= max && !text.chars().any(char::is_control)
+}
+
+/// A field a row of this version reads.
+fn known_field(key: &str) -> bool {
+    COLUMNS.iter().any(|c| c.eq_ignore_ascii_case(key)) || key.eq_ignore_ascii_case("source")
+}
+
 /// Read a pack: JSON when it starts with `{`, CSV otherwise.
 pub fn read(bytes: &[u8]) -> Result<ReadPack, PackError> {
     if bytes.len() > MAX_PACK_BYTES {
@@ -205,6 +215,10 @@ fn read_json(text: &str) -> Result<ReadPack, PackError> {
         };
         let mut fields = Vec::new();
         for (key, value) in row {
+            if !known_field(key) {
+                skipped.add(key);
+                continue;
+            }
             let text = match value {
                 Value::String(s) => s.clone(),
                 Value::Number(x) => x.to_string(),
@@ -284,17 +298,17 @@ fn pack_rule(row: usize, fields: &[(&str, String)], skipped: &mut Skipped) -> Re
         return Err(fail("the name must be at most 128 characters on one line".into()));
     }
     for (key, _) in fields {
-        if !COLUMNS.iter().any(|c| c.eq_ignore_ascii_case(key)) && !key.eq_ignore_ascii_case("source") {
+        if !known_field(key) {
             skipped.add(key);
         }
     }
     let mut rule = SheetRule::named(name);
     rule.material = get("material").unwrap_or_default().to_string();
-    if !plain_text(&rule.material, MAX_LABEL) {
+    if !plain_label(&rule.material, MAX_LABEL) {
         return Err(fail("the material must be at most 128 characters on one line".into()));
     }
     let gauge = get("gauge").unwrap_or_default().to_string();
-    if !plain_text(&gauge, MAX_GAUGE) {
+    if !plain_label(&gauge, MAX_GAUGE) {
         return Err(fail("the gauge must be at most 32 characters on one line".into()));
     }
     for (key, slot) in rule.fields_mut() {
@@ -305,13 +319,17 @@ fn pack_rule(row: usize, fields: &[(&str, String)], skipped: &mut Skipped) -> Re
         if expr::definition(text).is_some() {
             return Err(fail(format!("`{key}` is `{text}`: give a value, not a parameter definition")));
         }
-        if key != "k_factor" && expr::is_bare_number(text) {
-            return Err(fail(format!(
-                "`{key}` is `{text}` with no unit: write `{text} mm` or `{text} in`, since a pack goes into designs of any unit"
-            )));
-        }
         if let Some(other) = crate::sheet::rule_references(key, text).into_iter().next() {
             return Err(fail(format!("`{key}` uses `{other}`: a pack's values may use only the rule's own `Thickness`")));
+        }
+        // A length with no unit would take the unit of whichever design the rule goes into.
+        let with_thickness = |n: &str| {
+            if n == "Thickness" { Ok(expr::Value::length(1.0)) } else { Err(crate::DocError::Expr(format!("unknown parameter `{n}`"))) }
+        };
+        if key != "k_factor" && expr::eval_with(text, &with_thickness).is_ok_and(|v| v.unitless()) {
+            return Err(fail(format!(
+                "`{key}` is `{text}` with no unit: write it in mm or in (`2 mm`, `0.0598 in`), since a pack goes into designs of any unit"
+            )));
         }
         *slot = text.to_string();
     }
@@ -382,6 +400,14 @@ fn read_csv(text: &str) -> Result<ReadPack, PackError> {
             return Err(PackError::TooManyRules);
         }
         let cells = csv_fields(record, line + 1)?;
+        if cells.len() > header.len() {
+            let name = cells.first().map_or("", String::as_str);
+            return Err(row_error(
+                row + 1,
+                name,
+                format!("it has {} values for {} columns: quote a value that has a comma in it", cells.len(), header.len()),
+            ));
+        }
         let fields: Vec<(&str, String)> = header.iter().map(String::as_str).zip(cells).collect();
         rules.push(pack_rule(row + 1, &fields, &mut skipped)?);
     }

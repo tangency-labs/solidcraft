@@ -173,15 +173,26 @@ fn import(app: &mut SolveApp, path: &str) -> (String, bool) {
 }
 
 fn export(app: &mut SolveApp, path: &str) -> (String, bool) {
-    let rules = app.preferences.personal_sheet_rules.sheet_rules();
+    let (rules, left_out) = app.preferences.personal_sheet_rules.sheet_rules();
     let count = rules.len();
+    if count == 0 {
+        // Every personal rule has values a newer version saved: nothing this version can write.
+        return (tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")), true);
+    }
     let pack = RulePack {
         rules: rules.into_iter().map(|rule| PackRule { rule, gauge: String::new(), sources: Vec::new() }).collect(),
         ..RulePack::default()
     };
     let text = if path.to_lowercase().ends_with(".csv") { library::write_csv(&pack) } else { library::write_json(&pack) };
     match solidcraft_engine::io::vfs::write(path, text.as_bytes()) {
-        Ok(()) => (tr("sheet.library.exported").replace("{count}", &count.to_string()), false),
+        Ok(()) => {
+            let mut message = tr("sheet.library.exported").replace("{count}", &count.to_string());
+            if !left_out.is_empty() {
+                message.push(' ');
+                message.push_str(&tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")));
+            }
+            (message, false)
+        }
         Err(e) => (format!("{}: {e}", tr("sheet.library.export_failed")), true),
     }
 }

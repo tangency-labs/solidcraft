@@ -1215,8 +1215,10 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             let rules = rule_list(app);
             let fields = RULE_FIELDS.iter().map(|(key, _)| *key).zip(values);
             let mut p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
-            // Sent when there is one, or to clear the shown rule's (#18304).
-            if !material.trim().is_empty() || rules.get(*pick).is_some_and(|r| !r.material.is_empty()) {
+            // Sent when there is one, or to clear the one the rule has or a new rule would take from
+            // the active rule (#18304).
+            let inherited = rules.get(*pick).map_or_else(|| app.session.doc.sheet_rule(None).material, |r| r.material.clone());
+            if !material.trim().is_empty() || !inherited.is_empty() {
                 p["material"] = json!(material.trim());
             }
             p["corner_relief_shape"] = json!(RELIEF_SHAPES.get(*relief).copied().unwrap_or("notch"));

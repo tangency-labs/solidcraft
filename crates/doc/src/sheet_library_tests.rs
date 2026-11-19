@@ -178,7 +178,7 @@ fn a_short_csv_pack_takes_the_default_rule_for_what_it_leaves_out() {
 #[test]
 fn a_newer_pack_is_read_for_what_this_version_knows_and_names_the_rest() {
     let text = r#"{"format":"solidcraft-sheet-rules","version":3,"shop":"x","rules":[
-        {"name":"A","thickness":"2 mm","k_factor":0.4,"bend_radius":"2 mm","min_flange":"8 mm","tolerance":"0.1 mm"}]}"#;
+        {"name":"A","thickness":"2 mm","k_factor":0.4,"bend_radius":"2 mm","min_flange":"8 mm","tolerance":{"plus":"0.1 mm"}}]}"#;
     let read = read(text.as_bytes()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(read.version, 3);
     assert_eq!(read.skipped, ["min_flange", "shop", "tolerance"]);
@@ -200,6 +200,9 @@ fn row(fields: &str) -> String {
 fn hostile_packs_are_refused_with_what_to_change() {
     let ok = r#""thickness":"2 mm","k_factor":"0.4","bend_radius":"2 mm""#;
     assert!(read(row(ok).as_bytes()).is_ok());
+    // A material label is counted in characters: 128 of `é` is 256 bytes and fine.
+    assert!(read(row(&format!(r#""material":"{}",{ok}"#, "é".repeat(128))).as_bytes()).is_ok());
+    assert!(refused(&row(&format!(r#""material":"{}",{ok}"#, "é".repeat(129)))).contains("128 characters"));
     let cases: Vec<(String, &str)> = vec![
         ("x".repeat(MAX_PACK_BYTES + 1), "at most"),
         (format!("{}{}", "[".repeat(5000), "]".repeat(5000)), "not valid JSON"),
@@ -226,6 +229,10 @@ fn hostile_packs_are_refused_with_what_to_change() {
         (row(&format!(r#""thickness":"2 mm","k_factor":"0.4","bend_radius":"{}""#, "1".repeat(600))), "at most 512"),
         (row(r#""thickness":"2 mm\u0007","k_factor":"0.4","bend_radius":"2 mm""#), "one line"),
         (row(r#""material":"a\nb","thickness":"2 mm","k_factor":"0.4","bend_radius":"2 mm""#), "one line"),
+        (row(r#""thickness":"1 + 1","k_factor":"0.4","bend_radius":"2 mm""#), "no unit"),
+        (row(r#""thickness":"2 mm","k_factor":"0.4","bend_radius":"(2)""#), "no unit"),
+        (row(r#""thickness":"2 mm","k_factor":"0.4","bend_radius":"2 * Thickness / Thickness""#), "no unit"),
+        ("name,thickness,bend_radius,k_factor\nR,2 mm,2 mm,0,44\n".into(), "5 values for 4 columns"),
         (row(r#""thickness":"2 mm","k_factor":"0.4","bend_radius":"2 mm","source":"nowhere""#), "not in the pack's sources"),
         (format!(r#"{{"format":"solidcraft-sheet-rules","rules":[{{"name":"A",{ok}}},{{"name":"a",{ok}}}]}}"#), "two rules named"),
         ("name,thickness,k_factor\nA,2 mm,0.4\n".into(), "`bend_radius` column"),

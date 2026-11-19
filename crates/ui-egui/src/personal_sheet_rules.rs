@@ -138,7 +138,7 @@ impl Rule {
         if !valid_name(&self.name) {
             return Err(INVALID_NAME);
         }
-        if !valid_text(&self.material, MAX_NAME) {
+        if self.material.chars().count() > MAX_NAME || self.material.chars().any(char::is_control) {
             return Err(INVALID_VALUES);
         }
         if self.expressions().into_iter().any(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
@@ -320,10 +320,11 @@ impl Library {
         (added, left_out)
     }
 
-    /// The rules as a design keeps them, for a pack (#18304). Rules with values a newer version
-    /// saved are left out: this version can't write what it doesn't know.
-    pub(crate) fn sheet_rules(&self) -> Vec<SheetRule> {
-        self.0.iter().filter(|rule| rule.unknown.is_empty()).map(Rule::sheet_rule).collect()
+    /// The rules as a design keeps them, for a pack (#18304), and the names of the rules left out:
+    /// those with values a newer version saved, which this version can't write.
+    pub(crate) fn sheet_rules(&self) -> (Vec<SheetRule>, Vec<String>) {
+        let (known, newer): (Vec<&Rule>, Vec<&Rule>) = self.0.iter().partition(|rule| rule.unknown.is_empty());
+        (known.into_iter().map(Rule::sheet_rule).collect(), newer.into_iter().map(|rule| rule.name.clone()).collect())
     }
 
     pub(crate) fn is_empty(&self) -> bool {

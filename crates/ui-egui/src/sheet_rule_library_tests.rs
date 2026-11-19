@@ -77,14 +77,14 @@ fn a_rule_pack_imports_into_the_personal_rules_and_they_export_as_one() {
     std::fs::write(&pack, "name,material,thickness,k_factor,bend_radius,press\nShop CRS 16,CRS,1.52 mm,0.42,0.8 mm,B1\n").unwrap();
     h.step(&json!({"click":{"handle":"dialog:sheet.library:import"}})).unwrap();
     h.frames(4);
-    let rules = h.app.preferences.personal_sheet_rules.sheet_rules();
+    let (rules, _) = h.app.preferences.personal_sheet_rules.sheet_rules();
     assert_eq!(rules.len(), 1, "{}", status(&h));
     assert_eq!((rules[0].name.as_str(), rules[0].material.as_str(), rules[0].bend_radius.as_str()), ("Shop CRS 16", "CRS", "0.8 mm"));
     assert!(status(&h).contains("press"), "the skipped column is named: {}", status(&h));
     // A second import keeps the personal rule of that name as it is.
     h.step(&json!({"click":{"handle":"dialog:sheet.library:import"}})).unwrap();
     h.frames(4);
-    assert_eq!(h.app.preferences.personal_sheet_rules.sheet_rules().len(), 1);
+    assert_eq!(h.app.preferences.personal_sheet_rules.sheet_rules().0.len(), 1);
     assert!(status(&h).contains("Shop CRS 16"), "{}", status(&h));
     let out = dir.join("mine.json");
     let chosen = out.to_string_lossy().into_owned();
@@ -111,4 +111,20 @@ fn the_manager_keeps_the_rules_material_and_ok_saves_an_edit_of_it() {
     *material = "Galvanneal A60".into();
     let commands = ok_commands(&h);
     assert_eq!(commands[0].1["material"], "Galvanneal A60");
+}
+
+#[test]
+fn a_new_rule_with_its_material_cleared_saves_none_rather_than_the_active_rules() {
+    let mut h = manager();
+    h.app.run("sheet.manage_rules", json!({"name":"Galv","material":"Galvanneal","thickness":"1.6 mm","active":true})).unwrap();
+    h.app.start("sheet.manage_rules");
+    h.frames(4);
+    if let Some(Kind::Sheet(Sm::Rules { pick, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *pick = 1;
+    }
+    h.frames(2);
+    let Some(Kind::Sheet(Sm::Rules { material, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no manager") };
+    material.clear();
+    let commands = ok_commands(&h);
+    assert_eq!(commands[0].1["material"], "", "{}", commands[0].1);
 }

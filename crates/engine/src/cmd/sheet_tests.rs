@@ -680,6 +680,9 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     assert_eq!(own["rule"]["material"], "Galvanneal", "{own}");
     let refused =
         |s: &mut Session, p: Value| s.execute("sheet.manage_rules", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} was accepted"));
+    // 128 characters, counted as characters, not bytes.
+    let accented = run(&mut s, "sheet.manage_rules", json!({"name": "Accented", "material": "é".repeat(128), "thickness": "2 mm"}));
+    assert_eq!(accented["rule"]["material"], "é".repeat(128));
     let before = s.doc.to_json();
     let e = refused(&mut s, json!({"name": "X", "gauge": "16"}));
     assert!(e.contains("`gauge` needs `material`"), "{e}");
@@ -687,6 +690,8 @@ fn library_rules_keep_the_values_given_beside_them_and_refuse_what_the_library_l
     assert!(e.contains("not in the standard library") && e.contains("Aluminium 5052-H32"), "{e}");
     let e = refused(&mut s, json!({"name": "X", "material": "Stainless steel 304", "gauge": "13"}));
     assert!(e.contains("no gauge `13`") && e.contains("14 ga"), "{e}");
+    let e = refused(&mut s, json!({"name": "X", "material": "é".repeat(129)}));
+    assert!(e.contains("128 characters"), "{e}");
     let e = refused(&mut s, json!({"name": "X", "material": "a\nb"}));
     assert!(e.contains("one line"), "{e}");
     assert_eq!(s.doc.to_json(), before);

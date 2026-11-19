@@ -1039,7 +1039,7 @@ fn library_material(cmd: &str, p: &Value, rule: &mut SheetRule) -> Result<()> {
         Some(v) => Some(
             v.as_str()
                 .map(str::trim)
-                .filter(|m| m.len() <= 128 && !m.chars().any(char::is_control))
+                .filter(|m| m.chars().count() <= 128 && !m.chars().any(char::is_control))
                 .ok_or_else(|| bad(cmd, "`material` must be text of at most 128 characters on one line"))?,
         ),
     };
