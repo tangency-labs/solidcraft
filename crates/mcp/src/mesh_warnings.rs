@@ -7,7 +7,7 @@
 //! finite, is kept as it is: a changed wording makes the compact reply longer, never shorter
 //! by a warning.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value, json};
 
@@ -87,10 +87,44 @@ const NOTHING_STOPPED: &str = "nothing stopped it";
 const BOUNDARY_KEPT: &str = "its shared boundary was kept";
 
 /// Whether `reason` is one the export writes before ". Its triangles lie up to":
-/// [`BOUNDARY_KEPT`] or "its refinement stopped at a bound (...)" with the bounds inside.
+/// [`BOUNDARY_KEPT`] or "its refinement stopped at a bound (...)" with the planner's bounds
+/// inside, as `caps` reads them.
 fn surface_reason(reason: &str) -> bool {
-    reason == BOUNDARY_KEPT
-        || reason.strip_prefix("its refinement stopped at a bound (").and_then(|r| r.strip_suffix(')')).is_some_and(|caps| !caps.is_empty())
+    reason == BOUNDARY_KEPT || reason.strip_prefix("its refinement stopped at a bound (").and_then(|r| r.strip_suffix(')')).is_some_and(caps)
+}
+
+/// Whether `t` is the planner's bounds as the export writes them (`{:?}` of each, joined by
+/// ", "): `Refine` or `GridThinned { asked: [N, N], kept: [N, N] }`, at least one. A bound in
+/// any other wording leaves its line unfolded.
+fn caps(mut t: &str) -> bool {
+    /// A count (digits); the rest of the text after it.
+    fn count(t: &str) -> Option<&str> {
+        let end = t.find(|c: char| !c.is_ascii_digit()).unwrap_or(t.len());
+        (end > 0).then(|| t.get(end..)).flatten()
+    }
+    /// "N, N" (two counts); the rest of the text after them.
+    fn pair(t: &str) -> Option<&str> {
+        count(count(t)?.strip_prefix(", ")?)
+    }
+    loop {
+        let rest = match t.strip_prefix("Refine") {
+            Some(r) => Some(r),
+            None => t
+                .strip_prefix("GridThinned { asked: [")
+                .and_then(pair)
+                .and_then(|r| r.strip_prefix("], kept: ["))
+                .and_then(pair)
+                .and_then(|r| r.strip_prefix("] }")),
+        };
+        match rest {
+            Some("") => return true,
+            Some(r) => match r.strip_prefix(", ") {
+                Some(r) => t = r,
+                None => return false,
+            },
+            None => return false,
+        }
+    }
 }
 
 /// The bounds in "Points, Side".
@@ -192,10 +226,16 @@ fn quoted(body: &str) -> String {
 /// can't be mistaken for two bodies or a count.
 fn bodies(notes: &[&Note<'_>]) -> String {
     let mut seen: Vec<(&str, usize)> = Vec::new();
+    let mut index: HashMap<&str, usize> = HashMap::new();
     for n in notes {
-        match seen.iter_mut().find(|(b, _)| *b == n.body) {
-            Some((_, c)) => *c += 1,
-            None => seen.push((n.body, 1)),
+        #[cfg(test)]
+        tests::LOOKUPS.with(|c| c.set(c.get() + 1));
+        let i = *index.entry(n.body).or_insert_with(|| {
+            seen.push((n.body, 0));
+            seen.len() - 1
+        });
+        if let Some((_, c)) = seen.get_mut(i) {
+            *c += 1;
         }
     }
     seen.iter()
@@ -207,8 +247,11 @@ fn bodies(notes: &[&Note<'_>]) -> String {
 /// The reasons of `notes`, each once, in the order they first appear.
 fn reasons(notes: &[&Note<'_>]) -> String {
     let mut all: Vec<&str> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
     for r in notes.iter().flat_map(|n| n.reasons.iter()).filter(|r| **r != NOTHING_STOPPED) {
-        if !all.contains(r) {
+        #[cfg(test)]
+        tests::LOOKUPS.with(|c| c.set(c.get() + 1));
+        if seen.insert(r) {
             all.push(r);
         }
     }
@@ -262,14 +305,15 @@ fn summary(kind: &Kind<'_>, group: &[&Note<'_>]) -> Option<String> {
 
 /// The lines of each kind, in the order the kinds first appear, each as the indices of its lines
 /// in `notes`; and the group of each line (`None` for a line that is no mesh warning). Built in
-/// one pass over the lines, so a reply of many warnings takes time in proportion to its length.
+/// one pass over the lines. With the bodies and reasons also counted through maps, a reply's
+/// warnings take time in proportion to their length, however many kinds, bodies or reasons.
 fn groups<'a>(notes: &[Option<Note<'a>>]) -> (Vec<Vec<usize>>, Vec<Option<usize>>) {
     let mut index: HashMap<&Kind<'a>, usize> = HashMap::new();
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut of_line: Vec<Option<usize>> = Vec::new();
     for (i, n) in notes.iter().enumerate() {
         #[cfg(test)]
-        tests::LINES_READ.with(|c| c.set(c.get() + 1));
+        tests::LOOKUPS.with(|c| c.set(c.get() + 1));
         of_line.push(n.as_ref().map(|n| {
             let g = *index.entry(&n.kind).or_insert_with(|| {
                 groups.push(Vec::new());
@@ -313,7 +357,7 @@ pub(crate) fn compact(o: &mut Map<String, Value>) {
             _ => continue,
         }
         #[cfg(test)]
-        tests::LINES_READ.with(|c| c.set(c.get() + members.len()));
+        tests::LOOKUPS.with(|c| c.set(c.get() + members.len()));
         let same: Vec<&Note<'_>> = members.iter().filter_map(|&i| notes.get(i).and_then(Option::as_ref)).collect();
         // A group always has a worst line; were it to have none, its lines stay.
         match summary(&n.kind, &same) {
@@ -332,9 +376,10 @@ mod tests {
     use super::*;
 
     thread_local! {
-        /// How many times `compact` has read a line while grouping: once to place it in its
-        /// group and once more when its group's summary is written.
-        pub(super) static LINES_READ: Cell<usize> = const { Cell::new(0) };
+        /// How many steps `compact` has taken: reading a line to place it in its group or to
+        /// write its group's summary, and finding a body or a reason among those already seen.
+        /// Each step is one map lookup at most, never a scan of what came before.
+        pub(super) static LOOKUPS: Cell<usize> = const { Cell::new(0) };
     }
 
     fn compacted(lines: &[&str]) -> Value {
@@ -350,12 +395,12 @@ mod tests {
     fn past_and_within_the_tolerance_stay_apart() {
         let past = |f: u32, sag: &str| {
             format!(
-                "A: face {f}: its refinement stopped at a bound (Points). Its triangles lie up to {sag} mm off the surface, past it (chord tolerance 1.000e-3 mm)"
+                "A: face {f}: its refinement stopped at a bound (Refine). Its triangles lie up to {sag} mm off the surface, past it (chord tolerance 1.000e-3 mm)"
             )
         };
         let within = |f: u32, sag: &str, tol: &str| {
             format!(
-                "B: face {f}: its refinement stopped at a bound (Points). Its triangles lie up to {sag} mm off the surface, still within it (chord tolerance {tol} mm, 3 middles unmeasured)"
+                "B: face {f}: its refinement stopped at a bound (GridThinned {{ asked: [400, 300], kept: [200, 150] }}). Its triangles lie up to {sag} mm off the surface, still within it (chord tolerance {tol} mm, 3 middles unmeasured)"
             )
         };
         let lines = [past(1, "2.000e-3"), within(2, "9.000e-3", "5.000e-2"), past(3, "1.500e-3"), within(4, "1.000e-3", "2.000e-3")];
@@ -364,8 +409,8 @@ mod tests {
         assert_eq!(
             r["warnings"],
             json!([
-                "2 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, \"A\": face 1); bodies: \"A\" (2)",
-                "2 faces whose triangles lie off the surface, still within it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 1.000e-3 mm (chord tolerance 2.000e-3 mm, \"B\": face 4); 6 middles unmeasured; bodies: \"B\" (2)",
+                "2 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Refine)); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, \"A\": face 1); bodies: \"A\" (2)",
+                "2 faces whose triangles lie off the surface, still within it (its refinement stopped at a bound (GridThinned { asked: [400, 300], kept: [200, 150] })); the farthest for its tolerance: up to 1.000e-3 mm (chord tolerance 2.000e-3 mm, \"B\": face 4); 6 middles unmeasured; bodies: \"B\" (2)",
             ]),
             "{r}"
         );
@@ -508,11 +553,33 @@ mod tests {
             "its refinement stopped at a bound ()",
             "Its shared boundary was kept",
             "its refinement stopped at a bound (Points",
+            "its refinement stopped at a bound (Points)",
+            "its refinement stopped at a bound (Refined)",
+            "its refinement stopped at a bound (Refine,)",
+            "its refinement stopped at a bound (Refine; Refine)",
+            "its refinement stopped at a bound (GridThinned { asked: [400, 300] })",
+            "its refinement stopped at a bound (GridThinned { asked: [400, -300], kept: [200, 150] })",
+            "its refinement stopped at a bound (GridThinned { asked: [400 300], kept: [200 150] })",
         ] {
             let odd = [line(1, reason), line(2, reason)];
             let r = compacted(&odd.iter().map(String::as_str).collect::<Vec<_>>());
             assert_eq!(r["warnings"], json!(odd), "{r}");
             assert!(r.get("warning_count").is_none(), "{r}");
+        }
+        // Each bound the planner writes, alone or joined, is counted.
+        for reason in [
+            "its refinement stopped at a bound (Refine)",
+            "its refinement stopped at a bound (GridThinned { asked: [400, 300], kept: [200, 150] })",
+            "its refinement stopped at a bound (GridThinned { asked: [400, 300], kept: [200, 150] }, Refine)",
+        ] {
+            let r = compacted(&[&line(1, reason), &line(2, reason)]);
+            assert_eq!(
+                r["warnings"],
+                json!([format!(
+                    r#"2 faces whose triangles lie off the surface, past it ({reason}); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, "A": face 2); bodies: "A" (2)"#
+                )]),
+                "{r}"
+            );
         }
         // The exact reasons are counted; an unknown one beside them stays on its own line.
         let lines = [line(1, "its shared boundary was kept"), line(2, "its boundary was moved"), line(3, "its shared boundary was kept")];
@@ -556,37 +623,74 @@ mod tests {
         );
     }
 
-    /// 10,000 warnings of three kinds are grouped by reading each line twice, not once for every
-    /// other line (#19250).
+    /// 10,000 warnings are folded in steps in proportion to their number, whether they are of
+    /// three kinds on one body, each on a body of its own, or each with a reason of its own
+    /// (#19250). A step reads one line or looks up one body or reason; none scans the others.
     #[test]
     fn ten_thousand_lines_are_grouped_in_one_pass() {
+        let steps = |lines: &[String]| {
+            LOOKUPS.with(|c| c.set(0));
+            let r = compacted(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+            (r, LOOKUPS.with(Cell::get))
+        };
+        // Three kinds on one body.
         let mut lines = vec![String::from("Part has a print face but was written as it lies")];
         for i in 0..10_000u32 {
             lines.push(match i % 3 {
                 0 => format!("Part: face {i}: smallest angle {:.2}°, short of the 25° asked (stopped by: Corner)", 10.0 + f64::from(i % 997) / 100.0),
                 1 => format!(
-                    "Part: face {i}: its refinement stopped at a bound (Points). Its triangles lie up to {} mm off the surface, past it (chord tolerance 1.000e-3 mm)",
+                    "Part: face {i}: its refinement stopped at a bound (Refine). Its triangles lie up to {} mm off the surface, past it (chord tolerance 1.000e-3 mm)",
                     if i == 4999 { "9.000e-3" } else { "2.000e-3" }
                 ),
                 _ => format!(
-                    "Part: edge {i}: its sampling stopped at a bound (Points); its chords lie up to {} mm off the curve, past the 5.000e-3 mm chord tolerance",
+                    "Part: edge {i}: its sampling stopped at a bound (Depth); its chords lie up to {} mm off the curve, past the 5.000e-3 mm chord tolerance",
                     if i == 7001 { "8.000e-2" } else { "1.000e-2" }
                 ),
             });
         }
-        LINES_READ.with(|c| c.set(0));
-        let r = compacted(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+        let (r, n) = steps(&lines);
         assert_eq!(r["warning_count"], json!(10_001));
         assert_eq!(
             r["warnings"],
             json!([
                 "Part has a print face but was written as it lies",
                 r#"3334 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° ("Part": face 0); bodies: "Part" (3334)"#,
-                r#"3333 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Points)); the farthest for its tolerance: up to 9.000e-3 mm (chord tolerance 1.000e-3 mm, "Part": face 4999); bodies: "Part" (3333)"#,
-                r#"3333 edges whose chords lie off the curve, past the chord tolerance (stopped by: Points); the farthest for its tolerance: up to 8.000e-2 mm (chord tolerance 5.000e-3 mm, "Part": edge 7001); bodies: "Part" (3333)"#,
+                r#"3333 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (Refine)); the farthest for its tolerance: up to 9.000e-3 mm (chord tolerance 1.000e-3 mm, "Part": face 4999); bodies: "Part" (3333)"#,
+                r#"3333 edges whose chords lie off the curve, past the chord tolerance (stopped by: Depth); the farthest for its tolerance: up to 8.000e-2 mm (chord tolerance 5.000e-3 mm, "Part": edge 7001); bodies: "Part" (3333)"#,
             ])
         );
-        // Every line once to group it, and each of the 10,000 counted lines once more for its summary.
-        assert_eq!(LINES_READ.with(Cell::get), 10_001 + 10_000);
+        // Each line read to group it and again for its summary, each body looked up once, and
+        // each reason once for the summary (twice for an angle line, whose bounds are also
+        // listed under "stopped by").
+        assert_eq!(n, 10_001 + 10_000 + 10_000 + 3334 * 2 + 3333 + 3333);
+        // 10,000 lines, each on a body of its own.
+        let lines: Vec<String> = (0..10_000u32)
+            .map(|i| format!("B{i}: face 1: smallest angle {:.2}°, short of the 25° asked (stopped by: Corner)", 10.0 + f64::from(i % 997) / 100.0))
+            .collect();
+        let (r, n) = steps(&lines);
+        let w = r["warnings"].as_array().cloned().unwrap_or_default();
+        assert_eq!(w.len(), 1, "{r}");
+        let w = w[0].as_str().unwrap_or_default();
+        assert!(w.starts_with(r#"10000 faces short of the 25° asked (stopped by: Corner); the sharpest: smallest angle 10.00° ("B0": face 1); bodies: "B0" (1), "B1" (1), "#), "{w:.300}");
+        assert!(w.ends_with(r#", "B9998" (1), "B9999" (1)"#), "{w:.300}");
+        assert_eq!(n, 10_000 * 5);
+        // 10,000 surface lines, each with a thinned grid of its own.
+        let lines: Vec<String> = (0..10_000u32)
+            .map(|i| {
+                format!(
+                    "Part: face {i}: its refinement stopped at a bound (GridThinned {{ asked: [{i}, 300], kept: [200, 150] }}). Its triangles lie up to 2.000e-3 mm off the surface, past it (chord tolerance 1.000e-3 mm)"
+                )
+            })
+            .collect();
+        let (r, n) = steps(&lines);
+        let w = r["warnings"].as_array().cloned().unwrap_or_default();
+        assert_eq!(w.len(), 1, "{r}");
+        let w = w[0].as_str().unwrap_or_default();
+        assert!(
+            w.starts_with("10000 faces whose triangles lie off the surface, past it (its refinement stopped at a bound (GridThinned { asked: [0, 300], kept: [200, 150] }), its refinement stopped at a bound (GridThinned { asked: [1, 300]"),
+            "{w:.300}"
+        );
+        assert!(w.ends_with(r#"(GridThinned { asked: [9999, 300], kept: [200, 150] })); the farthest for its tolerance: up to 2.000e-3 mm (chord tolerance 1.000e-3 mm, "Part": face 9999); bodies: "Part" (10000)"#), "{w:.300}");
+        assert_eq!(n, 10_000 * 4);
     }
 }
