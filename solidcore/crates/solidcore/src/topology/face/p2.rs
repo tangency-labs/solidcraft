@@ -3548,6 +3548,9 @@ struct TrimBefore {
 /// tolerance stays upstream's. Twice is `SetUVTrimCurve`'s own allowance: it raises an edge
 /// to twice the distance its trim reports.
 ///
+/// A trim the edit left as it was (its geometry the same, bit for bit) at a tolerance not
+/// lowered is not bounded at all: it is covered after the edit exactly where it was before.
+///
 /// The trim before the edit is bounded only where the edited one would raise: on a dense
 /// net a trim just within its tolerance costs a deep bisection each time (the
 /// `crashes/2992` rig case bounds over a thousand such trims, all still covered).
@@ -3565,6 +3568,14 @@ fn keep_trim_covered(
         return Ok(());
     };
     let tolerance = b.edge(e)?.tolerance;
+    // (an edit that left the trim as it was, its tolerance not lowered, uncovers nothing: the
+    // trim covered before is the trim now; the corners of a body whose trims already meet
+    // there are most of them, each a deep bisection of a trim just within its tolerance)
+    if tolerance >= before.tolerance
+        && format!("{:?}", held_curve(b, holder)?.kind()) == format!("{:?}", before.trim.kind())
+    {
+        return Ok(());
+    }
     let fit = crate::topology::edgeuse::p3::fit_tolerance(k, b, e)?;
     let bound = {
         let trim = held_curve(b, holder)?;

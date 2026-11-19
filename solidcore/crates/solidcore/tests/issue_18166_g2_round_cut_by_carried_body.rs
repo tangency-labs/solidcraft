@@ -56,7 +56,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_variable_span_follows_fillet",
     "simple_coincidence_crossing_is_point",
     "ssi_proto_topology_statuses_pass_on",
-    "corner_patch_face_side_twist",
     "fillet_exact_round_classes",
     "surface_continuity_checks_last_v_knot",
     "local_surface_intersect_guards_max_boundary_retry",
