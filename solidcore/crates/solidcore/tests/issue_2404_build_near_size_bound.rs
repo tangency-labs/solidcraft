@@ -159,7 +159,6 @@ type Refused = (Option<NoRoomReason>, f64);
 /// (which ends a round before the strip): `Ok` built and stitched, else the reason and fit.
 fn bridge(size: f64, xsect: u32) -> (Kernel, Brep, Result<(), Refused>) {
     let mut k = kernel();
-    k.fixes.fillet_round_ends_on_outline = false;
     let block = create_box(&mut k, Point3::ZERO, 20.0, 4.0, 10.0).unwrap();
     let slot = create_box(&mut k, Point3::new(8.0, -1.0, -1.0), 4.0, 6.0, 10.0).unwrap();
     let mut b = boolean_difference(&mut k, block, slot).unwrap();

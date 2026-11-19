@@ -2750,6 +2750,136 @@ fn a_spheres_silhouette_is_one_circle() {
     assert_eq!(done["profiles"], 1, "{done}");
 }
 
+/// The plate of a design whose whole-body projection on a tilted sketch went wrong: 80 x 50 x 8
+/// with its upright edges rounded at 6, a 4 mm hole, and a boss of 12 standing 14 on top with a
+/// 6 mm bore right through.
+fn bossed_plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 4], [80, 0, 4], [80, 50, 4], [0, 50, 4]], "radius": 6}));
+    run(&mut s, "solid.cylinder", json!({"base": [12, 25, 0], "radius": 4, "height": 8, "operation": "cut"}));
+    run(&mut s, "solid.cylinder", json!({"base": [40, 25, 8], "radius": 12, "height": 14, "operation": "join", "targets": ["Plate"]}));
+    run(&mut s, "solid.cylinder", json!({"base": [40, 25, 0], "radius": 6, "height": 22, "operation": "cut"}));
+    s
+}
+
+/// How the whole-body projection on `sketch` compares with the true outline: the farthest a point
+/// of it lies from the true projection, and the most it falls short of the body's extent in any of
+/// 16 directions (a missing stretch of outline falls short somewhere). The truth is every edge of
+/// the body but a round wall's seam, sampled finely on its exact curve, and each round wall's two
+/// outline lines (where the view runs along the wall) between the wall's own ends, in the sketch's
+/// coordinates.
+fn against_true_outline(s: &Session, sketch: u64) -> (f64, f64) {
+    let state = s.model.state();
+    let solved = state.sketch(sketch).unwrap();
+    let plane = solved.plane;
+    let body = state.body("Plate").unwrap();
+    let record = body.body.record();
+    let q = solidcore_ops::query::Query::new(record);
+    let mut truth: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::new();
+    // Each face's edge points, for the axial reach of its round wall.
+    let mut on_face: Vec<Vec<solidcore_record::Vec3>> = vec![Vec::new(); record.faces.len()];
+    for e in 0..record.edges.len() {
+        let [t0, t1] = q.edge_interval(e).unwrap();
+        let world: Vec<_> = (0..=4000).map(|k| q.edge_at(e, t0 + (t1 - t0) * f64::from(k) / 4000.0).unwrap().0).collect();
+        let uses = q.edge_faces(e);
+        for f in &uses {
+            on_face[*f].extend(world.iter().copied());
+        }
+        // A round wall's seam is an edge but no outline: one face lies on both its sides.
+        if uses.len() == 2 && uses[0] == uses[1] {
+            continue;
+        }
+        let pts: Vec<_> = world.iter().map(|p| plane.to_local(*p)).collect();
+        truth.extend(pts.windows(2).map(|w| (w[0], w[1])));
+    }
+    let n = plane.normal();
+    for (f, edge_points) in on_face.iter().enumerate() {
+        if let Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) = solidcraft_kernel::face_surface(&body.body, f) {
+            let a = axis.vec();
+            let m = a.cross(n).normalized().unwrap();
+            let (lo, hi) = edge_points.iter().map(|p| (*p - origin).dot(a)).fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(t), hi.max(t)));
+            for side in [1.0, -1.0] {
+                let p = origin + m * (radius * side);
+                truth.push((plane.to_local(p + a * lo), plane.to_local(p + a * hi)));
+            }
+        }
+    }
+    let to_segment = |p: solidcore_record::Vec2, (a, b): (solidcore_record::Vec2, solidcore_record::Vec2)| {
+        let d = b - a;
+        let t = ((p - a).dot(d) / d.len2().max(1e-300)).clamp(0.0, 1.0);
+        p.dist(a + d * t)
+    };
+    let sk = &solved.sketch;
+    let link = &sk.links[0].id;
+    let got: Vec<_> = sk.link_curves(link).into_iter().flat_map(|ci| sk.polyline(ci)).collect();
+    let off = got.iter().map(|p| truth.iter().map(|seg| to_segment(*p, *seg)).fold(f64::MAX, f64::min)).fold(0.0, f64::max);
+    let short = (0..16)
+        .map(|k| {
+            let u = solidcore_record::Vec2::new((f64::from(k) * std::f64::consts::PI / 8.0).cos(), (f64::from(k) * std::f64::consts::PI / 8.0).sin());
+            let reach = |pts: &mut dyn Iterator<Item = solidcore_record::Vec2>| pts.map(|p| p.dot(u)).fold(f64::MIN, f64::max);
+            reach(&mut truth.iter().flat_map(|(a, b)| [*a, *b])) - reach(&mut got.iter().copied())
+        })
+        .fold(0.0, f64::max);
+    (off, short)
+}
+
+/// A whole body projected on a sketch tilted to it (the 45 degree plane of the design it came from,
+/// and the plane square to the Home view) is its exact outline: every round of the plate is a
+/// circle about the vertical, which a slant shows as an ellipse, so the outline holds elliptical
+/// arcs and no circular one, and each curve lies on the true outline. The mesh's outline was
+/// fitted with lines and circular arcs instead: 164 lines and 2 arcs at 45 degrees, up to 0.056 mm
+/// off, some bulging the wrong way.
+#[test]
+fn a_tilted_whole_body_projection_is_the_exact_outline() {
+    use solidcraft_sketch::CurveKind;
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let planes = [
+        ("45 degrees", json!({"origin": [0, 0, 8], "x_dir": [1, 0, 0], "y_dir": [0, c, c]})),
+        ("Home view", json!({"origin": [40, 25, 0], "x_dir": [c, c, 0], "y_dir": [-0.5, 0.5, c]})),
+    ];
+    for (name, plane) in planes {
+        let mut s = bossed_plate();
+        let sketch = run(&mut s, "sketch.create", json!({"plane": plane, "project_edges": false}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate"}]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let state = s.model.state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        let curves: Vec<_> = sk.link_curves(&sk.links[0].id).into_iter().map(|ci| &sk.curves[ci].kind).collect();
+        assert!(
+            !curves.iter().any(|k| matches!(k, CurveKind::Arc { .. } | CurveKind::Circle { .. })),
+            "{name}: a circular arc at a slant: {curves:?}"
+        );
+        assert!(curves.iter().any(|k| matches!(k, CurveKind::Conic { .. })), "{name}: no elliptical arc: {curves:?}");
+        // Exact curves only: a conic per span of a round edge's stretch, and a line per stretch
+        // of a straight edge or outline line of a round wall. A circle's spline has four quarter
+        // spans, and a stretch over its seam is two stretches: at most five conics per round
+        // edge; at most one line per straight edge and two per round wall.
+        let record = state.body("Plate").unwrap().body.record();
+        let rounds = record.edges.iter().filter(|e| matches!(e.curve, solidcore_record::brep::Curve::Circle { .. })).count();
+        let straight = record.edges.iter().filter(|e| matches!(e.curve, solidcore_record::brep::Curve::Line { .. })).count();
+        let walls = (0..record.faces.len())
+            .filter(|f| {
+                matches!(
+                    solidcraft_kernel::face_surface(&state.body("Plate").unwrap().body, *f),
+                    Some(solidcraft_kernel::FaceSurface::Cylinder { .. })
+                )
+            })
+            .count();
+        let conics = curves.iter().filter(|k| matches!(k, CurveKind::Conic { .. })).count();
+        let lines = curves.iter().filter(|k| matches!(k, CurveKind::Line { .. })).count();
+        assert_eq!(conics + lines, curves.len(), "{name}: only conics and lines: {curves:?}");
+        assert!(conics <= 5 * rounds, "{name}: {conics} conics for {rounds} round edges");
+        assert!(lines <= straight + 2 * walls, "{name}: {lines} lines for {straight} straight edges and {walls} round walls");
+        let (off, short) = against_true_outline(&s, sketch);
+        // The truth's chords stand within 12 * (pi / 4000)^2 / 8 < 1e-5 mm of its curves. The
+        // sketch's points lie on its curves but its chords cut inside a round's extreme, so the
+        // reach is checked to 2e-3 mm: a missing stretch of outline falls short by millimetres.
+        assert!(off < 2e-5, "{name}: {off} mm off the true outline");
+        assert!(short < 2e-3, "{name}: the outline falls {short} mm short of the body's extent");
+    }
+}
+
 /// The silhouette of a square with a conic round at each corner (rho 0.19, 0.4, 0.5 and 0.7) is
 /// one closed outline of the square's true area. Fitted arcs along a conic were snapped onto lines
 /// that ended further along the outline, which left gaps of up to 3.6 mm: no profile.

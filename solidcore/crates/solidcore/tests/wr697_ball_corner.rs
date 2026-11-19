@@ -57,14 +57,12 @@ use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -331,6 +329,62 @@ fn half_space(k: &mut Kernel, at: Vec3, n: Vec3) -> Brep {
     prism(k, &c, n, 400.0)
 }
 
+/// Two small creases meet on the rounded outline: the side wall and the bottom both
+/// turn by three degrees, with a one-unit flat between the bends. The selected edges
+/// lie on x + z = 20, with z = tan(3 degrees) max(|y| - 1/2, 0).
+#[test]
+fn rounds_follow_a_three_degree_crease_in_both_supports() {
+    let slope = 3.0_f64.to_radians().tan();
+    for reverse in [false, true] {
+        let mut k = all_fixes();
+        let mut b = create_box(&mut k, Point3::new(0.0, -10.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        for side in [-1.0, 1.0] {
+            for normal in [
+                Vec3::new(1.0, side * slope, 0.0),
+                Vec3::new(0.0, side * slope, -1.0),
+            ] {
+                let tool = half_space(&mut k, Point3::new(20.0, side * 0.5, 0.0), unit(normal));
+                b = boolean_difference(&mut k, b, tool).unwrap();
+            }
+        }
+        let z = slope * 4.5;
+        let mut at = [[20.0 - z, -5.0, z], [20.0, 0.0, 0.0], [20.0 - z, 5.0, z]];
+        if reverse {
+            at.reverse();
+        }
+        round(&mut k, &mut b, &at, 2.0).unwrap();
+        // The inclined wall rail is (20-u, y, r cos(a)+u), y=1/2+u/m.
+        // On the flat round (x-(20-r))^2+(z-r)^2=r^2, its near crossing
+        // satisfies 2u^2-2r(1+d)u+r^2 d^2=0, d=1-cos(a).
+        let r = 2.0;
+        let cos = 3.0_f64.to_radians().cos();
+        let d = 1.0 - cos;
+        let u = r * d * d / (1.0 + d + (1.0 + 2.0 * d - d * d).sqrt());
+        for side in [-1.0, 1.0] {
+            let y = side * (0.5 + u / slope);
+            for want in [
+                Point3::new(20.0 - u, y, r * cos + u),
+                Point3::new(20.0 - r * cos - u, y, u),
+            ] {
+                assert!(
+                    b.vertices().ids().any(|v| {
+                        solidcore::topology::vertex::point(&b, v)
+                            .unwrap()
+                            .distance(want)
+                            <= solidcore::topology::vertex::tolerance(&b, v).unwrap()
+                    }),
+                    "reverse {reverse}: missing rail/fillet crossing {want:?}"
+                );
+            }
+        }
+        assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "reverse {reverse}: {lines:?}");
+    }
+}
+
 /// capi `ball prism_corner`: a kite prism 10 tall, its corner V = (0, 0) of 120 degrees
 /// between sides square at their far ends to the sides on to (20, 0); the three edges at
 /// the top of V rounded r 2. The ball about (2 r / sqrt 3, 0, 10 - r). Removed: the
@@ -540,12 +594,12 @@ fn a_set_back_vertex_is_no_ball() {
 // Facet. The plane through X_u, X_v, X_w cuts off, beyond the mitre, the tetrahedron
 // M X_u X_v X_w: |det(X_u - M, X_v - M, X_w - M)| / 6 more.
 
-// Every fix but `geometric_g2_continuity`, with or without `fillet_chamfer_corner`.
+// Every fix, with or without `fillet_chamfer_corner`.
 fn chamfer_fixes(on: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && (on || name != "fillet_chamfer_corner") {
+        if on || name != "fillet_chamfer_corner" {
             *f.flag_mut(name).unwrap() = true;
         }
     }

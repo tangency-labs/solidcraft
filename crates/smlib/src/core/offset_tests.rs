@@ -16,13 +16,51 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, shell, thicken};
+use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, refused, shell, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
 
 /// A case longer than this is a hang.
 const TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Stress corpus S0790 (#18802): a frustum with two blind holes, one separated from its
+/// top rim by 0.00002 mm, shelled inward by 1.2 mm. A refusal must keep its named cause.
+#[test]
+fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
+    let error = timed("S0790", || {
+        let cone = super::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
+        let rim_hole = make_cylinder([8.79998, 0.0, 40.0], 1.2, 10.0).unwrap();
+        let centre_hole = make_cylinder([0.0, 0.0, 42.0], 1.0, 8.0).unwrap();
+        let drilled = super::boolean::boolean(&cone, &rim_hole, BooleanOp::Subtract).unwrap().unwrap();
+        let drilled = super::boolean::boolean(&drilled, &centre_hole, BooleanOp::Subtract).unwrap().unwrap();
+        shell(&drilled, &[], TOL, -1.2).expect_err("the shell is currently refused")
+    });
+    let words = error.to_string();
+    assert!(matches!(error, Error::Refused(_) | Error::Solidcore(_)) && !words.contains("upstream status"), "{words}");
+    assert!(words.contains("stage_failed") && words.contains("; caused by "), "{words}");
+    assert!(words.contains("the joined offset edge could not be split at the gap bridge joint"), "{words}");
+    eprintln!("{words}");
+}
+
+#[test]
+fn typed_offset_refusals_keep_their_nested_kernel_cause() {
+    use solidcore_ops::{Error as Ops, OffsetRefusal};
+
+    let refusal = Ops::OffsetRefused { face: None, why: OffsetRefusal::ExactCurveUncut };
+    let diagnostic = "offset::trim: exact_curve_uncut; caused by intersect::clip: the exact trim does not cross the face boundary".to_owned();
+    let error = refused(refusal.clone(), diagnostic.clone());
+    let words = error.to_string();
+    assert!(words.contains(&refusal.to_string()), "{words}");
+    assert!(words.contains(&diagnostic), "{words}");
+    assert_eq!(error, Error::RefusedWithDiagnostic { refusal, diagnostic });
+}
+
+#[test]
+fn offset_folds_keep_the_largest_wall() {
+    let refusal = solidcore_ops::Error::WallFolds { largest: Some(1.0) };
+    assert_eq!(refused(refusal, "offset::face: a folded wall".into()), Error::WallFolds { largest: Some(1.0) });
+}
 
 /// How near a pick point must be.
 const TOL: f64 = 0.01;
@@ -664,7 +702,10 @@ fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
     let prism = super::sweep::extrude(&profile, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
     let (tip, z, origin, angle) = ([[10.0, 18.0, 5.0]], [0.0, 0.0, 1.0], [0.0, 0.0, -100.0], (-2f64).to_radians());
     let vanishes = solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::EdgeVanishes };
-    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Refused(vanishes)));
+    assert!(matches!(
+        draft(&prism, &tip, TOL, origin, z, z, angle).err(),
+        Some(Error::RefusedWithDiagnostic { refusal, .. }) if refusal == vanishes
+    ));
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).

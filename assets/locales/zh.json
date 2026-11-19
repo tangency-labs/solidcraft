@@ -3110,7 +3110,6 @@
   "prefs.blur_off": "关闭",
   "prefs.blur_reduce_transparency": "已被系统的降低透明度设置禁用",
   "prefs.blur_software": "软件图形渲染不支持此功能 (gpu-software)",
-  "prefs.blur_source": "此工作区视图不支持此功能",
   "prefs.blur_web": "此网页渲染路径不支持此功能",
   "prefs.bodies_folders": "实体文件夹",
   "prefs.bodies_folders_always": "始终显示",
