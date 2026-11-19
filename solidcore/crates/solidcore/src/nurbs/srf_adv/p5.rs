@@ -384,13 +384,19 @@ pub(crate) fn create_skin_srf_boundary_continuity_mapped(
         }
     }
 
-    // Prune rational input.
+    // Pruning changes a curve or surface unless every weight is exactly equal. The general
+    // prune predicate uses WEIGHT_TOL and may otherwise change a shallow circular section.
     if has_rail && ts.is_none() {
         return Err(bad_input());
     }
     if let Some(der) = opt.der.as_mut() {
         for d in der.iter_mut().flatten() {
-            if d.is_rational() {
+            if d.is_rational()
+                && d.rows()
+                    .flatten()
+                    .next()
+                    .is_some_and(|p| d.rows().flatten().all(|q| q.w == p.w))
+            {
                 d.prune_rat();
             }
         }
@@ -400,7 +406,11 @@ pub(crate) fn create_skin_srf_boundary_continuity_mapped(
             if !r.is_3d() {
                 r.to_3d();
             }
-            if r.is_rational() {
+            if r.is_rational()
+                && r.cpts()
+                    .first()
+                    .is_some_and(|p| r.cpts().iter().all(|q| q.w == p.w))
+            {
                 r.prune_rat(false);
             }
         }
@@ -409,7 +419,11 @@ pub(crate) fn create_skin_srf_boundary_continuity_mapped(
         if !c.is_3d() {
             c.to_3d();
         }
-        if c.is_rational() {
+        if c.is_rational()
+            && c.cpts()
+                .first()
+                .is_some_and(|p| c.cpts().iter().all(|q| q.w == p.w))
+        {
             c.prune_rat(false);
         }
     }
@@ -1359,6 +1373,89 @@ mod tests {
     }
 
     #[test]
+    fn a_skin_keeps_a_shallow_rational_section_exact() {
+        let w = 0.99965;
+        let mut cs: Vec<Curve> = (0..4)
+            .map(|i| {
+                let z = f64::from(i) * 200.0;
+                Curve::new(
+                    vec![
+                        CPoint::new(0.0, 0.0, z, 1.0),
+                        CPoint::new(75.0 * w, 9.0 * w, z * w, w),
+                        CPoint::new(150.0, 15.0, z, 1.0),
+                    ],
+                    2,
+                    vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                )
+                .unwrap()
+            })
+            .collect();
+        let expected = cs[0].eval(0.5, Side::Left).unwrap();
+        let mut opt = SkinBoundaryOptions {
+            deg: 3,
+            dir: Direction::U,
+            cmp: true,
+            ..SkinBoundaryOptions::default()
+        };
+        let surface = create_skin_srf_boundary_continuity(&mut cs, &mut opt).unwrap();
+        let actual = surface.eval(0.0, 0.5, Side::Left, Side::Left).unwrap();
+        assert!(
+            cs[0].is_rational(),
+            "the section's unequal weights must be kept"
+        );
+        assert!(
+            (actual - expected).length() < 1e-9,
+            "skin {actual:?}, section {expected:?}"
+        );
+    }
+
+    #[test]
+    fn a_skin_keeps_a_shallow_rational_rail_exact() {
+        let w = 0.99965;
+        let rail = Curve::new(
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, 1.0),
+                CPoint::new(w, 0.0, 3.0 * w, w),
+                CPoint::new(0.0, 0.0, 6.0, 1.0),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let ts = vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
+        let mut cs: Vec<Curve> = ts
+            .iter()
+            .map(|&t| {
+                let p = rail.eval(t, Side::Left).unwrap();
+                Curve::new(
+                    vec![
+                        CPoint::new(p.x, p.y, p.z, 1.0),
+                        CPoint::new(p.x + 3.0, p.y, p.z, 1.0),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap()
+            })
+            .collect();
+        let expected = rail.eval(0.5, Side::Left).unwrap();
+        let mut opt = SkinBoundaryOptions {
+            rail: Some([Some(rail), None]),
+            ts: Some(ts),
+            deg: 3,
+            dir: Direction::U,
+            cmp: true,
+            ..SkinBoundaryOptions::default()
+        };
+        let surface = create_skin_srf_boundary_continuity(&mut cs, &mut opt).unwrap();
+        let actual = surface.eval(0.5, 0.0, Side::Left, Side::Left).unwrap();
+        assert!(
+            (actual - expected).length() < 1e-9,
+            "skin {actual:?}, rail {expected:?}"
+        );
+    }
+
+    #[test]
     fn derivative_strips_add_rows() {
         let mut cs = sections();
         let strip = |c: &Curve, sgn: f64| {
@@ -1386,6 +1483,66 @@ mod tests {
             let s = create_skin_srf_boundary_continuity(&mut cs, &mut opt).unwrap();
             assert_eq!(s.n(), 5);
         }
+    }
+
+    #[test]
+    fn a_skin_keeps_a_shallow_rational_derivative_strip() {
+        let w = 0.99965;
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let mut cs: Vec<Curve> = (0..4)
+            .map(|i| {
+                let z = f64::from(i);
+                Curve::new(
+                    (0..3)
+                        .map(|j| CPoint::new(f64::from(j), 0.0, z, NOW))
+                        .collect(),
+                    2,
+                    knots.clone(),
+                )
+                .unwrap()
+            })
+            .collect();
+        // At the attached boundary u=1 all weights are 1. On u=0 the middle
+        // weight is w, so at v=1/2 the boundary's cross derivative is exactly
+        // (0, 0, (1+w)/2), by the rational quotient rule.
+        let strip = Surface::new(
+            vec![
+                vec![
+                    CPoint::new(0.0, 0.0, -1.0, 1.0),
+                    CPoint::new(w, 0.0, -w, w),
+                    CPoint::new(2.0, 0.0, -1.0, 1.0),
+                ],
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, 1.0),
+                    CPoint::new(1.0, 0.0, 0.0, 1.0),
+                    CPoint::new(2.0, 0.0, 0.0, 1.0),
+                ],
+            ],
+            1,
+            2,
+            vec![0.0, 0.0, 1.0, 1.0],
+            knots,
+        )
+        .unwrap();
+        let expected = (1.0 + w) / 2.0;
+        let mut opt = SkinBoundaryOptions {
+            der: Some([Some(strip), None]),
+            cnt: [BoundaryContinuity::C1; 2],
+            ts: Some(vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]),
+            deg: 3,
+            dir: Direction::U,
+            cmp: true,
+            ..SkinBoundaryOptions::default()
+        };
+        let surface = create_skin_srf_boundary_continuity(&mut cs, &mut opt).unwrap();
+        let d = surface
+            .derivs(0.0, 0.5, Side::Left, Side::Left, false, 1, 1)
+            .unwrap();
+        assert!(
+            (d[1][0].z - expected).abs() < 1e-9,
+            "skin derivative {:?}, expected z {expected}",
+            d[1][0]
+        );
     }
 
     #[test]
