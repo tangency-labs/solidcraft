@@ -417,7 +417,7 @@ fn narrow_curved_tip(distance: f64, angle: f64) -> Run {
     let comment = s.error_info().comment.clone();
     if fit.is_some() {
         assert_eq!(
-            s.error_site().face.map(|f| f.id()),
+            s.error_site().face.map(solidcore::error::TargetFace::id),
             Some(top),
             "limiting top face"
         );
