@@ -6980,8 +6980,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
             } else {
                 crate::primitive_placement::params(s, cmd, &d.extra, &mut p);
-                if let Some(saved) = d.extra.get("saved_references") {
-                    p.insert("references".into(), saved.clone());
+                // A cylinder edited away from its face (an axis of expressions that isn't square
+                // to it now, #18822) keeps its reference edges, never none.
+                if *cmd == "solid.cylinder"
+                    && let Some((id, _)) = d.editing
+                    && let Some(references) = cylinder_references_now(s, id)
+                {
+                    p.insert("references".into(), json!(references));
                 }
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
@@ -7895,6 +7900,32 @@ fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
 }
 
+/// The reference edges of cylinder `id`, as OK sends them when the window didn't place it on its
+/// face: each edge found by its name where it is now, as `hole_refs::restore` finds them (else
+/// at its saved point), with its saved distance. `None` when it has none.
+fn cylinder_references_now(s: &Session, id: u64) -> Option<Vec<Value>> {
+    let f = s.doc.feature(id)?;
+    let FeatureKind::Cylinder { base, axis, references, .. } = &f.kind else { return None };
+    if references.is_empty() {
+        return None;
+    }
+    let st = crate::open_meshing::session_world(s);
+    let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(k, r)| (r.edge.0, f.edge_names.get(k).map(String::as_str))).collect();
+    let [x, y, z] = base.clone().map(|c| c.parse::<f64>().ok());
+    let found = match (x, y, z, axis_now(s, &pt_expr(axis))) {
+        (Some(x), Some(y), Some(z), Some(dir)) => {
+            solidcraft_engine::doc::hole_reference::reference_frame(&st, Vec3::new(x, y, z), -dir, &edges, false).ok()
+        }
+        _ => None,
+    };
+    let now = |k: usize| {
+        let f = found.as_ref()?;
+        let mesh = st.body(&f.body)?.mesh();
+        Some(crate::selection::polyline_mid(mesh.edges.get(*f.edges.get(k)?)?))
+    };
+    Some(references.iter().enumerate().map(|(k, r)| json!({"edge": pt3(now(k).unwrap_or(r.edge.0)), "distance": r.distance.to_string()})).collect())
+}
+
 /// The direction an axis saved as `[x, y, z]` of numbers or unitless expressions (#18822) has
 /// with the parameters as they are now.
 fn axis_now(s: &Session, axis: &Value) -> Option<Vec3> {
@@ -8353,11 +8384,6 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.items = vec![face];
                 }
                 crate::hole_refs::restore(s, &mut d, references, &f.edge_names, app.preferences.length_decimals);
-            } else if !references.is_empty() {
-                // Not placed on its face (an axis of expressions that isn't square to it now,
-                // #18822): OK sends the reference edges as they are saved, never none.
-                let saved: Vec<Value> = references.iter().map(|r| json!({"edge": pt3(r.edge.0), "distance": r.distance.to_string()})).collect();
-                d.extra.insert("saved_references".into(), json!(saved));
             }
             d
         }

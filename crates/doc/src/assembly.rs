@@ -493,14 +493,24 @@ fn map_exprs(m: &Mat, p: &mut crate::PointExpr, unit: &str) {
             }
         }
         let kept = constant != 0.0 && constant.abs() >= 1e-12 * scale;
+        // A direction's number is written short (`1e-20`, not 20 zeros), and its rounding
+        // noise is 0 whether or not an expression is left beside it.
+        let text = |v: f64| if direction { short_number(if kept { v } else { 0.0 }) } else { format!("{v}") };
         let mut e = terms.join(" + ");
         if terms.is_empty() {
-            e = format!("{constant}{unit}");
+            e = format!("{}{unit}", text(constant));
         } else if kept {
-            e = format!("{e} {} {}{unit}", if constant < 0.0 { '-' } else { '+' }, constant.abs());
+            e = format!("{e} {} {}{unit}", if constant < 0.0 { '-' } else { '+' }, text(constant.abs()));
         }
         *out = e.into();
     }
+}
+
+/// `v` as an expression reads it back exactly: plainly when that is short, else with an
+/// exponent (`1e-300`).
+fn short_number(v: f64) -> String {
+    let plain = format!("{v}");
+    if plain.len() <= 24 { plain } else { format!("{v:e}") }
 }
 
 /// Map a displacement given as length expressions, retaining its parameter dependencies.

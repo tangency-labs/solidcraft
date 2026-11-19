@@ -1431,11 +1431,19 @@ fn a_turned_direction_keeps_its_small_constants() {
     let unit = crate::unit_direction(Vec3::new(v[0], v[1], v[2])).expect("a direction, not zero");
     let h = std::f64::consts::FRAC_1_SQRT_2;
     assert!(unit.dist(Vec3::new(h, 0.0, h)) < 1e-9, "{d:?} -> {unit:?}");
-    // Rounding from the turn itself is still dropped from a direction of ordinary size.
+    // Rounding from the turn itself is dropped from a direction of ordinary size, with or
+    // without an expression beside it, and every number is written short.
+    let quarter = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_2);
     let mut d: crate::DirExpr = ["sin(t)".into(), "1".into(), "0".into()];
-    crate::map_dir_expr(&crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2), &mut d);
-    assert!(d[1].contains("sin(t)") && !d[1].contains("e-"), "{d:?}");
-    assert!(!d[0].contains("e-") && !d[0].contains("sin"), "{d:?}");
+    crate::map_dir_expr(&quarter, &mut d);
+    assert_eq!(d[1].to_string(), "0", "{d:?}");
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1e-300".into(), "0".into()];
+    crate::map_dir_expr(&quarter, &mut d);
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    doc.set_param("t", "30 deg", None, None).unwrap();
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    assert!((v[0] - 0.5).abs() < 1e-15 && v[1].abs() < 1e-290 && (v[2] - 1e-300).abs() < 1e-310, "{d:?} -> {v:?}");
 }
 
 #[test]
