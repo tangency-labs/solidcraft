@@ -2127,6 +2127,8 @@ mod tests {
         let mut h = drawing_open(json!({"font":"No Such Family Q7","language":"fr-CA"}));
         assert!(start(&mut h.app, "drawing.set"));
         h.frames(3);
+        // The note is looked up on a worker (the font folders, read cold): wait for it.
+        h.settle();
         assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_some(), "the font's note shows");
         assert!(h.widget("fr-CA").is_some(), "the language shows its own tag, not English");
 
@@ -2138,6 +2140,16 @@ mod tests {
         assert_eq!(the_drawing(&h).font, "");
         assert_eq!(h.app.session.undo.len(), steps + 1);
         assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_none(), "the built-in font needs no note");
+        // An undo brings the font back without a reply to read the note from: it is looked up again.
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        h.settle();
+        assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_some(), "the note follows an undo");
+        h.app.run("edit.redo", json!({})).unwrap();
+        h.frames(2);
+        h.settle();
+        assert!(crate::scenario::rect_of("dialog:note:drawing_settings_font_note").is_none(), "and a redo");
+        assert_eq!(h.app.session.undo.len(), steps + 1);
 
         h.step(&json!({"click":{"handle":"dialog:Language"}})).unwrap();
         h.frames(3);

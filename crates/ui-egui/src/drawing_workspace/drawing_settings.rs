@@ -25,22 +25,77 @@ pub(crate) struct Settings {
     font_filter: String,
     /// The engine's note on why the drawing's text is set in the built-in font, with the font it
     /// was made for: made again only when the drawing's font changes (a pick, an undo, a redo).
-    font_note: Option<(String, Option<String>)>,
+    font_note: Option<(String, Note)>,
+}
+
+/// A font's note, or the lookup still making it. The lookup reads the font folders: cold, a few
+/// hundred milliseconds for a font that isn't installed, so it runs on a worker, not in a frame.
+enum Note {
+    Ready(Option<String>),
+    #[cfg(not(target_arch = "wasm32"))]
+    Looking(crate::starting::Worker<Option<String>>),
+}
+
+impl Note {
+    /// Start the lookup for `font`; made at once where no thread can run it (and on the web, which
+    /// has no threads or font folders).
+    fn look_up(ctx: &egui::Context, font: &str) -> Self {
+        let make = |font: &str| solidcraft_engine::sketch::paper_font_note(&solidcraft_engine::sketch::font_dirs(), font);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let owned = font.to_owned();
+            if let Ok(worker) = crate::starting::Worker::spawn("font note", ctx.clone(), move || make(&owned)) {
+                return Note::Looking(worker);
+            }
+        }
+        let _ = ctx;
+        Note::Ready(make(font))
+    }
+
+    /// The note once it is made; none while the lookup runs. Never waits.
+    fn poll(&mut self) -> Option<String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Note::Looking(worker) = self {
+            *self = match worker.poll() {
+                crate::starting::Poll::Running => return None,
+                crate::starting::Poll::Done(note) => Note::Ready(note),
+                crate::starting::Poll::Failed => Note::Ready(None),
+            };
+        }
+        match self {
+            Note::Ready(note) => note.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Note::Looking(_) => None,
+        }
+    }
+
+    fn looking(&self) -> bool {
+        match self {
+            Note::Ready(_) => false,
+            #[cfg(not(target_arch = "wasm32"))]
+            Note::Looking(_) => true,
+        }
+    }
 }
 
 impl Settings {
-    /// The note on `font`, looked up once per font: the lookup reads the font folders.
-    fn note(&mut self, font: &str) -> Option<String> {
+    /// The note on `font`, looked up once per font.
+    fn note(&mut self, ctx: &egui::Context, font: &str) -> Option<String> {
         if self.font_note.as_ref().is_none_or(|(made_for, _)| made_for != font) {
-            let note = solidcraft_engine::sketch::paper_font_note(&solidcraft_engine::sketch::font_dirs(), font);
-            self.font_note = Some((font.to_string(), note));
+            self.font_note = Some((font.to_string(), Note::look_up(ctx, font)));
         }
-        self.font_note.as_ref().and_then(|(_, note)| note.clone())
+        self.font_note.as_mut().and_then(|(_, note)| note.poll())
     }
 }
 
 fn tr(id: &str) -> &str {
     solidcraft_ui_text::tr(id)
+}
+
+/// Whether the open window is still looking up its font's note: background work that
+/// `Harness::settle` waits for, as it waits for a file loading.
+pub(crate) fn looking(app: &SolveApp) -> bool {
+    app.drawing_workspace.drawing_settings.as_ref().and_then(|settings| settings.font_note.as_ref()).is_some_and(|(_, note)| note.looking())
 }
 
 /// Whether the window can open: in Drawing, with a drawing open.
@@ -61,7 +116,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !super::active(app) || settings.owner != (app.session.uid, drawing.id) {
         return;
     }
-    let note = settings.note(&drawing.font);
+    let note = settings.note(ctx, &drawing.font);
     let mut change = None;
     let closed = ui_kit::Window::new(egui::Id::unique("sc_drawing_settings"), "settings", tr("cmd.drawing_set")).show_body(ctx, |ui| {
         change = rows(ui, &drawing, &mut settings.font_filter, note.as_deref());
@@ -82,7 +137,7 @@ fn apply(app: &mut SolveApp, settings: &mut Settings, key: &str, value: Value) {
     match app.run(COMMAND, params) {
         Ok(reply) => {
             if let Some(font) = reply["font"].as_str() {
-                settings.font_note = Some((font.to_string(), reply["font_note"].as_str().map(str::to_string)));
+                settings.font_note = Some((font.to_string(), Note::Ready(reply["font_note"].as_str().map(str::to_string))));
             }
         }
         Err(error) => app.set_status(error, true),
