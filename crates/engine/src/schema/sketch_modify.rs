@@ -293,10 +293,10 @@ fn corner_forms(schema: &mut Schema) {
 // ---------------------------------------------------------------------------------------------
 // Trim, break, extend
 
-/// Remove the piece of a curve between the nearest crossings around a point (a curve nothing
-/// crosses goes whole). The cut ends are joined to the curve that cut them. Trimming a curve that
-/// has offsets, or a piece of an offset's copy, releases the offset into the dimensions that held
-/// it (#8074). One undo step.
+/// Remove the piece between the nearest boundaries around the pick. Crossings with other curves
+/// and points constrained onto the curve are boundaries. With no boundaries the whole curve goes.
+/// Trimming a curve that has offsets, or a piece of an offset's copy, releases the offset into
+/// the dimensions that held it (#8074). One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = trim_required)]
 pub struct TrimParams {
@@ -368,7 +368,7 @@ impl TrimPathParams {
     }
 }
 
-/// Split a curve in two or more, at the places other curves cross it (`at`) or at given
+/// Split a curve in two or more, at the boundaries around the pick (`at`) or at given
 /// positions (`points`). At a point where the curve ends and another curve meets, the curve
 /// gets its own end there and the two are no longer joined. One undo step.
 #[derive(Debug, JsonSchema)]
@@ -378,8 +378,8 @@ pub struct BreakParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub curve: Option<String>,
-    /// A point near the place to break, in mm: the curve is split at the crossings either side
-    /// of it. Used when `points` is not given.
+    /// A point on the piece to split out, in mm. Each side ends at the nearest crossing
+    /// or point constrained onto the curve. Used when `points` is not given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point2")]
     pub at: Option<Vec2>,
@@ -1434,7 +1434,10 @@ pub struct FilletResult {
     /// others equal to it.
     pub constraints: Vec<String>,
     /// The parameter that holds the radius.
-    pub param: String,
+    pub param: Option<String>,
+    /// A sheet sketch keeps its radius expression without making a model parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
     /// The points of corners kept as virtual sharp corners.
     pub virtual_corners: Vec<String>,
     /// The constraints and dimensions that moved to a virtual corner.

@@ -2088,7 +2088,7 @@ mod tests {
             run(&mut s, "solid.pattern.rectangular", json!({"features": ["Half"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10}));
             let state = s.world_state().unwrap();
             assert!(state.body("Plate").is_none());
-            assert!(state.sheets.is_empty());
+            assert!(state.surface_sheets.is_empty());
             assert_eq!(state.bodies.len(), usize::from(with_surface));
             assert_eq!(state.body("Sheet").map(|b| b.body.record()), surface.as_ref());
         }
@@ -2216,6 +2216,47 @@ mod tests {
             assert!(st.body("Tube").unwrap().body.is_surface());
             assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
         }
+    }
+
+    /// #18708: a Combine cut or intersect with an open (non-closed) tool body is refused up front
+    /// with an informative message instead of failing in kernel export; bodies are left unchanged.
+    #[test]
+    fn a_cut_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "cut"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
+    /// #18708: a Combine intersect with an open tool body is refused up front and names the tool.
+    #[test]
+    fn an_intersect_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "intersect"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
     }
 
     /// #15913 negative control: a join of overlapping solids still makes one body of the union.

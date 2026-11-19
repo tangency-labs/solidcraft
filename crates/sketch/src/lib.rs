@@ -32,6 +32,7 @@ mod model;
 mod nurbs;
 mod offset;
 mod offset_topology;
+mod paper_text;
 mod pattern;
 mod periodic;
 pub mod pierce;
@@ -55,13 +56,14 @@ pub use curves::{
 };
 pub use decompose::Budget;
 pub use dims::{
-    DimFrame, DimLayout, chain_centres, default_text, default_text_offset, dim_frame, dim_frame_at, dim_layout, dim_layout_reaching, dim_reach,
-    encode_text,
+    DimFrame, DimLayout, DimSizes, DimText, LinearAxis, chain_centres, default_text, default_text_offset, dim_frame, dim_frame_at, dim_layout,
+    dim_layout_reaching, dim_layout_sized, dim_reach, encode_text, in_sector, linear_axis,
 };
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT, VariableUnit};
 pub use fonts::{
-    DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, font_file_path, installed_families, set_font_file_check,
+    DEFAULT_FONT_FAMILY, FontData, check_family, fallback, families_in, find_style_in, font_data, font_data_saved, font_data_styled, font_dirs,
+    font_file_path, font_override_dirs, installed_families, set_font_file_check,
 };
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, SketchPlacement, TextExprs, sketch_axis_geom};
@@ -72,6 +74,11 @@ pub use model::{
 pub use nurbs::Nurbs;
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
+pub use paper_text::{
+    FlowedPaperText, Outcome, PaperFonts, PaperLines, PaperSourceFlow, PaperTextFlow, paper_fallback_notes, paper_font_note, paper_lines,
+    paper_lines_in, paper_lines_now, paper_text, paper_text_in, paper_text_now, paper_text_with_flow, paper_text_with_flow_in,
+    paper_text_with_flow_now,
+};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
 pub use profiles::{
@@ -86,7 +93,9 @@ pub use solver::{
     flips_from_stored, keep_point_order, keep_sides_at_zero, measure_dimension, move_line_towards, move_point_towards, point_along, solve,
     solve_after_edit, solve_after_link_move, solve_after_value_edit, solve_holding, solve_with,
 };
-pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, TextVerticalAlign, text_geometry, text_geometry_in, text_geometry_styled};
+pub use text::{
+    MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, TextVerticalAlign, saved_text_geometry, text_geometry, text_geometry_in, text_geometry_styled,
+};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
 pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireCurve, WireSpace, arc_from_3_points, arc_polyline, arc_sweep, fit_polyline};
 pub use wire_solve::{

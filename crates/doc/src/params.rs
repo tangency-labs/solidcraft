@@ -267,18 +267,28 @@ impl Document {
     /// Every length input of every feature as the geometry reads it (mm; a unit-less result is
     /// in the design's units), for checking that an edit moves nothing.
     pub fn length_inputs(&self) -> Vec<Option<f64>> {
+        let read = self.length_reader();
+        self.features.iter().flat_map(|f| f.kind.inputs()).filter(|(_, _, k)| *k == Kind::Length).map(|(_, e, _)| read(&e)).collect()
+    }
+
+    /// Feature `feature`'s length input `label` as the geometry reads it, as [`Document::length_inputs`]
+    /// reads each; `None` when it has none so labelled, or it doesn't evaluate.
+    pub fn length_input(&self, feature: u64, label: &str) -> Option<f64> {
+        let inputs = self.feature(feature)?.kind.inputs();
+        let (_, e, _) = inputs.iter().find(|(l, _, k)| *l == label && *k == Kind::Length)?;
+        self.length_reader()(e)
+    }
+
+    /// How a length expression reads, with the design's parameters as they are now: the one rule
+    /// of [`Document::length_inputs`] and [`Document::length_input`].
+    fn length_reader(&self) -> impl Fn(&str) -> Option<f64> {
         let (vals, _) = self.param_values();
         let scale = expr::unit_info(self.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
-        let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-        self.features
-            .iter()
-            .flat_map(|f| f.kind.inputs())
-            .filter(|(_, _, k)| *k == Kind::Length)
-            .map(|(_, e, _)| {
-                let d = if expr::is_literal(&e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
-                expr::eval_with_defaults(&e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
-            })
-            .collect()
+        move |e: &str| {
+            let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
+            let d = if expr::is_literal(e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
+            expr::eval_with_defaults(e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
+        }
     }
 
     pub fn change_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
@@ -690,6 +700,8 @@ pub enum ParamUser {
     /// A joint's offset, angle or value, or a motion link's gear, rack or screw length (`input`
     /// says which; a link is named by the joint it drives).
     Joint { joint: u64, name: String, input: String },
+    /// A component's quantity in bills of materials ([`crate::metadata::BOM_QUANTITY`]).
+    Quantity { component: u64, name: String },
     /// A sheet metal or plastic rule's value (`kind` says which, `field` which value).
     Rule { kind: String, name: String, field: String },
     /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
@@ -709,6 +721,7 @@ impl ParamUser {
                 None => format!("configuration column {column}"),
             },
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
+            ParamUser::Quantity { name, .. } => format!("component {name} (quantity)"),
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
             ParamUser::Occurrence { name, input, .. } => format!("occurrence {name} ({input})"),
@@ -848,6 +861,11 @@ impl Document {
             if expr::references(e).iter().any(|r| r == name) {
                 let jname = self.assembly.joints.iter().find(|j| j.id == joint).map(|j| j.name.clone()).unwrap_or_else(|| joint.to_string());
                 out.push(ParamUser::Joint { joint, name: jname, input });
+            }
+        }
+        for c in &self.components {
+            if c.metadata.bom_quantity().is_some_and(|e| expr::references(e).iter().any(|r| r == name)) {
+                out.push(ParamUser::Quantity { component: c.id, name: c.name.clone() });
             }
         }
         let uses = |e: &str| expr::references(e).iter().any(|r| r == name);
@@ -1043,6 +1061,13 @@ impl Document {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
+                n += 1;
+            }
+        }
+        for c in &mut self.components {
+            let Some(e) = c.metadata.bom_quantity() else { continue };
+            let r = expr::rename_reference(e, old, new);
+            if r != e && c.metadata.set(crate::metadata::Owner::Component, crate::metadata::BOM_QUANTITY, r.into()).is_ok() {
                 n += 1;
             }
         }

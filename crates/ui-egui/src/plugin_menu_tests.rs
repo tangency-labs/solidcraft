@@ -418,6 +418,44 @@ fn each_plugin_entry_has_its_own_dialog_with_its_own_values() {
     assert_eq!(h.app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["hex"]);
 }
 
+/// A reopened plugin command keeps its window position within the design. Another entry gets
+/// a separate window, while the serial id of each new run still changes (#18684).
+#[test]
+fn plugin_dialog_reopen_remembers_dragged_window_position() {
+    let mut h = crate::scenario::Harness::new();
+    assert!(!h.app.preferences.plugin_remember_dialog_position);
+    h.app.preferences.plugin_remember_dialog_position = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![entry("spur", "edit", json!([])), entry("hex", "edit", json!([]))])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    let (first_serial, first_id) = (dialog.id, dialog_window_id(dialog, true));
+    assert_ne!(dialog_window_id(dialog, false), first_id, "opt-out uses the old serial-based identity");
+    let first = h.ctx.memory(|m| m.area_rect(first_id)).expect("window is placed");
+    let header = crate::scenario::rect_of("dialog:header").unwrap();
+    let from = egui::pos2(header.left() + 48.0, header.center().y);
+    h.call("ui.drag", json!({"x0":from.x,"y0":from.y,"x1":from.x-105.0,"y1":from.y+55.0,"steps":8}));
+    h.frames(5);
+    let dragged = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((dragged.min - first.min).length() > 30.0, "drag moved the window: {first:?} -> {dragged:?}");
+
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "Cancel closes the old instance");
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let reopened = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(reopened.id, first_serial, "a new run gets a new serial");
+    assert_eq!(dialog_window_id(reopened, true), first_id, "the command's window keeps its egui identity");
+    let again = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((again.min - dragged.min).length() <= 2.0, "reopening keeps the moved position: {dragged:?} -> {again:?}");
+
+    open_entry(&mut h.app, 0, 1);
+    let other = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(dialog_window_id(other, true), first_id, "a different entry has its own position");
+}
+
 /// A 20 x 20 x 10 box in the home view, with a plugin whose one command has [`pick_schema`].
 fn box_and_pick_plugin() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
@@ -808,7 +846,8 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// A package with `home` (a box, then view.home), `edit` (a box and no view command) and `fail`.
+    /// A package with `home` (a box, then view.home), `edit` (a box and no view command), `fail`
+    /// and `place` (a component with a box in it, moved 100 mm along X).
     fn view_package(tag: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("solidcraft-plugin-view-{}-{tag}", std::process::id()));
         let dir = root.join("frames");
@@ -819,10 +858,46 @@ mod native {
         let entry = |entry_name: &str, label: &str| json!({"name": entry_name, "effect": "edit", "input_schema": {"type": "object"}, "slots": [{"kind": "menu", "name": label}]});
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail")],
-            "commands":["solid.box", "view.home"]}});
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place")],
+            "commands":["solid.box", "view.home", "component.create", "occurrence.move"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
+    }
+
+    /// A run that makes a component and moves it is previewed where the run leaves it, also in
+    /// a design where nothing was placed before: the preview used to show it on the origin
+    /// then, and where it goes only once the design had a moved component.
+    #[test]
+    fn a_component_a_run_makes_and_moves_is_previewed_where_it_goes() {
+        let root = view_package("place");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        assert!(!solidcraft_engine::frames::placed(&h.app.session), "a design with nothing placed");
+        open_entry(&mut h.app, 0, 3);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the moved box is drawn: {:?}", h.app.preview.error);
+        let b = h.app.preview.bounds;
+        assert_eq!((b.min.x.round(), b.max.x.round()), (100.0, 110.0), "where the run moved it, not on the origin");
+        // The triangles the preview draws are the box there, not only the bounds it reports.
+        let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+        let mut scratch = h.app.session.scratch();
+        dry_run(&mut scratch, &id);
+        let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+        let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+        let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(rest.is_empty() && !vertices.is_empty(), "the box is drawn");
+        let xs = vertices.iter().map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]));
+        let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        assert_eq!((lo.round(), hi.round()), (100.0, 110.0), "drawn where the run moved it");
+        // Run leaves it there too.
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        use solidcraft_engine::geom::MeshGeom as _;
+        let world = h.app.session.world_state().unwrap();
+        let placed = world.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |acc, body| acc.union(&body.mesh().bounds()));
+        assert_eq!((placed.min.x.round(), placed.max.x.round()), (100.0, 110.0));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn same_camera(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
