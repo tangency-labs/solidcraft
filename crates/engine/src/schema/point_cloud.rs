@@ -21,7 +21,8 @@ use super::types::IdOrName;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PointCloudInsertParams {
-    /// The file to read: a `.ply`, `.pcd`, `.xyz`, `.pts` or `.asc` file. Any other file is refused.
+    /// The file to read: a `.ply`, `.pcd`, `.xyz`, `.pts` or `.asc` file. Any other file is
+    /// refused.
     pub path: OpenPath,
     /// The cloud's name in the design. Default: the file's name without its extension, with
     /// ` (2)` and so on added when another cloud already has that name.

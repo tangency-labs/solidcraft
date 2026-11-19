@@ -3488,7 +3488,7 @@ impl SolveApp {
         Ok(())
     }
 
-    /// A dropped CAD, mesh, drawing or point cloud (PLY, PCD, XYZ, PTS, ASC) file joins a design that has
+    /// A dropped CAD, mesh, drawing or point cloud file joins a design that has
     /// features or point clouds; otherwise it opens. A dropped PNG or JPEG is a canvas to place,
     /// not a design to open: it starts the Canvas tool with that image chosen (#13926).
     /// A dropped ZIP goes through the plugin install review, which validates its contents

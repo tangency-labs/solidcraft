@@ -777,8 +777,9 @@ mod tests {
         assert_eq!((r["name"].as_str(), r["points"].as_u64(), r["source_points"].as_u64()), (Some("lidar"), Some(3), Some(3)));
         assert_eq!(r["bounds"], json!([[0.0, 0.0, 0.0], [2000.0, 3000.0, 1500.0]]));
         assert_eq!(s.doc.point_clouds[0].colors.get(1), Some([0, 255, 0]));
-        // A PCD field that is no position or colour colours and filters the cloud, as a PLY property does.
-        s.execute("pointcloud.edit", &json!({"cloud": "lidar", "color_by": "intensity", "filters": [{"property": "intensity", "range": [6, 7]}]})).unwrap();
+        // A PCD field colours and filters the cloud, as a PLY file's property does.
+        s.execute("pointcloud.edit", &json!({"cloud": "lidar", "color_by": "intensity", "filters": [{"property": "intensity", "range": [6, 7]}]}))
+            .unwrap();
         let c = &s.doc.point_clouds[0];
         assert_eq!((c.color_by, c.color_property.as_deref(), c.filters.len()), (ColorBy::Property, Some("intensity"), 1));
         let r = s.execute("pointcloud.insert", &json!({"path": asc})).unwrap();
@@ -786,7 +787,7 @@ mod tests {
         assert_eq!(s.doc.point_clouds[1].colors.get(1), Some([0, 255, 0]));
         assert_eq!(s.doc.point_clouds[1].world_point(1).map(|p| [p.x, p.y, p.z]), Some([10.0, 0.0, 0.0]));
 
-        // A PCD file that changed is read again, and what the cloud is coloured and filtered by is kept.
+        // A PCD file that changed is read again, and the cloud keeps its colouring and its filter.
         std::fs::write(&pcd, format!("{header}0 0 0 16711680 5\n2 0 0 65280 6\n4 0 0 255 7\n")).unwrap();
         let r = s.execute("pointcloud.reload", &json!({"cloud": "lidar"})).unwrap();
         assert_eq!(r["points"].as_u64(), Some(3));

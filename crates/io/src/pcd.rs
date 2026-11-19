@@ -343,7 +343,7 @@ pub(crate) fn read_pcd_cloud(bytes: &[u8], max_points: usize) -> Result<PlyCloud
             if h.points.checked_mul(h.row as u64) != Some(expanded as u64) {
                 return Err(invalid(format!("the compressed points do not expand to the file's {} points", h.points)));
             }
-            // What the block expands to is held in memory as a file's bytes are: under the same limit.
+            // The expanded block is held in memory as a file's bytes are: under the same limit.
             crate::limits::check(crate::limits::Kind::PointCloud, expanded as u64).map_err(IoError::Invalid)?;
             Source::Columns { b: lzf(data, expanded)?, points: h.points as usize }
         }
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn lzf_copies_plain_runs_and_bytes_already_written() {
-        // `abc` as it is; three bytes from three back; then ten from one back, the last byte repeated.
+        // `abc` as it is; three bytes from three back; ten from one back, the last byte repeated.
         let data = [2, b'a', b'b', b'c', 0x20, 2, 0xE0, 1, 0];
         assert_eq!(lzf(&data, 16).unwrap(), b"abcabccccccccccc");
         assert!(lzf(&data, 15).is_err() && lzf(&data, 17).is_err(), "not the length the file says");
@@ -479,7 +479,7 @@ mod tests {
         assert!(lzf(&[5, b'a'], 6).is_err(), "a run longer than the data");
         assert!(lzf(&[0xE0], 9).is_err() && lzf(&[0xE0, 1], 10).is_err(), "a copy cut short");
         assert!(lzf(&[], 1).is_err() && lzf(&[], 0).unwrap().is_empty());
-        // Two points at (1, 2, 3): each field's four bytes, then the same four copied from four back.
+        // Two points at (1, 2, 3): each field's four bytes, then the same four from four back.
         let mut file = head("x y z", "4 4 4", "F F F", "1 1 1", 2, "binary_compressed");
         let block = [3, 0, 0, 0x80, 0x3F, 0x40, 3, 3, 0, 0, 0, 0x40, 0x40, 3, 3, 0, 0, 0x40, 0x40, 0x40, 3];
         file.extend((block.len() as u32).to_le_bytes());
@@ -510,7 +510,8 @@ mod tests {
 
     #[test]
     fn a_grid_of_points_is_thinned_and_keeps_the_points_without_a_number() {
-        // A depth camera's picture: `WIDTH` by `HEIGHT`, with no `POINTS` line and `nan` where it saw nothing.
+        // A depth camera's picture: `WIDTH` by `HEIGHT` with no `POINTS` line, and `nan` where it
+        // saw nothing.
         let file = "VERSION .7\nFIELDS x y z t\nSIZE 4 4 4 8\nTYPE F F F F\nWIDTH 3\nHEIGHT 2\nDATA ascii\n\
             0 0 1 0.5\nnan nan nan 1.5\n2 0 1 2.5\n0 1 1 3.5\n1 1 1 4.5\n2 1 1 5.5\n";
         let all = read_pcd_cloud(file.as_bytes(), 6).unwrap();
