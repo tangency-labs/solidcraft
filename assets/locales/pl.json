@@ -2765,7 +2765,6 @@
   "prefs.blur_off": "Wyłączone",
   "prefs.blur_reduce_transparency": "Wyłączone przez systemowe ustawienie Ogranicz przezroczystość",
   "prefs.blur_software": "Niedostępne przy grafice programowej (gpu-software)",
-  "prefs.blur_source": "Niedostępne w tym widoku środowiska",
   "prefs.blur_web": "Niedostępne na tej internetowej ścieżce renderowania",
   "prefs.bodies_folders": "Foldery brył",
   "prefs.bodies_folders_always": "Zawsze",

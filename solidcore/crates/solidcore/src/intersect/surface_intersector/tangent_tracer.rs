@@ -307,6 +307,35 @@ impl<'a> TangentTracer<'a> {
         }))
     }
 
+    /// Not the fork's (#18930): whether surface `s`'s parametrization is regular at `(u, v)`,
+    /// its first partials as evaluated (no tangent put in for one that vanishes, as
+    /// [`Self::eval`] puts in) spanning the tangent plane by the test [`Self::eval`] makes.
+    /// `false` where the surface cannot be evaluated.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the evaluation.
+    fn regular_at(&self, k: &Kernel, s: usize, u: f64, v: f64) -> Result<bool> {
+        let srf = *self.surfaces.get(s).ok_or_else(oob)?;
+        let flags = EvaluateFlags {
+            u_side: Side::Left,
+            v_side: Side::Left,
+            only_upper_half: true,
+            non_zero_tangents: false,
+        };
+        let d = match srf.evaluate(k, Point2::new(u, v), 1, 1, flags) {
+            Ok(d) => d,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        };
+        let g = |i: usize, j: usize| -> Result<Vec3> {
+            d.get(i).and_then(|r| r.get(j)).copied().ok_or_else(oob)
+        };
+        let (su, sv) = (g(1, 0)?, g(0, 1)?);
+        let d_len = len(su.cross(sv));
+        Ok(d_len > 1e-12 * (su.dot(su) + sv.dot(sv)) && d_len > 1e-300)
+    }
+
     /// `Clamp`: both parameter pairs clamped to their domains.
     fn clamp(&self, x: &mut [f64; 4]) {
         for (s, dom) in self.domains.iter().enumerate() {
@@ -932,14 +961,39 @@ impl<'a> TangentTracer<'a> {
 
     /// `Probe`: the tangent-plane directions in which the contact continues from `p`
     /// (24 directions on a circle of radius `2e-3` model sizes, clustered within 30
-    /// degrees) into `dirs`; their number, or -1 when the contact holds in (almost)
-    /// every direction (coincident surfaces).
+    /// degrees) into `dirs`; their number, or -1 when the surfaces coincide around `p`.
+    /// None at a degenerate point of either parametrization.
+    ///
+    /// Not the fork's test (#18930): the surfaces coincide when three neighbouring
+    /// directions each find the contact along themselves, within half the angle between
+    /// two directions, measured in the tangent plane. A tangential curve gives a contact
+    /// along a direction only where it runs within that half angle, so one direction on
+    /// each side of `p` per curve through it; three neighbours need three curves through
+    /// `p` within 30 degrees of each other. A coincident region gives one in every
+    /// direction that stays in both domains: three neighbours wherever the region's
+    /// corner at `p` is at least 45 degrees wide in the tangent plane (a right-angled
+    /// domain corner holds seven). The fork asked for a contact exactly at the probe
+    /// point (`num_exact >= 5`), which lies in the tangent plane and misses a surface
+    /// curved by more than `0.02 / r`, or for more than half the directions (`hits >
+    /// 12`), which a contact on a domain edge or corner cannot have. Both tests judge
+    /// from 24 sampled directions, not from a certificate; the crossing mode
+    /// (`tangent` false) uses the same test.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the evaluations.
     pub fn probe(&self, k: &Kernel, p: &TcPt, dirs: &mut Vec<Vec3>) -> Result<i32> {
         dirs.clear();
+        // at a degenerate point of either parametrization (a sphere's pole) the drop of a
+        // direction into the parameters is not determined, so no direction can be judged
+        // there (#18930): the probe of a pole on two coincident spheres found the contact
+        // only along the one direction its parameters keep, and a tangential curve was
+        // traced along the coincident region's boundary
+        for s in 0..2 {
+            if !self.regular_at(k, s, at(&p.x, 2 * s)?, at(&p.x, 2 * s + 1)?)? {
+                return Ok(0);
+            }
+        }
         let n = p.n;
         let a = if n.x.abs() < 0.6 {
             Vec3::new(1.0, 0.0, 0.0)
@@ -950,8 +1004,10 @@ impl<'a> TangentTracer<'a> {
         let e2 = n.cross(e1);
         let r = 2e-3 * self.size;
         let mut hits: Vec<Vec3> = Vec::new();
-        let mut num_exact = 0;
-        for jj in 0..PROBE_DIRS {
+        // whether the contact found in each direction lies along it
+        let mut along = [false; PROBE_DIRS as usize];
+        let cos_half_step = (PI / f64::from(PROBE_DIRS)).cos();
+        for (jj, along_jj) in (0..PROBE_DIRS).zip(along.iter_mut()) {
             let th = 2.0 * PI * f64::from(jj) / f64::from(PROBE_DIRS);
             let d = e1 * th.cos() + e2 * th.sin();
             let Some(duv) = self.drop_dir(k, &p.x, d)? else {
@@ -971,14 +1027,17 @@ impl<'a> TangentTracer<'a> {
             if off > 0.35 * r {
                 continue;
             }
-            // contact right at the probe point: the surfaces coincide there
-            // (on a tangential curve this happens only when probing along it)
-            if off < 0.01 * r {
-                num_exact += 1;
-            }
-            hits.push(unit(q.p - p.p));
+            let h = q.p - p.p;
+            let h_t = h - n * n.dot(h);
+            *along_jj = h_t.dot(d) > cos_half_step * len(h_t);
+            hits.push(unit(h));
         }
-        if num_exact >= 5 || hits.len() > (PROBE_DIRS / 2) as usize {
+        let coincident = along
+            .iter()
+            .zip(along.iter().cycle().skip(1))
+            .zip(along.iter().cycle().skip(2))
+            .any(|((&a, &b), &c)| a && b && c);
+        if coincident {
             return Ok(-1);
         }
         // cluster

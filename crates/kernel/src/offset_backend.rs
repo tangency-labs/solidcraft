@@ -2,7 +2,8 @@
 //! record, tagged as operand 0, SMLib runs the operation, and the result comes back with SMLib's own
 //! history, renumbered into the body's and the result's face and edge order (as
 //! `crate::smlib_boolean` does for booleans). A result SMLib's own check refuses is an
-//! error, never a body.
+//! error, never a body, unless the evaluation's validation mode skips the check
+//! (`crate::validation`).
 //!
 //! SMLib's tags travel through the copies its offset makes, so a shell's inner wall and a
 //! thickened sheet's moved copy carry the tag of the face they were made from, and SMLib reads
@@ -64,22 +65,28 @@ fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
 
 /// Runs `op` on `b` in SMLib, tagged as operand 0, and brings the result back with SMLib's
 /// history over `[b]` (none where an order cannot be matched). `wall`: the operation's wall
-/// thickness, for its refusals.
+/// thickness, for its refusals. SMLib's check of the result runs here unless the evaluation's
+/// validation mode leaves it to the feature's end or skips it (`crate::validation`), as for
+/// booleans, blends and sweeps (#17601).
 pub(crate) fn run(
     name: &str,
     b: &Body,
     wall: Option<f64>,
     op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>,
 ) -> Result<(Body, Option<History>)> {
+    use crate::validation::{Checked, Step};
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
     let r = op(&tagged).map_err(|e| refused(name, wall, e))?;
-    let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
-    if !check.is_valid() {
-        let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-        let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
-        return Err(failed(name, what, check));
+    let step = crate::validation::step();
+    if step == Step::Check {
+        let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
+        if !check.is_valid() {
+            let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+            let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
+            return Err(failed(name, what, check));
+        }
     }
     let (body, or) = body_from_smlib_ordered(&r)?;
     let history = match (ob, or) {
@@ -89,6 +96,7 @@ pub(crate) fn run(
         }),
         _ => None,
     };
+    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r, &[b]) } else { body };
     Ok((body, history))
 }
 

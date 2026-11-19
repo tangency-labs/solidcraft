@@ -563,6 +563,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
             crate::drawing_workspace::edit_object(app, kind, hit.object);
         }
     }
+    // A text cell of the title block likewise: what it shows is typed where it is.
+    if response.double_clicked()
+        && !placing
+        && !hit.is_some_and(|hit| drawing.has_object(hit.object) || hit.kind == ObjectKind::PartsList)
+        && let (Some(point), Some(at)) = (on_paper, response.interact_pointer_pos())
+    {
+        crate::drawing_workspace::edit_title_cell(app, sheet, point, at);
+    }
     crate::dim_view::show_sheet_editor(app, ui.ctx());
     if let Some(hit) = hit
         && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)

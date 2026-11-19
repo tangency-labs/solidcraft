@@ -2512,7 +2512,6 @@
   "prefs.blur_off": "Vypnuto",
   "prefs.blur_reduce_transparency": "Vypnuto systémovým nastavením Omezit průhlednost",
   "prefs.blur_software": "Se softwarovou grafikou (gpu-software) není k dispozici",
-  "prefs.blur_source": "V tomto zobrazení pracovního prostředí není k dispozici",
   "prefs.blur_web": "Na této webové cestě vykreslování není k dispozici",
   "prefs.bodies_folders": "Složky těles",
   "prefs.bodies_folders_always": "Vždy",

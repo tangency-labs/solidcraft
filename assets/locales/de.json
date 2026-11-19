@@ -2793,7 +2793,6 @@
   "prefs.blur_off": "Aus",
   "prefs.blur_reduce_transparency": "Durch die Systemeinstellung zur Transparenzreduzierung deaktiviert",
   "prefs.blur_software": "Mit Softwaregrafik nicht verfügbar (gpu-software)",
-  "prefs.blur_source": "In dieser Arbeitsbereichsansicht nicht verfügbar",
   "prefs.blur_web": "Auf diesem Web-Renderpfad nicht verfügbar",
   "prefs.bodies_folders": "Körperordner",
   "prefs.bodies_folders_always": "Immer",

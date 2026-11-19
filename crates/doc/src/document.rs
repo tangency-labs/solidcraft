@@ -5531,7 +5531,7 @@ impl Document {
         let paired = moved_from.and_then(|from| sk.stored_with_rebuilt_texts(from));
         let moved_from = paired.as_ref().or(moved_from);
         let was = |sk: &Sketch| moved_from.and_then(|from| sk.positions_in(from));
-        let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty();
+        let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty() || !sk.freeform_chain_offsets.is_empty();
         // Offsets always require another solve after refresh. Only that last report is
         // published; the first report only decides which state the second solve starts from.
         let first_analysis = if offsets { solidcraft_sketch::Analysis::StatusOnly } else { analysis };

@@ -16,6 +16,8 @@ use cadmpeg_ir::products::{Occurrence, OccurrenceParent, ProductDefinition, Prot
 use cadmpeg_ir::transform::Transform;
 use solidcraft_kernel::{IMPORT_MAX_BODIES, IMPORT_MAX_DEPTH, IMPORT_MAX_VISITS, RecordBody, StepNode};
 
+use super::validation::Origin;
+
 type M4 = [[f64; 4]; 4];
 
 const IDENTITY: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -30,13 +32,14 @@ pub(super) struct Unplaced {
 /// The bodies and product tree of `ir`'s occurrences, from `read` (each body as read), with what
 /// could not be placed in `warnings`. `product` names the root that holds the bodies no
 /// occurrence reaches.
-pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &mut Vec<String>) -> (Vec<RecordBody>, Vec<StepNode>) {
+pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &mut Vec<String>) -> (Vec<RecordBody>, Vec<StepNode>, Vec<Origin>) {
     let mut walk = Walk {
         definitions: ir.model.product_definitions.iter().map(|d| (d.id.as_str(), d)).collect(),
         children: HashMap::new(),
         by_body: HashMap::new(),
         read: &read,
         bodies: Vec::new(),
+        origins: Vec::new(),
         first: HashMap::new(),
         visits: 0,
         full: false,
@@ -82,10 +85,11 @@ pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &
             }
             node.bodies.push(walk.bodies.len());
             walk.bodies.push(RecordBody { path: vec![product.to_string()], ..u.record.clone() });
+            walk.origins.push(Origin { body: u.body.clone(), world: IDENTITY });
         }
         tree.push(node);
     }
-    (walk.bodies, tree)
+    (walk.bodies, tree, walk.origins)
 }
 
 /// The bodies of the parts every occurrence under `roots` uses (through `children`), whether or
@@ -119,6 +123,8 @@ struct Walk<'a, 'w> {
     by_body: HashMap<&'a str, Vec<usize>>,
     read: &'a [Unplaced],
     bodies: Vec<RecordBody>,
+    /// Where each of `bodies` came from: its neutral-model body and its occurrence's placement.
+    origins: Vec<Origin>,
     /// The read bodies some occurrence placed, each with the body its first placement is: later
     /// placements are copies of that one.
     first: HashMap<usize, usize>,
@@ -209,6 +215,7 @@ impl Walk<'_, '_> {
                             }
                         };
                         self.bodies.push(placed);
+                        self.origins.push(Origin { body: u.body.clone(), world });
                     }
                 }
             }
