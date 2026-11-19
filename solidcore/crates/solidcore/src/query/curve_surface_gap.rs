@@ -78,6 +78,12 @@ impl NetSurface {
     /// The net of `surface`, or `None` when it has none (an offset, a step surface, a surface
     /// in a volume, a curve-bounded one) or its net's parameters are not the surface's: the
     /// net and the surface must give one point at the parameters `probe`.
+    ///
+    /// The bounds built on it take the net as the surface. That holds by construction for
+    /// the kinds [`as_b_spline`] returns whose evaluation is their own net (a B-spline
+    /// surface, and the analytic kinds through their exact base B-spline); the probe checks
+    /// the agreement only at `probe` (to `1e-9` relative), so it catches a parameterisation
+    /// mismatch but is no proof of agreement between the probes.
     pub(crate) fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
         let Some(bs) = as_b_spline(k, surface)? else {
             return Ok(None);
@@ -151,9 +157,21 @@ impl NetSurface {
     /// coordinates, weight included) is one point exactly, so the surface is that point all
     /// along the side. Each is `(across_u, at_max, point)`: `across_u` for a side at
     /// constant u (the first or last column), `at_max` for the last row or column, and the
-    /// point (`None` from a net with a zero weight there).
+    /// point (`None` from a net with a zero weight there). Only an end whose knots are
+    /// clamped (the first or last `degree + 1` equal) is a side: the surface's edge there
+    /// is that row; an unclamped end's row is not on the surface, and gives no side.
     pub(crate) fn collapsed_sides(&self) -> Vec<(bool, bool, V3<f64>)> {
         let n = &self.net;
+        // the end of a knot vector (degree `p`, `count` control points) is clamped
+        let clamped = |kn: &[f64], p: usize, count: usize, at_max: bool| -> bool {
+            if at_max {
+                let end = knot(kn, count as isize);
+                (1..=p).all(|i| knot(kn, (count + i) as isize) == end)
+            } else {
+                let end = knot(kn, p as isize);
+                (0..p).all(|i| knot(kn, i as isize) == end)
+            }
+        };
         let at = |i: usize, j: usize| -> Option<[f64; 4]> {
             let k = (i.checked_mul(n.nv)?.checked_add(j)?).checked_mul(4)?;
             let s = n.pw.get(k..k.checked_add(4)?)?;
@@ -171,6 +189,14 @@ impl NetSurface {
             (false, true, (0..n.nu).map(|i| (i, lv)).collect()),
         ];
         for (across_u, at_max, row) in sides {
+            let ends_clamped = if across_u {
+                clamped(&n.u, n.p, n.nu, at_max)
+            } else {
+                clamped(&n.v, n.q, n.nv, at_max)
+            };
+            if !ends_clamped {
+                continue;
+            }
             let pts: Option<Vec<[f64; 4]>> = row.iter().map(|&(i, j)| at(i, j)).collect();
             let Some(pts) = pts else {
                 continue;

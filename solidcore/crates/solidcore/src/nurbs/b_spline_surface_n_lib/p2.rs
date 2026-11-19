@@ -2243,9 +2243,48 @@ fn corner_blend_4(
     let tangent =
         make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?;
 
-    // Not upstream (WR-613): a patch that meets its face sides exactly, where it is proved
-    // closer to tangent than the patch that ships otherwise, on every side
-    if let Some((mut face_bounds, mut face_tans)) = face_sided {
+    // Not upstream (WR-613): a patch that meets its face sides exactly, where every side
+    // is proved within the largest angle the patch that ships otherwise is proved to
+    // reach, so the largest angle over the sides is no larger
+    let bar = tangent.unwrap_or(coons);
+    let Some(face_sided) = face_sided else {
+        return Ok(vec![bar]);
+    };
+    let sides = CoonsSides {
+        curves: originals,
+        uv_curves: &uv_crvs,
+        surfaces,
+        face_sides,
+    };
+    // the seam check's tangent angle (`make_coons_patch_tangent_to_sides`' target)
+    let target = (ANG_TOL_DEG * (PI / 180.0)).min(tangency_tol_radians);
+    let patch = face_sided_or_bar(k, tol, face_sided, coons_face_sides, &sides, bar, target)?;
+    Ok(vec![patch])
+}
+
+/// Not the fork's (WR-613): the face-sided corner patch ([`face_sided_patch`]) built from
+/// `face_sided` (the sides and cross tangents before the mean-twist patch consumed them,
+/// with `coons_face_sides` in [`BSplineSurface::create_coons_patch_on_faces`]' bits) where
+/// a candidate is taken, else `bar` (the patch that ships otherwise) bit for bit.
+///
+/// The attempt is an addition to the shipped patch, so it never fails a corner the shipped
+/// patch builds: an error anywhere in it (building the face-sided patch, refining or
+/// grading a candidate, projecting its rows, reading or proving a seam) keeps `bar`, as
+/// no candidate taken would ([`keep_bar_on_error`]).
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses from the attempt.
+fn face_sided_or_bar(
+    k: &crate::kernel::Kernel,
+    tol: f64,
+    (mut face_bounds, mut face_tans): (Vec<BSplineCurve>, Vec<BSplineCurve>),
+    coons_face_sides: u32,
+    sides: &CoonsSides<'_, '_>,
+    bar: BSplineSurface,
+    target: f64,
+) -> Result<BSplineSurface> {
+    let attempt = (|| -> Result<Option<BSplineSurface>> {
         let twisted = BSplineSurface::create_coons_patch_on_faces(
             tol,
             false,
@@ -2253,20 +2292,22 @@ fn corner_blend_4(
             &mut face_tans,
             coons_face_sides,
         )?;
-        let sides = CoonsSides {
-            curves: originals,
-            uv_curves: &uv_crvs,
-            surfaces,
-            face_sides,
-        };
-        let bar = tangent.as_ref().unwrap_or(&coons);
-        // the seam check's tangent angle (`make_coons_patch_tangent_to_sides`' target)
-        let target = (ANG_TOL_DEG * (PI / 180.0)).min(tangency_tol_radians);
-        if let Some(patch) = face_sided_patch(k, &twisted, bar, &sides, target)? {
-            return Ok(vec![patch]);
-        }
+        face_sided_patch(k, &twisted, &bar, sides, target)
+    })();
+    Ok(keep_bar_on_error(attempt)?.unwrap_or(bar))
+}
+
+/// Not the fork's (WR-613): the face-sided attempt's outcome ([`face_sided_or_bar`]), with
+/// every error other than the kernel's unported and cancelled statuses
+/// ([`SolidError::is_unported_or_cancelled`]) read as no candidate taken, so the caller
+/// keeps the patch that ships otherwise. Those two are passed on: work given up never
+/// becomes a result.
+fn keep_bar_on_error(attempt: Result<Option<BSplineSurface>>) -> Result<Option<BSplineSurface>> {
+    match attempt {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+        Ok(taken) => Ok(taken),
     }
-    Ok(vec![tangent.unwrap_or(coons)])
 }
 
 // ---- the fork's Coons patch tangency (tangency-labs/smlib@cae8618) ----------------------
@@ -3475,16 +3516,16 @@ const CERTIFY_PIECES: usize = 2048;
 /// the face sides ([`project_coons_side_rows`]). The first that passes the measured screen
 /// ([`read_within`]: each side's seam reading, [`coons_side_seams`], through
 /// [`seam_normal_angle`], the seam check's own function, stations and metric) and the
-/// proof ([`certified_within`]: on every side with a surface, the proved upper bound of its
-/// largest normal angle over the whole side, not only at the stations,
-/// [`seam_angle_enclosure`], is at most the limit) is taken. At most 1 + 4 x 4
-/// candidates: bounded work.
+/// proof ([`certified_within`]: on every side with a surface, its largest normal angle over
+/// the whole side, not only at the stations, is proved at most the limit,
+/// [`seam_angle_within`]) is taken. At most 1 + 4 x 4 candidates (the twisted patch, then
+/// four refinements by four gradings): bounded work.
 ///
 /// The rule is on the largest angle over all sides, so the error is not moved: a side of
 /// the candidate may read higher than `bar`'s same side, but never above what `bar` is
 /// proved to reach on its worst side.
 ///
-/// [`seam_angle_enclosure`]: crate::query::seam_bound::seam_angle_enclosure
+/// [`seam_angle_within`]: crate::query::seam_bound::seam_angle_within
 /// [`seam_normal_angle`]: crate::query::continuity::seam_normal_angle
 fn face_sided_patch(
     k: &crate::kernel::Kernel,
@@ -4367,12 +4408,12 @@ mod tests {
         assert_eq!(v, [0.0, 0.25, 0.5, 0.75, 1.0]);
     }
 
-    /// WR-613: a candidate is taken over the fallback exactly when no side's seam reading
-    /// is farther from tangent than the fallback's beyond the two readings' rounding (the
-    /// seam check's own test): a rise above the fallback by more than the rounding rejects
-    /// it, one within it does not, a side's reading below the fallback's is taken even
-    /// where it rises along the side (the reading is the side's largest angle), and a side
-    /// either reads nothing on, or a NaN, rejects it.
+    /// WR-613: the limit a candidate is held to is the largest proved lower bound of the
+    /// shipped patch's angle over its sides with a surface, capped at the target
+    /// ([`seam_limit`]; none where nothing is proved, or a NaN); the screen
+    /// ([`read_within`]) passes a candidate only where every side with a surface reads at
+    /// or below that limit, so one side may rise while the largest angle does not, and a
+    /// side that reads nothing, or a NaN, refuses it.
     #[test]
     fn wr_613_face_sided_patch_is_held_to_the_shipped_patchs_largest_angle() {
         use SideSeam::{Free, Read};
@@ -4507,6 +4548,77 @@ mod tests {
                 "budget {budget}"
             );
         }
+    }
+
+    /// The face-sided attempt never fails a corner the shipped patch builds (WR-613): an
+    /// error inside it (here building the face-sided patch from three sides, as
+    /// [`BSplineSurface::create_coons_patch_on_faces`] refuses) returns the shipped patch
+    /// bit for bit, while the kernel's unported and cancelled statuses are passed on and a
+    /// taken candidate is returned.
+    #[test]
+    fn wr_613_an_error_in_the_face_sided_attempt_keeps_the_shipped_patch() {
+        let k = &crate::Kernel::default();
+        let (bar, plane, uvs) = far_triangle(Vec3::new(0.0, 0.0, 0.0));
+        let side = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.3),
+        )
+        .unwrap();
+        let curves = vec![SmCurve::from(side.clone()); 4];
+        let surfaces = [Some(&plane); 4];
+        let sides = CoonsSides {
+            curves: &curves,
+            uv_curves: &uvs,
+            surfaces: &surfaces,
+            face_sides: 1 << LEFT,
+        };
+        // the attempt does fail: three sides are no Coons patch
+        let three = vec![side.clone(); 3];
+        assert!(BSplineSurface::create_coons_patch_on_faces(
+            1e-6,
+            false,
+            &mut three.clone(),
+            &mut Vec::new(),
+            COONS_FACE_LEFT,
+        )
+        .is_err());
+        let kept = face_sided_or_bar(
+            k,
+            1e-6,
+            (three, Vec::new()),
+            COONS_FACE_LEFT,
+            &sides,
+            bar.clone(),
+            1e-3,
+        )
+        .expect("an error in the attempt keeps the shipped patch");
+        assert_eq!(
+            kept.gw_nurb(),
+            bar.gw_nurb(),
+            "the shipped patch, bit for bit"
+        );
+        assert_eq!(kept.is_rational(), bar.is_rational());
+
+        // the mapping itself: any other error keeps the bar; unported and cancelled are
+        // passed on; a taken candidate is returned
+        let other = Err(SolidError::invalid_input("test", "a failed attempt"));
+        assert!(matches!(keep_bar_on_error(other), Ok(None)));
+        let unported = Err(SolidError::unported("sm_Test", "test.unit"));
+        assert!(matches!(
+            keep_bar_on_error(unported),
+            Err(SolidError::Unported { .. })
+        ));
+        let cancelled = Err(SolidError::Cancelled { operation: "test" });
+        assert!(matches!(
+            keep_bar_on_error(cancelled),
+            Err(SolidError::Cancelled { .. })
+        ));
+        let taken = keep_bar_on_error(Ok(Some(bar.clone()))).unwrap();
+        assert_eq!(
+            taken.map(|t| t.gw_nurb().cloned()),
+            Some(bar.gw_nurb().cloned())
+        );
     }
 
     /// Near a collapsed corner far from the origin the patch normal is lost in rounding:

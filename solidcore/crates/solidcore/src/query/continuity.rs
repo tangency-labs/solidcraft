@@ -672,14 +672,15 @@ pub const SEAM_MIN_STATIONS: usize = 257;
 pub const SEAM_DOT_ROUNDING: f64 = 8.0 * (f64::EPSILON / 2.0);
 
 /// The rounding of a [`seam_normal_angle`] reading `theta`: a bound on `|acos(c + d) - acos(c)|`
-/// for `|d| <= δ` ([`SEAM_DOT_ROUNDING`]). It is at most `sqrt(2 δ)` everywhere (worst at `c = 1`).
-/// Where `theta >= 2 sqrt(2 δ)` the exact angle is within `sqrt(2 δ) <= theta / 2` of the
+/// for `|d| <= δ` ([`SEAM_DOT_ROUNDING`]). It is at most `acos(1 - δ)` everywhere (worst at
+/// `c = 1`), and `acos(1 - δ) = sqrt(2 δ) (1 + δ / 12 + 3 δ^2 / 160 + ...) <= sqrt(2 δ) (1 + δ)`,
+/// the floor. Where `theta >= 2` floors the exact angle is within a floor `<= theta / 2` of the
 /// reading, so the derivative `1 / sin` of `acos` between them is at most
 /// `1 / sin(theta / 2) <= pi / theta`, and the rounding at most `pi δ / theta`: `4.1e-12` at
 /// `6.8e-4` radians, against `4.22e-8` at 0. The reading `min(θ, π - θ)` has the same bound.
 #[must_use]
 pub fn seam_angle_rounding(theta: f64) -> f64 {
-    let floor = (2.0 * SEAM_DOT_ROUNDING).sqrt();
+    let floor = (2.0 * SEAM_DOT_ROUNDING).sqrt() * (1.0 + SEAM_DOT_ROUNDING);
     if theta >= 2.0 * floor {
         std::f64::consts::PI * SEAM_DOT_ROUNDING / theta
     } else {

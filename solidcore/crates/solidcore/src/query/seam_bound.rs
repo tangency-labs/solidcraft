@@ -18,6 +18,13 @@
 //! box, not on its edge (a local nearest point). The enclosure is `lower <= Θ <= upper` for
 //! `Θ` the largest, over `t` in `[lo, hi]`, of the acute angle between the normals at the
 //! two sides' nearest points in their boxes (fact 1b narrows the feet to boxes of those).
+//! `Θ` is therefore the angle at the **local** nearest point next to the correspondence,
+//! not at the global nearest point nor at the point the seam check's own projection finds:
+//! where a side has another local nearest point farther along the surface, `Θ` does not
+//! see it. Next to a collapsed side (fact 3) the feet are those in a strip along the whole
+//! side, which can hold a different local nearest point from fact 1's box; a station's
+//! lower bound and a piece's upper bound proved by different facts can then be of
+//! different local nearest points.
 //!
 //! **The proof.** Facts 1 and 2 (with 3 and 4 below), each enclosed in outward-rounded interval arithmetic
 //! ([`crate::blend::fillet_section::interval`]). The curve's and the correspondences' values
@@ -57,7 +64,7 @@
 //! 3. *Near a side collapsed to a point* (a triangular corner patch's apex, where `σ` and
 //!    `N` vanish and fact 1 cannot close): where the net's row along a side is one point
 //!    `A` exactly (`NetSurface::collapsed_sides`), the feet lie in a strip along that side
-//!    as deep as `|C − A| + G` over the speed at which the surface leaves `A`, and the
+//!    as deep as `|C − A| + G + slack` over the speed at which the surface leaves `A`, and the
 //!    normal there is on the line of the fan's `S_st × S_t` (`apex_cones`, which proves
 //!    both). It is tried only where facts 1 and 2 do not prove the cones: far from the
 //!    point it does not close (the fan turns across the strip), so trying it everywhere
@@ -709,8 +716,9 @@ fn partials_hull_over(
 /// |m|`. On the collapsed side itself (`t =
 /// t_e`, where `N` is zero) the normal is taken as its limit, the line of `M` there.
 ///
-/// The feet: a foot is within `gap` of a curve point `C` (fact 1), so within `r = |C - A| +
-/// gap` of `A`. The side is cut into parts `P` (as for the cones). With `e` the midpoint of
+/// The feet: a foot is no farther from a curve point `C` than the surface at the clamped
+/// correspondence, within `gap` plus the slack of a correspondence past the net's end (as
+/// in fact 1), so within `r = |C - A| + gap + slack` of `A`. The side is cut into parts `P` (as for the cones). With `e` the midpoint of
 /// `[S_t]` over `P x (t_e to t_e ± η)` (a strip of the net along the side), a foot at `s` in
 /// `P` has `|e · (S - A)| = |∫ e · S_t| >= |t - t_e| κ` with `κ > 0` the least of `e · S_t`
 /// over `P`'s strip (the integral runs between `t_e` and `t` at that `s`). So `|S - A| >=
@@ -729,6 +737,12 @@ fn apex_cones(
     if !(gap.is_finite() && gap >= 0.0) {
         return Ok(None);
     }
+    // the slack of a correspondence past the net's end, as fact 1 adds it: `gap` bounds
+    // the curve's distance from the continued net at `W`, and the surface at the clamped
+    // point is within the slack of that (`NetSurface::partials`)
+    let Some((_, slack)) = partials_over(net, wu, wv, 1)? else {
+        return Ok(None);
+    };
     let (du, dv) = net.domain();
     let (along, across, w_across) = if across_u { (dv, du, wu) } else { (du, dv, wv) };
     let edge = if at_max { across.hi } else { across.lo };
@@ -755,7 +769,10 @@ fn apex_cones(
     let Some(ca) = norm_hi(v_sub(c, a)) else {
         return Ok(None);
     };
-    let r = round_up(ca + gap);
+    let r = round_up(round_up(ca + gap) + slack);
+    if !r.is_finite() {
+        return Ok(None);
+    }
     let width = round_up(across.hi - across.lo);
     // the strip from the side, `eta` deep
     let strip = |eta: f64| {
