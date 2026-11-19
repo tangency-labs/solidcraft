@@ -2994,10 +2994,10 @@ fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
     choose(&mut h, "To Object");
     assert!(to_object(&h));
     let face = crate::dialogs::face_sel_on(&h.app.session, Some("Block"), Vec3::new(30.0, 5.0, 0.0)).expect("the box's face");
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err(), "To Object needs a pick");
     {
         let d = h.app.dialog.as_mut().unwrap();
         assert_eq!(d.active_input().unwrap().label, "To Object", "the To Object input takes the next pick");
-        assert!(crate::dialogs::apply_commands(&h.app, d).is_err(), "To Object needs a pick");
         let active = d.active;
         d.inputs[active].items = vec![face];
     }
