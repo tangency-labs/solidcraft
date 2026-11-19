@@ -1223,6 +1223,106 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
     );
 }
 
+/// A loop once round a spline closed in u, given by its producer a period on and a rounding
+/// short of it: its lowest point 1.56e-9 of a period below the period's start, as SMLib's trims
+/// gave face #714 of the file in #19315. The loop comes back by the whole period, into the
+/// surface's range but for that rounding; left a period past it, the face's domain (the loops'
+/// box within the range) would hold none of it.
+#[test]
+fn a_loop_round_a_closed_spline_given_a_period_on_and_a_rounding_short_lands_in_its_range() {
+    let full = [0., TAU];
+    let on = |c: &Curve, iv: [f64; 2]| form::curve(c, iv).unwrap();
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [full, [0., 4.]],
+    )
+    .unwrap();
+    let low = on(
+        &Curve::Circle {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        full,
+    );
+    let high = on(
+        &Curve::Circle {
+            frame: about_z([0., 0., 4.], false),
+            radius: 3.,
+        },
+        full,
+    );
+    let line = Curve::Line {
+        start: [3., 0., 0.],
+        end: [3., 0., 4.],
+    };
+    fn use_of(edge: u32, curve: &Curve, interval: [f64; 2], forward: bool) -> EdgeUse<'_> {
+        EdgeUse {
+            edge,
+            curve,
+            interval,
+            forward,
+            tolerance: 0.0,
+            given: None,
+        }
+    }
+    let l = vec![
+        use_of(0, &low.0, low.1, true),
+        use_of(1, &line, [0., 1.], true),
+        use_of(2, &high.0, high.1, false),
+        use_of(1, &line, [0., 1.], false),
+    ];
+    let base = pcurves(&cylinder, std::slice::from_ref(&l), 1e-7)
+        .unwrap()
+        .remove(0);
+    let [u0, u1] = {
+        let r = SurfaceEval::new(&cylinder).unwrap().domain().range[0].unwrap();
+        [r.0, r.1]
+    };
+    let period = SurfaceEval::new(&cylinder).unwrap().domain().period[0].unwrap();
+    assert_eq!((u0, u1, period), (0., 4., 4.));
+    // The loop as made lies in the range, from the seam at its start.
+    let lowest = base
+        .iter()
+        .flat_map(points)
+        .map(|p| p[0])
+        .fold(f64::INFINITY, f64::min);
+    assert_eq!(lowest, u0);
+    let short = 1.56e-9 * period;
+    let given: Vec<Curve2> = base
+        .iter()
+        .map(|c| {
+            let mut c = c.clone();
+            move_by(&mut c, 0, period - short);
+            c
+        })
+        .collect();
+    let l_given: Vec<EdgeUse<'_>> = l
+        .iter()
+        .zip(&given)
+        .map(|(u, g)| EdgeUse {
+            given: Some(g),
+            ..*u
+        })
+        .collect();
+    let out = &pcurves(&cylinder, &[l_given], 1e-7).unwrap()[0];
+    for (k, (got, made)) in out.iter().zip(&base).enumerate() {
+        // Moved by whole periods only: the made pcurve less the rounding.
+        let mut want = made.clone();
+        move_by(&mut want, 0, -short);
+        let (p, q) = (points(got), points(&want));
+        assert_eq!(p.len(), q.len(), "use {k}");
+        for (p, q) in p.iter().zip(&q) {
+            assert!(
+                (p[0] - q[0]).abs() <= 1e-12 * period && (p[1] - q[1]).abs() <= 1e-12,
+                "use {k}: {p:?}, not {q:?} (u range [{u0}, {u1}])"
+            );
+        }
+    }
+}
+
 /// An intersection record evaluates to the point of both surfaces in the leader's normal
 /// plane; it has no exact pcurve on either.
 #[test]
