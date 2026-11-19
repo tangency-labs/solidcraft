@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.45.0-rc.4"
+version = "0.45.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -34,6 +34,8 @@ solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
 solidcraft-ui-kit = { path = "crates/ui-kit" }
+# The app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values
+solidcraft-panel-layout = { path = "crates/panel-layout" }
 solidcraft-look = { path = "crates/look" }
 solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
