@@ -2264,7 +2264,7 @@ fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGe
     let q = solidcore_ops::query::Query::new(rec);
     let mut edges = Vec::new();
     // The stretches of the edges on the outline, each projected as an edge link projects it.
-    for stretch in q.outline_stretches(n, size)? {
+    for stretch in q.outline_stretches(n, size).ok()? {
         let e = stretch.edge;
         let edge = rec.edges.get(e)?;
         let geom = if stretch.whole {
