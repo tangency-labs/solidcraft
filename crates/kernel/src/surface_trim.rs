@@ -223,7 +223,7 @@ pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Ve
     let kept: Vec<bool> = (0..n).map(|f| wanted.contains(&root(&parent, f))).collect();
     // A kept piece lies on the start side of each cut edge bounding it: into the face, across
     // the edge, it runs back against `along`, never on with it.
-    for (f, face) in rec.faces.iter().enumerate().filter(|(f, _)| kept.get(*f).copied().unwrap_or(false)) {
+    for (_, face) in rec.faces.iter().enumerate().filter(|(f, _)| kept.get(*f).copied().unwrap_or(false)) {
         let surface = SurfaceEval::new(face.parameters()).map_err(|e| lost(&format!("a face's surface: {e}")))?;
         let uses = face.loops.iter().flat_map(|l| match l {
             solidcore_record::brep::Loop::Edges { edges } => edges.as_slice(),
