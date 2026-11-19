@@ -753,12 +753,22 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
     return shade(i);
 }
 
-/// A whole hovered body, lit over the model from its own plan triangles in a lifted colour.
-@fragment
-fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
+fn hover_color(i: TOut) -> vec4<f32> {
     if (clipped(i.wp)) { discard; }
     // An opaque body keeps its finish under the hover; a faded or see-through one stays plain.
     return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99);
+}
+
+/// A hovered body or face, lit over the model in a lifted colour.
+@fragment
+fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
+    return hover_color(i);
+}
+
+@fragment
+fn fs_hl_hover_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    return hover_color(t);
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.
