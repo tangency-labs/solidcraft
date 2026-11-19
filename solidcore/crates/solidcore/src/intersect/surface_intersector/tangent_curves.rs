@@ -164,7 +164,8 @@ fn covers_crossing(
 
 /// Whether every direction in `dirs` lies within 30 degrees (the width of a probe's
 /// direction cluster) of one line through the point: one curve passing through it, not
-/// branches meeting there.
+/// branches meeting there. Two branches crossing at less than 30 degrees fall in it too:
+/// the probe's clusters cannot tell them from one curve.
 fn along_one_line(dirs: &[Vec3]) -> bool {
     let cos30 = deg2rad(30.0).cos();
     dirs.first()
@@ -354,11 +355,11 @@ pub(crate) fn find_tangent_curves(
         }
         if num_dirs == 0 {
             // no tangential curve here: a touching point, or a point where crossing
-            // branches meet (a saddle-like contact). One curve passing through (two
-            // opposite directions) is not a node (#18930): where two surfaces touch only to
-            // within their tolerance, along a fillet's rail, the contact holds along the
-            // rail with normals not quite parallel, so no tangential curve is found there
-            // but the crossing directions along it are.
+            // branches meet (a saddle-like contact). A contact whose crossing directions
+            // all lie along one line is a point of one curve passing through, not a node
+            // (#18930): along a round's rail, on the edge of the round's domain where it
+            // touches its support face and the marcher already returns a tangent curve,
+            // such contacts were reported as touching points, and the round failed.
             tr.tangent = false;
             let mut cross_dirs = Vec::new();
             let num_cross = tr.probe(k, &p, &mut cross_dirs)?;

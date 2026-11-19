@@ -967,13 +967,17 @@ impl<'a> TangentTracer<'a> {
     /// Not the fork's test (#18930): the surfaces coincide when three neighbouring
     /// directions each find the contact along themselves, within half the angle between
     /// two directions, measured in the tangent plane. A tangential curve gives a contact
-    /// along a direction only where it runs within that half angle, which is one
-    /// direction on each side of `p` at most; a coincident region gives one in every
-    /// direction that stays in both domains, so three neighbours at a domain corner (a
-    /// quarter of the circle) too. The fork asked for a contact exactly at the probe
+    /// along a direction only where it runs within that half angle, so one direction on
+    /// each side of `p` per curve through it; three neighbours need three curves through
+    /// `p` within 30 degrees of each other. A coincident region gives one in every
+    /// direction that stays in both domains: three neighbours wherever the region's
+    /// corner at `p` is at least 45 degrees wide in the tangent plane (a right-angled
+    /// domain corner holds seven). The fork asked for a contact exactly at the probe
     /// point (`num_exact >= 5`), which lies in the tangent plane and misses a surface
     /// curved by more than `0.02 / r`, or for more than half the directions (`hits >
-    /// 12`), which a contact on a domain edge or corner cannot have.
+    /// 12`), which a contact on a domain edge or corner cannot have. Both tests judge
+    /// from 24 sampled directions, not from a certificate; the crossing mode
+    /// (`tangent` false) uses the same test.
     ///
     /// # Errors
     ///
