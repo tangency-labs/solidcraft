@@ -1547,6 +1547,35 @@ mod tests {
         let huge_down = ev(v(1.0, 0.0, 0.0), v(0.0, -1e200, 0.0));
         assert_eq!(c(&huge_up, &huge_down), ContinuityType::C1);
         assert_eq!(c(&up, &huge_up), ContinuityType::C1);
+        assert_eq!(c(&huge_up, &up), ContinuityType::C1);
+        // the same overflowing curvature on both sides is the same curve: C2
+        assert_eq!(c(&huge_up, &huge_up), ContinuityType::C1C2);
+
+        // |P'|^4 overflows in the Frenet curvature (|P'| 2e77) while the true curvatures
+        // are 0.0625 with opposite normals: not G2 (both read as 0 when the denominator
+        // overflows)
+        let fast_up = ev(v(2e77, 0.0, 0.0), v(0.0, 2.5e153, 0.0));
+        let fast_down = ev(v(2e77, 0.0, 0.0), v(0.0, -2.5e153, 0.0));
+        assert_eq!(c(&fast_up, &fast_down), ContinuityType::C1);
+
+        // perpendicular tangents whose squared lengths overflow (|P'| 1e160): not G1
+        // (both unit tangents read as zero when the length overflows)
+        let along_x = ev(v(1e160, 0.0, 0.0), Vec3::ZERO);
+        let along_y = ev(v(0.0, 1e160, 0.0), Vec3::ZERO);
+        assert_eq!(c(&along_x, &along_y), ContinuityType::C0);
+
+        // G3: second derivatives (±1e200, 1, 0) along equal unit tangents are G2 (the
+        // same curvature 1) but not G3 by the Taylor test, whose gap is about 6e200; the
+        // overflowing gap must not pass as G3
+        let ev3 = |second| CurveEval {
+            position: v(1.0, 1.0, 0.0),
+            first: v(1.0, 0.0, 0.0),
+            second,
+            third: Some(Vec3::ZERO),
+        };
+        let g3_ahead = ev3(v(1e200, 1.0, 0.0));
+        let g3_behind = ev3(v(-1e200, 1.0, 0.0));
+        assert_eq!(c(&g3_ahead, &g3_behind), ContinuityType::C1G2);
     }
 
     /// WR-10: an oblique collinear set is Linear with the line tangent (pinned v1.0.1:
