@@ -1829,6 +1829,9 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
     if through_all2 && to2.is_some() {
         return Err(bad(cmd, "give `through_all2` or `to2` for the second side, not both"));
     }
+    if (through_all2 || to2.is_some()) && direction == Direction::Symmetric {
+        return Err(bad(cmd, "`through_all2` and `to2` are for Two Sides: give direction positive or negative, not symmetric"));
+    }
     let to_offset2 = expr(p, "to_offset2");
     if let Some(d) = &to_offset2 {
         check_expr(s, d, Kind::Length, cmd, "to_offset2")?;
