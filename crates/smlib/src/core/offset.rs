@@ -49,19 +49,30 @@ type Out<T> = std::result::Result<T, Error>;
 /// `SM_ERR_INVALID_INPUT`.
 const INVALID_INPUT: i32 = 1007;
 
-/// `status` (smlib_shim.h): an offset's refusal as solidcore-ops routes it
-/// ([`solidcore_ops::offset::refusal`], the routing of ops' own offsets): walls that touch
-/// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`] with the largest
-/// wall it names, solidcore#2367), a vertex moved past an edge's other end
-/// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); anything else as the
-/// blends pass it on, which carries ops' other offset refusals as they are.
+/// The offset's typed refusal and complete diagnostic come through solidcore-ops.
+/// Other failures pass through the blend mapper, retaining that diagnostic wherever
+/// it would otherwise give only a numeric status.
 fn status(e: SolidError) -> Error {
+    let diagnostic = solidcore_ops::offset::diagnostic(&e);
+    match diagnostic.refusal {
+        Some(error) => refused(error, diagnostic.detail),
+        None => match blend_status(e) {
+            Error::Status(_) => Error::Solidcore(diagnostic.detail),
+            other => other,
+        },
+    }
+}
+
+/// Application errors for ops' offset refusals: specialised wall answers keep
+/// their fields; other typed refusals keep the kernel diagnostic alongside them.
+pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error {
     use solidcore_ops::Error as Ops;
-    match solidcore_ops::offset::refusal(&e) {
-        Some(Ops::WallsTouch) => Error::WallsTouch,
-        Some(Ops::WallFolds { largest }) => Error::WallFolds { largest },
-        Some(Ops::Unsupported(_)) => Error::Unsupported,
-        _ => blend_status(e),
+    match error {
+        Ops::WallsTouch => Error::WallsTouch,
+        Ops::WallFolds { largest } => Error::WallFolds { largest },
+        Ops::Unsupported(_) => Error::Unsupported,
+        error @ Ops::OffsetRefused { why: solidcore_ops::OffsetRefusal::Phrase { .. }, .. } => Error::Refused(error),
+        refusal => Error::RefusedWithDiagnostic { refusal, diagnostic },
     }
 }
 

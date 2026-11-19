@@ -319,14 +319,17 @@ fn a_round_ending_at_a_crease_is_not_refused_over_rounds_it_never_reaches() {
         all.1
     );
     // The issue's figure, 4183.769446, came from the integrator before #16735, which leaked
-    // through the tolerant edges' gaps; the volume now closes them and reads 3.7e-6 above it,
-    // past the original 2e-6. Pinned instead at the new value (MEASURED: no closed form for
-    // B and C's corner patch), to 1e-8; the issue's figure is the maintainer's decision. The
-    // move against the body's old leak bound (sum g L max|z - o_z| over its edge uses, the
-    // gaps g sampled at the closure's grid, `volume_leak::leak`) is printed as a diagnostic
-    // only; the volume's independence of the origin is asserted.
+    // through the tolerant edges' gaps, and from B and C's corner patch with the retired
+    // `corner_patch_face_side_twist` on (4183.769449703 once #16735 closed the gaps). Pinned
+    // at the default kernel's body (MEASURED: no closed form for B and C's corner patch), to
+    // 1e-8: since #18640 retired that flag, the corner keeps the default kernel's patch, and
+    // main with the flag off reads this value to the last digit. The flag-on patch read
+    // farther from tangent on two of its sides (#18640). The move against the body's old
+    // leak bound (sum g L max|z - o_z| over its edge uses, the gaps g sampled at the
+    // closure's grid, `volume_leak::leak`) is printed as a diagnostic only; the volume's
+    // independence of the origin is asserted.
     assert!(
-        (all.1 - 4_183.769_449_703_122_5).abs() < 1e-8,
+        (all.1 - 4_183.775_516_040_999).abs() < 1e-8,
         "A B C: {}",
         all.1
     );

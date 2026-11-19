@@ -259,7 +259,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.join_touching_loops = true;
-    k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
