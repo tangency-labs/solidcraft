@@ -15,7 +15,7 @@ struct U {
     // blocked; curvature flat, middle, tight
     ana_c: array<vec4<f32>, 8>,
     ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
-    depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
+    depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`); w: how far an edge layer has faded in (0 to 1)
     // Where the drawn geometry is moved in the world: identity, or a dragged component's move
     // from where its scene was built (`MovingLayer`)
     model: mat4x4<f32>,
@@ -1127,6 +1127,20 @@ fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u
 fn fs_line(i: LOut) -> @location(0) vec4<f32> {
     if (clipped(i.wp)) { discard; }
     return out_color(i.c);
+}
+
+/// An edge layer's lines (`EdgeLayer`) as it fades in over the model's own.
+@fragment
+fn fs_line_in(i: LOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return out_color(vec4<f32>(i.c.rgb, i.c.a * clamp(u.depth.w, 0.0, 1.0)));
+}
+
+/// The model's lines an edge layer replaces, as they fade out under it.
+@fragment
+fn fs_line_out(i: LOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return out_color(vec4<f32>(i.c.rgb, i.c.a * (1.0 - clamp(u.depth.w, 0.0, 1.0))));
 }
 
 struct IOut {
