@@ -31,6 +31,7 @@ pub struct State {
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
     dimension: Option<dimension::Draft>,
+    dimension_hover: Option<dimension::Hover>,
     dimension_edit: Option<panels::DimensionEdit>,
     /// The object whose options the panel shows because it was selected (it alone), and the one
     /// thing selected when that was last looked at: see [`follow_selection`].
@@ -80,6 +81,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.note = None;
         app.drawing_workspace.view_edit = None;
         app.drawing_workspace.dimension = None;
+        app.drawing_workspace.dimension_hover = None;
         app.drawing_workspace.dimension_edit = None;
         app.drawing_workspace.shown_for = None;
         app.drawing_workspace.selection_seen = None;
@@ -181,6 +183,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.note = None;
     app.drawing_workspace.view_edit = None;
     app.drawing_workspace.dimension = None;
+    app.drawing_workspace.dimension_hover = None;
     app.drawing_workspace.dimension_edit = None;
     app.drawing_workspace.shown_for = None;
     app.drawing_workspace.add_sheet = None;
@@ -322,7 +325,11 @@ pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> 
     } else {
         return false;
     };
-    close_panel(app);
+    // The Dimension tool stays in hand while one of its sheet's dimensions is edited, as in a
+    // sketch; any other panel gives way to the box.
+    if !placing_dimension(app) {
+        close_panel(app);
+    }
     crate::dim_view::edit_sheet_text(target, solidcraft_ui_text::tr(title), text, at);
     true
 }
@@ -1270,7 +1277,9 @@ mod tests {
         let hover = &crate::drawing_sheet_page::inspect(&h.app)["hover"];
         assert_eq!(hover["object"], created["view"]);
         assert_eq!(hover["on_edge"], false);
-        assert_eq!(hover["outlined"], true);
+        // The hovered view is lit in the accent colour, as a sketch shows what the pointer is over
+        // (it was outlined with a box before).
+        assert_eq!(hover["lit"], true);
         h.step(&json!({"click":[x,y]})).unwrap();
         h.frames(3);
         // Selected, with its options on the right and nothing floating over the sheet: what the

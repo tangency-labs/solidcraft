@@ -26,7 +26,7 @@ pub enum Kind {
     Step,
     /// Design files (`.sc`, older `.solidcraft`, JSON).
     Design,
-    /// Point cloud files (`.ply`, `.xyz`, `.pts`).
+    /// Point cloud files (`.ply`, `.pcd`, `.xyz`, `.pts`, `.asc`).
     PointCloud,
 }
 

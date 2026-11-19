@@ -3426,6 +3426,133 @@ fn a_spline_surface_whose_ends_meet_within_the_tolerance_is_closed() {
     assert!(closed_within(&BSurface::RationalSpline { u_knots, v_knots, homogeneous }, tol).is_none(), "weights differ at the ends");
 }
 
+/// A fan narrowing to a point at v = 1, degree 2 along u and 1 along v, whose last control
+/// column is the apex `(0, 0, 10)` with the k-th of its three points moved by `off[k]` along x.
+fn fan(off: [f64; 3]) -> BSurface {
+    let base = [[-5.0, 0.0, 0.0], [0.0, -5.0, 0.0], [5.0, 0.0, 0.0]];
+    BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: base.iter().zip(off).map(|(&p, o)| vec![p, [o, 0.0, 10.0]]).collect(),
+    }
+}
+
+/// A spline side whose control points all lie within the tolerance of their centroid, but are not
+/// one point, is made an exact pole: its points become their centroid, and the surface moves by
+/// at most the farthest any of them moved. A side already one point (or one to rounding), one
+/// spread wider than the tolerance, one on knots not clamped at that end, and a surface no wider than ten tolerances
+/// anywhere are left as they are. A rational side keeps its weights.
+#[test]
+fn a_spline_side_that_closes_to_a_point_within_the_tolerance_is_made_an_exact_pole() {
+    let tol = 1e-3;
+    let off = [2e-4, -1e-4, 5e-5];
+    let near = fan(off);
+    let (pole, sides) = poles_within(&near, tol, &[]).expect("a side within the tolerance of a point");
+    assert_eq!(sides, 1);
+    let (BSurface::Spline { points, .. }, BSurface::Spline { points: was, .. }) = (&pole, &near) else { panic!("splines") };
+    let apex = [(off[0] + off[1] + off[2]) / 3.0, 0.0, 10.0];
+    assert!(points.iter().all(|row| row[1] == apex), "{points:?}");
+    assert!(points.iter().zip(was).all(|(row, was)| row[0] == was[0]), "the other side stays");
+    // The farthest control point moved by |2e-4 - 5e-5| = 1.5e-4: the surface by no more.
+    let farthest = off.iter().map(|o| (o - apex[0]).abs()).fold(0.0, f64::max);
+    let (before, after) = (SurfaceEval::new(&near).unwrap(), SurfaceEval::new(&pole).unwrap());
+    let mut moved = 0.0_f64;
+    for i in 0..=20 {
+        for j in 0..=20 {
+            let uv = [f64::from(i) / 20.0, f64::from(j) / 20.0];
+            moved = moved.max(before.point(uv).unwrap().dist(after.point(uv).unwrap()));
+        }
+    }
+    assert!(moved <= farthest * (1.0 + 1e-12), "moved {moved}, farthest control point {farthest}");
+    // One point to the rounding of the surface's evaluation (its control points are one exactly).
+    let top: Vec<_> = (0..=20).map(|i| after.point([f64::from(i) / 20.0, 1.0]).unwrap()).collect();
+    assert!(top.iter().all(|p| p.dist(Vec3::new(apex[0], apex[1], apex[2])) < 1e-12), "the side is one point: {top:?}");
+    // With the face's vertex at the apex, the pole is the vertex, not the centroid: the side's
+    // farthest point (2e-4 off it) is within the tolerance. A vertex farther from the side than
+    // the tolerance does not move it there.
+    let vertex = Vec3::new(0.0, 0.0, 10.0);
+    let (at_vertex, _) = poles_within(&near, tol, &[Vec3::new(5.0, 0.0, 0.0), vertex]).expect("a pole at the vertex");
+    let BSurface::Spline { points, .. } = &at_vertex else { panic!("a spline") };
+    assert!(points.iter().all(|row| row[1] == [0.0, 0.0, 10.0]), "{points:?}");
+    let (off_vertex, _) = poles_within(&near, tol, &[Vec3::new(0.0, 0.0, 10.01)]).expect("a pole at the centroid");
+    let BSurface::Spline { points, .. } = &off_vertex else { panic!("a spline") };
+    assert!(points.iter().all(|row| row[1] == apex), "{points:?}");
+
+    assert!(poles_within(&fan([0.0; 3]), tol, &[]).is_none(), "already a pole");
+    // One ulp apart (as a rational sphere's pole row reads back from a file): a pole already.
+    let BSurface::Spline { u_knots, v_knots, mut points } = fan([0.0; 3]) else { panic!("a spline") };
+    points[1][1][2] = f64::from_bits(10.0_f64.to_bits() + 1);
+    assert!(poles_within(&BSurface::Spline { u_knots, v_knots, points }, tol, &[]).is_none(), "one to rounding");
+    assert!(poles_within(&fan([2e-3, 0.0, 0.0]), tol, &[]).is_none(), "farther from a point than the tolerance");
+    let BSurface::Spline { u_knots, points, .. } = fan(off) else { panic!("a spline") };
+    let unclamped = BSurface::Spline { u_knots, v_knots: vec![0.0, 0.0, 1.0, 2.0], points };
+    assert!(poles_within(&unclamped, tol, &[]).is_none(), "the last column is not the surface's side");
+    let sliver = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![vec![[0.0, 0.0, 0.0], [0.0, 0.0, 10.0]], vec![[5e-3, 0.0, 0.0], [5e-4, 0.0, 10.0]]],
+    };
+    assert!(poles_within(&sliver, tol, &[]).is_none(), "a sliver is thin, not collapsed");
+
+    let BSurface::Spline { u_knots, v_knots, points } = fan(off) else { panic!("a spline") };
+    let weights = [1.0, 0.5, 2.0];
+    let homogeneous = points.iter().zip(weights).map(|(row, w)| row.iter().map(|p| [p[0] * w, p[1] * w, p[2] * w, w]).collect()).collect();
+    let (rational, _) = poles_within(&BSurface::RationalSpline { u_knots, v_knots, homogeneous }, tol, &[]).expect("a rational side");
+    let BSurface::RationalSpline { homogeneous, .. } = rational else { panic!("rational") };
+    for (row, w) in homogeneous.iter().zip(weights) {
+        assert_eq!(row[1][3], w, "the weight stays");
+        assert!((row[1][0] / w - apex[0]).abs() < 1e-18 && row[1][2] / w == 10.0, "{row:?}");
+    }
+}
+
+/// A tetrahedron A B C D whose face A B D (on y = 0) is a degree 1 spline whose side at v = 1
+/// should be the vertex D, but whose control point over A lies 2e-4 mm off it, in a file of
+/// uncertainty 1e-3 mm. That side is made an exact pole when the face is read (noted), so the
+/// kernel's check takes the solid: no boundary is only close to singular (its surface test 5,
+/// "Bad Surf Pole Approximation", which every operation on the body ran into).
+#[test]
+fn a_spline_face_whose_side_closes_to_its_vertex_within_the_tolerance_reads_with_an_exact_pole() {
+    let (a, bp, c, d) = ([0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]);
+    let mut w = W::default();
+    let (va, vb, vc, vd) = (w.vertex(a), w.vertex(bp), w.vertex(c), w.vertex(d));
+    let edge = |w: &mut W, (vp, p): (u64, V), (vq, q): (u64, V)| w.line_edge((vp, p), (vq, q), true, len3(sub3(q, p)));
+    let ab = edge(&mut w, (va, a), (vb, bp));
+    let ac = edge(&mut w, (va, a), (vc, c));
+    let ad = edge(&mut w, (va, a), (vd, d));
+    let bc = edge(&mut w, (vb, bp), (vc, c));
+    let bd = edge(&mut w, (vb, bp), (vd, d));
+    let cd = edge(&mut w, (vc, c), (vd, d));
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, o)| w.oe(e, o)).collect();
+        let bound = w.bound(&oes, true, true);
+        w.face(&[bound], surface, true)
+    };
+    let z0 = w.plane(a, [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let x0 = w.plane(a, [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let r3 = 1.0 / 3.0_f64.sqrt();
+    let slope = w.plane(bp, [r3, r3, r3], [-std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2, 0.0]);
+    let (p00, p01, p10, p11) = (w.pt(a), w.pt([2e-4, 0.0, 10.0]), w.pt(bp), w.pt(d));
+    let spline = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#{p00},#{p01}),(#{p10},#{p11})),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)"
+    ));
+    let faces = [
+        face(&mut w, &[(ac, true), (bc, false), (ab, false)], z0),
+        face(&mut w, &[(ad, true), (cd, false), (ac, false)], x0),
+        face(&mut w, &[(bc, true), (cd, true), (bd, false)], slope),
+        face(&mut w, &[(ab, true), (bd, true), (ad, false)], spline),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    let s = one_solid(&w.file_with_uncertainty(&[solid], 1e-3));
+    assert!(s.notes.iter().any(|n| n.contains("1 sides of spline surfaces that close to a point")), "{:?}", s.notes);
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    let check = body.check(solidcore_ops::CheckLevel::All).unwrap();
+    assert!(!check.text.contains("Pole Approximation"), "{check}");
+    assert!(check.is_valid(), "{check}");
+    let volume = body.mass_properties(1e-6).unwrap().volume;
+    assert!((volume - 1000.0 / 6.0).abs() < 1e-3, "{volume}");
+}
+
 /// The range a closed profile is built over for a face whose loops are walked: a loop round the
 /// whole profile (a band round an extruded ellipse, its samples an eighth of a turn apart) takes
 /// the whole turn from its first point; one along part of it the part it sweeps, however coarse
@@ -3457,6 +3584,127 @@ fn a_spline_surface_on_unclamped_knots_is_not_closed() {
         [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [1e-5, 0.0]].iter().map(|&[x, y]| vec![[x, y, 0.0], [x, y, 5.0]]).collect();
     let unclamped = BSurface::Spline { u_knots: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], points };
     assert!(closed_within(&unclamped, 1e-3).is_none());
+}
+
+/// A cubic along x whose third control point steps back `back` mm against the polygon's way
+/// (and a little off it, `off` along y), its ends at x = 0 and 10.
+fn wiggle(back: f64, off: f64) -> BCurve {
+    BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0 - back, off, 0.0], [7.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+    }
+}
+
+/// A control polygon whose step turns back on the one before it by no more than the tolerance
+/// has that step's inner point moved onto its neighbour: the curve moves by at most the step, its
+/// ends stay, and the polygon no longer turns back. A step back longer than the tolerance, a
+/// polygon that does not turn back, and a step that turns less than the check's 170 degrees are
+/// left as they are. A rational point keeps its weight.
+#[test]
+fn a_control_polygon_that_turns_back_within_the_tolerance_is_unfolded() {
+    let tol = 1e-3;
+    let near = wiggle(5e-4, 0.0);
+    let (unfolded, moved) = unfolded_curve(&near, tol).expect("a step back within the tolerance");
+    assert_eq!(moved, 1);
+    let BCurve::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(points[2], [4.0, 0.0, 0.0], "onto its neighbour");
+    assert_eq!((points[0], points[4]), ([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]), "the ends stay");
+    let (before, after) = (CurveEval::new(&near).unwrap(), CurveEval::new(&unfolded).unwrap());
+    let moved_by = (0..=200).map(|k| f64::from(k) / 200.0).map(|t| before.point(t).unwrap().dist(after.point(t).unwrap())).fold(0.0, f64::max);
+    assert!(moved_by <= 5e-4 * (1.0 + 1e-12), "moved {moved_by}");
+    assert!(unfolded_curve(&unfolded, tol).is_none(), "nothing left to unfold");
+
+    assert!(unfolded_curve(&wiggle(2e-3, 0.0), tol).is_none(), "farther back than the tolerance");
+    assert!(unfolded_curve(&wiggle(-5e-4, 0.0), tol).is_none(), "no step back");
+    // 5e-4 back and 2e-4 aside turns about 158 degrees: under the check's 170.
+    assert!(unfolded_curve(&wiggle(5e-4, 2e-4), tol).is_none(), "turns less than 170 degrees");
+
+    let BCurve::Spline { knots, points } = wiggle(5e-4, 0.0) else { panic!("a spline") };
+    let w = [1.0, 0.5, 2.0, 1.0, 1.0];
+    let homogeneous = points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, w]).collect();
+    let (rational, _) = unfolded_curve(&BCurve::RationalSpline { knots, homogeneous }, tol).expect("a rational step back");
+    let BCurve::RationalSpline { homogeneous, .. } = rational else { panic!("rational") };
+    assert_eq!(homogeneous[2], [8.0, 0.0, 0.0, 2.0], "onto its neighbour, keeping its weight");
+}
+
+/// A spline surface's control rows and columns are unfolded as a curve's polygon is: a row that
+/// steps back within the tolerance has that point moved onto its neighbour, the surface moving
+/// by at most the step.
+#[test]
+fn a_control_net_that_turns_back_within_the_tolerance_is_unfolded() {
+    let tol = 1e-3;
+    let row = |y: f64, back: f64| vec![[0.0, y, 0.0], [4.0, y, 0.0], [4.0 - back, y, 0.0], [7.0, y, 0.0], [10.0, y, 0.0]];
+    let net = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+        points: vec![row(0.0, 0.0), row(5.0, 5e-4)],
+    };
+    let (unfolded, moved) = unfolded_surface(&net, tol).expect("a row that steps back");
+    assert_eq!(moved, 1);
+    let BSurface::Spline { points, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(points[1][2], [4.0, 5.0, 0.0]);
+    assert_eq!(points[0], row(0.0, 0.0), "the other row stays");
+    let (before, after) = (SurfaceEval::new(&net).unwrap(), SurfaceEval::new(&unfolded).unwrap());
+    let mut moved_by = 0.0_f64;
+    for i in 0..=10 {
+        for j in 0..=100 {
+            let uv = [f64::from(i) / 10.0, f64::from(j) / 100.0];
+            moved_by = moved_by.max(before.point(uv).unwrap().dist(after.point(uv).unwrap()));
+        }
+    }
+    assert!(moved_by <= 5e-4 * (1.0 + 1e-12), "moved {moved_by}");
+    assert!(unfolded_surface(&unfolded, tol).is_none());
+}
+
+/// A polygon whose run back reaches its last point keeps that end: the run's points from the
+/// end of the last step forward are moved onto it, each within the tolerance of where it was,
+/// and nothing that turns back is left. Moved one point at a time, the run left a step back of
+/// 0.8 µm behind (review of the first version).
+#[test]
+fn a_run_back_to_a_polygons_last_point_is_moved_onto_it() {
+    let tol = 1e-3;
+    let points = vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9996, 0.0, 0.0], [3.9992, 0.0, 0.0]];
+    let curve = BCurve::Spline { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], points: points.clone() };
+    let (unfolded, moved) = unfolded_curve(&curve, tol).expect("a run back to the end");
+    let BCurve::Spline { points: now, .. } = &unfolded else { panic!("a spline") };
+    assert_eq!(now, &vec![[0.0, 0.0, 0.0], [3.9992, 0.0, 0.0], [3.9992, 0.0, 0.0], [3.9992, 0.0, 0.0]]);
+    assert_eq!(moved, 2);
+    assert!(now.iter().zip(&points).all(|(a, b)| (a[0] - b[0]).abs() <= tol), "{now:?}");
+    assert!(unfolded_curve(&unfolded, tol).is_none(), "nothing left that turns back");
+    // A run back farther than the tolerance from where its points were is left as it is.
+    let far = BCurve::Spline {
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9994, 0.0, 0.0], [3.9988, 0.0, 0.0], [3.9985, 0.0, 0.0]],
+    };
+    let BCurve::Spline { points: far_points, .. } = &far else { panic!("a spline") };
+    if let Some((c, _)) = unfolded_curve(&far, tol) {
+        let BCurve::Spline { points: now, .. } = &c else { panic!("a spline") };
+        assert!(now.iter().zip(far_points).all(|(a, b)| (a[0] - b[0]).abs() <= tol), "{now:?}");
+    }
+}
+
+/// A control point a row and its column both move stays within the tolerance of where the file
+/// put it: every move is bounded against the original net. The rows' pass moves the centre point
+/// to 3.9994 and the columns' pass would carry it on to 3.9988, 1.2 µm from 4.0 (review of the
+/// first version).
+#[test]
+fn a_control_point_moved_by_its_row_and_its_column_stays_within_the_tolerance() {
+    let tol = 1e-3;
+    let points = vec![
+        vec![[0.0, -1.0, 0.0], [3.9988, 0.0, 0.0], [5.0, -1.0, 0.0]],
+        vec![[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [3.9994, 0.0, 0.0]],
+        vec![[0.0, 1.0, 0.0], [3.9989, 0.0, 0.0], [5.0, 1.0, 0.0]],
+    ];
+    let bezier = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let net = BSurface::Spline { u_knots: bezier.clone(), v_knots: bezier, points: points.clone() };
+    let (unfolded, _) = unfolded_surface(&net, tol).expect("a row that steps back to its end");
+    let BSurface::Spline { points: now, .. } = &unfolded else { panic!("a spline") };
+    for (row, was) in now.iter().zip(&points) {
+        for (p, q) in row.iter().zip(was) {
+            let d = ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+            assert!(d <= tol, "a point moved {d}: {now:?}");
+        }
+    }
 }
 
 /// A rational surface's end lines are made one only while the surface moves by at most the

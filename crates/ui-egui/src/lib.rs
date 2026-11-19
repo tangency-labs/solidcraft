@@ -16,6 +16,7 @@ pub mod ai_connect;
 pub use solidcraft_ui_kit::app_bar;
 pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
+pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 mod browser_defects;
@@ -34,6 +35,7 @@ pub mod context_menu;
 pub mod control;
 pub mod control_job;
 mod control_joint_drive;
+mod control_joint_pose;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
@@ -3488,7 +3490,7 @@ impl SolveApp {
         Ok(())
     }
 
-    /// A dropped CAD, mesh, drawing or point cloud (PLY, XYZ, PTS) file joins a design that has
+    /// A dropped CAD, mesh, drawing or point cloud file joins a design that has
     /// features or point clouds; otherwise it opens. A dropped PNG or JPEG is a canvas to place,
     /// not a design to open: it starts the Canvas tool with that image chosen (#13926).
     /// A dropped ZIP goes through the plugin install review, which validates its contents
