@@ -1937,7 +1937,7 @@ impl Sketch {
         // curve alone joins nothing (a circle's radius and centre move independently).
         let own = self.curves.iter().filter_map(|x| match &x.kind {
             CurveKind::Arc { c, a, b } => Some(vec![*c, *a, *b]),
-            CurveKind::Spline { pts, periodic: true, .. } => match (pts.first(), pts.last()) {
+            CurveKind::Spline { pts, periodic: true, control: false, .. } => match (pts.first(), pts.last()) {
                 (Some(a), Some(b)) if a != b => Some(vec![*a, *b]),
                 _ => None,
             },
@@ -2048,6 +2048,11 @@ impl Sketch {
                         .collect(),
                 )
             }
+            CurveKind::Spline { pts, control: true, degree, periodic: true, .. } => {
+                let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                let pieces = crate::nurbs::closed_control_beziers(&p, *degree)?;
+                pieces.iter().map(|piece| solidcraft_geom::bezier(piece)).collect()
+            }
             CurveKind::Spline { pts, control: true, degree, nurbs: Some(nurbs), .. } => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 nurbs.segs(&p, *degree)
@@ -2144,8 +2149,10 @@ impl Sketch {
                         solidcore_record::MAX_BEZIER_DEGREE
                     )));
                 }
-                if *periodic {
-                    if *control || *degree != 3 {
+                if *periodic && *control {
+                    crate::periodic::validate_closed_control(pts.len(), *degree)?;
+                } else if *periodic {
+                    if *degree != 3 {
                         return Err(SketchError::Invalid("periodic mode requires a cubic fit spline".into()));
                     }
                     let p = pts

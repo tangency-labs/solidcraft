@@ -510,31 +510,25 @@ impl JsonSchema for BlendContinuity {
     }
 }
 
-/// `periodic`, as `spline` reads it: true or false (`null` too is refused). Only a cubic fit
-/// point spline (`FIT`) can be periodic; the control point splines refuse `true`.
+/// `periodic`, as `spline` reads it: true or false (`null` too is refused).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Periodic<const FIT: bool>(pub bool);
+pub struct Periodic(pub bool);
 
-impl<'de, const FIT: bool> Deserialize<'de> for Periodic<FIT> {
+impl<'de> Deserialize<'de> for Periodic {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::Bool(b) if FIT || !b => Ok(Periodic(b)),
-            Value::Bool(_) => Err(D::Error::custom(whole("periodic mode requires a cubic fit spline"))),
+            Value::Bool(b) => Ok(Periodic(b)),
             _ => Err(D::Error::custom(whole("periodic must be boolean"))),
         }
     }
 }
 
-impl<const FIT: bool> JsonSchema for Periodic<FIT> {
+impl JsonSchema for Periodic {
     fn schema_name() -> Cow<'static, str> {
-        if FIT { "PeriodicFit" } else { "PeriodicNever" }.into()
+        "Periodic".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        if FIT {
-            json_schema!({"description": "Close the spline smoothly through its points (needs at least 3 distinct points). Default: false.", "type": "boolean"})
-        } else {
-            json_schema!({"description": "Not available for a control point spline: only false is accepted. Default: false.", "type": "boolean", "const": false})
-        }
+        json_schema!({"description": "Close the spline. A fit spline passes smoothly through its points (cubic, at least 3 distinct points); a control point spline wraps its control polygon into a loop (degree 3 or 5, at least degree + 1 points). Default: false.", "type": "boolean"})
     }
 }
 
@@ -1123,8 +1117,8 @@ pub struct FitPointSplineParams {
     pub points: Option<SplinePoints>,
     /// Close it smoothly through its points. Default: false.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Periodic<true>")]
-    pub periodic: Option<Periodic<true>>,
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -1142,10 +1136,10 @@ pub struct ControlPointSplineParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SplinePoints")]
     pub points: Option<SplinePoints>,
-    /// Refused as true: only a cubic fit point spline can be periodic. Default: false.
+    /// Close the control polygon into a loop. Default: false.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Periodic<false>")]
-    pub periodic: Option<Periodic<false>>,
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
