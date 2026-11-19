@@ -2761,6 +2761,17 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             }
             continue;
         }
+        // On a drawing's sheet, a sketch tool's key starts the tool that does its job there: the
+        // Dimension key (D by default, or the key it was rebound to) starts Dimension.
+        if drawing_history
+            && app.session.active_sketch.is_none()
+            && !mods.alt
+            && let Some(tool) =
+                crate::keymap::commands_for(app, &crate::keymap::key_name(k, mods)).into_iter().find_map(crate::drawing_workspace::counterpart)
+        {
+            app.start(tool);
+            continue;
+        }
         if !shown {
             continue;
         }

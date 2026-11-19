@@ -146,6 +146,15 @@ pub(crate) fn placing_dimension(app: &SolveApp) -> bool {
     app.drawing_workspace.options == Some(Tool::Dimension(None))
 }
 
+/// The Drawing tool that does on a sheet what the sketch tool `command` does in a sketch, if
+/// there is one: it starts from that tool's key, so the key learnt in a sketch works here.
+pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
+    match command {
+        "sketch.dimension" => Some("drawing.dimension"),
+        _ => None,
+    }
+}
+
 pub fn can_open_options(id: &str) -> bool {
     Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }
@@ -1290,6 +1299,35 @@ mod tests {
         h.step(&json!({"key":"Y", "cmd": true})).unwrap();
         h.frames(2);
         assert!(h.app.session.drawing("drawing.inspect").unwrap().view(a).is_none(), "and Ctrl+Y deletes it again");
+    }
+
+    /// The key that starts Dimension in a sketch starts Dimension on a sheet: D, or whatever key
+    /// Sketch Dimension was rebound to.
+    #[test]
+    fn the_sketch_dimension_key_starts_the_dimension_tool_on_a_sheet() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[120,150]})).unwrap();
+        h.frames(8);
+        assert!(!placing_dimension(&h.app));
+        h.step(&json!({"key":"D"})).unwrap();
+        h.frames(2);
+        assert!(placing_dimension(&h.app), "D starts Dimension, as in a sketch");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!placing_dimension(&h.app), "and Esc puts it down");
+
+        h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M"}));
+        h.step(&json!({"key":"D"})).unwrap();
+        h.frames(2);
+        assert!(!placing_dimension(&h.app), "the old key no longer starts it");
+        h.step(&json!({"key":"M"})).unwrap();
+        h.frames(2);
+        assert!(placing_dimension(&h.app), "the key Sketch Dimension was rebound to does");
     }
 
     #[test]
