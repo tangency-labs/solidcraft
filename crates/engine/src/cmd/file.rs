@@ -2695,7 +2695,7 @@ fn export_to(
         return export_glb(s, cmd, path, bodies, quality, hierarchy);
     }
     if written_by_cadmpeg(format) {
-        return export_cadmpeg(s, cmd, path, bodies, quality, format, false);
+        return export_cadmpeg(s, cmd, path, bodies, quality, format, false, None);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
@@ -2751,6 +2751,18 @@ fn physics_flag(p: &Value, cmd: &str, format: Format) -> Result<bool> {
             Err(bad(cmd, "`physics` is for OpenUSD: URDF and SDF always write their joints and masses, and the other formats hold none"))
         }
         Some(_) => Err(bad(cmd, "`physics` must be true or false")),
+    }
+}
+
+/// `render_setup` as `file.export` reads it: the saved render setup whose image textures an
+/// OpenUSD package holds. Only OpenUSD takes it.
+fn render_setup_arg<'a>(p: &'a Value, cmd: &str, format: Format) -> Result<Option<&'a str>> {
+    match p.get("render_setup") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(name)) if format == Format::Usd && !name.trim().is_empty() => Ok(Some(name.as_str())),
+        Some(Value::String(_)) if format == Format::Usd => Err(bad(cmd, "`render_setup` must name a render setup")),
+        Some(Value::String(_)) => Err(bad(cmd, "`render_setup` is for OpenUSD: other formats written here hold no image textures")),
+        Some(_) => Err(bad(cmd, "`render_setup` must be the name of a render setup")),
     }
 }
 
@@ -2877,8 +2889,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which names {by_path:?}")));
     }
-    // Read before URDF and SDF go their own way, so neither takes it silently.
+    // Read before URDF and SDF go their own way, so neither takes them silently.
     let physics = physics_flag(p, cmd, format)?;
+    let setup = render_setup_arg(p, cmd, format)?;
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2899,7 +2912,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
     if written_by_cadmpeg(format) {
-        return export_cadmpeg(s, cmd, path, &bodies, quality, format, physics);
+        return export_cadmpeg(s, cmd, path, &bodies, quality, format, physics, setup);
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality, hierarchy(p, cmd, format)?)
 }
@@ -3256,7 +3269,9 @@ fn written_by_cadmpeg(format: Format) -> bool {
 /// atomically, so a refusal or a failed write leaves a file already there as it was. What the
 /// file could not carry is in the reply's warnings, among them each body a render setup gives an
 /// image texture or optics, written with its look alone. With `physics`, OpenUSD also holds the
-/// joints, grounding and each component's mass.
+/// joints, grounding and each component's mass, and with `setup` the image textures that render
+/// setup gives bodies (in a `.usdz` package).
+#[allow(clippy::too_many_arguments)]
 fn export_cadmpeg(
     s: &Session,
     cmd: &str,
@@ -3265,6 +3280,7 @@ fn export_cadmpeg(
     quality: solidcraft_io::MeshQuality,
     format: Format,
     physics: bool,
+    setup: Option<&str>,
 ) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let world = s.world_state()?;
@@ -3282,16 +3298,40 @@ fn export_cadmpeg(
         bodies: world.bodies.iter().filter(|b| !s.body_visible(&b.name)).map(|b| b.name.clone()).collect(),
         placements: s.visibility.hidden_occurrences.clone(),
     };
-    let options = solidcraft_io::CadmpegOptions { hidden, physics };
-    let (bytes, mut warnings) =
+    let mut warnings = Vec::new();
+    let surfaces = match setup {
+        Some(name) => super::render::surface_bindings::export_plans(s, name, cmd, &mut warnings)?,
+        None => Vec::new(),
+    };
+    let options = solidcraft_io::CadmpegOptions { hidden, physics, surfaces };
+    let (bytes, written) =
         solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
+    warnings.extend(written);
     warnings.extend(held.iter().map(|name| held_warning(name)));
     let label = if format == Format::Usd { "OpenUSD" } else { "Rhino" };
-    let bound = super::render::bound_bodies(s, cmd)?;
-    for b in world.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)) {
-        if let Some((setup, what)) = bound.get(&b.name) {
-            warnings
-                .push(format!("{}: render setup `{setup}` gives it {what}, which {label} export does not write yet: written with its look", b.name));
+    let chosen = |b: &str| bodies.is_empty() || bodies.iter().any(|x| x == b);
+    match setup {
+        // The chosen setup's images are written (or their absence is a warning already): its
+        // optics are what remains.
+        Some(name) => match super::render::optics_bodies(s, cmd, name) {
+            Ok(optics) => {
+                for b in optics.iter().filter(|b| chosen(b)) {
+                    warnings
+                        .push(format!("{b}: render setup `{name}` gives it optics, which {label} export does not write yet: written with its look"));
+                }
+            }
+            Err(e) => warnings.push(format!("render setup `{name}`: its optics are not written: {e}")),
+        },
+        None => {
+            let bound = super::render::bound_bodies(s, cmd)?;
+            for b in world.bodies.iter().filter(|b| chosen(&b.name)) {
+                if let Some((setup, what)) = bound.get(&b.name) {
+                    warnings.push(format!(
+                        "{}: render setup `{setup}` gives it {what}, which {label} export does not write yet: written with its look",
+                        b.name
+                    ));
+                }
+            }
         }
     }
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;

@@ -53,7 +53,10 @@ the others are written without them, with a warning), each grounded placement fi
 placement of a component as a rigid body, each component's mass, centre of mass and principal inertia from
 its bodies' materials, and a physics scene. Other joint kinds, suppressed joints and motion links are left
 out with a warning. With bodies chosen, or a placement that is not rigid, no physics is written, and a
-warning says why. Textures and collision shapes are not written yet.
+warning says why. With `render_setup: <name>` and a `.usdz` path, the images that render setup gives the
+bodies (base colour, roughness, metallic, and a normal map the file can show as the renderer does) go
+into the package, on each body's mesh; a `.usda` or `.usdc` file is written without them, with a warning.
+Collision shapes are not written yet.
 
 **File → Export Rhino…** (`file.export` with a `.3dm` path) writes a Rhino 8 file through cadmpeg, from
 the design directly. cadmpeg's Rhino writer does not write assemblies yet, so every body is written where

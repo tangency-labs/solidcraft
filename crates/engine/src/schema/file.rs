@@ -242,6 +242,10 @@ pub struct ExportParams {
     /// OpenUSD physics, for a simulator. Default: false.
     #[serde(default)]
     pub physics: Option<bool>,
+    /// OpenUSD only: the saved render setup whose image textures a `.usdz` package holds.
+    /// Default: none, each body written with its look.
+    #[serde(default)]
+    pub render_setup: Option<String>,
     /// SDF only: the model's name. Default: the folder's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -327,6 +331,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             hierarchy: None,
             solids: None,
             physics: None,
+            render_setup: None,
             name: None,
             is_static: None,
             model_uris: None,
@@ -370,6 +375,13 @@ impl<'de> Deserialize<'de> for ExportParams {
                 return Err(refuse("`physics` is for OpenUSD: URDF and SDF always write their joints and masses, and the other formats hold none"));
             }
             Some(_) => return Err(refuse("`physics` must be true or false")),
+        };
+        out.render_setup = match m.get("render_setup") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(n)) if format == Format::Usd && !n.trim().is_empty() => Some(n.clone()),
+            Some(Value::String(_)) if format == Format::Usd => return Err(refuse("`render_setup` must name a render setup")),
+            Some(Value::String(_)) => return Err(refuse("`render_setup` is for OpenUSD: other formats written here hold no image textures")),
+            Some(_) => return Err(refuse("`render_setup` must be the name of a render setup")),
         };
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.

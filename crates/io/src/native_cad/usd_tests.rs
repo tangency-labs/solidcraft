@@ -877,3 +877,202 @@ fn physics_grounds_every_placement_and_makes_each_placement_a_rigid_body() {
     assert_eq!(grounded, 2, "{:?}", built.warnings);
     assert_eq!(built.ir.model.rigid_bodies.len(), 6, "{:?}", built.warnings);
 }
+
+/// A 2 × 2 RGBA PNG.
+fn tiny_png() -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 2, 2);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&[255u8; 16]).unwrap();
+    }
+    out
+}
+
+/// One box's surface plan: a base-colour image projected along x and y, 10 mm a repeat along x
+/// and 20 mm along y, the image's v as stored.
+fn box_surface(body: &str) -> crate::SurfacePlan {
+    let bytes = tiny_png();
+    crate::SurfacePlan {
+        setup: "Studio".into(),
+        definition: body.into(),
+        component: 0,
+        path: Vec::new(),
+        world: body.into(),
+        origin: [0.0; 3],
+        u: [10.0, 0.0, 0.0],
+        v: [0.0, 20.0, 0.0],
+        flip_v: false,
+        normal_strength: 1.0,
+        base_color: Some(crate::SurfaceMap { sha256: "f00d".into(), bytes: std::sync::Arc::from(bytes) }),
+        normal: None,
+        roughness: None,
+        metallic: None,
+    }
+}
+
+/// The member names of the package `bytes`.
+fn members(bytes: &[u8]) -> Vec<String> {
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().unwrap().to_string()).collect()
+}
+
+/// The text of `name` inside the package `bytes`.
+fn member(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut file = zip.by_name(name).ok()?;
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut out).unwrap();
+    Some(out)
+}
+
+/// The values of the array attribute `head` (such as `point3f[] points`) in `text`, flat.
+fn array(text: &str, head: &str) -> Vec<f64> {
+    let at = text.find(head).unwrap_or_else(|| panic!("no {head}:\n{text}"));
+    let rest = &text[at + head.len()..];
+    let body = &rest[rest.find('[').unwrap() + 1..rest.find(']').unwrap()];
+    body.split(['(', ')', ',']).filter_map(|v| v.trim().parse().ok()).collect()
+}
+
+/// A render setup's image is written into a package with the mesh's coordinates in it: each
+/// point's (s, t) is its x over 10 mm and minus its y over 20 mm (the image read from its
+/// bottom-left in the file, from its top-left by the renderer), and the image is a member.
+#[test]
+fn a_render_setup_image_is_packaged_with_the_projections_coordinates() {
+    let (doc, model) = one_box();
+    let body = model.state().bodies[0].name.clone();
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { surfaces: vec![box_surface(&body)], ..Default::default() };
+    let (bytes, warnings) = crate::usd_from_design(&doc, &model.state(), &world, &[], &options, "box.usdz", crate::MeshQuality::Standard).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let root = members(&bytes).into_iter().find(|n| n.ends_with(".usda") || n.ends_with(".usdc")).unwrap();
+    let text = String::from_utf8(member(&bytes, &root).unwrap()).unwrap();
+    assert!(text.contains("UsdUVTexture"), "{text}");
+    assert_eq!(member(&bytes, "textures/f00d.png"), Some(tiny_png()));
+    let points = array(&text, "point3f[] points");
+    let st = array(&text, "texCoord2f[] primvars:st");
+    assert_eq!(points.len() / 3, st.len() / 2, "{text}");
+    for (p, c) in points.chunks(3).zip(st.chunks(2)) {
+        // The layer is in metres.
+        let (x, y) = (p[0] * 1000.0, p[1] * 1000.0);
+        assert!((c[0] - x / 10.0).abs() < 1e-4 && (c[1] + y / 20.0).abs() < 1e-4, "{p:?} gives {c:?}");
+    }
+}
+
+/// A render setup's images are written only in a package: a text layer warns and keeps the look.
+#[test]
+fn a_render_setup_image_outside_a_package_warns() {
+    let (doc, model) = one_box();
+    let body = model.state().bodies[0].name.clone();
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { surfaces: vec![box_surface(&body)], ..Default::default() };
+    let (bytes, warnings) = crate::usd_from_design(&doc, &model.state(), &world, &[], &options, "box.usda", crate::MeshQuality::Standard).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("written only in a .usdz package")), "{warnings:?}");
+    assert!(!String::from_utf8(bytes).unwrap().contains("UsdUVTexture"));
+}
+
+/// A component placed twice with an image on one placement only is written with its look, with a
+/// warning: the file gives a component's body one mesh.
+#[test]
+fn an_image_on_one_placement_of_two_warns() {
+    let (doc, model) = galvanometer();
+    let (paths, body) = needles(&doc, &model);
+    let needle = doc.components.iter().find(|c| c.name == "Needle").unwrap().id;
+    let mut plan = box_surface(&body);
+    plan.component = needle;
+    plan.path = paths[0].clone();
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { surfaces: vec![plan], ..Default::default() };
+    let (bytes, warnings) = crate::usd_from_design(&doc, &model.state(), &world, &[], &options, "g.usdz", crate::MeshQuality::Standard).unwrap();
+    assert!(warnings.iter().any(|w| w.contains(&body) && w.contains("different images")), "{warnings:?}");
+    assert!(!members(&bytes).iter().any(|n| n.starts_with("textures/")));
+}
+
+/// The galvanometer built for OpenUSD with `options`.
+fn built_with(doc: &Document, model: &Model, world: &ModelState, options: &crate::CadmpegOptions) -> super::super::cadir_out::Built {
+    super::super::cadir_out::design(doc, &model.state(), world, &[], options, "design", crate::MeshQuality::Standard).unwrap()
+}
+
+/// `plan` with its base-colour image named `sha`.
+fn with_image(mut plan: crate::SurfacePlan, sha: &str) -> crate::SurfacePlan {
+    plan.base_color = Some(crate::SurfaceMap { sha256: sha.into(), bytes: std::sync::Arc::from(tiny_png()) });
+    plan
+}
+
+/// A hidden placement's image does not count: the needle's shown placement has image B, its
+/// hidden one image A, and B is written with no warning.
+#[test]
+fn the_shown_placements_image_is_written_when_a_hidden_one_differs() {
+    let (doc, model) = galvanometer();
+    let (paths, body) = needles(&doc, &model);
+    let needle = doc.components.iter().find(|c| c.name == "Needle").unwrap().id;
+    let plan = |path: &Vec<u64>, sha: &str| {
+        let mut p = with_image(box_surface(&body), sha);
+        p.component = needle;
+        p.path = path.clone();
+        p
+    };
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions {
+        hidden: crate::Hidden { placements: vec![paths[0].clone()], ..Default::default() },
+        surfaces: vec![plan(&paths[0], "aaaa"), plan(&paths[1], "bbbb")],
+        ..Default::default()
+    };
+    let built = built_with(&doc, &model, &world, &options);
+    assert!(!built.warnings.iter().any(|w| w.contains("different images")), "{:?}", built.warnings);
+    let assets: Vec<&str> = built.ir.model.assets.iter().map(|a| a.id.as_str()).collect();
+    assert!(assets.iter().any(|a| a.ends_with("bbbb")) && !assets.iter().any(|a| a.ends_with("aaaa")), "{assets:?}");
+}
+
+/// Two placements with the same base colour and different half-strength normal maps, which are
+/// left out of both, share the base colour.
+#[test]
+fn normal_maps_left_out_do_not_tell_placements_apart() {
+    let (doc, model) = galvanometer();
+    let (paths, body) = needles(&doc, &model);
+    let needle = doc.components.iter().find(|c| c.name == "Needle").unwrap().id;
+    let plan = |path: &Vec<u64>, normal: &str| {
+        let mut p = box_surface(&body);
+        p.component = needle;
+        p.path = path.clone();
+        p.normal_strength = 0.5;
+        p.normal = Some(crate::SurfaceMap { sha256: normal.into(), bytes: std::sync::Arc::from(tiny_png()) });
+        p
+    };
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { surfaces: vec![plan(&paths[0], "n1"), plan(&paths[1], "n2")], ..Default::default() };
+    let built = built_with(&doc, &model, &world, &options);
+    assert!(!built.warnings.iter().any(|w| w.contains("different images")), "{:?}", built.warnings);
+    assert!(built.ir.model.assets.iter().any(|a| a.id.as_str().ends_with("f00d")), "{:?}", built.warnings);
+}
+
+/// Two bodies with no look of their own, one imported red and one blue, given the same roughness
+/// image, keep their own colours: two textured appearances, not one.
+#[test]
+fn bodies_of_different_colours_with_one_image_keep_their_colours() {
+    let mut doc = Document::new("Pair");
+    add_box(&mut doc, Vec3::ZERO, 0);
+    add_box(&mut doc, Vec3::new(50.0, 0.0, 0.0), 0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let mut world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    for (b, colour) in world.bodies.iter_mut().zip([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]) {
+        b.imported = Some(std::sync::Arc::new(solidcraft_doc::appearance::ImportedLook { color: Some(colour), ..Default::default() }));
+    }
+    let surfaces = world
+        .bodies
+        .iter()
+        .map(|b| {
+            let mut p = box_surface(&b.name);
+            p.roughness = p.base_color.take();
+            p
+        })
+        .collect();
+    let options = crate::CadmpegOptions { surfaces, ..Default::default() };
+    let built = built_with(&doc, &model, &world, &options);
+    let textured: Vec<_> = built.ir.model.appearances.iter().filter(|a| !a.textures.is_empty()).map(|a| a.base_color).collect();
+    assert_eq!(textured.len(), 2, "{textured:?}");
+    assert_ne!(textured[0], textured[1], "{textured:?}");
+}
