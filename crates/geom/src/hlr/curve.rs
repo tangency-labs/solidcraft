@@ -332,11 +332,12 @@ impl C3 {
     /// +1 or -1 when its angular speed keeps that sign all along (certified on each Bézier piece
     /// from the Bernstein coefficients of `X Y' - Y X'`, which has the speed's sign as the
     /// weights are positive), 0 when it does not turn, `None` when it turns back or this cannot
-    /// be certified.
+    /// be certified: also when no piece holds any of `r` (a spline that couldn't be split has
+    /// none), since nothing was checked.
     pub fn turn_sign(&self, r: [f64; 2], o: Vec3, u: Vec3, v: Vec3) -> Option<f64> {
         use crate::bspline::{HPoint, bezier_segment};
         let C3::Spline { pieces, .. } = self else { return None };
-        let mut sign = 0f64;
+        let (mut sign, mut checked) = (0f64, false);
         for (span, ctrl) in pieces {
             let (a, b) = (r[0].max(span[0]), r[1].min(span[1]));
             let len = span[1] - span[0];
@@ -364,6 +365,7 @@ impl C3 {
             };
             let n: Vec<f64> = bernstein_product(&x, &d(&y)).iter().zip(bernstein_product(&y, &d(&x))).map(|(a, b)| a - b).collect();
             let s = definite_sign(&n, 0)?;
+            checked = true;
             if s != 0. {
                 if sign != 0. && s != sign {
                     return None;
@@ -371,7 +373,7 @@ impl C3 {
                 sign = s;
             }
         }
-        Some(sign)
+        checked.then_some(sign)
     }
 
     /// Points whose hull holds the spline's part `r`: the projected control points of its
@@ -381,7 +383,13 @@ impl C3 {
         use crate::bspline::{HPoint, bezier_segment};
         let C3::Spline { pieces, .. } = self else { return None };
         let mut out = Vec::new();
-        for (span, ctrl) in pieces {
+        // The pieces run in parameter order: start at the first one that can reach past r[0]
+        // and stop after r[1], so a part costs its own pieces, not the whole curve's.
+        let first = pieces.partition_point(|(span, _)| span[1] <= r[0]);
+        for (span, ctrl) in pieces.get(first..).unwrap_or_default() {
+            if span[0] >= r[1] {
+                break;
+            }
             let (a, b) = (r[0].max(span[0]), r[1].min(span[1]));
             let len = span[1] - span[0];
             if !(b > a && len > 0.) {
@@ -408,11 +416,9 @@ pub(crate) fn de_boor(p: usize, knots: &[f64], ctrl: &[[f64; 4]], t: f64) -> Vec
     let n = ctrl.len();
     let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(n)) else { return Vec3::ZERO };
     let t = t.clamp(lo, hi);
-    // Span k with knots[k] <= t < knots[k+1], last nonempty span at the end.
-    let mut k = p;
-    while k + 1 < n && knots.get(k + 1).is_some_and(|u| *u <= t) {
-        k += 1;
-    }
+    // Span k with knots[k] <= t < knots[k+1], last nonempty span at the end: the knots are
+    // in order (Brep::validate), so the knots after p that are at most t come first.
+    let k = p + knots.get(p + 1..n).map_or(0, |after| after.partition_point(|u| *u <= t));
     let mut d: Vec<[f64; 4]> = (0..=p).map(|j| ctrl.get(j + k - p).copied().unwrap_or([0.; 4])).collect();
     for r in 1..=p {
         for j in (r..=p).rev() {

@@ -4,6 +4,9 @@
 //! past [`CEILING`]. Every read site asks [`max_step_bytes`] / [`max_design_bytes`] for the limit
 //! in force, so the size check still happens before a file is read. In the browser (wasm32) the
 //! defaults always apply: the web app's address space can't hold more.
+//!
+//! A point cloud file ([`Kind::PointCloud`]) follows the limit for import files and is never read
+//! under the 1 GiB it has always had: the preference raises that limit, never lowers it.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -16,13 +19,15 @@ pub const CEILING: u64 = 16 * GB;
 /// Whether this build lets the limits rise: not in the browser.
 pub const ADJUSTABLE: bool = cfg!(not(target_arch = "wasm32"));
 
-/// The two kinds of file with a size limit.
+/// The kinds of file with a size limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// STEP, IGES and the other CAD files read as an Import feature.
     Step,
     /// Design files (`.sc`, older `.solidcraft`, JSON).
     Design,
+    /// Point cloud files (`.ply`, `.pcd`, `.xyz`, `.pts`, `.asc`).
+    PointCloud,
 }
 
 impl Kind {
@@ -32,6 +37,7 @@ impl Kind {
         match self {
             Kind::Step => l.step,
             Kind::Design => l.design,
+            Kind::PointCloud => point_cloud_limit(l.step),
         }
     }
 
@@ -39,6 +45,7 @@ impl Kind {
         match self {
             Kind::Step => "STEP and import files",
             Kind::Design => "design files",
+            Kind::PointCloud => "point cloud files",
         }
     }
 }
@@ -48,6 +55,12 @@ impl Kind {
 pub struct FileLimits {
     pub step: u64,
     pub design: u64,
+}
+
+/// The limit a point cloud file is read under: the limit for import files, and never under the
+/// 1 GiB a point cloud file has always been read up to.
+fn point_cloud_limit(step: u64) -> u64 {
+    step.max(crate::MAX_POINT_CLOUD_BYTES as u64)
 }
 
 impl Default for FileLimits {
@@ -176,7 +189,25 @@ pub fn max_step_bytes() -> usize {
 
 /// The largest design file read (and written) now.
 pub fn max_design_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(cap) = test_cap::get() {
+        return cap;
+    }
     usize::try_from(effective().design).unwrap_or(usize::MAX)
+}
+
+/// A design file limit below the smallest the app allows, for this test's thread only, so a test
+/// can pass the limit with a small design.
+#[cfg(test)]
+pub(crate) mod test_cap {
+    use std::cell::Cell;
+    thread_local!(static CAP: Cell<Option<usize>> = const { Cell::new(None) });
+    pub fn get() -> Option<usize> {
+        CAP.with(Cell::get)
+    }
+    pub fn set(cap: Option<usize>) {
+        CAP.with(|c| c.set(cap));
+    }
 }
 
 const BROWSER_NOTE: &str = "the web app can't open larger files: a browser tab can't hold them";
@@ -328,6 +359,17 @@ mod tests {
         assert!(check(Kind::Design, 256 * MB).is_ok() && check(Kind::Design, 256 * MB + 1).is_err());
         assert_eq!(describe(2 * GB), "2 GB");
         assert_eq!(describe(1536 * MB), "1.5 GB");
+    }
+
+    #[test]
+    fn a_point_cloud_file_follows_the_import_limit_and_keeps_the_1_gib_it_has_always_had() {
+        assert_eq!(point_cloud_limit(512 * MB), crate::MAX_POINT_CLOUD_BYTES as u64, "never under the 1 GiB it has always had");
+        assert_eq!(point_cloud_limit(2 * GB), 2 * GB, "the preference raises it");
+        let message = too_large(Kind::PointCloud, 2 * GB);
+        assert!(message.contains("point cloud files") && message.contains("1 GB"), "{message}");
+        if ADJUSTABLE {
+            assert!(message.contains("Preferences > General > Largest file to open") && message.contains("--max-file-size"), "{message}");
+        }
     }
 
     #[test]

@@ -814,6 +814,395 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// The drops `CreateBlendSurface`'s sampler makes along one boundary curve
+    /// (`GetSampleValues`, 100 samples and the end): each curve point dropped onto the
+    /// surface over its natural domain, from the previous foot (none for the first). Each
+    /// foot is enclosed ([`crate::certify::nearest`]); returns the widest enclosure relative
+    /// to its upper end.
+    fn blend_drops(k: &Kernel, name: &str, surface: &Surface, curve: &SmCurve, ivl: &Extent1d) -> f64 {
+        use solidcore::surface::surface::p4::NoObject;
+        use solidcore::surface::surface::p5::DropPointOptions;
+        let domain = surface.natural_uv_domain_with_nurb(k).expect("domain");
+        let mut guess = None;
+        let mut widest = 0.0_f64;
+        for ii in 0..=100_u32 {
+            let param = if ii < 100 { f64::from(ii) / 100.0 } else { 1.0 };
+            let p = curve.evaluate_point(k, ivl.evaluate(param)).expect("curve point");
+            let opts = DropPointOptions {
+                guess_uv: guess,
+                ..Default::default()
+            };
+            let d = surface.drop_point::<NoObject>(k, p, &domain, &opts).expect("drop");
+            assert!(d.success, "{name} sample {ii}: the drop failed");
+            let e = crate::certify::nearest(k, surface, None, p, d.result_uv);
+            assert!(e.lo <= e.hi, "{name} sample {ii}: {e:?}");
+            if e.width() > 1e-12 * e.hi.max(1.0) {
+                // the drop without a guess (the global solve), for comparison
+                let g = surface
+                    .drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())
+                    .expect("drop");
+                let at = |uv| p.distance(surface.evaluate_point(k, uv).expect("point"));
+                eprintln!(
+                    "{name} sample {ii}: foot {:?} distance {:e} in [{:e}, {:e}]; global foot {:?} distance {:e}",
+                    d.result_uv,
+                    at(d.result_uv),
+                    e.lo,
+                    e.hi,
+                    g.result_uv,
+                    at(g.result_uv)
+                );
+            }
+            widest = widest.max(e.width() / e.hi.max(f64::MIN_POSITIVE));
+            guess = Some(d.result_uv);
+        }
+        widest
+    }
+
+    /// WR-56 (#17467, #17773): a blend surface between boundary curves of two surfaces,
+    /// whose cross derivatives are sampled at the feet of the curves' points dropped onto
+    /// their surfaces, each drop guessed from the one before. Every foot is certified the
+    /// nearest point of its surface, to a width of 1e-9 of its distance
+    /// (its upper end): the moved row `gen1959`'s 2 x 101 feet, and `gen0378`'s 101 on its first
+    /// surface, where taking a guessed local result nearer than its guess kept local
+    /// minima up to 0.19 farther than the nearest point (samples 63 to 81) until the
+    /// global solve decided them. (`gen0378`'s second surface is not asserted: its row is
+    /// main's, and one foot there, which the global solve also finds, is enclosed only to
+    /// 5.3e-4.)
+    #[test]
+    fn wr56_blend_samples_drop_to_the_nearest_point() {
+        for (name, sides) in [("gen0378", &[1][..]), ("gen1959", &[1, 2][..])] {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert_eq!(row.first(), Some(&0.0), "{name}: status");
+            let OpIn::Blend {
+                curve1,
+                ivl1,
+                other,
+                curve2,
+                ivl2,
+                ..
+            } = &i.op
+            else {
+                panic!("{name}: not a blend case");
+            };
+            let k = Kernel::default();
+            let s1 = surface_of(&k, &i.surface).expect("surface").expect("a surface");
+            let s2 = surface_of(&k, other).expect("surface").expect("a surface");
+            let c1 = curve_of(curve1).expect("curve").expect("a curve");
+            let c2 = curve_of(curve2).expect("curve").expect("a curve");
+            for (side, s, c, ivl) in [(1, &s1, &c1, ivl1), (2, &s2, &c2, ivl2)] {
+                if !sides.contains(&side) {
+                    continue;
+                }
+                let widest = blend_drops(&k, name, s, c, &ivl_of(*ivl));
+                eprintln!("{name} surface {side}: widest relative enclosure {widest:e}");
+                assert!(widest <= 1e-9, "{name} surface {side}: {widest:e}");
+            }
+        }
+    }
+
+    /// `InvertPointNearSingularity` near an edge that is not collapsed (`gen1191`: the
+    /// guess is at u = 0.996, and the boundary u = 1 runs from 4.003 to 36085 away from
+    /// the test point, tangency-labs/solidcraft#18052). The method assumes that boundary
+    /// is a pole, and its drops land at best 1163.2 from the test point (v = 0.4624),
+    /// nearer than the guess (1395.2) but not the closest point: S(1, 0.41725) is
+    /// certified 9.399 away. The test point dropped onto the boundary finds a point
+    /// proven nearer than the answer, so the boundary is not a pole and the inversion
+    /// refuses (1001, main's status). Fails without the boundary check (the drop at
+    /// v = 0.4624 is reported found).
+    #[test]
+    fn invert_near_singularity_refuses_a_drop_off_a_boundary_that_is_not_a_pole() {
+        let case = crate::case::regression_case(&Runner, "gen1191");
+        let i: Inputs = case.parse().expect("inputs");
+        let OpIn::Invert { p, dom, uv, tol } = &i.op else {
+            panic!("gen1191: not an invert case");
+        };
+        let k = Kernel::default();
+        let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
+        let r = s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol);
+        let e = r.expect_err("gen1191: a drop off a boundary that is not a pole is refused");
+        assert_eq!(status(&e), 1001.0, "gen1191: {e}");
+        // (the drop the search kept is proven farther than a point of that boundary)
+        let near = wr57_distance(&k, &s, v3(*p), Point2::new(1.0, 0.41725)).expect("enclosed");
+        let drop = wr57_distance(&k, &s, v3(*p), Point2::new(1.0, 0.462_430_875_879_150_77)).expect("enclosed");
+        assert!(near.1 < 10.0 && drop.0 > 1000.0 && near.1 < drop.0, "gen1191: {near:?} {drop:?}");
+        let row = rust_run(&i).unwrap_or_else(|_| panic!("gen1191: rust"));
+        assert_eq!(row, [1001.0], "gen1191: row");
+    }
+
+    /// `InvertPointNearSingularity` refuses an answer proven farther than its guess
+    /// (`gen0158`: the guess is 2.2566 from the test point, and the nearest drop is
+    /// proven farther; main reports the drop at u = 0.1249, 9.1456 away, found). Status 1001, main's for a
+    /// search that does not converge. Fails with the farther-than-the-guess refusal
+    /// removed.
+    #[test]
+    fn invert_near_singularity_refuses_an_answer_farther_than_its_guess() {
+        let case = crate::case::regression_case(&Runner, "gen0158");
+        let i: Inputs = case.parse().expect("inputs");
+        let OpIn::Invert { p, dom, uv, tol } = &i.op else {
+            panic!("gen0158: not an invert case");
+        };
+        let k = Kernel::default();
+        let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
+        let r = s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol);
+        let e = r.expect_err("gen0158: an answer farther than the guess is refused");
+        assert_eq!(status(&e), 1001.0, "gen0158: {e}");
+        let row = rust_run(&i).unwrap_or_else(|_| panic!("gen0158: rust"));
+        assert_eq!(row, [1001.0], "gen0158: row");
+    }
+
+    /// The rows of `InvertPointNearSingularity` WR-57's retirement moved (#17856): each
+    /// case's name, main's row (3740d2254) and the new row (`[status, reason, u, v]`, or
+    /// `[status]`).
+    #[rustfmt::skip]
+    const WR57_MOVED: &[(&str, &[f64], &[f64])] = &[
+        ("gen0014", &[0.0, 1.0, 0.0, 0.3333333333333333], &[1001.0]),
+        ("gen0047", &[0.0, 1.0, 0.9066324340674627, 0.5394037365288399], &[0.0, 1.0, 0.9066324340699695, 0.5394037496452493]),
+        ("gen0053", &[1001.0], &[0.0, 1.0, -0.7956794078729252, 0.0]),
+        ("gen0074", &[1001.0], &[0.0, 1.0, -0.07409559152995882, 0.7883623775104649]),
+        ("gen0105", &[1001.0], &[0.0, 1.0, 0.5369190333955278, 0.0]),
+        ("gen0158", &[0.0, 1.0, 0.12489462218132177, 0.9906255839782234], &[1001.0]),
+        ("gen0172", &[1001.0], &[0.0, 1.0, 0.9375372909889319, 1.6784421551462283]),
+        ("gen0181", &[0.0, 1.0, 0.0, 0.5555555555555556], &[1001.0]),
+        ("gen0188", &[1001.0], &[0.0, 1.0, 1.0, 0.5538509292645661]),
+        ("gen0231", &[0.0, 1.0, -0.9288773064566884, 0.4215134453827129], &[1001.0]),
+        ("gen0263", &[0.0, 1.0, 4.9446034172910664, 0.19409115069965427], &[0.0, 1.0, 1.0, 0.19409115069965427]),
+        ("gen0270", &[0.0, 1.0, 0.0, 0.7777777777777778], &[1001.0]),
+        ("gen0305", &[0.0, 1.0, 0.0, 0.2761485602687741], &[0.0, 1.0, 0.2222222222222222, 0.27614856026877416]),
+        ("gen0313", &[0.0, 1.0, 0.8490544991340391, 0.7096605998269282], &[1001.0]),
+        ("gen0350", &[0.0, 1.0, 0.0, 1.0], &[1001.0]),
+        ("gen0367", &[1001.0], &[0.0, 1.0, 0.6833358118884136, 1.0]),
+        ("gen0386", &[0.0, 1.0, 0.9996021360682996, 0.6437453228585033], &[1001.0]),
+        ("gen0424", &[0.0, 1.0, 0.007337507469351864, 0.3333333333333333], &[0.0, 1.0, 0.007337507469351885, 0.2969559706197508]),
+        ("gen0455", &[0.0, 1.0, 0.015096173323598534, 0.1111111111111111], &[0.0, 1.0, 0.015096173323600607, 0.2222222222222222]),
+        ("gen0480", &[0.0, 1.0, 0.4975101335583329, 0.4444444444444444], &[0.0, 1.0, 0.4975101335583329, 0.5555555555555556]),
+        ("gen0522", &[0.0, 1.0, 0.9772760805607773, 0.2999881846062191], &[1001.0]),
+        ("gen0560", &[0.0, 1.0, 0.0, 0.1111111111111111], &[1001.0]),
+        ("gen0594", &[0.0, 1.0, 0.0, 0.1111111111111111], &[0.0, 1.0, 0.0, 0.0]),
+        ("gen0598", &[1001.0], &[0.0, 1.0, 0.9741626315171246, -0.12830170427069731]),
+        ("gen0623", &[0.0, 1.0, 0.9235918569506598, 4.198448818477761], &[0.0, 1.0, 0.92359185695066, 0.45930453789140524]),
+        ("gen0625", &[0.0, 1.0, 11.505289406562873, 0.8706963713055447], &[0.0, 1.0, 1.0, 0.8706963713055447]),
+        ("gen0677", &[0.0, 1.0, 16.622753413247768, 0.34604919278209584], &[0.0, 1.0, 1.0, 0.34604919278209584]),
+        ("gen0725", &[0.0, 1.0, 1.0, 0.07810518260728934], &[0.0, 1.0, 0.9957032996868314, 0.07810518260728921]),
+        ("gen0726", &[0.0, 1.0, 6.244028325018639, 0.8155595818260026], &[0.0, 1.0, 0.4921644857675187, 0.8155595818260023]),
+        ("gen0775", &[0.0, 1.0, 0.08302362587299912, 2.037560255903], &[0.0, 1.0, 0.08302362587299913, 0.13584054917843388]),
+        ("gen0781", &[0.0, 1.0, 10.934484812069021, 0.7176821150238701], &[0.0, 1.0, 1.0, 0.7176821150238701]),
+        ("gen0816", &[0.0, 1.0, 2.5356010619296665, 1.0], &[0.0, 1.0, 1.3156639158049133, 0.3600495743950692]),
+        ("gen0858", &[1001.0], &[0.0, 1.0, 0.011799220179244839, 0.0]),
+        ("gen0887", &[0.0, 1.0, 0.1605075345008261, 7.396434227128571], &[0.0, 1.0, 0.1605075345008261, 1.0566334610183672]),
+        ("gen0903", &[0.0, 1.0, 8.623782752222228, 0.2453309118051222], &[0.0, 1.0, 0.5077514536779808, 0.24533091180512226]),
+        ("gen0962", &[1001.0], &[0.0, 1.0, 1.9594815675856745, 1.0]),
+        ("gen0963", &[0.0, 1.0, 0.013105740496176483, 4.9591047726717585], &[0.0, 1.0, 0.013105740496176485, 0.0]),
+        ("gen0974", &[0.0, 1.0, 0.0, 0.3333333333333333], &[1001.0]),
+        ("gen1001", &[1001.0], &[0.0, 1.0, 0.9906494367092904, 1.841687344022744]),
+        ("gen1023", &[1001.0], &[0.0, 1.0, -1.701240783902778, -0.5600289912404222]),
+        ("gen1065", &[1001.0], &[0.0, 1.0, 0.26723201799703267, 1.0]),
+        ("gen1071", &[0.0, 1.0, 0.011850340167537055, 0.2222222222222222], &[0.0, 1.0, 0.011850340167540507, 0.1111111111111111]),
+        ("gen1123", &[0.0, 1.0, 0.024550142943931222, 0.5555555555555556], &[0.0, 1.0, 0.024550142943932173, 0.6666666666666666]),
+        ("gen1128", &[0.0, 1.0, 0.0, 0.1111111111111111], &[1001.0]),
+        ("gen1131", &[0.0, 1.0, 1.4112457664347887e-16, -1.0537632839133653], &[1001.0]),
+        ("gen1138", &[0.0, 1.0, 7.135077433825912, 0.7257070461571425], &[0.0, 1.0, 0.5007015278013288, 0.7257070461571427]),
+        ("gen1152", &[0.0, 1.0, 0.504635940702727, 0.2306637224781882], &[1001.0]),
+        ("gen1178", &[0.0, 1.0, 2.314920805189961, -0.3381767038753387], &[1001.0]),
+        ("gen1183", &[0.0, 1.0, 1.5573592017675013, 0.885123558981613], &[1001.0]),
+        ("gen1246", &[1001.0], &[0.0, 1.0, -0.3446844117534995, 2.4351420286874634]),
+        ("gen1257", &[0.0, 1.0, 4.166142441029816, 0.261747880000477], &[0.0, 1.0, 0.4878583181380995, 0.261747880000477]),
+        ("gen1298", &[0.0, 1.0, 0.033334114380528836, 0.8888888888888888], &[0.0, 1.0, 0.03333411438052887, 0.6666666666666666]),
+        ("gen1304", &[1001.0], &[0.0, 1.0, 1.1324709099809074, 0.899876532946227]),
+        ("gen1400", &[1001.0], &[0.0, 1.0, 0.9016104159623767, 2.4381581600504143]),
+        ("gen1414", &[1001.0], &[0.0, 1.0, -1.7939064783174012, 1.0]),
+        ("gen1486", &[0.0, 1.0, 0.4444444444444444, 0.0], &[1001.0]),
+        ("gen1510", &[1001.0], &[0.0, 1.0, 3.1179564298330127, 0.0]),
+        ("gen1511", &[0.0, 1.0, 2.7462086273793243, 0.7716294691231871], &[1001.0]),
+        ("gen1545", &[0.0, 1.0, 2.5113871811481134, 0.9166749287312247], &[0.0, 1.0, 0.0, 0.9166749287312247]),
+        ("gen1562", &[0.0, 1.0, -1.2344133753969428, 1.1511373258295077], &[0.0, 1.0, 0.07660168143685353, 1.0682841038601312]),
+        ("gen1573", &[1001.0], &[0.0, 1.0, 1.0, 1.7813197093476114]),
+        ("gen1617", &[0.0, 1.0, 0.0, 0.1111111111111111], &[1001.0]),
+        ("gen1625", &[1001.0], &[0.0, 1.0, 1.9603139438558477, 0.8143256774521873]),
+        ("gen1645", &[1001.0], &[0.0, 1.0, 0.9763395118843511, 1.0]),
+        ("gen1668", &[0.0, 1.0, 2.3437645526109203, 0.12712715782255418], &[0.0, 1.0, 2.3517922574205494, 0.23607017682643616]),
+        ("gen1710", &[0.0, 1.0, 26.221650593892594, 0.2427790871502131], &[0.0, 1.0, 1.0, 0.24277908715021304]),
+        ("gen1759", &[1001.0], &[0.0, 1.0, -1.1893621250558348, 1.0]),
+        ("gen1767", &[0.0, 1.0, 14.592733309543917, 0.2075963621402525], &[0.0, 1.0, 1.0, 0.2075963621402525]),
+        ("gen1873", &[0.0, 1.0, 7.292630543375605, 0.6107063669597693], &[0.0, 1.0, 0.9834814920662496, 0.6107063669597693]),
+        ("gen1876", &[1001.0], &[0.0, 1.0, 0.0009527643812059326, 1.0]),
+        ("gen1935", &[0.0, 1.0, 1.0, 0.0], &[1001.0]),
+        ("gen1958", &[1001.0], &[0.0, 1.0, 0.005735801586641001, 0.0]),
+        ("gen1988", &[1001.0], &[0.0, 1.0, 0.47640873711050946, 0.0]),
+        ("gen1997", &[1001.0], &[0.0, 1.0, 0.007875936036191088, 0.26077138073868533]),
+    ];
+
+    /// The certified distance from `p` to `s`'s point at `uv`: `[lo, hi]`, the evaluation's
+    /// rounding ([`crate::certify::evaluation_slack_at`], grown past the knots) and the
+    /// distance's own ([`solidcore::geom::certified::distance`]) charged; `None` where the
+    /// evaluation is not bounded (a rational net past its knots).
+    fn wr57_distance(k: &Kernel, s: &Surface, p: Vec3, uv: Point2) -> Option<(f64, f64)> {
+        crate::certify::distance(k, s, p, uv)
+    }
+
+    /// A lower bound on the distance from `p` to `s` over its natural domain
+    /// ([`crate::certify::split_lower_bound`]).
+    fn wr57_split_lower_bound(k: &Kernel, s: &Surface, p: Vec3, want: f64) -> f64 {
+        crate::certify::split_lower_bound(k, s, p, want).expect("the lower bound")
+    }
+
+    /// The nearest of 2001 samples on each edge of `dom` to `p`, with its enclosed
+    /// distance ([`wr57_distance`]); `None` where no sample is enclosed.
+    fn wr57_nearest_edge_point(k: &Kernel, s: &Surface, p: Vec3, dom: &Extent2d) -> Option<((f64, f64), Point2)> {
+        let (u0, v0, u1, v1) = (dom.min().x, dom.min().y, dom.max().x, dom.max().y);
+        let mut best: Option<((f64, f64), Point2)> = None;
+        for i in 0..=2000_u32 {
+            let t = f64::from(i) / 2000.0;
+            for q in [
+                Point2::new(u0, v0 + (v1 - v0) * t),
+                Point2::new(u1, v0 + (v1 - v0) * t),
+                Point2::new(u0 + (u1 - u0) * t, v0),
+                Point2::new(u0 + (u1 - u0) * t, v1),
+            ] {
+                if let Some(d) = wr57_distance(k, s, p, q) {
+                    if best.is_none_or(|(b, _)| d.1 < b.1) {
+                        best = Some((d, q));
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    /// WR-57 (#17856): every row of `InvertPointNearSingularity` that moved from main is
+    /// replayed (the code checked is the code that blessed: the row agrees with the golden)
+    /// and certified with enclosed distances from the test point:
+    /// - answered in both: the new answer is not proven farther than main's (its lower end
+    ///   at most main's upper end); the rows where the enclosures part (proven nearer) are
+    ///   counted and the count asserted, the rest are ties within the rounding;
+    /// - refused by main (1001), answered now: the new answer is not proven farther than
+    ///   the guess, the acceptance rule of the search. That is not a proof that it is the
+    ///   closest point (ARGUED): the surface's certified lower bound is printed per row, and
+    ///   the rows where it is within `1e-6` relative of the answer's upper end (the answer
+    ///   proven the closest point to that) are counted and the count asserted;
+    /// - answered by main, refused now: main's answer is proven farther than the guess
+    ///   (its lower end above the guess's upper end), so main returned an answer worse
+    ///   than the starting point it was asked to improve.
+    ///
+    /// A row whose answer (or guess) lies past a rational net's knots has no enclosure
+    /// ([`wr57_distance`]): it is listed as unproven, and the list asserted.
+    #[test]
+    fn wr57_moved_inversions_are_certified() {
+        let k = Kernel::default();
+        let (mut proven_nearer, mut ties, mut globally_nearest, mut argued) = (0usize, 0usize, 0usize, 0usize);
+        let (mut refused_farther_than_guess, mut refused_off_a_pole) = (0usize, 0usize);
+        let mut unproven: Vec<&str> = Vec::new();
+        for &(name, main, new) in WR57_MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&i).unwrap_or_else(|_| panic!("{name}: rust"));
+            // the goldens' agreement (`crate::REL_TOL`): a bless keeps a row within it
+            assert!(
+                row.len() == new.len()
+                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                "{name}: the code gives {row:?}, not the new row"
+            );
+            let OpIn::Invert { p, uv, dom, .. } = &i.op else {
+                panic!("{name}: not an invert case");
+            };
+            let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
+            let at = |r: &[f64]| wr57_distance(&k, &s, v3(*p), Point2::new(r[2], r[3]));
+            let guess = wr57_distance(&k, &s, v3(*p), p2(*uv));
+            match (main.len(), new.len()) {
+                (4, 4) => {
+                    let (Some(m), Some(n)) = (at(main), at(new)) else {
+                        unproven.push(name);
+                        eprintln!("{name}: unproven (past a rational net's knots), main {main:?} new {new:?}");
+                        continue;
+                    };
+                    assert!(n.0 <= m.1, "{name}: new {n:?} proven farther than main {m:?}");
+                    if n.1 < m.0 {
+                        proven_nearer += 1;
+                    } else {
+                        ties += 1;
+                    }
+                    eprintln!("{name}: both answered, main {m:?} new {n:?}");
+                }
+                (1, 4) => {
+                    let (Some(n), Some(guess)) = (at(new), guess) else {
+                        unproven.push(name);
+                        eprintln!("{name}: unproven (past a rational net's knots), new {new:?}");
+                        continue;
+                    };
+                    assert!(n.0 <= guess.1, "{name}: new {n:?} proven farther than the guess {guess:?}");
+                    let global = crate::certify::nearest(&k, &s, None, v3(*p), Point2::new(new[2], new[3]));
+                    // (where the whole surface's bound stops short, the bound over a
+                    // grid of boxes, each its own subdivision: the least of them)
+                    let lo = if global.hi - global.lo <= 1e-6 * global.hi {
+                        global.lo
+                    } else {
+                        wr57_split_lower_bound(&k, &s, v3(*p), global.hi)
+                    };
+                    if global.hi - lo <= 1e-6 * global.hi {
+                        globally_nearest += 1;
+                    } else {
+                        argued += 1;
+                    }
+                    eprintln!("{name}: answered now, new {n:?} guess {guess:?} surface's lower bound {lo}");
+                }
+                (4, 1) => {
+                    let (Some(m), Some(guess)) = (at(main), guess) else {
+                        unproven.push(name);
+                        eprintln!("{name}: unproven (past a rational net's knots), main {main:?}");
+                        continue;
+                    };
+                    if m.0 > guess.1 {
+                        refused_farther_than_guess += 1;
+                        eprintln!("{name}: refused now, main {m:?} proven farther than the guess {guess:?}");
+                    } else {
+                        // (main's answer on a boundary that is not a pole: a point of the
+                        // inversion domain's edges proven nearer, found by sampling them;
+                        // a sampled point found nearer is a proof, its absence none)
+                        let edge = wr57_nearest_edge_point(&k, &s, v3(*p), &dom_of(*dom));
+                        assert!(
+                            edge.is_some_and(|(e, _)| e.1 < m.0),
+                            "{name}: main {m:?} proven neither farther than the guess {guess:?} nor than an edge point {edge:?}"
+                        );
+                        refused_off_a_pole += 1;
+                        eprintln!("{name}: refused now, main {m:?} proven farther than the edge point {edge:?}");
+                    }
+                }
+                _ => panic!("{name}: an unexpected transition {main:?} -> {new:?}"),
+            }
+        }
+        eprintln!(
+            "{proven_nearer} answers proven nearer than main's, {ties} ties; {globally_nearest} answers \
+             now proven the closest point, {argued} not farther than the guess only (ARGUED); refused: \
+             {refused_farther_than_guess} main proven farther than the guess, {refused_off_a_pole} than an edge \
+             point; unproven {unproven:?}"
+        );
+        assert_eq!(
+            (
+                proven_nearer,
+                ties,
+                globally_nearest,
+                argued,
+                refused_farther_than_guess,
+                refused_off_a_pole,
+                unproven.as_slice()
+            ),
+            WR57_COUNTS,
+            "the certified counts moved"
+        );
+    }
+
+    /// [`wr57_moved_inversions_are_certified`]'s counts: proven nearer, ties, answered now
+    /// and proven the closest point, answered now and not farther than the guess only, and
+    /// the refused rows where main's answer is proven farther than the guess and where it is
+    /// proven farther than a point of the inversion domain's edges (gen0270, whose answer
+    /// lies on an edge that is not a pole), and the rows without an enclosure. The tie is
+    /// gen1668 (the enclosures an ulp apart). gen0074's answer, 1.1e-4 from the domain's
+    /// `u_min` in a narrow valley, is proven the closest point by the split bound
+    /// ([`wr57_split_lower_bound`]: 0.2309564528332 against its 0.2309564528361; the whole
+    /// surface's subdivision stops at 0.2260). gen1191 is main's refusal again (#18052).
+    const WR57_COUNTS: (usize, usize, usize, usize, usize, usize, &[&str]) = (28, 1, 25, 0, 19, 1, &[]);
+
     /// Generated cases reach every op, and the comparable ones mostly compare values.
     #[test]
     fn generated_cases_are_diverse() {

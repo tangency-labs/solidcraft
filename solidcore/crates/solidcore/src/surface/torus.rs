@@ -93,6 +93,9 @@
 //!   radius is measured from the torus origin (WR-501; upstream measures it from the
 //!   first sweep circle's centre, off the equator when the tube does not start there,
 //!   #1470).
+//! - **Generator interval.** Recognition, rebuilding and support installation use
+//!   the finalized generator interval for the surface's analytic V bounds. The
+//!   provisional seam-snapped angles only seed generator reconstruction (#19083).
 //! - **Parent calls.** `Transform` finishes in `SmSurfOfRevolution::Transform`
 //!   (status ignored), its polar-converter rebuild given the torus's iso circles as
 //!   upstream's virtual call does; `ReadFromDB` reads the parent record with
@@ -567,8 +570,7 @@ impl Torus {
         .ok_or_else(|| {
             SolidError::surface_failed(OP_REBUILD, "a meridian has no radial direction")
         })?;
-        self.base.anal_uv_domain = Extent2d::from_bounds(sweep.min(), v0, sweep.max(), v1);
-        self.base.gen_curve = Some(Curve::from(Ellipse::new_circle(
+        let circle = Ellipse::new_circle(
             k,
             centre,
             x,
@@ -580,7 +582,11 @@ impl Torus {
                 nurb: Some(&generator),
                 inside_out: self.inside_out,
             },
-        )?));
+        )?;
+        let tube = circle.step_interval();
+        self.base.anal_uv_domain =
+            Extent2d::from_bounds(sweep.min(), tube.min(), sweep.max(), tube.max());
+        self.base.gen_curve = Some(Curve::from(circle));
         self.base.position = placement;
         self.major_radius = major;
         self.minor_radius = minor;
@@ -1221,20 +1227,12 @@ impl Torus {
             [start_for_max_angle, vec_max],
             torus_z_axis,
             inside_out,
-            EFF_ZERO_DEG,
+            tube_ends_zero_deg(scaled_zero, min_rad),
         ) {
             Ok(ivl) => ivl,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None),
         };
-
-        // define Torus domain
-        let anal_uv_domain = Extent2d::from_bounds(
-            sweep_ivl.min(),
-            gen_angle_min,
-            sweep_ivl.max(),
-            gen_angle_max,
-        );
 
         // Get GenCurve Isoparameter Curve
         let gen_curve_iso = test.create_iso_parametric_curve(
@@ -1252,7 +1250,7 @@ impl Torus {
             min_origin,
             start_for_min_angle,
             torus_z_axis,
-            anal_uv_domain.v_interval(),
+            Extent1d::from_min_max(gen_angle_min, gen_angle_max),
             min_rad,
             &EllipseOptions {
                 dim: 3,
@@ -1260,6 +1258,12 @@ impl Torus {
                 inside_out,
             },
         )?;
+
+        // The ellipse finalizes its angles against the retained NURB. The surface
+        // must use that same interval, rather than the provisional seam-snapped ends.
+        let tube = circle.step_interval();
+        let anal_uv_domain =
+            Extent2d::from_bounds(sweep_ivl.min(), tube.min(), sweep_ivl.max(), tube.max());
 
         // build a new torus with given GenCurve to force parameterization compatibility
         //    constant U Curve orientations,
@@ -1474,16 +1478,8 @@ impl Torus {
             [start_for_max_angle, vec_max],
             torus_z_axis,
             inside_out,
-            EFF_ZERO_DEG,
+            tube_ends_zero_deg(scaled_zero, min_rad),
         )?;
-
-        // define Torus domain
-        let anal_uv_domain = Extent2d::from_bounds(
-            sweep_ivl.min(),
-            gen_angle_min,
-            sweep_ivl.max(),
-            gen_angle_max,
-        );
 
         // Get GenCurve Isoparameter Curve
         let gen_curve_iso = srf.create_iso_parametric_curve(
@@ -1501,7 +1497,7 @@ impl Torus {
             min_origin,
             start_for_min_angle,
             torus_z_axis,
-            anal_uv_domain.v_interval(),
+            Extent1d::from_min_max(gen_angle_min, gen_angle_max),
             min_rad,
             &EllipseOptions {
                 dim: 3,
@@ -1517,6 +1513,12 @@ impl Torus {
                 "the generator circle is degenerate",
             ));
         }
+
+        // The ellipse finalizes its angles against the retained NURB. The surface
+        // must use that same interval, rather than the provisional seam-snapped ends.
+        let tube = circle.step_interval();
+        let anal_uv_domain =
+            Extent2d::from_bounds(sweep_ivl.min(), tube.min(), sweep_ivl.max(), tube.max());
 
         // set m_pGenCurve
         self.base.gen_curve = Some(Curve::from(circle));
@@ -2003,10 +2005,36 @@ fn torus_gen_curve_interval(
     if high.abs() < zero_deg {
         high = 0.0;
     }
+    // (not upstream, solidcore#3339's S0049/S0332) ends that are one point within
+    // `zero_deg` close a whole turn exactly
+    if (high - low).abs() < zero_deg {
+        high = low;
+    }
     if high < low + zero_deg {
         high += 360.0;
     }
     Ok((low, high))
+}
+
+/// Not upstream (the Dutchman stress corpus S0049 and S0332): the angle, in degrees, within
+/// which a torus's generating circle's ends found from its NURB are one point. The ends
+/// carry the rounding of their coordinates, `scaled_zero` (the recogniser's length zero,
+/// grown with the points' size), which turns through `scaled_zero / minor` radians about a
+/// tube of radius `minor`; at least `SM_EFF_ZERO_DEG`. A thin tube far from the origin (r
+/// 0.05 mm at 1000 mm) has its closed ends ~1.6e-9 degrees apart: taken as not quite a turn,
+/// the torus's tube interval ended short of its generator's and the check refused it
+/// (`SmSurfOfRevolution` test #2, `SmTorus` test #2).
+fn tube_ends_zero_deg(scaled_zero: f64, minor: f64) -> f64 {
+    let turned = if minor > 0.0 {
+        (scaled_zero / minor).to_degrees()
+    } else {
+        0.0
+    };
+    if turned.is_finite() {
+        EFF_ZERO_DEG.max(turned)
+    } else {
+        EFF_ZERO_DEG
+    }
 }
 
 #[cfg(test)]
@@ -2343,6 +2371,60 @@ mod tests {
         assert!(t.approx_eq(&r));
     }
 
+    /// A genuine tube phase below the seam snapping threshold must survive
+    /// reconstruction. The surface and retained iso circle share one parameter map.
+    #[test]
+    fn reconstructed_torus_uses_final_generator_interval() {
+        let k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
+        let frame = Axis2Placement::IDENTITY;
+        let phase = 1e-9_f64.to_degrees();
+        for swap in [false, true] {
+            for inside_out in [false, true] {
+                let mut original = Torus::create_canonical(
+                    &k,
+                    &frame,
+                    62.0,
+                    0.5,
+                    TorusOptions {
+                        swap_uv: swap,
+                        inside_out,
+                        circle_nurb: None,
+                    },
+                    Some(&Extent2d::from_bounds(0.0, phase, 60.0, 180.0 + phase)),
+                )
+                .unwrap();
+                original.inside_out = inside_out;
+                let form = plain(&original);
+                let mut found = Torus::is_nurb_surface_torus(&k, &form, 1.0)
+                    .unwrap()
+                    .expect("torus");
+                let check = |t: &Torus| {
+                    let CurveKind::Ellipse(circle) = t.base.gen_curve.as_ref().unwrap().kind()
+                    else {
+                        panic!("circle generator")
+                    };
+                    assert!(
+                        circle.step_interval().min() > 0.0,
+                        "the tube phase survives"
+                    );
+                    assert_eq!(
+                        t.base.anal_uv_domain.v_interval(),
+                        circle.step_interval(),
+                        "swap={swap}, inside_out={inside_out}"
+                    );
+                };
+                check(&found);
+                found.on_support(&k, frame, 62.0, 0.5, form).unwrap();
+                check(&found);
+                original.rebuild_step_from_nurb_parameters(&k).unwrap();
+                check(&original);
+            }
+        }
+    }
+
     #[test]
     fn read_reaches_the_base_record() {
         let mut db = DatabaseReader::new();
@@ -2629,6 +2711,45 @@ mod tests {
             let v = found.base.anal_uv_domain.v_interval();
             assert!(
                 (v.min() + 90.0).abs() < 1e-9 && (v.length() - 360.0).abs() < 1e-9,
+                "swap {swap}: tube interval {v:?}"
+            );
+        }
+    }
+
+    /// The Dutchman stress corpus S0049 and S0332: a circle r 0.05 swept a quarter turn round
+    /// an arc r 0.3 at z = 1000 is a torus whose NURB runs once round its tube. Its two tube
+    /// ends are one point but carry the rounding of coordinates near 1000, about 1.6e-9
+    /// degrees of a 0.05 tube; taken as not quite a turn, the tube interval ended short of its
+    /// generator's and the check refused the torus. The tube is a whole turn, exactly.
+    #[test]
+    fn a_thin_tube_far_from_the_origin_is_one_whole_turn() {
+        let frame = Axis2Placement::new(
+            Vec3::new(0.0, 0.3, 1000.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        let dom = Extent2d::from_bounds(0.0, -90.0, 90.0, 270.0);
+        for swap in [false, true] {
+            let k = Kernel::default();
+            let t = Torus::create_canonical(
+                &k,
+                &frame,
+                0.3,
+                0.05,
+                TorusOptions {
+                    swap_uv: swap,
+                    inside_out: false,
+                    circle_nurb: None,
+                },
+                Some(&dom),
+            )
+            .unwrap();
+            let found = Torus::is_nurb_surface_torus(&k, &plain(&t), 1.0)
+                .unwrap()
+                .expect("a torus");
+            let v = found.base.anal_uv_domain.v_interval();
+            assert!(
+                (v.length() - 360.0).abs() <= 1e-12 * 360.0,
                 "swap {swap}: tube interval {v:?}"
             );
         }

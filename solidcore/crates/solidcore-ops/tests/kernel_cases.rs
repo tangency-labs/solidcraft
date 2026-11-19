@@ -31,7 +31,7 @@
 //! - `KERNEL_CASES_CASE`: run only cases whose name contains it;
 //! - `KERNEL_CASES_TIMEOUT_S`: a case's time limit in seconds; one past it is a hang. In this
 //!   process (`KERNEL_CASES_JOBS` unset or 1) it is wall time, 180 s by default, and the cases
-//!   after a hang are not run (it holds the process kernel). With jobs it is the case process's
+//!   after a hang are not run (it still runs on its thread). With jobs it is the case process's
 //!   CPU time (user and system, from `/proc` on Linux; wall time elsewhere), 600 s by default,
 //!   with a backstop of four times it in wall time for a process that hangs without using CPU;
 //!   the hung process is killed, and the other cases still run;
@@ -53,6 +53,9 @@
     clippy::print_stdout,
     clippy::cast_precision_loss
 )] // test
+
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -1380,12 +1383,24 @@ fn run_case_with_records(
                     bodies.insert(name.to_owned(), body);
                 }
             }
-            // A handled refusal is an attempt, not the case's outcome. Keep checking the
-            // later operations and final geometry; an unmarked refusal still ends the case.
-            (Err(_), Some(_)) if continued => {}
-            (Err(_), Some(_)) => {
-                write_smb(e, &ins);
-                return Ok(None);
+            (Err(x), Some(_)) => {
+                // An entry may name the refusal it expects (`refused_as`, a part of the
+                // error's text): any other error, such as a blend that fails inside instead of
+                // being refused, does not stand for it, whether the refusal was handled or not.
+                if let Some(kind) = c.get("refused_as").and_then(Value::as_str) {
+                    if !x.contains(kind) {
+                        write_smb(e, &ins);
+                        return Err(Stop::Fail(format!(
+                            "call {i} ({op}) failed where the rig's was refused as \"{kind}\": {x}"
+                        )));
+                    }
+                }
+                // A handled refusal is an attempt, not the case's outcome. Keep checking the
+                // later operations and final geometry; an unmarked refusal still ends the case.
+                if !continued {
+                    write_smb(e, &ins);
+                    return Ok(None);
+                }
             }
             (Err(x), None) => {
                 write_smb(e, &ins);
@@ -1522,8 +1537,7 @@ fn moved_from_the_rig(result: &[Slot], rig: f64, got: f64) -> Result<(), String>
         return Err(format!("{} result bodies, not one", result.len()));
     };
     let bytes = s.body.to_smb(true).map_err(|x| format!("to_smb: {x}"))?;
-    // the case's own fixes: the reader refuses what they write otherwise (a round kept as its
-    // definition, `fillet_round_as_definition`, writes a procedural blend surface)
+    // the case's own fixes: the reader refuses what they write otherwise
     let mut k = solidcore::Kernel::default();
     for name in session::fixes() {
         let flag = k
@@ -1945,6 +1959,36 @@ fn handled_refusal_case() -> Value {
         "expected": {"body_count": 1, "volume_mm3": 4.0 * std::f64::consts::PI / 3.0,
                      "tolerance": {"rel": 1e-9}}
     })
+}
+
+#[test]
+fn a_named_refusal_kind_must_match_the_replayed_error() {
+    let mut e = handled_refusal_case();
+    let calls = e["calls"].as_array_mut().unwrap();
+    calls.truncate(1);
+    calls[0].as_object_mut().unwrap().remove("continued");
+    e["result"] = serde_json::json!([]);
+    // without a kind, any error stands for the traced refusal
+    assert!(matches!(run_case(Path::new("unused.json"), &e), Ok(None)));
+    e["calls"][0]["refused_as"] = serde_json::json!("no room");
+    assert!(
+        matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
+    );
+}
+
+#[test]
+fn a_handled_refusal_checks_its_named_kind() {
+    let mut e = handled_refusal_case();
+    e["calls"][0]["refused_as"] = serde_json::json!("no room");
+    assert!(
+        matches!(run_case(Path::new("unused.json"), &e), Err(Stop::Fail(why)) if why.contains("refused as \"no room\""))
+    );
+    // a kind the replayed error does have lets the case go on to the final geometry
+    e["calls"][0]["refused_as"] = serde_json::json!("invalid argument");
+    assert!(matches!(
+        run_case(Path::new("unused.json"), &e),
+        Ok(Some(_))
+    ));
 }
 
 #[test]
@@ -3129,10 +3173,7 @@ fn union_all_replays_an_odd_operand_list_without_consuming_inputs() {
 #[test]
 #[ignore = "the 17 captured unions are slow; also covered by the full kernel rig"]
 fn union_all_replays_captured_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let mut files = Vec::new();
     entries(&corpus(), &mut files);
     files.sort();
@@ -3170,10 +3211,7 @@ fn union_all_replays_captured_cases() {
 #[test]
 #[ignore = "replays corpus cases with the rig's fixes; run with the kernel rig (--ignored)"]
 fn turn_cases_replay_their_traced_turn() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     for (case, refused) in [
         ("cov-fillet-turn-mitre-boss-base-r1", false),
@@ -3683,7 +3721,7 @@ fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> 
             g.moved = is_listed;
             g.hang = true;
             g.note
-                .push_str(" (the run stops here: the case holds the process kernel)");
+                .push_str(" (the run stops here: the case still runs on its thread)");
             return g;
         }
     };
@@ -4306,10 +4344,7 @@ fn extend_sheet_metadata_and_refusal_are_distinct() {
 #[test]
 #[ignore = "the whole corpus is slow; run it with --ignored, KERNEL_CASES_AREA shards it"]
 fn kernel_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     let areas: Option<Vec<String>> = std::env::var("KERNEL_CASES_AREA").ok().map(|a| {
         a.split(',')
@@ -4868,4 +4903,53 @@ fn report(graded: &[Graded], listed: &BTreeMap<String, Listed>, not_run: usize) 
         writeln!(s, "- {}/{} [{}]: {}", g.area, g.case, l.issue, g.note).unwrap();
     }
     s
+}
+
+/// solidcraft#2992 (#17896): the disk joined with its 36 twisted lofted blades passes
+/// solidcore's own check. Where a blade's lofted (free-form) face meets the disk, the edge
+/// keeps the intersector's UV curve on that face, the curve its 3D curve was fitted from.
+/// `MakeFace`'s drop of the edge onto the loft, a second fit, gave nine trims whose radii
+/// of curvature were under the check's bound (Test #13, offsets 2.9e-5 to 9.6e-5 against
+/// tolerances 1.0e-4 to 1.2e-4), and the join was refused.
+#[test]
+fn the_disk_joined_with_its_lofted_blades_passes_the_check() {
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("crashes/2992-join-disk-and-36-twisted-loft-blades.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let recs = records(&entry, &e);
+    // each union_all input is a tagged copy of a copy of an operand record
+    let mut from: HashMap<String, String> = HashMap::new();
+    let mut inputs = Vec::new();
+    for call in e["calls"].as_array().unwrap() {
+        let input = call["inputs"][0].as_str().unwrap().to_owned();
+        match call["op"].as_str().unwrap() {
+            "union_all" => {
+                inputs = call["inputs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_owned())
+                    .collect();
+            }
+            _ => {
+                from.insert(call["outputs"][0].as_str().unwrap().to_owned(), input);
+            }
+        }
+    }
+    let bodies: Vec<Body> = inputs
+        .iter()
+        .map(|name| {
+            let mut name = name.clone();
+            while let Some(up) = from.get(&name) {
+                name.clone_from(up);
+            }
+            let record: Record = serde_json::from_value(recs[&name].clone()).unwrap();
+            let trusted = e["bodies"][&name]["trusted"].as_bool().unwrap_or(true);
+            Body::from_record(&record, trusted).unwrap().0
+        })
+        .collect();
+    assert_eq!(bodies.len(), 37);
+    let joined = union_all(bodies).unwrap();
+    let report = joined.check(solidcore_ops::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
 }

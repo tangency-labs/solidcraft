@@ -170,6 +170,12 @@ const URDF_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "mesh_prefix", label: "Mesh file prefix", kind: OptionKind::Text { default: "", hint: "package://robot/meshes/" } },
     OptionSpec { param: "effort", label: "Joint effort", kind: OptionKind::Number { default: 1000.0, min: 0.0, max: 1e9, unit: "" } },
     OptionSpec { param: "velocity", label: "Joint velocity", kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "" } },
+    OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
+];
+
+const SDF_OPTIONS: &[OptionSpec] = &[
+    OptionSpec { param: "static", label: "Static model", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "model_uris", label: "Name files as model://", kind: OptionKind::Bool { default: false } },
 ];
 
 const VIEW_DXF_OPTIONS: &[OptionSpec] = &[
@@ -205,7 +211,7 @@ pub static FORMATS: &[FormatSpec] = &[
     FormatSpec {
         id: "design",
         label: "SolidCraft design",
-        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], crate::DESIGN_EXTS[2], "json"],
+        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], "json"],
         role: Role::Design,
         import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
         export: None,
@@ -300,10 +306,30 @@ pub static FORMATS: &[FormatSpec] = &[
         import: None,
         export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
     },
+    // Read through cadmpeg: meshes as mesh bodies and the prim tree as components, turned to Z up
+    // when the file says Y is up. Written through cadmpeg from the STEP the bodies make: exact
+    // B-rep and meshes, in metres with Z up; the extension picks the encoding.
+    FormatSpec {
+        id: "usd",
+        label: "OpenUSD",
+        extensions: &["usd", "usda", "usdc", "usdz"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[], native_only: false }),
+        export: Some(ExportSpec { command: "file.export", format: None, options: &[], scope: ExportScope::Bodies, lossless: false }),
+    },
     FormatSpec {
         id: "ply",
         label: "PLY point cloud",
         extensions: &["ply"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    // The Point Cloud Library's file: text, binary or compressed.
+    FormatSpec {
+        id: "pcd",
+        label: "PCD point cloud",
+        extensions: &["pcd"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
@@ -324,6 +350,15 @@ pub static FORMATS: &[FormatSpec] = &[
         import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
     },
+    // The same text as XYZ under another name.
+    FormatSpec {
+        id: "asc",
+        label: "ASC point cloud",
+        extensions: &["asc"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
     FormatSpec {
         id: "urdf",
         label: "URDF robot",
@@ -331,6 +366,14 @@ pub static FORMATS: &[FormatSpec] = &[
         role: Role::Artifact,
         import: None,
         export: Some(ExportSpec { command: "file.export", format: None, options: URDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
+    },
+    FormatSpec {
+        id: "sdf",
+        label: "Gazebo model (SDF)",
+        extensions: &["sdf"],
+        role: Role::Artifact,
+        import: None,
+        export: Some(ExportSpec { command: "file.export", format: None, options: SDF_OPTIONS, scope: ExportScope::Design, lossless: false }),
     },
     FormatSpec {
         id: "design-json",
@@ -443,12 +486,30 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
             ImportTarget::Kicad => add(f.label, f.extensions),
+            // An OpenUSD scene is read as meshes, but it is its own kind of file to most people.
+            ImportTarget::Mesh if f.id == "usd" => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
-            ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
+            ImportTarget::PointCloud => add("Point cloud (PLY, PCD, XYZ, PTS, ASC)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
     groups
+}
+
+/// The Open dialog's groups for installed importer plugins: (plugin name, lower-case extensions).
+/// The app sets them before it shows the dialog; hosts add them after the built-in groups.
+static PLUGIN_OPEN_FILTERS: std::sync::RwLock<Vec<(String, Vec<String>)>> = std::sync::RwLock::new(Vec::new());
+
+/// Set the importer plugins' Open dialog groups (see [`plugin_open_filters`]).
+pub fn set_plugin_open_filters(filters: Vec<(String, Vec<String>)>) {
+    if let Ok(mut current) = PLUGIN_OPEN_FILTERS.write() {
+        *current = filters;
+    }
+}
+
+/// The importer plugins' Open dialog groups the app last set.
+pub fn plugin_open_filters() -> Vec<(String, Vec<String>)> {
+    PLUGIN_OPEN_FILTERS.read().map(|filters| filters.clone()).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -493,7 +554,7 @@ mod tests {
         for e in ["3mf", "stl", "obj", "glb", "gltf"] {
             assert!(with_target(ImportTarget::Mesh).contains(&e), "registry misses mesh .{e}");
         }
-        for e in ["ply", "xyz", "pts"] {
+        for e in ["ply", "pcd", "xyz", "pts", "asc"] {
             assert!(with_target(ImportTarget::PointCloud).contains(&e), "registry misses point cloud .{e}");
             assert!(crate::is_point_cloud_path(&format!("scan.{e}")));
             assert!(open_extensions(true).contains(&e));
@@ -536,6 +597,10 @@ mod tests {
         assert_eq!(for_path("a.glb").map(|f| f.id), Some("gltf"));
         let writes = |ext: &str| exportable().filter(|f| f.extensions.contains(&ext)).map(|f| f.id).collect::<Vec<_>>();
         assert_eq!(writes("glb"), vec!["glb"]);
+        for e in ["usd", "usda", "usdc", "usdz"] {
+            assert_eq!(import_for_path(&format!("a.{e}")).map(|f| f.id), Some("usd"));
+            assert_eq!(writes(e), vec!["usd"]);
+        }
         assert!(writes("gltf").is_empty(), "a .gltf file is never written");
         assert!(for_path("a.png").is_none());
         assert!(for_path("nodot").is_none());
@@ -558,12 +623,13 @@ mod tests {
     fn import_filter_groups_hold_the_expected_extensions() {
         let native = import_filters(true);
         let find = |label: &str| native.iter().find(|(l, _)| *l == label).map(|(_, e)| e.clone()).unwrap_or_default();
-        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
+        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
-        assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
+        assert_eq!(find("OpenUSD"), vec!["usd", "usda", "usdc", "usdz"]);
+        assert_eq!(find("Point cloud (PLY, PCD, XYZ, PTS, ASC)"), vec!["ply", "pcd", "xyz", "pts", "asc"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
     }

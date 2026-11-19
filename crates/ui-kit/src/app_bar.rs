@@ -49,19 +49,11 @@ pub mod brand {
 /// The pills' height, and the least width at which the bar gives the first pill its label.
 pub const PILL_HEIGHT: f32 = 24.0;
 pub const PILL_LABEL_MIN: f32 = 1100.0;
-/// The gap before and between pills, and the × inside one.
-const PILL_GAP: f32 = 6.0;
+/// The × inside a pill.
 const PILL_X: f32 = 16.0;
 
 /// Space between the search field and Settings.
 pub const SEARCH_GAP: f32 = 4.0;
-/// Home's least place from the bar's left edge, and the least gap between the app's name and
-/// Home's button. 128 was Home's fixed place, sized for "SolidCraft": the name starts at 36 and is
-/// 65.1 wide in Plex Sans semibold at the theme's heading size (14), so it ends at 101.1, and Home's
-/// button starts at 108 (20 before its place), 6.9 after it. A longer name moves Home right by
-/// the same gap, rounded down so SolidCraft's bar stays put: 36 + 65.1 + 6 + 20 = 127.1, under 128.
-const HOME_MIN: f32 = 128.0;
-const NAME_GAP: f32 = 6.0;
 /// A bar narrower than this shows no product name, no Undo and Redo, and narrower file actions.
 const COMPACT: f32 = 640.0;
 /// Space the File menu keeps below its rows for its frame and a gap above the window's bottom.
@@ -78,8 +70,6 @@ pub struct Handles<'a> {
     /// The File button, likewise.
     pub file: &'a [&'a str],
     pub file_rect: &'a [&'a str],
-    /// The Plugins button's rect and centre, when the bar has one.
-    pub plugins: &'a str,
     /// A button's rect as a target, under each prefix followed by its id.
     pub button: &'a [&'a str],
     /// A separator's rect, this prefix followed by its group.
@@ -147,14 +137,12 @@ pub struct AppBar<'a> {
     /// The app's mark, painted centred at the point given, and its name beside it.
     pub mark: &'a dyn Fn(&Painter, Pos2),
     pub name: &'a str,
+    /// Optional space for an app-owned control before Home.
+    pub leading: Option<egui::Vec2>,
     pub home: BarButton<'a>,
     /// The File button's label; it is enabled with `home`, and drawn held while its menu is open.
     pub file: &'a str,
     pub file_open: bool,
-    /// The Plugins menu's text button after File, and whether its menu is open; `None` leaves it
-    /// out (the web build, which runs no plugins). Its accessible name is the third member
-    /// ("Plugins menu"), which contains the visible label but is not the Preferences page's name.
-    pub plugins: Option<(&'a str, bool, &'a str)>,
     /// The file actions after File.
     pub actions: Vec<BarButton<'a>>,
     /// How many quick-access buttons the app draws after them (one `step` each).
@@ -175,13 +163,12 @@ pub struct AppBar<'a> {
     pub handles: Handles<'a>,
 }
 
-/// A menu's text button (File, Plugins), its label starting 5 before `x`: its rect, and whether it
+/// A menu's text button (File), in its laid-out rect: its rect, and whether it
 /// was clicked while `idle`. Drawn held while its menu is `open`.
 /// It shows `label`; `name` is its accessible name.
-fn text_button(ui: &mut egui::Ui, r: Rect, x: f32, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
+fn text_button(ui: &mut egui::Ui, rect: Rect, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
-    let rect = Rect::from_min_size(pos2(x - 13.0, r.center().y - 13.0), vec2(galley.size().x + 16.0, 26.0));
     let resp = ui.interact(rect, ui.scope_id().with(("ab", salt)), if idle { Sense::click() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, name));
     if idle && (resp.hovered() || resp.has_focus() || open) {
@@ -198,10 +185,6 @@ pub enum BarAction {
     Home,
     /// The File button, at `rect`.
     File {
-        rect: Rect,
-    },
-    /// The Plugins button, at `rect`.
-    Plugins {
         rect: Rect,
     },
     /// A file action or Settings, by its id.
@@ -227,6 +210,8 @@ pub enum BarAction {
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Space reserved for the app-owned control before Home.
+    pub leading: Option<Rect>,
     pub actions: Vec<BarAction>,
     /// The File button, where its menu opens.
     pub file: Rect,
@@ -240,8 +225,6 @@ pub struct BarOut {
     pub controls_left: f32,
     pub search: Option<Rect>,
     pub assistant: Option<Rect>,
-    /// The bar had no room for the Plugins button: the app lists Plugins in the File menu.
-    pub plugins_in_file: bool,
 }
 
 fn handle(prefix: &str, key: &str) -> String {
@@ -306,27 +289,21 @@ fn pill_width(ui: &egui::Ui, p: &Pill) -> f32 {
     8.0 + 14.0 + label + 4.0 + PILL_X + 3.0
 }
 
-/// The room the pills take left of Report a bug: each with the gap before it.
-fn pills_width(ui: &egui::Ui, pills: &[Pill]) -> f32 {
-    pills.iter().map(|p| pill_width(ui, p) + PILL_GAP).sum()
-}
-
 /// A flat capsule `PILL_HEIGHT` tall in `fill`, a touch lighter while `hot`.
 fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
     let fill = if hot { fill.lerp_to_gamma(egui::Color32::WHITE, 0.12) } else { fill };
     ui.painter().rect_filled(rect, egui::CornerRadius::same((rect.height() / 2.0) as u8), fill);
 }
 
-/// One pill, its right edge at `right`: returns its left edge. A flat capsule with full-height
+/// One pill in its laid-out rect. A flat capsule with full-height
 /// corners; hovering lightens its fill by about 8 % over 0.1 s. The × is a plain glyph, with a
 /// round translucent dark background (black at 38 %) that fades in while it is hovered. Edges are
 /// snapped to whole pixels so they stay crisp at any scale.
-fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) -> f32 {
+fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) {
     let t = Tokens::get();
     let ppp = ui.ctx().pixels_per_point();
     let snap = |v: f32| (v * ppp).round() / ppp;
-    let width = snap(pill_width(ui, p));
-    let rect = Rect::from_min_size(pos2(snap(right - width), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(width, PILL_HEIGHT));
+    let rect = Rect::from_min_size(pos2(rect.left(), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(rect.width(), PILL_HEIGHT));
     let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
     let main = Rect::from_min_max(rect.min, pos2(x_rect.left(), rect.bottom()));
     let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click());
@@ -366,7 +343,6 @@ fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions
     if x_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.hide_tip).clicked() {
         actions.push(BarAction::HidePill { id: p.id.to_string() });
     }
-    rect.left() - PILL_GAP
 }
 
 /// A short divider between the bar's groups.
@@ -399,38 +375,50 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
 /// window's own buttons).
 pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOut {
+    use crate::app_bar_layout::{application, layout};
+
     let t = Tokens::get();
     let h = &data.handles;
     let r = bar;
-    let left = content.left();
-    let compact = r.right() - left < COMPACT;
-    // The Plugins menu's button shows its label where the bar has room for it. Between the compact
-    // width and that room, a button would cost the bar a control it had before there was a Plugins
-    // menu: the bar leaves it out and the app puts Plugins in the File menu instead. A compact
-    // bar, which already drops controls, shows it as a narrow icon.
-    let plugins_label = data.plugins.is_some_and(|(label, _, _)| {
-        let width = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 18.0;
-        r.right() - left >= COMPACT + width
-    });
-    let plugins_in_file = data.plugins.is_some() && !plugins_label && !compact;
+    let report_font = FontId::proportional(t.font_button);
+    let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
+    let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
+    let measured = application::Measurements {
+        origin: r.left(),
+        name: ui.painter().layout_no_wrap(data.name.to_string(), crate::type_face::semibold(t.font_heading), t.app_bar_text).size().x,
+        file: ui.painter().layout_no_wrap(data.file.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 16.0,
+        leading: data.leading.map(|size| size.x),
+        actions: data.actions.iter().map(|b| b.wide_only).collect(),
+        quick: data.quick,
+        report: label_width,
+        report_icon_only: data.report.icon_only,
+        pills: data.pills.iter().map(|p| pill_width(ui, p)).collect(),
+        search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
+        assistant: data.assistant,
+        version: version.as_ref().map(|(_, galley)| galley.size().x),
+        offered: solidcraft_ui_registry::rect_of("titlebar:update").map(|u| u.width()),
+        pixels_per_point: ui.ctx().pixels_per_point(),
+    };
+    let spec = application::spec(r.width(), content.left() - r.left(), r.right() - content.right(), measured);
+    let geometry = layout(&spec).application.unwrap_or_default();
+    let compact = geometry.compact;
+    let rect = |span: application::Span, height| {
+        Rect::from_min_max(pos2(r.left() + span.left, r.center().y - height / 2.0), pos2(r.left() + span.right, r.center().y + height / 2.0))
+    };
     let mut actions = Vec::new();
-    (data.mark)(ui.painter(), pos2(left + 20.0, r.center().y));
-    // Home's place: after the name as drawn, and never before HOME_MIN.
-    let mut x = if compact {
-        left + 56.0
-    } else {
-        let name = ui.painter().text(
-            pos2(left + 36.0, r.center().y),
+    (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
+    if !compact {
+        ui.painter().text(
+            pos2(r.left() + geometry.name, r.center().y),
             Align2::LEFT_CENTER,
             data.name,
             crate::type_face::semibold(t.font_heading),
             t.app_bar_text,
         );
-        // Home's button starts 20 before its place (32 wide, centred 4 before it).
-        (left + HOME_MIN).max(name.right() + NAME_GAP + 20.0)
-    };
+    }
+    let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
     // Home.
-    let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
+    let home = rect(geometry.home, 32.0);
     let idle = data.home.enabled;
     let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
     home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
@@ -447,12 +435,9 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
         actions.push(BarAction::Home);
     }
-    x = home.right() + 8.0;
-    separator(ui, r, x, "brand", h);
-    x += 16.0;
-    // The File menu's text button, then the Plugins menu's.
-    let (file, clicked) = text_button(ui, r, x, (data.file, data.file), data.file_open, idle, "file");
-    x = file.right() + 17.0;
+    separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
+    // The File menu's text button, .
+    let (file, clicked) = text_button(ui, rect(geometry.file, 26.0), (data.file, data.file), data.file_open, idle, "file");
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
     }
@@ -462,83 +447,36 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if clicked {
         actions.push(BarAction::File { rect: file });
     }
-    if let Some((label, open, name)) = data.plugins.filter(|_| !plugins_in_file) {
-        let (plugins, clicked) = if plugins_label {
-            let (plugins, clicked) = text_button(ui, r, x - 2.0, (label, name), open, idle, "plugins");
-            x = plugins.right() + 17.0;
-            (plugins, clicked)
-        } else {
-            let button = BarButton { id: "plugins", icon: "prefs_plugins", tip: name, enabled: idle, narrow: true, wide_only: false };
-            let plugins = Rect::from_center_size(pos2(x, r.center().y), vec2(22.0, 32.0));
-            if open {
-                ui.painter().rect_filled(plugins.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-            }
-            let clicked = icon_button(ui, r, x, &button, compact, h);
-            x += 24.0;
-            (plugins, clicked)
-        };
-        solidcraft_ui_registry::publish_rect(h.plugins, plugins);
-        solidcraft_ui_registry::publish_handle(h.plugins, plugins.center());
-        if clicked {
-            actions.push(BarAction::Plugins { rect: plugins });
-        }
-    }
     // The file actions, then the app's quick-access buttons.
-    let step = if compact { 22.0 } else { 34.0 };
-    for b in data.actions.iter().filter(|b| !(compact && b.wide_only)) {
-        if icon_button(ui, r, x, b, compact, h) {
+    for (b, at) in data.actions.iter().zip(&geometry.actions) {
+        if let Some(at) = at
+            && icon_button(ui, r, r.left() + at, b, compact, h)
+        {
             actions.push(BarAction::Button { id: b.id.to_string() });
         }
-        x += step;
     }
-    let mut quick = None;
-    if !compact && data.quick > 0 {
-        separator(ui, r, x - step / 2.0 + 8.0, "quick_access", h);
-        x += 8.0;
-        quick = Some((x, step));
-        x += data.quick as f32 * step;
+    if let Some(at) = geometry.quick_separator {
+        separator(ui, r, r.left() + at, "quick_access", h);
     }
+    let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
-    let captions = r.right() - content.right();
-    let separator_x = x - step + if compact { 19.0 } else { 24.0 };
-    separator(ui, r, separator_x, "documents", h);
-    let tabs_start = separator_x + 10.0;
-    let report_font = FontId::proportional(t.font_button);
-    let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
-    // The version links to its release notes; measured here so Report a bug leaves it room.
-    let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
-    let version_width = version.as_ref().map(|(_, galley)| galley.size().x);
-    let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version_width, data.report.icon_only);
-    // The right-hand controls keep their places; the link pills sit left of them, in the room the
-    // document tabs leave (see `pills_w` below).
-    let anchor = report.left();
-    // Settings' left edge; the search field, when the bar holds it, sits just before it and moves
-    // the assistant and the end of the document tabs left by its width.
-    let gear_left = anchor - 68.0;
-    let search = data.search.then(|| search_rect(ui.ctx(), data.search_shortcut, r, gear_left - SEARCH_GAP, anchor - CLUSTER_BUTTONS - tabs_start));
-    let search_shift = search.map_or(0.0, |s| s.width() + SEARCH_GAP);
+    separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
+    let tabs_start = r.left() + geometry.tabs_start;
+    let report = rect(geometry.report, if data.report.icon_only { 32.0 } else { 26.0 });
+    let report_label = geometry.report_labeled;
+    let search = geometry.search.map(|span| rect(span, 26.0));
     if let Some(search) = search {
         solidcraft_ui_registry::publish_target(h.search, search);
     }
-    if icon_button(ui, r, anchor - 18.0, &data.help, compact, h) {
-        actions.push(BarAction::Help { x: anchor - 18.0 });
+    let help = r.left() + geometry.help;
+    if icon_button(ui, r, help, &data.help, compact, h) {
+        actions.push(BarAction::Help { x: help });
     }
     // An offer (a newer release) sits before the right cluster, in the space up to the file
     // actions; labelled where Report a bug is (an icon-only one leaves it to fit by room).
-    let mut controls_left = anchor - CLUSTER_BUTTONS - search_shift;
-    let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
-    // The link pills sit left of the offer pill (which stays beside the assistant: the app draws it
-    // in `offer`, and its width is last frame's) or, with none, of the assistant. They are left out
-    // where the tabs would keep less than one tab's room (216) beside them, so a narrow bar looks as
-    // it did without them.
-    let offered = solidcraft_ui_registry::rect_of("titlebar:update").map_or(0.0, |u| u.width() + 4.0);
-    let pills_w = pills_width(ui, &data.pills);
-    let pills_shown = !data.pills.is_empty() && controls_left - offered - pills_w - tabs_start >= 216.0;
-    let pills_right = controls_left - 4.0 - offered;
-    if pills_shown {
-        controls_left -= pills_w + offered;
-    }
-    let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
+    let controls_left = r.left() + geometry.controls_left;
+    let offer = rect(geometry.offer, report.height());
+    let offer_labeled = geometry.offer_labeled;
     // Report a bug.
     let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
@@ -568,27 +506,26 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         actions.push(BarAction::Report);
     }
     // The link pills, left of the assistant.
-    let mut right = pills_right;
-    for p in data.pills.iter().rev().filter(|_| pills_shown) {
-        right = pill(ui, r, right, p, h, &mut actions);
+    for (p, span) in data.pills.iter().zip(&geometry.pills).rev() {
+        pill(ui, r, rect(*span, PILL_HEIGHT), p, h, &mut actions);
     }
     // Settings sits immediately left of Help.
-    let gear = Rect::from_center_size(pos2(anchor - 52.0, r.center().y), vec2(32.0, 32.0));
+    let gear = rect(geometry.settings, 32.0);
     let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
     if gresp.hovered() || gresp.has_focus() {
         ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
     }
     crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
     solidcraft_ui_registry::publish_rect(h.settings, gear);
-    let assistant = data.assistant.then(|| Rect::from_center_size(pos2(anchor - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
+    let assistant = geometry.assistant.map(|span| rect(span, 32.0));
     solidcraft_ui_registry::publish_handle(h.settings, gear.center());
     if gresp.backing_on_hover_text(data.settings.tip).clicked() {
         actions.push(BarAction::Button { id: data.settings.id.to_string() });
     }
     if let Some((v, galley)) = version
-        && version_room(r, captions, tabs_start, galley.size().x).is_some()
+        && let Some(span) = geometry.version
     {
-        let vrect = Align2::RIGHT_CENTER.anchor_size(pos2(r.right() - 12.0 - captions, r.center().y), galley.size());
+        let vrect = rect(span, galley.size().y);
         let vresp = ui.interact(
             vrect.expand2(vec2(2.0, 4.0)).intersect(Rect::everything_right_of(report.right())),
             ui.scope_id().with("sc_version_link"),
@@ -604,7 +541,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
             actions.push(BarAction::Version);
         }
     }
-    BarOut { actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant, plugins_in_file }
+    BarOut { leading, actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant }
 }
 
 /// Where the tab strip publishes its parts: each prefix is followed by the tab's place.
@@ -800,6 +737,9 @@ pub struct TabStrip<'a> {
     /// The selected design's views are sub-tabs in its tab (option A); off, its tab has a view
     /// switcher (option B). Option A also falls back to B where the bar has no room for it.
     pub views_as_tabs: bool,
+    /// The selected design's tab has a view switcher even with its one view (off: a design with one
+    /// view is a plain tab). Ignored while `views_as_tabs` is on.
+    pub switcher_always: bool,
     pub view_text: ViewText<'a>,
     /// The rows of a view's right-click menu, of the menu of the + and of the switcher's footer.
     pub view_menu: &'a [TabMenuRow<'a>],
@@ -891,7 +831,7 @@ struct ViewDrag {
 /// How the selected design's tab is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectedLayout {
-    /// A plain tab (a design with one view, or none).
+    /// A plain tab (a design with one view unless the switcher is asked for always, or none).
     Plain,
     /// Expanded into a pill with its views as sub-tabs.
     Pill,
@@ -899,10 +839,13 @@ pub enum SelectedLayout {
     Switcher,
 }
 
-/// How the selected design's tab is drawn: `views` views, the app asks for sub-tabs (`as_tabs`),
-/// the pill needs `pill_min` points at the least and the bar leaves it `room`.
-pub fn selected_layout(views: usize, as_tabs: bool, pill_min: f32, room: f32) -> SelectedLayout {
-    if views < 2 {
+/// How the selected design's tab is drawn: `views` views, the app asks for sub-tabs (`as_tabs`)
+/// or for a switcher even with one view (`switcher_always`, ignored with `as_tabs`), the pill needs
+/// `pill_min` points at the least and the bar leaves it `room`.
+pub fn selected_layout(views: usize, as_tabs: bool, switcher_always: bool, pill_min: f32, room: f32) -> SelectedLayout {
+    if views == 1 && switcher_always && !as_tabs {
+        SelectedLayout::Switcher
+    } else if views < 2 {
         SelectedLayout::Plain
     } else if as_tabs && pill_min <= room {
         SelectedLayout::Pill
@@ -1100,9 +1043,10 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view: its tab carries a small + after its name.
+/// Whether tab `i` is the shown, selected design with a single view while views are sub-tabs: its
+/// tab carries a small + after its name. With a switcher the tab stays as it was before views.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    strip.views_as_tabs && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
@@ -1130,7 +1074,7 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     let before = pill_before(dot, name_w);
     let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + PILL_AFTER + TAB_MARGIN;
     let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + PILL_AFTER + TAB_MARGIN;
-    let kind = selected_layout(n, strip.views_as_tabs, pill_min, room);
+    let kind = selected_layout(n, strip.views_as_tabs, strip.switcher_always, pill_min, room);
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
@@ -1555,8 +1499,11 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     // The selected tab grows with a name being typed into it.
     let typed = strip.rename.as_ref().map(|r| r.text.clone());
     let view_typed = strip.view_rename.as_ref().map(|(k, r)| (*k, r.text.clone()));
-    // The selected design's several views: a pill or a switcher, as far as the bar has room.
-    let geom = strip.tabs.get(strip.selected).copied().filter(|tab| strip.shown_selected == Some(strip.selected) && tab.views.len() > 1).map(|tab| {
+    // The selected design's several views: a pill or a switcher, as far as the bar has room (one
+    // view gets a switcher only when the app asks for it always).
+    let min_views = if strip.switcher_always && !strip.views_as_tabs { 1 } else { 2 };
+    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && tab.views.len() >= min_views;
+    let geom = strip.tabs.get(strip.selected).copied().filter(expands).map(|tab| {
         let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
         measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
     });

@@ -280,6 +280,12 @@ impl PreviewState {
         self.layer = Some((key, solidcraft_engine::doc::IDENTITY));
     }
 
+    /// The moving scene waiting in the layer's slot for the renderer, if one is.
+    #[cfg(test)]
+    pub(crate) fn waiting_layer_for_tests(&self) -> Option<GpuScene> {
+        self.layer_slot.lock().ok().and_then(|slot| slot.clone())
+    }
+
     /// The renderer takes the scene waiting in the layer's slot, as a frame that draws the layer
     /// does; whether one was waiting.
     #[cfg(test)]
@@ -308,7 +314,7 @@ impl PreviewState {
         }
     }
 
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.straight.clear();
         self.moving.clear();
         self.detach();
@@ -344,6 +350,11 @@ impl PreviewState {
             *slot = Some(sc);
         }
         self.key = self.key.wrapping_add(1);
+    }
+
+    pub(crate) fn show_joint_drive(&mut self, key: u64, start: f64, built: Built) {
+        self.started = start;
+        self.apply(key, Ok(built));
     }
 
     fn apply(&mut self, key: u64, job: Job) {
@@ -558,6 +569,10 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
 /// Keep the preview in step with the open dialog: start a computation when its inputs changed,
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
+    crate::control_joint_drive::expire(app);
+    if app.control_joint_drive.active() || !crate::ui_kit::numeric_preview_ready(ctx) {
+        return;
+    }
     // A Mirror's operation follows whether a copy meets the body it was made from: Join when one
     // overlaps or touches its body, New Body when none does. It is set once for each pick of
     // bodies and plane, so an operation picked by hand afterwards stays until they change.
@@ -568,8 +583,11 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         d.extra.insert("combine".into(), Value::Bool(meets));
         app.preview.mirror_decided = Some(key);
     }
+    // A plugin command's dialog: its run, on a scratch session without the plugin's grants.
+    let plugin = crate::plugin_menu::preview_commands(app);
     let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
+        _ if plugin.is_some() => plugin.as_ref().map(|(_, _, c)| c.clone()).unwrap_or_default(),
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),
         // A parameter being edited in Change Parameters.
         _ if app.params.as_ref().and_then(|p| p.preview_commands()).is_some() => {
@@ -616,7 +634,10 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             app.preview.busy = false;
             return;
         }
-        let scratch = app.session.scratch();
+        let mut scratch = app.session.scratch();
+        if let Some((_, id, _)) = &plugin {
+            crate::plugin_menu::dry_run(&mut scratch, id);
+        }
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();
@@ -800,6 +821,39 @@ fn mirror_of(cmds: &[(String, Value)]) -> Option<&Value> {
     match cmds {
         [(command, p)] if command == "solid.mirror" && p.get("bodies").is_some() => Some(p),
         _ => None,
+    }
+}
+
+/// The Mirror of bodies the open dialog `d` would make, when its preview is on (the only case
+/// whose operation the dialog sets by itself).
+fn dialog_mirror(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<Value> {
+    if !matches!(d.kind, crate::dialogs::Kind::Mirror) || !(d.previews() && d.preview_enabled) {
+        return None;
+    }
+    let cmds = crate::dialogs::preview_commands(app, d).ok()?;
+    mirror_of(&cmds).cloned()
+}
+
+/// New Body or Join was picked by hand in the Mirror dialog: it stays for the current bodies and
+/// plane, so the operation the preview chooses when it comes in does not replace it.
+pub(crate) fn mirror_operation_picked(app: &mut SolveApp, d: &crate::dialogs::Dialog) {
+    if let Some(p) = dialog_mirror(app, d) {
+        app.preview.mirror_decided = Some(mirror_key(&p));
+    }
+}
+
+/// OK on a Mirror whose operation is not set yet for its bodies and plane (the preview has not
+/// said whether a copy meets its body): set it now, on the same exact check the preview makes.
+/// OK then makes the same Mirror however soon after the picks it comes (#17377).
+pub(crate) fn decide_mirror_operation(app: &mut SolveApp, d: &mut crate::dialogs::Dialog) {
+    let Some(p) = dialog_mirror(app, d) else { return };
+    let key = mirror_key(&p);
+    if app.preview.mirror_decided == Some(key) {
+        return;
+    }
+    if let Ok(Some(meets)) = app.session.mirror_meets(&p) {
+        d.extra.insert("combine".into(), Value::Bool(meets));
+        app.preview.mirror_decided = Some(key);
     }
 }
 
@@ -1469,6 +1523,39 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_prefix_waits_before_scheduling_the_next_preview() {
+        let ctx = crate::fonts::test_context();
+        crate::params_dialog::install_expressions(&ctx);
+        let mut harness = crate::scenario::Harness::new();
+        let app = &mut harness.app;
+        let mut text = "2".to_owned();
+        let mut id = egui::Id::NULL;
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.0), ..Default::default() }, |ui| {
+            id = crate::ui_kit::checked_field(ui, &mut text, "", false).1.id;
+        });
+        ctx.memory_mut(|m| m.request_focus(id));
+        crate::ui_kit::test_support::raw_frame(
+            &ctx,
+            egui::RawInput { time: Some(0.01), events: vec![egui::Event::Text("m".into())], ..Default::default() },
+            |ui| {
+                crate::ui_kit::checked_field(ui, &mut text, "", false);
+            },
+        );
+        app.preview.active = true;
+        text = "2mm".into();
+        // As in the app, scheduling precedes this frame's dialog inputs.
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.02), ..Default::default() }, |ui| {
+            update(app, ui.ctx());
+            assert!(app.preview.active, "retain the preview while the previous pass's unit is pending");
+            crate::ui_kit::checked_field(ui, &mut text, "", false);
+        });
+        crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(0.03), ..Default::default() }, |ui| {
+            update(app, ui.ctx());
+            assert!(!app.preview.active, "the completed value reaches the scheduler immediately; no dialog clears this preview");
+        });
+    }
+
+    #[test]
     fn correcting_inputs_clears_old_errors_and_discards_late_old_jobs() {
         let mut pv = PreviewState {
             shown_key: Some(1),
@@ -2058,6 +2145,51 @@ mod tests {
         assert_eq!(operation(&mut h), Some(false), "apart: New Body");
         pick(&mut h, "Face");
         assert_eq!(operation(&mut h), Some(true), "about its face again: Join");
+    }
+
+    /// #17377: OK on a Mirror before its preview has set the operation sets it on the spot, so a
+    /// quick OK makes the same Mirror a slow one does. An operation picked by hand before the
+    /// preview came in stays, at OK and when the preview's own choice arrives later.
+    #[test]
+    fn a_mirror_ok_before_its_preview_sets_the_operation_the_preview_would() {
+        use crate::scenario::Harness;
+        use solidcraft_engine::Sel;
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "YZ", "offset": 30, "name": "Far"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "YZ", "offset": 10, "name": "Face"})).unwrap();
+        h.app.start("solid.mirror");
+        let combine = |h: &Harness| h.app.dialog.as_ref().and_then(|d| d.extra.get("combine")).and_then(Value::as_bool);
+        // Picks made and OK pressed with no frame in between: the preview has set nothing.
+        let ok_now = |h: &mut Harness, plane: &str| {
+            let mut d = h.app.dialog.take().unwrap();
+            d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+            d.inputs[1].items = vec![Sel::Plane { name: plane.into() }];
+            decide_mirror_operation(&mut h.app, &mut d);
+            h.app.dialog = Some(d);
+        };
+        ok_now(&mut h, "Face");
+        assert_eq!(combine(&h), Some(true), "about its own face: Join, as the preview sets it");
+        ok_now(&mut h, "Far");
+        assert_eq!(combine(&h), Some(false), "apart: New Body");
+        // About the face again, New Body picked by hand before any preview: OK keeps it.
+        let mut d = h.app.dialog.take().unwrap();
+        d.inputs[1].items = vec![Sel::Plane { name: "Face".into() }];
+        d.extra.insert("combine".into(), json!(false));
+        mirror_operation_picked(&mut h.app, &d);
+        decide_mirror_operation(&mut h.app, &mut d);
+        h.app.dialog = Some(d);
+        assert_eq!(combine(&h), Some(false), "picked by hand: OK keeps New Body");
+        // The preview comes in afterwards and says the copy meets the block: the pick still stays.
+        let began = std::time::Instant::now();
+        while h.app.preview.busy || h.app.preview.mirror_meets.is_none() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the preview did not finish");
+            h.frame();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(2);
+        assert_eq!(h.app.preview.mirror_meets.map(|(_, meets)| meets), Some(true));
+        assert_eq!(combine(&h), Some(false), "picked by hand: the preview's choice does not replace it");
     }
 
     /// #17154: the preview of a point along a path in a moved component marks where the point

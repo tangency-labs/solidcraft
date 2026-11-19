@@ -19,6 +19,9 @@
     clippy::indexing_slicing
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use std::f64::consts::PI;
@@ -26,17 +29,16 @@ use std::f64::consts::PI;
 use common::edge_at;
 use solidcore_ops::blend::{blend, Blend, Corners};
 use solidcore_ops::boolean::boolean;
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error, RoomReason};
+use solidcore_ops::{
+    blend_with, make_box, session, BlendOptions, Body, BooleanOp, CheckLevel, Contract, Error,
+    RoomReason,
+};
 
 const LENGTH: f64 = 10.0;
 
-/// The corpus's fix set (`kernel_cases/fixes.json`, the set SolidCraft runs).
+/// SolidCraft's fix set (`solidcraft_fixes.rs`, the set SolidCraft runs).
 fn fixes() {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// The L step with a strip `w` wide.
@@ -1351,13 +1353,18 @@ fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
 const CORNER_ROUND_REACHES_W: f64 = 25.0 - 14.317_821_063_276_353;
 
 /// The corner round `r4` on [`arm_boss_foot_only`] (or on `b`), with the corpus's fix set
-/// (`corpus`) or none: its result, the fix set restored after.
+/// (`corpus`) or none, under [`Contract::Proved`]: its result, the fix set restored after.
 fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
     let e = edge_at(b, [-36.0, -65.0, 2.5]);
     if !corpus {
         session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
     }
-    let result = blend(b, Blend::Round, &[e], &[r4], &[], Corners::Filled);
+    // proved: the contract under which a blend refuses rounds that cross
+    let proved = BlendOptions {
+        contract: Contract::Proved,
+        ..BlendOptions::default()
+    };
+    let result = blend_with(b, Blend::Round, &[e], &[r4], &[], Corners::Filled, proved);
     fixes();
     result.map(|_| ())
 }
@@ -1478,6 +1485,208 @@ fn a_corner_round_whose_cap_edge_crosses_a_slot_in_the_side_is_refused_as_on_mai
         ),
         other => panic!("no fixes: {other:?}"),
     }
+}
+
+/// #17590's part: a box x in [-40, 40], y in [-20, 20], z in [0, 30] with a boss of radius 5.5
+/// about (0, -19), from z = 28 to 40, joined across the box's edge y = -20, z = 30. The boss
+/// overhangs the side y = -20 and meets it along the line E, x = -[`boss_side_x`], from the top
+/// z = 30 down to W at z = 28, where the boss's bottom face starts.
+fn box_and_boss() -> Body {
+    fixes();
+    let b = make_box([-40.0, -20.0, 0.0], [80.0, 40.0, 30.0]).unwrap();
+    let boss = solidcore_ops::make_cylinder([0.0, -19.0, 28.0], 5.5, 12.0).unwrap();
+    boolean(b, boss, BooleanOp::Union).unwrap().unwrap()
+}
+
+/// Where the boss's wall crosses the side y = -20: x = ±sqrt(5.5^2 - 1).
+fn boss_side_x() -> f64 {
+    (5.5_f64 * 5.5 - 1.0).sqrt()
+}
+
+/// What the round `r` on [`box_and_boss`]'s edge y = -20, z = 30 takes, from x = -40 to the
+/// boss's wall: its section (the corner's square less the quarter disc about (-20 + r, 30 - r))
+/// at angle `phi` from the top, y = -20 + r - r sin phi, is r - r cos phi high and ends at
+/// x = -sqrt(5.5^2 - (y + 19)^2) on the wall. Simpson's rule in `phi`, where the integrand is
+/// smooth.
+fn boss_edge_round_removed(r: f64) -> f64 {
+    let f = |phi: f64| {
+        let y = -20.0 + r - r * phi.sin();
+        let end = -(5.5_f64 * 5.5 - (y + 19.0).powi(2)).sqrt();
+        r * (1.0 - phi.cos()) * (end + 40.0) * r * phi.cos()
+    };
+    let n = 2000;
+    let h = PI / 2.0 / f64::from(n);
+    let mut sum = f(0.0) + f(PI / 2.0);
+    for i in 1..n {
+        sum += f64::from(if i % 2 == 1 { 4 } else { 2 }) * f(f64::from(i) * h);
+    }
+    sum * h / 3.0
+}
+
+/// #17590: the box's edge y = -20, z = 30 of [`box_and_boss`] rounded `r`, up to the boss. The
+/// round's rail on the side runs at z = 30 - r: up to r = 2 it ends on E; past it, it meets E's
+/// line at R = (-[`boss_side_x`], -20, 30 - r), below W, under the boss. The end face there is
+/// the boss's wall, a cylinder whose ruling E is, and the edge leaving W on it is the boss's
+/// bottom circle, square to E. The round ends on the wall continued below the boss's bottom,
+/// with a cap edge from R to W on the side. Before, the end corner's patch on the wall failed:
+/// "Fillet Corner Error: Corner Geometry Computation Failure" (status 1001), with the corpus's
+/// fix set and with none. Now, with either, from r = 2.05 (a cap edge 0.05 long) to r = 6 (the
+/// round's top rail, y = -14, still on the boss, which reaches y = -13.5): valid at the full
+/// check, the round one face on its
+/// exact cylinder with its rails the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r),
+/// the cap edge through R and W, and the volume the input's less [`boss_edge_round_removed`].
+/// 10 faces, 24 edges and 16 vertices: the input's 9, 21 and 14 with the round's face; its two
+/// rails, its two end curves and the cap edge in place of the rounded edge and E (the cap lies
+/// on the boss's wall, one face with it); the rails' four ends, R one of them, in place of the
+/// rounded edge's two. The shells are the input's.
+///
+/// Control: at r = 2 the rail ends at W itself (R not past W), the corner is main's, and the
+/// round builds with one edge and one vertex fewer, 10, 23 and 15.
+///
+/// Only the edge left of the boss: its mirror, right of it, still fails (status 1001) on this
+/// boss, on main as here.
+#[test]
+fn a_round_ending_at_a_boss_across_its_edge_ends_on_the_boss_s_wall_below_its_bottom() {
+    for (r, topology) in [
+        (2.0, (10, 23, 15)),
+        (2.05, BOSS_EDGE_ROUND_TOPOLOGY),
+        (3.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (4.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (5.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (6.0, BOSS_EDGE_ROUND_TOPOLOGY),
+    ] {
+        for corpus in [true, false] {
+            assert_round_into_boss_builds(
+                box_and_boss,
+                boss_side_x(),
+                boss_edge_round_removed(r),
+                topology,
+                (r, corpus, -1.0),
+            );
+        }
+    }
+}
+
+/// The topology of [`box_and_boss`] with its edge rounded past r = 2: faces, edges, vertices.
+const BOSS_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (10, 24, 16);
+
+/// [`box_and_boss`] with a block x in [-5, 5], y in [-24, -16], z in [28, 40] for the boss: the
+/// end face is the block's side x = -5, a plane, and the edge leaving W on it is the block's
+/// bottom edge along y, square to E, not turned back.
+fn box_and_block() -> Body {
+    fixes();
+    let b = make_box([-40.0, -20.0, 0.0], [80.0, 40.0, 30.0]).unwrap();
+    let block = make_box([-5.0, -24.0, 28.0], [10.0, 8.0, 12.0]).unwrap();
+    boolean(b, block, BooleanOp::Union).unwrap().unwrap()
+}
+
+/// The same with a block for the boss ([`box_and_block`]), up to r = 3.5 (the round's top rail
+/// on the block's side, which ends at y = -16): its side x = -5 ends the round, and the round
+/// takes its section r^2 (1 - pi / 4) along the 35 from x = -40 (or to x = 40). Before, as with
+/// the boss (status 1001), with the corpus's fix set and with none; now built the same way, the
+/// input's 12 faces, 30 edges and 20 vertices with the same changes.
+#[test]
+fn a_round_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_bottom() {
+    for r in [2.5, 3.0, 3.5] {
+        for corpus in [true, false] {
+            for side in [-1.0, 1.0] {
+                assert_round_into_boss_builds(
+                    box_and_block,
+                    5.0,
+                    35.0 * r * r * (1.0 - PI / 4.0),
+                    BLOCK_EDGE_ROUND_TOPOLOGY,
+                    (r, corpus, side),
+                );
+            }
+        }
+    }
+}
+
+/// The topology of [`box_and_block`] with its edge rounded past r = 2: faces, edges, vertices.
+const BLOCK_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (13, 33, 22);
+
+/// The box's edge y = -20, z = 30 of `input` rounded `r` on the side `side` of the boss (-1 its
+/// left, x < 0; 1 its mirror), with the corpus's fix set (`corpus`) or none: built, valid at the
+/// full check, `topology` (faces, edges, vertices) and the input's shells, the round one face on
+/// its exact class, the cylinder of radius r along x about (-20 + r, 30 - r), its rails the
+/// lines along x through (x, -20 + r, 30) and (x, -20, 30 - r), the cap edge on the side through
+/// x = `side` `side_x`, z = (30 - r + 28) / 2, and the volume the input's less `removed`.
+fn assert_round_into_boss_builds(
+    input: fn() -> Body,
+    side_x: f64,
+    removed: f64,
+    topology: (usize, usize, usize),
+    (r, corpus, side): (f64, bool, f64),
+) {
+    use solidcore::query::api_queries::edge_closest_point;
+    use solidcore::surface::surface::SurfaceKind;
+    let what = format!("r {r} corpus {corpus} side {side}");
+    let b = input();
+    let before = b.volume(1e-9).unwrap();
+    let shells = common::kernel_copy(&b).1.shells().len();
+    let e = edge_at(&b, [30.0 * side, -20.0, 30.0]);
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled);
+    fixes();
+    result.unwrap_or_else(|err| panic!("{what}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{what}: {report}");
+    let (k, brep) = common::kernel_copy(&b);
+    let counts = (
+        brep.face_list().len(),
+        brep.edge_list().len(),
+        brep.vertex_list().len(),
+    );
+    assert_eq!(counts, topology, "{what}: faces, edges, vertices");
+    assert_eq!(brep.shells().len(), shells, "{what}: shells");
+    // the round's face is its exact class: the cylinder of radius r along x about
+    // (-20 + r, 30 - r)
+    let rounds = brep
+        .face_list()
+        .iter()
+        .filter(|&&f| {
+            let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+            match surface.kind() {
+                SurfaceKind::Cone(c) if c.is_cylinder() && (c.bot_radius() - r).abs() < 1e-9 => {
+                    let place = c.rev().position();
+                    let (o, a) = (place.origin(), place.z_axis());
+                    (o.y - (-20.0 + r)).hypot(o.z - (30.0 - r)) < 1e-9
+                        && a.y.hypot(a.z) < 1e-9 * a.length()
+                }
+                _ => false,
+            }
+        })
+        .count();
+    assert_eq!(rounds, 1, "{what}: the round's cylinder");
+    let on_edge = |p: [f64; 3]| {
+        let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+        brep.edge_list().iter().any(|&e| {
+            edge_closest_point(&k, &brep, e, q)
+                .unwrap()
+                .closest
+                .distance
+                < 1e-7
+        })
+    };
+    for along in [35.0, 20.0, 10.0] {
+        let x = along * side;
+        for p in [[x, -20.0 + r, 30.0], [x, -20.0, 30.0 - r]] {
+            assert!(on_edge(p), "{what}: no rail through {p:?}");
+        }
+    }
+    let z = (30.0 - r + 28.0) / 2.0;
+    assert!(
+        on_edge([side_x * side, -20.0, z]),
+        "{what}: no cap edge through z {z}"
+    );
+    let after = b.volume(1e-9).unwrap();
+    let expected = before - removed;
+    assert!(
+        (after - expected).abs() < 1e-6,
+        "{what}: volume {after}, expected {expected}"
+    );
 }
 
 /// Edge 28 of `b27` rounded past the R3 round's own radius (3.5 and 4): the ball does not fit
@@ -2162,7 +2371,8 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
                 && matches!(
                     &built,
                     Err(Error::BlendFailed { status: 1001, phrase, .. })
-                        if phrase == "the faces the rails enclose reach past the rails"
+                        // the kernel's statement, then what the session noted of the step
+                        if phrase.starts_with("the faces the rails enclose reach past the rails")
                 )
             {
                 continue;
@@ -2251,4 +2461,492 @@ fn four_rounds_on_a_seamed_disc_build_across_its_seam() {
         (v - expected).abs() < 5e-6 * 4.0 * 30.0 * 18.0 * PI,
         "volume {v}, expected {expected}"
     );
+}
+
+/// SolidCraft #18411's part: a block 56.5 x 10 x 27.5 with a pocket 28.2 by 11.8 and 4 deep cut
+/// into its top y = 10, the pocket's two floor edges along z (x = 12.8 and x = 41, y = 6, 11.8
+/// long) rounded R3. Each of those walls keeps a 1 wide flat (y = 9 to 10) above its floor
+/// round, which runs on into it tangentially.
+fn pocket_with_floor_rounds() -> Body {
+    let block = make_box([1.5, 0.0, 0.0], [56.5, 10.0, 27.5]).unwrap();
+    let pocket = make_box([12.8, 6.0, 7.4], [28.2, 5.0, 11.8]).unwrap();
+    let b = boolean(block, pocket, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let floor: Vec<usize> = [12.8, 41.0]
+        .iter()
+        .map(|&x| edge_at(&b, [x, 6.0, 13.3]))
+        .collect();
+    blend(&b, Blend::Round, &floor, &[3.0; 2], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// The section area a rim round `r` of [`pocket_with_floor_rounds`] takes, past the 1 wide flat:
+/// in the wall's frame (the wall x = 0, the top y = 0, the material x > 0, y < 0), the floor
+/// round's centre is (-3, -1) and the ball's (c, -r), (c + 3)^2 + (1 - r)^2 = (3 + r)^2; the
+/// region bounded by the top from the wall to the ball's contact (c, 0), the ball to its contact
+/// on the floor round, the floor round up to the flat's end (0, -1) and the flat, by Green's
+/// theorem over its two lines and two arcs.
+fn pocket_rim_area(r: f64) -> f64 {
+    let c = ((3.0 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+    let to_floor = (-1.0 + r).atan2(-3.0 - c);
+    let floor_contact = (-3.0 - 3.0 * to_floor.cos(), -1.0 - 3.0 * to_floor.sin());
+    let on_floor = (floor_contact.1 + 1.0).atan2(floor_contact.0 + 3.0);
+    let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
+        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
+            - cy * rad * (to.cos() - from.cos()))
+    };
+    let ball_to = (floor_contact.1 + r)
+        .atan2(floor_contact.0 - c)
+        .rem_euclid(2.0 * PI);
+    let total = arc(c, -r, r, PI / 2.0, ball_to) + arc(-3.0, -1.0, 3.0, on_floor, 0.0);
+    total.abs()
+}
+
+/// The rims along z of [`pocket_with_floor_rounds`]'s walls at `xs` rounded R2.5 in one blend:
+/// built, valid at the full check, the input's faces, edges, vertices and shells (each rim's
+/// round takes its wall's flat and adds one face), each round its exact class, the cylinder of
+/// radius 2.5 along z about (41 + c, 7.5) or (12.8 - c, 7.5), and the volume the input's less
+/// [`pocket_rim_area`] along the pocket's 11.8 for each.
+fn assert_pocket_rims_round(xs: &[f64]) {
+    use solidcore::surface::surface::SurfaceKind;
+    let r = 2.5;
+    fixes();
+    let b = pocket_with_floor_rounds();
+    let before = b.volume(1e-9).unwrap();
+    let (_, input) = common::kernel_copy(&b);
+    let topology = (
+        input.face_list().len(),
+        input.edge_list().len(),
+        input.vertex_list().len(),
+        input.shells().len(),
+    );
+    assert_eq!(topology, (13, 30, 20, 2), "the input");
+    let rims: Vec<usize> = xs.iter().map(|&x| edge_at(&b, [x, 10.0, 13.3])).collect();
+    blend(
+        &b,
+        Blend::Round,
+        &rims,
+        &vec![r; xs.len()],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_or_else(|err| panic!("rims {xs:?}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "rims {xs:?}: {report}");
+    let (_, brep) = common::kernel_copy(&b);
+    let counts = (
+        brep.face_list().len(),
+        brep.edge_list().len(),
+        brep.vertex_list().len(),
+        brep.shells().len(),
+    );
+    assert_eq!(
+        counts, topology,
+        "rims {xs:?}: faces, edges, vertices, shells"
+    );
+    let c = ((3.0_f64 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+    for &x in xs {
+        let axis_x = if x > 20.0 { x + c } else { x - c };
+        let rounds = brep
+            .face_list()
+            .iter()
+            .filter(|&&f| {
+                let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+                match surface.kind() {
+                    SurfaceKind::Cone(cone)
+                        if cone.is_cylinder() && (cone.bot_radius() - r).abs() < 1e-9 =>
+                    {
+                        let place = cone.rev().position();
+                        let (o, a) = (place.origin(), place.z_axis());
+                        (o.x - axis_x).hypot(o.y - (10.0 - r)) < 1e-9
+                            && a.x.hypot(a.y) < 1e-9 * a.length()
+                    }
+                    _ => false,
+                }
+            })
+            .count();
+        assert_eq!(rounds, 1, "rims {xs:?}: the round's cylinder at x {x}");
+    }
+    let expected = before - xs.len() as f64 * 11.8 * pocket_rim_area(r);
+    let v = b.volume(1e-9).unwrap();
+    assert!(
+        (v - expected).abs() < 1e-6,
+        "rims {xs:?}: volume {v}, expected {expected}"
+    );
+}
+
+/// SolidCraft #18411: R2.5 on both rims along z of the pocket in one fillet. The 1 wide flat under
+/// each rim is narrower than the ball reaches, so each round rolls over the flat's smooth lower
+/// edge onto the floor round, the whole length. Each rim alone builds (a lone round, its rollover
+/// decided in closed form); both in one blend were refused as having no room (SolidCraft: "the
+/// largest radius that fits is 1 mm"), because each rolled rail ends on the pocket's end walls,
+/// faces across its floor round's edges.
+#[test]
+fn both_pocket_rims_roll_onto_their_floor_rounds_in_one_fillet() {
+    assert_pocket_rims_round(&[41.0]);
+    assert_pocket_rims_round(&[12.8]);
+    assert_pocket_rims_round(&[41.0, 12.8]);
+}
+
+#[test]
+fn the_pocket_rim_area_oracle_agrees_with_a_polygon() {
+    // the closed form against a fine polygon of the same boundary, in the wall's frame
+    for r in [1.5_f64, 2.0, 2.5, 3.0] {
+        let c = ((3.0 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+        let ball = (c, -r);
+        let to_floor = (ball.1 + 1.0).atan2(ball.0 + 3.0);
+        let contact = (-3.0 + 3.0 * to_floor.cos(), -1.0 + 3.0 * to_floor.sin());
+        let (from, to) = (
+            PI / 2.0,
+            (contact.1 - ball.1)
+                .atan2(contact.0 - ball.0)
+                .rem_euclid(2.0 * PI),
+        );
+        let mut pts = vec![(0.0, -1.0), (0.0, 0.0)];
+        let n = 20000;
+        for i in 0..=n {
+            let t = from + (to - from) * f64::from(i) / f64::from(n);
+            pts.push((ball.0 + r * t.cos(), ball.1 + r * t.sin()));
+        }
+        for i in 1..n {
+            let t = to_floor + (0.0 - to_floor) * f64::from(i) / f64::from(n);
+            pts.push((-3.0 + 3.0 * t.cos(), -1.0 + 3.0 * t.sin()));
+        }
+        let mut twice = 0.0;
+        for (i, p) in pts.iter().enumerate() {
+            let q = pts[(i + 1) % pts.len()];
+            twice += p.0 * q.1 - q.0 * p.1;
+        }
+        let polygon = twice.abs() / 2.0;
+        let closed = pocket_rim_area(r);
+        assert!(
+            (polygon - closed).abs() < 1e-6,
+            "r {r}: {polygon} vs {closed}"
+        );
+    }
+}
+
+/// Controls for #18411: a rim along z of [`pocket_with_floor_rounds`] rounded R2.5 together with
+/// a round that meets it, at its edge (a rim along x, R2.5 or R1) or on a face it may roll off
+/// or onto (the floor round's end arc at z = 7.4, R1), is not apart from it: its rollover is
+/// proposed from the ball's sections and proved after the trace, as on main. Each is refused
+/// today (the three rims as running into the material, naming 0.99 mm; the others as having no
+/// room); the check here is that none builds an invalid body.
+#[test]
+fn pocket_rim_rounds_meeting_another_round_build_valid_or_are_refused() {
+    fixes();
+    let arc = [
+        38.0 + 3.0 * std::f64::consts::FRAC_1_SQRT_2,
+        9.0 - 3.0 * std::f64::consts::FRAC_1_SQRT_2,
+        7.4,
+    ];
+    let cases: [(&[[f64; 3]], &[f64]); 4] = [
+        (
+            &[[41.0, 10.0, 13.3], [12.8, 10.0, 13.3], [26.9, 10.0, 7.4]],
+            &[2.5; 3],
+        ),
+        (&[[41.0, 10.0, 13.3], [26.9, 10.0, 19.2]], &[2.5, 1.0]),
+        (&[[41.0, 10.0, 13.3], arc], &[2.5, 1.0]),
+        (
+            &[[41.0, 10.0, 13.3], [12.8, 10.0, 13.3], arc],
+            &[2.5, 2.5, 1.0],
+        ),
+    ];
+    for (points, radii) in cases {
+        let b = pocket_with_floor_rounds();
+        let edges: Vec<usize> = points.iter().map(|&p| edge_at(&b, p)).collect();
+        if blend(&b, Blend::Round, &edges, radii, &[], Corners::Filled).is_ok() {
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{points:?}: {report}");
+        }
+    }
+}
+
+/// The hole's radius, the slots' width and the heights of the hole's floor and the block's
+/// top in [`slotted_hole`].
+const HOLE_R: f64 = 2.94;
+const SLOT_W: f64 = 1.0;
+const HOLE_FLOOR: f64 = 4.4;
+const BLOCK_TOP: f64 = 8.0;
+
+/// SolidCraft #18830's part: a block 20 x 20 x 8 with a blind hole of radius 2.94 down to
+/// z = 4.4 (a magnet pocket; its cylinder's seam runs along x > 0), and a radial slot 1 wide
+/// cut to the hole's floor at each angle of `slots` (degrees from x), each reaching 0.5 past
+/// the hole with a round end. A slot at 14.8 degrees has its sides at 5 and 24.6 degrees on
+/// the hole's wall, so the seam leaves a strip of wall 0.26 wide (5 degrees) beside the slot.
+fn slotted_hole(slots: &[f64]) -> Body {
+    use solidcore_ops::make_cylinder;
+    use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
+    let block = make_box([-10.0, -10.0, 0.0], [20.0, 20.0, BLOCK_TOP]).unwrap();
+    let hole = make_cylinder([0.0, 0.0, HOLE_FLOOR], HOLE_R, 4.0).unwrap();
+    let mut b = boolean(block, hole, BooleanOp::Subtract).unwrap().unwrap();
+    for &deg in slots {
+        let (s, c) = deg.to_radians().sin_cos();
+        let at =
+            |along: f64, across: f64| [along * c - across * s, along * s + across * c, HOLE_FLOOR];
+        let reach = HOLE_R + 0.5;
+        let outline = [
+            Curve::Line {
+                start: at(0.0, -SLOT_W / 2.0),
+                end: at(reach, -SLOT_W / 2.0),
+            },
+            Curve::Arc {
+                center: at(reach, 0.0),
+                axis: [0.0, 0.0, 1.0],
+                reference: [s, -c, 0.0],
+                radius: SLOT_W / 2.0,
+                start: 0.0,
+                end: PI,
+            },
+            Curve::Line {
+                start: at(reach, SLOT_W / 2.0),
+                end: at(0.0, SLOT_W / 2.0),
+            },
+            Curve::Line {
+                start: at(0.0, SLOT_W / 2.0),
+                end: at(0.0, -SLOT_W / 2.0),
+            },
+        ];
+        let slot = extrude(
+            &outline,
+            [0.0, 0.0, 1.0],
+            4.0,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap();
+        b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    b
+}
+
+/// The edges where the slot at `deg` meets the hole's wall, on its side at `+0.5` across and
+/// at `-0.5`, as `(side, edge index)`.
+fn slot_roots(b: &Body, deg: f64) -> [usize; 2] {
+    let (s, c) = deg.to_radians().sin_cos();
+    let along = (HOLE_R * HOLE_R - SLOT_W * SLOT_W / 4.0).sqrt();
+    let mid = (HOLE_FLOOR + BLOCK_TOP) / 2.0;
+    [SLOT_W / 2.0, -SLOT_W / 2.0]
+        .map(|across| edge_at(b, [along * c - across * s, along * s + across * c, mid]))
+}
+
+/// The section area a round `r` takes where a slot's side (a plane `h` from the slot's middle)
+/// meets the hole's wall (a circle of radius `R`, the material outside it): the ball's centre
+/// is `r` from the side, into the material, and `R + r` from the hole's axis; the area is the
+/// triangle of the corner and the ball's two contacts, less the ball's segment and the hole's
+/// segment between them.
+fn root_area(big_r: f64, r: f64, h: f64) -> f64 {
+    let corner = ((big_r * big_r - h * h).sqrt(), h);
+    let centre = (((big_r + r).powi(2) - (h + r).powi(2)).sqrt(), h + r);
+    let on_side = (centre.0, h);
+    let on_hole = (
+        centre.0 * big_r / (big_r + r),
+        centre.1 * big_r / (big_r + r),
+    );
+    let triangle = ((on_side.0 - corner.0) * (on_hole.1 - corner.1)
+        - (on_hole.0 - corner.0) * (on_side.1 - corner.1))
+        .abs()
+        / 2.0;
+    let segment = |rad: f64, p: (f64, f64), q: (f64, f64)| {
+        let chord = (p.0 - q.0).hypot(p.1 - q.1);
+        let angle = 2.0 * (chord / (2.0 * rad)).asin();
+        rad * rad / 2.0 * (angle - angle.sin())
+    };
+    triangle - segment(r, on_side, on_hole) - segment(big_r, on_hole, corner)
+}
+
+/// SolidCraft #18830: R0.5 on both edges where a slot meets the hole, in one fillet, the slot's
+/// side at 5 degrees past the hole's seam. The 0.26 wide strip of wall between that side and
+/// the seam is narrower than the ball reaches, so that round rolls over the seam onto the rest
+/// of the wall, the whole length. Each edge alone builds (a lone round, decided in closed form);
+/// both together were refused ("Corner Edge Computation Failure"), because the other round's
+/// edge is an edge of the wall it rolls onto, which sent it to the ball's sections, and they do
+/// not roll a rail over a seam onto its own surface.
+///
+/// Closed form: the rounds are apart (the slot's two sides), each takes `root_area` along the
+/// hole's depth, and each is a cylinder of radius 0.5 along z about its ball's centre.
+#[test]
+fn slot_roots_beside_a_hole_s_seam_round_in_one_fillet() {
+    use solidcore::surface::surface::SurfaceKind;
+    let r = 0.5;
+    fixes();
+    for deg in [14.8, -14.8] {
+        let b = slotted_hole(&[deg]);
+        let before = b.volume(1e-9).unwrap();
+        let roots = slot_roots(&b, deg);
+        blend(&b, Blend::Round, &roots, &[r; 2], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("slot at {deg}: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "slot at {deg}: {report}");
+        let expected = before - 2.0 * (BLOCK_TOP - HOLE_FLOOR) * root_area(HOLE_R, r, SLOT_W / 2.0);
+        let v = b.volume(1e-9).unwrap();
+        assert!(
+            (v - expected).abs() < 1e-6,
+            "slot at {deg}: volume {v}, expected {expected}"
+        );
+        let (_, brep) = common::kernel_copy(&b);
+        let centre_along = ((HOLE_R + r).powi(2) - (SLOT_W / 2.0 + r).powi(2)).sqrt();
+        let (s, c) = f64::to_radians(deg).sin_cos();
+        for across in [SLOT_W / 2.0 + r, -(SLOT_W / 2.0 + r)] {
+            let (x, y) = (centre_along * c - across * s, centre_along * s + across * c);
+            let rounds = brep
+                .face_list()
+                .iter()
+                .filter(|&&f| {
+                    let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+                    match surface.kind() {
+                        SurfaceKind::Cone(cone)
+                            if cone.is_cylinder() && (cone.bot_radius() - r).abs() < 1e-9 =>
+                        {
+                            let place = cone.rev().position();
+                            let (o, a) = (place.origin(), place.z_axis());
+                            (o.x - x).hypot(o.y - y) < 1e-9 && a.x.hypot(a.y) < 1e-9 * a.length()
+                        }
+                        _ => false,
+                    }
+                })
+                .count();
+            assert_eq!(rounds, 1, "slot at {deg}: the round about ({x}, {y})");
+        }
+    }
+}
+
+/// The angle on the hole's wall between a slot's middle and its side, in degrees: the side
+/// is the line `SLOT_W / 2` from the slot's middle.
+fn slot_half_angle() -> f64 {
+    (SLOT_W / 2.0 / HOLE_R).asin().to_degrees()
+}
+
+/// Controls for #18830: a second slot on the far side of the hole's seam, all four roots of
+/// both slots rounded R0.5 in one fillet. The first slot (at 14.8 degrees, a side 5 degrees
+/// past the seam) rolls one round over the seam onto the wall the second slot's near side
+/// stands on. With that side `past` degrees the other way from the seam, the round on it
+/// takes about 7.1 degrees of wall (its ball touches the wall 0.36 from its edge) and the
+/// rolled round about 2.1 degrees past the seam, so the bands overlap below about 9.2 degrees:
+/// at 8 and 9 degrees the fillet is refused as having no room; at 12 and 20 degrees all four
+/// rounds build, each its exact [`root_area`] along the hole's depth. At 5 degrees (slots at
+/// 14.8 and -14.8) both near sides roll over the seam, from opposite sides, and their bands
+/// overlap: [`slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart`].
+#[test]
+fn slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping() {
+    let r = 0.5;
+    fixes();
+    let area = root_area(HOLE_R, r, SLOT_W / 2.0);
+    for past in [8.0, 9.0, 12.0, 20.0] {
+        let slots = [14.8, -(past + slot_half_angle())];
+        let b = slotted_hole(&slots);
+        let before = b.volume(1e-9).unwrap();
+        let mut edges = slot_roots(&b, slots[0]).to_vec();
+        edges.extend(slot_roots(&b, slots[1]));
+        let result = blend(&b, Blend::Round, &edges, &[r; 4], &[], Corners::Filled);
+        if past < 10.0 {
+            assert!(
+                matches!(result, Err(Error::NoRoom)),
+                "side {past} degrees past the seam: {result:?}"
+            );
+            continue;
+        }
+        result.unwrap_or_else(|err| panic!("side {past} degrees past the seam: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(
+            report.is_valid(),
+            "side {past} degrees past the seam: {report}"
+        );
+        let expected = before - 4.0 * (BLOCK_TOP - HOLE_FLOOR) * area;
+        let v = b.volume(1e-9).unwrap();
+        assert!(
+            (v - expected).abs() < 1e-6,
+            "side {past} degrees past the seam: volume {v}, expected {expected}"
+        );
+    }
+}
+
+/// Controls for #18830: slots at 14.8 and -14.8 degrees put a side 5 degrees either side of
+/// the hole's seam, and both those rounds roll over the seam, from opposite sides, so their
+/// bands overlap. Each round's closed form rolls over the seam, so neither is apart from the
+/// other: both go to the ball's sections, as on main, and the fillet is refused there with the
+/// corner error, in either order of the edges. (Taken as apart, each would roll in closed form
+/// and the overlap would surface later, as an edge of the fillet that maps back to no edge.)
+#[test]
+fn slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart() {
+    fixes();
+    let slots = [14.8, -14.8];
+    for reversed in [false, true] {
+        let b = slotted_hole(&slots);
+        let mut edges = slot_roots(&b, slots[0]).to_vec();
+        edges.extend(slot_roots(&b, slots[1]));
+        if reversed {
+            edges.reverse();
+        }
+        match blend(&b, Blend::Round, &edges, &[0.5; 4], &[], Corners::Filled) {
+            Err(Error::BlendFailed { phrase, .. })
+                if phrase.contains("Corner Edge Computation Failure") => {}
+            other => panic!("edges reversed {reversed}: {other:?}"),
+        }
+    }
+}
+
+/// #19242: the slots of [`slot_roots_beside_a_hole_s_seam_round_in_one_fillet`] and
+/// [`slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping`] with
+/// SolidCraft's fixes less `fillet_refuse_overlapping_bands`, as a solidcore caller that never
+/// turns it on runs them. The round that rolls over the seam is taken as apart although
+/// another round stands on the wall it rolls onto, so only the bands' check compares the two;
+/// it runs without its fix too. Where the bands overlap (the second slot's near side 8 or 9
+/// degrees past the seam) the fillet is refused as having no room, as with the fix on (with
+/// the check skipped, the overlap surfaced later as "no fillet B-rep edge matches the fillet
+/// edge"). Where they don't, the fillet builds, valid, the same volume as with the fix on to
+/// 1e-9.
+#[test]
+fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked_without_the_bands_fix() {
+    let r = 0.5;
+    let with_fix_off = || {
+        let names = solidcraft_fixes::solidcraft_fix_names()
+            .into_iter()
+            .filter(|&name| name != "fillet_refuse_overlapping_bands");
+        session::set_thread_fixes(names).unwrap();
+    };
+    let one_slot = |deg: f64| (vec![deg], 2, true);
+    let two_slots = |past: f64| (vec![14.8, -(past + slot_half_angle())], 4, past > 10.0);
+    for (slots, n, builds) in [
+        one_slot(14.8),
+        one_slot(-14.8),
+        two_slots(8.0),
+        two_slots(9.0),
+        two_slots(12.0),
+        two_slots(20.0),
+    ] {
+        let run = |fix_on: bool| {
+            if fix_on {
+                fixes();
+            } else {
+                with_fix_off();
+            }
+            let b = slotted_hole(&slots);
+            let mut edges = Vec::new();
+            for &deg in &slots {
+                edges.extend(slot_roots(&b, deg));
+            }
+            blend(&b, Blend::Round, &edges, &vec![r; n], &[], Corners::Filled).map(|_| {
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "slots {slots:?}, fix on {fix_on}: {report}"
+                );
+                b.volume(1e-9).unwrap()
+            })
+        };
+        let on = run(true);
+        let off = run(false);
+        match (on, off) {
+            (Err(Error::NoRoom), Err(Error::NoRoom)) if !builds => {}
+            (Ok(on), Ok(off)) if builds => assert!(
+                (on - off).abs() <= 1e-9 * on,
+                "slots {slots:?}: volume {off} with the fix off, {on} with it on"
+            ),
+            (on, off) => panic!("slots {slots:?}: fix on {on:?}, fix off {off:?}"),
+        }
+    }
+    fixes();
 }
