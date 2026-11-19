@@ -1957,10 +1957,12 @@ pub(crate) fn cover_joined_faces(
     Ok(())
 }
 
-/// Not upstream (#18166): after the cover raised `e` ([`cover_joined_faces`]), raises it to
-/// the proved bound of each of its UV trims ([`trim_deviation_bound`]) that the raised
-/// tolerance does not cover, as that bound comes out at the raised tolerance (the fit
-/// [`settle_face_bounds`] takes), for at most [`SETTLE_ROUNDS`] rounds. A raised edge covers
+/// Not upstream (#18166): after the cover raised `e` ([`cover_joined_faces`]), raises it once
+/// to the largest proved bound of its UV trims ([`raised_trim_bound`]) that the raised
+/// tolerance does not cover. Each bound is taken at the fit the raised tolerance gives, once:
+/// a proved bound holds whatever the edge's tolerance, and bounding again at each raised
+/// tolerance only coarsens the fit (gen1108 edge 9 climbed 2.48e-5, 2.97e-5, ... 5.83e-5 in
+/// eight such rounds, for one trim bounded at 2.48e-5). A raised edge covers
 /// everything it lies on: a trim set by an edit raised the tolerance when it was set
 /// (`keep_trim_covered`), but a trim the operation was given is bounded only here
 /// (`primitive.api_primitives` gen1108: a line 5.5e8 long, raised to 1.17e-5 for its
@@ -1971,25 +1973,20 @@ pub(crate) fn cover_joined_faces(
 ///
 /// [`SolidError::NotFound`] for a dangling id; those of [`trim_deviation_bound`].
 fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
-    for _ in 0..SETTLE_ROUNDS {
-        let mut raised = false;
-        let uses = b.edge(e)?.edgeuses.clone();
-        for x in uses {
-            let Some(trim) = b.edgeuse(x)?.uv_trim_curve.clone() else {
-                continue;
-            };
-            let tol = b.edge(e)?.tolerance;
-            match raised_trim_bound(k, b, x, &trim, tol)? {
-                Some(again) if again.is_finite() && again > tol => {
-                    crate::topology::edge::set_tolerance(b, e, again, true, true)?;
-                    raised = true;
-                }
-                _ => {}
+    let tol = b.edge(e)?.tolerance;
+    let mut reach = tol;
+    for &x in &b.edge(e)?.edgeuses {
+        let Some(trim) = b.edgeuse(x)?.uv_trim_curve.as_ref() else {
+            continue;
+        };
+        if let Some(bound) = raised_trim_bound(k, b, x, trim, tol)? {
+            if bound.is_finite() && bound > reach {
+                reach = bound;
             }
         }
-        if !raised {
-            break;
-        }
+    }
+    if reach > tol {
+        crate::topology::edge::set_tolerance(b, e, reach, true, true)?;
     }
     Ok(())
 }
