@@ -25,6 +25,8 @@ this format.
       "name": "CRS 16 ga",
       "material": "Mild steel (cold-rolled)",
       "gauge": "16 ga",
+      "chart": "Acme Fab stock list",
+      "hardness": "medium",
       "thickness": "0.0598 in",
       "k_factor": "0.42",
       "bend_radius": "0.8 * Thickness",
@@ -37,11 +39,20 @@ this format.
 - `format` must be `solidcraft-sheet-rules`. `version` is a whole number; left out, it is 1.
 - `name` and `note` describe the pack. `sources` lists where the values come from; a rule's
   `source` names their ids (one id or a list), and an id not in `sources` is refused.
-- Each rule needs `name`, `thickness`, `k_factor` and `bend_radius`. It may also give
-  `material`, `gauge`, `relief_width`, `relief_depth`, `corner_relief`, `corner_relief_shape`
+- Each rule needs `name` and `thickness`. The thickness is the data: `gauge` is only a label,
+  and `chart` says whose gauge chart it is from (different charts give one gauge different
+  thicknesses).
+- `material` labels the rule. `hardness` (`soft`, `medium` or `hard`) is the column of the
+  generic K-factor chart the material reads, and `min_bend_radius` its published minimum inside
+  radius (a length, may use `Thickness`).
+- `k_factor` and `bend_radius` are a shop's own: a K-factor measured from test bends and the
+  working radius of its tooling. A rule without them keeps the rule's own radius when picked,
+  and its K-factor is estimated from the bend method (air bending, bottoming or coining) at that
+  R/T, and said to be an estimate.
+- A rule may also give `relief_width`, `relief_depth`, `corner_relief`, `corner_relief_shape`
   (`notch`, `round`, `rectangular` or `tear`), `hem_gap`, `gap` and `angle_display` (`bend` or
-  `included`); what it leaves out takes SolidCraft's default rule's value. These are the values
-  of `sheet.manage_rules`.
+  `included`), the values of `sheet.manage_rules`. Imported into personal rules, what a rule
+  leaves out takes SolidCraft's default rule's value.
 - Values are expressions, as in the manager. Lengths carry their unit (`1.5 mm`, `0.0598 in`),
   since a pack goes into designs of any unit, and may use the rule's own `Thickness`
   (`0.8 * Thickness`). They may not use a design's parameters.
@@ -50,13 +61,12 @@ this format.
 ## CSV
 
 A CSV pack holds the rules only: no name, note or sources. The first row names the columns,
-with the JSON names (any case, any order); `name`, `thickness`, `k_factor` and `bend_radius` are
-required.
+with the JSON names (any case, any order); `name` and `thickness` are required.
 
 ```csv
-name,material,gauge,thickness,k_factor,bend_radius
-CRS 16 ga,Mild steel (cold-rolled),16 ga,0.0598 in,0.42,0.8 * Thickness
-AL 3 mm,Aluminium 5052-H32,,3 mm,0.45,3 mm
+name,material,gauge,chart,thickness,k_factor,bend_radius
+CRS 16 ga,Mild steel (cold-rolled),16 ga,Acme Fab stock list,0.0598 in,0.42,0.8 * Thickness
+AL 3 mm,Aluminium 5052-H32,,,3 mm,0.45,3 mm
 ```
 
 Fields with commas or quotes are quoted as spreadsheets write them. A field SolidCraft writes

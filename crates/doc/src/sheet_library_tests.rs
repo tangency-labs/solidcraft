@@ -35,10 +35,20 @@ fn the_standard_library_has_the_issues_materials_each_value_with_its_sources() {
         assert!(source.url.starts_with("https://") && !source.title.is_empty(), "{source:?}");
     }
     for r in &lib.rules {
-        // A gauge source, the K-factor chart, and a radius source.
-        assert_eq!(r.sources.len(), 3, "{}", r.rule.name);
-        assert!(r.sources.contains(&"kfactor".to_string()), "{}", r.rule.name);
+        // Its gauge chart, the K-factor chart its hardness reads, and the radius chart when it
+        // has a minimum radius.
+        let mut want = vec![r.sources[0].clone(), "kfactor".to_string()];
+        if !r.min_bend_radius.is_empty() {
+            want.push("al-radii".into());
+        }
+        assert_eq!(r.sources, want, "{}", r.rule.name);
+        assert!(["msg", "uss", "awg"].contains(&r.sources[0].as_str()), "{}", r.rule.name);
         assert_eq!(r.rule.name, format!("{}, {}", r.rule.material, r.gauge));
+        // A gauge is a label that says whose chart it is.
+        assert!(r.gauge_label().ends_with(&format!("({})", r.chart)) && !r.chart.is_empty(), "{}", r.rule.name);
+        // The library gives stock, not tooling: no working radius and no K-factor of its own.
+        assert_eq!(r.given, Given::default(), "{}", r.rule.name);
+        assert!(r.hardness.is_some(), "{}", r.rule.name);
         values(&r.rule);
     }
 }
@@ -97,45 +107,71 @@ fn aluminium_copper_and_brass_gauges_are_brown_and_sharpe() {
     assert_eq!(standard_rule("Copper C110", "10ga").map(inches), Some(0.1019));
 }
 
-/// The generic air-bending chart: by inside radius over thickness (0 to T, T to 3T, over 3T)
-/// and by soft (aluminium; copper and brass with it), medium (steel) and hard (stainless).
+/// The generic K-factor chart, every cell: by bend method, by inside radius over thickness (0 to
+/// T, T to 3T, over 3T) and by soft, medium and hard material. Each material's hardness is the
+/// column its family reads: aluminium soft (copper and brass with it), mild steel medium,
+/// stainless hard.
 #[test]
-fn k_factors_follow_the_generic_air_bending_chart() {
-    let chart = |hardness: usize, r_over_t: f64| -> f64 {
-        let band = if r_over_t < 1.0 {
-            [0.33, 0.38, 0.40]
-        } else if r_over_t <= 3.0 {
-            [0.40, 0.43, 0.45]
-        } else {
-            [0.50, 0.50, 0.50]
-        };
-        band[hardness]
-    };
+fn k_factor_estimates_are_the_generic_charts_cells() {
+    let chart = [
+        (BendMethod::Air, [[0.33, 0.38, 0.40], [0.40, 0.43, 0.45], [0.50, 0.50, 0.50]]),
+        (BendMethod::Bottoming, [[0.42, 0.44, 0.46], [0.46, 0.47, 0.48], [0.50, 0.50, 0.50]]),
+        (BendMethod::Coining, [[0.38, 0.41, 0.44], [0.44, 0.46, 0.47], [0.50, 0.50, 0.50]]),
+    ];
+    for (method, rows) in chart {
+        for (row, r_over_t) in rows.iter().zip([0.5, 1.0, 3.5]) {
+            for (want, hardness) in row.iter().zip([Hardness::Soft, Hardness::Medium, Hardness::Hard]) {
+                assert_eq!(k_factor_estimate(method, hardness, r_over_t), *want, "{method:?} {hardness:?} R/T {r_over_t}");
+            }
+        }
+        // The middle band holds at 3T; past it, 0.50.
+        assert_eq!(k_factor_estimate(method, Hardness::Hard, 3.0), rows[1][2]);
+    }
     for r in &standard().rules {
-        let hardness = match r.rule.material.as_str() {
-            "Mild steel (cold-rolled)" => 1,
-            "Stainless steel 304" => 2,
-            _ => 0,
+        let want = match r.rule.material.as_str() {
+            "Mild steel (cold-rolled)" => Hardness::Medium,
+            "Stainless steel 304" => Hardness::Hard,
+            _ => Hardness::Soft,
         };
-        let v = values(&r.rule);
-        assert!((v.k_factor - chart(hardness, v.bend_radius / v.thickness)).abs() < 1e-12, "{}: K {}", r.rule.name, v.k_factor);
+        assert_eq!(r.hardness, Some(want), "{}", r.rule.name);
     }
 }
 
-/// 6061-T6's approximate minimum radius for a 90° cold bend, the top of each range, by the
-/// thickness the chart lists at or above the sheet's: 1/64 in 1T, 1/32 in 1-1/2T, 1/16 in 2T,
-/// 1/8 in 3T, 3/16 in 4T. The other materials bend at one thickness.
+/// The published approximate minimum radius for a 90° cold bend, the top of each range, by the
+/// thickness the chart lists at or above the sheet's. 6061-T6: 1/64 in 1T, 1/32 in 1-1/2T, 1/16
+/// in 2T, 1/8 in 3T, 3/16 and 1/4 in 4T. 5052-H32: none (a sharp bend) up to 1/16 in, then 1T
+/// to 3/16 in and 1-1/2T at 1/4 in. The other materials have no published table here, so none.
 #[test]
-fn bend_radii_follow_the_published_minimum_radii() {
-    let bands = [(1.0 / 64.0, 1.0), (1.0 / 32.0, 1.5), (1.0 / 16.0, 2.0), (1.0 / 8.0, 3.0), (3.0 / 16.0, 4.0)];
+fn minimum_radii_are_the_published_cold_bend_chart() {
+    let charts: [(&str, [(f64, Option<f64>); 6]); 2] = [
+        (
+            "Aluminium 6061-T6",
+            [
+                (1.0 / 64.0, Some(1.0)),
+                (1.0 / 32.0, Some(1.5)),
+                (1.0 / 16.0, Some(2.0)),
+                (1.0 / 8.0, Some(3.0)),
+                (3.0 / 16.0, Some(4.0)),
+                (0.25, Some(4.0)),
+            ],
+        ),
+        (
+            "Aluminium 5052-H32",
+            [(1.0 / 64.0, None), (1.0 / 32.0, None), (1.0 / 16.0, None), (1.0 / 8.0, Some(1.0)), (3.0 / 16.0, Some(1.0)), (0.25, Some(1.5))],
+        ),
+    ];
     for r in &standard().rules {
-        let v = values(&r.rule);
-        let want = if r.rule.material == "Aluminium 6061-T6" {
-            bands.iter().find(|(t, _)| inches(r) <= *t).map(|(_, m)| *m).unwrap_or_else(|| panic!("{}", r.rule.name))
-        } else {
-            1.0
-        };
-        assert!((v.bend_radius / v.thickness - want).abs() < 1e-12, "{}: {} T", r.rule.name, v.bend_radius / v.thickness);
+        let t = values(&r.rule).thickness;
+        let want = charts
+            .iter()
+            .find(|(m, _)| *m == r.rule.material)
+            .and_then(|(_, bands)| bands.iter().find(|(band, _)| t / 25.4 <= band + 1e-9).and_then(|(_, m)| *m));
+        let got = r.min_bend_radius_mm(t).map(|mm| mm / t);
+        match (want, got) {
+            (Some(w), Some(g)) => assert!((w - g).abs() < 1e-12, "{}: {g} T", r.rule.name),
+            (None, None) => {}
+            _ => panic!("{}: want {want:?} T, the library has {got:?} T", r.rule.name),
+        }
     }
 }
 
@@ -214,7 +250,11 @@ fn hostile_packs_are_refused_with_what_to_change() {
         (r#"{"format":"solidcraft-sheet-rules","rules":{}}"#.into(), "must be a list"),
         (r#"{"format":"solidcraft-sheet-rules","rules":[]}"#.into(), "no rules"),
         (r#"{"format":"solidcraft-sheet-rules","rules":[7]}"#.into(), "an object"),
-        (row(r#""thickness":"2 mm""#), "`k_factor` is required"),
+        (row(r#""k_factor":"0.4""#), "`thickness` is required"),
+        (row(r#""thickness":"2 mm","hardness":"squishy""#), "soft, medium or hard"),
+        (row(r#""thickness":"2 mm","min_bend_radius":"0 mm""#), "more than 0"),
+        (row(r#""thickness":"2 mm","min_bend_radius":"-1 mm""#), "more than 0"),
+        (row(r#""thickness":"2 mm","min_bend_radius":"2""#), "no unit"),
         (row(r#""thickness":"2","k_factor":"0.4","bend_radius":"2 mm""#), "no unit"),
         (row(r#""thickness":"T = 2 mm","k_factor":"0.4","bend_radius":"2 mm""#), "not a parameter definition"),
         (row(r#""thickness":"Thick","k_factor":"0.4","bend_radius":"2 mm""#), "only the rule's own `Thickness`"),
@@ -235,7 +275,7 @@ fn hostile_packs_are_refused_with_what_to_change() {
         ("name,thickness,bend_radius,k_factor\nR,2 mm,2 mm,0,44\n".into(), "5 values for 4 columns"),
         (row(r#""thickness":"2 mm","k_factor":"0.4","bend_radius":"2 mm","source":"nowhere""#), "not in the pack's sources"),
         (format!(r#"{{"format":"solidcraft-sheet-rules","rules":[{{"name":"A",{ok}}},{{"name":"a",{ok}}}]}}"#), "two rules named"),
-        ("name,thickness,k_factor\nA,2 mm,0.4\n".into(), "`bend_radius` column"),
+        ("name,k_factor\nA,0.4\n".into(), "`thickness` column"),
         ("name,thickness,k_factor,bend_radius\n\"A,2 mm,0.4,2 mm\n".into(), "unmatched quotes"),
         ("name,thickness,k_factor,bend_radius\n".into(), "no rules"),
         ("".into(), "no rules"),

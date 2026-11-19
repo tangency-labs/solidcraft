@@ -480,6 +480,7 @@ fn rule_contract_keys_and_readers_match() {
         &[
             "active",
             "angle_display",
+            "bend_method",
             "bend_radius",
             "corner_relief",
             "corner_relief_shape",

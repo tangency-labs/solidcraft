@@ -164,8 +164,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
          active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
-         gauge?: with material, a gauge of the standard library (sheet.rule_library): the rule takes its thickness, K-factor and bend radius, \
-         except those given here",
+         gauge?: with material, a gauge of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
+         its K-factor is the bend model's estimate at the rule's R/T for bend_method?: air|bottoming|coining (default air), said in notes, \
+         unless k_factor is given; notes also say when the radius is under the material's published minimum",
     ),
     CommandSpec::new("sheet.rule_library", "Sheet Metal Standard Library", crate::checked!("sheet.rule_library", rule_library))
         .contract(&RULE_LIBRARY_CONTRACT)
@@ -174,9 +175,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .doc_only()
         .params(
-            "material? → the standard library: common materials in standard gauges, each with its thickness, K-factor and bend radius \
-             (expressions and millimetres) and the ids of the published tables they come from (sources). Generic values: a shop's own \
-             are better. sheet.manage_rules {name, material, gauge} makes a rule of one",
+            "material? → the standard library: common materials in standard gauges, each with its thickness (expression and mm), \
+             the gauge's chart, the material's hardness for the generic K-factor chart, its published minimum inside radius where there \
+             is one, and the ids of the published tables they come from (sources). The working radius is the tooling's. \
+             sheet.manage_rules {name, material, gauge} makes a rule of one",
         ),
     CommandSpec::new("sheet.rules", "List Sheet Metal Rules", crate::checked!("sheet.rules", list_rules))
         .contract(&RULES_CONTRACT).output(output_schema_for::<RulesResult>).icon("sheet_rules").noundo().doc_only().params("→ rules with their expressions and values, and the active one"),
@@ -990,11 +992,16 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut rule =
         s.doc.sheet.rules.iter().find(|r| r.name == name).cloned().unwrap_or_else(|| SheetRule { name: name.clone(), ..s.doc.sheet_rule(None) });
-    library_material(cmd, p, &mut rule)?;
+    let picked = library_material(cmd, p, &mut rule)?;
     for (k, slot) in rule.fields_mut() {
         if let Some(e) = expr(p, k) {
             *slot = e.into();
         }
+    }
+    let mut notes = Vec::new();
+    if let Some(entry) = picked {
+        let (vals, _) = s.doc.param_values();
+        library_k_and_radius(s, cmd, p, entry, &vals, &mut rule, &mut notes)?;
     }
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {
         let shape = shape.as_str().and_then(solidcraft_doc::sheet::ReliefShape::parse);
@@ -1026,14 +1033,56 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         rule: Box::new(RuleReply::from(&rule)),
         values: values.into(),
         errors,
+        notes,
         param_warnings: Vec::new(),
     })
     .map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// A rule's `material`, and with `gauge` the standard library's thickness, K-factor and bend
-/// radius for it (#18304); the values given beside them are set after, so they win.
-fn library_material(cmd: &str, p: &Value, rule: &mut SheetRule) -> Result<()> {
+/// A library pick's K-factor and the radius check (#18304). The K-factor is the pack's own when it
+/// gives one, else the bend model's estimate for `bend_method` (air by default) at the rule's
+/// R/T, said so in `notes`; one given beside the pick wins. A working radius under the material's
+/// published minimum is kept, with a note naming the minimum.
+fn library_k_and_radius(
+    s: &Session,
+    cmd: &str,
+    p: &Value,
+    entry: &library::PackRule,
+    vals: &std::collections::BTreeMap<String, solidcraft_doc::expr::Value>,
+    rule: &mut SheetRule,
+    notes: &mut Vec<String>,
+) -> Result<()> {
+    let method = match str_(p, "bend_method") {
+        None => library::BendMethod::Air,
+        Some(m) => library::BendMethod::parse(m).ok_or_else(|| bad(cmd, "`bend_method` must be air, bottoming or coining"))?,
+    };
+    let v = s.doc.rule_values(vals, rule).map_err(|e| bad(cmd, e.to_string()))?;
+    if expr(p, "k_factor").is_none()
+        && !entry.given.k_factor
+        && let Some(hardness) = entry.hardness
+    {
+        let r_over_t = v.bend_radius / v.thickness;
+        let k = library::k_factor_estimate(method, hardness, r_over_t);
+        rule.k_factor = format!("{k:.2}");
+        notes.push(format!(
+            "the K-factor {k:.2} is an estimate from the generic {} chart at R/T {r_over_t:.2}; your shop's measured value is better",
+            method.name()
+        ));
+    }
+    if let Some(min) = entry.min_bend_radius_mm(v.thickness)
+        && v.bend_radius < min - 1e-9
+    {
+        notes.push(format!(
+            "the bend radius {:.3} mm is under {}'s published minimum of {min:.3} mm at {:.3} mm thick",
+            v.bend_radius, entry.rule.material, v.thickness
+        ));
+    }
+    Ok(())
+}
+
+/// A rule's `material`, and with `gauge` the standard library's thickness for it (#18304), and
+/// the library entry picked. The values given beside them are set after, so they win.
+fn library_material(cmd: &str, p: &Value, rule: &mut SheetRule) -> Result<Option<&'static library::PackRule>> {
     let material = match p.get("material").filter(|v| !v.is_null()) {
         None => None,
         Some(v) => Some(
@@ -1047,7 +1096,7 @@ fn library_material(cmd: &str, p: &Value, rule: &mut SheetRule) -> Result<()> {
         if let Some(material) = material {
             rule.material = material.into();
         }
-        return Ok(());
+        return Ok(None);
     };
     let Some(material) = material.filter(|m| !m.is_empty()) else {
         return Err(bad(cmd, "`gauge` needs `material`: the standard library's gauges are by material"));
@@ -1065,9 +1114,14 @@ fn library_material(cmd: &str, p: &Value, rule: &mut SheetRule) -> Result<()> {
     };
     rule.material.clone_from(&entry.rule.material);
     rule.thickness.clone_from(&entry.rule.thickness);
-    rule.k_factor.clone_from(&entry.rule.k_factor);
-    rule.bend_radius.clone_from(&entry.rule.bend_radius);
-    Ok(())
+    // A pack's own K-factor and radius (a shop's); the library gives neither.
+    if entry.given.k_factor {
+        rule.k_factor.clone_from(&entry.rule.k_factor);
+    }
+    if entry.given.bend_radius {
+        rule.bend_radius.clone_from(&entry.rule.bend_radius);
+    }
+    Ok(Some(entry))
 }
 
 fn rule_library(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1090,11 +1144,12 @@ fn rule_library(s: &mut Session, p: &Value) -> Result<Value> {
                 name: r.rule.name.clone(),
                 material: r.rule.material.clone(),
                 gauge: r.gauge.clone(),
+                chart: r.chart.clone(),
                 thickness: r.rule.thickness.clone(),
-                k_factor: r.rule.k_factor.clone(),
-                bend_radius: r.rule.bend_radius.clone(),
                 thickness_mm: v.thickness,
-                bend_radius_mm: v.bend_radius,
+                hardness: r.hardness.map(|h| h.name().to_string()),
+                min_bend_radius: (!r.min_bend_radius.is_empty()).then(|| r.min_bend_radius.clone()),
+                min_bend_radius_mm: r.min_bend_radius_mm(v.thickness),
                 sources: r.sources.clone(),
             })
         })

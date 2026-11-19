@@ -5,6 +5,12 @@
 //! `docs/formats/sheet-rule-packs.md`. The standard library is such a pack, shipped in
 //! `assets/sheet-metal/standard-library.json` with the source of every value.
 //!
+//! What a pack row holds is what the stock and the shop decide. The thickness is the data; a
+//! gauge is only a label, from a named chart. A material's published minimum inside radius is
+//! material data, but the working radius comes from the tooling, so the library leaves it to the
+//! rule (or a shop pack). The K-factor comes from the bend model ([`k_factor_estimate`]: the
+//! bend method and R/T) unless the pack gives a measured one.
+//!
 //! A pack is read from a local file someone chose, so everything in it is checked before it is
 //! used: its size, its row count and every string are bounded, each value must work out as a
 //! rule's value does in a design, and a row may read no parameter but its own `Thickness` (a
@@ -37,12 +43,15 @@ const MAX_NOTE: usize = 2000;
 const MAX_SOURCES: usize = 64;
 const MAX_SKIPPED: usize = 32;
 
-const REQUIRED: &[&str] = &["name", "thickness", "k_factor", "bend_radius"];
+const REQUIRED: &[&str] = &["name", "thickness"];
 /// The columns of a CSV pack, in the order a pack is written.
 const COLUMNS: &[&str] = &[
     "name",
     "material",
     "gauge",
+    "chart",
+    "hardness",
+    "min_bend_radius",
     "thickness",
     "k_factor",
     "bend_radius",
@@ -63,13 +72,134 @@ pub struct Source {
     pub url: String,
 }
 
-/// One rule of a pack, with the gauge it is (`16 ga`, or empty) and the ids of the sources its
-/// values come from.
+/// How the sheet is bent: the bend model's method (the rows of the generic K-factor chart).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BendMethod {
+    #[default]
+    Air,
+    Bottoming,
+    Coining,
+}
+
+impl BendMethod {
+    pub const ALL: [BendMethod; 3] = [BendMethod::Air, BendMethod::Bottoming, BendMethod::Coining];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BendMethod::Air => "air",
+            BendMethod::Bottoming => "bottoming",
+            BendMethod::Coining => "coining",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<BendMethod> {
+        BendMethod::ALL.into_iter().find(|m| m.name().eq_ignore_ascii_case(s.trim()))
+    }
+}
+
+/// Which column of the generic K-factor chart a material reads: soft (aluminium, and copper and
+/// brass with it), medium (mild steel) or hard (stainless).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hardness {
+    Soft,
+    Medium,
+    Hard,
+}
+
+impl Hardness {
+    pub fn name(self) -> &'static str {
+        match self {
+            Hardness::Soft => "soft",
+            Hardness::Medium => "medium",
+            Hardness::Hard => "hard",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Hardness> {
+        [Hardness::Soft, Hardness::Medium, Hardness::Hard].into_iter().find(|h| h.name().eq_ignore_ascii_case(s.trim()))
+    }
+}
+
+/// The K-factor the generic chart gives for `method`, `hardness` and an inside radius over
+/// thickness of `r_over_t`: by R/T from 0 to T, from T to 3T, and past 3T. An estimate: a shop's
+/// coupon measurement is better.
+pub fn k_factor_estimate(method: BendMethod, hardness: Hardness, r_over_t: f64) -> f64 {
+    let column = match hardness {
+        Hardness::Soft => 0,
+        Hardness::Medium => 1,
+        Hardness::Hard => 2,
+    };
+    let rows: [[f64; 3]; 2] = match method {
+        BendMethod::Air => [[0.33, 0.38, 0.40], [0.40, 0.43, 0.45]],
+        BendMethod::Bottoming => [[0.42, 0.44, 0.46], [0.46, 0.47, 0.48]],
+        BendMethod::Coining => [[0.38, 0.41, 0.44], [0.44, 0.46, 0.47]],
+    };
+    let band = if r_over_t < 1.0 {
+        rows[0]
+    } else if r_over_t <= 3.0 {
+        rows[1]
+    } else {
+        [0.50, 0.50, 0.50]
+    };
+    band[column]
+}
+
+/// One rule of a pack: the rule's thickness and material, and its K-factor and radius when the
+/// row gives them (`given`); the gauge it is (`16 ga`, a label) and whose chart that is; the
+/// material's hardness for the K-factor chart and its published minimum inside radius; and the
+/// ids of the sources of its values.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackRule {
     pub rule: SheetRule,
     pub gauge: String,
+    pub chart: String,
+    pub hardness: Option<Hardness>,
+    /// An expression that may use `Thickness`, or empty when none is published.
+    pub min_bend_radius: String,
+    pub given: Given,
     pub sources: Vec<String>,
+}
+
+/// Which of a rule's working values a pack row gave; the others are the default rule's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Given {
+    pub k_factor: bool,
+    pub bend_radius: bool,
+}
+
+impl PackRule {
+    /// A design's or a person's rule as a pack row: every value is its own, K-factor and radius too.
+    pub fn of(rule: SheetRule) -> PackRule {
+        PackRule {
+            rule,
+            gauge: String::new(),
+            chart: String::new(),
+            hardness: None,
+            min_bend_radius: String::new(),
+            given: Given { k_factor: true, bend_radius: true },
+            sources: Vec::new(),
+        }
+    }
+
+    /// The minimum inside radius for a sheet `thickness` mm thick, when one is published.
+    pub fn min_bend_radius_mm(&self, thickness: f64) -> Option<f64> {
+        if self.min_bend_radius.is_empty() {
+            return None;
+        }
+        let look = |n: &str| {
+            if n == "Thickness" { Ok(expr::Value::length(thickness)) } else { Err(crate::DocError::Expr(format!("unknown parameter `{n}`"))) }
+        };
+        expr::eval_with(&self.min_bend_radius, &look).and_then(|v| v.to_kind(expr::Kind::Length)).ok()
+    }
+
+    /// The gauge as a label that says whose chart it is: `16 ga (Brown & Sharpe)`.
+    pub fn gauge_label(&self) -> String {
+        match (self.gauge.is_empty(), self.chart.is_empty()) {
+            (true, _) => String::new(),
+            (false, true) => self.gauge.clone(),
+            (false, false) => format!("{} ({})", self.gauge, self.chart),
+        }
+    }
 }
 
 /// A rule pack.
@@ -311,7 +441,18 @@ fn pack_rule(row: usize, fields: &[(&str, String)], skipped: &mut Skipped) -> Re
     if !plain_label(&gauge, MAX_GAUGE) {
         return Err(fail("the gauge must be at most 32 characters on one line".into()));
     }
-    for (key, slot) in rule.fields_mut() {
+    let chart = get("chart").unwrap_or_default().to_string();
+    if !plain_label(&chart, MAX_LABEL) {
+        return Err(fail("the chart must be at most 128 characters on one line".into()));
+    }
+    let hardness = match get("hardness") {
+        None => None,
+        Some(h) => Some(Hardness::parse(h).ok_or_else(|| fail("`hardness` must be soft, medium or hard".into()))?),
+    };
+    let given = Given { k_factor: get("k_factor").is_some(), bend_radius: get("bend_radius").is_some() };
+    let mut min_bend_radius = String::new();
+    let fields_and_min = rule.fields_mut().into_iter().chain(std::iter::once(("min_bend_radius", &mut min_bend_radius)));
+    for (key, slot) in fields_and_min {
         let Some(text) = get(key) else { continue };
         if !plain_text(text, MAX_EXPRESSION) {
             return Err(fail(format!("`{key}` must be at most 512 characters on one line")));
@@ -341,8 +482,12 @@ fn pack_rule(row: usize, fields: &[(&str, String)], skipped: &mut Skipped) -> Re
         rule.angle_display = AngleDisplay::parse(display).ok_or_else(|| fail("`angle_display` must be bend or included".into()))?.name().into();
     }
     let no_parameters = std::collections::BTreeMap::new();
-    crate::Document::default().rule_values(&no_parameters, &rule).map_err(|e| fail(e.to_string()))?;
-    Ok(PackRule { rule, gauge, sources: Vec::new() })
+    let values = crate::Document::default().rule_values(&no_parameters, &rule).map_err(|e| fail(e.to_string()))?;
+    let pack_rule = PackRule { rule, gauge, chart, hardness, min_bend_radius, given, sources: Vec::new() };
+    if !pack_rule.min_bend_radius.is_empty() && !pack_rule.min_bend_radius_mm(values.thickness).is_some_and(|r| r > 0.0 && r.is_finite()) {
+        return Err(fail("`min_bend_radius` must be a length more than 0".into()));
+    }
+    Ok(pack_rule)
 }
 
 fn finish(pack: RulePack, version: u64, skipped: Skipped) -> Result<ReadPack, PackError> {
@@ -421,10 +566,19 @@ fn rule_json(r: &PackRule) -> Value {
     if !rule.material.is_empty() {
         row.insert("material".into(), json!(rule.material));
     }
-    if !r.gauge.is_empty() {
-        row.insert("gauge".into(), json!(r.gauge));
+    for (key, text) in [("gauge", &r.gauge), ("chart", &r.chart), ("min_bend_radius", &r.min_bend_radius)] {
+        if !text.is_empty() {
+            row.insert(key.into(), json!(text));
+        }
+    }
+    if let Some(h) = r.hardness {
+        row.insert("hardness".into(), json!(h.name()));
     }
     for (key, text, _) in rule.fields() {
+        // A K-factor or radius the row didn't give stays out: it is the bend model's or the tooling's.
+        if (key == "k_factor" && !r.given.k_factor) || (key == "bend_radius" && !r.given.bend_radius) {
+            continue;
+        }
         row.insert(key.into(), json!(text));
     }
     row.insert("corner_relief_shape".into(), json!(rule.corner_relief_shape));
@@ -466,6 +620,11 @@ pub fn write_csv(pack: &RulePack) -> String {
                 "name" => &rule.name,
                 "material" => &rule.material,
                 "gauge" => &r.gauge,
+                "chart" => &r.chart,
+                "hardness" => r.hardness.map_or("", Hardness::name),
+                "min_bend_radius" => &r.min_bend_radius,
+                "k_factor" if !r.given.k_factor => "",
+                "bend_radius" if !r.given.bend_radius => "",
                 "corner_relief_shape" => &rule.corner_relief_shape,
                 "angle_display" => &rule.angle_display,
                 key => rule.fields().into_iter().find(|(k, _, _)| *k == key).map_or("", |(_, text, _)| text.as_str()),
@@ -502,9 +661,8 @@ pub fn standard_materials() -> Vec<&'static str> {
 
 /// `16`, `16ga`, `16 ga` and `16 gauge` are one gauge.
 fn gauge_key(gauge: &str) -> String {
-    let g = gauge.trim().to_lowercase();
-    let g = g.strip_suffix("gauge").or_else(|| g.strip_suffix("ga")).unwrap_or(&g);
-    g.trim().to_string()
+    let g: String = gauge.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    g.strip_suffix("gauge").or_else(|| g.strip_suffix("ga")).unwrap_or(&g).to_string()
 }
 
 /// The standard library's rule for `material` (ignoring case) in `gauge`.

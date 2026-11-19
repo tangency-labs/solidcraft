@@ -40,17 +40,28 @@ fn folder(name: &str) -> std::path::PathBuf {
 fn picking_a_material_and_gauge_fills_the_manager_and_ok_makes_that_rule() {
     let mut h = manager();
     choose(&mut h, "sheet.library.material", "Aluminium 6061-T6");
-    choose(&mut h, "sheet.library.gauge", "14 ga  0.0641 in");
+    choose(&mut h, "sheet.library.gauge", "14 ga (Brown & Sharpe)  0.0641 in");
     let commands = ok_commands(&h);
     let (command, p) = &commands[0];
     assert_eq!(command, "sheet.manage_rules");
     assert_eq!(p["thickness"], "0.0641 in", "{p}");
+    // The working radius stays the rule's (the tooling's), and the K-factor is the air-bending
+    // estimate at that R/T = 1: the soft column's 0.40.
+    assert_eq!(p["bend_radius"], "Thickness", "{p}");
     assert_eq!(p["k_factor"], "0.40", "{p}");
-    assert_eq!(p["bend_radius"], "3 * Thickness", "{p}");
     assert_eq!(p["material"], "Aluminium 6061-T6", "{p}");
+    // The estimate is said, and so is a radius under 6061-T6's published 3T at 14 ga.
+    assert!(crate::scenario::handle_at("dialog:report:sheet_library_note_0").is_some());
+    assert!(crate::scenario::handle_at("dialog:report:sheet_library_note_1").is_some());
+    // Bottoming estimates again from the same R/T.
+    choose(&mut h, "sheet.library.method", "Bottoming");
+    assert_eq!(ok_commands(&h)[0].1["k_factor"], "0.46");
+    // Another material clears the pick and leaves the thickness alone.
+    choose(&mut h, "sheet.library.material", "Stainless steel 304");
+    assert_eq!(ok_commands(&h)[0].1["thickness"], "0.0641 in");
     // Nothing changed in the design before OK.
     assert!(h.app.session.doc.sheet.rules.is_empty());
-    for (command, p) in commands {
+    for (command, p) in ok_commands(&h) {
         h.app.run(&command, p).unwrap();
     }
     let rule = h.app.session.doc.sheet_rule(None);

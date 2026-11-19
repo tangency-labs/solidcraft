@@ -724,10 +724,13 @@ pub struct ManageRulesParams {
     /// the rule; empty clears it. With `gauge`, a material of the standard library
     /// (`sheet.rule_library`). Ignored when deleting.
     pub material: Option<String>,
-    /// A gauge of `material` in the standard library (`16`, `16 ga`): the rule takes that gauge's
-    /// thickness, K-factor and bend radius, except the ones given here. Needs `material`.
-    /// Ignored when deleting.
+    /// A gauge of `material` in the standard library (`16`, `16 ga`): the rule takes its
+    /// thickness and keeps its own bend radius; its K-factor is the bend model's estimate, unless
+    /// `k_factor` is given. Needs `material`. Ignored when deleting.
     pub gauge: Option<String>,
+    /// With `gauge`, the bend method the K-factor estimate is for: air (default), bottoming or
+    /// coining. Ignored otherwise.
+    pub bend_method: Option<String>,
 }
 
 /// The standard library of sheet metal materials and gauges, each value with its sources.
@@ -752,13 +755,17 @@ pub struct LibraryRule {
     pub name: String,
     pub material: String,
     pub gauge: String,
-    /// Expressions, as the rule takes them.
+    /// Whose gauge chart `gauge` is from.
+    pub chart: String,
+    /// The thickness as the rule takes it, and in millimetres.
     pub thickness: String,
-    pub k_factor: String,
-    pub bend_radius: String,
-    /// The thickness and inside radius worked out, in millimetres.
     pub thickness_mm: f64,
-    pub bend_radius_mm: f64,
+    /// The column of the generic K-factor chart the material reads: soft, medium or hard.
+    pub hardness: Option<String>,
+    /// The material's published minimum inside radius at this thickness (an expression, and in
+    /// millimetres), when there is one. The working radius is the tooling's.
+    pub min_bend_radius: Option<String>,
+    pub min_bend_radius_mm: Option<f64>,
     /// Ids of the sources of these values.
     pub sources: Vec<String>,
 }
@@ -921,6 +928,10 @@ pub enum ManageRulesResult {
         rule: Box<RuleReply>,
         values: RuleValuesReply,
         errors: Vec<RuleFeatureError>,
+        /// What a standard library pick estimated or found (#18304): a K-factor from the bend
+        /// model, a radius under the material's published minimum.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         param_warnings: Vec<String>,
     },
