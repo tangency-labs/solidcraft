@@ -822,6 +822,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-codec-usd"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "382d92e3a553c226d9bd28dd0cb5ea84d84f4112c364cffa9b3706757e7bbeed"
+dependencies = [
+ "cadmpeg-container",
+ "cadmpeg-core",
+ "cadmpeg-ir",
+ "cadmpeg-tessellate",
+ "crc32fast",
+ "unicode-ident",
+]
+
+[[package]]
 name = "cadmpeg-container"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,6 +901,7 @@ dependencies = [
  "cadmpeg-codec-freecad",
  "cadmpeg-codec-rhino",
  "cadmpeg-codec-step",
+ "cadmpeg-codec-usd",
  "cadmpeg-container",
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -895,6 +910,16 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "toml",
+]
+
+[[package]]
+name = "cadmpeg-tessellate"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3eb1cde284412b5389fb9e462321be8f05497e0b426d38be4dc9e46321e583f"
+dependencies = [
+ "cadmpeg-core",
+ "cadmpeg-ir",
 ]
 
 [[package]]
