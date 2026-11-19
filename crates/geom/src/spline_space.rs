@@ -501,6 +501,32 @@ impl Monotone {
         Ok(Monotone { x, y, m })
     }
 
+    /// The monotone cubic through increasing points with the given slopes, each limited to
+    /// three times the secant of the intervals beside it (Fritsch & Carlson's sufficient
+    /// condition, so it never decreases). A slope that is negative or not finite is taken at
+    /// that limit. Slopes of an increasing function within the limit are kept
+    /// exactly, so the cubic matches the function to fourth order.
+    pub fn with_slopes(x: Vec<f64>, y: Vec<f64>, slopes: &[f64]) -> SplineResult<Monotone> {
+        let n = x.len();
+        if n < 2 || y.len() != n || slopes.len() != n {
+            return invalid("a monotone cubic needs two points or more, each with a slope");
+        }
+        let increasing = |v: &[f64]| v.iter().all(|t| t.is_finite()) && v.windows(2).all(|w| w[0] < w[1]);
+        if !increasing(&x) || !increasing(&y) {
+            return invalid("the points of a monotone cubic must increase");
+        }
+        let d: Vec<f64> = x.windows(2).zip(y.windows(2)).map(|(a, b)| (b[1] - b[0]) / (a[1] - a[0])).collect();
+        let m = slopes
+            .iter()
+            .enumerate()
+            .map(|(k, &s)| {
+                let limit = 3.0 * k.checked_sub(1).and_then(|i| d.get(i)).into_iter().chain(d.get(k)).fold(f64::INFINITY, |a, b| a.min(*b));
+                if s.is_finite() && s >= 0.0 { s.min(limit) } else { limit }
+            })
+            .collect();
+        Ok(Monotone { x, y, m })
+    }
+
     /// The value and the first two derivatives at `t` (clamped to the points' range).
     pub fn eval(&self, t: f64) -> [f64; 3] {
         let n = self.x.len();
@@ -626,5 +652,32 @@ mod tests {
         // Repeated conditions do not determine a spline.
         assert!(Interpolant::new(s.clone(), vec![Cond { t: 0.5, der: 0 }; 4]).is_err());
         assert!(Interpolant::lowest(vec![Cond { t: 2.0, der: 0 }], 0.0, 1.0).is_err());
+    }
+
+    /// Given slopes within three times the secants are kept exactly, so a cubic is reproduced
+    /// from its values and slopes; a slope past the limit, or an infinite one (a function
+    /// standing still where its inverse is taken), is limited, and the cubic never decreases.
+    #[test]
+    fn monotone_with_slopes_keeps_exact_slopes_and_never_decreases() {
+        let f = |x: f64| x + 0.5 * x * x * x;
+        let df = |x: f64| 1.0 + 1.5 * x * x;
+        let xs: Vec<f64> = (0..=4).map(|k| k as f64 * 0.25).collect();
+        let m = Monotone::with_slopes(xs.clone(), xs.iter().map(|x| f(*x)).collect(), &xs.iter().map(|x| df(*x)).collect::<Vec<_>>()).unwrap();
+        for k in 0..=40 {
+            let x = k as f64 / 40.0;
+            assert!(close(m.eval(x)[0], f(x)), "at {x}");
+        }
+        // x = s³ inverted: t = s^(1/3) has an infinite slope at 0.
+        let ss: Vec<f64> = (0..=8).map(|k| (k as f64 / 8.0).powi(3)).collect();
+        let ts: Vec<f64> = (0..=8).map(|k| k as f64 / 8.0).collect();
+        let slopes: Vec<f64> = ts.iter().map(|t| 1.0 / (3.0 * t * t)).collect();
+        let m = Monotone::with_slopes(ss, ts, &slopes).unwrap();
+        let mut last = m.eval(0.0)[0];
+        for k in 1..=4000 {
+            let v = m.eval(k as f64 / 4000.0)[0];
+            assert!(v >= last, "decreases at {}", k as f64 / 4000.0);
+            last = v;
+        }
+        assert!(Monotone::with_slopes(vec![0.0, 1.0], vec![0.0, 1.0], &[1.0]).is_err());
     }
 }

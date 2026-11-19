@@ -61,8 +61,10 @@ pub const MAX_NETWORK_CURVES: usize = 32;
 const MAX_SPANS: usize = 512;
 /// Fewest spans the fitting starts with in one direction.
 const MIN_SPANS: usize = 8;
-/// Samples of a curve's arc-length table (its joints are added to them).
-const TABLE: usize = 256;
+/// Samples of a curve's arc-length table (its joints are added to them). The map between them is
+/// a cubic with exact slopes, whose second derivative jumps at each sample by O(h²): at 256 the
+/// sections of #19578 still missed the fit by 1.13e-4, at 512 they fit with room (as at 1024).
+const TABLE: usize = 512;
 /// Most joints of one curve ([`NetCurve::joints`]).
 const MAX_JOINTS: usize = 1024;
 /// How far a curve that crosses a G1 or G2 boundary may lean out of the face's tangent plane
@@ -202,52 +204,43 @@ struct Track<'a> {
     condition: Option<(Continuity, Box<dyn CrossFace + 'a>)>,
 }
 
-/// One piece of a curve, between two of its joints or ends: a cubic spline from normalised arc
-/// length to the curve's parameter through the table samples on the piece, with its slopes at the
-/// ends (interpolation with end derivatives and knots by averaging, the NURBS Book §9.2.1–9.2.2).
-/// The end slopes are one over the curve's speed there, from the curve itself: interpolation alone
-/// would leave them a little off where a piece has few samples, and the curve would change speed
-/// at the joint along `s` after all.
+/// One piece of a curve, between two of its joints or ends: a monotone cubic from normalised arc
+/// length to the curve's parameter through the table samples on the piece, with the slope `dt/ds`
+/// at each sample one over the curve's speed there, from the curve itself (Hermite
+/// interpolation, [`Monotone::with_slopes`]). With the slopes exact, the curve along the map runs
+/// at nearly constant speed right up to a joint, where it changes speed along its own parameter.
+/// The slope limit keeps the map increasing where the curve stands still, so the curve never runs
+/// back along itself.
 struct Piece {
-    /// The piece's ends: arc length and parameter.
+    /// The piece's ends in arc length.
     s: [f64; 2],
-    t: [f64; 2],
-    space: Space,
-    ctrl: Vec<f64>,
+    map: Monotone,
 }
 
 impl Piece {
-    /// The piece through `nodes` (arc length, parameter), both increasing, with the slopes
-    /// `dt/ds` at its ends (none where the curve stands still); a sample that doesn't move along
-    /// the curve adds nothing and is left out. None for a piece of no length.
-    fn new(nodes: &[(f64, f64)], slopes: [Option<f64>; 2]) -> SplineResult<Option<Piece>> {
-        let mut kept: Vec<(f64, f64)> = Vec::with_capacity(nodes.len());
+    /// The piece through `nodes` (arc length, parameter, `dt/ds`), the first two increasing; a
+    /// sample that doesn't move along the curve adds nothing and is left out. None for a piece of
+    /// no length.
+    fn new(nodes: &[(f64, f64, f64)]) -> SplineResult<Option<Piece>> {
+        let mut kept: Vec<(f64, f64, f64)> = Vec::with_capacity(nodes.len());
         for &n in nodes {
             if kept.last().is_none_or(|l| n.0 > l.0) {
                 kept.push(n);
             }
         }
-        let (Some(&first), Some(&last)) = (kept.first(), kept.last()) else { return Ok(None) };
+        let (Some(first), Some(last)) = (kept.first(), kept.last()) else { return Ok(None) };
         if kept.len() < 2 {
             return Ok(None);
         }
-        let mut conds: Vec<Cond> = kept.iter().map(|n| Cond { t: n.0, der: 0 }).collect();
-        let mut data: Vec<f64> = kept.iter().map(|n| n.1).collect();
-        for (at, slope) in [first.0, last.0].into_iter().zip(slopes) {
-            if let Some(m) = slope {
-                conds.push(Cond { t: at, der: 1 });
-                data.push(m);
-            }
-        }
-        let interp = Interpolant::lowest(conds, first.0, last.0)?;
-        let ctrl = interp.fit(&data)?;
-        Ok(Some(Piece { s: [first.0, last.0], t: [first.1, last.1], space: interp.space().clone(), ctrl }))
+        let s = [first.0, last.0];
+        let slopes: Vec<f64> = kept.iter().map(|n| n.2).collect();
+        let map = Monotone::with_slopes(kept.iter().map(|n| n.0).collect(), kept.iter().map(|n| n.1).collect(), &slopes)?;
+        Ok(Some(Piece { s, map }))
     }
 
     /// The curve's parameter at arc length `s` (on the piece).
-    fn param(&self, s: f64) -> SplineResult<f64> {
-        let t = self.space.eval(&self.ctrl, s.clamp(self.s[0], self.s[1]), 0)?;
-        Ok(t.clamp(self.t[0], self.t[1]))
+    fn param(&self, s: f64) -> f64 {
+        self.map.eval(s)[0]
     }
 }
 
@@ -261,10 +254,10 @@ impl<'a> Track<'a> {
         joints.retain(|j| j.is_finite() && *j > 0.0 && *j < 1.0);
         joints.sort_by(f64::total_cmp);
         joints.dedup();
-        // The evenly spaced samples, less any within 1e-9 of a joint, and the joints.
+        // The evenly spaced samples, less any inside one within 1e-9 of a joint, and the joints.
         let mut t: Vec<(f64, bool)> = (0..=TABLE)
             .map(|k| k as f64 / TABLE as f64)
-            .filter(|tk| !joints.iter().any(|j| (j - tk).abs() < 1e-9))
+            .filter(|tk| *tk == 0.0 || *tk == 1.0 || !joints.iter().any(|j| (j - tk).abs() < 1e-9))
             .map(|tk| (tk, false))
             .chain(joints.iter().map(|j| (*j, true)))
             .collect();
@@ -313,20 +306,35 @@ impl<'a> Track<'a> {
             *x /= acc;
         }
         // The pieces between joints, each through its samples (a joint ends one and starts the
-        // next), with dt/ds at its ends: the normalised length over the curve's speed there, from
-        // a one-sided difference of second order inside the piece, a 64th of its end cell long.
-        let mut slope = |t0: f64, h: f64| -> SplineResult<Option<f64>> {
-            let (a, b, c) = (at(t0)?, at(t0 + h)?, at(t0 + 2.0 * h)?);
-            let speed = ((b - a) * 4.0 - (c - a)).len() / (2.0 * h.abs());
-            Ok((speed.is_finite() && speed > 1e-9 * acc).then(|| acc / speed))
+        // next), with dt/ds at each: the normalised length over the curve's speed there, by a
+        // difference of second order a 64th of a cell long, one-sided at a piece's ends so that it
+        // stays on the piece.
+        let mut slope = |t0: f64, h: f64, central: bool| -> SplineResult<f64> {
+            let speed = if central {
+                (at(t0 + h)? - at(t0 - h)?).len() / (2.0 * h)
+            } else {
+                let (a, b, c) = (at(t0)?, at(t0 + h)?, at(t0 + 2.0 * h)?);
+                ((b - a) * 4.0 - (c - a)).len() / (2.0 * h.abs())
+            };
+            // A curve standing still has no slope: the limit takes it.
+            Ok(acc / speed)
         };
         let mut pieces = Vec::new();
         let mut from = 0;
-        for k in 1..t.len() {
-            if is_joint[k] || k + 1 == t.len() {
-                let nodes: Vec<(f64, f64)> = (from..=k).map(|i| (s[i], t[i])).collect();
-                let slopes = [slope(t[from], (t[from + 1] - t[from]) / 64.0)?, slope(t[k], -(t[k] - t[k - 1]) / 64.0)?];
-                if let Some(piece) = Piece::new(&nodes, slopes)? {
+        for (k, &joint) in is_joint.iter().enumerate().skip(1) {
+            if joint || k + 1 == t.len() {
+                let mut nodes = Vec::with_capacity(k + 1 - from);
+                for i in from..=k {
+                    let m = if i == from {
+                        slope(t[i], (t[i + 1] - t[i]) / 64.0, false)?
+                    } else if i == k {
+                        slope(t[i], -(t[i] - t[i - 1]) / 64.0, false)?
+                    } else {
+                        slope(t[i], (t[i] - t[i - 1]).min(t[i + 1] - t[i]) / 64.0, true)?
+                    };
+                    nodes.push((s[i], t[i], m));
+                }
+                if let Some(piece) = Piece::new(&nodes)? {
                     pieces.push(piece);
                 }
                 from = k;
@@ -349,7 +357,7 @@ impl<'a> Track<'a> {
         let s = if self.flipped { 1.0 - s } else { s }.clamp(0.0, 1.0);
         let k = self.pieces.partition_point(|p| p.s[1] < s).min(self.pieces.len().saturating_sub(1));
         let t = match self.pieces.get(k) {
-            Some(piece) => piece.param(s)?,
+            Some(piece) => piece.param(s),
             // A point: every parameter is the point.
             None => s,
         };
@@ -1818,6 +1826,43 @@ mod tests {
         let steep = line("steep", Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 5.0));
         let err = network_surface(vec![edge(), far], vec![steep, curve("right", side(10.0))], TOL).unwrap_err();
         assert!(err.to_string().contains("steep") && err.to_string().contains("tangent"), "{err}");
+    }
+
+    /// A curve given by a function of its parameter, in pieces that meet at `joints`.
+    struct Jointed<G: FnMut(f64) -> Vec3>(G, Vec<f64>);
+    impl<G: FnMut(f64) -> Vec3> NetCurve for Jointed<G> {
+        fn point(&mut self, t: f64) -> Option<Vec3> {
+            Some((self.0)(t))
+        }
+        fn joints(&self) -> Vec<f64> {
+            self.1.clone()
+        }
+    }
+
+    /// A curve measured by arc length runs forward along itself from its start to its end: also
+    /// where its own parameter stands still at the start (x = t³, whose arc length has an
+    /// infinite slope against it there), and with a joint a hair from the start (the start is
+    /// still on it). From #19579's review.
+    #[test]
+    fn a_track_runs_forward_from_its_start_to_its_end() {
+        let cube = |t: f64| Vec3::new(t * t * t, 0.0, 0.0);
+        let still = Track::new(NetworkCurve { label: "still".into(), curve: Box::new(F(cube)), condition: None }).unwrap();
+        let near = Track::new(NetworkCurve {
+            label: "near".into(),
+            curve: Box::new(Jointed(|t: f64| Vec3::new(t, 0.0, 0.0), vec![1e-10, 1.0 - 1e-10])),
+            condition: None,
+        })
+        .unwrap();
+        for mut track in [still, near] {
+            assert!(track.point(0.0).unwrap().dist(Vec3::ZERO) < 1e-12, "{} starts at its start", track.label);
+            assert!(track.point(1.0).unwrap().dist(Vec3::X) < 1e-12, "{} ends at its end", track.label);
+            let mut last = 0.0;
+            for k in 1..=20_000 {
+                let x = track.point(k as f64 / 20_000.0).unwrap().x;
+                assert!(x >= last, "{} runs back at s = {}", track.label, k as f64 / 20_000.0);
+                last = x;
+            }
+        }
     }
 
     /// Networks that can't be built are refused, naming the curves; none panics.
