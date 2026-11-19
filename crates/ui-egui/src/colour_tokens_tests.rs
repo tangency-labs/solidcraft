@@ -145,7 +145,7 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
-    ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
+    ("gpu.rs", 2, "the white tints that show the background picture and a plugin's sky as they are"),
     ("glass.rs", 1, "the grey a glass panel shows, from the theme's glass style and the luma under it"),
     ("navigation.rs", 1, "the navigator's face shading, made from a token"),
     ("drawing_sheet_page.rs", 2, "the drawing sheet moves toward white, else black, to stand off the backdrop"),
