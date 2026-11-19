@@ -571,7 +571,7 @@ mod tests {
         let many = format!("FIELDS {}\nSIZE 4\nTYPE F\nPOINTS 1\nDATA ascii\n", "x ".repeat(MAX_FIELDS + 1));
         let mut not_text = ok.replace("1 2 3\n", "1 2 ").into_bytes();
         not_text.push(0xFF);
-        let cases: Vec<Vec<u8>> = vec![
+        let cases = [
             Vec::new(),
             b"VERSION .7\n".to_vec(),
             b"\xff\xfe\x00DATA".to_vec(),
