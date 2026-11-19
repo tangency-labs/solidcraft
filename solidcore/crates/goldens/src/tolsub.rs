@@ -39,6 +39,39 @@ pub(crate) fn active() -> bool {
 #[cfg(test)]
 mod replay;
 
+/// Runs `f` with the kept-trim cover's raises (tangency-labs/solidcraft#19295) put back on
+/// every read it makes: each raised edge and vertex holds its tolerance before the cover,
+/// as on main. For the certificates recorded on the reads before the cover
+/// ([`crate::operand_trim_rows`]); the cover's own moves are proved by the replay.
+#[cfg(test)]
+pub(crate) fn with_trim_cover_put_back<T>(f: impl FnOnce() -> T) -> T {
+    // (the mode is removed even when `f` panics, so it cannot reach a later test)
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                state::set(None);
+            }
+        }
+    }
+    state::set(Some(state::Mode::Substitute {
+        subs: Vec::new(),
+        reads: 0,
+        applied: 0,
+        already: 0,
+        undone: 0,
+        failures: Vec::new(),
+    }));
+    let clear = Clear;
+    let out = f();
+    drop(clear);
+    let Some(state::Mode::Substitute { failures, .. }) = state::take() else {
+        panic!("tolsub mode lost");
+    };
+    assert!(failures.is_empty(), "{failures:?}");
+    out
+}
+
 #[cfg(test)]
 pub(crate) mod state {
     use std::cell::RefCell;

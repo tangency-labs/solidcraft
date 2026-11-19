@@ -34,9 +34,11 @@
 //! tolerance of an edge whose kept UV trim runs farther from it than its tolerance, to a
 //! proved bound on that distance, and records each raise it makes with the value before
 //! (`Brep::trim_cover_raises`). Every read of a replayed row first has those raises put
-//! back. [`TRIM_COVER`] lists the rows only the cover moved, each with main's row hash
-//! ([`record_main_hashes`] on main's goldens): with the raises put back (at least one) the
-//! row is main's row, and as is it is the committed golden line.
+//! back. [`TRIM_COVER`] lists the rows only the cover moved, each with the hash of main's
+//! encoded row from main's own run of the case ([`record`] on main; a committed golden line
+//! can differ from main's run in the last bits, within the goldens' tolerance): with the
+//! raises put back (at least one) the row is main's row, and as is it is the committed
+//! golden line.
 
 use std::collections::BTreeMap;
 
@@ -280,29 +282,6 @@ fn record() {
             "line": line, "reads": snaps,
         });
         let _ = writeln!(out, "{rec}");
-    }
-    std::fs::write(std::env::var("TOLSUB_OUT").unwrap(), out).unwrap();
-}
-
-/// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, the line `unit<TAB>case<TAB>hash`
-/// to `$TOLSUB_OUT`: the hash of the case's committed golden line. Run before the moved
-/// rows are blessed, it gives main's row hashes (main's goldens are main's rows).
-#[test]
-#[ignore = "makes TRIM_COVER's hashes; run before blessing"]
-fn record_main_hashes() {
-    use std::fmt::Write as _;
-    let list = std::fs::read_to_string(std::env::var("TOLSUB_CASES").unwrap()).unwrap();
-    let mut goldens = BTreeMap::new();
-    let mut out = String::new();
-    for l in list.lines() {
-        let (id, name) = l.split_once('\t').unwrap();
-        let golden = goldens
-            .entry(id.to_string())
-            .or_insert_with(|| read(&default_dir(), id).unwrap());
-        let line = golden
-            .get(name)
-            .unwrap_or_else(|| panic!("{id}: no golden {name}"));
-        let _ = writeln!(out, "{id}\t{name}\t{:#018x}", hash(line));
     }
     std::fs::write(std::env::var("TOLSUB_OUT").unwrap(), out).unwrap();
 }
