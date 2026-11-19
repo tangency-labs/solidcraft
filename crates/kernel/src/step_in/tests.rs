@@ -3425,6 +3425,74 @@ fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
     assert!(refused, "{far:?}");
 }
 
+/// A flat cubic spline patch 30 mm across (every control point at z = 0, so the surface is the
+/// plane, parametrized linearly) whose four edges, cubic B-splines on its boundary rows, have
+/// their two inner control points written `h` mm above it, in a file that states 0.01 mm. Each
+/// edge then lies 3t(1 - t)·h above the surface at its parameter t: on it at its vertices, and
+/// farthest, 3h/4, at its middle.
+fn flat_spline_with_edges_bowed(h: f64) -> String {
+    let mut t = String::from(HEAD);
+    let mut rows = Vec::new();
+    for i in 0..4 {
+        let row: Vec<String> = (0..4).map(|j| format!("#{}", 100 + i * 4 + j)).collect();
+        for j in 0..4 {
+            t += &format!("#{}=CARTESIAN_POINT('',({}.,{}.,0.));\n", 100 + i * 4 + j, i * 10, j * 10);
+        }
+        rows.push(format!("({})", row.join(",")));
+    }
+    t += &format!(
+        "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(4,4),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
+        rows.join(",")
+    );
+    let sides: [[(usize, usize); 4]; 4] =
+        [[(0, 0), (1, 0), (2, 0), (3, 0)], [(3, 0), (3, 1), (3, 2), (3, 3)], [(3, 3), (2, 3), (1, 3), (0, 3)], [(0, 3), (0, 2), (0, 1), (0, 0)]];
+    let p = |(i, j): (usize, usize), z: f64| format!("({}.,{}.,{z:?})", i * 10, j * 10);
+    for (k, side) in sides.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=VERTEX_POINT('',#{});\n", 200 + k, p(side[0], 0.0), 210 + k, 200 + k);
+        let pts: Vec<String> = (0..4).map(|m| format!("#{}", 300 + k * 4 + m)).collect();
+        for (m, &q) in side.iter().enumerate() {
+            let z = if m == 1 || m == 2 { h } else { 0.0 };
+            t += &format!("#{}=CARTESIAN_POINT('',{});\n", 300 + k * 4 + m, p(q, z));
+        }
+        t += &format!("#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.);\n", 400 + k, pts.join(","));
+    }
+    for k in 0..4 {
+        t += &format!(
+            "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            500 + k,
+            210 + k,
+            210 + (k + 1) % 4,
+            400 + k,
+            510 + k,
+            500 + k
+        );
+    }
+    t += "#520=EDGE_LOOP('',(#510,#511,#512,#513));\n#521=FACE_OUTER_BOUND('',#520,.T.);\n#522=ADVANCED_FACE('',(#521),#10,.T.);\n";
+    t +=
+        "#530=OPEN_SHELL('',(#522));\n#531=SHELL_BASED_SURFACE_MODEL('Bowed',(#530));\n#532=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#531),#540);\n";
+    t += &context(540, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-2)");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn edges_off_their_spline_face_by_more_than_half_the_files_tolerance_pass_smlibs_check() {
+    // Each edge lies at most g = 3h/4 = 0.006 mm off the patch, inside the file's 0.01 mm. SMLib
+    // reads an edge's tolerance τ as a zone of τ/2 about its curve and passes an edge/surface gap
+    // only within that zone, so each edge's tolerance holds 2g at least, and the sheet passes
+    // SMLib's check. (#19315: edges 6.2 and 6.8 µm off their spline faces in a file that states
+    // 0.01 mm kept 0.01 and failed SmBrep test #4.)
+    let g = 0.006;
+    let imp = step_import(&flat_spline_with_edges_bowed(4.0 * g / 3.0)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
+    let r = imp.bodies[0].body.record();
+    assert_eq!((r.faces.len(), r.edges.len(), r.vertices.len()), (1, 4, 4));
+    assert!(r.edges.iter().all(|e| e.tolerance / 2.0 >= g), "{:?}", r.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, 900.0) < 1e-6, "{}", m.area);
+}
+
 #[test]
 fn spline_edges_off_their_plane_by_less_than_the_file_states_get_their_closed_form() {
     // 0.8e-6 mm off, inside the file's 1e-6 mm but past the half of it a closed-form pcurve is
