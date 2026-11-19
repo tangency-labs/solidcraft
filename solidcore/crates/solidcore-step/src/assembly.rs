@@ -62,6 +62,23 @@ pub(crate) const EDGE_GAP_SAMPLES: usize = 16;
 /// within which SMLib takes two of a surface's sides for one (#12757: a planar sliver face
 /// 1e-5 mm wide).
 pub(crate) const OPEN_DOMAIN_SPAN: f64 = 1e-3;
+/// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
+/// record check measures it: with margin, as a vertex's.
+pub(crate) const EDGE_GAP_MARGIN: f64 = 1.5;
+
+/// Whether the nearest point of `surface` to a point is in closed form (a plane, cylinder, cone,
+/// sphere or torus): `measure_edges` measures an edge's gap from such a surface along the edge.
+fn nearest_in_closed_form(surface: &BSurface) -> bool {
+    matches!(
+        surface,
+        BSurface::Plane { .. }
+            | BSurface::PlaneThrough { .. }
+            | BSurface::Cylinder { .. }
+            | BSurface::Cone { .. }
+            | BSurface::Sphere { .. }
+            | BSurface::Torus { .. }
+    )
+}
 
 /// A body (a solid or a sheet) assembled into a record ([`Assembly::finish`]).
 #[derive(Clone, Debug)]
@@ -497,15 +514,7 @@ impl<'t> Assembly<'t> {
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
         // 0.003 mm), widening tolerances past what SMLib takes. A spline face's gaps are measured
         // on the pcurves its kernel makes (`raise_edges`).
-        if !matches!(
-            surface,
-            BSurface::Plane { .. }
-                | BSurface::PlaneThrough { .. }
-                | BSurface::Cylinder { .. }
-                | BSurface::Cone { .. }
-                | BSurface::Sphere { .. }
-                | BSurface::Torus { .. }
-        ) {
+        if !nearest_in_closed_form(surface) {
             return Ok(());
         }
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
@@ -584,12 +593,19 @@ impl<'t> Assembly<'t> {
     /// An edge's curve as the file has it may lie off a face's surface by more than the file's
     /// uncertainty states (an intersection curve written looser than its context). Each use's
     /// gap, between its pcurve on the surface and its edge's curve, is measured along the edge as
-    /// the record check measures it, and the edge's tolerance covers it with the margin a
-    /// closed-form surface's gap gets ([`pcurve::SURFACE_GAP_MARGIN`], `measure_edges`): SMLib
-    /// takes half an edge's tolerance as the zone a gap must lie in. The pcurves are as made and
-    /// the record says how far its geometry agrees.
+    /// the record check measures it, and the edge's tolerance covers it, as a vertex's covers its
+    /// gap: the pcurves are as made and the record says how far its geometry agrees.
+    ///
+    /// SMLib's check measures another gap: from the edge's curve to the nearest point of the
+    /// surface, within half the edge's tolerance (its zone). On a surface whose nearest point is
+    /// in closed form `measure_edges` covers it; on any other each sample's nearest point is
+    /// searched from its pcurve's point, and the edge's tolerance covers the nearer of the two
+    /// with [`pcurve::SURFACE_GAP_MARGIN`]. The pcurve's point is a point of the surface, so the
+    /// gap taken is never more than the pcurve's, wherever the search settles.
     fn raise_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &[Vec<Curve2>]) -> R<()> {
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
+        let nearest = !nearest_in_closed_form(surface);
+        let starts = crate::kernel::Starts::default();
         for (l, pc) in edge_loops.iter().zip(pcs) {
             for (&(e, _), c) in l.iter().zip(pc) {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
@@ -598,16 +614,21 @@ impl<'t> Assembly<'t> {
                     None => (&edge.curve, edge.interval),
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
-                let mut gap = 0.0f64;
+                let (mut gap, mut off) = (0.0f64, 0.0f64);
                 for k in 0..=EDGE_GAP_SAMPLES {
                     let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
                     // A point a pcurve or surface lacks is the record check's to name.
                     let (Some(q), Some(p)) = (solidcore_ops::pcurve::eval(c, t), eval.point(t)) else { continue };
-                    if let Some(s) = on.point(q) {
-                        gap = gap.max(s.dist(p));
+                    let Some(s) = on.point(q) else { continue };
+                    let along = s.dist(p);
+                    gap = gap.max(along);
+                    if nearest {
+                        let near = on.project_with(&starts, p, Some(q), f64::INFINITY).and_then(|r| on.point(r)).map_or(along, |n| n.dist(p));
+                        off = off.max(near.min(along));
                     }
                 }
-                self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
+                self.cover_edge(e, gap, EDGE_GAP_MARGIN)?;
+                self.cover_edge(e, off, pcurve::SURFACE_GAP_MARGIN)?;
             }
         }
         Ok(())
@@ -741,9 +762,8 @@ impl<'t> Assembly<'t> {
         if !self.raised_edges.is_empty() {
             let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
             notes.push(format!(
-                "{} edges lie off their faces' surfaces by more than {:.3e} mm: their tolerances grow to cover the gaps (to at most {most:.3e} mm)",
-                self.raised_edges.len(),
-                self.tol / pcurve::SURFACE_GAP_MARGIN
+                "{} edges lie off their faces' surfaces by more than their tolerances held: their tolerances grow to cover the gaps (to at most {most:.3e} mm)",
+                self.raised_edges.len()
             ));
         }
         if self.loops_joined > 0 {
