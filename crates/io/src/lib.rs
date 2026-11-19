@@ -85,6 +85,7 @@ mod native_cad;
 pub use native_cad::NATIVE_CAD_EXTS;
 pub use native_cad::NativeDesign;
 pub use native_cad::USD_EXTS;
+pub use native_cad::cadmpeg_iges_records;
 pub use native_cad::cadmpeg_step_records;
 pub use native_cad::detects_freecad;
 pub use native_cad::is_freecad_path;

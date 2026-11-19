@@ -5462,7 +5462,7 @@
   "select the sheet edge first": "selecciona primero la arista de la chapa",
   "select two components": "selecciona dos componentes",
   "set by the sketch's lines": "definido por las líneas del boceto",
-  "settings.cadmpeg_import": "Leer los archivos STEP, FreeCAD y Rhino con cadmpeg directamente a B-rep, en lugar de a través del lector STEP de SolidCraft",
+  "settings.cadmpeg_import": "Leer los archivos STEP, IGES, FreeCAD y Rhino con cadmpeg directamente a B-rep, en lugar de a través de los lectores STEP e IGES de SolidCraft",
   "settings.display_quality_note": "Los niveles más finos muestran las caras y aristas curvas con mayor suavidad, pero tardan más en generar la malla. Solo cambia el visor, nunca el diseño ni las exportaciones.",
   "settings.double_click_components": "Doble clic en un componente para activarlo, o para editar uno vinculado en contexto",
   "settings.frame_rate_details_note": "Añade un gráfico con los tiempos de los últimos fotogramas y los triángulos dibujados encima, un histograma de tiempos de fotograma y lo que dibujó la GPU. Haz clic en la tasa de fotogramas de la vista para mostrarlos u ocultarlos.",

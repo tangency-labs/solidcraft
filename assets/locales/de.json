@@ -5096,7 +5096,7 @@
   "select the sheet edge first": "zuerst die Blechkante auswählen",
   "select two components": "zwei Komponenten auswählen",
   "set by the sketch's lines": "durch die Skizzenlinien festgelegt",
-  "settings.cadmpeg_import": "STEP-, FreeCAD- und Rhino-Dateien mit cadmpeg direkt in B-Rep lesen statt über den STEP-Leser von SolidCraft",
+  "settings.cadmpeg_import": "STEP-, IGES-, FreeCAD- und Rhino-Dateien mit cadmpeg direkt in B-Rep lesen statt über die STEP- und IGES-Leser von SolidCraft",
   "settings.display_quality_note": "Feinere Stufen zeigen gekrümmte Flächen und Kanten glatter und brauchen länger zum Vernetzen. Nur die Ansicht ändert sich, nie das Design oder Exporte.",
   "settings.double_click_components": "Komponente zum Aktivieren doppelklicken",
   "settings.frame_rate_details_note": "Fügt ein Diagramm der Bildzeiten der letzten Bilder hinzu, darüber die gezeichneten Dreiecke, dazu ein Histogramm der Bildzeiten und was die GPU gezeichnet hat. Ein Klick auf die Bildrate in der Ansicht blendet sie ein oder aus.",

@@ -1,12 +1,13 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]). cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]); and STEP and IGES when the
+//! cadmpeg reader is chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]). cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
 //! ([`cadir_records`]) and the Import feature keeps those records, with no STEP text in between.
 //!
 //! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
-//! `fcstd`, `rhino`, `step` and `usd` features alone). cadmpeg's codecs for commercial formats, and its
+//! `fcstd`, `iges`, `rhino`, `step` and `usd` features alone). cadmpeg's codecs for commercial formats, and its
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
@@ -53,6 +54,20 @@ pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel
 pub fn cadmpeg_step_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     solidcraft_kernel::guard("cadmpeg STEP import", || convert::step_records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
+        |e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        },
+    )
+}
+
+/// Read an IGES file (`file` is its name) with cadmpeg's IGES decoder into an import kept as
+/// B-rep records, as a STEP file is read with [`cadmpeg_step_records`]: the alternative to
+/// SolidCraft's own IGES reader, chosen by the caller ([`crate::StepReader`]). Panics inside
+/// cadmpeg or the reader become errors.
+pub fn cadmpeg_iges_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg IGES import", || convert::iges_records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
         |e| match e {
             solidcraft_kernel::KernelError::Invalid(m) => m,
             e => e.to_string(),
@@ -648,6 +663,15 @@ mod convert {
         records_of(name, &ext, bytes, &["step"])
     }
 
+    /// An IGES file (`name`) read by cadmpeg's IGES decoder into an import kept as records.
+    pub(super) fn iges_records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        if !matches!(ext.as_str(), "igs" | "iges") {
+            return Err(format!("{name}: not an IGES file (.igs or .iges)"));
+        }
+        records_of(name, &ext, bytes, &["iges"])
+    }
+
     /// `bytes` decoded by the cadmpeg codec they are, if it is one of `accepted`, and read into
     /// records.
     fn records_of(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
@@ -705,12 +729,12 @@ mod convert {
             "fcstd" => "FreeCAD",
             "rhino" => "Rhino",
             "usd" => "OpenUSD",
-            "step" => "",
+            "step" | "iges" => "",
             other => other,
         };
         // A Rhino object's colour is often its layer's default (black), which is not how Rhino
-        // shades it; STEP's and OpenUSD's colours are how the part looks.
-        let (mut records, origins) = super::traced_records(&ir, &product, system, matches!(format, "step" | "usd"), format == "usd");
+        // shades it; STEP's, IGES's and OpenUSD's colours are how the part looks.
+        let (mut records, origins) = super::traced_records(&ir, &product, system, matches!(format, "step" | "iges" | "usd"), format == "usd");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
