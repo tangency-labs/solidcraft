@@ -223,7 +223,7 @@ impl Names {
         let base = sanitise(raw, true);
         let mut name = format!("{base}.{ext}");
         let mut k = 2;
-        while !self.0.insert(name.to_ascii_lowercase()) {
+        while !self.taken.insert(name.to_ascii_lowercase()) {
             name = format!("{base}_{k}.{ext}");
             k += 1;
         }
