@@ -21,23 +21,43 @@ pub struct Dialog {
     /// The board's thickness (mm): its own when the window opens, and editable.
     pub thickness: f64,
     pub color: [u8; 3],
+    /// The format table's other KiCad options (the board as a solid or a mesh), drawn by the
+    /// shared import-option rows (`crate::import_options`).
+    pub extra: crate::import_options::Values,
 }
+
+/// The options this window draws itself; the table's others are [`Dialog::extra`].
+const OWN: &[&str] = &["components", "copper", "silkscreen"];
 
 impl Dialog {
     /// The window for `path`, every option at its default.
     pub fn new(path: &str) -> Dialog {
-        Dialog { path: path.to_string(), components: true, copper: KicadCopper::default(), silkscreen: true, thickness: 1.6, color: [13, 84, 46] }
+        let extra = crate::import_options::Values::for_path(path, OWN, &Default::default())
+            .unwrap_or(crate::import_options::Values { format: "kicad", fields: Vec::new() });
+        Dialog {
+            path: path.to_string(),
+            components: true,
+            copper: KicadCopper::default(),
+            silkscreen: true,
+            thickness: 1.6,
+            color: [13, 84, 46],
+            extra,
+        }
     }
 
     /// The `doc.open` parameters, without the path.
     pub fn params(&self) -> Value {
-        json!({
+        let mut params = json!({
             "components": self.components,
             "copper": self.copper.as_str(),
             "silkscreen": self.silkscreen,
             "color": format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]),
             "thickness": self.thickness,
-        })
+        });
+        if let Some(map) = params.as_object_mut() {
+            map.extend(self.extra.params());
+        }
+        params
     }
 
     /// Why the options cannot be imported yet, if they cannot.
@@ -117,6 +137,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::scenario::publish_handle("kicad:thickness", t.rect.center());
                 ui.end_row();
             });
+            crate::import_options::option_rows(ui, &mut dialog.extra);
             if let Some(problem) = dialog.problem() {
                 ui.add_space(4.0);
                 ui.colored_label(solidcraft_theme::Tokens::get().error, solidcraft_ui_text::tr_label(problem));
@@ -154,6 +175,9 @@ mod tests {
         assert_eq!(p["thickness"], json!(1.6), "the board's thickness is always sent");
         d.thickness = 2.4;
         assert_eq!(d.params()["thickness"], json!(2.4));
+        assert!(p.get("representation").is_none(), "an untouched table option keeps the command's default");
+        d.extra.fields[0].value = crate::import_options::Choice::Choice(1);
+        assert_eq!(d.params()["representation"], json!("mesh"), "the board as a mesh, from the table's row");
     }
 
     #[test]
@@ -227,7 +251,17 @@ mod tests {
         // A long switch label is not squeezed into a narrow column.
         let label = crate::scenario::rect_of("kicad:copper_label").expect("the copper label was drawn");
         assert!(label.width() > 150.0, "the copper label is squeezed: {label:?}");
-        for label in ["Include components", "Copper (traces, vias, zones, pads)", "None", "Overlay on the board", "Modeled", "Include silkscreen"] {
+<<<<<<< HEAD
+        for label in
+            ["Include components", "Copper (traces, vias, zones, pads)", "None", "Overlay on the board", "Modeled", "Include silkscreen", "Board"]
+        {
+||||||| parent of d8c29f894b (Open and Insert: choose a file's import options (body names, FreeCAD history, glTF up axis) before it comes in)
+        for label in ["Include components", "Copper (traces, vias, zones, pads)", "None", "Overlay on the board", "Modelled", "Include silkscreen"] {
+=======
+        for label in
+            ["Include components", "Copper (traces, vias, zones, pads)", "None", "Overlay on the board", "Modelled", "Include silkscreen", "Board"]
+        {
+>>>>>>> d8c29f894b (Open and Insert: choose a file's import options (body names, FreeCAD history, glTF up axis) before it comes in)
             assert!(h.widget(label).is_some(), "`{label}` is missing");
         }
         h.frames(4);

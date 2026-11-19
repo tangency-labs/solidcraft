@@ -2159,6 +2159,16 @@ mod tests {
         assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
         h.step(&json!({"choose_file": "part2.step"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
+        // A STEP file asks its import options first (`import_options`): the defaults. The window
+        // opens once the load reaches it, which can take more than a frame or two on a loaded
+        // machine.
+        for _ in 0..600 {
+            if crate::scenario::handle_at("import_options:ok").is_some() {
+                break;
+            }
+            h.frames(1);
+        }
+        h.step(&json!({"click": {"handle": "import_options:ok"}})).unwrap();
         for _ in 0..600 {
             if h.app.session.world_state().unwrap().bodies.len() == 2 {
                 break;

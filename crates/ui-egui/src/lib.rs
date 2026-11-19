@@ -121,6 +121,7 @@ mod i18n_painted_tests;
 mod i18n_ui_tests;
 pub mod icon_svg;
 pub mod icons;
+pub mod import_options;
 pub mod inference;
 pub mod insert_handles;
 pub mod install;
@@ -896,6 +897,10 @@ pub struct SolveApp {
     pub(crate) quick_measure: quick_measure::QuickMeasure,
     /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
     pub mesh_units: Option<mesh_units::Ask>,
+    /// A STEP, IGES, FreeCAD, Rhino or glTF file waiting for its import options (`import_options`).
+    pub import_options: Option<import_options::Ask>,
+    /// Files asked while another waits for its options (several dropped at once), asked in turn.
+    pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
@@ -1207,6 +1212,8 @@ impl SolveApp {
             recovery_discard_all: false,
             quick_measure: Default::default(),
             mesh_units: None,
+            import_options: None,
+            import_options_waiting: Default::default(),
             plugin_menu: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
@@ -4658,6 +4665,8 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
         kicad_import_dialog::show(self, ui.ctx());
+        // A file's import options are asked on Home too, where Open and Import start.
+        import_options::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());

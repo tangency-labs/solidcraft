@@ -1410,6 +1410,8 @@ fn an_insert_runs_again_for_a_design_edited_meanwhile_and_lands_after_the_edit()
     let dir = scratch("insert-again");
     let step = step_box(&dir);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]})).unwrap();
     let (started, release) = hold_next(&mut w);
@@ -1438,6 +1440,8 @@ fn a_waiting_result_does_not_hold_the_queue_and_a_closed_tab_releases_it() {
     let step = step_box(&dir);
     let other = large_design(&dir, 2);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
     // An insert for the design in tab 0, with another tab shown when its result comes in.
@@ -1470,6 +1474,8 @@ fn an_insert_waits_for_its_designs_tab() {
     let dir = scratch("insert-tab");
     let step = step_box(&dir);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]})).unwrap();
     let (started, release) = hold_next(&mut w);
