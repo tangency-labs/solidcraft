@@ -4,6 +4,7 @@
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
+use solidcraft_doc::hardware_catalog::{HOLE_TOLERANCE, HardwareKind, hardware_size, hardware_sizes_of};
 use solidcraft_doc::sheet::{self, SheetRule};
 use solidcraft_doc::sheet_library as library;
 use solidcraft_doc::{BodyName, SketchId};
@@ -18,15 +19,16 @@ use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list,
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
     BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
-    ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
-    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
+    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HardwareInfo, HardwareKindParam, HardwareParams, HardwareResult,
+    HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams, ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams,
+    RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult, RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const FLANGE_CONTRACT: TypedContract<FlangeParams> = TypedContract::new();
 const PERFORATE_CONTRACT: TypedContract<PerforateParams> = TypedContract::new();
+const HARDWARE_CONTRACT: TypedContract<HardwareParams> = TypedContract::new();
 const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
 const UNFOLD_CONTRACT: TypedContract<UnfoldParams> = TypedContract::new();
@@ -83,6 +85,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(
         "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
+    ),
+    CommandSpec::new("sheet.hardware", "Press-in Hardware", crate::checked!("sheet.hardware", hardware)).begins_edit()
+        .at("SHEET METAL", "CREATE")
+        .icon("hole")
+        .contract(&HARDWARE_CONTRACT)
+        .output(output_schema_for::<HardwareResult>)
+        .params(
+        "kind: nut|flush_nut|stud|standoff; thread: \"M3\" (ISO metric coarse; the sizes each kind has are in docs/hardware-catalogue.md); length?: expr (stud and standoff: required; a nut takes none); diameter?: expr (the mounting hole: the table's size to 0.08 mm over it; default the table's); sketch + points? (the holes' centres, as solid.hole), single?, flip? | position: [x,y,z] on the sheet's face; direction?; targets?; name? - cuts the mounting hole of press-in hardware (a plain through hole, in the folded part, the flat pattern and the DXF) and records the hardware on it: kind, thread, length and part (e.g. nut.m3). A sheet thinner than the hardware's minimum is refused; a centre nearer an edge, a cut-out or a bend than its minimum is a warning (the hole is still cut). Redefine the hole with this command, not solid.hole",
     ),
     CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem)).begins_edit()
         .at("SHEET METAL", "CREATE")
@@ -658,6 +668,134 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let profiles = p.get("profiles").map(|_| profiles(p, cmd)).transpose()?;
     add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from), sketch, profiles })
+}
+
+/// The sizes a kind has, for a refusal.
+fn hardware_sizes_text(kind: HardwareKind) -> String {
+    hardware_sizes_of(kind).iter().map(|s| s.thread).collect::<Vec<_>>().join(", ")
+}
+
+/// The longest stud or standoff the command takes (mm): past it a length is a typo.
+const LONGEST_HARDWARE: f64 = 1000.0;
+
+/// What `solid.hole` takes to shape a hole other than a plain through hole: a depth or an end, a
+/// head, a tip, a thread, a clearance fit, reference edges. `sheet.hardware` takes none of them.
+const HOLE_SHAPE_KEYS: &[&str] = &[
+    "depth",
+    "type",
+    "to",
+    "all",
+    "cb_diameter",
+    "cb_depth",
+    "cs_diameter",
+    "cs_angle",
+    "tip_angle",
+    "bridge",
+    "thread_depth",
+    "thread_class",
+    "hand",
+    "modeled",
+    "ease_out",
+    "references",
+    "clearance",
+];
+
+fn hardware(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.hardware";
+    let kind = str_(p, "kind").and_then(HardwareKind::from_name).ok_or_else(|| bad(cmd, "`kind` is nut, flush_nut, stud or standoff"))?;
+    let thread = str_(p, "thread").map(str::trim).filter(|t| !t.is_empty()).ok_or_else(|| bad(cmd, "`thread` names the size, such as \"M3\""))?;
+    let size = hardware_size(kind, thread).ok_or_else(|| {
+        bad(cmd, format!("the table has no {} in `{thread}`: its sizes are {} (docs/hardware-catalogue.md)", kind.label(), hardware_sizes_text(kind)))
+    })?;
+    // A stud's or a standoff's length is saved with the hardware; a nut has none.
+    let length = match (kind.has_length(), expr(p, "length")) {
+        (true, None) => return Err(bad(cmd, format!("a {} needs its `length`", kind.label()))),
+        (false, Some(_)) => return Err(bad(cmd, format!("a {} has no `length`", kind.label()))),
+        (false, None) => None,
+        (true, Some(e)) => {
+            // A bare number is in the design's unit, as `add_feature` will write it: check what it stores.
+            let e: solidcraft_doc::Expr = s.doc.with_design_unit(e.as_str(), Kind::Length).into();
+            check_expr(s, &e, Kind::Length, cmd, "length")?;
+            let mm = s.doc.eval(&e, Kind::Length).map_err(|err| bad(cmd, format!("length: {err}")))?;
+            if !(mm.is_finite() && mm > 0.0 && mm <= LONGEST_HARDWARE) {
+                return Err(bad(cmd, format!("`length` must be more than 0 and at most {LONGEST_HARDWARE} mm, not {mm}")));
+            }
+            Some(e)
+        }
+    };
+    // The mounting hole: the table's size, or another within the makers' tolerance over it.
+    let diameter = match expr(p, "diameter") {
+        None => format!("{} mm", size.hole),
+        Some(e) => {
+            let e: solidcraft_doc::Expr = s.doc.with_design_unit(e.as_str(), Kind::Length).into();
+            check_expr(s, &e, Kind::Length, cmd, "diameter")?;
+            let mm = s.doc.eval(&e, Kind::Length).map_err(|err| bad(cmd, format!("diameter: {err}")))?;
+            let (low, high) = (size.hole, size.hole + HOLE_TOLERANCE);
+            if !(mm.is_finite() && mm >= low - 1e-9 && mm <= high + 1e-9) {
+                return Err(bad(cmd, format!("an {} {} takes a hole of {low} to {high} mm, not {mm}", thread, kind.label())));
+            }
+            e.as_str().to_string()
+        }
+    };
+    let Some(mut q) = p.as_object().cloned() else { return Err(bad(cmd, "the parameters must be an object")) };
+    // Press-in hardware is a plain through hole: what shapes any other hole is not its to take.
+    if let Some(key) = HOLE_SHAPE_KEYS.iter().find(|k| q.contains_key(**k)) {
+        return Err(bad(cmd, format!("press-in hardware cuts a plain through hole: remove `{key}`")));
+    }
+    for key in ["kind", "thread", "length"] {
+        q.remove(key);
+    }
+    q.insert("diameter".into(), json!(diameter));
+    let hardware = solidcraft_doc::Hardware { kind, thread: size.thread.to_string(), length: length.clone(), part: size.part() };
+    let mut reply = super::features::hole_with(s, &Value::Object(q), cmd, Some(hardware))?;
+    // The hole must lie in a sheet metal part, in a sheet thick enough for the hardware. A
+    // refusal here undoes the feature; a design that is rebuilt thinner later only warns.
+    let changed: Vec<&str> =
+        reply.get("changed_bodies").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    let state = s.model.state();
+    let cut: Vec<_> = state.surface_sheets.iter().filter(|sk| changed.contains(&sk.body.as_str())).collect();
+    if cut.is_empty() {
+        return Err(bad(cmd, "the hole is not in a sheet metal part: place it on a face of a sheet (`sheet.flange`, `sheet.convert`)"));
+    }
+    // Nor in anything else: a block the hole also cuts (named in `targets`) is no sheet.
+    if changed.iter().any(|b| !state.surface_sheets.iter().any(|sk| sk.body == *b)) {
+        return Err(bad(cmd, "a press-in hole cuts only sheet metal bodies: remove the other targets"));
+    }
+    if let Some(sk) = cut.iter().find(|sk| sk.thickness + 1e-9 < size.min_sheet) {
+        return Err(bad(
+            cmd,
+            format!(
+                "{} is {} mm thick: an {} {} is made for a sheet of at least {} mm (docs/hardware-catalogue.md); use a thicker sheet or another size",
+                sk.body,
+                sk.thickness,
+                thread,
+                kind.label(),
+                size.min_sheet
+            ),
+        ));
+    }
+    let info = HardwareInfo {
+        kind: kind_param(kind),
+        thread: size.thread.to_string(),
+        length: length.and_then(|e| s.doc.eval(&e, Kind::Length).ok()),
+        part: size.part(),
+        hole_diameter: size.hole,
+        min_sheet_thickness: size.min_sheet,
+        min_edge_distance: size.edge,
+    };
+    if let Some(o) = reply.as_object_mut() {
+        o.insert("hardware".into(), serde_json::to_value(info).map_err(|e| bad(cmd, e.to_string()))?);
+    }
+    Ok(reply)
+}
+
+fn kind_param(k: HardwareKind) -> HardwareKindParam {
+    match k {
+        HardwareKind::Nut => HardwareKindParam::Nut,
+        HardwareKind::FlushNut => HardwareKindParam::FlushNut,
+        HardwareKind::Stud => HardwareKindParam::Stud,
+        HardwareKind::Standoff => HardwareKindParam::Standoff,
+    }
 }
 
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {
