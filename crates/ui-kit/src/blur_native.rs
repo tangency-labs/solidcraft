@@ -381,16 +381,22 @@ struct Inner {
 struct Marker {
     rect: Rect,
     corners: egui::CornerRadius,
-    opacity: f32,
     snap: bool,
     // Identity only: the paint job owns this callback for the entire frame. Keeping
     // its Arc here would create a Shared -> callback -> Shared ownership cycle.
     callback_id: usize,
 }
 
+/// Whether a surface with this fill, painted at this opacity, borrows the blurred backdrop.
+/// Only a glass material blurs: an opaque fill has nothing to show through, and a surface
+/// painted below full opacity (fading, dimmed, dragged) is translucent to be seen through or
+/// to fade, so what is behind it stays sharp. Blur appears only once the fade is complete.
+pub fn wants_backdrop(fill: Color32, opacity: f32, visible: bool) -> bool {
+    fill.a() != 0 && fill.a() != 255 && opacity.is_finite() && opacity >= 1.0 && visible
+}
+
 pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape) -> Shape {
-    let opacity = painter.opacity();
-    if frame.fill.a() == 0 || (frame.fill.a() == 255 && opacity >= 1.0) || !opacity.is_finite() || opacity <= 0.0 || !painter.is_visible() {
+    if !wants_backdrop(frame.fill, painter.opacity(), painter.is_visible()) {
         return ordinary;
     }
     CURRENT.with(|c| {
@@ -415,7 +421,6 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
             inner.markers.push(Marker {
                 rect,
                 corners: frame.corner_radius,
-                opacity,
                 snap: painter.ctx().tessellation_options(|o| o.round_rects_to_pixels),
                 callback_id: Arc::as_ptr(&callback.callback) as *const () as usize,
             });
@@ -646,7 +651,6 @@ impl CallbackTrait for PanelMarker {
         let Some(binding) = gpu.markers.get(self.index) else { return };
         let mut p = [0.0; 24];
         p[2] = u8::from(self.shared.host.format.is_srgb()) as f32;
-        p[3] = marker.opacity;
         let r = info.viewport;
         if !r.is_finite() || !r.is_positive() {
             return;

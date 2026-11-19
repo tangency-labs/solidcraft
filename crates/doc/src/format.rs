@@ -579,6 +579,7 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
     validate_versioned_geometry(v)?;
     validate_emboss_targets(v)?;
     validate_freeform_offsets(v)?;
+    validate_freeform_chain_offsets(v)?;
     validate_sketch_sizes(v)?;
     crate::format_offsets::validate_raw(v)?;
     validate_wires(v, version)
@@ -703,6 +704,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_freeform_chain_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
@@ -1146,6 +1148,56 @@ fn validate_freeform_offsets(value: &Value) -> Result<()> {
                 return Err(invalid());
             }
             resolved.insert(output);
+        }
+    }
+    Ok(())
+}
+
+/// The trimmed chain offsets of a design's sketches: the sources each was made from, the
+/// curves it made and the distance it runs at.
+fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
+    let Some(features) = value.get("features").and_then(Value::as_array) else { return Ok(()) };
+    for feature in features {
+        if feature.get("type").and_then(Value::as_str) != Some("sketch") {
+            continue;
+        }
+        let Some(records) = feature.get("sketch").and_then(|sketch| sketch.get("freeform_chain_offsets")) else { continue };
+        let invalid = || DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into());
+        let records = records.as_array().ok_or_else(invalid)?;
+        if records.len() > 128 {
+            return Err(invalid());
+        }
+        let mut outputs = std::collections::BTreeSet::new();
+        for record in records {
+            let object = record.as_object().ok_or_else(invalid)?;
+            if object.len() != 3 || object.keys().any(|key| !matches!(key.as_str(), "sources" | "outputs" | "distance")) {
+                return Err(invalid());
+            }
+            let sources = record.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
+            let made = record.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
+            if sources.is_empty() || sources.len() > 512 || made.is_empty() || made.len() > 512 {
+                return Err(invalid());
+            }
+            for source in sources {
+                let pair = source.as_array().ok_or_else(invalid)?;
+                if pair.len() != 2 {
+                    return Err(invalid());
+                }
+                let id = pair[0].as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || pair[1].as_bool().is_none() {
+                    return Err(invalid());
+                }
+            }
+            for output in made {
+                let id = output.as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || !outputs.insert(id) {
+                    return Err(invalid());
+                }
+            }
+            let distance = record.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
+            if !distance.is_finite() || !(1e-9..=MAX_REAL).contains(&distance.abs()) {
+                return Err(invalid());
+            }
         }
     }
     Ok(())
