@@ -588,6 +588,10 @@ pub struct BoundingSolidParams {
     /// negative one sets that side into the bodies, but not past their opposite side.
     #[serde(default)]
     pub margins: Option<[LengthExpr; 6]>,
+    /// Instead of `bodies`: an envelope of this component, a box around every body placed inside
+    /// it (its subcomponents' at any depth, every placement), added to the component in its axes.
+    #[serde(default)]
+    pub component: Option<super::component_link::ComponentRef>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -163,7 +163,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("bounding_solid")
         .contract(&BOUNDING_SOLID_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); name?, body_name?"),
+        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); component?: id or name (instead of `bodies`: an envelope of that component, a box around every body placed inside it, its subcomponents' at any depth and every placement, in its own axes; the box is added to that component, so it moves with it, and is built again when a part inside it moves. inspect.clearance and inspect.interference leave envelopes out unless named, and `envelopes: true` there checks each envelope instead of its contents); name?, body_name?"),
     CommandSpec::new("solid.scale", "Scale", crate::checked!("solid.scale", scale))
         .at("SOLID", "MODIFY")
         .icon("scale")
@@ -297,7 +297,7 @@ impl Session {
     /// assembly's root cutting through its parts, #1234). The command and its preview both ask
     /// this, so the preview never refuses a cut the command makes (#3085).
     pub fn cut_takes_every_body(&self, st: &solidcraft_doc::ModelState) -> bool {
-        !st.bodies.is_empty() && !st.bodies.iter().any(|b| self.doc.model_body_component(b) == self.active_component)
+        !st.bodies.is_empty() && !st.bodies.iter().any(|b| !b.envelope && self.doc.model_body_component(b) == self.active_component)
     }
 }
 
@@ -355,11 +355,12 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // wrong type (`add_feature`), so a wrong type cannot make this cut anything. This preview
     // cannot fail, so it reads the list leniently.
     let parts = string_list_or_default(p, "participants");
-    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component);
+    let implicit_all = grouped.is_some() && !st.bodies.iter().any(|body| !body.envelope && s.doc.model_body_component(body) == s.active_component);
     let mut bodies: Vec<_> = if !parts.is_empty() {
         st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
     } else if implicit_all {
-        st.bodies.iter().collect()
+        // As the evaluator's `*`: every body but the envelopes, which only stand in for checks.
+        st.bodies.iter().filter(|b| !b.envelope).collect()
     } else {
         active_scope(s, st)
     };
@@ -1293,7 +1294,8 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
 /// part where it is shown (#3223).
 fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a solidcraft_doc::ModelBody> {
     let active = s.active_component;
-    let own: Vec<_> = st.bodies.iter().filter(|b| s.doc.model_body_component(b) == active).collect();
+    // A component's envelope stands in for its parts in checks only: it is never worked on.
+    let own: Vec<_> = st.bodies.iter().filter(|b| !b.envelope && s.doc.model_body_component(b) == active).collect();
     if !own.is_empty() {
         return own;
     }
@@ -1302,7 +1304,7 @@ fn active_scope<'a>(s: &Session, st: &'a solidcraft_doc::ModelState) -> Vec<&'a 
         .iter()
         .filter(|b| {
             let comp = s.doc.model_body_component(b);
-            if !s.doc.component_within(comp, active) {
+            if b.envelope || !s.doc.component_within(comp, active) {
                 return false;
             }
             let frame = s.doc.component_transform(comp);
@@ -4628,7 +4630,30 @@ fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`margins` must have six values: -X, +X, -Y, +Y, -Z, +Z")),
         None => None,
     };
-    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin, margins })
+    let bodies: Vec<BodyName> = string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect();
+    if p.get("component").is_none_or(Value::is_null) {
+        return add_feature(s, p, FeatureKind::BoundingSolid { bodies, margin, contents: false, margins });
+    }
+    if !bodies.is_empty() {
+        return Err(bad(cmd, "give `bodies` or `component`, not both"));
+    }
+    let component = super::component::component(s, p, "component", cmd)?;
+    envelope_in(s, p, component, margin, margins)
+}
+
+/// Add an envelope of `component` (a Bounding Solid of its contents, grown by `margin`, or by
+/// `margins` per side) with the feature parameters `p` (`name`, `body_name`). It is made in the
+/// component it bounds, in its frame, as if that component were active.
+pub(crate) fn envelope_in(s: &mut Session, p: &Value, component: u64, margin: Expr, margins: Option<[Expr; 6]>) -> Result<Value> {
+    // Two envelopes of one component would each stand in for the other and its contents.
+    if s.doc.features.iter().any(|f| f.component == component && matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })) {
+        return Err(bad("solid.bounding_solid", "the component already has an envelope"));
+    }
+    let active = (s.active_component, s.active_occurrence_path.take());
+    s.active_component = component;
+    let out = add_feature(s, p, FeatureKind::BoundingSolid { bodies: Vec::new(), margin, contents: true, margins });
+    (s.active_component, s.active_occurrence_path) = active;
+    out
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

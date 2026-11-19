@@ -3256,6 +3256,115 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
 }
 
+/// A Bounding Solid of listed bodies (no `contents`), as every saved design has it, keeps the box
+/// it always built: around the bodies' display meshes, not their exact bounds, so a design saved
+/// before component envelopes rebuilds at the same size.
+#[test]
+fn a_bounding_solid_without_contents_keeps_its_mesh_bound_size() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "body_name": "Rod"}));
+    // Turned 7 degrees about Z, the rim's mesh points no longer reach the exact circle's extremes.
+    run(&mut s, "solid.move", json!({"bodies": ["Rod"], "axis": [0, 0, 1], "angle": "7 deg"}));
+    let st = s.model.state();
+    let rod = st.body("Rod").unwrap();
+    let (mesh, exact) = (rod.mesh().bounds(), rod.body.exact_bounds().unwrap());
+    drop(st);
+    assert!((exact.max.x - mesh.max.x).abs() > 1e-6 || (exact.max.y - mesh.max.y).abs() > 1e-6, "{mesh:?} vs {exact:?}");
+    run(&mut s, "solid.bounding_solid", json!({"bodies": ["Rod"], "margin": 1, "body_name": "Stock"}));
+    let stock = s.model.state().body("Stock").unwrap().body.exact_bounds().unwrap();
+    for (got, want) in
+        [(stock.min.x, mesh.min.x - 1.0), (stock.min.y, mesh.min.y - 1.0), (stock.max.x, mesh.max.x + 1.0), (stock.max.y, mesh.max.y + 1.0)]
+    {
+        assert!((got - want).abs() < 1e-9, "{stock:?} around mesh {mesh:?}");
+    }
+}
+
+/// A component's envelope (`solid.bounding_solid` with `component`) bounds every body placed inside
+/// it, its subcomponents' and each placement of a part placed twice, in its own frame: it moves
+/// with the component and is built again when a part inside it moves.
+#[test]
+fn a_components_envelope_bounds_its_parts_where_they_are_placed() {
+    let mut s = Session::default();
+    let bought = run(&mut s, "component.create", json!({"name": "Bought", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    let pin = run(&mut s, "component.create", json!({"name": "Pin"}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 10], "length": 2, "width": 2, "height": 4, "body_name": "Peg"}));
+    // The pin placed again 20 mm along X: only an occurrence, no body of its own in the model.
+    let copy = run(&mut s, "occurrence.copy", json!({"component": pin, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let bounds = |s: &mut Session| {
+        let m = run(s, "inspect.measure", json!({"bodies": ["Bought Envelope"]}));
+        let bb = &m["bodies"][0]["bbox"];
+        let v = |k: &str, i: usize| bb[k][i].as_f64().unwrap();
+        [v("min", 0), v("min", 1), v("min", 2), v("max", 0), v("max", 1), v("max", 2)]
+    };
+    let close = |a: [f64; 6], b: [f64; 6]| a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-9);
+    let out = run(&mut s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Bought Envelope"}));
+    assert_eq!(out["created_bodies"], json!(["Bought Envelope"]), "{out}");
+    let f = s.doc.features.last().unwrap();
+    assert!(matches!(f.kind, solidcraft_doc::FeatureKind::BoundingSolid { contents: true, .. }) && f.component == bought);
+    assert!(s.active_component == 0, "the active component is left as it was");
+    let b = bounds(&mut s);
+    assert!(close(b, [0.0, 0.0, 0.0, 22.0, 10.0, 14.0]), "{b:?}");
+    // The whole component moves: the envelope goes with it.
+    let occurrence = s.doc.occurrence_of(bought).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 0]}));
+    let b = bounds(&mut s);
+    assert!(close(b, [100.0, 0.0, 0.0, 122.0, 10.0, 14.0]), "{b:?}");
+    // A part inside it moves: the envelope is built again around where it now stands.
+    run(&mut s, "occurrence.move", json!({"occurrence": copy, "translate": [5, 0, 3]}));
+    let b = bounds(&mut s);
+    assert!(close(b, [100.0, 0.0, 0.0, 127.0, 10.0, 17.0]), "{b:?}");
+    // It survives saving and opening, and `bodies` with `component` is refused.
+    let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert!(matches!(back.features.last().unwrap().kind, solidcraft_doc::FeatureKind::BoundingSolid { contents: true, .. }));
+    assert!(Session::new(back).model.state().body("Bought Envelope").is_some());
+    let e = s.execute("solid.bounding_solid", &json!({"component": "Bought", "bodies": ["Plate"]})).unwrap_err().to_string();
+    assert!(e.contains("not both"), "{e}");
+    // A second envelope of the same component is refused: each would stand in for the other.
+    let e = s.execute("solid.bounding_solid", &json!({"component": "Bought"})).unwrap_err().to_string();
+    assert!(e.contains("already has an envelope"), "{e}");
+    // A feature of the component that names no bodies works on its parts, never on its envelope.
+    let volume = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["total"]["volume_mm3"].as_f64().unwrap();
+    let envelope = volume(&mut s, "Bought Envelope");
+    run(&mut s, "component.activate", json!({"component": "Bought"}));
+    run(&mut s, "solid.box", json!({"corner": [108, 8, 8], "length": 4, "width": 4, "height": 4, "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let plate = volume(&mut s, "Plate");
+    assert!((plate - 992.0).abs() < 1e-6, "the plate is cut: {plate}, envelope {envelope} -> {}", volume(&mut s, "Bought Envelope"));
+    assert!((volume(&mut s, "Bought Envelope") - envelope).abs() < 1e-6, "the envelope is left alone");
+    // A cut from the root, which has no body of its own, takes part in every body (`*`): the
+    // parts, never the envelope.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [102, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "cut"}));
+    assert_eq!(s.doc.features.last().unwrap().participants, vec!["*".to_string()]);
+    let plate = volume(&mut s, "Plate");
+    assert!((plate - 972.0).abs() < 1e-6, "the plate is cut from the root: {plate}");
+    assert!((volume(&mut s, "Bought Envelope") - envelope).abs() < 1e-6, "the envelope is left alone by `*`");
+}
+
+/// An envelope smaller than its contents could miss a contact: a negative margin, single or for
+/// one side, is refused for an envelope.
+#[test]
+fn an_envelope_refuses_a_negative_margin() {
+    for margins in [json!({"margin": -1}), json!({"margins": [0, 0, 0, 0, "-0.5 mm", 0]})] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Bought"}));
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let mut p = json!({"component": "Bought", "body_name": "Envelope"});
+        p.as_object_mut().unwrap().extend(margins.as_object().unwrap().clone());
+        let refused = s.execute("solid.bounding_solid", &p);
+        assert!(
+            refused.is_err() || s.model.results.last().is_some_and(|r| r.error.as_deref().is_some_and(|e| e.contains("negative"))),
+            "{margins}: {refused:?}"
+        );
+        assert!(s.model.state().body("Envelope").is_none(), "{margins}");
+    }
+}
+
 /// A body stretched by a non-uniform `solid.scale` keeps its flat faces flat, so a boolean whose
 /// tool crosses a stretched side wall comes out right (#14409). The faces used to become free-form
 /// surfaces, and then a cylinder standing on the x side wall made the join and the cut fail SMLib's
