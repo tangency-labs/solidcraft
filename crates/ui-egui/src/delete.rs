@@ -191,7 +191,27 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let list = |k: &str| -> Vec<String> {
         p.report[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
     };
-    let (deleted, fails) = (list("deleted"), list("would_fail"));
+    let (mut deleted, fails) = (list("deleted"), list("would_fail"));
+    // A drawing's views are listed by the names the browser gives them: those that go beyond the
+    // ones selected, as the report's ids say.
+    let asked: Vec<&str> = p.params["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "drawing")
+        .filter_map(|item| item["object"].as_str())
+        .collect();
+    if !asked.is_empty() {
+        let names: Vec<String> = list("views")
+            .iter()
+            .filter(|view| !asked.contains(&view.as_str()))
+            .filter_map(|view| solidcraft_engine::doc::ids::decode(view))
+            .filter_map(|view| crate::drawing_workspace::browser::name_of(app, view))
+            .collect();
+        if names.len() == deleted.len() {
+            deleted = names;
+        }
+    }
     let shared = shared_occurrences(app, &p.params);
     // A drawing's delete takes views with it, not features: the list is headed so.
     let of_drawing = p.params["items"].as_array().is_some_and(|items| items.iter().any(|item| item["type"] == "drawing"));
