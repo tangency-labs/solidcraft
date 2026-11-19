@@ -1031,13 +1031,18 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
     match p {
-        PlaneRef::Midplane { a, b } => {
+        PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
             if na.cross(nb).len() < 1e-9 {
                 // Parallel: half way between them.
                 let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
                 let center = pa.origin + half;
+                // A design saved before the midplane took a world plane's frame keeps the
+                // frame it was saved with: the first plane's own origin and axes (#18260).
+                if *old_frame {
+                    return Plane::new(center, pa.x, pa.y).ok_or_else(degenerate);
+                }
                 // Two planes that are parallel to a world plane give a midplane in that world
                 // plane's frame: its origin on the world axis and not at the point the planes
                 // were picked, and its axes the world's. A sketch on it then keeps its world
@@ -1277,7 +1282,7 @@ impl PlaneRef {
     /// The references of a plane built from model geometry.
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
-            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Midplane { a, b, .. } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, reference, .. } => {
