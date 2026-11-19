@@ -4984,6 +4984,26 @@ fn point_at(sk: &solidcraft_sketch::Sketch, id: &str) -> Vec2 {
     sk.point(sk.resolve_point(id).expect("a point")).expect("its position")
 }
 
+/// The distance an offset runs at: the nearest its curves come to the line that closes the
+/// chain, which the offset of that line runs one distance away from.
+fn offset_gap(s: &Session, offset: &[String], line: &str) -> f64 {
+    let sk = sketch(s);
+    let source = sk.curve_index(line).expect("the source line");
+    let ends = sk.curves[source].kind.point_ids();
+    let (a, b) = (sk.point(ends[0]).expect("its start"), sk.point(ends[1]).expect("its end"));
+    let along = b - a;
+    offset
+        .iter()
+        .filter_map(|id| sk.curve_index(id))
+        .flat_map(|index| sk.curves[index].kind.point_ids())
+        .filter_map(|point| sk.point(point))
+        .map(|at| {
+            let t = ((at - a).dot(along) / along.len2()).clamp(0.0, 1.0);
+            at.dist(a + along * t)
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
 #[test]
 fn extend_two_lines_meet_in_an_open_l_and_close_into_one_profile() {
     // A runs right along y=0 and stops at (8,0); B comes down x=12 from (12,6) to (12,2). Their
@@ -6385,19 +6405,27 @@ fn a_far_away_point_does_not_keep_a_constraint_the_move_broke() {
     assert_eq!(r["released"], json!([{"id": level, "kind": "Horizontal"}]), "{r}");
 }
 
-/// #12294: a spline offset together with a line is trimmed and unlinked, so a distance that names a
-/// parameter drives nothing. The reply says so; a linked offset of the same parameter does not.
+/// #12294: the offset of a chain that includes a spline is trimmed, but it is kept with the
+/// sources it was made from, so the distance that names a parameter drives it: changing the
+/// parameter rebuilds the offset at the new distance.
 #[test]
-fn an_unlinked_offset_says_its_parameter_drives_nothing() {
+fn a_chain_offset_with_a_spline_follows_its_distance_parameter() {
     let mut s = new_sketch();
     run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
     let sp = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-20, 0], [-10, 15], [10, 15], [20, 0]]}))["curves"])[0].clone();
-    run(&mut s, "sketch.line", json!({"points": [[20, 0], [-20, 0]]}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[20, 0], [-20, 0]]}))["curves"])[0].clone();
     let r = run(&mut s, "sketch.offset", json!({"curves": [sp], "distance": "wall", "side": [0, 5], "param": "w_in"}));
-    assert!(r["param"].is_null(), "{r}");
-    let warning = r["warning"].as_str().unwrap_or_default();
-    assert!(warning.contains("not linked to its source"), "{r}");
-    // A rectangle's offset is linked: its parameter drives it and nothing is said.
+    // The offset gets the dimension its distance names.
+    assert_eq!(r["param"], "w_in", "{r}");
+    let curves = ids(&r["curves"]);
+    assert!(!curves.is_empty(), "{r}");
+    assert!((offset_gap(&s, &curves, &line) - 1.0).abs() < 0.01, "the offset runs at the parameter's distance");
+    // Changing the parameter rebuilds the offset at the new distance, in place.
+    run(&mut s, "parameters.change", json!({"name": "wall", "expression": "2 mm"}));
+    let sk = sketch(&s);
+    assert!(curves.iter().all(|id| sk.curve_index(id).is_some()), "the offset keeps its curves");
+    assert!((offset_gap(&s, &curves, &line) - 2.0).abs() < 0.01, "the offset follows the parameter");
+    // A rectangle's offset is driven the same way.
     let mut s = new_sketch();
     run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
     let lines: Vec<String> = [[[0, 0], [20, 0]], [[20, 0], [20, 10]], [[20, 10], [0, 10]], [[0, 10], [0, 0]]]
@@ -6406,7 +6434,6 @@ fn an_unlinked_offset_says_its_parameter_drives_nothing() {
         .collect();
     let r = run(&mut s, "sketch.offset", json!({"curves": lines, "distance": "wall", "side": [10, 5]}));
     assert!(r["param"].is_string(), "{r}");
-    assert!(r.get("warning").is_none(), "{r}");
 }
 
 fn side_directions(s: &Session, sides: &[String]) -> Vec<Vec2> {
