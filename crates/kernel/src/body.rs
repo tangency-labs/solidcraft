@@ -1638,31 +1638,40 @@ impl Body {
         (self.size() * 1e-7).max(1e-9) * 10.0
     }
 
-    /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
-    /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. An edge out of the plane that lies on a
-    /// cylinder whose axis is `plane`'s normal (a hole's rim on a curved wall) projects onto that
-    /// cylinder's circle: the arc of it ([`Body::projected_on_cylinder`]). `None` for any other
-    /// edge that doesn't lie in a plane parallel to `plane`, one that isn't read exactly or isn't
-    /// there, and for every edge of a mesh body.
+    /// Edges `indices` (record edge indices) as planar curves in `plane`'s coordinates:
+    /// lines, circular arcs and splines with their own knots and weights. An edge must lie
+    /// in a plane parallel to `plane`, except a cylinder's rim read along its axis
+    /// ([`Body::projected_on_cylinder`]). Nonparallel curves, unreadable edges and mesh
+    /// bodies return `None`; drawing measurements must not measure a flattened image.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
-        let mut faces = None;
         indices
             .iter()
             .map(|i| {
-                let mut work = 262_144usize;
-                let run = crate::prism_curve::Run::of(&self.record, *i, true)?;
-                crate::prism_curve::projected_curves(&run, plane, tol, &mut work).or_else(|| {
-                    let faces = faces.get_or_insert_with(|| crate::history::edge_faces(&self.record));
-                    let segs = self.projected_on_cylinder(plane, *i, faces.get(*i)?, tol)?;
-                    Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect())
-                })
+                if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, *i, tol) {
+                    solidcore_ops::spline_projection::project_edges(&self.record, plane, &[*i], tol).pop().flatten()
+                } else {
+                    self.cylinder_edge_projection(plane, *i)
+                }
             })
             .collect()
+    }
+
+    /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
+    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate.
+    pub fn cylinder_edge_projection(&self, plane: &solidcore_record::Plane, edge: usize) -> Option<Vec<crate::PlanarPiece>> {
+        if self.is_mesh() {
+            return None;
+        }
+        let tol = self.planar_edges_tolerance();
+        if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
+            return None;
+        }
+        let faces = crate::history::faces_of(self.record.edges.get(edge)?);
+        self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
     }
 
     /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it

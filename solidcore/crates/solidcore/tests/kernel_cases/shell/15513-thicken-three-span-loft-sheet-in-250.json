@@ -1,0 +1,88 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b2"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "thicken",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "symmetric": false,
+        "thickness": -250.0
+      }
+    }
+  ],
+  "case": "15513-thicken-three-span-loft-sheet-in-250",
+  "expected": {
+    "body_count": 1,
+    "edges": 28,
+    "faces": 14,
+    "method": "Steiner's formula over the record's patches with d = -250 (the side against the natural normals), less the overlap of the two slabs at each seam, the integral of d^2 tan(theta/2) along it (125692.69 mm^3). 14 faces, 28 edges, 16 vertices",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#15513"
+    ],
+    "tolerance": {
+      "rel": 1e-07
+    },
+    "vertices": 16,
+    "volume_mm3": 281265831159.0656,
+    "what": "the three-face loft sheet of 15513-thicken-three-span-loft-sheet-out-250 thickened 250 against its normals: refused as 'not a closed solid' too, at the other seam"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "15513-thicken-three-span-loft-sheet-in-250.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#15513"
+  ],
+  "ungraded": [],
+  "what": "the three-face loft sheet of 15513-thicken-three-span-loft-sheet-out-250 thickened 250 against its normals: refused as 'not a closed solid' too, at the other seam",
+  "why_not": []
+}

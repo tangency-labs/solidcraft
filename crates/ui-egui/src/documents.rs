@@ -90,6 +90,7 @@ fn take_work(app: &mut SolveApp) -> DocWork {
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
+        crate::drawing_workspace::close_panel(app);
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
         return DocWork { bom, tab, ..DocWork::default() };
     }
@@ -126,11 +127,13 @@ fn put_work(app: &mut SolveApp, work: DocWork) {
         }
     }
     crate::workspace::sync_context(app);
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
 /// is in the session's `visibility`, saved with the design).
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 struct DocView {
     render: crate::render_workspace::ViewState,
     /// The runs and folders opened and folded in its History, and which part of the design it
@@ -146,6 +149,8 @@ struct DocView {
     cut: crate::edit_clipboard::CutSet,
     /// `SolveApp::own_clipboard_stamp`.
     own_clipboard_stamp: u64,
+    /// Its Drawing workspace: the sheet page (sheet, zoom, camera) and the panels open on it.
+    drawing: crate::drawing_workspace::State,
 }
 
 impl DocSlot {
@@ -417,6 +422,7 @@ fn take_view(app: &mut SolveApp) -> DocView {
         copied_placements: std::mem::take(&mut app.copied_placements),
         cut: std::mem::take(&mut app.cut),
         own_clipboard_stamp: app.own_clipboard_stamp,
+        drawing: std::mem::take(&mut app.drawing_workspace),
     }
 }
 
@@ -432,6 +438,7 @@ fn put_view(app: &mut SolveApp, v: DocView) {
     app.copied_placements = v.copied_placements;
     app.cut = v.cut;
     app.own_clipboard_stamp = v.own_clipboard_stamp;
+    app.drawing_workspace = v.drawing;
     crate::edit_clipboard::drop_stale(app);
 }
 
@@ -447,6 +454,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // (`take_work`).
     crate::timeline::stop_playback(app);
     crate::sketch_text_move::cancel_drag(app);
+    crate::control_joint_drive::discard(app);
     let work = take_work(app);
     crate::dim_view::cancel();
     app.params = None;
@@ -953,8 +961,15 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         // canonicalize resolves symlinks and Windows long names/case using the filesystem.
-        // Never lowercase: Windows can also host case-sensitive directories.
-        if let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        // Never lowercase: Windows can also host case-sensitive directories. A path on a network
+        // location not allowed (other than the host the other path is on) or a device is never
+        // resolved: on Windows that connects to the host before any "network location" question.
+        use solidcraft_engine::io::vfs;
+        let reachable = |p: &str, other: &str| vfs::design_path_refusal(p, Some(other)).is_none();
+        if reachable(a, b)
+            && reachable(b, a)
+            && let (Ok(a), Ok(b)) = (vfs::canonicalize(a), vfs::canonicalize(b))
+        {
             return a == b;
         }
         // A deleted file can still select its live editing session. Path equality also
@@ -1032,6 +1047,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::history_folds::load(app);
         crate::timeline_scope::reset(app);
         crate::render_workspace::reset_document(app);
+        crate::drawing_workspace::reset_document(app);
         app.session.invalidate_view(rev);
         app.cam = Camera::default();
         app.forms_prototype = Default::default();
@@ -1147,6 +1163,52 @@ pub fn prepare_open(app: &mut SolveApp) {
     } else {
         crate::prefs::apply_new_design(app);
     }
+}
+
+/// Close only the active clean design for the control API. The optional document_id
+/// guards against a tab switch between inspection and closing (#18781).
+pub(crate) fn close_clean(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let expected = match p {
+        Value::Null => None,
+        Value::Object(fields) => {
+            if let Some(key) = fields.keys().find(|key| key.as_str() != "document_id") {
+                return Err(format!("unknown document.close field {key}"));
+            }
+            match fields.get("document_id") {
+                None => None,
+                Some(Value::String(id)) => Some(id.as_str()),
+                _ => return Err("document_id must be a string".into()),
+            }
+        }
+        _ => return Err("document.close params must be an object".into()),
+    };
+    if let Some(id) = expected
+        && id != app.session.document_id
+    {
+        return Err("the active document changed; nothing was closed".into());
+    }
+    if app.file_picker_busy()
+        || app.file_load.busy()
+        || app.saving.is_some()
+        || app.docs.closing.is_some()
+        || app.docs.quitting.is_some()
+        || app.docs.batch.is_some()
+        || app.docs.group.is_some()
+    {
+        return Err("finish the file operation or save prompt before closing a document".into());
+    }
+    if app.docs.count() == 1 && active_is_blank(app) {
+        return Err("no open design to close".into());
+    }
+    if dirty(app, app.docs.active) {
+        return Err("the design has unsaved changes; save it before document.close".into());
+    }
+    let closed = app.session.document_id.clone();
+    close(app, app.docs.active, false);
+    if app.session.document_id == closed {
+        return Err("the active design could not be closed".into());
+    }
+    Ok(json!({"closed_document_id": closed, "document_id": app.session.document_id, "documents": app.docs.count()}))
 }
 
 /// Close tab `i`: asks first when it has unsaved changes (`force`: close anyway).
@@ -1476,6 +1538,17 @@ fn tab_place(path: Option<&str>, dirty: bool, security: Option<&str>) -> String 
     place
 }
 
+/// The drawing each tab has open, by id and name, or null.
+fn tab_drawings(app: &SolveApp) -> Vec<Value> {
+    open_sessions(app)
+        .into_iter()
+        .map(|session| match session.drawing("ui.documents") {
+            Ok(d) => json!({"id": solidcraft_engine::doc::ids::encode(d.id), "name": d.name}),
+            Err(_) => Value::Null,
+        })
+        .collect()
+}
+
 /// What a design's signature says, for its tab's tooltip: the last verification when one ran, or
 /// that the file carries records that have not been checked in this session.
 fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
@@ -1680,7 +1753,11 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
         Some("cancel") => answer_disk(app, DiskAnswer::Cancel),
         _ => {}
     }
-    let tabs: Vec<Value> = tabs_info(app).into_iter().map(|(name, dirty)| json!({"name": name, "dirty": dirty})).collect();
+    let tabs: Vec<Value> = tabs_info(app)
+        .into_iter()
+        .zip(tab_drawings(app))
+        .map(|((name, dirty), drawing)| json!({"name": name, "dirty": dirty, "drawing": drawing}))
+        .collect();
     let save_prompt = app.docs.group.as_ref().map(|group| {
         group
             .rows
@@ -2573,6 +2650,24 @@ mod tests {
         assert!(reuse_path(&mut a, "picker.solidcraft").is_err());
         assert_eq!(a.docs.active, 1);
         assert_eq!(a.docs.count(), 2);
+    }
+
+    /// A design's link to a network location not allowed is never resolved to see whether it is
+    /// an open design (Edit in Place asks that before the "network location" question).
+    #[test]
+    fn saved_path_identity_never_resolves_a_refused_network_path() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-paths-net-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let open = dir.join("assembly.solidcraft").to_string_lossy().into_owned();
+        let calls = solidcraft_engine::io::vfs::file_calls();
+        for link in [r"\\server\share\part.solidcraft", "//server/share/part.solidcraft", r"\\.\pipe\part.solidcraft"] {
+            assert!(!same_path(&open, link), "{link}");
+            assert!(!same_path(link, &open), "{link}");
+        }
+        assert_eq!(solidcraft_engine::io::vfs::file_calls(), calls, "a refused path was resolved");
+        // Two paths on the same server (a design opened from it) are still compared.
+        assert!(same_path(r"\\files\share\a.solidcraft", r"\\files\share\a.solidcraft"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -4323,6 +4418,156 @@ mod tests {
         a.preferences.hidden_toolbar_tabs = vec!["SURFACE".into()];
         switch(&mut a, 0);
         assert_eq!(a.ui.tab, "MODEL");
+    }
+
+    /// A design with a box and a drawing of two sheets, open: the sheets' ids.
+    fn two_sheet_drawing(a: &mut SolveApp) -> [u64; 2] {
+        a.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
+        a.run("drawing.create", json!({})).unwrap();
+        a.run("drawing.sheet.add", json!({"name": "Inspection sheet"})).unwrap();
+        let drawing = a.session.drawing("test").unwrap();
+        [0, 1].map(|i| drawing.sheets[i].id)
+    }
+
+    /// K10 (#3890): each tab keeps its own Drawing workspace. The sheet and the zoom chosen in one
+    /// tab come back with it, and the other tab's never show in it.
+    #[test]
+    fn a_drawing_tab_keeps_its_sheet_and_zoom() {
+        use crate::drawing_sheet_page::{active_sheet, select_sheet, set_zoom, zoom_percent};
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let [_, second] = two_sheet_drawing(&mut a);
+        select_sheet(&mut a, second);
+        set_zoom(&mut a, &ctx, 1.5);
+        new_design(&mut a);
+        let [other, _] = two_sheet_drawing(&mut a);
+        select_sheet(&mut a, other);
+        set_zoom(&mut a, &ctx, 0.5);
+        switch(&mut a, 0);
+        assert_eq!(active_sheet(&a), Some(second), "the first tab is back on its second sheet");
+        assert!((zoom_percent(&a, &ctx) - 150.0).abs() < 1.0, "at 150 %: {}", zoom_percent(&a, &ctx));
+        switch(&mut a, 1);
+        assert_eq!(active_sheet(&a), Some(other));
+        assert!((zoom_percent(&a, &ctx) - 50.0).abs() < 1.0, "at 50 %: {}", zoom_percent(&a, &ctx));
+    }
+
+    /// K10 (#3890): `ui.documents` says which drawing each tab has open, and the entries follow
+    /// their tabs when a tab moves.
+    #[test]
+    fn each_tab_keeps_its_open_drawing_and_says_which() {
+        let mut a = app();
+        two_sheet_drawing(&mut a);
+        let drawing = a.session.drawing("test").unwrap();
+        let expected = json!({"id": solidcraft_engine::doc::ids::encode(drawing.id), "name": drawing.name});
+        new_design(&mut a);
+        let drawings = |a: &mut SolveApp| {
+            let reply = control(a, &json!({}));
+            reply["documents"].as_array().unwrap().iter().map(|tab| tab["drawing"].clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(drawings(&mut a), [expected.clone(), Value::Null]);
+        control(&mut a, &json!({"action": "move", "from": 0, "to": 1}));
+        assert_eq!(drawings(&mut a), [Value::Null, expected.clone()]);
+        switch(&mut a, 0);
+        assert_eq!(drawings(&mut a), [Value::Null, expected]);
+    }
+
+    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does, with a
+    /// sheet sketch being edited there too; the sheet sketch stays in its own tab and is still
+    /// active after a round trip.
+    #[test]
+    fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
+        let mut a = app();
+        let [sheet, _] = two_sheet_drawing(&mut a);
+        // A sheet sketch is made, and finished, in Drawing.
+        crate::workspace::enter(&mut a, "drawing").unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.open_drawing.is_some(), "with the drawing still open");
+        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_some(), "a model command leaves the sheet sketch open");
+        new_design(&mut a);
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
+        switch(&mut a, 0);
+        assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
+        crate::workspace::enter(&mut a, "drawing").unwrap();
+        a.run("sketch.finish", json!({})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+    }
+
+    /// K10 (#3890): without "Keep dialogs and tools open when switching designs", a tab switch
+    /// closes the Drawing workspace's panels, as it cancels a dialog. With it, a panel waits in its
+    /// own tab and never shows in another.
+    #[test]
+    fn a_tab_switch_closes_the_drawing_panels_by_default() {
+        for keep in [false, true] {
+            let mut a = app();
+            a.preferences.keep_work_on_tab_switch = keep;
+            two_sheet_drawing(&mut a);
+            crate::drawing_workspace::enter(&mut a, true).unwrap();
+            a.drawing_workspace.settings_open = true;
+            new_design(&mut a);
+            assert!(!a.drawing_workspace.settings_open, "Sheet Settings stays out of the other tab");
+            switch(&mut a, 0);
+            assert_eq!(a.drawing_workspace.settings_open, keep, "keep: {keep}");
+        }
+    }
+
+    /// K10 (#3890): a new design in one tab (`file.new`, as `doc.open` and `doc.recover`) starts
+    /// that tab's Drawing workspace over and leaves the other tab's.
+    #[test]
+    fn opening_a_file_resets_only_that_tabs_drawing_page() {
+        use crate::drawing_sheet_page::{active_sheet, select_sheet, set_zoom, zoom_percent};
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let [_, second] = two_sheet_drawing(&mut a);
+        select_sheet(&mut a, second);
+        set_zoom(&mut a, &ctx, 1.5);
+        new_design(&mut a);
+        let blank = zoom_percent(&a, &ctx);
+        two_sheet_drawing(&mut a);
+        set_zoom(&mut a, &ctx, 0.5);
+        a.run("file.new", json!({})).unwrap();
+        assert!((zoom_percent(&a, &ctx) - blank).abs() < 1e-3, "this tab starts over");
+        switch(&mut a, 0);
+        assert_eq!(active_sheet(&a), Some(second));
+        assert!((zoom_percent(&a, &ctx) - 150.0).abs() < 1.0, "the other tab keeps its page");
+    }
+
+    /// K10 (#3890): a design opened into the blank tab starts its Drawing workspace over, as
+    /// `doc.open` does: no panel or zoom is left from the blank design.
+    #[test]
+    fn adopting_a_design_resets_the_drawing_workspace() {
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let blank = crate::drawing_sheet_page::zoom_percent(&a, &ctx);
+        a.drawing_workspace.settings_open = true;
+        crate::drawing_sheet_page::set_zoom(&mut a, &ctx, 2.0);
+        assert!(active_is_blank(&a));
+        let mut design = Session::default();
+        design.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(adopt(&mut a, design));
+        assert_eq!(a.docs.count(), 1, "the blank tab took it");
+        assert!(!a.drawing_workspace.settings_open);
+        assert!((crate::drawing_sheet_page::zoom_percent(&a, &ctx) - blank).abs() < 1e-3);
+    }
+
+    /// K10 (#3890): a drawing edit is an unsaved change of its design: closing its tab asks once.
+    #[test]
+    fn closing_a_tab_with_an_unsaved_drawing_edit_asks_once() {
+        let mut a = app();
+        two_sheet_drawing(&mut a);
+        new_design(&mut a);
+        switch(&mut a, 0);
+        a.session.mark_saved();
+        assert!(!dirty(&a, 0));
+        a.run("drawing.sheet.add", json!({"name": "Third sheet"})).unwrap();
+        assert!(dirty(&a, 0));
+        close(&mut a, 0, false);
+        assert_eq!((a.docs.closing, a.docs.count()), (Some(0), 2));
+        close(&mut a, 0, true);
+        assert_eq!(a.docs.count(), 1);
     }
 
     /// #9360: a feature being edited keeps its history rolled back to it in its own design only,

@@ -423,7 +423,7 @@ pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Op
     match sel {
         Sel::Feature { id } => Some(*id),
         Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {
-            doc.features.iter().find(|f| f.kind.is_construction() && crate::browser::construction_sel(f) == *sel).map(|f| f.id)
+            doc.features.iter().find(|f| f.kind.is_construction() && solidcraft_engine::browser_find::construction_sel(f) == *sel).map(|f| f.id)
         }
         _ => None,
     }
@@ -432,7 +432,7 @@ pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Op
 /// What the 3D view lights for a selected construction feature: the plane, axis or point
 /// itself, picked by name. `None` for any other feature.
 pub(crate) fn viewport_sel_of_feature(doc: &Document, id: u64) -> Option<solidcraft_engine::Sel> {
-    doc.feature(id).filter(|f| f.kind.is_construction()).map(crate::browser::construction_sel)
+    doc.feature(id).filter(|f| f.kind.is_construction()).map(solidcraft_engine::browser_find::construction_sel)
 }
 
 /// The selected timeline features, in timeline order.
@@ -755,12 +755,23 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
     result.import_report.as_deref().map(import_summary)
 }
 
+/// The status line after an open or an import that warns: the import's summary
+/// ([`import_status`]), else how many warnings the reply has and the first of them. `None` without
+/// warnings. The desktop's open, the web's open and an insert all say it the same way.
+pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<String> {
+    import_status(app, reply).or_else(|| {
+        let w = reply.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty())?;
+        Some(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")))
+    })
+}
+
 /// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
 /// what it found joins the import's result, so its History chip warns, and a part to repair is
 /// said on the status line, once per import, in history order. While a check runs the window
 /// looks again a few times a second.
 pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
-    app.session.model.settle_import_checks();
+    // Parts the checks healed: the import is its healed bodies from now on.
+    app.session.settle_import_checks();
     for id in app.session.model.take_import_notices() {
         if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
             app.set_status(summary, false);
@@ -1623,8 +1634,15 @@ mod tests {
         crate::i18n::install();
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
         let _english = solidcraft_ui_text::scope("en");
-        let issue =
-            |kind, item: Option<u64>, faces, detail: &str| ImportIssue { kind, item, part: String::new(), faces, times: 1, detail: detail.into() };
+        let issue = |kind, item: Option<u64>, faces, detail: &str| ImportIssue {
+            kind,
+            item,
+            part: String::new(),
+            paths: Vec::new(),
+            faces,
+            times: 1,
+            detail: detail.into(),
+        };
         let report = ImportReport {
             parts: 43,
             solids: 40,
@@ -1649,6 +1667,7 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            single_root: true,
             ..Default::default()
         };
         let summary = super::import_summary(&report);
@@ -1661,8 +1680,13 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired =
-            ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")], ..Default::default() };
+        let repaired = ImportReport {
+            parts: 1,
+            solids: 1,
+            issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")],
+            single_root: true,
+            ..Default::default()
+        };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -3466,11 +3490,9 @@ mod tests {
         assert!(folder_names(&h, &[("Mid", &["B", "A", "C"])]), "dropped inside the open folder, it joins it: {:?}", folders(&h));
     }
 
-    /// A STEP file that brings more than one item into the history (here one cylinder placed
-    /// twice) shows as one folded chip named Group #1, holding its Import feature and the rigid
-    /// joints that keep its parts in place (grouped as one button, which shows each joint); the
-    /// joints chip after the history leaves them out. A file with one object shows its Import
-    /// feature as before.
+    /// An assembly's STEP file (here one cylinder placed twice) shows as one folded chip named
+    /// Group #1, holding its Import feature; one rigid group keeps its parts in place, so there
+    /// are no joints to show. A file with one object shows its Import feature as before.
     #[test]
     fn a_multi_object_step_insert_shows_as_one_chip() {
         use crate::scenario::{handle_at, handles};
@@ -3487,21 +3509,16 @@ mod tests {
         assert_eq!(handles("timeline-folder-chip:").len(), 1, "only the second insert is a folder");
         assert!(handle_at("timeline-folder-chip:Group #1").is_some(), "{two}");
         assert!(handle_at(&format!("timeline:{}", feature(&two))).is_none(), "the Import feature is folded into the chip");
-        let joints = h.app.session.doc.assembly.joints.len();
-        assert_eq!(joints, 2, "a rigid joint per placement");
-        assert!(handles("timeline-joint:").is_empty() && handle_at("timeline:joints").is_none(), "its joints are in its chip");
+        // One rigid group holds its parts: no joints, so nothing to show after the feature.
+        assert!(h.app.session.doc.assembly.joints.is_empty() && h.app.session.doc.assembly.rigid_groups.len() == 1);
+        assert!(handles("timeline-joint:").is_empty() && handle_at("timeline:joints").is_none());
 
         h.step(&json!({"click": {"handle": "timeline-folder-chip:Group #1"}})).unwrap();
-        let import = handle_at(&format!("timeline:{}", feature(&two))).expect("open, the Import feature shows");
-        let group = handle_at("timeline-folder-joints:Group #1").expect("and its two joints after it, as one button");
-        assert!(group.x > import.x && handles("timeline-joint:").is_empty());
-        h.step(&json!({"click": {"handle": "timeline-folder-joints:Group #1"}})).unwrap();
-        let shown = handles("timeline-joint:");
-        assert_eq!(shown.len(), joints, "the button shows each joint");
-        assert!(shown.iter().all(|(_, at)| at.x > import.x));
+        assert!(handle_at(&format!("timeline:{}", feature(&two))).is_some(), "open, the Import feature shows");
+        assert!(handle_at("timeline-folder-joints:Group #1").is_none(), "and no joints button");
     }
 
-    /// A STEP folder's joints, shown one by one, stay shown in their own design only: another
+    /// A folder's joints, shown one by one, stay shown in their own design only: another
     /// design's `Group #1`, numbered the same, keeps its joints grouped, and the first design
     /// shows them again when its tab comes back.
     #[test]
@@ -3511,12 +3528,21 @@ mod tests {
         let mut h = Harness::new();
         assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
         assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        // An assembly's import, unlocked and held instead by two rigid joints of a folder with its
+        // Import feature.
         let insert = |h: &mut Harness| {
-            let reply = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": true})).unwrap();
+            let reply = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice")})).unwrap();
+            let component = reply["component"].as_u64().unwrap();
+            h.app.run("component.unlock", json!({"component": component})).unwrap();
+            let doc = &h.app.session.doc;
+            let occurrences: Vec<u64> =
+                doc.occurrences.iter().filter(|o| o.component == component || doc.component_within(o.parent, component)).map(|o| o.id).collect();
+            let joints = h.app.run("joint.rigid_group", json!({"occurrences": occurrences})).unwrap()["joints"].clone();
+            let group = h.app.run("timeline.group", json!({"name": "Group #1", "features": [reply["feature"]], "joints": joints})).unwrap();
             h.app.run("component.activate", json!({"component": "root"})).unwrap();
             h.frames(4);
             h.step(&json!({"click": {"handle": "timeline-folder-chip:Group #1"}})).unwrap();
-            reply["group"].clone()
+            group["group"].clone()
         };
         let first = insert(&mut h);
         h.step(&json!({"click": {"handle": "timeline-folder-joints:Group #1"}})).unwrap();
@@ -3564,7 +3590,7 @@ mod tests {
         assert_eq!(v["ok"], true, "{v}");
         let names: Vec<&str> = h.app.session.doc.timeline_groups.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(names, ["Pair"], "neither insert made a folder");
-        assert_eq!(h.app.session.doc.assembly.joints.len(), 4, "their rigid joints are there all the same");
+        assert_eq!(h.app.session.doc.assembly.rigid_groups.len(), 2, "their rigid groups are there all the same");
 
         assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
@@ -4000,8 +4026,18 @@ mod tests {
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
         let h = two_boxes(false);
         let plain = h.app.session.model.results[0].clone();
-        let issue = ImportIssue { kind: IssueKind::Repaired, item: Some(3), part: String::new(), faces: 0, times: 1, detail: "solid #3: …".into() };
-        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, ..Default::default() }));
+        let issue = ImportIssue {
+            kind: IssueKind::Repaired,
+            item: Some(3),
+            part: String::new(),
+            paths: Vec::new(),
+            faces: 0,
+            times: 1,
+            detail: "solid #3: …".into(),
+        };
+        let report = |issues: Vec<ImportIssue>| {
+            Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, single_root: true, ..Default::default() }))
+        };
         let with = |warning: Option<&str>, import_report| {
             let mut result = plain.clone();
             result.warning = warning.map(str::to_string);

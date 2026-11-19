@@ -2663,6 +2663,7 @@ mod tests {
                 samples: 1,
                 tess: false,
                 oit: false,
+                edges: false,
             });
             let ctx = egui::Context::default();
             let draw = |app: &mut SolveApp| {
@@ -3582,6 +3583,7 @@ mod tests {
             samples: 1,
             tess: false,
             oit: false,
+            edges: false,
         });
         let ctx = egui::Context::default();
         let draw = |app: &mut SolveApp| {

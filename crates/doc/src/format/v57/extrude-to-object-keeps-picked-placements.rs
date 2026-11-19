@@ -40,6 +40,7 @@ pub fn step(v: &mut Value) -> Result<()> {
             transform: crate::IDENTITY,
             grounded: false,
             expressed_moves: Vec::new(),
+            bom_type: None,
         });
     }
     if occurrences.is_empty() {

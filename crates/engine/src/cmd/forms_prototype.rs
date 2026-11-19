@@ -5422,7 +5422,13 @@ mod tests {
         let id = s
             .doc_mut()
             .add_feature(
-                crate::doc::FeatureKind::Import { file: "original-cubic-support.step".into(), step: step.into(), components: vec![], skip: vec![] },
+                crate::doc::FeatureKind::Import {
+                    file: "original-cubic-support.step".into(),
+                    step: step.into(),
+                    components: vec![],
+                    skip: vec![],
+                    records: None,
+                },
                 Some("CurvedSupport"),
             )
             .unwrap();

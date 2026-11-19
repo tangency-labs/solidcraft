@@ -126,6 +126,82 @@ fn a_kernel_failure_leaves_its_own_words_to_take() {
     assert_eq!(take_failure_detail(), None);
 }
 
+/// A call that fails with a kernel error has the kernel's code: its kind's number and its
+/// operation, on the call; taken once, like the kernel's words.
+#[test]
+fn a_kernel_failure_leaves_its_code_to_take() {
+    all_fixes();
+    let _ = take_failure_code();
+    let r: Result<()> = run("fails", |_| {
+        Err(SolidError::invalid_input("the routine", "what was wrong"))
+    });
+    assert!(r.is_err());
+    let code = FailureCode {
+        call: "fails",
+        kind: solidcore::error::ErrorKind::InvalidInput.code(),
+        operation: "the routine",
+    };
+    assert_eq!(take_failure_code(), Some(code));
+    assert_eq!(take_failure_code(), None, "taken once");
+    run("ends well", |_| Ok(())).unwrap();
+    assert_eq!(take_failure_code(), None);
+    assert_eq!(
+        code.to_string(),
+        format!("fails · {} · the routine", code.kind)
+    );
+}
+
+/// A refusal a call's answer carries keeps the code of the kernel error it is, as ops typed
+/// it; a refusal ops decided itself is [`FailureCode::OPS`] with its variant's name, even after
+/// the call typed a kernel error it did not refuse with; a panic is ops' `Internal`; a
+/// cancellation is no failure and leaves no code.
+#[test]
+fn a_refusal_keeps_the_kernel_code_it_came_from() {
+    all_fixes();
+    let _ = take_failure_code();
+    let r: Result<Result<()>> = run("refuses", |_| {
+        Ok(Err(status(SolidError::invalid_input("the routine", "no"))))
+    });
+    assert!(matches!(r, Ok(Err(Error::Refused { .. }))));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "refuses",
+            kind: solidcore::error::ErrorKind::InvalidInput.code(),
+            operation: "the routine",
+        })
+    );
+    let r: Result<Result<()>> = run("refuses itself", |_| {
+        // a kernel error typed and dropped: not what the call refuses with
+        drop(status(SolidError::invalid_input("the routine", "no")));
+        Ok(Err(Error::NoEffect))
+    });
+    assert_eq!(r, Ok(Err(Error::NoEffect)));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "refuses itself",
+            kind: FailureCode::OPS,
+            operation: "NoEffect",
+        })
+    );
+    let r: Result<()> = run("panics", |_| panic!("on purpose"));
+    assert!(matches!(r, Err(Error::Internal(_))));
+    assert_eq!(
+        take_failure_code(),
+        Some(FailureCode {
+            call: "panics",
+            kind: FailureCode::OPS,
+            operation: "Internal",
+        })
+    );
+    let token = CancelToken::new();
+    token.cancel();
+    let r: Result<()> = crate::cancel::within(&token, || run("cancelled", |_| Ok(())));
+    assert_eq!(r, Err(Error::Cancelled));
+    assert_eq!(take_failure_code(), None);
+}
+
 /// A panicking failure callback loses nothing of the call's result.
 #[test]
 fn a_panicking_hook_keeps_the_calls_result() {

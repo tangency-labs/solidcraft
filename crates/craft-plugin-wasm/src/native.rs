@@ -42,6 +42,17 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 fn limit(name: &str) -> HostError {
     HostError::LimitExceeded { limit: name.into() }
 }
+/// The deadline passed. [`with_limits`] fills in the manifest's number.
+fn deadline() -> HostError {
+    HostError::Exhausted { limit: "deadline_ms".into(), allowed: 0 }
+}
+/// Fills in the budget a [`deadline`] or other placeholder left out, once the call is over.
+fn with_limits(error: HostError, limits: &Limits) -> HostError {
+    match error {
+        HostError::Exhausted { limit, allowed: 0 } if limit == "deadline_ms" => HostError::Exhausted { limit, allowed: limits.deadline_ms },
+        error => error,
+    }
+}
 fn trap(reason: impl Into<String>) -> HostError {
     HostError::Trap { reason: reason.into() }
 }
@@ -55,6 +66,8 @@ fn wit_error(error: HostError) -> PluginError {
         HostError::Trap { reason } => PluginError::Trap(reason),
         HostError::Cancelled => PluginError::Cancelled,
         HostError::UnsupportedCapability { reason, .. } => PluginError::InvalidManifest(types::FieldFailure { field: "capabilities".into(), reason }),
+        HostError::Unsupported { reason } => PluginError::Unsupported(reason),
+        error @ (HostError::OverCeiling { .. } | HostError::Exhausted { .. }) => PluginError::LimitExceeded(error.to_string()),
     }
 }
 fn host_error(error: PluginError) -> HostError {
@@ -66,6 +79,7 @@ fn host_error(error: PluginError) -> HostError {
         PluginError::InvalidInput(types::FieldFailure { field, reason }) => HostError::InvalidInput { field, reason },
         PluginError::Trap(reason) => trap(reason),
         PluginError::Cancelled => HostError::Cancelled,
+        PluginError::Unsupported(reason) => HostError::Unsupported { reason },
     }
 }
 struct Folder {
@@ -123,7 +137,7 @@ impl<H: PluginHost> State<H> {
             return Err(self.fail(HostError::Cancelled));
         }
         if Instant::now() >= self.deadline {
-            return Err(self.fail(limit("deadline")));
+            return Err(self.fail(deadline()));
         }
         self.calls = self.calls.saturating_add(1);
         if self.calls > self.max_calls {
@@ -267,6 +281,11 @@ impl<H: PluginHost> files::Host for State<H> {
         Ok(bytes)
     }
     fn write_file(&mut self, grant: String, path: String, data: Vec<u8>) -> std::result::Result<(), PluginError> {
+        // A read entry stays read-only in every way: no file write, whatever folders are granted.
+        if self.effect == Effect::Read {
+            self.check()?;
+            return Err(self.fail(craft_plugin::read_entry_refusal("write-file")));
+        }
         self.file_path(&grant, &path, true)?;
         let path: PathBuf = Path::new(&path).components().collect();
         if data.len() > MAX_JSON_BYTES {
@@ -427,7 +446,8 @@ impl<H: PluginHost> design::Host for State<H> {
             return Err(self.fail(HostError::PermissionDenied { permission: "design: this call is not an import".into() }));
         };
         if import.design.len().saturating_add(bytes.len()) > MAX_IMPORT_DESIGN_BYTES {
-            return Err(self.fail(limit("design: more than 256 MiB")));
+            let allowed = (MAX_IMPORT_DESIGN_BYTES >> 20) as u64;
+            return Err(self.fail(HostError::Exhausted { limit: "design_mib".into(), allowed }));
         }
         import.design.extend_from_slice(&bytes);
         Ok(())
@@ -521,7 +541,7 @@ fn refuse_links(dir: &Dir, path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn execution_error(failure: &wasmtime::Error, remaining: Option<u64>, limits: &Limits) -> HostError {
+fn execution_error(failure: &wasmtime::Error, remaining: Option<u64>, limits: &Limits, stack_bytes: usize) -> HostError {
     let trap_name = failure.downcast_ref::<wasmtime::Trap>().map(|t| format!("{t:?}")).unwrap_or_else(|| "none".into());
     let fuel = remaining.map(|n| format!("fuel_consumed={}, fuel_remaining={n}", limits.fuel.saturating_sub(n))).unwrap_or_default();
     let reason = format!(
@@ -531,47 +551,102 @@ fn execution_error(failure: &wasmtime::Error, remaining: Option<u64>, limits: &L
         limits.memory_mib,
         limits.deadline_ms
     );
+    // A budget the plugin ran into is said plainly; the engine's details are for its author.
+    let exhausted = |limit: &str, allowed: u64| {
+        ::log::debug!(target: "craft_plugin_wasm", "plugin stopped: {reason}");
+        HostError::Exhausted { limit: limit.into(), allowed }
+    };
     match failure.downcast_ref::<wasmtime::Trap>() {
-        Some(wasmtime::Trap::OutOfFuel) => limit(&format!("fuel: {reason}")),
-        Some(wasmtime::Trap::StackOverflow) => limit(&format!("stack: {reason}")),
-        _ if reason.contains("growing memory") => limit(&format!("memory: {reason}")),
+        Some(wasmtime::Trap::OutOfFuel) => exhausted("fuel", limits.fuel),
+        Some(wasmtime::Trap::StackOverflow) => exhausted("stack_kib", (stack_bytes / 1024) as u64),
+        _ if reason.contains("growing memory") => exhausted("memory_mib", limits.memory_mib as u64),
         _ => trap(reason),
     }
 }
 
-/// Refuse reserved network imports even when Wasmtime elides an unused import instance.
-fn reject_network_imports(engine: &Engine, component: &Component) -> Result<()> {
+/// The WIT a component was built against: the current [`craft_plugin::API`] or the frozen 0.1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wit {
+    Current,
+    V0_1,
+}
+
+/// Record an interface version before compilation can fail on a validator limit.
+fn note_version(name: &str, found: &mut BTreeSet<String>) -> Result<()> {
+    let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
+    let version_of = |name: &str| -> Option<String> {
+        name.strip_prefix(&format!("{package}/")).and_then(|rest| rest.split_once('@')).map(|(_, version)| version.chars().take(32).collect())
+    };
+    let Some(version) = version_of(name) else { return Ok(()) };
+    if !craft_plugin::WIT_VERSIONS.contains(&version.as_str()) {
+        return Err(HostError::UnsupportedCapability {
+            capability: format!("{package}@{version}"),
+            reason: format!(
+                "built against {package}@{version}, and this host runs {package} {}; update the app or the plugin",
+                craft_plugin::WIT_VERSIONS.join(" and ")
+            ),
+        });
+    }
+    found.insert(version);
+    Ok(())
+}
+
+/// Refuse reserved network imports even when Wasmtime elides an unused import instance, and read
+/// the WIT version the component's imports and exports name: one the host runs, and only one.
+fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
     use wasmtime::component::types::ComponentItem;
-    fn check(engine: &Engine, name: &str, item: ComponentItem, depth: usize, remaining: &mut usize) -> Result<()> {
+    let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
+    let mut found = BTreeSet::new();
+    /// One import (`import`) or export and everything in it, at most `remaining` items in all.
+    #[allow(clippy::too_many_arguments)]
+    fn check(
+        engine: &Engine,
+        package: &str,
+        import: bool,
+        name: &str,
+        item: ComponentItem,
+        depth: usize,
+        remaining: &mut usize,
+        note: &mut dyn FnMut(&str) -> Result<()>,
+    ) -> Result<()> {
         if depth > 64 || *remaining == 0 {
-            return Err(limit("plugin import interface count or depth"));
+            return Err(limit(if import { "plugin import interface count or depth" } else { "plugin export interface count or depth" }));
         }
         *remaining -= 1;
-        let package = craft_plugin::API.split_once('@').map(|(package, _)| package).unwrap_or(craft_plugin::API);
-        if let Some(version) = name.strip_prefix(&format!("{package}/")).and_then(|rest| rest.split_once('@')).map(|(_, version)| version)
-            && Some(version) != craft_plugin::API.split_once('@').map(|(_, version)| version)
+        note(name)?;
+        // Only an import reaches the network; an export named like one is the plugin's own.
+        if import
+            && (name == "fetch"
+                || name.starts_with("wasi:sockets/")
+                || name.starts_with("wasi:http/")
+                || name.starts_with(&format!("{package}/fetch")))
         {
-            let version: String = version.chars().take(32).collect();
-            return Err(HostError::UnsupportedCapability {
-                capability: format!("{package}@{version}"),
-                reason: format!("built against {package}@{version}, and this host runs {}; update the app or the plugin", craft_plugin::API),
-            });
-        }
-        if name == "fetch" || name.starts_with("wasi:sockets/") || name.starts_with("wasi:http/") || name.starts_with(&format!("{package}/fetch")) {
             return Err(HostError::PermissionDenied { permission: format!("network import is forbidden: {name}") });
         }
         if let ComponentItem::ComponentInstance(instance) = item {
             for (name, export) in instance.exports(engine) {
-                check(engine, name, export.ty, depth + 1, remaining)?;
+                check(engine, package, import, name, export.ty, depth + 1, remaining, note)?;
             }
         }
         Ok(())
     }
     let mut remaining = 4096;
     for (name, import) in component.component_type().imports(engine) {
-        check(engine, name, import.ty, 0, &mut remaining)?;
+        check(engine, package, true, name, import.ty, 0, &mut remaining, &mut |name| note_version(name, &mut found))?;
     }
-    Ok(())
+    // Exports are read the same way, members of exported instances too, with a budget of their own.
+    let mut remaining = 4096;
+    for (name, export) in component.component_type().exports(engine) {
+        check(engine, package, false, name, export.ty, 0, &mut remaining, &mut |name| note_version(name, &mut found))?;
+    }
+    if found.len() > 1 {
+        let versions = found.iter().map(String::as_str).collect::<Vec<_>>().join(" and ");
+        return Err(HostError::UnsupportedCapability {
+            capability: package.into(),
+            reason: format!("mixes {package} {versions}; build the plugin against one version"),
+        });
+    }
+    Ok(if found.first().is_some_and(|version| version == "0.1.0") { Wit::V0_1 } else { Wit::Current })
 }
 
 pub(super) fn run<H: PluginHost + 'static>(
@@ -603,7 +678,8 @@ pub(super) fn run<H: PluginHost + 'static>(
         if params.len() > MAX_JSON_BYTES {
             return Err(limit("parameters exceed 1 MiB"));
         }
-        let (engine, component) = compile(bytes, stack_bytes(&runtime.limits, options, false)?)?;
+        let stack = stack_bytes(&runtime.limits, options, false)?;
+        let (engine, component) = compile(bytes, stack)?;
         let commands = host.command_catalog().into_iter().filter(|s| runtime.commands.contains(&s.name)).map(|s| (s.name.clone(), s)).collect();
         let groups: BTreeSet<String> = host.granted_command_groups().intersection(&runtime.permissions.command_groups).cloned().collect();
         let mut folders = BTreeMap::new();
@@ -621,13 +697,13 @@ pub(super) fn run<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         host.begin_transaction()?;
-        Ok((runtime, entry, params, engine, component, (commands, groups), folders))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), folders))
     })();
-    let (runtime, entry, params, engine, component, commands, folders) = match prepared {
+    let (runtime, entry, params, compiled, commands, folders) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, engine, component, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -651,8 +727,7 @@ fn execute<H: PluginHost + 'static>(
     runtime: &craft_plugin::RuntimeManifest,
     entry: &craft_plugin::Entry,
     params: String,
-    engine: Engine,
-    component: Component,
+    (engine, component, stack): (Engine, Component, usize),
     (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
     folders: BTreeMap<String, Folder>,
 ) -> (State<H>, Result<Value>) {
@@ -676,26 +751,29 @@ fn execute<H: PluginHost + 'static>(
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
-        reject_network_imports(&engine, &component)?;
-        let mut linker = Linker::new(&engine);
-        bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(|e| trap(e.to_string()))?;
-        let response = with_interrupts(&engine, || {
-            let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
-            call_entry!(guest, &mut store, &entry.name, &params)
+        let wit = check_imports(&engine, &component)?;
+        let response = with_interrupts(&engine, || match wit {
+            Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
+            Wit::Current => {
+                let mut linker = Linker::new(&engine);
+                bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
+                Ok(call_entry!(guest, &mut store, &entry.name, &params)?.map_err(host_error))
+            }
         })?;
         if let Some(error) = store.data().failed.clone() {
             return Err(error);
         }
-        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits))?;
-        let text = response.map_err(host_error)?;
+        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits, stack))?;
+        let text = response?;
         if text.len() > MAX_JSON_BYTES {
-            return Err(limit("entry result exceeds 1 MiB"));
+            return Err(limit("the entry's result is larger than 1 MiB"));
         }
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
         if Instant::now() >= store.data().deadline {
-            return Err(limit("deadline"));
+            return Err(deadline());
         }
         let value = serde_json::from_str(&text)
             .map_err(|e| HostError::InvalidInput { field: "result".into(), reason: format!("entry result is not JSON: {e}") })?;
@@ -710,7 +788,7 @@ fn execute<H: PluginHost + 'static>(
         }
         Ok(value)
     })();
-    (store.into_data(), outcome)
+    (store.into_data(), outcome.map_err(|error| with_limits(error, limits)))
 }
 
 fn store_limits(limits: &Limits, table_elements: usize) -> StoreLimits {
@@ -736,7 +814,7 @@ fn prepare_store<H: PluginHost + 'static>(store: &mut Store<State<H>>, limits: &
             return Err(wasmtime::Error::msg("plugin cancelled"));
         }
         if Instant::now() >= state.deadline {
-            state.failed.get_or_insert_with(|| limit("deadline"));
+            state.failed.get_or_insert_with(deadline);
             return Err(wasmtime::Error::msg("plugin deadline exceeded"));
         }
         Ok(UpdateDeadline::Continue(1))
@@ -825,9 +903,12 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     }
     let importer = runtime.is_importer();
     let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer)?)?;
-    reject_network_imports(&engine, &component)?;
-    let mut linker = Linker::<State<Inert>>::new(&engine);
+    let wit = check_imports(&engine, &component)?;
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
+    if wit == Wit::V0_1 {
+        return v0_1::check_link::<Inert>(&engine, &component, importer).map_err(link);
+    }
+    let mut linker = Linker::<State<Inert>>::new(&engine);
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -859,14 +940,70 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     Ok((engine, component))
 }
 
+/// The parser exposes limit failures as messages rather than a public error kind.
+fn component_parse_error(error: &wasmtime::wasmparser::BinaryReaderError) -> HostError {
+    if error.message().contains("exceeds limit") {
+        limit(&format!("component validation: {}", error.message()))
+    } else {
+        trap(format!("component parsing failed: {error}"))
+    }
+}
+
+/// Read the outer interface before Wasmtime validation. Exporting an instance creates another
+/// instance index, so its 1000-instance limit can precede our 4096-interface limit. The typed scan
+/// still checks nested interfaces after compilation; this pass does not interpret private names.
+fn check_outer_interfaces(bytes: &[u8]) -> Result<()> {
+    use wasmtime::wasmparser::{Parser, Payload};
+    let mut depth = 0usize;
+    let mut imports = 0usize;
+    let mut exports = 0usize;
+    let mut found = BTreeSet::new();
+    for payload in Parser::new(0).parse_all(bytes) {
+        let payload = payload.map_err(|e| component_parse_error(&e))?;
+        match payload {
+            Payload::Version { .. } => depth += 1,
+            Payload::End(_) => depth = depth.saturating_sub(1),
+            Payload::ComponentImportSection(section) if depth == 1 => {
+                for import in section {
+                    let import = import.map_err(|e| component_parse_error(&e))?;
+                    imports += 1;
+                    note_version(import.name.name, &mut found)?;
+                }
+            }
+            Payload::ComponentExportSection(section) if depth == 1 => {
+                for export in section {
+                    let export = export.map_err(|e| component_parse_error(&e))?;
+                    exports += 1;
+                    note_version(export.name.name, &mut found)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    if imports > 4096 {
+        return Err(limit("plugin import interface count or depth"));
+    }
+    if exports > 4096 {
+        return Err(limit("plugin export interface count or depth"));
+    }
+    Ok(())
+}
+
 /// Compiles `bytes` under the host's configuration, without the cache.
 fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+    check_outer_interfaces(bytes)?;
     let mut config = Config::new();
     config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
     // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
     config.async_stack_size(stack_bytes.saturating_add(1 << 20));
     let engine = Engine::new(&config).map_err(|e| trap(e.to_string()))?;
-    let component = Component::from_binary(&engine, bytes).map_err(|e| trap(format!("component compilation failed: {e:#}")))?;
+    let component = Component::from_binary(&engine, bytes).map_err(|e| {
+        // Inspect the parser error itself, not plugin names in the compilation context.
+        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
+            return component_parse_error(error);
+        }
+        trap(format!("component compilation failed: {e:#}"))
+    })?;
     Ok((engine, component))
 }
 
@@ -915,7 +1052,8 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         if size > MAX_IMPORT_INPUT_BYTES {
             return Err(limit("source: the file is larger than 1 GiB"));
         }
-        let (engine, component) = compile(bytes, stack_bytes(&runtime.limits, runtime_options, true)?)?;
+        let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
+        let (engine, component) = compile(bytes, stack)?;
         let import = ImportState {
             dir,
             name: name.clone(),
@@ -927,9 +1065,9 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             scratch: Vec::new(),
             evaluating: false,
         };
-        Ok((runtime, entry, options, engine, component, import, source::FileInfo { name, size }))
+        Ok((runtime, entry, options, (engine, component, stack), import, source::FileInfo { name, size }))
     })();
-    let (runtime, entry, options, engine, component, import, file) = match prepared {
+    let (runtime, entry, options, (engine, component, stack), import, file) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
@@ -941,7 +1079,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
-        effect: Effect::Edit,
+        effect: Effect::Open,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
@@ -957,21 +1095,23 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     let mut store = Store::new(&engine, state);
     let outcome = (|| {
         prepare_store(&mut store, limits)?;
-        reject_network_imports(&engine, &component)?;
-        let mut linker = Linker::new(&engine);
-        importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)
-            .map_err(|e| trap(e.to_string()))?;
-        let response = with_interrupts(&engine, || {
-            let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
-            call_import!(guest, &mut store, &entry.name, &file, &options)
+        let wit = check_imports(&engine, &component)?;
+        let response = with_interrupts(&engine, || match wit {
+            Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
+            Wit::Current => {
+                let mut linker = Linker::new(&engine);
+                importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
+                let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
+                Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))
+            }
         })?;
         if let Some(error) = store.data().failed.clone() {
             return Err(error);
         }
-        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits))?;
-        let text = response.map_err(host_error)?;
+        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits, stack))?;
+        let text = response?;
         if text.len() > MAX_JSON_BYTES {
-            return Err(limit("loss report exceeds 1 MiB"));
+            return Err(limit("the importer's loss report is larger than 1 MiB"));
         }
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
@@ -985,14 +1125,15 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         }
         // A last host call can finish after the deadline, before the next epoch tick sees it.
         if Instant::now() >= store.data().deadline {
-            return Err(limit("deadline"));
+            return Err(deadline());
         }
         Ok(Imported { design, report })
     })();
     let mut state = store.into_data();
     state.close_evaluation();
-    (state.host, outcome)
+    (state.host, outcome.map_err(|error| with_limits(error, limits)))
 }
 
 #[cfg(test)]
 mod tests;
+mod v0_1;

@@ -45,8 +45,8 @@ pub const EXTRUDE_TOLERANCE: f64 = 1e-7;
 struct Out<T>(std::result::Result<T, Error>);
 
 impl<T> Answer for Out<T> {
-    fn refusal(&self) -> Option<String> {
-        self.0.as_ref().err().map(ToString::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.0.as_ref().err().cloned()
     }
 }
 
@@ -426,6 +426,17 @@ pub fn fitted_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Result<Loop
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// Counter-clockwise angle between two planar rays, in radians modulo one turn.
+/// Equal rays give zero. Nonfinite and zero rays have no angle.
+#[must_use]
+pub fn counterclockwise_sweep(center: Vec2, start: Vec2, end: Vec2) -> Option<f64> {
+    kp::counterclockwise_sweep(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+    )
 }
 
 /// The directed parameter interval of a recognized ellipse arc, in the input plane.

@@ -526,6 +526,7 @@ mod tests {
             samples: 1,
             tess: false,
             oit: false,
+            edges: false,
         });
         app.forms_prototype.elements.insert(Element::Face(0));
         app.forms_prototype.hover = Some(Element::Face(1));

@@ -245,6 +245,12 @@ fn nearest(key: &str, allowed: &BTreeSet<String>) -> Option<String> {
         .map(|(_, a)| a.clone())
 }
 
+/// The command `cmd`'s parameters `p` as its contract type `P`, refused in the words the contract
+/// check uses, so the handler and the check say the same thing about the same mistake.
+pub(crate) fn read<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {
+    serde_path_to_error::deserialize(p).map_err(|e| bad(cmd, parse_issue(&e).message))
+}
+
 /// A deserialization failure as an issue, in the engine's style.
 pub(crate) fn parse_issue(e: &serde_path_to_error::Error<serde_json::Error>) -> Issue {
     let path = error_path(e);
