@@ -312,7 +312,7 @@ fn reconcile_priority_context(envelope: &mut LayoutEnvelope) -> PanelResult<()> 
 /// Raw sidecars have already been merged, but their effective tiers must travel
 /// with them. Live preset fields remain authoritative; shared latent sources
 /// cannot silently choose between conflicting effective recovery intents.
-pub(super) fn merge_retained_priority_context(
+pub fn merge_retained_priority_context(
     envelope: &mut LayoutEnvelope,
     current: &ExtentPriorityContext,
     incoming: &ExtentPriorityContext,

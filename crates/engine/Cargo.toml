@@ -54,6 +54,8 @@ solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcraft-ui-text = { workspace = true }
+# the app-neutral panel placement core (engine::panels re-exports it)
+solidcraft-panel-layout = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
 # an SVG canvas or decal image, drawn into a PNG as it is inserted (src/cmd/canvas_svg.rs)

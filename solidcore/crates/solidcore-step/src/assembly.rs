@@ -109,6 +109,9 @@ pub enum Kind {
     Open {
         /// The solid's shells after the first are its voids.
         voids: bool,
+        /// The first shell is the solid's outer one. False where every face of the outer shell
+        /// was left out: then each shell is one of its voids, a cavity still.
+        outer: bool,
     },
 }
 
@@ -206,6 +209,10 @@ pub struct Assembly<'t> {
     pub(crate) edges_turned: usize,
     /// Spline surfaces whose first and last control lines met within the tolerance, closed.
     pub(crate) splines_closed: usize,
+    /// Control points of spline curves and surfaces whose polygon turned back on itself within
+    /// the tolerance, moved onto their neighbours ([`crate::topology::unfolded_curve`],
+    /// [`crate::topology::unfolded_surface`]).
+    pub(crate) points_unfolded: usize,
     /// Sides of spline surfaces that collapsed to within the tolerance of a point, made exact
     /// poles ([`crate::topology::poles_within`]).
     pub(crate) poles_made_exact: usize,
@@ -231,6 +238,7 @@ impl<'t> Assembly<'t> {
             loops_left_touching: Vec::new(),
             edges_turned: 0,
             splines_closed: 0,
+            points_unfolded: 0,
             poles_made_exact: 0,
             raised_edges: HashSet::new(),
         }
@@ -260,6 +268,15 @@ impl<'t> Assembly<'t> {
     /// gap (with margin) as its tolerance, and one too far off refuses the edge, named
     /// `edge #origin`.
     pub fn add_edge(&mut self, origin: u64, curve: BCurve, interval: [f64; 2], ends: [u32; 2]) -> R<(u32, bool)> {
+        // A control polygon that turns back on itself within the tolerance is a wiggle of the
+        // file's, taken out before anything is measured on the curve.
+        let curve = match crate::topology::unfolded_curve(&curve, self.tol) {
+            Some((unfolded, moved)) => {
+                self.points_unfolded += moved;
+                unfolded
+            }
+            None => curve,
+        };
         let eval = CurveEval::new(&curve).map_err(|m| format!("edge #{origin}: {m}"))?;
         let mut at = [Vec3::new(0.0, 0.0, 0.0); 2];
         for (slot, t) in at.iter_mut().zip(interval) {
@@ -334,8 +351,9 @@ impl<'t> Assembly<'t> {
     /// surface's natural normal; `outer` is the outer bound's index in `bounds` when the reader
     /// knows it (the pcurves decide otherwise, [`Assembly::finish`]); `forward` says the face's
     /// side is the natural normal. A spline surface whose first and last control lines meet
-    /// within the tolerance is closed on itself (noted), and a side that closes to a point within
-    /// it is made an exact pole (noted). `origin` names the face.
+    /// within the tolerance is closed on itself (noted), a side that closes to a point within it is
+    /// made an exact pole (noted), and a control net that turns back on itself within it is
+    /// unfolded (noted). `origin` names the face.
     pub fn add_face(&mut self, origin: u64, surface: BSurface, bounds: Vec<Bound>, outer: Option<usize>, forward: bool) -> R<u32> {
         // A sphere bounded by its poles alone is the whole sphere, with a meridian for its seam.
         let bounds = match &surface {
@@ -365,6 +383,11 @@ impl<'t> Assembly<'t> {
         if let Some((poled, sides)) = crate::topology::poles_within(&surface, self.tol, &corners) {
             self.poles_made_exact += sides;
             surface = poled;
+        }
+        // A control net that turns back on itself within the tolerance is unfolded.
+        if let Some((unfolded, moved)) = crate::topology::unfolded_surface(&surface, self.tol) {
+            self.points_unfolded += moved;
+            surface = unfolded;
         }
         if bounds.len() == 2
             && let BSurface::Sphere { frame, .. } = &mut surface
@@ -635,6 +658,12 @@ impl<'t> Assembly<'t> {
                 self.splines_closed, self.tol
             ));
         }
+        if self.points_unfolded > 0 {
+            notes.push(format!(
+                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved onto their neighbours",
+                self.points_unfolded, self.tol
+            ));
+        }
         if self.poles_made_exact > 0 {
             notes.push(format!(
                 "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
@@ -804,7 +833,7 @@ impl<'t> Assembly<'t> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open { voids } => {
+            Kind::Open { voids, outer } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
                 }
@@ -812,7 +841,7 @@ impl<'t> Assembly<'t> {
                 // the inside of an outer shell or a model's shell still whole.
                 for (k, c) in closed.iter().enumerate() {
                     if *c {
-                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                        regions.push(Region { shells: vec![index(k)?], void: voids && (k > 0 || !outer) });
                     }
                 }
             }
@@ -1924,16 +1953,30 @@ pub(crate) fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2
 /// that evaluates a periodic spline modulo its period): the curve and interval the record takes,
 /// the interval moved into the range by whole periods, and the curve restarted there (exactly:
 /// knot insertion) when the edge runs across the seam, as the STEP reader reads such an edge.
+/// An end a rounding from the seam is at the seam: an edge all the way round, start to end, is
+/// the curve as it is.
 pub fn periodic_edge(curve: BCurve, [t0, t1]: [f64; 2]) -> R<(BCurve, [f64; 2])> {
     let Natural::Range(a, b) = curve.natural() else { return Err("a periodic spline without a range".into()) };
     let period = b - a;
-    if !(period > 0.0) || !(t0 <= t1) || !(t1 - t0 <= period) {
+    // Rounding is allowed for (`eps`): an edge all the way round may be written a rounding long.
+    let eps = 1e-9 * period;
+    if !(period > 0.0) || !(t0 <= t1) || !(t1 - t0 <= period + eps) {
         return Err("an edge longer than its periodic spline's period".into());
     }
     let turns = ((t0 - a) / period).floor();
-    let (lo, hi) = (t0 - turns * period, t1 - turns * period);
-    if hi <= b {
-        return Ok((curve, [lo, hi]));
+    let (mut lo, mut hi) = (t0 - turns * period, t1 - turns * period);
+    // Moving by whole periods rounds: a start a rounding short of the range's end is the seam
+    // (the range's start), and an end a rounding past it is that end, as the STEP reader takes an
+    // end within a rounding of its seam. A restart is only ever strictly inside the range. An edge
+    // that ends before the range does (a short one a rounding short of it) stays where it is.
+    if b - lo <= eps && hi > b {
+        (lo, hi) = (a, hi - period);
+    }
+    if lo - a <= eps {
+        lo = a;
+    }
+    if hi <= b + eps {
+        return Ok((curve, [lo, hi.min(b)]));
     }
     Ok((crate::kernel::restart_curve(&curve, lo)?, [lo, hi]))
 }

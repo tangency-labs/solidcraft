@@ -72,6 +72,7 @@ pub mod form_transform;
 pub mod forms_view_queries;
 pub mod hatch;
 pub mod heal;
+pub mod hlr;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;

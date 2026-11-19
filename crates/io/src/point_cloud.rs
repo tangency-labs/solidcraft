@@ -99,7 +99,9 @@ pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize)
     };
     let stride;
     if let Some(r) = table {
-        stride = r.vertices.div_ceil(r.positions.len().max(1) as u64).max(1);
+        // Points without a position were left out before thinning: they count as unread.
+        keep.bad += r.skipped;
+        stride = r.vertices.saturating_sub(r.skipped).div_ceil(r.positions.len().max(1) as u64).max(1);
         keep.colored = r.colors.is_some();
         let colors = r.colors.unwrap_or_default();
         let mut read = Vec::with_capacity(r.positions.len());
@@ -158,6 +160,7 @@ fn numbers(line: &str, out: &mut Vec<f64>) -> bool {
 /// Read an XYZ file into `keep`; returns the thinning stride.
 fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
     let text = String::from_utf8_lossy(bytes);
+    let text = text.trim_start_matches('\u{feff}');
     // An ESRI grid is an ASC file too, but one of heights in rows: read as points it is nonsense.
     let first = text.lines().find_map(|line| line.split_whitespace().next());
     if first.is_some_and(|word| word.eq_ignore_ascii_case("ncols")) {
@@ -311,11 +314,12 @@ mod tests {
         assert_eq!(&*c.complex.column("intensity", On::Point).unwrap().values.0, &[10.0, 12.0, 13.0], "the point left out takes its number with it");
         c.complex.check(3).unwrap();
         assert_eq!(c.warnings, ["1 point(s) could not be read and were left out"]);
+        // Thinned, the point without a position takes no place: every second of the other three.
         let thinned = read_point_cloud(pcd.as_bytes(), "scan.pcd", 1.0, 2).unwrap();
-        assert_eq!((thinned.source_points, &thinned.points[..]), (4, &[0.0, 0.0, 0.0, 0.5, 0.0, 0.0][..]));
-        assert_eq!(thinned.colors, [255, 0, 0, 0, 255, 0]);
-        assert_eq!(&*thinned.complex.column("intensity", On::Point).unwrap().values.0, &[10.0, 12.0]);
-        assert_eq!(thinned.warnings, ["2 of the file's 4 points kept (one in 2)"]);
+        assert_eq!((thinned.source_points, &thinned.points[..]), (4, &[0.0, 0.0, 0.0, 1.0, 0.0, 0.0][..]));
+        assert_eq!(thinned.colors, [255, 0, 0, 0, 0, 255]);
+        assert_eq!(&*thinned.complex.column("intensity", On::Point).unwrap().values.0, &[10.0, 13.0]);
+        assert_eq!(thinned.warnings, ["1 point(s) could not be read and were left out", "2 of the file's 4 points kept (one in 2)"]);
     }
 
     #[test]
@@ -330,6 +334,10 @@ mod tests {
         // An ESRI grid has the same extension: rows of heights, which are no points.
         let grid = b"ncols 3\nnrows 2\nxllcorner 0\nyllcorner 0\ncellsize 10\nNODATA_value -9999\n1 2 3\n4 5 6\n";
         let refused = read_point_cloud(grid, "terrain.asc", 1.0, DEFAULT_MAX_POINTS).unwrap_err().to_string();
+        assert!(refused.contains("grid of heights"), "{refused}");
+        // The same with the byte-order mark a Windows editor writes first.
+        let marked = [&b"\xef\xbb\xbf"[..], grid].concat();
+        let refused = read_point_cloud(&marked, "terrain.asc", 1.0, DEFAULT_MAX_POINTS).unwrap_err().to_string();
         assert!(refused.contains("grid of heights"), "{refused}");
     }
 

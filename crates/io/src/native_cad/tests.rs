@@ -694,7 +694,7 @@ fn a_part_whose_body_was_not_imported_is_said_not_checked() {
     assert!(!ir.model.declared_measures.is_empty());
     // Every region refused: a coedge missing from each.
     ir.model.coedges.clear();
-    let (records, origins) = traced_records(&ir, "washer", "", true);
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
     assert!(records.bodies.is_empty(), "{:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     let notes = validation::check(&ir, &records, &origins, &imp);
@@ -730,11 +730,30 @@ fn a_part_with_one_body_imported_and_one_not_is_said_not_checked() {
         }
     }
     model.bodies.push(refused);
-    let (records, origins) = traced_records(&ir, "washer", "", true);
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
     assert!(!records.bodies.is_empty(), "the washer itself comes in: {:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
     let notes = validation::check(&ir, &records, &origins, &imp);
     assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("was not checked")), "{notes:?}");
+}
+
+/// A part whose solid could not be closed, come in as an open surface of the faces that read, is
+/// said not checked against the volume and centre its file states, not left out of them unsaid.
+#[test]
+fn a_part_whose_solid_came_in_open_is_said_not_checked() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let ours = solidcraft_kernel::step_import(&std::fs::read_to_string(dir.join("washer.step")).unwrap()).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    // One face's plane moved 5 mm off its edges: the reader names that face, and the solid comes
+    // in open.
+    let text = washer_stating(m.volume, [m.centroid.x, m.centroid.y, m.centroid.z])
+        .replace("#50=CARTESIAN_POINT('',(0.0,0.0,0.0));", "#50=CARTESIAN_POINT('',(0.0,0.0,-5.0));");
+    let ir = neutral(text.as_bytes(), "washer.step");
+    let (records, origins) = traced_records(&ir, "washer", "", true, false);
+    assert!(records.bodies.iter().any(|b| b.sheet), "{:?}", records.warnings);
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    let notes = validation::check(&ir, &records, &origins, &imp);
+    assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("came in as open surfaces")), "{notes:?}");
 }
 
 /// The washer with the CAx-IF validation properties a CAD system writes for it: its volume and its
@@ -877,7 +896,7 @@ fn mesh_placed_twice() -> cadmpeg_ir::document::CadIr {
 /// holds no triangles of its own, and both placements come in as mesh bodies.
 #[test]
 fn a_mesh_part_placed_twice_keeps_its_triangles_once() {
-    let (records, _) = traced_records(&mesh_placed_twice(), "twice", "", true);
+    let (records, _) = traced_records(&mesh_placed_twice(), "twice", "", true, false);
     let shape: Vec<(bool, Option<usize>)> = records.bodies.iter().map(|b| (b.mesh.is_some(), b.copy_of)).collect();
     assert_eq!(shape, [(true, None), (false, Some(0))], "{:?}", records.warnings);
     let imp = solidcraft_kernel::records_import(&records).unwrap();
@@ -919,7 +938,7 @@ fn triangles_on_a_hidden_layer_come_in_hidden() {
             let layer = serde_json::json!({"id": "test:hidden:layer#0", "name": "Hidden parts", "visible": false, "items": [{"kind": "tessellation", "tessellation": t}]});
             ir.model.presentation_layers.push(serde_json::from_value(layer).unwrap());
         }
-        let (records, _) = traced_records(&ir, "twice", "", true);
+        let (records, _) = traced_records(&ir, "twice", "", true, false);
         assert_eq!(records.bodies.len(), 2, "{:?}", records.warnings);
         assert!(records.bodies.iter().all(|b| b.hidden == on_layer), "on a hidden layer: {on_layer}");
     }
@@ -941,4 +960,21 @@ fn a_part_on_a_hidden_layer_comes_in_hidden() {
     assert!(with("#300=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#99));\n#301=INVISIBILITY((#300));\n"), "on a hidden layer");
     assert!(!with("#300=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#99));\n"), "on a shown layer");
     assert!(!with(""), "on no layer");
+}
+
+/// Names come in trimmed, as SolidCraft's STEP reader trims them: a product written with a
+/// trailing space ("Guma NR 60ShA černá ", as a real assembly writes one) is the same product to
+/// both readers.
+#[test]
+fn product_names_come_in_trimmed() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("cylinder_placed.step"))
+        .unwrap()
+        .replace("PRODUCT('cylinder_placed','cylinder_placed'", "PRODUCT(' cylinder_placed  ',' cylinder_placed  '");
+    let ours = solidcraft_kernel::step_import(&text).unwrap();
+    let (theirs, warnings) = by_records(&neutral(text.as_bytes(), "cylinder_placed.step"));
+    let theirs = theirs.unwrap_or_else(|e| panic!("{e} {warnings:?}"));
+    assert_eq!(tree_of(&theirs), tree_of(&ours));
+    let tree = tree_of(&theirs);
+    assert!(tree.get(1).is_some_and(|l| l.starts_with("1 cylinder_placed [") && l.contains("/cylinder_placed|")), "{tree:?}");
 }

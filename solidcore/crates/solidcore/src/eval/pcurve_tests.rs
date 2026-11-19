@@ -1393,6 +1393,60 @@ fn a_curve_weaving_across_a_thread_flank_is_refused() {
     );
 }
 
+/// A short cubic edge on a cylinder's NURBS form, its angle not moving at a steady pace (θ
+/// quadratic in its parameter), ending on the form's seam. Its end there projects to either side
+/// of the seam; on the far side the segment between its ends ran the wrong way round, and the one
+/// through its middle at its middle's pace was taken, within half a tolerance of 0.02 of the edge
+/// but with its ends 5 um round the axis from the edge's: the loop's pcurves did not meet at the
+/// vertices once healing set the edge tolerances to the edges' own gaps (`SmTrimmingTools` test
+/// 0). The ends are taken on the middle's sheet, so the segment between them is the one taken,
+/// ending where the edge ends, as off the seam.
+#[test]
+fn a_spline_edge_ending_on_a_closed_forms_seam_gets_the_segment_between_its_ends() {
+    let r = 20.;
+    let (surface, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: r,
+        },
+        [[0., TAU], [0., 1.]],
+    )
+    .unwrap();
+    let s = SurfaceEval::new(&surface).unwrap();
+    for end in [TAU, 3.0] {
+        // The cubic Bézier with the ends and end tangents of the curve at angle θ(t) and height
+        // 0.35·t, 0.05 rad round the axis (5e-4 rad of it from the quadratic term). The segment
+        // between its ends and the one through its middle each come within 5.0e-3 of it.
+        let start = end - 0.05;
+        let theta = |t: f64| start + 0.0495 * t + 0.0005 * t * t;
+        let dtheta = |t: f64| 0.0495 + 0.001 * t;
+        let at = |t: f64| [r * theta(t).cos(), r * theta(t).sin(), 0.35 * t];
+        let tangent = |t: f64| {
+            let (a, w) = (theta(t), dtheta(t));
+            [-r * w * a.sin(), r * w * a.cos(), 0.35]
+        };
+        let (p0, p3, d0, d3) = (at(0.), at(1.), tangent(0.), tangent(1.));
+        let edge = Curve::Spline {
+            knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+            points: vec![
+                p0,
+                [0, 1, 2].map(|k| p0[k] + d0[k] / 3.),
+                [0, 1, 2].map(|k| p3[k] - d3[k] / 3.),
+                p3,
+            ],
+        };
+        let pc = &pcurves(&surface, &one(&edge, [0., 1.]), 0.02).unwrap()[0][0];
+        for (t, p) in [(0., p0), (1., p3)] {
+            let lifted = s.point(eval(pc, t).unwrap()).unwrap();
+            assert!(
+                lifted.dist(v3(p)) < 1e-9,
+                "ending at {end}: the pcurve at {t} lifts to {lifted:?}, the edge is at {p:?}"
+            );
+        }
+        assert!(lift_error(&surface, &edge, [0., 1.], pc) <= 0.01);
+    }
+}
+
 /// The B-spline of degree `p` through `points` at `params` (knots by averaging, NURBS Book §9.2.1).
 fn interpolate(params: &[f64], points: &[[f64; 3]], p: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     let m = points.len();

@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.sketch_spline_control_knots": "Control Point Spline with Knots",
+    "help.sketch.spline.control_knots": "Draws a control point spline with the knots and weights it is given, so the curve is exactly that B-spline and not one the points imply. Use it to reproduce a spline with a fixed knot vector, such as one from another system; a weighted spline must be of degree 2."
+  },
+  "ar": {
+    "cmd.sketch_spline_control_knots": "منحنى نقاط تحكم بعُقَد",
+    "help.sketch.spline.control_knots": "يرسم منحنى نقاط تحكم بالعُقَد والأوزان المعطاة له، فيكون المنحنى هو ذلك المنحنى B-spline تمامًا وليس منحنى تستنتجه النقاط. استخدمه لإعادة إنشاء منحنى بمتجه عُقَد ثابت، مثل منحنى من نظام آخر؛ ويجب أن تكون درجة المنحنى الموزون 2."
+  },
+  "he": {
+    "cmd.sketch_spline_control_knots": "ספליין נקודות בקרה עם קשרים",
+    "help.sketch.spline.control_knots": "משרטט ספליין נקודות בקרה עם הקשרים והמשקלים שניתנו לו, כך שהעקומה היא בדיוק ה-B-spline הזה ולא עקומה שהנקודות מרמזות עליה. השתמשו בו כדי לשחזר ספליין עם וקטור קשרים קבוע, למשל ספליין ממערכת אחרת; ספליין עם משקלים חייב להיות ממעלה 2."
+  },
+  "ja": {
+    "cmd.sketch_spline_control_knots": "ノット指定の制御点スプライン",
+    "help.sketch.spline.control_knots": "指定されたノットと重みで制御点スプラインを描きます。曲線は点から推定されるものではなく、その B スプラインそのものになります。別のシステムからのスプラインなど、ノットベクトルが決まっているスプラインを再現するときに使います。重み付きスプラインは次数 2 でなければなりません。"
+  },
+  "vi": {
+    "cmd.sketch_spline_control_knots": "Spline điểm điều khiển với nút",
+    "help.sketch.spline.control_knots": "Vẽ một spline điểm điều khiển với các nút và trọng số được cho, nên đường cong đúng là B-spline đó chứ không phải đường mà các điểm gợi ra. Dùng để dựng lại một spline có vectơ nút cố định, chẳng hạn spline từ một hệ thống khác; spline có trọng số phải có bậc 2."
+  },
+  "zh": {
+    "cmd.sketch_spline_control_knots": "带节点的控制点样条",
+    "help.sketch.spline.control_knots": "按给定的节点和权重绘制控制点样条，曲线正是该 B 样条，而不是由点推出的曲线。用于重现节点向量固定的样条，例如来自其他系统的样条；带权重的样条必须为 2 次。"
+  }
+}

@@ -490,6 +490,11 @@ pub struct Preview {
     pub after: Arc<ModelState>,
     /// What each command replied (as `execute` returns it).
     pub replies: Vec<Value>,
+    /// The joints the commands posed, with their effective values now: the ones they drove and
+    /// the ones they moved (a motion link's follower, a joint a closed loop moved). Their values
+    /// are as the solver placed them, after motion links and limits, as `joint.inspect` and
+    /// `joint.drive` give them. Empty when the commands posed no joint.
+    pub joints: Vec<crate::schema::joints::ReachedJoint>,
 }
 
 impl Preview {
@@ -500,7 +505,7 @@ impl Preview {
             shown.bodies.retain(|body| session.body_visible(&body.name));
             Ok(Arc::new(shown))
         };
-        Ok(Self { before: visible(before)?, after: visible(after)?, replies })
+        Ok(Self { before: visible(before)?, after: visible(after)?, joints: cmd::joints::posed_joints(before, after, &replies), replies })
     }
 }
 
@@ -3258,17 +3263,17 @@ impl Session {
     /// A `timeline.redefine` is shown even while the timeline is rolled back to the feature
     /// being edited.
     pub fn preview(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview {
-            before: self.model.state(),
-            after: after.model.state(),
-            replies,
+        self.scratch().preview_in_place(commands, None).map(|(after, replies)| {
+            let joints = cmd::joints::posed_joints(self, &after, &replies);
+            Preview { before: self.model.state(), after: after.model.state(), replies, joints }
         })
     }
 
     /// The same evaluated preview in occurrence coordinates, including uncaptured moves.
     pub fn preview_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies })
+        let joints = cmd::joints::posed_joints(self, &after, &replies);
+        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies, joints })
     }
 
     /// World preview with each session's visibility applied, including new body placements.

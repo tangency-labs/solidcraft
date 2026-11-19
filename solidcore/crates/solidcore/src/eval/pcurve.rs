@@ -691,13 +691,29 @@ impl On {
             points: vec![a, b],
         };
         let mut candidates = Vec::new();
-        let ends = (self.project_in(p0, exact), self.project_in(p1, exact));
+        let middle = self.project_in(pm, exact);
+        // Each end on the sheet of the edge's middle: an end on the seam of a closed form projects
+        // to either side of it, and on the far side the segment between the ends runs the wrong
+        // way round. A segment that missed for that left the ones below, whose ends are placed
+        // from the middle, to fit the edge within the tolerance with ends off its vertices.
+        let sheet = |mut q: [f64; 2]| {
+            if let Some(m) = middle {
+                for ((x, near), period) in q.iter_mut().zip(m).zip(self.dom.period) {
+                    *x = uv::unwrap(*x, near, period);
+                }
+            }
+            q
+        };
+        let ends = (
+            self.project_in(p0, exact).map(sheet),
+            self.project_in(p1, exact).map(sheet),
+        );
         if let (Some(a), Some(b)) = ends {
             candidates.push(line(a, b));
         }
         // One parameter fixed where the edge's middle is (an end on a seam or at an apex may
         // project anywhere along it), the other from the ends.
-        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, self.project_in(pm, exact)) {
+        if let (Some(a), Some(b), Some(m)) = (ends.0, ends.1, middle) {
             candidates.push(line([m[0], a[1]], [m[0], b[1]]));
             candidates.push(line([a[0], m[1]], [b[0], m[1]]));
         }

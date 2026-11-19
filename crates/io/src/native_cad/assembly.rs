@@ -163,7 +163,7 @@ impl Walk<'_, '_> {
             PrototypeReference::Local { definition } => self.definitions.get(definition.as_str()).copied(),
             _ => None,
         };
-        let name = definition.map_or_else(|| o.name.clone().unwrap_or_default(), product_name);
+        let name = definition.map_or_else(|| o.name.as_deref().unwrap_or_default().trim().to_string(), product_name);
         let mut node =
             StepNode { name: name.clone(), transform: IDENTITY, bodies: Vec::new(), items: Vec::new(), left_out: Vec::new(), children: Vec::new() };
         let label = if name.is_empty() { o.id.as_str().to_string() } else { name.clone() };
@@ -235,7 +235,7 @@ impl Walk<'_, '_> {
                         let placed = RecordBody {
                             name: if u.record.name.is_empty() { name.clone() } else { u.record.name.clone() },
                             path: path.clone(),
-                            instance: o.name.clone().filter(|n| !n.trim().is_empty()),
+                            instance: o.name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string),
                             hidden: hidden || u.record.hidden,
                             placement: (placement != IDENTITY).then_some(placement),
                             ..part
@@ -261,7 +261,9 @@ impl Walk<'_, '_> {
 
 /// A definition's name: its label, else its name in the file, else its part number.
 fn product_name(d: &ProductDefinition) -> String {
-    [&d.label, &d.source_name, &d.part_number].into_iter().flatten().find(|n| !n.trim().is_empty()).cloned().unwrap_or_default()
+    // Trimmed, as SolidCraft's STEP reader trims a product's name ("Guma NR 60ShA černá " is
+    // "Guma NR 60ShA černá").
+    [&d.label, &d.source_name, &d.part_number].into_iter().flatten().map(|n| n.trim()).find(|n| !n.is_empty()).unwrap_or_default().to_string()
 }
 
 /// Occurrence `o`'s placement in its parent, when rigid: one that scales or mirrors is refused.

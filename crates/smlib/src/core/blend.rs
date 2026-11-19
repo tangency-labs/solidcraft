@@ -245,7 +245,7 @@ fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) 
         Ops::NoRoom | Ops::SetbackTooLong { .. } => Error::NoRoom,
         Ops::TooLarge { size, kind, at, face, why } => Error::TooLarge { size, kind, at, face, why },
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
-        Ops::CornerUnsupported => Error::CornerUnsupported,
+        Ops::CornerUnsupported { why, at } => Error::CornerUnsupported { why, at },
         Ops::CornerRefused { corner } => Error::CornerRefused { corner },
         Ops::TurnRefused { room, why, at } => Error::TurnRefused { room, why, at },
         Ops::NoEffect => Error::NoEffect,

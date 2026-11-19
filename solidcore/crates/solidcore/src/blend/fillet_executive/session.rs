@@ -122,6 +122,12 @@ pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";
 
+/// The session's note at a bevel corner of three chamfers of both convexities.
+const MIXED_CHAMFER_CORNER: &str = "Fillet Error: chamfers of convex and of concave edges meet at the vertex; their mitre is not built yet";
+/// The same, as the refusing step's reason.
+const MIXED_CHAMFER_CORNER_REASON: &str =
+    "chamfers of convex and of concave edges meet at the vertex";
+
 /// The tangency within which the band check takes two blended edges for one tangent chain
 /// (`chains_among`), radians: 10 degrees, as a chamfer's chain (`two_offsets`) and an
 /// edge's continuation (`edge_refusals`) take it.
@@ -2303,6 +2309,9 @@ impl<'target> FilletSession<'target> {
                                 }),
                                 fit: refusal.fit,
                             });
+                        }
+                        ChamferClass::MixedConvexity => {
+                            corner.chamfer_mixed_convexity = true;
                         }
                         ChamferClass::Declined(_) => {}
                     }
@@ -6791,6 +6800,29 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
         // edge's edge/face gap)
         crate::topology::edgeuse::p3::fit_tolerance(k, self.target, id)
     }
+    fn parameters_edge_gap(&mut self, k: &Kernel, edge: FilletObject) -> Result<f64> {
+        let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) = edge else {
+            return Err(invalid("edge is not in the target"));
+        };
+        let mut gap = None::<f64>;
+        // The gap only decides a tolerance at the B-rep's scale: a face that is a blend by its
+        // definition is measured on its certified net wherever the net's bound is far inside
+        // that (a reopened round's definition is otherwise evaluated at every sample, as no
+        // scope is open yet).
+        let _scope =
+            crate::surface::procedural_blend::NetScope::within(k, 0.1 * self.target.tolerance());
+        for eu in self.target.edge(id)?.edgeuses.clone() {
+            let measured =
+                crate::topology::edgeuse::p1::max_edge_face_gap(k, self.target, eu, false)?;
+            if let Some(g) = measured.filter(|g| g.gap_3d >= 0.0) {
+                gap = Some(gap.map_or(g.gap_3d, |m| m.max(g.gap_3d)));
+            }
+        }
+        match gap {
+            Some(gap) => Ok(gap),
+            None => crate::topology::edge::tolerance(self.target, id),
+        }
+    }
     fn parameters_new_solver(
         &mut self,
         k: &mut Kernel,
@@ -6942,7 +6974,7 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
 ///
 /// # Errors
 /// Those of the topology walks and the seam and tangency tests.
-fn runs_on_across_seams(
+pub(crate) fn runs_on_across_seams(
     k: &Kernel,
     target: &mut Brep,
     edges: &[EdgeId],
@@ -7839,6 +7871,29 @@ impl SessionObjects<'_> {
         if let Some(corner) = self.corners.get_mut(id.0 as usize) {
             if let Some(event) = corner.chamfer_corner.as_ref() {
                 corner.bevel = event.definition.is_mitre();
+            }
+        }
+        // Chamfers of both convexities at a vertex of three, as a bevel: the bevel looks for
+        // the chamfers' common point from a rails' crossing towards the vertex, and here it
+        // lies across the vertex's faces. Refused, at the vertex, until the chamfer event
+        // builds their mitre.
+        if let Some(corner) = self.corners.get(id.0 as usize) {
+            if corner.bevel && corner.chamfer_mixed_convexity {
+                let vertex = corner.filleted_vertex();
+                let location =
+                    vertex.and_then(|v| crate::topology::vertex::point(self.target, v).ok());
+                executive.error.note_vertex_error(
+                    vertex
+                        .map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
+                    location,
+                    crate::blend::fillet_geom::p1::FilStatus::Failure,
+                    crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
+                    Some(MIXED_CHAMFER_CORNER),
+                );
+                return Err(SolidError::Unsupported {
+                    operation: NATIVE,
+                    reason: MIXED_CHAMFER_CORNER_REASON,
+                });
             }
         }
         let edgeuses = self

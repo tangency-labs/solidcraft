@@ -26,7 +26,8 @@ use crate::*;
 /// holes whose tools were built (not moved from another copy's), the imported files read for an
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
 /// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
-/// the radius that fits, and the meshes a cam's profile was read from.
+/// the radius that fits, the meshes a cam's profile was read from, and the kernel's point
+/// classifications a pattern's copies were probed with.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Counts {
     pub moved: usize,
@@ -57,6 +58,7 @@ pub(crate) struct Counts {
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
+    pub classifications: usize,
 }
 
 thread_local! {
@@ -90,6 +92,7 @@ thread_local! {
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
+            classifications: 0,
         })
     };
 }
@@ -3721,4 +3724,20 @@ fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
     assert!(error.contains("the largest radius that fits is 6.828 mm"), "{error}");
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 1, "{work:?}");
+}
+
+/// A pattern's copies are probed with the kernel's point classifications, to know whether they
+/// take material without intersecting them with the body (#11257). The points of a line are
+/// classified in one call, not one call a point: the kernel makes the body's copy and its
+/// search structures once for all the points of a call, and again for every call a point makes
+/// on its own.
+#[test]
+fn a_pattern_probes_its_copies_with_one_classification_a_line() {
+    // The ten grooves of the pattern notch the same round bore: the probe's points lie on the
+    // bore's surface, where they are not inside the ring, so the probe tries every line it
+    // has before it finds the ring's material. It asked the kernel for 370 classifications,
+    // one a point, and asks for 36.
+    let (faces, work) = grooved_ring_faces();
+    assert_eq!(faces, 24, "the ring comes out as it did");
+    assert_eq!(work.classifications, 36, "{work:?}");
 }
