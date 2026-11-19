@@ -1,6 +1,6 @@
 # Backdrop blur: one mechanism for every view, window and surface (#19213)
 
-Status: design for review. Nothing here is built yet. Read `docs/blur-behind.md` first; it
+Status: steps 1 to 6 of section 5 are built (section 9 lists where the code differs from this text); section 3.7 is built by its own PR (#10395). Read `docs/blur-behind.md` first; it
 describes what main does today and this document changes parts of it.
 
 ## 1. What is wrong today
@@ -288,3 +288,30 @@ Decided here:
 Open for review: none right now.
 
 Related: #9809, #8876, #10395, #11218, #14251 (the UI kit now owns this code).
+
+## 9. Built as (where the code differs from the text above)
+
+- The planner is `plan(jobs, markers, pad, screen)`; a `Member` is `{ job, region }`. Members of a run
+  have disjoint marker rectangles, but their padded regions may overlap: both compute the same values
+  from the same snapshot, so overlap only costs area. A marker joins only the latest run, because a
+  later run's pyramid overwrites the shared textures. `blur_plan::reach` computes the pad from every
+  tap of every level instead of the `2 * radius + 2^(steps + 1)` estimate.
+- Counters: `blur_passes` is per pass (`2 * steps` per run); `blur_runs` and `blur_pixels` are new;
+  `source_passes` and `cache_hits` are gone. There is no cache.
+- The blur resources are created inside `render`, not in a callback's `finish_prepare`, because
+  nothing prepares them any more.
+- The pop-out host in `panel_runtime/native.rs` only opens an invisible placeholder viewport and draws
+  nothing, so only `panel_runtime/app.rs` and `agent_chat/panel.rs` call `begin`. The Assistant window
+  does not begin a frame when egui draws it inside the main window (`EmbeddedWindow`), where the main
+  window's frame is already open.
+- Per-window state is `Windows { map: HashMap<viewport id, Inner> }` behind one mutex. A window not
+  begun for 600 `begin` calls is forgotten; the 256 MiB budget is shared, and a window that needs room
+  releases the least recently painted other window first.
+- Step 5: `blur_plan::Budget` (eight screens of region area, 64 runs, 256 markers with a binding) drops
+  the later markers of a frame one at a time. The 256-marker count is replaced by a bound of 4096
+  emitted markers per window and frame that only protects memory. A marker over that bound returns
+  the ordinary shape and no longer turns the effect off.
+- Step 6: the first user outside `Container` is the running-operations card (`operations.rs`), whose
+  fill is the theme's translucent `overlay`. It asks with `blur::Backdrop`, so it blurs only under a
+  blurring theme.
+- `prefs.blur_source` is removed from every message catalog directly; pending files only add strings.

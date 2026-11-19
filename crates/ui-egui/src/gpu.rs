@@ -1767,12 +1767,21 @@ mod tests {
                 crate::ui_kit::Container::show_backing(ui, frame, |ui| {
                     ui.label("pop-out panel");
                 });
+                // A surface that is not a container host asks for its own backdrop.
+                let own = egui::Rect::from_min_size(egui::pos2(300.0, 300.0), egui::vec2(120.0, 80.0));
+                ui.painter().add(crate::blur::Backdrop::new(own).corners(6).shape(ui.painter()));
             });
             super::test_support::paint_egui_output_in(popout, &ctx, &mut out, &f.renderer, &f.device, &f.queue, &f.output);
         }
         let counters = f.app.blur.counters();
         assert!(counters.markers_drawn > 0, "the pop-out panel drew its backdrop");
         assert!(counters.blur_runs > 0);
+        assert!(counters.markers_emitted >= 8, "the container panel and the Backdrop each emitted a marker per frame");
+        f.radius(0.0);
+        let ctx = crate::fonts::test_context();
+        let shape = crate::blur::Backdrop::new(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(10.0, 10.0)))
+            .shape(&ctx.layer_painter(egui::LayerId::background()));
+        assert!(matches!(shape, egui::Shape::Noop), "blur off: a Backdrop is nothing");
         assert_eq!(f.app.blur.capability_for(popout), crate::blur::Capability::Available);
     }
 

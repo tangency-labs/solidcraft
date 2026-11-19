@@ -458,35 +458,42 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
     if !wants_backdrop(frame.fill, painter.opacity(), painter.is_visible()) {
         return ordinary;
     }
+    match mark(painter, frame.widget_rect(content), frame.corner_radius) {
+        Some(marker) => Shape::Vec(vec![marker, ordinary]),
+        None => ordinary,
+    }
+}
+
+/// A backdrop request for `rect`: the marker shape to add before the surface's own fill, or `None`
+/// when blur is off, the window has not begun a frame, or the marker cannot be had.
+pub(super) fn mark(painter: &Painter, rect: Rect, corners: egui::CornerRadius) -> Option<Shape> {
+    // A faded painter never blurs (see `wants_backdrop`).
+    let opacity = painter.opacity();
+    if !opacity.is_finite() || opacity < 1.0 || !painter.is_visible() || !rect.is_finite() || !rect.is_positive() {
+        return None;
+    }
     CURRENT.with(|c| {
         let kept = c.borrow();
-        let Some(current) = kept.as_ref() else { return ordinary };
+        let current = kept.as_ref()?;
         // A window that did not begin its own frame cannot hold markers.
         if key(painter.ctx().viewport_id()) != current.window {
-            return ordinary;
+            return None;
         }
-        let rect = frame.widget_rect(content);
-        if !rect.is_finite() || !rect.is_positive() {
-            return ordinary;
-        }
-        let Ok(mut windows) = current.shared.windows.lock() else { return ordinary };
-        let Some(inner) = windows.map.get_mut(&current.window) else { return ordinary };
-        if inner.failure.is_some() {
-            return ordinary;
-        }
-        if inner.markers.len() >= MAX_MARKERS {
-            return ordinary;
+        let mut windows = current.shared.windows.lock().ok()?;
+        let inner = windows.map.get_mut(&current.window)?;
+        if inner.failure.is_some() || inner.markers.len() >= MAX_MARKERS {
+            return None;
         }
         let index = inner.markers.len();
         let callback = egui_wgpu::Callback::new_paint_callback(rect, PanelMarker { shared: current.shared.clone(), window: current.window, index });
         inner.markers.push(Marker {
             rect,
-            corners: frame.corner_radius,
+            corners,
             snap: painter.ctx().tessellation_options(|o| o.round_rects_to_pixels),
             callback_id: Arc::as_ptr(&callback.callback) as *const () as usize,
         });
         inner.counts.markers_emitted += 1;
-        Shape::Vec(vec![Shape::Callback(callback), ordinary])
+        Some(Shape::Callback(callback))
     })
 }
 

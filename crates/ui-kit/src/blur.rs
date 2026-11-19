@@ -202,6 +202,32 @@ impl Session {
     }
 }
 
+/// A request for a blurred backdrop behind a surface that is not a `Container` host (those get it
+/// from the container). Add the shape before the surface's own translucent fill:
+/// `painter.add(Backdrop::new(rect).corners(radius).shape(&painter))`. It is `Shape::Noop` when
+/// blur is off, unavailable, the painter is faded (see-through never blurs), or the window did not begin a frame, so callers add it unconditionally.
+/// Which surfaces ask is the caller's policy: HUDs, toasts and input shields should not.
+#[derive(Clone, Copy, Debug)]
+pub struct Backdrop {
+    rect: Rect,
+    corners: egui::CornerRadius,
+}
+
+impl Backdrop {
+    pub fn new(rect: Rect) -> Self {
+        Self { rect, corners: egui::CornerRadius::ZERO }
+    }
+
+    pub fn corners(mut self, corners: impl Into<egui::CornerRadius>) -> Self {
+        self.corners = corners.into();
+        self
+    }
+
+    pub fn shape(&self, painter: &Painter) -> Shape {
+        implementation::mark(painter, self.rect, self.corners).unwrap_or(Shape::Noop)
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "blur_native.rs"]
 mod implementation;
@@ -259,6 +285,9 @@ mod implementation {
     }
     pub fn decorate(_: &Painter, _: Frame, _: Rect, shape: Shape) -> Shape {
         shape
+    }
+    pub(super) fn mark(_: &Painter, _: Rect, _: egui::CornerRadius) -> Option<Shape> {
+        None
     }
 }
 #[cfg(target_arch = "wasm32")]
