@@ -11,9 +11,10 @@
 //!    `Err(SolidError::Cancelled { .. })` (`sm_status() == None`, `!is_unported()`),
 //!    never a partial `Ok` result and never a remapped upstream status (`SM_ERR`).
 //! 3. **Mid-solve & worker-thread cancellation:** [`GlobalSolver::solve_branch`] stops
-//!    deterministically mid-traversal when its shared [`CancelToken`] is signalled; a
-//!    host thread cancels an in-flight worker-thread kernel job (and a multi-worker group
-//!    sharing one token) once the job has polled its token; and [`CancelToken::reset`] / [`Kernel::clear_cancel_token`]
+//!    deterministically mid-traversal when its shared [`CancelToken`] is signalled;
+//!    `brep_mass_properties` stops at the poll a counting token cancels from; a host thread
+//!    cancels a worker thread running kernel jobs (and a multi-worker group sharing one
+//!    token) once it has polled its token; and [`CancelToken::reset`] / [`Kernel::clear_cancel_token`]
 //!    restore normal execution.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -508,6 +509,38 @@ fn mass_properties_ode_integration_parity_and_cancellation() {
             m.inertia.z.to_bits(),
         ])
     });
+
+    // A cancel in the middle of one integration stops it there, measured in the token's polls,
+    // not in time: a counting token first counts the polls of the whole job, `whole`; a token
+    // cancelled from half of them then stops a second job, well past its first poll.
+    let run = |token: &CancelToken| {
+        let mut k = Kernel::default();
+        k.set_cancel_token(token.clone());
+        let mut b = copy_brep(&mut Kernel::default(), &torus_template, 1);
+        let store = AttributeStore::default();
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &|_| ObjectKey(0),
+        };
+        brep_mass_properties(&k, &mut b, 1e-3, 1.0, centre, &attrs).map(|_| ())
+    };
+    let probe = CancelToken::after_polls(u64::MAX);
+    run(&probe).expect("an uncancelled counting token lets the job finish");
+    let whole = probe.polls().unwrap();
+    let n = whole / 2;
+    let token = CancelToken::after_polls(n);
+    let res = run(&token);
+    eprintln!(
+        "brep_mass_properties polls {whole} times; cancelled at {n}, polled {:?}",
+        token.polls()
+    );
+    assert!(n >= 2, "the job polls {whole} times");
+    assert_cancelled_err("brep_mass_properties cancelled mid-integration", res);
+    assert_eq!(
+        token.polls(),
+        Some(n),
+        "no poll after the one that cancelled"
+    );
 }
 
 /// Runs `brep_mass_properties` (`accuracy = 1e-8`, a heavy NURBS ODE integration) on a fresh
@@ -549,10 +582,12 @@ fn worker_thread_and_group_cancel_in_flight_via_cancel_token() {
         create_box(&mut setup, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let cyl_template = create_cylinder(&mut setup, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
 
-    // 1. Single worker running heavy NURBS ODE integrations until it is cancelled, cancelled
-    //    mid-flight from the host thread via its cloned `CancelToken`, then reused cleanly
+    // 1. Single worker running heavy NURBS ODE integrations until one returns an error,
+    //    cancelled from the host thread via its cloned `CancelToken`, then reused cleanly
     //    after `token.reset()`. The token counts its polls and never cancels by count: the
-    //    host cancels once the worker has polled, so the job is running, not after a sleep.
+    //    host cancels once the worker has polled inside a kernel job, not after a sleep. The
+    //    cancel may reach that job or the next one's first poll; a cancel inside one job is
+    //    shown, without threads, in `mass_properties_ode_integration_parity_and_cancellation`.
     let torus_worker = copy_brep(&mut setup, &torus_template, 1);
     let mut retry_brep = copy_brep(&mut setup, &torus_template, 2);
 
