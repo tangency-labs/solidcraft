@@ -457,17 +457,6 @@ fn outward_normal(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<[f64; 3]> {
     Ok(point_of_vec(frame.normal.value))
 }
 
-/// Two unit vectors in the plane of `normal` with `e1 x e2 = normal`.
-fn plane_frame(normal: [f64; 3]) -> ([f64; 3], [f64; 3]) {
-    let helper = if normal[0].abs() < 0.9 {
-        [1.0, 0.0, 0.0]
-    } else {
-        [0.0, 1.0, 0.0]
-    };
-    let e1 = scale(cross(normal, helper), 1.0 / dot(cross(normal, helper), cross(normal, helper)).sqrt());
-    let e2 = cross(normal, e1);
-    (e1, e2)
-}
 
 /// The meridian of the elliptical dome: the quarter ellipse from the rim to the apex, as the
 /// control points `(x, y, w)` of the cap (`x` scales the outline about the centroid, `y` is the
@@ -548,9 +537,6 @@ fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
-fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
-    [a[0] * s, a[1] * s, a[2] * s]
-}
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
