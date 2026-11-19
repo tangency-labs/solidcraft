@@ -325,7 +325,11 @@ pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> 
     } else {
         return false;
     };
-    close_panel(app);
+    // The Dimension tool stays in hand while one of its sheet's dimensions is edited, as in a
+    // sketch; any other panel gives way to the box.
+    if !placing_dimension(app) {
+        close_panel(app);
+    }
     crate::dim_view::edit_sheet_text(target, solidcraft_ui_text::tr(title), text, at);
     true
 }

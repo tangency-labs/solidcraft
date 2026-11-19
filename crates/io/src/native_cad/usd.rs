@@ -139,6 +139,30 @@ fn colours_to_linear(ir: &mut CadIr) {
     }
 }
 
+/// USD's colours are linear; SolidCraft's are sRGB. The inverse of [`colours_to_linear`], for a
+/// file read into records.
+pub(super) fn colours_to_srgb(ir: &mut CadIr) {
+    let srgb = |c: Color| {
+        let f = |v: f32| solidcraft_color::srgb::encode(f64::from(v).clamp(0.0, 1.0)).clamp(0.0, 1.0) as f32;
+        Color::new(f(c.r()), f(c.g()), f(c.b()), c.a()).unwrap_or(c)
+    };
+    for b in &mut ir.model.bodies {
+        b.color = b.color.map(srgb);
+    }
+    for f in &mut ir.model.faces {
+        f.color = f.color.map(srgb);
+    }
+    for a in &mut ir.model.appearances {
+        a.base_color = a.base_color.map(srgb);
+    }
+}
+
+/// Whether the layer cadmpeg read says Y is up: anything but `Z`, as OpenUSD has it (Y when the
+/// layer says nothing).
+pub(super) fn says_y_up(ir: &CadIr) -> bool {
+    ir.source.as_ref().and_then(|s| s.attributes.iter().find(|(k, _)| k.as_str() == "up_axis").map(|(_, v)| v.clone())).is_none_or(|axis| axis != "Z")
+}
+
 /// A definition's name: its label, else its name in the file, else its part number.
 fn product_name(d: &ProductDefinition) -> Option<String> {
     [&d.label, &d.source_name, &d.part_number].into_iter().flatten().find(|n| !n.trim().is_empty()).map(|n| clean_name(n))
@@ -159,11 +183,7 @@ pub(super) fn read(bytes: &[u8], file: &str) -> Result<(GltfImport, bool), Strin
     let ext = if ext == "usd" { String::from("usdc") } else { ext };
     let (_, decoded) = decode_at(&name, &ext, bytes, &[CODEC], DecodeDepth::Full)?;
     let (ir, report, _) = decoded.into_parts();
-    let y_up = ir
-        .source
-        .as_ref()
-        .and_then(|s| s.attributes.iter().find(|(k, _)| k.as_str() == "up_axis").map(|(_, v)| v.clone()))
-        .is_none_or(|axis| axis != "Z");
+    let y_up = says_y_up(&ir);
     let stem = std::path::Path::new(&name)
         .file_stem()
         .map(|s| clean_name(&s.to_string_lossy()))

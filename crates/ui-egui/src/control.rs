@@ -682,6 +682,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             DOCUMENT_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
+        // The solved joint pose the preview shows: what a client follows a joint with (#19437).
+        "control.joint_pose" => ok(crate::control_joint_pose::snapshot(app)),
         // What the MCP server bridged to this app shapes its output with (Preferences › AI).
         "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
@@ -1098,6 +1100,26 @@ fn ui_home(app: &mut SolveApp, q: params::Home) -> Outcome {
     ok(json!({"open": app.home.open, "recent": app.home.recent}))
 }
 
+/// Visibility lists name sets of items; order and repeated items do not change the view.
+fn same_visibility(a: &solidcraft_engine::Visibility, b: &solidcraft_engine::Visibility) -> bool {
+    fn same_items<T: Ord>(a: &[T], b: &[T]) -> bool {
+        a.iter().collect::<std::collections::BTreeSet<_>>() == b.iter().collect()
+    }
+    a == b
+        || (a.origin_hidden == b.origin_hidden
+            && same_items(&a.hidden_bodies, &b.hidden_bodies)
+            && same_items(&a.hidden_occurrences, &b.hidden_occurrences)
+            && same_items(&a.hidden_origin, &b.hidden_origin)
+            && same_items(&a.hidden_sketches, &b.hidden_sketches)
+            && same_items(&a.shown_sketches, &b.shown_sketches)
+            && same_items(&a.hidden_joints, &b.hidden_joints)
+            && same_items(&a.shown_component_origins, &b.shown_component_origins)
+            && same_items(&a.hidden_profiles, &b.hidden_profiles)
+            && same_items(&a.shown_dimensions, &b.shown_dimensions)
+            && same_items(&a.locked_bodies, &b.locked_bodies)
+            && same_items(&a.hidden_folders, &b.hidden_folders))
+}
+
 /// `ui.set {...UiState fields}`: UI state and what is hidden.
 fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
     // What is hidden lives in the session (`browser.visibility`); `ui.set` still sets it.
@@ -1155,6 +1177,9 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
             }
             u.ribbon_context = app.ui.ribbon_context.clone();
             app.ui = u;
+            if !same_visibility(&v, &app.session.visibility) {
+                crate::control_joint_drive::discard(app);
+            }
             app.session.visibility = v;
             ok(ui_state(app))
         }
@@ -1744,6 +1769,88 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn external_joint_drive_ends_when_ui_set_changes_visibility() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("joint.drive", json!({"joint": arm, "value": 15})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        let source = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        assert_eq!(history.1, 1);
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(r["result"]["values"][0]["value"], 45.0, "{r}");
+        assert!(h.app.preview.active);
+        let body = h.app.preview.replaced.first().unwrap().clone();
+
+        let hidden = h.app.session.visibility.hidden_bodies.clone();
+        let r = h.call("ui.set", json!({"hiddenBodies": hidden}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+        let show_grid = !h.app.ui.show_grid;
+        let r = h.call("ui.set", json!({"showGrid": show_grid}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(h.app.ui.show_grid, show_grid);
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+
+        let r = h.call("ui.set", json!({"hiddenBodies": [body]}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        assert!(h.app.session.visibility.hidden_bodies.contains(&body));
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(joint_angle(&mut h, arm), 15.0);
+    }
+
+    #[test]
+    fn external_joint_drive_survives_reordered_and_repeated_visibility_items() {
+        let (mut h, arm, follower) = joint_drive_design();
+        let r = h.call(
+            "ui.set",
+            json!({
+                "hiddenFolders": ["c0/sketches", "c0/bodies"],
+                "hiddenBodies": ["Body1", "Body2"],
+                "hiddenOrigin": ["X", "Y"],
+                "hiddenSketches": [100, 200], "shownSketches": [100, 200],
+                "hiddenJoints": [arm, follower], "hiddenProfiles": [100, 200],
+                "shownDims": [100, 200], "lockedBodies": ["Body1", "Body2"]
+            }),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        let client = std::sync::Arc::new(());
+        let movement = begin_joint_drive(&mut h, &client, arm);
+        let r = joint_drive(&mut h, &client, json!({"action": "update", "movement": movement, "value": 45}));
+        assert_eq!(r["result"]["values"][0]["value"], 45.0, "{r}");
+
+        let r = h.call("ui.set", json!({"showSketches": false}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+        let r = h.call(
+            "ui.set",
+            json!({
+                "hiddenFolders": ["c0/sketches", "c0/bodies", "c0/sketches"],
+                "hiddenBodies": ["Body2", "Body1", "Body2"],
+                "hiddenOrigin": ["Y", "X", "Y"],
+                "hiddenSketches": [200, 100, 200], "shownSketches": [200, 100, 200],
+                "hiddenJoints": [follower, arm, follower], "hiddenProfiles": [200, 100, 200],
+                "shownDims": [200, 100, 200], "lockedBodies": ["Body2", "Body1", "Body2"]
+            }),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.control_joint_drive.active() && h.app.preview.active);
+        assert_eq!(joint_angle(&mut h, arm), 0.0);
+        let finish = joint_drive(&mut h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish, json!({"ok": true, "result": {"changed": true}}));
+        assert_eq!(joint_angle(&mut h, arm), 45.0);
+    }
+
+    #[test]
     fn external_joint_drive_ends_on_disconnect_or_tab_leave_and_checks_the_owner() {
         let (mut h, arm, _) = joint_drive_design();
         let client = std::sync::Arc::new(());
@@ -1819,6 +1926,61 @@ pub(crate) mod tests {
         let r = joint_drive(&mut h, &client, json!({"action": "begin", "document_id": document_id, "joint": arm}));
         assert_eq!(r["ok"], false, "{r}");
         assert_eq!(joint_angle(&mut h, arm), 0.0);
+    }
+
+    /// The control channel reads the solved joint pose the preview shows: the angle a limited
+    /// hinge reached, and the joint a motion link moved with it (#19437).
+    #[test]
+    fn the_control_channel_reports_the_solved_joint_pose_of_a_preview() {
+        let (mut h, arm, follower) = joint_drive_design();
+        h.app.run("joint.motion_link", json!({"a": arm, "b": follower, "ratio": 0.5})).unwrap();
+        let source = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+
+        // Nothing is previewed: the reply says so.
+        let empty = h.call("control.joint_pose", json!({}));
+        assert_eq!(empty["ok"], true, "{empty}");
+        assert_eq!(empty["result"]["pose"], Value::Null, "{empty}");
+
+        // Drive Joints asks for more than the hinge allows.
+        h.app.start("joint.drive");
+        h.frames(4);
+        let Some(d) = h.app.dialog.as_mut() else { panic!("the drive dialog") };
+        if let crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { values, .. }) = &mut d.kind {
+            values[0] = "120 deg".into();
+        }
+        h.frames(2);
+        // The preview runs on a worker thread: wait for it as the other preview tests do.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the drive preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frame();
+        }
+        assert!(h.app.preview.active, "the viewport shows the pose");
+
+        let r = h.call("control.joint_pose", json!({}));
+        assert_eq!(r["ok"], true, "{r}");
+        let pose = &r["result"]["pose"];
+        assert_eq!(pose["source"], "joint.drive", "{r}");
+        // The hinge reached its limit, and the follower came with it.
+        let angle = |joint: u64| {
+            pose["joints"]
+                .as_array()
+                .and_then(|joints| joints.iter().find(|j| j["joint"] == joint))
+                .and_then(|j| j["values"].as_array())
+                .and_then(|values| values.first())
+                .map(|v| (v["value"].as_f64().unwrap(), v["unit"].as_str().unwrap().to_string()))
+        };
+        assert_eq!(angle(arm), Some((90.0, "deg".to_string())), "{r}");
+        assert_eq!(angle(follower), Some((45.0, "deg".to_string())), "{r}");
+
+        // Reading again changes nothing: no undo step, no new design.
+        let again = h.call("control.joint_pose", json!({}));
+        assert_eq!(again["result"]["pose"], *pose, "{again}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(joint_angle(&mut h, arm), 0.0, "the preview does not change the design");
     }
 
     #[test]

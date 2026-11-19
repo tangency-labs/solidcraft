@@ -700,27 +700,10 @@ const TEXT_WAITS: &str = "its text waits for a font to fall back to; drawing.sce
 /// no box, and says why. It reads the model as it is evaluated and draws no view's lines, so a view
 /// whose lines fail still answers.
 fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved) -> (Option<DimensionLayoutResult>, Option<String>) {
-    // The view draws from where the design places its parts, as the sheet does; a dimension reads the
-    // same either way, as it reads the model, not the session's moves.
-    let on = match crate::drawing_view::on_its_sheet(s, d, dimension.view, INSPECT) {
-        Ok(on) => on,
-        Err(why) => return (None, Some(why.to_string())),
+    let (paper, centre) = match alone_on_sheet(s, d, dimension, r) {
+        Ok((paper, centre, _)) => (paper, centre),
+        Err(why) => return (None, why),
     };
-    let centre = on.centre;
-    // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
-    let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
-        return (None, (!r.points.is_empty()).then(|| NO_PLACE.to_string()));
-    };
-    // No layout at all until the font is found: a short span's lines depend on its text's width.
-    if paper.pending {
-        return (None, Some(TEXT_WAITS.to_string()));
-    }
-    // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
-    let mut alone = Scene::new(on.size, vec![moved(&paper.group, centre)]);
-    alone.add_fonts(paper.fonts);
-    if let Err(e) = alone.validate() {
-        return (None, Some(e.to_string()));
-    }
     // Each point plus the centre, as the sheet moves the group, so the two are the same numbers.
     let at = |p: &Vec2| {
         let p = *p + centre;
@@ -734,6 +717,52 @@ fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved
         text_boxes: paper.layout.text_boxes.iter().map(|corners| corners.each_ref().map(at)).collect(),
     };
     (Some(layout), paper.why)
+}
+
+/// `dimension` of `d`, read as `r`, laid out as the sheet draws it ([`paper_group`]): its group, its
+/// view's centre on the sheet, and the dimension alone on its sheet, moved there, as a scene that
+/// passes the paper scene's checks. Or why not ([`layout_on_sheet`] says it), none when its status says.
+fn alone_on_sheet(
+    s: &Session,
+    d: &Drawing,
+    dimension: &Dimension,
+    r: &Resolved,
+) -> std::result::Result<(crate::drawing_dimension_paper::OnPaper, Vec2, Scene), Option<String>> {
+    // The view draws from where the design places its parts, as the sheet does; a dimension reads the
+    // same either way, as it reads the model, not the session's moves.
+    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, INSPECT).map_err(|why| Some(why.to_string()))?;
+    let centre = on.centre;
+    // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
+    let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
+        return Err((!r.points.is_empty()).then(|| NO_PLACE.to_string()));
+    };
+    // No layout at all until the font is found: a short span's lines depend on its text's width.
+    if paper.pending {
+        return Err(Some(TEXT_WAITS.to_string()));
+    }
+    // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
+    let mut alone = Scene::new(on.size, vec![moved(&paper.group, centre)]);
+    alone.add_fonts(paper.fonts.clone());
+    alone.validate().map_err(|e| Some(e.to_string()))?;
+    Ok((paper, centre, alone))
+}
+
+/// The dimension `params` (as `drawing.dimension.add` takes them) would add, alone on its sheet and
+/// drawn exactly as the sheet will draw it once placed: the same group, at the same size, from the
+/// same layout. Added on a copy of the session, so nothing is added, no id taken and no undo step
+/// made. What a Dimension tool previews while the dimension follows the pointer.
+pub fn preview_scene(s: &Session, params: &Value) -> Result<Scene> {
+    let request: AddParams = crate::schema::read(ADD, params)?;
+    let mut copy = s.scratch();
+    let reply = added(&mut copy, request)?;
+    let id = reply["dimension"].as_str().and_then(ids::decode).ok_or_else(|| bad(ADD, "the dimension wasn't added"))?;
+    let d = copy.drawing(ADD)?.clone();
+    let dimension = d.dimension(id).ok_or_else(|| bad(ADD, "the dimension wasn't added"))?;
+    let resolved = crate::drawing_view::ViewSessions::new(&copy)
+        .read_on(&d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
+        .map_err(|e| bad(ADD, e.to_string()))?;
+    let r = resolved.into_iter().next().ok_or_else(|| bad(ADD, "the dimension wasn't read"))?;
+    alone_on_sheet(&copy, &d, dimension, &r).map(|(.., scene)| scene).map_err(|why| bad(ADD, why.unwrap_or_else(|| NO_PLACE.to_string())))
 }
 
 /// How a command's answer says where a reference stands with the model: the status's word, why

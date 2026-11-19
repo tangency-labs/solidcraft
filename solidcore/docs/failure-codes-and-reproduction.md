@@ -2,7 +2,7 @@
 
 # Failure codes and reproduction
 
-Status: design, not built yet. The application side is RFC 0016 in SolidCraft's `docs/rfcs/`; the ticket side is `docs/failure-signatures.md` in tangency-labs/tickets.
+Status: steps 1 (3.1, the failure code) and 3 (3.4, single-entry replay) are built; the rest is design. The application side is RFC 0016 in SolidCraft's `docs/rfcs/`; the ticket side is `docs/failure-signatures.md` in tangency-labs/tickets.
 
 When a kernel operation fails for a user, three things must reach whoever fixes it: **which failure it is** (so reports of the same failure are grouped without anyone reading them), **the call that failed** (so it replays on the kernel alone), and **the smallest geometry that still fails** (so the cause can be seen and a clean case written). This page is solidcore's part: a stable failure code on every ops error, the call's arguments with its bodies, a single-entry replay, and a reducer.
 
@@ -43,8 +43,9 @@ pub struct FailureCode {
 }
 ```
 
-- `Error::code(&self) -> Option<FailureCode>` reads it. The session sets it where it already has both (`run_with` holds the call name; `status()` holds the kernel error). The variants that lose the most (`Status`) carry it; the variants that already are their own code (`Argument`, `Cancelled`, `Reentered`) need none.
-- `Failure` (the hook) gets `code: Option<FailureCode>`.
+- `session::take_failure_code() -> Option<FailureCode>` reads it after a failed call, on the thread that made it, beside `session::take_failure_detail()` (the kernel's words), and taken like it. The session sets it in `run_with`, which holds the call name: a call that fails with a kernel error has that error's kind and operation; a refusal the call's answer carries has those of the kernel error it is, as ops typed it (each place ops types a kernel error, `status()` and the blend, round and offset refusals, notes it for the call; the refusal must be of the variant the note became, so a point or an index ops adds afterwards keeps it, and an attempt the call tries and gives up puts the note back); a failure ops decided itself (an argument, a result its own checks refuse, a caught panic) is kind `FailureCode::OPS` (0) with the `Error`'s variant name (`Error::name()`) as its operation. A cancellation is no failure and has none, nor has an argument an operation refuses before it starts a call. It is beside `Error`, not inside it: `Error` is a plain value applications compare and match by its variants, and every variant would have to carry it.
+- `Failure` (the hook) gets `code: FailureCode`, the same code.
+- Its `Display` is `call · kind · operation`.
 - Every field is a static string or an integer: no geometry, no names, no numbers from the model. Two reports of one failure have equal codes, compared as strings.
 - `kind` is the stable part and the bucket. `operation` splits a coarse kind (6, `Failed`, "does not describe how yet") and follows the module path, so a refactor can move it: it is the second level of a signature, never its key.
 
@@ -59,6 +60,8 @@ Each `Failed` error built where the routine knows its entity (an edge being blen
 ### 3.4 Replaying one entry
 
 The rig runner takes `KERNEL_CASES_ENTRY=<path>`: one entry file, its `<case>.bodies.json.gz` beside it, outside the corpus and outside the manifest. The run reports the outcome and the failing call's `FailureCode`, and checks that code against the entry's (`same failure`, `other failure`, `builds now`).
+
+Built: `KERNEL_CASES_ENTRY=<entry.json> cargo test -p solidcore-ops --test kernel_cases -- kernel_case_entry` prints one JSON line, `{"case", "outcome", "code", "expected", "note"}`. The expected code is the `code` of the entry's last failing call that is not `continued`. The outcome is `same failure`, `other failure`, `builds now` or `unsupported`. The test fails unless it is `same failure`, or `KERNEL_CASES_REPORT_ONLY` is set; `KERNEL_CASES_REPORT` writes the line to a file too.
 
 ### 3.5 The reducer
 
