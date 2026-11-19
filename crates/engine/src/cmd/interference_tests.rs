@@ -176,6 +176,12 @@ fn a_body_name_that_is_no_body_is_refused() {
         !s.execute("inspect.interference", &json!({"bodies": ["Typo"]})).unwrap_err().to_string().contains("did you mean"),
         "nothing is near `Typo`"
     );
+    // A long name a rename gives (100 CJK characters, 300 bytes) still gets its suggestion.
+    let long = "中".repeat(100);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "operation": "new_body", "body_name": long}));
+    let typo = format!("{}国", "中".repeat(99));
+    let e = s.execute("inspect.interference", &json!({"bodies": ["A", typo]})).unwrap_err().to_string();
+    assert!(e.contains(&format!("did you mean `{long}`?")), "{e}");
 }
 
 /// `exclude_pairs` leaves a pair out by body or by occurrence, and each pair reported says where

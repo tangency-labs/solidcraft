@@ -8,7 +8,7 @@
       (export "command-failure" (type $command-failure-export (eq $command-failure)))
       (type $field-failure (record (field "field" string) (field "reason" string)))
       (export "field-failure" (type $field-failure-export (eq $field-failure)))
-      (type $plugin-error (variant (case "permission-denied" string) (case "command-failed" $command-failure-export) (case "limit-exceeded" string) (case "invalid-manifest" $field-failure-export) (case "invalid-input" $field-failure-export) (case "trap" string) (case "cancelled")))
+      (type $plugin-error (variant (case "permission-denied" string) (case "command-failed" $command-failure-export) (case "limit-exceeded" string) (case "invalid-manifest" $field-failure-export) (case "invalid-input" $field-failure-export) (case "trap" string) (case "cancelled") (case "unsupported" string)))
       (export "plugin-error" (type (eq $plugin-error)))
     )
   )

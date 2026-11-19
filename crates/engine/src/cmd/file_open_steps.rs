@@ -106,7 +106,8 @@ impl OpenSteps {
     pub fn next_import(&self) -> Option<Arc<str>> {
         let f = self.doc.features.get(self.next).filter(|_| !self.done())?;
         match &f.kind {
-            FeatureKind::Import { step, .. } if !f.suppressed => Some(step.clone()),
+            // An import kept as records has no STEP text to read first.
+            FeatureKind::Import { step, records: None, .. } if !f.suppressed => Some(step.clone()),
             _ => None,
         }
     }

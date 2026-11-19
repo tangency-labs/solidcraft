@@ -21,12 +21,18 @@ use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::tol::ZONE_TOL_3D;
+use solidcore::mass::enclosure::enclose_volume;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+use solidcore::nurbs::crv_basic::Curve as NurbCurve;
+use solidcore::nurbs::math::CPoint;
 use solidcore::surface::cone::Cone;
+use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, Kernel, Vec3};
@@ -404,5 +410,373 @@ fn issue_1477_a_whole_circle_keeps_upstream_cylinder() {
             step.u_interval().min(),
             step.u_interval().max()
         );
+    }
+}
+
+/// The placement and radius of the B-rep's only cylinder.
+fn the_cylinder(b: &Brep) -> (Axis2Placement, f64) {
+    let found: Vec<_> = b
+        .face_list()
+        .iter()
+        .filter_map(
+            |&f| match AnalyticSupport::of(b.face(f).unwrap().surface.as_ref().unwrap()) {
+                Some(AnalyticSupport::Cylinder { placement, radius }) => Some((placement, radius)),
+                _ => None,
+            },
+        )
+        .collect();
+    let [one] = found.as_slice() else {
+        panic!("one cylinder: {:?}", kinds(b));
+    };
+    *one
+}
+
+/// The area of the circular segment of radius `r` and sweep `theta` (radians) between the
+/// arc and its chord, `r² (θ − sin θ) / 2`, from the series of `θ − sin θ`
+/// (`Σ (−1)^(k+1) θ^(2k+1) / (2k+1)!`, k >= 1), which keeps its digits for a short arc,
+/// where `θ − sin θ` cancels. Used for `θ <= 0.5`, where 12 terms are exact to the last bit.
+fn segment_area(r: f64, theta: f64) -> f64 {
+    assert!(theta <= 0.5, "{theta}");
+    let (mut term, mut sum) = (theta.powi(3) / 6.0, 0.0);
+    for n in 0..12 {
+        sum += term;
+        term *= -theta * theta / f64::from((2 * n + 4) * (2 * n + 5));
+    }
+    r * r / 2.0 * sum
+}
+
+/// The B-rep's face, edge and vertex counts.
+fn counts(b: &Brep) -> [usize; 3] {
+    [
+        b.face_list().len(),
+        b.edge_list().len(),
+        b.vertex_list().len(),
+    ]
+}
+
+/// The B-rep's volume by the integrator, at its finest accuracy (1e-8 relative).
+fn integrated_volume(k: &mut Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-8, &attrs).unwrap()
+}
+
+/// The sagitta `r (1 - cos(θ / 2))` of an arc of radius `r` and sweep `theta`: the width
+/// of the segment between the arc and its chord.
+fn sagitta(r: f64, theta: f64) -> f64 {
+    2.0 * r * (theta / 4.0).sin().powi(2)
+}
+
+/// A segment whose width is under the zone tolerance is a sliver: its arc and chord are one
+/// edge within the zone at each end of the sweep, and its caps are no faces, so the body is
+/// the wall and the chord's face on four edges (the two merged ends and the two swept
+/// vertices' lines). Its volume is checked against `want` by a certified enclosure and by
+/// the integrator (see below). `chord_normal` is the profile's in-plane normal to its chord;
+/// the check turns `b`, so it takes it.
+fn assert_sliver(
+    k: &mut Kernel,
+    mut b: Brep,
+    r: f64,
+    theta: f64,
+    chord_normal: Vec3,
+    want: f64,
+    case: &str,
+) {
+    assert!(sagitta(r, theta) < ZONE_TOL_3D, "{case}: not a sliver");
+    assert_eq!(counts(&b), [2, 4, 4], "{case}: {:?}", kinds(&b));
+    // MEASURED, not certified: `brep_volume` at its finest accuracy agrees with the closed
+    // form to 8.3e-6 (short arc), 4.9e-7 (tilt 1e-3) and 4.9e-5 (tilt 1e-2) relative, the
+    // same at every requested accuracy from 1e-2 to 1e-8 (the merged ends leave no caps, so
+    // its residual is not the requested accuracy). 1e-3 keeps a 20x margin over the worst
+    // and still fails a volume of 0, twice `want`, or a tilted row without its strip term
+    // (which is 98% of `want` there).
+    let volume = integrated_volume(k, &mut b);
+    assert!(
+        (volume - want).abs() <= 1e-3 * want,
+        "{case}: volume {volume:e}, want {want:e}"
+    );
+    // PROVEN: a certified enclosure of the volume holds `want` and is at most 5e-2 `want`
+    // wide, so it excludes 0, twice `want` and a tilted row without its strip term. The
+    // enclosure is the flux of (0, 0, z - z0), so its gap (strip) cells are bounded by
+    // |z - z0| times their area. In the sweep's frame z runs the whole sweep, the volume sits
+    // in the merged ends and that bound alone is wider than `want`: the enclosure holds 0.
+    // An exact axis permutation (rows of 0 and 1, a rigid turn) first puts the axis nearest
+    // the chord normal on z, so the strips span only the sagitta. MEASURED: asked for
+    // 5e-2 `want`, it stops at that width within 16 cells, holding [0.99990, 1.00011] (short
+    // arc), [0.99780, 1.00220] (tilt 1e-3) and [0.98714, 1.01296] (tilt 1e-2) times `want`;
+    // a tighter width only spends the cell budget for little gain (2.5e-2 at 131072 cells
+    // for tilt 1e-2).
+    let [nx, ny, nz] = [
+        chord_normal.x.abs(),
+        chord_normal.y.abs(),
+        chord_normal.z.abs(),
+    ];
+    let to_z = if nx >= ny && nx >= nz {
+        // x -> z, y -> x, z -> y
+        [
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+        ]
+    } else if ny >= nz {
+        // x -> y, y -> z, z -> x
+        [
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+        ]
+    } else {
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ]
+    };
+    let [r0, r1, r2] = to_z;
+    transform_matrix(k, &mut b, &[r0, r1, r2, [0.0, 0.0, 0.0, 1.0]], false).unwrap();
+    let e = enclose_volume(k, &mut b, 5e-2 * want).unwrap();
+    // written so that a NaN end or width fails
+    let holds = e.lo <= want && want <= e.hi && e.width() <= 5e-2 * want;
+    assert!(holds, "{case}: want {want:e} not enclosed by {e:?}");
+}
+
+/// Review r2 of SolidCraft #17462: a short arc that really lies in a plane tilted by `tilt`
+/// about its chord stays within the arc zero of the plane square to the sweep, but the
+/// circle squared to the sweep keeps the fit's radius about the projected centre and so
+/// misses it by about `r tilt² / 2` across: 4.4e-5 for r 88, 4.4e-3 (and no manifold
+/// solid) at a tilt of 1e-2. A short `distance` lets the caller's `distance * tilt` check
+/// pass. These keep the fit's frame, as upstream: the profile is on the cylinder's base
+/// edge.
+#[test]
+fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
+    for (r, span, tilt, distance) in [
+        (88.0, 0.005, 1e-3_f64, 0.005),
+        (1000.0, 0.05, 2e-4, 0.04),
+        (88.0, 0.005, 1e-2, 0.0005),
+        (50.0, 10.0, 2e-7, 5.0),
+    ] {
+        let case = format!("r {r} span {span} tilt {tilt:e} distance {distance}");
+        let mut k = Kernel::default();
+        k.fixes.linear_sweep_arc_is_cylinder = true;
+        let (s, c) = (tilt.sin(), tilt.cos());
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::new(c, 0.0, -s), Vec3::Y);
+        let arc = circle(&k, &frame, r, 0.0, span);
+        let ends = arc.ends(&k).unwrap();
+        let chord = seg(ends.end, ends.start);
+        let mut b =
+            create_linear_sweep(&mut k, &[Some(&arc), Some(&chord)], Vec3::Z, distance, true)
+                .unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "{case}: not a manifold solid"
+        );
+        // The wall is the arc swept along its normal n = (s, 0, c), the chord's face the chord
+        // swept along z, between the profile's plane and its translate by `distance` z. The
+        // slice in that plane moved by h z holds the arc moved by h c n and the chord by h z:
+        // the arc lies h (c n - z) = h s X farther out than in the profile, and X is at
+        // cos(θ / 2) to the chord's normal, so the slice is the segment plus a strip of
+        // chord · h s cos(θ / 2) = r sin θ h s. Over the slices, c dh apart:
+        // c d A + c s r sin θ d² / 2, exactly: at each end the slice closes across the same
+        // h s X, from the arc's end moved along n to the chord's moved along z (the side edge
+        // they share within the zone).
+        let theta = span.to_radians();
+        let want = c * distance * segment_area(r, theta)
+            + c * s * r * theta.sin() * distance * distance / 2.0;
+        // a sliver is checked last: its check turns the body
+        let sliver = sagitta(r, theta) < ZONE_TOL_3D;
+        if !sliver {
+            assert_eq!(counts(&b), [4, 6, 4], "{case}: {:?}", kinds(&b));
+            // MEASURED, not certified: the r 50 row agrees to 2.1e-14 and the r 1000 row to
+            // 4.2e-9, a 2.4x margin under 1e-8. That is the integrator's requested accuracy,
+            // so the bound cannot be tighter, and the run is deterministic, so not flaky.
+            // Without the strip term the rows are off by 3.9e-6 and 6.3%, both caught.
+            let volume = integrated_volume(&mut k, &mut b);
+            assert!(
+                (volume - want).abs() <= 1e-8 * want,
+                "{case}: volume {volume:e}, want {want:e}"
+            );
+        }
+        let (placement, radius) = the_cylinder(&b);
+        let axis = placement.z_axis();
+        for i in 0..=8 {
+            let u = (span * f64::from(i) / 8.0).to_radians();
+            let p = frame.x_axis() * (r * u.cos()) + frame.y_axis() * (r * u.sin());
+            let off = (p - placement.origin()).cross(axis).length() - radius;
+            assert!(
+                off.abs() < 1e-9,
+                "{case}: {p:?} is {off:e} off the cylinder"
+            );
+            let along = (p - placement.origin()).dot(axis);
+            assert!(
+                along.abs() < 1e-9,
+                "{case}: {p:?} is {along:e} off the base edge's plane"
+            );
+        }
+        if sliver {
+            // the chord's normal in the profile's plane: the arc's middle direction
+            let normal =
+                frame.x_axis() * (theta / 2.0).cos() + frame.y_axis() * (theta / 2.0).sin();
+            assert_sliver(&mut k, b, r, theta, normal, want, &case);
+        }
+    }
+}
+
+/// The start angle (radians) of [`short_arc`] about its centre.
+const SHORT_ARC_START: f64 = -1.4235;
+
+/// The cubic Bezier of a 0.005 degree arc of radius 88.3 about (-8.19, 145.98) at z = -53,
+/// its two inner control points an ulp or two off that plane, as a profile placed there by
+/// a transform holds them (SolidCraft #17462: 0.008 mm of a spline).
+fn short_arc() -> Curve {
+    let (cx, cy, r) = (-8.185_840_780_2, 145.979_194_294, 88.295_980_686);
+    let (a0, sweep) = (SHORT_ARC_START, 0.005_f64.to_radians());
+    let on = |a: f64| (cx + r * a.cos(), cy + r * a.sin());
+    let tangent = |a: f64| (-a.sin(), a.cos());
+    let h = 4.0 / 3.0 * (sweep / 4.0).tan() * r;
+    let (p0, p3) = (on(a0), on(a0 + sweep));
+    let (t0, t3) = (tangent(a0), tangent(a0 + sweep));
+    let points = [
+        (p0.0, p0.1, -53.0),
+        (p0.0 + h * t0.0, p0.1 + h * t0.1, -53.000_000_000_000_01),
+        (p3.0 - h * t3.0, p3.1 - h * t3.1, -52.999_999_999_999_99),
+        (p3.0, p3.1, -53.0),
+    ]
+    .into_iter()
+    .map(|(x, y, z)| CPoint::from_point(Vec3::new(x, y, z)))
+    .collect();
+    let nurb = NurbCurve::new(points, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+    Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+}
+
+/// SolidCraft #17462: a very short arc fitted from a planar curve has an ill-conditioned
+/// frame, its normal 5e-8 rad off the plane's. The sweep accepted it (53 mm times that is
+/// under the B-rep tolerance) and built the cylinder on that normal, so the wall leaned
+/// across the sweep, its far edge 2.6e-6 mm off the swept curve. A profile whose control
+/// points lie in a plane square to the sweep now gets a cylinder about the sweep direction,
+/// with the profile on its base edge.
+#[test]
+fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direction() {
+    let mut k = Kernel::default();
+    k.fixes.linear_sweep_arc_is_cylinder = true;
+    let arc = short_arc();
+    // The case needs the fit's normal off the sweep: it is what the sweep corrects.
+    // (the sweep's zero, `1000 SM_EFF_ZERO (1 + the ends' largest coordinate)`)
+    let (frame, ..) = arc
+        .is_arc(&k, 8, 1e-9 * (1.0 + 146.0))
+        .unwrap()
+        .expect("an arc");
+    let normal = frame.z_axis();
+    assert!(
+        normal.x != 0.0 || normal.y != 0.0,
+        "the fitted normal is exact: {normal:?}"
+    );
+    assert!(normal.x.hypot(normal.y) < 1e-6, "{normal:?}");
+
+    let ends = arc.ends(&k).unwrap();
+    let chord = seg(ends.end, ends.start);
+    let b = create_linear_sweep(
+        &mut k,
+        &[Some(&arc), Some(&chord)],
+        Vec3::new(0.0, 0.0, 1.0),
+        53.0,
+        true,
+    )
+    .unwrap();
+    assert!(is_manifold_solid(&b).unwrap(), "not a manifold solid");
+    // The segment swept square to its plane; 8.4e-8 wide, a sliver.
+    let (r, theta) = (88.295_980_686, 0.005_f64.to_radians());
+    let want = segment_area(r, theta) * 53.0;
+    let (placement, radius) = the_cylinder(&b);
+    let axis = placement.z_axis();
+    assert!(
+        axis.x == 0.0 && axis.y == 0.0 && axis.z.abs() == 1.0,
+        "{axis:?}"
+    );
+    // The profile is the cylinder's base edge and its translate the far edge: on the
+    // cylinder radially, and axially at 0 and 53 along it.
+    for p in [ends.start, ends.end] {
+        for (p, v) in [(p, 0.0), (p + Vec3::new(0.0, 0.0, 53.0), 53.0)] {
+            let off = (p - placement.origin()).cross(axis).length() - radius;
+            assert!(off.abs() < 1e-9, "{p:?} is {off:e} off the cylinder");
+            let along = (p - placement.origin()).dot(axis).abs() - v;
+            assert!(
+                along.abs() < 1e-9,
+                "{p:?} is {along:e} off the edge's plane"
+            );
+        }
+    }
+    // last, as its check turns the body; the chord's normal is the arc's middle direction
+    // (`short_arc`'s start angle plus half its sweep)
+    let middle = SHORT_ARC_START + theta / 2.0;
+    let chord_normal = Vec3::new(middle.cos(), middle.sin(), 0.0);
+    assert_sliver(&mut k, b, r, theta, chord_normal, want, "short arc");
+}
+
+/// Review of SolidCraft #17462: a profile that really leans across the sweep, by more than
+/// the arc zero over the curve (up to `2 r` times the tilt), keeps the fit's frame: squaring
+/// it moved the cylinder off its own profile, 1e-2 mm off for a whole circle of radius 50
+/// swept 0.01 at a tilt of 1e-4, and the body was not manifold. The circle lies in z = 0
+/// and the sweep leans by `tilt` towards +x; `distance * tilt` is within the tolerance, so
+/// the wall is a cylinder, which must keep the profile on its base edge.
+#[test]
+fn issue_17462_a_profile_tilted_across_the_sweep_stays_on_its_cylinder() {
+    for (whole, tilt, distance, r) in [
+        (true, 1e-4, 0.01, 50.0),
+        (false, 1e-4, 0.01, 50.0),
+        (true, 1e-7, 5.0, 100.0),
+        (false, 1e-7, 5.0, 100.0),
+    ] {
+        let case = format!("whole {whole} tilt {tilt:e} distance {distance} r {r}");
+        let mut k = Kernel::default();
+        k.fixes.linear_sweep_arc_is_cylinder = true;
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let end = if whole { 360.0 } else { 180.0 };
+        let arc = circle(&k, &frame, r, 0.0, end);
+        let mut profile = vec![arc];
+        if !whole {
+            profile.push(seg(Vec3::new(-r, 0.0, 0.0), Vec3::new(r, 0.0, 0.0)));
+        }
+        let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+        let mut b =
+            create_linear_sweep(&mut k, &refs, Vec3::new(tilt, 0.0, 1.0), distance, true).unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "{case}: not a manifold solid"
+        );
+        // The disc or half disc in z = 0, swept `distance` along the unit (tilt, 0, 1).
+        let area = if whole {
+            std::f64::consts::PI * r * r
+        } else {
+            std::f64::consts::PI * r * r / 2.0
+        };
+        let want = area * distance / (1.0 + tilt * tilt).sqrt();
+        // A whole circle is its wall and two caps on two circle edges and their seam, a
+        // half disc the wall, the diameter's face and two caps.
+        let want_counts = if whole { [3, 3, 2] } else { [4, 6, 4] };
+        assert_eq!(counts(&b), want_counts, "{case}: {:?}", kinds(&b));
+        let volume = integrated_volume(&mut k, &mut b);
+        assert!(
+            (volume - want).abs() <= 1e-8 * want,
+            "{case}: volume {volume:e}, want {want:e}"
+        );
+        let (placement, radius) = the_cylinder(&b);
+        let axis = placement.z_axis();
+        for i in 0..=36 {
+            let a = (end * f64::from(i) / 36.0).to_radians();
+            let p = Vec3::new(r * a.cos(), r * a.sin(), 0.0);
+            let along = (p - placement.origin()).dot(axis);
+            assert!(
+                along.abs() < 1e-9,
+                "{case}: {p:?} is {along:e} off the base edge's plane"
+            );
+            let off = (p - placement.origin()).cross(axis).length() - radius;
+            assert!(
+                off.abs() < 1e-9,
+                "{case}: {p:?} is {off:e} off the cylinder"
+            );
+        }
     }
 }

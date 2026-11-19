@@ -22,11 +22,11 @@ fn png() -> String {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<CanvasInsertParams>(),
-        &["angle", "at", "center", "data", "flip", "name", "offset", "opacity", "path", "plane", "width"],
+        &["angle", "at", "center", "data", "flip", "name", "offset", "opacity", "path", "plane", "resolution", "width"],
     );
     assert_keys(
         input_schema_for::<CanvasDecalParams>(),
-        &["angle", "at", "center", "data", "face", "flip", "name", "offset", "opacity", "path", "width"],
+        &["angle", "at", "center", "data", "face", "flip", "name", "offset", "opacity", "path", "resolution", "width"],
     );
     assert_keys(input_schema_for::<CanvasEditParams>(), &["angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"]);
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);
@@ -331,11 +331,13 @@ fn a_canvas_traced_into_a_sketch_replies_as_its_schema_says() {
     let r = s.execute("canvas.to_sketch", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
     assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{r}");
     assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    // A second trace of the same canvas takes the next free sketch name, not a refused repeat.
+    assert_eq!(r["name"], "Pic sketch (2)", "{r}");
 
     // A `name` that is not text: the handler reads it as absent and names the sketch after the
     // canvas, and the warning says what the key takes.
     let r = s.execute("canvas.to_sketch", &json!({"name": 5})).unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(r["name"], "Pic sketch", "{r}");
+    assert_eq!(r["name"], "Pic sketch (3)", "{r}");
     assert!(r["param_warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("`name`")))), "{r}");
 
     // Strict refuses both before anything runs.

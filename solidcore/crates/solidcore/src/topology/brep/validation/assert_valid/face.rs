@@ -17,12 +17,24 @@
 //! pairs a box search over the edges' curve boxes leaves possible, in the all-pairs
 //! order (#431, fork `ef9041d`): the pairs it skips are those whose boxes
 //! `GlobalCoincidenceChecker` itself rejects, so the result is upstream's.
+//! `sm_AssertTestFace34` does not count a range that is one point at the tolerance
+//! on either edge (its tight box's diagonal is shorter than the tolerance; #18212,
+//! WR-18212): two edges that leave a shared vertex at an angle stay within the
+//! tolerance for a short way, and when one is split there (a hook at its start makes
+//! every piece holding it half closed), `GlobalCoincidenceChecker` returned a piece
+//! inside that way as a range or not depending on where the splits fell, so a
+//! smaller tolerance could fail the test. A piece that misses the vertex is at most
+//! about 0.4 of that way (`split_in_three` cuts at 0.375 and 0.625), and the way is
+//! about `tol / sin(angle)`, so this covers edges meeting at about 24 degrees or
+//! more. `GlobalCoincidenceChecker` itself keeps upstream's answer: other callers
+//! rely on those ranges.
 
 use std::collections::BTreeMap;
 
 use super::{base, class, geometry_key, seams, Cx};
-use crate::curve::curve::CurveKind;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::SS_NONE;
 use crate::geom::solution_array::SolutionType;
 use crate::intersect::point_class::{PointClassType, PointClassification};
@@ -387,32 +399,71 @@ fn assert_test_face34(k: &Kernel, b: &Brep, f: FaceId) -> Result<bool> {
             let i2 = b.edge(e2)?.interval;
             let t2 = b.edge(e2)?.tolerance;
             let t = if t1 > t2 { t1 } else { t2 };
-            // status ignored
-            let Some(found) = crate::error::ignored(
-                c1.global_coincidence_checker::<crate::topology::ObjectHandle>(
-                    k,
-                    &i1,
-                    c2,
-                    &i2,
-                    t,
-                    true,
-                    [None, None],
-                ),
-            )?
-            else {
-                continue;
-            };
-            // Check solutions for range intersections
-            if found
-                .solutions
-                .iter()
-                .any(|s| s.solution_type == SolutionType::RangeOfValues)
-            {
+            if partially_coincident(k, c1, &i1, c2, &i2, t)? {
                 return Ok(false);
             }
         }
     }
     Ok(true)
+}
+
+/// Test 34's verdict for one edge pair: whether `GlobalCoincidenceChecker` (with
+/// `snap_to_ends`) finds the curves over `i1` and `i2` coincident over a range at `t`
+/// that is longer than a point at `t` on both (not upstream, #18212). A failed check
+/// counts as no range (its status is ignored).
+pub(super) fn partially_coincident(
+    k: &Kernel,
+    c1: &Curve,
+    i1: &Extent1d,
+    c2: &Curve,
+    i2: &Extent1d,
+    t: f64,
+) -> Result<bool> {
+    let Some(found) = crate::error::ignored(
+        c1.global_coincidence_checker::<crate::topology::ObjectHandle>(
+            k,
+            i1,
+            c2,
+            i2,
+            t,
+            true,
+            [None, None],
+        ),
+    )?
+    else {
+        return Ok(false);
+    };
+    // Check solutions for range intersections
+    for s in &found.solutions {
+        if s.solution_type != SolutionType::RangeOfValues {
+            continue;
+        }
+        // Not upstream (#18212): a range that is one point at t on either curve is a
+        // touch, not a stretch the edges share; one that cannot be measured counts
+        let point = |c: &Curve, a: f64, b: f64| -> Result<bool> {
+            Ok(crate::error::ignored(is_one_point_at(k, c, a, b, t))?.unwrap_or(false))
+        };
+        if !point(c1, s.start.param(0)?, s.end.param(0)?)?
+            && !point(c2, s.start.param(1)?, s.end.param(1)?)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether `c` between the parameters `a` and `b` (either order) is one point at `t`:
+/// its ends are closer than `t` and its tight box (the ends, the tangent
+/// discontinuous knots and the turning points) has a diagonal shorter than `t`, so
+/// every two of its points are closer than `t`.
+fn is_one_point_at(k: &Kernel, c: &Curve, a: f64, b: f64, t: f64) -> Result<bool> {
+    let end = c.evaluate_point(k, b)?;
+    if c.evaluate_point(k, a)?.distance(end) >= t {
+        return Ok(false);
+    }
+    let stretch = Extent1d::from_min_max(a.min(b), a.max(b));
+    let tight = c.calculate_tight_bounding_box(k, &stretch)?;
+    Ok(!tight.has_negative_volume() && tight.size().length() < t)
 }
 
 /// `sm_AssertTestFace39`: `false` when a vertex is used by two loops of the face.

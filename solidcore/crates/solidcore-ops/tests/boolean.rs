@@ -1,6 +1,9 @@
 //! The boolean family on bodies whose answers are known.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use std::f64::consts::{PI, TAU};
@@ -13,7 +16,7 @@ use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
-    Error,
+    Error, PointClass,
 };
 use solidcore_record::brep::Brep as Record;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -236,6 +239,66 @@ fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
     }
 }
 
+/// A 0.68 mm sphere and a box whose edge runs 1.5e-4 inside it, 4.2e-6 deep, across the
+/// sphere's seam, with a corner 9.8e-6 outside the sphere (`ub175` of the kernel's golden unit
+/// `boolean.api_brep`). The vertex on the seam stands for three points up to 2.17e-5 apart and
+/// the corner's for two 9.97e-6 apart, and each kept a tolerance short of them, so the union,
+/// the intersection and the difference failed their checks. Each is now one valid solid, with
+/// or without the fixes, and their volumes add up: union + common = sphere + box and
+/// difference + common = sphere, within 1e-6 of the sphere (measured 2e-7; the lens the edge
+/// cuts off is 3e-6 of it at most).
+#[test]
+fn a_box_edge_grazing_a_tiny_sphere_across_its_seam_gives_valid_solids() {
+    let c = [
+        0.000_620_018_136_026_583_4,
+        -0.000_460_304_429_701_722_37,
+        0.000_076_983_630_377_661_13,
+    ];
+    let r = 0.000_681_902_795_490_716_8_f64;
+    let o = [
+        0.000_510_378_840_547_897,
+        -0.000_598_367_716_621_174,
+        0.000_197_124_463_185_099_34,
+    ];
+    let d = [
+        0.000_776_710_634_559_774_7,
+        0.000_535_188_654_593_634_2,
+        0.000_719_601_710_449_030_5,
+    ];
+    let sphere = 4.0 / 3.0 * PI * r * r * r;
+    let block = d[0] * d[1] * d[2];
+    for fixes in [false, true] {
+        if fixes {
+            all_fixes();
+        }
+        let run = |op: BooleanOp| {
+            let a = make_sphere(c, r).unwrap();
+            let b = make_box(o, d).unwrap();
+            let body = boolean(a, b, op)
+                .unwrap_or_else(|e| panic!("{op:?} fixes {fixes}: {e:?}"))
+                .unwrap();
+            assert!(
+                body.is_manifold_solid().unwrap(),
+                "{op:?} fixes {fixes}: not a manifold solid"
+            );
+            assert_eq!(body.solid_count().unwrap(), 1, "{op:?} fixes {fixes}");
+            body.volume(1e-9).unwrap()
+        };
+        let union = run(BooleanOp::Union);
+        let common = run(BooleanOp::Intersect);
+        let difference = run(BooleanOp::Subtract);
+        let off = [
+            union + common - sphere - block,
+            difference + common - sphere,
+        ];
+        // Written to accept: a NaN volume fails.
+        assert!(
+            off.iter().all(|v| v.abs() <= 1e-6 * sphere),
+            "fixes {fixes}: union {union:e} common {common:e} difference {difference:e} against sphere {sphere:e} and box {block:e}"
+        );
+    }
+}
+
 /// Two equal cylinders side by side, touching along a line. Their faces leave the line
 /// together and part as the square of the distance over the radius, so the fixed steps off
 /// the line took two large ones for one surface, and the union failed (100 times the size)
@@ -434,10 +497,7 @@ fn corpus_case(case: &str) -> (Value, impl Fn(&str) -> Body) {
         "{}/../solidcore/tests/kernel_cases",
         env!("CARGO_MANIFEST_DIR")
     );
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(format!("{corpus}/fixes.json")).unwrap())
-            .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let entry: Value = serde_json::from_str(
         &std::fs::read_to_string(format!("{corpus}/booleans/{case}.json")).unwrap(),
     )
@@ -1898,6 +1958,350 @@ fn a_traced_join_onto_a_chamfered_holes_face_is_their_sum() {
     one_valid_solid_of_volume(&r, [9, 19, 12], block + slab, 1e-9);
 }
 
+/// #17118's cut as SolidCraft passed it: the target of #16935 (its 1 mm groove rounds) less one
+/// of the wedges between the plain decagon's sharp sloping edges and their 5 mm rounds. The
+/// wedge's two faces are tangent at its knife edges, so within about 0.01 of them it is thinner
+/// than the tolerance. Near the top, a vertex of the target where a groove round meets its corner
+/// patch lies 0.0115 from a knife edge, on the wedge's plane and 1.3e-5 off its cylinder: the
+/// round's edge on the plane and the patch's curve on the cylinder each imprinted a vertex for it
+/// in the wedge, 2.4e-5 apart, and relating the target's vertex to the second failed with
+/// "another entity is already related". Once the two are one vertex, a sliver of the round
+/// between that vertex and the knife edge, within the tolerance of both of the wedge's faces,
+/// was left to a ray and kept, so the result was not closed.
+///
+/// The cut removes the wedge less what the target's rounds and corner patches had already taken
+/// out of it near the top: under 1e-4, a tenth of the 1e-3 bound for all ten wedges in the
+/// intersect above.
+#[test]
+fn a_traced_cut_by_a_wedge_grazing_the_grooves_1_mm_rounds_removes_the_wedge() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the target's 92 faces and the wedge's cylinder
+    assert_eq!(r.counts().unwrap(), [93, 266, 175]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-4,
+        "volume {v}, target less the wedge {want}"
+    );
+}
+
+/// #17118's cut repeated with all ten wedges, one at a time in the order SolidCraft cut them
+/// (`wedge0` to `wedge9`), each cut on what the earlier ones left. The wedges are rotated copies,
+/// but the faces are visited in a different order at each: where the sliver of a groove's round
+/// in the wedge's thin edge first meets the wedge's plane before that plane is classified, the
+/// two faces were not paired (they lie on surfaces of different kinds), the sliver was left to a
+/// ray and kept: the fifth cut here, and the sixth wedge alone on the target, left bodies that
+/// were not closed. The result is
+/// the intersect above: the target less the ten wedges, plus what the target's rounds had already
+/// taken out of them, under 1e-3.
+#[test]
+fn a_traced_cut_by_each_of_ten_wedges_in_turn_is_the_target_less_the_wedges() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let mut r = body("target");
+    let mut want = r.volume(1e-11).unwrap();
+    for i in 0..10 {
+        let wedge = body(&format!("wedge{i}"));
+        want -= wedge.volume(1e-11).unwrap();
+        r = boolean(r, wedge, BooleanOp::Subtract).unwrap().unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "after wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "after wedge {i}");
+    }
+    // the target's 92 faces and the ten cylinders, as the intersect gives
+    assert_eq!(r.counts().unwrap(), [102, 320, 220]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-3,
+        "volume {v}, target less the wedges {want}"
+    );
+}
+
+/// The ten wedges of the test above joined to the target one at a time. Each wedge reaches out
+/// of the target only where the target's groove rounds and corner patches dip below the slopes,
+/// so each join adds the part the cut leaves behind, 6.8e-5. The sliver of a groove's round in
+/// a wedge's thin edge lies on the wedge's plane within the tolerance; the plane is kept, so
+/// the sliver goes. Classified as a coincident face the join keeps, it was kept beside the
+/// plane, and the first join left a body that was not closed; the face count and the check below
+/// catch that.
+///
+/// The volume bound is the precision of the volume of these traced bodies, not a tolerance on the
+/// joins. The bodies' edges may end anywhere within the tolerance of their vertices: the sixth
+/// wedge as traced (`wedge5`) has an arc on the top face that ends 4.5e-7 short of its vertex,
+/// where `wedge0`'s ends on it. The join keeps that arc, so the result's top face is open by that
+/// gap, and its integrated area is 2.1e-6 larger than in the first join (half the cross product of
+/// the arc's end with the gap); the volume integration over the open loops then depends on the
+/// point it is taken about. Moved 40 above the centre of the bounding box, where `Body::volume`
+/// takes it, that point changes the target's own volume by 1.3e-4 and what the sixth join adds by
+/// 1.8e-4. So nine joins add 7.3e-5 each, the sixth 1.0e-4 alone and 2.0e-4 after the other five,
+/// and the bound allows 3e-5 a wedge. The test after this one checks each join's vertices
+/// against the first join's, which the volume cannot do to better than that.
+#[test]
+fn a_traced_join_of_each_of_ten_wedges_in_turn_adds_what_lies_outside_the_target() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let target = body("target").volume(1e-11).unwrap();
+    // what the first wedge leaves when it is cut from the target: the part outside it
+    let wedge = body("wedge0");
+    let inside = target
+        - boolean(body("target"), body("wedge0"), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+            .volume(1e-11)
+            .unwrap();
+    let outside = wedge.volume(1e-11).unwrap() - inside;
+    let mut r = body("target");
+    for i in 0..10 {
+        r = boolean(r, body(&format!("wedge{i}")), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "after wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "after wedge {i}");
+    }
+    // the target's 92 faces and two faces of each wedge, its cylinder and its plane's piece
+    assert_eq!(r.counts().unwrap()[0], 112);
+    let added = r.volume(1e-11).unwrap() - target;
+    assert!(
+        (added - 10.0 * outside).abs() <= 10.0 * 3e-5,
+        "added {added}, ten times the part of a wedge outside the target {outside}"
+    );
+}
+
+/// The ten wedges of the test above, each joined alone to the target. The wedges and the target
+/// are ten turns of one part about the z axis, so each join, turned back by its wedge's multiple
+/// of 36 degrees, must have the first join's counts and its vertices, each within 1e-6 (a tenth of
+/// the tolerance) of one of the first join's and the other way round. This checks the geometry of
+/// every join directly, where the volume bound above only measures it as precisely as the traced
+/// bodies' open loops allow.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's comparison, not ops computing geometry
+fn a_traced_join_of_each_wedge_alone_is_the_first_join_turned_into_place() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let angle = |b: &Body| {
+        let [x, y, _] = b.mass_properties(1e-11).unwrap().centroid;
+        y.atan2(x)
+    };
+    let joined = |i: usize| {
+        let wedge = body(&format!("wedge{i}"));
+        let turn = angle(&wedge);
+        let r = boolean(body("target"), wedge, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "wedge {i}");
+        (r, turn)
+    };
+    // each vertex of the join, turned about z by `turn`
+    let vertices = |r: &Body, turn: f64| -> Vec<[f64; 3]> {
+        let (_, brep) = common::kernel_copy(r);
+        let (s, c) = turn.sin_cos();
+        brep.vertices()
+            .ids()
+            .map(|v| {
+                let p = brep.vertex(v).unwrap().point;
+                [c * p.x - s * p.y, s * p.x + c * p.y, p.z]
+            })
+            .collect()
+    };
+    let nearest = |p: &[f64; 3], set: &[[f64; 3]]| {
+        set.iter()
+            .map(|q| ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt())
+            .fold(f64::INFINITY, f64::min)
+    };
+    let (first, first_turn) = joined(0);
+    let counts = first.counts().unwrap();
+    let want = vertices(&first, 0.0);
+    for i in 1..10 {
+        let (r, turn) = joined(i);
+        assert_eq!(r.counts().unwrap(), counts, "wedge {i}");
+        // the wedge's whole number of tenths of a turn from the first
+        let steps = ((turn - first_turn) / (TAU / 10.0)).round();
+        let got = vertices(&r, -steps * TAU / 10.0);
+        for (a, b, which) in [
+            (&got, &want, "of this join"),
+            (&want, &got, "of the first join"),
+        ] {
+            for p in a {
+                let d = nearest(p, b);
+                assert!(
+                    d <= 1e-6,
+                    "wedge {i}: a vertex {which} at {p:?} is {d} from the other"
+                );
+            }
+        }
+    }
+}
+
+/// The ten wedges joined to the target one at a time, compared with each joined alone. Each
+/// wedge changes the target only near itself, so the vertices of the joint result are the
+/// target's, less those each join alone removed and plus those each join alone added, and the
+/// same holds for the midpoints of the edges. Every point must be within 1e-6 (a tenth of the
+/// tolerance) of one expected and the other way round, which checks the faces' trims in the
+/// sequential result without its volume.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's comparison, not ops computing geometry
+fn a_traced_join_of_the_ten_wedges_in_turn_has_the_vertices_and_edges_of_each_join_alone() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    // the body's vertices, then the midpoints of its edges
+    let points = |r: &Body| -> [Vec<[f64; 3]>; 2] {
+        let (k, brep) = common::kernel_copy(r);
+        let vertices = brep
+            .vertices()
+            .ids()
+            .map(|v| {
+                let p = brep.vertex(v).unwrap().point;
+                [p.x, p.y, p.z]
+            })
+            .collect();
+        let midpoints = brep
+            .edges()
+            .ids()
+            .filter_map(|e| {
+                let edge = brep.edge(e).unwrap();
+                let p = edge
+                    .curve
+                    .as_ref()?
+                    .evaluate_point(&k, edge.interval.evaluate(0.5))
+                    .unwrap();
+                Some([p.x, p.y, p.z])
+            })
+            .collect();
+        [vertices, midpoints]
+    };
+    let near = |p: &[f64; 3], set: &[[f64; 3]]| {
+        set.iter().any(|q| {
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt() <= 1e-6
+        })
+    };
+    let target = points(&body("target"));
+    let mut want = target.clone();
+    let mut r = body("target");
+    for i in 0..10 {
+        let wedge = || body(&format!("wedge{i}"));
+        let alone = points(
+            &boolean(body("target"), wedge(), BooleanOp::Union)
+                .unwrap()
+                .unwrap(),
+        );
+        for kind in 0..2 {
+            let removed: Vec<_> = target[kind]
+                .iter()
+                .filter(|p| !near(p, &alone[kind]))
+                .copied()
+                .collect();
+            want[kind].retain(|p| !near(p, &removed));
+            want[kind].extend(alone[kind].iter().filter(|p| !near(p, &target[kind])));
+        }
+        r = boolean(r, wedge(), BooleanOp::Union).unwrap().unwrap();
+    }
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let got = points(&r);
+    for (kind, name) in [(0, "vertex"), (1, "edge midpoint")] {
+        assert_eq!(got[kind].len(), want[kind].len(), "{name}s");
+        for (a, b, which) in [
+            (&got[kind], &want[kind], "of the result is not expected"),
+            (&want[kind], &got[kind], "expected is not in the result"),
+        ] {
+            for p in a {
+                assert!(near(p, b), "a {name} {which}: {p:?}");
+            }
+        }
+    }
+}
+
+/// The ten wedges joined to the target one at a time, checked against the operands alone, with
+/// nothing taken from a join. The boundary of a union lies on the boundaries of its operands and
+/// inside none of them. So every point sampled from the result, nine along each edge's curve and
+/// one on each face (the face's point closest to the centroid of its area), must classify on the
+/// boundary of the target or of a wedge, and inside none of the eleven. A face kept on the wrong
+/// surface, a trim curve that leaves its surfaces, or a piece kept where another operand covers it
+/// fails this, whatever the volume and the counts say.
+#[test]
+#[allow(clippy::disallowed_methods)] // sampling the result to check it, not ops computing geometry
+fn a_traced_join_of_the_ten_wedges_in_turn_lies_on_its_operands_and_inside_none() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let operands: Vec<(String, Body)> = std::iter::once("target".to_string())
+        .chain((0..10).map(|i| format!("wedge{i}")))
+        .map(|name| {
+            let b = body(&name);
+            (name, b)
+        })
+        .collect();
+    let mut r = body("target");
+    for i in 0..10 {
+        r = boolean(r, body(&format!("wedge{i}")), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+
+    // nine points along each edge's curve, over its interval
+    let (k, brep) = common::kernel_copy(&r);
+    let mut points: Vec<([f64; 3], String)> = Vec::new();
+    for e in brep.edges().ids() {
+        let edge = brep.edge(e).unwrap();
+        let Some(curve) = edge.curve.as_ref() else {
+            continue;
+        };
+        for j in 1..10 {
+            let p = curve
+                .evaluate_point(&k, edge.interval.evaluate(f64::from(j) / 10.0))
+                .unwrap();
+            points.push(([p.x, p.y, p.z], format!("edge {e:?} at {j}/10")));
+        }
+    }
+    // one point on each face: its point closest to the centroid of its area
+    let (record, order) = r.to_record().unwrap();
+    for f in 0..record.faces.len() {
+        let c = r.face_centroid(&order, f, 1e-6).unwrap().centroid;
+        let on = r
+            .closest_to_point(&order, &[f], &[], c)
+            .unwrap()
+            .unwrap()
+            .to;
+        points.push((on, format!("face {f}")));
+    }
+    assert!(points.len() > 1000, "{} points", points.len());
+
+    let classes: Vec<Vec<PointClass>> = operands
+        .iter()
+        .map(|(_, b)| {
+            b.classify_points(&points.iter().map(|(p, _)| *p).collect::<Vec<_>>())
+                .unwrap()
+                .into_iter()
+                .map(Result::unwrap)
+                .collect()
+        })
+        .collect();
+    for (n, (p, from)) in points.iter().enumerate() {
+        let inside: Vec<_> = operands
+            .iter()
+            .zip(&classes)
+            .filter(|(_, c)| c[n] == PointClass::Inside)
+            .map(|((name, _), _)| name.as_str())
+            .collect();
+        assert!(inside.is_empty(), "{from} at {p:?} is inside {inside:?}");
+        assert!(
+            classes.iter().any(|c| c[n] == PointClass::OnBoundary),
+            "{from} at {p:?} is on no operand's boundary"
+        );
+    }
+}
+
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
 fn filleted_cube() -> Body {
     let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();
@@ -2193,4 +2597,811 @@ fn a_symmetric_cut_through_a_half_pipe_is_the_same_for_every_length_past_it() {
             volume(&cut)
         );
     }
+}
+
+/// A 6 deep, 11 high slab whose long wall lies in the plane of the wall of #17595's join,
+/// moved `shift` into the slab (at 0 it is that wall), from `from` to `to` along the wall's
+/// 120 long line, standing on z = `z0`.
+fn slab_on_the_join_wall(from: f64, to: f64, shift: f64, z0: f64) -> Body {
+    let start = [-77.110_635_008_193_54, 233.891_523_985_808_33];
+    let end = [-137.110_634_991_806_45, 129.968_476_014_191_62];
+    let inward = [0.866_025_403_784_438_6, -0.5];
+    let at = |along: f64, deep: f64| {
+        [
+            start[0] + along / 120.0 * (end[0] - start[0]) + deep * inward[0],
+            start[1] + along / 120.0 * (end[1] - start[1]) + deep * inward[1],
+            z0,
+        ]
+    };
+    let corners = [
+        at(from, shift),
+        at(to, shift),
+        at(to, shift + 6.0),
+        at(from, shift + 6.0),
+    ];
+    let profile: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        11.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+/// The union of `corner` and `slab` (and of `slab` and `corner` with `either_order`) is one
+/// valid solid of `counts`, on the default kernel and with every fix on, whose volume is the
+/// two less what they share (as the default kernel intersects them), within `rel`.
+fn joins_as_both_less_the_shared(
+    corner: &dyn Fn() -> Body,
+    slab: &dyn Fn() -> Body,
+    either_order: bool,
+    counts: [usize; 3],
+    rel: f64,
+) {
+    let no_fixes: &[&str] = &[];
+    session::set_thread_fixes(no_fixes.iter().copied()).unwrap();
+    let shared = boolean(corner(), slab(), BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let both = corner().volume(1e-11).unwrap() + slab().volume(1e-11).unwrap()
+        - shared.volume(1e-11).unwrap();
+    for fixes in [no_fixes, solidcore::kernel::UpstreamFixes::NAMES] {
+        session::set_thread_fixes(fixes.iter().copied()).unwrap();
+        let joined = boolean(corner(), slab(), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        one_valid_solid_of_volume(&joined, counts, both, rel);
+        if either_order {
+            let joined = boolean(slab(), corner(), BooleanOp::Union)
+                .unwrap()
+                .unwrap();
+            one_valid_solid_of_volume(&joined, counts, both, rel);
+        }
+    }
+}
+
+/// #17595: a block joined onto an imported part came back as the part alone. In the part two
+/// spline faces meet in an edge of tolerance 4.0e-3, which the join's wall crosses at 1.3° to
+/// 1.8° (measured there). Each face's curve ends where its own surface meets the wall, so the
+/// two ends lie 0.057 apart along the edge; they were two vertices and the intersection loop
+/// stayed open between them. The fixture is a 3 mm cube of the part around that crossing
+/// (`data/issue_17595_imported_corner.smb`: 9 faces, 13.57 mm³; the edge's tolerance there is
+/// 9.1e-3). The wall's face was not cut through, the flood crossed the gap, and every face of
+/// the slab was taken for inside the corner: the union was the corner alone (11 faces,
+/// 13.57 mm³, the slab's 792 missing). The same with the wall 0.05 out. The two ends are one
+/// crossing of the edge with the wall: the union is the corner and the slab less what they
+/// share. (The edge's tolerance over the cube's 3 x 3 section lets two results differ by
+/// 0.08, 1e-4 of the volume; measured 0.0085 at most.)
+///
+/// With the slab first the same two unions are refused on this cube as not a solid (the
+/// part itself joins in either order): open, and not asserted here.
+///
+/// A wall that misses the edge is untouched: 1 mm in, the same sum in either order; 1 mm out
+/// the slab holds the corner and the union is the slab, 12 x 6 x 11.
+#[test]
+fn a_join_whose_wall_crosses_a_loose_spline_edge_at_a_shallow_angle_keeps_the_tool() {
+    let corner = || {
+        Body::from_smb(
+            include_bytes!("data/issue_17595_imported_corner.smb").to_vec(),
+            false,
+        )
+        .unwrap()
+    };
+    assert_eq!(corner().counts().unwrap(), [9, 20, 13]);
+    for (shift, either_order, counts) in [
+        (0.0, false, [10, 21, 14]),
+        (-0.05, false, [10, 21, 14]),
+        (1.0, true, [15, 35, 23]),
+    ] {
+        let slab = || slab_on_the_join_wall(80.35, 92.35, shift, -46.0);
+        joins_as_both_less_the_shared(&corner, &slab, either_order, counts, 1e-4);
+    }
+    let slab = boolean(
+        corner(),
+        slab_on_the_join_wall(80.35, 92.35, -1.0, -46.0),
+        BooleanOp::Union,
+    )
+    .unwrap()
+    .unwrap();
+    one_valid_solid_of_volume(&slab, [6, 12, 8], 12.0 * 6.0 * 11.0, 1e-8);
+}
+
+/// #17595, the same join farther along its wall, where the wall leaves a spline face through
+/// an edge whose curve lies 3.3e-3 outside the face's surface, past the edge's tolerance of
+/// 2.8e-3 (as the STEP import left it; the fixture is a 3 mm cube of the part there, 7 faces,
+/// with that edge's tolerance:
+/// `data/issue_17595_imported_edge_off_its_face.record.json`). The wall's curve on the face
+/// ends on the surface's natural boundary, 3.3e-3 from the edge's curve, where the curve/edge
+/// intersection finds no crossing: the end was taken for a point inside the face, became a
+/// vertex 8.8e-3 short of the one where the next face's curve starts on the edge, and the
+/// intersection loop stayed open between the two. The face's trims put that end on the edge.
+/// The union, in either order, is the corner and the slab less what they share (within 1e-4
+/// of the volume, as above; measured 0.0098 of 799).
+#[test]
+fn a_join_past_an_imported_edge_that_lies_off_its_face_keeps_the_tool() {
+    let record: Record = serde_json::from_str(include_str!(
+        "data/issue_17595_imported_edge_off_its_face.record.json"
+    ))
+    .unwrap();
+    let corner = || Body::from_record(&record, true).unwrap().0;
+    let slab = || slab_on_the_join_wall(49.8, 61.8, 0.0, -50.0);
+    assert_eq!(corner().counts().unwrap(), [7, 15, 10]);
+    joins_as_both_less_the_shared(&corner, &slab, true, [12, 27, 18], 1e-4);
+}
+
+/// `b` written to a record and read back, as the app hands its operands to the kernel.
+fn through_record(b: &Body) -> Body {
+    Body::from_record(&b.to_record().unwrap().0, true)
+        .unwrap()
+        .0
+}
+
+/// #17596: a block with a bore of radius 149 up to z = 100 and one of radius 143 on through the
+/// top, the bore's ceiling edge rounded 2 mm, less a cylinder of radius 155 up to z = 100. The
+/// tool's top merges with the ceiling, an annulus with the 143 bore as its inner loop, and the
+/// merge turns the surviving face over: the inner loop must move onto the face use that keeps its
+/// side. It landed on the other one, and the result was refused as no solid (in the app: "Face
+/// Loop has bad orientation", "Edgeuses share same region"). The round lies inside the tool (r 147
+/// to 149, z 98 to 100), so the result is the block less the r 155 cylinder up to z = 100 and the
+/// r 143 one above it: 400 · 400 · 108 − π (155² · 100 + 143² · 8).
+#[test]
+fn a_cylinder_cut_flush_with_a_rounded_bore_ceiling_is_one_valid_solid() {
+    all_fixes();
+    let block = make_box([-200.0, -200.0, 0.0], [400.0, 400.0, 108.0]).unwrap();
+    let bore = solidcore_ops::make_cylinder([0.0, 0.0, -1.0], 149.0, 101.0).unwrap();
+    let block = boolean(block, bore, BooleanOp::Subtract).unwrap().unwrap();
+    let upper = solidcore_ops::make_cylinder([0.0, 0.0, 99.0], 143.0, 10.0).unwrap();
+    let block = boolean(block, upper, BooleanOp::Subtract).unwrap().unwrap();
+    let ceiling = common::edge_at(&block, [0.0, 149.0, 100.0]);
+    blend(
+        &block,
+        Blend::Round,
+        &[ceiling],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert!(block.check(CheckLevel::All).unwrap().is_valid());
+    let tool = solidcore_ops::make_cylinder([0.0, 0.0, -11.0], 155.0, 111.0).unwrap();
+    let r = boolean(
+        through_record(&block),
+        through_record(&tool),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let want = 400.0 * 400.0 * 108.0 - PI * (155.0 * 155.0 * 100.0 + 143.0 * 143.0 * 8.0);
+    one_valid_solid_of_volume(&r, [9, 18, 12], want, 1e-9);
+}
+
+/// The closed drum of #16133: radius 105.5, 82 tall, walls 3 thick all round (a void of radius
+/// 102.5 from z = 3 to 79), a radius 9 hole through its axis.
+fn drum_with_a_hole() -> Body {
+    let drum = solidcore_ops::make_cylinder([0.0; 3], 105.5, 82.0).unwrap();
+    let void = solidcore_ops::make_cylinder([0.0, 0.0, 3.0], 102.5, 76.0).unwrap();
+    let drum = boolean(drum, void, BooleanOp::Subtract).unwrap().unwrap();
+    let hole = solidcore_ops::make_cylinder([0.0, 0.0, -1.0], 9.0, 97.0).unwrap();
+    boolean(drum, hole, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #16133: Split Body keeps what lies on each side of a plane by intersecting with a box whose
+/// face lies in it, here the plane of the drum's void ceiling, z = 79. Above it, the box's bottom
+/// merges with the ceiling, an annulus whose inner loop is the hole, and the merge turns the
+/// surviving face over: the hole's loop must move onto the face use that keeps its side. It
+/// landed on the other one and the part was refused as no solid (in the app: "Face Loop has bad
+/// orientation", "Edgeuses share same region"). Operands go through the record as the app's do.
+/// Below: π (105.5² · 79 − 102.5² · 76 − 9² · 3); above, the 3 mm lid: π (105.5² − 9²) · 3.
+#[test]
+fn a_drum_cut_on_its_void_ceiling_with_a_hole_through_both_is_two_valid_solids() {
+    all_fixes();
+    let drum = drum_with_a_hole();
+    assert!(drum.check(CheckLevel::All).unwrap().is_valid());
+    let below = make_box([-200.0, -200.0, -10.0], [400.0, 400.0, 89.0]).unwrap();
+    let above = make_box([-200.0, -200.0, 79.0], [400.0, 400.0, 20.0]).unwrap();
+    for (tool, counts, want) in [
+        (
+            below,
+            [6, 9, 6],
+            PI * (105.5 * 105.5 * 79.0 - 102.5 * 102.5 * 76.0 - 9.0 * 9.0 * 3.0),
+        ),
+        (above, [4, 6, 4], PI * (105.5 * 105.5 - 9.0 * 9.0) * 3.0),
+    ] {
+        let r = boolean(
+            through_record(&drum_with_a_hole()),
+            through_record(&tool),
+            BooleanOp::Intersect,
+        )
+        .unwrap()
+        .unwrap();
+        one_valid_solid_of_volume(&r, counts, want, 1e-9);
+    }
+}
+
+/// #18064's bin: a 168 x 252 x 35 block with a pocket from z = 7 up, its walls x = 2.85 and
+/// 165.15, y = 2.85 and 249.15, its corners rounds of radius 1.15 about (4, 4), (4, 248),
+/// (164, 4) and (164, 248).
+fn pocketed_bin() -> Body {
+    let (x0, x1, y0, y1, r, z) = (2.85, 165.15, 2.85, 249.15, 1.15, 7.0);
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], a[1], z],
+        end: [b[0], b[1], z],
+    };
+    let round = |c: [f64; 2], start: f64| Curve::Arc {
+        center: [c[0], c[1], z],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start,
+        end: start + PI / 2.0,
+    };
+    let outline = [
+        line([x0 + r, y0], [x1 - r, y0]),
+        round([x1 - r, y0 + r], -PI / 2.0),
+        line([x1, y0 + r], [x1, y1 - r]),
+        round([x1 - r, y1 - r], 0.0),
+        line([x1 - r, y1], [x0 + r, y1]),
+        round([x0 + r, y1 - r], PI / 2.0),
+        line([x0, y1 - r], [x0, y0 + r]),
+        round([x0 + r, y0 + r], PI),
+    ];
+    let pocket = extrude(
+        &outline,
+        [0.0, 0.0, 1.0],
+        35.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let block = make_box([0.0, 0.0, 0.0], [168.0, 252.0, 35.0]).unwrap();
+    boolean(block, pocket, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The top of #18064's insert: the quadratic spline from (y, z) = (2.85, 28) through the
+/// control point (200, 7) to (249.15, 7), tangent there to the pocket's floor z = 7, as
+/// (y, height above the floor, dy/dt) at `t`.
+fn insert_top(t: f64) -> [f64; 3] {
+    let (y0, ym, y1) = (2.85, 200.0, 249.15);
+    let u = 1.0 - t;
+    let y = u * u * y0 + 2.0 * t * u * ym + t * t * y1;
+    let dy = 2.0 * (1.0 - t) * (ym - y0) + 2.0 * t * (y1 - ym);
+    [y, 21.0 * u * u, dy]
+}
+
+/// The parameter of `insert_top` at `y`.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing it
+fn insert_top_at(y: f64) -> f64 {
+    let (y0, ym, y1) = (2.85_f64, 200.0_f64, 249.15_f64);
+    let (a, b, c) = (y0 - 2.0 * ym + y1, 2.0 * (ym - y0), y0 - y);
+    (-b + (b * b - 4.0 * a * c).sqrt()) / (2.0 * a)
+}
+
+/// #18064's insert against the pocket's wall x = 2.85: a prism along y from 2.85 to 249.15
+/// whose section is the quadrilateral of the wall from z = 7 to 28, the floor out to
+/// x = 26.868841 and a side up to x = 9.247749 at z = 28, cut through along x by the region
+/// above `insert_top`. Its top meets the floor tangentially along the line y = 249.15, which
+/// touches the corner round there at its end.
+fn insert_flush_with_a_wall() -> Body {
+    let (f, top) = (7.0, 28.0);
+    let q = [[2.85, f], [26.868841, f], [9.247749, top], [2.85, top]];
+    let section: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (q[i], q[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], 2.85, a[1]],
+                end: [b[0], 2.85, b[1]],
+            }
+        })
+        .collect();
+    let prism = extrude(
+        &section,
+        [0.0, 1.0, 0.0],
+        246.3,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let x = -5.0;
+    let above = [
+        Curve::Nurbs {
+            degree: 2,
+            points: vec![[x, 2.85, top, 1.0], [x, 200.0, f, 1.0], [x, 249.15, f, 1.0]],
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        },
+        Curve::Line {
+            start: [x, 249.15, f],
+            end: [x, 249.15, top],
+        },
+        Curve::Line {
+            start: [x, 249.15, top],
+            end: [x, 2.85, top],
+        },
+    ];
+    let cut = extrude(
+        &above,
+        [1.0, 0.0, 0.0],
+        200.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    boolean(prism, cut, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// `f` integrated over [a, b] by Simpson's rule on `n` (even) intervals.
+fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
+    let h = (b - a) / f64::from(n);
+    let inner: f64 = (1..n)
+        .map(|i| f(a + f64::from(i) * h) * if i % 2 == 1 { 4.0 } else { 2.0 })
+        .sum();
+    (f(a) + f(b) + inner) * h / 3.0
+}
+
+/// #18064: a Gridfinity bin's insert joined into it, flush with the pocket's wall x = 2.85,
+/// its floor and its end walls, its spline top meeting the floor tangentially along the far
+/// wall y = 249.15. That line is tangent to the corner round about (4, 248) at its end
+/// (4, 249.15), and the curve where the top crosses the round runs within 1e-10 of the
+/// round's floor edge for 0.027 before it ends there, touching it to fourth order. The
+/// curve/edge intersection took the last 0.027 for a coincident stretch (both its ends
+/// within the scaled zero) and split the curve there, which the insert's own topology did
+/// not follow: the join was refused (`SM_ERR`; on the issue's insert, "not a closed solid"),
+/// while the mirror image against x = 165.15, whose subdivision found the touching point,
+/// joined. The range is the flank of the tangency at the touching point and is dropped. The
+/// join is the bin and the insert less what they share: the insert's corners
+/// inside the walls outside the two rounds, its full section there, of height the top's.
+#[test]
+fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
+    all_fixes();
+    let r = 1.15_f64;
+    // what the insert shares with the bin: over each corner square outside its round, the
+    // insert's height above the floor
+    #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing it
+    let width = |dy: f64| 4.0 - (r * r - dy * dy).max(0.0).sqrt() - 2.85;
+    let shared_over = |ya: f64, yb: f64, centre: f64| {
+        simpson(
+            |t| {
+                let [y, h, dy] = insert_top(t);
+                width(y - centre) * h * dy
+            },
+            insert_top_at(ya),
+            insert_top_at(yb),
+            200_000,
+        )
+    };
+    let shared = shared_over(2.85, 4.0, 4.0) + shared_over(248.0, 249.15, 248.0);
+    let bin = pocketed_bin();
+    let insert = insert_flush_with_a_wall();
+    let want = bin.volume(1e-11).unwrap() + insert.volume(1e-11).unwrap() - shared;
+    let joined = boolean(bin, insert, BooleanOp::Union).unwrap().unwrap();
+    // the bin's 15 faces with the insert's top and slanted side
+    one_valid_solid_of_volume(&joined, [17, 41, 27], want, 1e-9);
+}
+
+/// The upper half (z >= 0) of the torus of radii 1.8 and 0.6 about z, revolved from its
+/// profile circle starting at the circle's outer point (2.4, 0, 0) as SolidCraft revolves it:
+/// the seam meridian lies in the xz plane on +x and ends at (2.4, 0, 0) on the flat face's
+/// outer edge, which is the profile circle's own seam.
+fn half_torus() -> Body {
+    let profile = [Curve::Arc {
+        center: [1.8, 0.0, 0.0],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 0.6,
+        start: 0.0,
+        end: TAU,
+    }];
+    let torus = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let below = make_box([-3.4, -3.4, -1.6], [6.8, 6.8, 1.6]).unwrap();
+    boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// A cylinder of `radius` about z from `base` up `height`, its seam at the angle SolidCraft
+/// gives a cylinder's (0.6131 rad from +x).
+#[allow(clippy::disallowed_methods)] // the test's operand, not ops computing geometry
+fn rod(base: [f64; 3], radius: f64, height: f64) -> Body {
+    let (s, c) = 0.6131_f64.sin_cos();
+    let circle = [Curve::Arc {
+        center: base,
+        axis: [0.0, 0.0, 1.0],
+        reference: [c, s, 0.0],
+        radius,
+        start: 0.0,
+        end: TAU,
+    }];
+    extrude(
+        &circle,
+        [0.0, 0.0, 1.0],
+        height,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+/// The record's vertex nearest `corner`, its distance from the seam (`off_seam` of its
+/// point) and the record's tolerance.
+#[allow(clippy::disallowed_methods)] // the test's own measure, not ops geometry
+fn seam_vertex_gap(r: &Body, corner: [f64; 3], off_seam: impl Fn([f64; 3]) -> f64) -> (f64, f64) {
+    let (rec, _) = r.to_record().unwrap();
+    let dist = |p: [f64; 3]| (0..3).map(|i| (p[i] - corner[i]).powi(2)).sum::<f64>();
+    let v = rec
+        .vertices
+        .iter()
+        .min_by(|a, b| dist(a.point).total_cmp(&dist(b.point)))
+        .unwrap();
+    (off_seam(v.point), rec.tolerance)
+}
+
+/// #18274: a boss of radius 0.07 and height 0.14 joined under the flat face of a half
+/// torus, centred on the torus's seam meridian, its side `d` beyond the flat face's outer
+/// edge, both through their records as SolidCraft hands them on. The boss's top crosses
+/// that edge 1.2e-3 either side of the seam at 1 degree, a crossing fixed only to the
+/// tolerance over that sine, so the two crossings and the seam's vertex between them are one
+/// point. The vertex the merge kept was a crossing's, 1.2e-3 off the seam, so the seam edge
+/// ended off the seam and the check refused the join (face test 36) for d 1e-5 and 2e-5. The
+/// seam's vertex now stays. The join is one valid solid of the two volumes added,
+/// π²·1.8·0.6² + π·0.07²·0.14: they share only part of a face.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's own measure, not ops geometry
+fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() {
+    all_fixes();
+    let want = PI * PI * 1.8 * 0.36 + PI * 0.07 * 0.07 * 0.14;
+    for d in [1e-5, 1.5e-5, 2e-5] {
+        let boss = round_tripped(&rod([2.33 + d, 0.0, -0.14], 0.07, 0.14));
+        let r = boolean(round_tripped(&half_torus()), boss, BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "d {d}");
+        // the torus, its flat face, the boss's side and bottom
+        assert_eq!(r.counts().unwrap(), [4, 7, 4], "d {d}");
+        // the seam meridian: radius 0.6 about (1.8, 0, 0) in the xz plane
+        let (gap, tol) = seam_vertex_gap(&r, [2.4, 0.0, 0.0], |[x, y, z]| {
+            y.hypot((x - 1.8).hypot(z) - 0.6)
+        });
+        assert!(gap <= tol, "d {d}: the seam's vertex is {gap} off the seam");
+        let v = volume(&r);
+        assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
+    }
+}
+
+/// #18274: the r 2 ball cut flat at z 1.2 (a cap edge of radius 1.6), less a notch of radius
+/// 0.19 from z -0.4 up to the cap, centred on the cap's edge just off the ball's seam meridian
+/// so that its side passes `d` outside the corner (1.6, 0, 1.2) where the seam meets the cap's
+/// edge, the operands through their records. The corner lies on the notch's top circle within
+/// tolerance, and the vertex definition there moved it halfway to the circle, 5e-6 off the
+/// seam: the seam edge's trim left the seam and the check refused the cut (face test 36). The
+/// seam's corner now stays. The cut is one valid solid: the ball less its cap, less the
+/// notch's share of it, which is the same wherever the notch's centre lies on the cap's edge:
+/// over each radius ρ about z, the notch's arc at ρ times the ball's height there between the
+/// bottom and the cap.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
+    all_fixes();
+    let (big, cap, edge, r, bottom) = (2.0_f64, 1.2_f64, 1.6_f64, 0.19_f64, -0.4_f64);
+    let h = big - cap;
+    let capped = 4.0 / 3.0 * PI * big.powi(3) - PI * h * h * (3.0 * big - h) / 3.0;
+    let height = |rho: f64| (big * big - rho * rho).max(0.0).sqrt().min(cap) - bottom;
+    let arc = |rho: f64| {
+        2.0 * rho
+            * ((rho * rho + edge * edge - r * r) / (2.0 * rho * edge))
+                .clamp(-1.0, 1.0)
+                .acos()
+    };
+    // (split at ρ = 1.6, where the height turns from the cap's to the ball's)
+    let share = |step: f64| {
+        tanh_sinh(|rho| height(rho) * arc(rho), edge - r, edge, step)
+            + tanh_sinh(|rho| height(rho) * arc(rho), edge, edge + r, step)
+    };
+    let (coarse, fine) = (share(1.0 / 32.0), share(1.0 / 64.0));
+    assert!((coarse - fine).abs() <= 1e-13 * fine, "{coarse} {fine}");
+    let want = capped - fine;
+    for d in [5e-6, 1e-5, 2e-5] {
+        // the centre on the cap's edge at the angle that puts the corner r + d from it
+        let angle = 2.0 * ((r + d) / (2.0 * edge)).asin();
+        let notch = rod(
+            [edge * angle.cos(), edge * angle.sin(), bottom],
+            r,
+            cap - bottom,
+        );
+        let ball = make_sphere([0.0; 3], big).unwrap();
+        let top = make_box([-3.0, -3.0, cap], [6.0, 6.0, 2.0]).unwrap();
+        let capped_ball = boolean(ball, top, BooleanOp::Subtract).unwrap().unwrap();
+        let res = boolean(
+            round_tripped(&capped_ball),
+            round_tripped(&notch),
+            BooleanOp::Subtract,
+        )
+        .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+        .unwrap_or_else(|| panic!("d {d}: the cut removed everything"));
+        let report = res.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(res.solid_count().unwrap(), 1, "d {d}");
+        // the ball, the cap, the notch's side and bottom
+        assert_eq!(res.counts().unwrap(), [4, 8, 6], "d {d}");
+        // the seam meridian: radius 2 about the origin in the xz plane, on +x
+        let (gap, tol) = seam_vertex_gap(&res, [edge, 0.0, cap], |[x, y, z]| {
+            y.hypot(x.hypot(z) - big)
+        });
+        assert!(gap <= tol, "d {d}: the seam's corner is {gap} off the seam");
+        let v = volume(&res);
+        assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
+    }
+}
+
+/// #18689: a ring revolved a whole turn about z from a profile in the yz plane (the r 6
+/// ball's own arc from its equator down to z -2, the line out to r 6 and up to the equator),
+/// joined to that ball, both through their records as SolidCraft hands them on. The revolve
+/// axis is `off` along y from the ball's centre: the arc's centre is that far from the axis,
+/// so the revolve turns the arc into a sphere centred on the axis, the ball's own sphere
+/// moved by `off`. With the axis 3e-9 to 1e-7 off, within tolerance, the join was refused
+/// ("Face Near missing Seam", face test 36); at 0 and 1e-6 it joined. Every offset is one
+/// valid solid with the faces, edges and vertices of the join about the centre. Its volume is
+/// the ball's plus the ring's outside it: the ring's wall has radius 6 + `off` about the axis
+/// and holds every section of the ball between z -2 and 0, so the join adds
+/// ∫₋₂⁰ π((6 + off)² - (36 - z²)) dz to 4/3·π·6³: 288π + 8π/3 + 2π·off·(12 + off).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
+    all_fixes();
+    let end = (1.0_f64 / 3.0).asin();
+    let (rim, corner) = ([0.0, -6.0 * end.cos(), -2.0], [0.0, -6.0, -2.0]);
+    let profile = [
+        // from (0, -6, 0) down the ball to the rim at z -2
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [1.0, 0.0, 0.0],
+            reference: [0.0, -1.0, 0.0],
+            radius: 6.0,
+            start: 0.0,
+            end,
+        },
+        Curve::Line {
+            start: rim,
+            end: corner,
+        },
+        Curve::Line {
+            start: corner,
+            end: [0.0, -6.0, 0.0],
+        },
+    ];
+    let mut about_the_centre = None;
+    for off in [0.0, 3e-9, 1e-8, 1e-7, 1e-6] {
+        let ball = make_sphere([0.0; 3], 6.0).unwrap();
+        let ring = revolve(&profile, [0.0, off, 0.0], [0.0, 0.0, 1.0], TAU, true)
+            .unwrap_or_else(|e| panic!("off {off}: {e:?}"));
+        let r = boolean(round_tripped(&ball), round_tripped(&ring), BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("off {off}: {e:?}"))
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "off {off}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "off {off}");
+        let counts = r.counts().unwrap();
+        assert_eq!(counts, *about_the_centre.get_or_insert(counts), "off {off}");
+        let want = 288.0 * PI + 8.0 * PI / 3.0 + 2.0 * PI * off * (12.0 + off);
+        let v = volume(&r);
+        assert!((v - want).abs() <= 1e-9 * want, "off {off}: {v} vs {want}");
+    }
+}
+
+/// `b` as a record whose tolerances (the body's, every edge's and vertex's) are all
+/// `tolerance`, as a file read at that tolerance gives it.
+fn read_at(b: &Body, tolerance: f64) -> Body {
+    fn set(v: &mut Value, t: f64) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m.iter_mut() {
+                    if k == "tolerance" {
+                        *x = serde_json::json!(t);
+                    } else {
+                        set(x, t);
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| set(x, t)),
+            _ => {}
+        }
+    }
+    let (r, _) = b.to_record().unwrap();
+    let mut v = serde_json::to_value(&r).unwrap();
+    set(&mut v, tolerance);
+    let r: Record = serde_json::from_value(v).unwrap();
+    Body::from_record(&r, true).unwrap().0
+}
+
+/// solidcore#3292: a body read at a file's round tolerance (0.01 mm) joined by one with an
+/// edge of 3 um, as a nameplate's plate and a letter read finer for its own short edges. The
+/// result took the plate's tolerance, the short edge's ends merged and its side face's edges
+/// ran together (`SmFace` test #34, partially coincident edges). The plate's geometry meets
+/// the letter's tolerance, so the boolean reads it at that one: the result is valid and keeps
+/// the short edge.
+///
+/// The plate 20 x 20 x 5; on it, from z = 5 to 10, the prism over (5, 5), (15, 5), (15, 12),
+/// (10.0015, 15), (9.9985, 15), (5, 12): a 10 x 7 rectangle and, above it, a trapezoid 3 high
+/// between widths 10 and 0.003, 70 + 3 (10 + 0.003) / 2 = 85.0045 in area. Volume
+/// 2000 + 5 * 85.0045 = 2425.0225.
+#[test]
+fn a_short_edge_joined_onto_a_body_read_coarser_is_kept() {
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    let corners = [
+        v(5.0, 5.0),
+        v(15.0, 5.0),
+        v(15.0, 12.0),
+        v(10.0015, 15.0),
+        v(9.9985, 15.0),
+        v(5.0, 12.0),
+    ];
+    let region = Region2 {
+        outer: Loop2::polygon(&corners),
+        holes: vec![],
+    };
+    let letter = read_at(
+        &extrude_planar_regions(&Plane::XY, &[region], 5.0, 10.0).unwrap(),
+        0.25 * 0.003,
+    );
+    for plate_tolerance in [0.01, 0.0001] {
+        let plate = read_at(
+            &make_box([0.0, 0.0, 0.0], [20.0, 20.0, 5.0]).unwrap(),
+            plate_tolerance,
+        );
+        for (a, b) in [
+            (letter.copy().unwrap(), plate.copy().unwrap()),
+            (plate.copy().unwrap(), letter.copy().unwrap()),
+        ] {
+            let r = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = r.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{plate_tolerance}: {}", report.text);
+            // the short edge, at the top and at the foot: from (9.9985, 15) to (10.0015, 15)
+            let (rec, _) = r.to_record().unwrap();
+            let at = |p: [f64; 3], x: f64| (p[0] - x).abs() < 1e-9 && (p[1] - 15.0).abs() < 1e-9;
+            let short = rec
+                .edges
+                .iter()
+                .filter(|e| {
+                    let [p, q] = e.vertices;
+                    let (p, q) = (
+                        rec.vertices[p as usize].point,
+                        rec.vertices[q as usize].point,
+                    );
+                    (at(p, 9.9985) && at(q, 10.0015)) || (at(p, 10.0015) && at(q, 9.9985))
+                })
+                .count();
+            assert_eq!(short, 2, "{plate_tolerance}");
+            let want = 2000.0 + 5.0 * 85.0045;
+            let got = volume(&r);
+            assert!(near(got, want), "{plate_tolerance}: {got} vs {want}");
+        }
+    }
+}
+
+/// The area two circles of radii `a` and `b` whose centres are `d` apart have in common.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn circles_common_area(a: f64, b: f64, d: f64) -> f64 {
+    if d >= a + b {
+        return 0.0;
+    }
+    if d <= (a - b).abs() {
+        return PI * a.min(b).powi(2);
+    }
+    let ta = ((d * d + a * a - b * b) / (2.0 * d * a)).acos();
+    let tb = ((d * d + b * b - a * a) / (2.0 * d * b)).acos();
+    a * a * ta + b * b * tb - 0.5 * ((-d + a + b) * (d + a - b) * (d - a + b) * (d + a + b)).sqrt()
+}
+
+/// A ball of radius 2 cut flat at z = 1.2, then drilled by a cylinder of radius 0.19 from
+/// z = -0.4 up to the flat, whose wall passes `d` outside the flat rim's vertex (1.6, 0, 1.2)
+/// on the sphere's seam: the vertex is `d` inside the tool (tangency-labs/solidcore#3339, the
+/// Dutchman stress item S0314). For d within the tolerance the wall/sphere curve runs from the
+/// rim, within d of the seam, down to where it crosses the seam (2.8e-4 below the vertex at
+/// d = 1e-5): that run was taken for a curve mislabelled as on the seam and removed, and
+/// nothing else meets the sphere there, since the seam has the sphere on both sides. The
+/// wall was left open there and the cut came back empty or not closed for d = 5e-6 to
+/// 1.5e-5. Each cut is one valid solid of the volume of the ball, less its cap of height 0.8
+/// (π h² (3R − h) / 3), less the part of the cylinder inside the ball, the integral over z of
+/// the area the drill's circle has in common with the ball's section of radius √(4 − z²): the
+/// cylinder's whole area below z0, where √(4 − z0²) = ρ + 0.19 for its axis ρ from the ball's,
+/// and a lens above, integrated by Simpson's rule on each side of z0 (20000 steps each: its
+/// error is far inside the check's 1e-7). d = 1e-6 and 2e-5 are not covered: the run is then
+/// within a tolerance of the vertex, or starts just past it, and those still fail `SmFace`
+/// tests 29 and 31.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_drill_grazing_the_seam_vertex_of_a_cut_balls_rim_cuts_it() {
+    all_fixes();
+    let (big, r, flat, bottom): (f64, f64, f64, f64) = (2.0, 0.19, 1.2, -0.4);
+    let vertex = [(big * big - flat * flat).sqrt(), 0.0];
+    // the direction from the vertex to the drill's axis (the issue's placement)
+    let (ux, uy): (f64, f64) = (-0.011_280_0, 0.189_655_0);
+    let n = (ux * ux + uy * uy).sqrt();
+    let (ux, uy) = (ux / n, uy / n);
+    let simpson = |f: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 20_000;
+        let h = (b - a) / f64::from(n);
+        let mut s = f(a) + f(b);
+        for i in 1..n {
+            s += f(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        s * h / 3.0
+    };
+    let cap = PI * (big - flat).powi(2) * (3.0 * big - (big - flat)) / 3.0;
+    for d in [-1e-5, 0.0, 5e-6, 1e-5, 1.5e-5, 4e-5, 1e-4] {
+        let axis = [vertex[0] + (r - d) * ux, vertex[1] + (r - d) * uy];
+        let rho = axis[0].hypot(axis[1]);
+        let section = |z: f64| circles_common_area(r, (big * big - z * z).sqrt(), rho);
+        let z0 = (big * big - (rho + r).powi(2)).sqrt();
+        let drilled = PI * r * r * (z0 - bottom) + simpson(&section, z0, flat);
+        let want = 4.0 / 3.0 * PI * big.powi(3) - cap - drilled;
+        let ball = make_sphere([0.0; 3], big).unwrap();
+        let block = make_box([-3.0, -3.0, flat], [6.0, 6.0, 2.0]).unwrap();
+        let cut = boolean(ball, block, BooleanOp::Subtract).unwrap().unwrap();
+        let drill =
+            solidcore_ops::make_cylinder([axis[0], axis[1], bottom], r, flat - bottom).unwrap();
+        let got = boolean(cut, drill, BooleanOp::Subtract)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+            .unwrap_or_else(|| panic!("d {d}: empty"));
+        let report = got.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(got.solid_count().unwrap(), 1, "d {d}");
+        assert!(got.is_manifold_solid().unwrap(), "d {d}");
+        let v = volume(&got);
+        assert!((v - want).abs() <= 1e-7 * want, "d {d}: {v} vs {want}");
+    }
+}
+
+/// #17527's cut as SolidCraft passed it: a part with a 2.1 mm hole, less a revolved counterbore
+/// (a 4.25 mm bore, a 45° cone down to the hole's radius, a disc closing it). The sketch's revolve
+/// axis is 1.19e-5 off the hole's axis, so the tool's rim (radius 2.1000073) lies 4.6e-6 to
+/// 1.9e-5 from the hole's wall: in it, within the rim's tolerance, but nowhere within the proto
+/// topology's. The cone and the disc each meet the wall along the rim in a curve of their own.
+/// Their overlapping proto edges were replaced by the rim classified within half the zone
+/// tolerance, which found it nowhere in the wall, so the cut failed in `make_faceuse`; with the
+/// rim classified within its own tolerance, a piece of the disc's circle outside the overlap
+/// stayed beside its replacement and was related twice ("another entity is already related").
+/// The cut is one valid solid, the same as the cut by the tool moved onto the hole's axis.
+#[test]
+fn a_traced_revolved_counterbore_a_hair_off_the_holes_axis_cuts_the_part() {
+    all_fixes();
+    let body = traced_operands("issue_17527_revolve_cut_round_edge");
+    let cut = |dy: f64| {
+        let tool = body("tool");
+        tool.transform(&[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, dy, 0.0, 1.0],
+        ])
+        .unwrap();
+        boolean(body("target"), tool, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    // the tool moved by the offset of its axis from the hole's: no rim off the wall
+    let want = cut(1.1866e-5).volume(1e-9).unwrap();
+    let r = cut(0.0);
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the part's 41 faces (the hole's wall now ends at the rim), the bore and the cone
+    assert_eq!(r.counts().unwrap(), [43, 104, 65]);
+    let v = r.volume(1e-9).unwrap();
+    assert!(
+        (v - want).abs() < 1e-3,
+        "volume {v}, on the hole's axis {want}"
+    );
 }

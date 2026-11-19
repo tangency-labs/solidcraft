@@ -102,8 +102,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
          plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a folded sheet's face: `sheet:<body>:<panel>:<side>`, panel base or a flange's tag F<feature>.<k>, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is, and it holds while sizes change and flanges come and go)",
+         sheet_face? (a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
+         taken wherever a face name is; a sheet made from surfaces has none: its faces' names are the model's, after what made each)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")
@@ -169,11 +169,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MaterialListResult>)
         .params("→ built-in and design-owned materials (user: true, look, optional physical_card/physical_validation/density_comparison). Read-only; candidate engineering records do not certify sources or supply a solver"),
     CommandSpec::new("engine.commands", "List Commands", crate::checked!("engine.commands", commands))
+        .any_part()
         .icon("list")
         .noundo()
         .contract(&COMMANDS_CONTRACT)
         .output(output_schema_for::<Vec<CommandEntry>>),
-    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe))
+    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe)).any_part()
         .icon("list")
         .noundo()
         .doc_only()
@@ -200,8 +201,10 @@ pub(super) fn measure_body(
     definitions: Option<&solidcraft_doc::ModelState>,
 ) -> Result<solidcraft_kernel::BodyMeasure> {
     let mut measured = b.measure()?;
+    // A sheet's perforation fields (#732): their holes, which the body does not have, come off
+    // what it measures.
     if let Some(state) = definitions
-        && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
+        && let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
     {
         let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
         // A body transfer moves the geometry and sheet metadata together. Apply only
@@ -298,7 +301,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.density_g_cm3 = Some(rho);
             b.mass_g = Some(v * rho / 1000.0);
         }
-        if definitions.sheets.iter().any(|sheet| sheet.body == source) {
+        // A sheet made from surfaces (#6748) is sheet metal: its perforation fields' holes are
+        // taken off its volume, area and centre where each body is measured (`measure_body`);
+        // its counts are its stored B-rep's, which has no such holes (see `BodyFigures::faces`).
+        if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
             b.sheet_metal = Some(true);
         }
         bodies.push(b);
@@ -490,7 +496,8 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
     Some(SketchInspected {
         id,
         name: ss.name.clone(),
-        plane: serde_json::to_value(ss.plane).unwrap_or_default(),
+        plane: ss.plane.into(),
+        world_plane: plane.into(),
         status: ss.report.status.into(),
         dof: ss.report.shown_dof(),
         fully_constrained: ss.report.shown_dof() == 0,

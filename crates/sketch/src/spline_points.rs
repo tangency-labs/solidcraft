@@ -235,8 +235,8 @@ impl Sketch {
     /// Reverse spline `ci`'s direction: its last point becomes its first and the curve runs the
     /// other way along the same path. Its points are reversed in place, so every point, and every
     /// constraint on them and on the curve, stays. The shape doesn't change: a fit spline's chord
-    /// lengths and natural ends, a control point spline's uniform clamped knots and a closed
-    /// spline's cyclic fit (whose closing point repeats its first) read the same both ways.
+    /// lengths and natural ends, a control point spline's mirrored knots and reversed weights,
+    /// and a closed spline's cyclic fit read the same both ways.
     pub fn reverse_spline(&mut self, ci: usize) -> Result<()> {
         let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
         if !matches!(curve.kind, CurveKind::Spline { .. }) {
@@ -253,8 +253,11 @@ impl Sketch {
             return Err(SketchError::Invalid("the spline is part of an offset; break the offset association first".into()));
         }
         let mut mirrored = Vec::new();
-        if let Some(CurveKind::Spline { pts, handles, periodic, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+        if let Some(CurveKind::Spline { pts, handles, periodic, nurbs, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
             pts.reverse();
+            if let Some(knots) = nurbs {
+                *knots = knots.reversed();
+            }
             if !handles.is_empty() {
                 if *periodic {
                     // The closing point repeats the first, which keeps its place: the handles of

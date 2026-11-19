@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Tidy dimensions</title>
+  <path d="M12 15L12 49M52 15L52 49" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12 22L52 22M12 32L52 32M12 42L52 42M17 18L12 22L17 26M47 38L52 42L47 46" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -99,6 +99,7 @@ use crate::topology::brep::p2 as brep_p2;
 use crate::topology::face::p4 as face_p4;
 use crate::topology::VertexuseId;
 use crate::topology::{vertex, Brep, EdgeId, FaceId, LoopId, RegionId, ShellId, VertexId};
+use std::collections::BTreeMap;
 
 /// A pending topology allocation with attributes borrowed from a database reader.
 /// On failure/drop, detaches each attribute with native `bDoNotDelete = TRUE`
@@ -2463,6 +2464,74 @@ fn make_manifold_in(
     result
 }
 
+/// (not upstream, #18570) Whether each region of `b` is void, read from its faces: in a
+/// solid every face has material on one side and void on the other, so the flags
+/// alternate across faces, starting from the infinite region (void). A region of a
+/// hollowed body that only the cavity's faces bound is void; one that faces reach from
+/// the outside in one step is material. Regions no face reaches are left out. `None`
+/// where there is no infinite region, or where the faces do not alternate: a face with
+/// one region on both sides, or two regions a face divides that would both be void or
+/// both material.
+///
+/// # Errors
+///
+/// Those of the face, face use and shell queries.
+pub(crate) fn alternating_void_flags(b: &Brep) -> Result<Option<BTreeMap<RegionId, bool>>> {
+    let Some(infinite) = b.infinite_region() else {
+        return Ok(None);
+    };
+    let mut across: BTreeMap<RegionId, Vec<RegionId>> = BTreeMap::new();
+    for face in brep_faces(b)? {
+        let (first, last) = face_shells(b, face)?;
+        let (Some(r1), Some(r2)) = (b.shell(first)?.region, b.shell(last)?.region) else {
+            return Ok(None);
+        };
+        if r1 == r2 {
+            return Ok(None);
+        }
+        across.entry(r1).or_default().push(r2);
+        across.entry(r2).or_default().push(r1);
+    }
+    let mut void = BTreeMap::from([(infinite, true)]);
+    let mut todo = vec![infinite];
+    while let Some(region) = todo.pop() {
+        let flag = void.get(&region).copied().unwrap_or(true);
+        for &next in across.get(&region).map_or(&[][..], Vec::as_slice) {
+            match void.get(&next) {
+                Some(&other) if other == flag => return Ok(None),
+                Some(_) => {}
+                None => {
+                    void.insert(next, !flag);
+                    todo.push(next);
+                }
+            }
+        }
+    }
+    Ok(Some(void))
+}
+
+/// (not upstream, #18570) Sets each region's void flag as [`alternating_void_flags`]
+/// reads it, where it reads one; a region it does not reach, and every region where it
+/// reads none, keeps its flag. Whether any flag changed.
+///
+/// # Errors
+///
+/// Those of [`alternating_void_flags`].
+pub(crate) fn set_alternating_void_flags(b: &mut Brep) -> Result<bool> {
+    let Some(flags) = alternating_void_flags(b)? else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    for (region, is_void) in flags {
+        let value = i32::from(is_void);
+        if b.region(region)?.is_void() != value {
+            b.region_mut(region)?.set_is_void(value);
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
 /// Sets `m_bEditingEnabled`, returning the previous value.
 fn set_editing_enabled(b: &mut Brep, enabled: bool) -> bool {
     let previous = b.editing_enabled();
@@ -2556,17 +2625,21 @@ pub fn remove_topological_with_notifications(
             if b.edge(edge).is_err() {
                 continue;
             }
-            // IsTopological can expand a surface even when this edge is on the
-            // keep list. Do not move the keep-list test before this call.
+            // Not upstream (#17616): an edge on the keep list stays, so it is not tested.
+            // IsTopological's coverage test expands the covering face's surface in place
+            // and drops that face's UV trims, leaving its UV domain on the old
+            // parameterisation; only the merge below sets the domain anew. Upstream tests
+            // first, and the face of a kept edge keeps the expanded surface under its old
+            // domain: on two bends of one cylinder its trims dropped off the domain.
+            if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
+                continue;
+            }
             let Some(topological) =
                 crate::error::ignored(crate::topology::edge::is_topological(k, b, edge, 1.0))?
             else {
                 continue;
             };
             if !topological.is_topological {
-                continue;
-            }
-            if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
                 continue;
             }
             let keep = topological.surf_to_keep.ok_or_else(|| {
@@ -3496,7 +3569,7 @@ fn turn_to_nurbs(
 ) -> Result<()> {
     with_p3_notifications(k, b, notifications, |k, b, env| {
         let key_of = env.key_of;
-        let mut selection = std::collections::BTreeMap::new();
+        let mut selection = BTreeMap::new();
         for entity in brep_faces(b)?
             .into_iter()
             .map(crate::EntityRef::Face)
