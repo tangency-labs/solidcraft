@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json (default from extension; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (default false; true: each shown canvas and decal is written as a textured quad, its image next to the URDF); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); physics?: bool (OpenUSD only, default false: true also writes the joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -2521,7 +2521,7 @@ fn export_to(
         return export_glb(s, cmd, path, bodies, quality);
     }
     if written_by_cadmpeg(format) {
-        return export_cadmpeg(s, cmd, path, bodies, quality, format);
+        return export_cadmpeg(s, cmd, path, bodies, quality, format, false);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
@@ -2565,6 +2565,19 @@ fn skipped_from_warnings(warnings: &[String]) -> Vec<String> {
 /// A picture of the part, drawn only for a format that has a place for it.
 fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
     matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
+}
+
+/// `physics` as `file.export` reads it: true writes the joints, grounding and each component's
+/// mass as OpenUSD physics. Only OpenUSD takes it; `false` is accepted for any format.
+fn physics_flag(p: &Value, cmd: &str, format: Format) -> Result<bool> {
+    match p.get("physics") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => Ok(false),
+        Some(Value::Bool(true)) if format == Format::Usd => Ok(true),
+        Some(Value::Bool(true)) => {
+            Err(bad(cmd, "`physics` is for OpenUSD: URDF and SDF always write their joints and masses, and the other formats hold none"))
+        }
+        Some(_) => Err(bad(cmd, "`physics` must be true or false")),
+    }
 }
 
 /// `lay_on_print_faces` as the mesh exports read it: true writes each body with a print face laid
@@ -2674,6 +2687,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("file.export", format!("`format: {f}` disagrees with the path's extension, which names {by_path:?}")));
     }
+    // Read before URDF and SDF go their own way, so neither takes it silently.
+    let physics = physics_flag(p, cmd, format)?;
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2688,6 +2703,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let bodies = string_list(cmd, p, "bodies")?;
     if lay_on_print_faces(p, cmd, format)? {
         return export_laid(s, path, format, &bodies, &parts, quality);
+    }
+    if written_by_cadmpeg(format) {
+        return export_cadmpeg(s, cmd, path, &bodies, quality, format, physics);
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality)
 }
@@ -2954,20 +2972,37 @@ fn written_by_cadmpeg(format: Format) -> bool {
 /// cadmpeg cannot write a new FreeCAD file yet. What the view hides is written hidden. Written
 /// atomically, so a refusal or a failed write leaves a file already there as it was. What the
 /// file could not carry is in the reply's warnings, among them each body a render setup gives an
-/// image texture or optics, written with its look alone.
-fn export_cadmpeg(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, format: Format) -> Result<Value> {
+/// image texture or optics, written with its look alone. With `physics`, OpenUSD also holds the
+/// joints, grounding and each component's mass.
+fn export_cadmpeg(
+    s: &Session,
+    cmd: &str,
+    path: &str,
+    bodies: &[String],
+    quality: solidcraft_io::MeshQuality,
+    format: Format,
+    physics: bool,
+) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let world = s.world_state()?;
     // The placements the world has, uncaptured moves included, so the assembly is written where
-    // the design shows it, as chosen bodies are.
-    let doc = s.placed_document();
+    // the design shows it, as chosen bodies are; with physics written, as URDF has them, a
+    // placement the joints place is where they place it, so its joints' frames meet as the
+    // simulator starts. An export that writes no physics (chosen bodies, a placement that is not
+    // rigid) is written where the design shows it, and says nothing of joints.
+    let jointed = if physics { Some(jointed_document(s)) } else { None };
+    let (doc, held) = match jointed {
+        Some((doc, held)) if solidcraft_io::CadmpegOptions::physics_fits(&doc, bodies) => (doc, held),
+        _ => (s.placed_document(), Vec::new()),
+    };
     let hidden = solidcraft_io::Hidden {
         bodies: world.bodies.iter().filter(|b| !s.body_visible(&b.name)).map(|b| b.name.clone()).collect(),
         placements: s.visibility.hidden_occurrences.clone(),
     };
-    let options = solidcraft_io::CadmpegOptions { hidden };
+    let options = solidcraft_io::CadmpegOptions { hidden, physics };
     let (bytes, mut warnings) =
         solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
+    warnings.extend(held.iter().map(|name| held_warning(name)));
     let label = if format == Format::Usd { "OpenUSD" } else { "Rhino" };
     let bound = super::render::bound_bodies(s, cmd)?;
     for b in world.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)) {
@@ -2979,6 +3014,33 @@ fn export_cadmpeg(s: &Session, cmd: &str, path: &str, bodies: &[String], quality
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// The design with its uncaptured moves (not the exploded view, which is shown only), except
+/// for the occurrences the joint solver places: it puts them back as soon as a joint moves, so
+/// they stay where their joints place them. With the names of those left so.
+fn jointed_document(s: &Session) -> (std::borrow::Cow<'_, solidcraft_doc::Document>, Vec<String>) {
+    let moves = s.uncaptured_moves();
+    if moves.is_empty() {
+        return (std::borrow::Cow::Borrowed(&*s.doc), Vec::new());
+    }
+    let placed = solidcraft_doc::joints::solve(&s.doc, &s.model.state()).world;
+    let mut held = Vec::new();
+    let mut doc = (*s.doc).clone();
+    for o in &mut doc.occurrences {
+        match moves.get(&o.id) {
+            Some(_) if placed.contains_key(&o.id) => held.push(o.name.clone()),
+            Some(t) => o.transform = *t,
+            None => {}
+        }
+    }
+    (std::borrow::Cow::Owned(doc), held)
+}
+
+/// The warning for occurrence `name`, moved without the move captured, written where its joints
+/// place it ([`jointed_document`]).
+fn held_warning(name: &str) -> String {
+    format!("`{name}` was moved but the move is not captured: exported where its joints place it")
 }
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
@@ -3003,32 +3065,14 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     // places: it puts them back as soon as a joint moves, so the move must not become part of
     // their links.
     let st = s.model.state();
-    let mut held = Vec::new();
-    // The exploded view is shown only: the links are where the design places them.
-    let moves = s.uncaptured_moves();
-    let doc = if moves.is_empty() {
-        std::borrow::Cow::Borrowed(&*s.doc)
-    } else {
-        let placed = solidcraft_doc::joints::solve(&s.doc, &st).world;
-        let mut doc = (*s.doc).clone();
-        for o in &mut doc.occurrences {
-            match moves.get(&o.id) {
-                Some(_) if placed.contains_key(&o.id) => held.push(o.name.clone()),
-                Some(t) => o.transform = *t,
-                None => {}
-            }
-        }
-        std::borrow::Cow::Owned(doc)
-    };
+    let (doc, held) = jointed_document(s);
     let mut decal_warnings = Vec::new();
     if images {
         options.decals = urdf_decals(&doc, &st, &mut decal_warnings);
     }
     let mut pkg = solidcraft_io::urdf(&doc, &doc.painted(&st), &stem, &options)?;
     pkg.warnings.extend(decal_warnings);
-    for name in held {
-        pkg.warnings.push(format!("`{name}` was moved but the move is not captured: exported where its joints place it"));
-    }
+    pkg.warnings.extend(held.iter().map(|name| held_warning(name)));
     let dir = file.parent().unwrap_or(std::path::Path::new(""));
     let mut targets: Vec<(String, &[u8])> = pkg.meshes.iter().map(|(n, b)| (dir.join(n).to_string_lossy().to_string(), b.as_slice())).collect();
     targets.push((path.to_string(), pkg.xml.as_bytes()));

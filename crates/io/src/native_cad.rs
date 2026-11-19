@@ -407,6 +407,7 @@ mod usd;
 pub use usd::{USD_EXTS, is_usd_path};
 
 mod cadir_out;
+mod cadir_physics;
 mod export;
 
 /// What the design's view hides, for an export that writes it: bodies by their world name
@@ -423,6 +424,17 @@ pub struct Hidden {
 pub struct CadmpegOptions {
     /// What the design's view hides, written hidden.
     pub hidden: Hidden,
+    /// OpenUSD: the joints, grounding and each component's mass written as physics.
+    pub physics: bool,
+}
+
+impl CadmpegOptions {
+    /// Whether an export of `bodies` (all when empty) of `doc` writes the physics
+    /// [`Self::physics`] asks for: only the whole design, with its components, each placed
+    /// rigidly. Otherwise each body is written where the world shows it, without physics.
+    pub fn physics_fits(doc: &solidcraft_doc::Document, bodies: &[String]) -> bool {
+        bodies.is_empty() && !doc.occurrences.is_empty() && doc.occurrences.iter().all(|o| solidcraft_doc::is_placement(&o.transform))
+    }
 }
 pub(crate) use export::FREECAD_REFUSED;
 

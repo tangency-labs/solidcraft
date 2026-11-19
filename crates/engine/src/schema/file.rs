@@ -204,6 +204,10 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// OpenUSD only: also write the joints, the grounded placements and each component's mass as
+    /// OpenUSD physics, for a simulator. Default: false.
+    #[serde(default)]
+    pub physics: Option<bool>,
     /// SDF only: the model's name. Default: the folder's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -285,6 +289,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             images: None,
             lay_on_print_faces: None,
+            physics: None,
             name: None,
             is_static: None,
             model_uris: None,
@@ -302,6 +307,16 @@ impl<'de> Deserialize<'de> for ExportParams {
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
+        // Read before URDF and SDF read their own keys, as the handler reads it.
+        out.physics = match m.get("physics") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(false)) => Some(false),
+            Some(Value::Bool(true)) if format == Format::Usd => Some(true),
+            Some(Value::Bool(true)) => {
+                return Err(refuse("`physics` is for OpenUSD: URDF and SDF always write their joints and masses, and the other formats hold none"));
+            }
+            Some(_) => return Err(refuse("`physics` must be true or false")),
+        };
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;

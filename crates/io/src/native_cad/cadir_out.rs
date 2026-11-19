@@ -168,6 +168,11 @@ pub(crate) fn design_for(
     }
     let structured = assembly && writes.products;
     let unplaced = doc.occurrences.iter().find(|o| !solidcraft_doc::is_placement(&o.transform));
+    b.physics = options.physics && writes.products && CadmpegOptions::physics_fits(doc, bodies);
+    if options.physics && !b.physics {
+        b.warnings
+            .push("joints and mass are written only for the whole design with its components and rigid placements: no physics is written".into());
+    }
     match (structured, unplaced) {
         (true, None) => b.assembly(model, &root)?,
         (true, Some(o)) => {
@@ -224,6 +229,10 @@ struct Builder<'a> {
     quality: MeshQuality,
     writes: Writes,
     hidden: &'a super::Hidden,
+    /// Joints, grounding and mass written ([`super::cadir_physics`]).
+    physics: bool,
+    /// Each component's bodies' masses in its frame, when [`Self::physics`].
+    masses: HashMap<u64, Vec<crate::urdf::BodyMass>>,
     ir: CadIr,
     warnings: Vec<String>,
     looks: HashMap<LookKey, AppearanceId>,
@@ -242,6 +251,8 @@ impl<'a> Builder<'a> {
             quality,
             writes,
             hidden,
+            physics: false,
+            masses: HashMap::new(),
             ir: CadIr::empty(),
             warnings: Vec::new(),
             looks: HashMap::new(),
@@ -324,6 +335,21 @@ impl<'a> Builder<'a> {
             }
         }
         Ok(())
+    }
+
+    /// The mass of body `b` (its geometry `geometry` in its component's frame) for component
+    /// `component`, from its material's density and its closed mesh; a body that does not close
+    /// adds none, with a warning.
+    fn add_mass(&mut self, b: &ModelBody, geometry: &solidcraft_kernel::Body, component: u64) {
+        match crate::mass_properties(geometry) {
+            Ok(Some(mp)) => {
+                // g/cm³ to kg/mm³.
+                let rho = self.doc.density(&b.name) * 1e-6;
+                self.masses.entry(component).or_default().push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
+            }
+            Ok(None) => self.warnings.push(format!("{}: not a closed solid: it adds no mass", clean(&b.name).unwrap_or_else(|| "a body".into()))),
+            Err(e) => self.warnings.push(format!("{}: its mass could not be measured: {e}", clean(&b.name).unwrap_or_else(|| "a body".into()))),
+        }
     }
 
     /// Body `id` written hidden.
@@ -464,6 +490,9 @@ impl<'a> Builder<'a> {
                     ));
                 }
                 list.push(id);
+                if self.physics {
+                    self.add_mass(b, framed.as_ref().unwrap_or(&b.body), owner);
+                }
             }
         }
         let mut definitions = Vec::with_capacity(names.len());
@@ -491,6 +520,7 @@ impl<'a> Builder<'a> {
         let mut cut = !doc.placements_complete();
         let first = self.occurrence(0, &design, OccurrenceParent::Root {}, 0, Transform::identity(), Some(root.to_string()))?;
         let mut stack = vec![(0u64, first, Vec::new())];
+        let mut placed_ids: HashMap<Vec<u64>, cadmpeg_ir::ids::OccurrenceId> = HashMap::new();
         let mut made = 1usize;
         while let Some((component, parent, path)) = stack.pop() {
             for (ordinal, o, definition) in children.get(&component).into_iter().flatten() {
@@ -511,6 +541,7 @@ impl<'a> Builder<'a> {
                 {
                     occurrence.visible = Some(false);
                 }
+                placed_ids.insert(placed.clone(), id.clone());
                 stack.push((o.component, id, placed));
             }
         }
@@ -520,6 +551,16 @@ impl<'a> Builder<'a> {
                 solidcraft_doc::MAX_PLACEMENT_DEPTH,
                 solidcraft_doc::MAX_PLACEMENTS
             ));
+        }
+        if self.physics {
+            let components: HashMap<u64, ProductDefinitionId> =
+                keys.iter().filter_map(|(component, key)| definitions.get(*key).map(|d| (*component, d.clone()))).collect();
+            let physics = super::cadir_physics::build(doc, model, &placed_ids, &components, &self.masses)?;
+            self.warnings.extend(physics.warnings);
+            self.ir.model.assembly_joints.extend(physics.joints);
+            self.ir.model.mass_properties.extend(physics.masses);
+            self.ir.model.rigid_bodies.extend(physics.rigid_bodies);
+            self.ir.model.physics_scenes.extend(physics.scenes);
         }
         Ok(())
     }

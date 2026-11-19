@@ -391,3 +391,145 @@ fn hidden_bodies_are_invisible_and_render_setup_optics_warn() {
     assert!(!prim(&text, "Glass").contains(invisible), "Glass stays shown:\n{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The value of the attribute that `line` (such as `float physics:mass =`) starts, in `text`
+/// after `from`.
+fn value_after(text: &str, from: usize, line: &str) -> Vec<f64> {
+    let rest = &text[from..];
+    let at = rest.find(line).unwrap_or_else(|| panic!("no `{line}` after {from}:\n{text}"));
+    let value = rest[at + line.len()..].lines().next().unwrap_or_default();
+    value.split(['(', ')', ',']).filter_map(|v| v.trim().parse().ok()).collect()
+}
+
+/// With `physics`, a jointed placement moved without capturing the move is written where its
+/// joints place it, as URDF export writes it, with URDF's warning, so its joint's frames meet as a
+/// simulator starts: the file is the one written before the move.
+#[test]
+fn a_physics_export_writes_jointed_parts_where_their_joints_place_them() {
+    let dir = temp_dir("physics-moved");
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = s.doc.occurrence_of(s.doc.find_component("A").unwrap()).unwrap().id;
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "revolute", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Hinge"}));
+    let before = dir.join("before.usda");
+    run(&mut s, "file.export", json!({"path": before.to_string_lossy(), "physics": true}));
+    let b = s.doc.occurrence_of(s.doc.find_component("B").unwrap()).unwrap();
+    let (id, name) = (b.id, b.name.clone());
+    let mut moved = b.transform;
+    moved[3][0] += 20.0;
+    s.pending_moves.insert(id, moved);
+    let after = dir.join("after.usda");
+    let reply = run(&mut s, "file.export", json!({"path": after.to_string_lossy(), "physics": true}));
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
+    assert!(
+        warnings.iter().any(|w| w == &format!("`{name}` was moved but the move is not captured: exported where its joints place it")),
+        "{warnings:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&after).unwrap(), std::fs::read_to_string(&before).unwrap());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// With `physics`, an export of chosen bodies writes no physics, so a jointed placement moved
+/// without capturing the move is written where the design shows it, as without `physics`, and
+/// nothing says it was exported where its joints place it.
+#[test]
+fn a_physics_export_of_chosen_bodies_writes_them_where_they_are_shown() {
+    let dir = temp_dir("physics-chosen");
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = s.doc.occurrence_of(s.doc.find_component("A").unwrap()).unwrap().id;
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "revolute", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Hinge"}));
+    let b = s.doc.occurrence_of(s.doc.find_component("B").unwrap()).unwrap();
+    let id = b.id;
+    let mut moved = b.transform;
+    moved[3][0] += 20.0;
+    s.pending_moves.insert(id, moved);
+    let world = s.world_state().unwrap();
+    let body = world.bodies.iter().find(|b| solidcraft_kernel::measure(&b.body).unwrap().bbox.min.x > 15.0).expect("the moved body").name.clone();
+    let export = |s: &mut Session, name: &str, physics: bool| {
+        let path = dir.join(name);
+        let reply = run(s, "file.export", json!({"path": path.to_string_lossy(), "bodies": [body.clone()], "physics": physics}));
+        let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
+        (std::fs::read_to_string(&path).unwrap(), warnings)
+    };
+    let (with, warnings) = export(&mut s, "with.usda", true);
+    assert!(!warnings.iter().any(|w| w.contains("exported where its joints place it")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("no physics is written")), "{warnings:?}");
+    let (without, _) = export(&mut s, "without.usda", false);
+    assert_eq!(with, without);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// With `physics`, the joints, the grounded placement and each component's mass are written as
+/// OpenUSD physics: a revolute joint with its limits in degrees, the grounded placement fixed to
+/// the world, and a 10 mm cube's mass, centre and inertia from its density. A joint with no
+/// OpenUSD form is left out with a warning. Without `physics`, none of it is written.
+#[test]
+fn physics_writes_joints_grounding_and_mass() {
+    let dir = temp_dir("physics");
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = s.doc.occurrence_of(s.doc.find_component("A").unwrap()).unwrap().id;
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "limits": [[-0.5, 1.0]], "name": "Hinge"}),
+    );
+    run(&mut s, "joint.create", json!({"type": "pin_slot", "a": {"face": [25, 5, 10]}, "b": {"face": [45, 5, 0]}, "name": "Slot"}));
+    let path = dir.join("physics.usda");
+    let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "physics": true}));
+    let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap();
+    assert!(warnings.iter().any(|w| w.starts_with("joint `Slot`: a PinSlot joint has no OpenUSD physics form")), "{warnings:?}");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(text.matches("def PhysicsRevoluteJoint").count(), 1, "{text}");
+    assert_eq!(text.matches("def PhysicsFixedJoint").count(), 1, "the grounded A:\n{text}");
+    let hinge = text.find("def PhysicsRevoluteJoint").unwrap();
+    let lower = value_after(&text, hinge, "float physics:lowerLimit = ");
+    let upper = value_after(&text, hinge, "float physics:upperLimit = ");
+    // `joint.create` takes the limits in degrees, as written.
+    let saved = s.doc.assembly.joints.iter().find(|j| j.name == "Hinge").unwrap().limits[0].unwrap();
+    assert!((saved.0.to_degrees() + 0.5).abs() < 1e-9 && (saved.1.to_degrees() - 1.0).abs() < 1e-9, "{saved:?}");
+    assert!((lower[0] + 0.5).abs() < 1e-4 && (upper[0] - 1.0).abs() < 1e-4, "{lower:?} {upper:?}");
+    // B: a 10 mm cube (1 cm³) of its material's density (g/cm³), centred at (25, 5, 5) mm in its
+    // frame; about its centre each moment is m a² / 6. The stage is in kg and metres.
+    let body = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == s.doc.find_component("B").unwrap()).unwrap().name.clone();
+    let mass = s.doc.density(&body) * 1e-3;
+    let b = text.find("\"B").unwrap_or_else(|| panic!("no B prim:\n{text}"));
+    let got = value_after(&text, b, "float physics:mass = ");
+    assert!((got[0] - mass).abs() < 1e-6 * mass.max(1.0), "{got:?} is not {mass}");
+    let com = value_after(&text, b, "point3f physics:centerOfMass = ");
+    assert_eq!(com.len(), 3, "{com:?}");
+    for (g, w) in com.iter().zip([0.025, 0.005, 0.005]) {
+        assert!((g - w).abs() < 1e-6, "{com:?}");
+    }
+    let inertia = value_after(&text, b, "float3 physics:diagonalInertia = ");
+    assert_eq!(inertia.len(), 3, "{inertia:?}");
+    let moment = mass * 0.01 * 0.01 / 6.0;
+    for g in &inertia {
+        assert!((g - moment).abs() < 1e-3 * moment, "{inertia:?} is not {moment} each");
+    }
+
+    let plain = dir.join("plain.usda");
+    run(&mut s, "file.export", json!({"path": plain.to_string_lossy()}));
+    let text = std::fs::read_to_string(&plain).unwrap();
+    assert!(!text.contains("Physics"), "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

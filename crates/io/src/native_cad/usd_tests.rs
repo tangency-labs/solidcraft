@@ -764,7 +764,7 @@ fn placements_of_missing_components_keep_the_others_ordinals() {
 /// hides written hidden.
 fn usda_hidden(doc: &Document, model: &Model, bodies: &[String], hidden: &crate::Hidden) -> (String, Vec<String>) {
     let world = solidcraft_doc::world_state(doc, &model.state()).unwrap();
-    let options = crate::CadmpegOptions { hidden: hidden.clone() };
+    let options = crate::CadmpegOptions { hidden: hidden.clone(), ..Default::default() };
     let (bytes, warnings) =
         crate::usd_from_design(doc, &model.state(), &world, bodies, &options, "design.usda", crate::MeshQuality::Standard).unwrap();
     (String::from_utf8(bytes).unwrap(), warnings)
@@ -854,4 +854,26 @@ fn an_only_body_keeps_its_name_when_placed_once() {
     assert!(text.contains("defaultPrim = \"Box\""), "{text}");
     let at = text.find("def Xform \"Box\"").unwrap_or_else(|| panic!("no prim Box:\n{text}"));
     assert!(text[at..].contains(&format!("def Xform \"{body}\"")), "{text}");
+}
+
+/// With physics, a frame placed twice grounds its grounded needle in both placements, as the
+/// design does, and every placement of a part with mass is a rigid body, joined or not: the two
+/// frames and the four needles.
+#[test]
+fn physics_grounds_every_placement_and_makes_each_placement_a_rigid_body() {
+    let (mut doc, _) = galvanometer();
+    let frame = doc.find_component("Frame").unwrap();
+    doc.add_occurrence(frame, 0, solidcraft_doc::rigid(Vec3::new(0.0, 200.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    // Only the needle is grounded (the design grounds its first part, the frame, by itself).
+    let needle = doc.find_component("Needle").unwrap();
+    doc.occurrences.iter_mut().for_each(|o| o.grounded = false);
+    doc.occurrences.iter_mut().find(|o| o.component == needle).unwrap().grounded = true;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let world = solidcraft_doc::world_state(&doc, &model.state()).unwrap();
+    let options = crate::CadmpegOptions { physics: true, ..Default::default() };
+    let built = super::super::cadir_out::design(&doc, &model.state(), &world, &[], &options, "design", crate::MeshQuality::Standard).unwrap();
+    let grounded = built.ir.model.assembly_joints.iter().filter(|j| j.native_ref.as_deref().is_some_and(|r| r.ends_with(" grounded"))).count();
+    assert_eq!(grounded, 2, "{:?}", built.warnings);
+    assert_eq!(built.ir.model.rigid_bodies.len(), 6, "{:?}", built.warnings);
 }
