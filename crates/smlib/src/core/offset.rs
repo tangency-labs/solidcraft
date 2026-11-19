@@ -325,7 +325,7 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
             Err(e) => Err(e),
         };
         match shelled {
-            Err(e) if is_bare_failure(&e) => match outline_touch(k, &w)? {
+            Err(e) if is_bare_failure(&e) => match solidcore_ops::offset::outline_touch(k, &w)? {
                 Some(at) => Ok(Err(Error::OutlineTouches { at })),
                 None => Ok(Err(e)),
             },
@@ -341,68 +341,6 @@ fn is_bare_failure(e: &Error) -> bool {
         e,
         Error::Status(_) | Error::Solidcore(_) | Error::NotSolid | Error::Exception | Error::Refused(solidcore_ops::Error::OffsetRefused { .. })
     )
-}
-
-/// (#18568) Where a face of `b` has an outline that touches itself: a loop that passes through
-/// one vertex twice (not a seam's end), or a vertex of one loop that is a vertex of another
-/// loop of the face too, or lies on one of its edges within the vertex's and the edge's
-/// tolerances (exact distances to the edges' curves). The first such vertex's point, if any.
-fn outline_touch(k: &Kernel, b: &Brep) -> solidcore::Result<Option<[f64; 3]>> {
-    use solidcore::topology::edgeuse::p1 as eu1;
-    use solidcore::topology::{edge, vertex};
-    for f in brep_p1::faces(b, None)? {
-        let Some(fu) = b.face(f)?.faceuse else { continue };
-        let loopuses = eu1::faceuse_loopuses(b, fu, false, None)?;
-        // each loop's vertices and edges
-        let mut loops = Vec::new();
-        for lu in loopuses {
-            let (mut vertices, mut edges) = (Vec::new(), Vec::new());
-            // each edge use's edge and the vertex it starts at
-            for eu in eu1::loopuse_edgeuses(b, lu)? {
-                let start = match eu1::vertexuse(b, eu)? {
-                    Some(vu) => b.vertexuse(vu)?.vertex,
-                    None => None,
-                };
-                if let (Some(e), Some(v)) = (b.edgeuse(eu)?.edge, start) {
-                    edges.push(e);
-                    vertices.push(v);
-                }
-            }
-            // A loop through one vertex twice pinches there, unless it is a seam's end: the
-            // seam's edge in the loop twice, once each way.
-            for (n, &v) in vertices.iter().enumerate() {
-                let again = vertices.iter().skip(n + 1).any(|&w| w == v);
-                let seam_end = edges.iter().zip(&vertices).any(|(e, &w)| w == v && edges.iter().filter(|&f| f == e).count() > 1);
-                if again && !seam_end {
-                    let p = vertex::point(b, v)?;
-                    return Ok(Some([p.x, p.y, p.z]));
-                }
-            }
-            loops.push((vertices, edges));
-        }
-        for (i, (vertices, _)) in loops.iter().enumerate() {
-            for (j, (others, edges)) in loops.iter().enumerate() {
-                if i == j {
-                    continue;
-                }
-                for &v in vertices {
-                    let p = vertex::point(b, v)?;
-                    if others.contains(&v) {
-                        return Ok(Some([p.x, p.y, p.z]));
-                    }
-                    let reach = vertex::tolerance(b, v)?;
-                    for &e in edges {
-                        // an edge the point does not drop onto is not touched
-                        let Ok(near) = solidcore::query::api_queries::edge_closest_point(k, b, e, p) else { continue };
-                        if near.closest.distance <= reach + edge::tolerance(b, e)? {
-                            return Ok(Some([p.x, p.y, p.z]));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(None)
 }
 
 /// `smlib_offset_faces`: its checks, the pick, the solid check, (moving faces in) the cavity
