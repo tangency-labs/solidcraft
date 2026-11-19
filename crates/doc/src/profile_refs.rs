@@ -148,6 +148,7 @@ fn is_analytic(sketch: &solidcraft_sketch::Sketch, id: &str) -> bool {
                 solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Arc { .. } | solidcraft_sketch::CurveKind::Circle { .. }
             )
     }) && !sketch.freeform_offsets.iter().any(|offset| offset.output == id)
+        && !sketch.freeform_chain_offsets.iter().any(|offset| offset.outputs.iter().any(|out| out == id))
 }
 
 /// A loop made only of analytic curves: how many pieces each is cut into does not matter.
@@ -191,7 +192,10 @@ fn fallback_loop(ss: &SolvedSketch, curves: &[String]) -> Option<(Vec<usize>, St
     if stored.is_empty() || stored.len() != curves.len() || curves.len() > 512 || ss.profiles.len() > 10_000 {
         return None;
     }
-    if stored.iter().any(|id| sketch.freeform_offsets.iter().any(|offset| offset.output == *id)) {
+    if stored.iter().any(|id| {
+        sketch.freeform_offsets.iter().any(|offset| offset.output == *id)
+            || sketch.freeform_chain_offsets.iter().any(|offset| offset.outputs.iter().any(|out| out == *id))
+    }) {
         return None;
     }
     let from_offset = stored.iter().any(|id| sketch.offsets.iter().any(|offset| offset.owns_output(id)));

@@ -359,6 +359,153 @@ fn certify_in_plane(net: &Net, e: Vec3, plane: &Plane) -> bool {
     })
 }
 
+/// Only a certified coincident profile bypasses transverse planar classification:
+/// distinct roots of a transverse profile may sweep overlapping pieces of one line.
+pub(super) fn generator_in_plane(gen: &Curve, e: Vec3, plane: &Plane) -> bool {
+    net_points(gen).is_some_and(|net| certify_in_plane(&net, e, plane))
+}
+
+/// Proves a crossing of the complete generator at sweep parameter zero. Opposite
+/// endpoint signs give a root by continuity; positive weights keep its plane UV
+/// coordinates in the control hull, which must fit the requested plane domain.
+pub(super) fn generator_crosses_plane(
+    gen: &Curve,
+    e: Vec3,
+    plane: &Plane,
+    domain: &Extent2d,
+) -> bool {
+    let Ok(base) = gen_base(gen) else {
+        return false;
+    };
+    let Ok(canon) = base.canonical() else {
+        return false;
+    };
+    let ivl = gen.natural_interval();
+    let clamped = canon.knots.first() == Some(&ivl.min())
+        && canon.knots.last() == Some(&ivl.max())
+        && canon
+            .knot_multiplicities
+            .first()
+            .is_some_and(|&m| m > canon.degree)
+        && canon
+            .knot_multiplicities
+            .last()
+            .is_some_and(|&m| m > canon.degree);
+    // Full interior multiplicity can jump between opposite signs without a root.
+    let continuous = ivl.min() < ivl.max()
+        && canon
+            .knot_multiplicities
+            .get(1..canon.knot_multiplicities.len().saturating_sub(1))
+            .is_some_and(|interior| interior.iter().all(|&m| m <= canon.degree));
+    if !clamped || !continuous {
+        return false;
+    }
+    let Some(net) = net_points(gen) else {
+        return false;
+    };
+    let Some(frame) = Frame::new(plane, e, 0.0) else {
+        return false;
+    };
+    let normal = Affine {
+        d: plane.position().z_axis(),
+        o: frame.o,
+        c: 0.0,
+    };
+    let (Some(&(a, ea)), Some(&(b, eb))) = (net.pts.first(), net.pts.last()) else {
+        return false;
+    };
+    let (fa, ra) = normal.at(a, ea);
+    let (fb, rb) = normal.at(b, eb);
+    if !((fa > ra && fb < -rb) || (fb > rb && fa < -ra)) {
+        return false;
+    }
+    net.pts.iter().all(|&(p, err)| {
+        [
+            (frame.du, domain.min().x, domain.max().x),
+            (frame.dw, domain.min().y, domain.max().y),
+        ]
+        .into_iter()
+        .all(|(d, lo, hi)| {
+            let (value, error) = Affine {
+                d,
+                o: frame.o,
+                c: 0.0,
+            }
+            .at(p, err);
+            value - error >= lo && value + error <= hi
+        })
+    })
+}
+
+/// Bounds the whole output curve using the same control-net enclosure as patches.
+pub(super) fn curve_plane_deviation(curve: &Curve, plane: &Plane) -> Option<f64> {
+    plane_deviation(&net_points(curve)?, plane)
+}
+
+/// Bounds the whole output curve's distance to the bounded source extrusion.
+/// Each generator witness defines one segment wholly on the source. Distance to
+/// that fixed convex segment is convex, so bounds at the certified output hull's
+/// vertices also bound every point in its hull, hence every curve point. Each
+/// segment supplies a whole-curve bound; the smallest of those bounds is valid.
+pub(super) fn curve_source_deviation(
+    curve: &Curve,
+    witnesses: &[(Point3, f64)],
+    e: Vec3,
+    sweep: Extent1d,
+) -> Option<f64> {
+    let finite_point = |p: Point3| [p.x, p.y, p.z].iter().all(|x| x.is_finite());
+    let e2 = e.dot(e);
+    if witnesses.is_empty()
+        || !finite_point(e)
+        || !e2.is_finite()
+        || e2 <= 0.0
+        || !sweep.min().is_finite()
+        || !sweep.max().is_finite()
+        || sweep.min() > sweep.max()
+    {
+        return None;
+    }
+    let hull = curve.piece_hull_points(&curve.natural_interval())?;
+    if hull.is_empty() {
+        return None;
+    }
+    let mut best = f64::INFINITY;
+    for &(c, gen_err) in witnesses {
+        if !finite_point(c) || !gen_err.is_finite() || gen_err < 0.0 {
+            return None;
+        }
+        let mut worst = 0.0_f64;
+        for &(p, hull_err) in &hull {
+            if !finite_point(p) || !hull_err.is_finite() || hull_err < 0.0 {
+                return None;
+            }
+            let projection = (p - c).dot(e) / e2;
+            if !projection.is_finite() {
+                return None;
+            }
+            // Any computed parameter inside the segment gives a valid witness;
+            // its projection error cannot invalidate the distance upper bound.
+            let v = projection.max(sweep.min()).min(sweep.max());
+            let q = c + v * e;
+            if !finite_point(q) {
+                return None;
+            }
+            // L1 bounds Euclidean distance. Three coordinate errors cover each
+            // certified point; gamma(16) covers the affine witness, subtraction
+            // and absolute-coordinate sums. Widen the assembled bound as well.
+            let scale = norm1(p) + norm1(c) + v.abs() * norm1(e);
+            let bound =
+                (norm1(p - q) + 3.0 * (gen_err + hull_err) + gamma(16) * scale) * (1.0 + gamma(8));
+            if !bound.is_finite() {
+                return None;
+            }
+            worst = worst.max(bound);
+        }
+        best = best.min(worst);
+    }
+    best.is_finite().then_some(best)
+}
+
 /// Bounds distance to the plane on the whole positive-weight control net, by
 /// convexity. Keep the profile's bound even for boundaries made on the plane:
 /// those boundaries can still be that far from the extrusion. Dividing by the

@@ -113,6 +113,24 @@ mod tests {
     use crate::{BoolOp, boolean, cylinder, torus};
     use solidcraft_geom::prelude::*;
 
+    #[test]
+    fn selected_faces_skip_exact_conversion_for_either_mesh_operand() {
+        let mesh = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y], &[[0, 1, 2]]).unwrap();
+        let exact = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let mut unavailable = exact.clone();
+        // A cached refusal is how ops_body represents a B-rep it could not convert.
+        unavailable.ops = std::sync::Arc::new(std::sync::OnceLock::from(None));
+        assert!(mesh.is_mesh() && !unavailable.is_mesh());
+        for (a, b) in [(&mesh, &unavailable), (&unavailable, &mesh)] {
+            assert_eq!(crate::faces_closest(a, &[0], b, &[0]).unwrap(), None);
+        }
+        for (a, b) in [(&exact, &unavailable), (&unavailable, &exact)] {
+            assert!(
+                matches!(crate::faces_closest(a, &[0], b, &[0]), Err(crate::KernelError::Failed(message)) if message.contains("exact measurement is unavailable"))
+            );
+        }
+    }
+
     /// The selected sides of nested cylinders are their radii apart; whole-body distance
     /// would instead see coincident caps. Both witnesses belong to the selected surfaces.
     #[test]

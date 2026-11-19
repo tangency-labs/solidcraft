@@ -62,3 +62,52 @@ fn issue1557_failed_radius_keeps_the_existing_rounds() {
     assert_eq!(s.undo.len(), undo);
     assert!((volume(&mut s) - v).abs() < 1e-6);
 }
+
+/// A cylinder of diameter `d` and height `h` with a square notch cut into its top rim (4.8 x 4.8
+/// for d = 40, scaled with d), its top face's outer loop rounded with radius `r`. Returns the
+/// volume before and after the round.
+fn notched_rim_round(d: f64, h: f64, r: f64) -> (f64, f64) {
+    let k = d / 40.0;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": d, "height": h, "operation": "new", "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "NotchSketch1", "offset": h}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0.0, 20.0 * k], "corner": [2.4 * k, 22.4 * k]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let notch = json!({"sketch": "NotchSketch1", "distance": 20.0 * k, "direction": "negative", "operation": "cut", "targets": ["Base"]});
+    run(&mut s, "solid.extrude", notch);
+    let measure = |s: &mut Session| {
+        let value = run(s, "inspect.measure", json!({}));
+        assert_eq!(value["body_count"], 1, "{value}");
+        assert_eq!(value["bodies"][0]["closed"], true, "{value}");
+        assert_eq!(value["bodies"][0]["notes"], json!([]), "{value}");
+        let state = s.model.state();
+        let body = &state.body("Base").unwrap().body;
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        value["total"]["volume_mm3"].as_f64().unwrap()
+    };
+    let before = measure(&mut s);
+    let rim = [-18.7938524157 * k, -6.84040286651 * k, h];
+    let edges = json!([rim, [2.4 * k, 18.8 * k, h], [-2.4 * k, 18.8 * k, h], [0.0, 17.6 * k, h]]);
+    let out = s.execute("solid.fillet", &json!({"edges": edges, "radius": r, "body": "Base"}));
+    if let Err(e) = out {
+        panic!("d {d} h {h} r {r}: {e}");
+    }
+    (before, measure(&mut s))
+}
+
+/// #18543: the top loop of a cylinder with a square notch in its rim (the rim, then in and out
+/// around the notch) is rounded, at the sizes it was refused at with "the fillet is larger than
+/// the faces beside its edges allow; no smaller radius builds either". A convex round of radius r
+/// along a loop of length L takes (1 - pi/4) r^2 L; the loop is the rim less the notch's mouth
+/// plus the notch's three walls, about 2 pi R + 4.7 k for notch scale k.
+/// (A long thin one, d 1 x 1000, is still refused: "the rounds would leave openings".)
+#[test]
+fn issue18543_the_top_loop_of_a_cylinder_with_a_notch_in_its_rim_is_rounded() {
+    for (d, h, r) in [(40.0, 60.0, 1.0), (40.0, 60.0, 0.3), (3.0, 4.5, 0.075), (1.0, 1.5, 0.025), (1200.0, 1800.0, 30.0)] {
+        let (before, after) = notched_rim_round(d, h, r);
+        let k = d / 40.0;
+        let full = (1.0 - std::f64::consts::FRAC_PI_4) * r * r * (std::f64::consts::PI * d + 4.7 * k);
+        let taken = before - after;
+        assert!(taken > 0.5 * full && taken < 1.2 * full, "d {d} h {h} r {r}: took {taken} of about {full}");
+    }
+}

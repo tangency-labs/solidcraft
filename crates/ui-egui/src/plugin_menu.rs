@@ -960,6 +960,11 @@ impl EntryDialog {
     }
 }
 
+/// Whether a plugin command that edits this design has an open dialog.
+pub(crate) fn editing_dialog_open(app: &SolveApp) -> bool {
+    app.plugin_menu.dialogs.iter().any(|dialog| dialog.session == app.session.uid && !dialog.read && dialog.opens.is_none())
+}
+
 /// The dialog the viewport previews, and the `plugin.run` it previews: the dialog picking in the
 /// viewport, else the most recently opened one, when it is a command that edits the design on
 /// this design, has Preview on, is not running and its fields make parameters. `None` while a

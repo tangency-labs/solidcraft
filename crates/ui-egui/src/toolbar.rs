@@ -652,6 +652,16 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     }
 }
 
+/// The Drawing tool `key` starts on a drawing's sheet (`on_sheet`): the one that does there what
+/// the sketch tool bound to the key does in a sketch. None while a sheet sketch is being edited,
+/// where the key is the sketch's own.
+fn sheet_tool(app: &SolveApp, on_sheet: bool, key: &str) -> Option<&'static str> {
+    if !on_sheet || app.session.active_sketch.is_some() {
+        return None;
+    }
+    crate::keymap::commands_for(app, key).into_iter().find_map(crate::drawing_workspace::counterpart)
+}
+
 /// Whether the design is on screen: viewport/menu editing stays disabled behind File.
 /// File owns its explicit Save/Save As/export actions and returns to the design before dispatch.
 pub fn design_shown(app: &SolveApp) -> bool {
@@ -2682,7 +2692,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             // As in a sketch: the first Esc drops the Dimension tool's picks, the next leaves it.
             if cancel_unfinished(app)
                 || crate::drawing_workspace::dimension::clear_picks(app)
-                || crate::drawing_workspace::close_panel(app)
+                || crate::drawing_workspace::escape_panel(app)
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
@@ -2733,6 +2743,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     let key = crate::keymap::key_name(k, mods);
                     if drawing_history && crate::keymap::command_for(app, &key) == Some("select.all") {
                         crate::keymap::press(app, &key, repeat);
+                    } else if let Some(tool) = sheet_tool(app, drawing_history, &key) {
+                        app.start(tool);
                     }
                 }
                 // Ctrl+W closes the view shown, and the design with it when that is its only view;
@@ -2759,6 +2771,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::S => save(app),
                 _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
+            continue;
+        }
+        // On a drawing's sheet, a sketch tool's key starts the tool that does its job there: the
+        // Dimension key (D by default, or the key it was rebound to) starts Dimension.
+        if let Some(tool) = sheet_tool(app, drawing_history, &crate::keymap::key_name(k, mods)) {
+            app.start(tool);
             continue;
         }
         if !shown {
