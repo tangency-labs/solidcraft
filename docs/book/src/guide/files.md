@@ -80,9 +80,13 @@ panel, and in the right-click menu of a body) open the same dialog with that for
 the selected bodies as STL, OBJ, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
 
+**File → Export OBJ…** opens the file picker and exports every body. With an empty Export file
+name template, it offers the design's name. To choose bodies or deliberately allow missing
+bodies for an OBJ, explicitly open **Save As Mesh** and choose **OBJ** as the format.
+
 STL, OBJ and 3MF exports fail if any selected body cannot mesh, naming the body and failing
 face. No output file is replaced in that case. To deliberately export the remaining bodies,
-tick **Allow missing bodies (report each skipped body)** in the export dialog. The result
+tick **Allow missing bodies (report each skipped body)** in **Save As Mesh**. The result
 lists every skipped body and its face diagnostic. This choice starts off for each export.
 Scripts use `allow_missing: true` with `file.export`, `file.export_stl`, `file.export_obj`,
 `file.export_3mf` or `file.save_mesh`; the reply's `skipped` and `warnings` list the omissions.
