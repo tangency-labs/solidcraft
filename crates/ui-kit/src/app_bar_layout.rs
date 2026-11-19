@@ -383,6 +383,8 @@ pub mod application {
         pub actions: Vec<Option<f32>>,
         pub quick_separator: Option<f32>,
         pub quick: Option<(f32, f32)>,
+        /// Index into the host's quick list and its independently placed centre.
+        pub quick_slots: Vec<(usize, f32)>,
         pub documents_separator: f32,
         pub tabs_start: f32,
         pub controls_left: f32,
@@ -523,6 +525,10 @@ pub mod application {
         if complete && needed <= clean(width) - clean(captions_left) - clean(captions_right) {
             return established;
         }
+        fitted_spec(width, captions_left, captions_right, m, old)
+    }
+
+    fn fitted_spec(width: f32, captions_left: f32, captions_right: f32, m: Measurements, old: Policy) -> Spec {
         let mut items = vec![Item::new("logo", Zone::Start, &[HOME_MIN.max(36.0 + clean(m.name) + NAME_GAP + 20.0) - 20.0, 36.0], 0).locked()];
         if let Some(w) = m.leading {
             items.push(Item::new("leading", Zone::Start, &[clean(w) + 8.0], 85));
@@ -580,6 +586,86 @@ pub mod application {
         }
     }
 
+    /// Apply the saved movable list to the measured slots. Default lists retain the established
+    /// geometry; customised lists use the same fitting engine with independent slots.
+    pub fn spec_with_items(
+        dimensions: (f32, f32, f32),
+        m: Measurements,
+        saved: &crate::app_bar_items::Layout,
+        action_ids: &[&str],
+        quick_ids: &[&str],
+        pill_ids: &[&str],
+    ) -> Spec {
+        use crate::app_bar_items::{Layout, Zone as SavedZone};
+        let defaults = Layout::default_for(quick_ids.iter().copied());
+        let mut saved = saved.clone();
+        saved.sanitize(&defaults);
+        let (width, left, right) = dimensions;
+        if [SavedZone::Start, SavedZone::End].into_iter().all(|zone| {
+            saved
+                .items
+                .iter()
+                .filter(|p| p.zone == zone && defaults.items.iter().any(|d| d.id == p.id))
+                .eq(defaults.items.iter().filter(|p| p.zone == zone))
+        }) {
+            return spec(width, left, right, m);
+        }
+        let established = established_spec(width, left, right, m.clone());
+        let Some(policy) = established.application else { return spec(width, left, right, m) };
+        let mut spec = fitted_spec(width, left, right, m, policy);
+        let slots = std::mem::take(&mut spec.items);
+        let stable = |id: &str| -> String {
+            if let Some(i) = id.strip_prefix("action:").and_then(|s| s.parse::<usize>().ok()) {
+                return action_ids.get(i).copied().unwrap_or("").to_string();
+            }
+            if let Some(i) = id.strip_prefix("quick:").and_then(|s| s.parse::<usize>().ok()) {
+                return quick_ids.get(i).map(|id| format!("quick:{id}")).unwrap_or_default();
+            }
+            if let Some(i) = id.strip_prefix("pill:").and_then(|s| s.parse::<usize>().ok()) {
+                return pill_ids.get(i).copied().unwrap_or("").to_string();
+            }
+            id.to_string()
+        };
+        let movable = |zone| {
+            saved
+                .items
+                .iter()
+                .filter(move |p| p.zone == zone && p.shown)
+                .filter_map(|p| {
+                    let mut item = slots
+                        .iter()
+                        .find(|s| {
+                            stable(&s.id) == p.id && !matches!(s.id.as_str(), "logo" | "leading" | "brand" | "file" | "tabs" | "managed" | "offered")
+                        })?
+                        .clone();
+                    item.zone = match zone {
+                        SavedZone::Start => Zone::Start,
+                        SavedZone::End => Zone::End,
+                    };
+                    Some(item)
+                })
+                .collect::<Vec<_>>()
+        };
+        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "logo" | "leading")).cloned());
+        let mut start = movable(SavedZone::Start);
+        // Keep Home before the locked File group when it is still the first Start control.
+        // Hiding an unrelated item must not move Home across File.
+        if start.first().is_some_and(|item| item.id == "home") {
+            spec.items.extend(start.drain(..1));
+        }
+        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "brand" | "file")).cloned());
+        spec.items.extend(start);
+        spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "tabs" | "managed")).cloned());
+        let mut end = movable(SavedZone::End);
+        // Update follows the community pills in today's bar, immediately before the cluster.
+        let offer_at = end.iter().position(|s| !s.id.starts_with("pill:")).unwrap_or(end.len());
+        if let Some(offer) = slots.iter().find(|s| s.id == "offered") {
+            end.insert(offer_at, offer.clone());
+        }
+        spec.items.extend(end);
+        spec
+    }
+
     fn fit(spec: &Spec, policy: &Policy) -> Placed {
         let mut p = layout_row(spec);
         let at = |id: &str| slot(spec, &p, id);
@@ -596,7 +682,7 @@ pub mod application {
             .into_iter()
             .chain(spec.items.iter().zip(&p.placements).filter(|(i, _)| i.zone == Zone::End).filter_map(|(_, p)| p.map(|p| p.x)))
             .fold(clean(spec.width) - clean(spec.captions_right), f32::min);
-        let quick_count = (0..24).take_while(|i| present(&format!("quick:{i}"))).count();
+        let quick_count = (0..24).filter(|i| present(&format!("quick:{i}"))).count();
         let mut g = Geometry {
             compact: false,
             name_visible: present("logo") && logo.step == 0,
@@ -614,7 +700,13 @@ pub mod application {
                 })
                 .collect(),
             quick_separator: None,
-            quick: (quick_count > 0).then(|| (at("quick:0").x + 17.0, 34.0)),
+            quick: present("quick:0").then(|| (at("quick:0").x + 17.0, 34.0)),
+            quick_slots: (0..24)
+                .filter_map(|i| {
+                    let id = format!("quick:{i}");
+                    present(&id).then(|| (i, at(&id).x + 17.0))
+                })
+                .collect(),
             quick_count,
             documents_separator: tabs.x,
             tabs_start: tabs.x,
@@ -715,6 +807,9 @@ pub mod application {
                 .collect(),
             quick_separator: policy.quick.then(|| at("quick").x),
             quick: policy.quick.then(|| (at("quick").x + step / 2.0, step)),
+            quick_slots: (0..(slot(spec, &placed, "quick").width / step).round() as usize)
+                .map(|i| (i, at("quick").x + step / 2.0 + i as f32 * step))
+                .collect(),
             documents_separator: documents.right() - 10.0,
             tabs_start: documents.right(),
             controls_left,

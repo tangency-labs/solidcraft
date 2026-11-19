@@ -1705,6 +1705,7 @@ impl SolveApp {
                 self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
             }
             match id {
+                "ui.appBarReset" => self.toolbar_custom.reset_app_bar(),
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
@@ -2180,6 +2181,12 @@ impl SolveApp {
             return;
         }
         if id == "timeline.play" {
+            if let Err(why) = self.run(id, json!({})) {
+                self.set_status(why, true);
+            }
+            return;
+        }
+        if id == "ui.appBarReset" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
             }
