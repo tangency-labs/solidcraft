@@ -413,3 +413,52 @@ fn closed_mitre_is_on_both_ends_of_the_round() {
         }
     }
 }
+
+/// The closed Turn under every turn choice: the swept turn is built between
+/// two rounds at a side edge, so a round meeting itself is not swept. Auto leaves it the
+/// Mitred Turn, the same body as Mitre's (5 faces, the side vertex at (0, 0, 10 - r)); Swept
+/// refuses it as not built yet, with the reason, rather than failing the fillet.
+#[test]
+fn closed_turn_is_mitred_under_auto_and_refused_as_not_swept_yet() {
+    use solidcore::blend::blend_corner::TurnChoice;
+    use solidcore::blend::fillet_geom::p1::FilletErrorType;
+    let r = 0.5;
+    let mut k = new_blend_kernel();
+    let (mitred, at, _) = closed_mitre(&mut k, r);
+    let mut b = teardrop(&mut k);
+    let rim = top_rim(&k, &b);
+    {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_constant_radius_edges(&mut k, &[rim], r, 1, 1, 1.0)
+            .unwrap();
+        s.set_turns(TurnChoice::Auto);
+        s.do_fillet(&mut k).unwrap();
+    }
+    assert!(check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines()
+        .is_empty());
+    assert_eq!(b.face_list().len(), 5);
+    assert_eq!(b.face_list().len(), mitred.face_list().len());
+    assert_eq!(b.edge_list().len(), mitred.edge_list().len());
+    assert_eq!(b.vertex_list().len(), mitred.vertex_list().len());
+    assert!(b
+        .vertex_list()
+        .iter()
+        .any(|&v| vertex::point(&b, v).unwrap().distance(at) <= 1e-12));
+    let mut b = teardrop(&mut k);
+    let rim = top_rim(&k, &b);
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    s.prepare_constant_radius_edges(&mut k, &[rim], r, 1, 1, 1.0)
+        .unwrap();
+    s.set_turns(TurnChoice::Swept);
+    assert!(s.do_fillet(&mut k).is_err());
+    let info = s.error_info();
+    assert_eq!(
+        info.code,
+        FilletErrorType::CornerUnsupported as i32,
+        "{}",
+        info.comment
+    );
+    assert!(info.comment.contains("two rounds"), "{}", info.comment);
+}

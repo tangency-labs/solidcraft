@@ -42,7 +42,7 @@ use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::rollover::{
     concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, RollOver,
 };
-use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::blend_corner::{BlendCornerEvent, TurnChoice};
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
 use solidcore::blend::definition_check::BlendFaceLog;
@@ -127,6 +127,12 @@ pub enum Turn {
     /// section revolved about the side edge, tangent to both rounds: between planes at a
     /// straight side edge, a torus. For [`Blend::Round`] only.
     Swept,
+    /// Each turn is [`Turn::Swept`] where the kernel builds it (the rolling ball can pass the
+    /// side edge: it and the rounds differ in convexity, and the rounds are constant, of one
+    /// radius, at a straight side edge square to them) and [`Turn::Mitre`] where it does not.
+    /// Decided per corner before anything is built, so it is never refused where the mitre
+    /// would have been made. Chamfers, which have no swept turn, are mitred.
+    Auto,
 }
 
 /// How chamfers close a corner where every edge at a vertex is chamfered between planes (the
@@ -915,7 +921,12 @@ fn pass(
     let done = {
         let mut s = FilletSession::new(k, b)?;
         // read as the corners are made
-        s.set_swept_turns(p.turn == Turn::Swept);
+        s.set_turns(match p.turn {
+            Turn::Mitre => TurnChoice::Mitre,
+            Turn::Swept => TurnChoice::Swept,
+            Turn::Auto if p.section.chamfer() => TurnChoice::Mitre,
+            Turn::Auto => TurnChoice::Auto,
+        });
         // the Facet asked of the kernel's chamfer corners; the default leaves the session as it
         // always was (no type set), so it builds what ops built before
         if p.chamfer_corner == ChamferCorner::Facet {
@@ -1727,7 +1738,7 @@ fn blend_on_body(
     // a round that may be the Roll-over's concave chain asked on its own (#10876), of one edge
     // too (#19476: the foot of a cylinder that stands through a face)
     let asked_alone = kind == Blend::Round
-        && turn == Turn::Mitre
+        && turn != Turn::Swept
         && back.is_empty()
         && corners == Corners::Filled;
     let may_be_chain = asked_alone && has_end_arc(k, b, &picked)?;
@@ -1741,7 +1752,7 @@ fn blend_on_body(
     // refuses them; a round asked of the event's concave chain on its own (B1 rounded by an
     // earlier feature: [`is_concave_chain`], the ledge's edges once B1 is rounded, never a
     // pocket floor's) is the event's second pass where the first call refuses it
-    let step = if may_go_first && kind == Blend::Round && turn == Turn::Mitre {
+    let step = if may_go_first && kind == Blend::Round && turn != Turn::Swept {
         RollOverStep::Classify
     } else {
         RollOverStep::No

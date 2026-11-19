@@ -20,6 +20,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::blend::blend_corner::TurnChoice;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -125,6 +126,31 @@ fn round(
     Ok(())
 }
 
+/// Rounds the edges at `at` as [`round`] does, their turns made as `turns` says
+/// ([`FilletSession::set_turns`]): the error code and reason on failure.
+fn round_turning(
+    k: &mut Kernel,
+    b: &mut Brep,
+    at: &[[f64; 3]],
+    radii: &[f64],
+    turns: TurnChoice,
+) -> Result<(), (i32, String)> {
+    let edges: Vec<EdgeId> = at.iter().map(|&p| pick(k, b, p)).collect();
+    let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
+    {
+        let mut s = FilletSession::new(k, b).unwrap();
+        s.prepare_per_edge_constant_radius(k, &edges, radii, &xs, 1, 1.0)
+            .unwrap();
+        s.set_turns(turns);
+        if s.do_fillet(k).is_err() {
+            let info = s.error_info();
+            return Err((info.code, info.comment.clone()));
+        }
+    }
+    stitch_and_orient(k, b, &StitchAndOrientOptions::default()).unwrap();
+    Ok(())
+}
+
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
@@ -219,6 +245,21 @@ fn a_pocket_rim_notes_that_no_radius_fits() {
 /// section. The corner revolves the same spandrel about the side edge through the turn, pi/2.
 /// By Pappus that is its area times pi/2 times its centroid's distance from the axis, the
 /// distance from the wall, (10 - 3 pi) r / (3 (4 - pi)): pi r^3 (10 - 3 pi) / 24.
+///
+/// The torus: the end sections' arcs are centred at (10, 9, 4) and (9, 10, 4), one r in from
+/// the top face and from their walls, and revolve about the side edge x = 10, y = 10, so it is
+/// centred on that edge at the height of the arcs' centres, (10, 10, 4), with its axis along
+/// z. Its face is the triangle S = (10, 10, 4), where both sections meet the side edge, A =
+/// (10, 9, 5) and B = (9, 10, 5) on the top face.
+///
+/// Topology: the L has 8 faces, 18 edges and 12 vertices. The rounds and the torus add 3
+/// faces. The rounded top corner (10, 10, 5) becomes S, A and B, and each round's far end
+/// corner, (20, 10, 5) and (10, 20, 5), becomes two (the end face's notch, an arc from the top
+/// face down to the wall): 12 + 2 + 1 + 1 = 16 vertices. Edges: the 6 bottom ones, 6 upright
+/// ones (three ending at S and at the far ends' wall points), 7 round the top face (the outer
+/// four, the two rounds' tangent lines and the torus's arc A-B), the two rounds' tangent lines
+/// on their walls, the two end notches' arcs and the torus's arcs S-A and S-B: 25. Euler:
+/// 16 - 25 + 11 = 2.
 #[test]
 fn convex_rounds_turn_round_a_concave_side_edge_as_a_horn_torus() {
     let mut k = all_fixes();
@@ -244,6 +285,30 @@ fn convex_rounds_turn_round_a_concave_side_edge_as_a_horn_torus() {
     assert_eq!(tori.len(), 1, "{tori:?}");
     assert!((tori[0].0 - 1.0).abs() <= 1e-12 && (tori[0].1 - 1.0).abs() <= 1e-12);
     assert!((v - expect).abs() <= 1e-9 * expect, "{v} against {expect}");
+    let faces = get_faces(&b).unwrap().len();
+    let edges = get_edges(&b).unwrap().len();
+    let vertices = solidcore::topology::brep::p1::vertices(&b, None)
+        .unwrap()
+        .len();
+    eprintln!("{faces} faces, {edges} edges, {vertices} vertices");
+    assert_eq!((faces, edges, vertices), (11, 25, 16));
+    let frames: Vec<_> = get_faces(&b)
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| match face2::surface(&b, f).unwrap()?.kind() {
+            SurfaceKind::Torus(t) => Some(*t.base().position()),
+            _ => None,
+        })
+        .collect();
+    let place = frames[0];
+    let o = place.origin();
+    let z = place.z_axis();
+    eprintln!("torus origin {o:?}, axis {z:?}");
+    assert!(
+        (o.x - 10.0).abs() <= 1e-12 && (o.y - 10.0).abs() <= 1e-12 && (o.z - 4.0).abs() <= 1e-12,
+        "{o:?}"
+    );
+    assert!(z.x.abs() <= 1e-12 && z.y.abs() <= 1e-12, "{z:?}");
 }
 
 /// Two convex rounds at a box's corner, the third edge there (the convex side edge) left sharp:
@@ -267,6 +332,246 @@ fn convex_rounds_at_a_convex_side_edge_are_refused_naming_the_radius() {
         why.contains("round that edge at a radius of at least 1 first"),
         "{why}"
     );
+}
+
+/// The spandrel between a round's square corner and its arc, r^2 (1 - pi/4), and its first
+/// moment about either of its straight sides, r^3 (10 - 3 pi) / 12 (its centroid lies
+/// (10 - 3 pi) r / (3 (4 - pi)) from each), for r 1.
+fn spandrel() -> (f64, f64) {
+    let pi = std::f64::consts::PI;
+    (1.0 - pi / 4.0, (10.0 - 3.0 * pi) / 12.0)
+}
+
+/// The L of [`convex_rounds_turn_round_a_concave_side_edge_as_a_horn_torus`].
+fn l_prism(k: &mut Kernel) -> Brep {
+    let a = create_box(k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0, 5.0).unwrap();
+    let c = create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 5.0).unwrap();
+    boolean_union(k, a, c).unwrap()
+}
+
+/// `b`'s face, edge and vertex counts.
+fn counts(b: &Brep) -> (usize, usize, usize) {
+    (
+        get_faces(b).unwrap().len(),
+        get_edges(b).unwrap().len(),
+        solidcore::topology::brep::p1::vertices(b, None)
+            .unwrap()
+            .len(),
+    )
+}
+
+/// The L's swept inner corner, as [`convex_rounds_turn_round_a_concave_side_edge_as_a_horn_torus`]
+/// derives it: one horn torus (1, 1) centred on the side edge x = y = 10 at the arcs' height,
+/// (10, 10, 4), its axis along z, and its surface its own definition (the swept corner's
+/// recertified distance to it 0).
+fn assert_l_inner_torus(k: &Kernel, b: &Brep) {
+    assert_eq!(tori(b), [(1.0, 1.0)]);
+    let place = get_faces(b)
+        .unwrap()
+        .into_iter()
+        .find_map(|f| match face2::surface(b, f).unwrap()?.kind() {
+            SurfaceKind::Torus(t) => Some(*t.base().position()),
+            _ => None,
+        })
+        .unwrap();
+    let (o, z) = (place.origin(), place.z_axis());
+    assert!(
+        (o.x - 10.0).abs() <= 1e-12 && (o.y - 10.0).abs() <= 1e-12 && (o.z - 4.0).abs() <= 1e-12,
+        "{o:?}"
+    );
+    assert!(z.x.abs() <= 1e-12 && z.y.abs() <= 1e-12, "{z:?}");
+    let swept = corner_faces(b, CornerKind::Swept);
+    assert_eq!(swept.len(), 1);
+    assert_eq!(
+        swept[0].procedural_blend().unwrap().recertify(k).unwrap(),
+        0.0
+    );
+}
+
+/// The mitre at a convex corner of two r 1 rounds on the top face z = `top`, whose side edge is
+/// the upright line x = `side[0]`, y = `side[1]`, the material on the `inward` side of it (each
+/// component +1 or -1). The round along x runs on the cylinder of axis y = side[1] +
+/// inward[1], z = top - 1, the round along y on that of axis x = side[0] + inward[0],
+/// z = top - 1. The mitre is their crossing: it runs from the side edge at (side, top - 1),
+/// where both rounds meet their walls, to (side + inward, top), where both meet the top face,
+/// and every point of it is 1 from both axes and on the bisector plane |x - side[0]| =
+/// |y - side[1]|. Returns the largest of those distances' errors over 33 points.
+fn mitre_off(k: &Kernel, b: &Brep, side: [f64; 2], inward: [f64; 2], top: f64) -> f64 {
+    use solidcore::topology::vertex;
+    let foot = Point3::new(side[0], side[1], top - 1.0);
+    let head = Point3::new(side[0] + inward[0], side[1] + inward[1], top);
+    let at = |v: Option<solidcore::topology::VertexId>, p: Point3| {
+        v.is_some_and(|v| vertex::point(b, v).unwrap().distance(p) <= 1e-9)
+    };
+    let mitre = get_edges(b)
+        .unwrap()
+        .into_iter()
+        .find(|&e| {
+            let (s, t) = (
+                edge::start_vertex(b, e).unwrap(),
+                edge::end_vertex(b, e).unwrap(),
+            );
+            (at(s, foot) && at(t, head)) || (at(s, head) && at(t, foot))
+        })
+        .expect("the mitre runs from the side edge to the top face");
+    let c = edge::curve(b, mitre).unwrap().unwrap();
+    let ivl = edge::interval(b, mitre).unwrap();
+    let (ya, xa, za) = (side[1] + inward[1], side[0] + inward[0], top - 1.0);
+    let mut worst: f64 = 0.0;
+    for i in 0..=32 {
+        let p = c
+            .evaluate_point(k, ivl.evaluate(f64::from(i) / 32.0))
+            .unwrap();
+        let along_x = ((p.y - ya).hypot(p.z - za) - 1.0).abs();
+        let along_y = ((p.x - xa).hypot(p.z - za) - 1.0).abs();
+        let bisector = ((p.x - side[0]).abs() - (p.y - side[1]).abs()).abs();
+        worst = worst.max(along_x).max(along_y).max(bisector);
+    }
+    worst
+}
+
+/// Auto turns are swept where the swept turn builds: the L's inner corner is the same horn
+/// torus, at the same closed-form volume, as with every turn swept.
+#[test]
+fn auto_turns_are_swept_where_the_swept_turn_builds() {
+    let mut k = all_fixes();
+    let mut b = l_prism(&mut k);
+    round_turning(
+        &mut k,
+        &mut b,
+        &[[15.0, 10.0, 5.0], [10.0, 15.0, 5.0]],
+        &[1.0; 2],
+        TurnChoice::Auto,
+    )
+    .unwrap();
+    let (area, moment) = spandrel();
+    let pi = std::f64::consts::PI;
+    let expect = 1500.0 - 20.0 * area - moment * pi / 2.0;
+    let v = volume(&k, &mut b);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!((v - expect).abs() <= 1e-9 * expect, "{v} against {expect}");
+    // the body every turn swept builds: its topology and torus as derived there
+    assert_eq!(counts(&b), (11, 25, 16));
+    assert_l_inner_torus(&k, &b);
+}
+
+/// Auto turns are mitred where the swept turn does not build, never refused: two convex rounds
+/// at a box's convex corner, which the swept turn refuses, meet in the mitre. Closed form: each
+/// round runs on to the bisector plane through the side edge, so each straight 10 mm round
+/// gives back the part of its spandrel prism past that plane, the spandrel's first moment about
+/// the other wall, r^3 (10 - 3 pi) / 12; the box is 1000.
+///
+/// Topology: the box's 6 faces, 12 edges and 8 vertices. The two rounds add 2 faces. The
+/// rounded corner (0, 0, 10) becomes the mitre's two ends, (0, 0, 9) on the side edge and
+/// (1, 1, 10) on the top face, and each round's far end, (10, 0, 10) and (0, 10, 10), becomes
+/// two (the end face's notch, an arc from the top face down to the wall): 8 - 3 + 2 + 2 + 2 =
+/// 11 vertices. Edges: the 12 less the 2 rounded, plus each round's tangent lines on the top
+/// face and on its wall (4), the two end notches' arcs and the mitre: 17. Euler: 11 - 17 + 8 = 2.
+#[test]
+fn auto_turns_are_mitred_where_the_swept_turn_is_refused() {
+    let at = [[5.0, 0.0, 10.0], [0.0, 5.0, 10.0]];
+    let mut k = all_fixes();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    round_turning(&mut k, &mut b, &at, &[1.0; 2], TurnChoice::Auto).unwrap();
+    let (area, moment) = spandrel();
+    let expect = 1000.0 - 20.0 * area + 2.0 * moment;
+    let v = volume(&k, &mut b);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    eprintln!("auto box corner: volume {v:.12} (closed form {expect:.12})");
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(tori(&b).is_empty());
+    assert!((v - expect).abs() <= 1e-9 * expect, "{v} against {expect}");
+    assert_eq!(counts(&b), (8, 17, 11));
+    let off = mitre_off(&k, &b, [0.0, 0.0], [1.0, 1.0], 10.0);
+    eprintln!("auto box corner: mitre off its closed form by {off:e}");
+    assert!(off <= 1e-9, "{off:e}");
+    // the mitre is the one every turn mitred builds
+    let mut k = all_fixes();
+    let mut m = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    round_turning(&mut k, &mut m, &at, &[1.0; 2], TurnChoice::Mitre).unwrap();
+    assert!((volume(&k, &mut m) - v).abs() <= 1e-9 * expect);
+}
+
+/// One fillet, two kinds of turn: the L's two inner top edges and the outer wall x = 20's,
+/// r 1. Its inner corner is a swept turn (convex rounds at a concave side edge) and the corner
+/// at (20, 10) is not (convex rounds at a convex side edge): with every turn swept the fillet is
+/// refused there; with Auto each corner is decided alone, the inner one swept and the outer
+/// one mitred. Closed form: 1500, less three straight rounds' spandrels, less the swept
+/// corner's revolved spandrel, plus the two moments the mitre gives back.
+///
+/// Topology: the swept L's 11 faces, 25 edges and 16 vertices, as
+/// [`convex_rounds_turn_round_a_concave_side_edge_as_a_horn_torus`] derives them, and the round
+/// along x = 20 adds a face. At (20, 10, 5) the swept L's two vertices (its notch arc's ends on
+/// the end face x = 20, (20, 9, 5) and (20, 10, 4)) become the mitre's two, (19, 9, 5) on the
+/// top face and (20, 10, 4) on the side edge, and the notch arc the mitre: no change. The new
+/// round's far
+/// end (20, 0, 5) becomes two (+1 vertex), and the round replaces its edge with its tangent
+/// lines on the top face and on the wall and the end notch's arc on y = 0 (+2 edges): 12 faces,
+/// 27 edges and 17 vertices. Euler: 17 - 27 + 12 = 2.
+#[test]
+fn auto_decides_each_turn_of_one_fillet_on_its_own() {
+    let at = [[15.0, 10.0, 5.0], [10.0, 15.0, 5.0], [20.0, 5.0, 5.0]];
+    let mut k = all_fixes();
+    let mut b = l_prism(&mut k);
+    let (code, _) = round(&mut k, &mut b, &at, &[1.0; 3]).unwrap_err();
+    assert_eq!(code, FilletErrorType::NoRoom as i32);
+    let mut k = all_fixes();
+    let mut b = l_prism(&mut k);
+    round_turning(&mut k, &mut b, &at, &[1.0; 3], TurnChoice::Auto).unwrap();
+    let (area, moment) = spandrel();
+    let pi = std::f64::consts::PI;
+    let expect = 1500.0 - 30.0 * area - moment * pi / 2.0 + 2.0 * moment;
+    let v = volume(&k, &mut b);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    eprintln!("auto L: volume {v:.12} (closed form {expect:.12})");
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!((v - expect).abs() <= 1e-9 * expect, "{v} against {expect}");
+    assert_eq!(counts(&b), (12, 27, 17));
+    assert_l_inner_torus(&k, &b);
+    let off = mitre_off(&k, &b, [20.0, 10.0], [-1.0, -1.0], 5.0);
+    eprintln!("auto L: mitre off its closed form by {off:e}");
+    assert!(off <= 1e-9, "{off:e}");
+}
+
+/// Unequal rounds at a sharp side edge the ball cannot pass are refused as not swept yet, not
+/// as wanting the side edge rounded first: no one radius would let both balls pass, and the
+/// refusal is the same whichever round comes first. The box's convex rounds at its convex
+/// corner edge, r 1 and 2 in both orders, and the pocket rim's concave rounds at its concave
+/// corner edges, r 1 and 1.5.
+#[test]
+fn unequal_rounds_at_a_side_edge_the_ball_cannot_pass_are_not_swept_yet() {
+    for radii in [[1.0, 2.0], [2.0, 1.0]] {
+        let mut k = all_fixes();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let (code, why) = round(
+            &mut k,
+            &mut b,
+            &[[5.0, 0.0, 10.0], [0.0, 5.0, 10.0]],
+            &radii,
+        )
+        .unwrap_err();
+        assert_eq!(
+            code,
+            FilletErrorType::CornerUnsupported as i32,
+            "{radii:?}: {why}"
+        );
+        assert!(
+            why.contains("constant rounds of one radius"),
+            "{radii:?}: {why}"
+        );
+    }
+    let mut k = all_fixes();
+    let mut b = pocket(&mut k);
+    let (code, why) = round(&mut k, &mut b, &RIM, &[1.0, 1.5, 1.0, 1.5]).unwrap_err();
+    assert_eq!(code, FilletErrorType::CornerUnsupported as i32, "{why}");
+    assert!(why.contains("constant rounds of one radius"), "{why}");
 }
 
 #[test]

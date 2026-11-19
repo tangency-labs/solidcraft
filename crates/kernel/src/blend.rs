@@ -284,17 +284,21 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
     }
 }
 
-/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
-/// both on a plane, such as the rounds along a boss's base at its upright edges.
+/// How two rounds turn where they meet at a sharp side edge on a face they share, such as the
+/// rounds along a boss's base at its upright edges.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FilletTurn {
     /// The rounds run on to where they cross and meet in a mitre.
     #[default]
     Mitre,
     /// The rounds end at the side edge and the corner is their section revolved about it, a
-    /// torus tangent to both. Refused where it is not built (unequal or variable rounds, a
-    /// concave, curved or tangent side edge, a corner of four edges), with the reason.
+    /// torus tangent to both: the rolling ball kept on the side edge. Refused where it is not
+    /// built, with the reason: a side edge of the rounds' own convexity (the ball cannot pass
+    /// it), unequal or variable rounds, a curved or tangent side edge, a corner of four edges.
     Swept,
+    /// Each turn swept where it is built, as [`FilletTurn::Swept`], and mitred where it is not:
+    /// decided per corner before anything is built, so never refused where a mitre is made.
+    Auto,
 }
 
 /// Constant-radius fillet of the edges nearest to the given points. A radius too large for the
