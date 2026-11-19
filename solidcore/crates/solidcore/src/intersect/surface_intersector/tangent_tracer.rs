@@ -1260,6 +1260,67 @@ mod tests {
         assert_eq!(tr.probe(&k, &p, &mut dirs).unwrap(), 0);
     }
 
+    /// A bilinear patch over `[cx - 1, cx + 1] x [cy - 1, cy + 1]` at height
+    /// `z + slope (x - cx)`.
+    fn tilted(cx: f64, cy: f64, z: f64, slope: f64) -> Surface {
+        let at = |dx: f64, dy: f64| Vec3::new(cx + dx, cy + dy, z + slope * dx);
+        Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                at(-1.0, -1.0),
+                at(1.0, -1.0),
+                at(-1.0, 1.0),
+                at(1.0, 1.0),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// The crossing mode's probe at the middle of two patches, from the contact the free
+    /// solve finds there.
+    fn crossing_probe(a: &Surface, b: &Surface) -> (i32, Vec<Vec3>) {
+        let k = Kernel::default();
+        let doms = [
+            a.natural_uv_domain_with_nurb(&k).unwrap(),
+            b.natural_uv_domain_with_nurb(&k).unwrap(),
+        ];
+        let mut tr = TangentTracer::new([a, b], doms, 1e-6, 2.0);
+        tr.tangent = false;
+        let mut x = [0.5; 4];
+        let p = tr
+            .solve(
+                &k,
+                &mut x,
+                SolveMode::Free,
+                Vec3::ZERO,
+                Vec3::ZERO,
+                None,
+                0.0,
+            )
+            .unwrap()
+            .unwrap();
+        let mut dirs = Vec::new();
+        let n = tr.probe(&k, &p, &mut dirs).unwrap();
+        (n, dirs)
+    }
+
+    /// #18930: two parallel patches 1e-9 apart, within the tolerance 1e-6 but not
+    /// meeting, give the crossing probe no direction (it took every direction, and
+    /// called them coincident); two patches crossing at 1e-3 rad along x = cx give it
+    /// the two directions of their crossing line, at the origin and 1e6 from it.
+    #[test]
+    fn the_probe_continues_only_where_the_surfaces_meet() {
+        let (n, dirs) = crossing_probe(&tilted(0.0, 0.0, 0.0, 0.0), &tilted(0.0, 0.0, 1e-9, 0.0));
+        assert_eq!((n, dirs.len()), (0, 0), "{dirs:?}");
+        for c in [0.0, 1e6] {
+            let (n, dirs) = crossing_probe(&tilted(c, c, 0.0, 0.0), &tilted(c, c, 0.0, 1e-3));
+            assert_eq!(n, 2, "at {c}: {dirs:?}");
+            for d in &dirs {
+                assert!(d.y.abs() > 1.0 - 1e-6, "at {c}: {dirs:?}");
+            }
+            assert!(dirs[0].y * dirs[1].y < 0.0, "at {c}: {dirs:?}");
+        }
+    }
+
     /// The parabola tangents of three points, the polyline distance and the near test.
     #[test]
     fn tangent_tangents_of_three_points() {
