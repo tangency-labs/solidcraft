@@ -1428,6 +1428,8 @@ preference_settings! {
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
     theme: String = "dark".into(), PAGE_APPEARANCE;
+    /// Theme files use alphabetical order or built-in order followed by imported themes.
+    theme_files_by_name: bool = true, PAGE_APPEARANCE => check_id_help("prefs.theme_files_by_name", "prefs.theme_files_by_name_help");
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
@@ -3921,8 +3923,8 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
         .collect())
 }
 
-/// Every theme the Theme list offers, as (id, name): the modes, the built-in theme files, then
-/// the imported ones.
+/// Theme choices keep Light and Dark first. The preference selects alphabetical file order
+/// or declared built-in order followed by imported file order (#8637).
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes =
         THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), solidcraft_ui_text::tr_label(label).to_string()));
@@ -3930,11 +3932,23 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let builtins = crate::theme_files::builtin().iter().map(|t| (t.id.clone(), solidcraft_ui_text::tr_label(&t.name).to_string()));
     let custom = app.preferences.custom_themes.iter().map(|t| (t.id.clone(), t.name.clone()));
     let mut choices: Vec<_> = modes.chain(builtins).chain(custom).collect();
-    choices.sort_by_key(|(id, _)| match id.as_str() {
-        "light" => 0,
-        "dark" => 1,
-        _ => 2,
-    });
+    if app.preferences.theme_files_by_name {
+        choices.sort_by_cached_key(|(id, name)| {
+            let rank = match id.as_str() {
+                "light" => 0,
+                "dark" => 1,
+                _ => 2,
+            };
+            let name = if rank < 2 { String::new() } else { name.to_lowercase() };
+            (rank, name, id.clone())
+        });
+    } else {
+        choices.sort_by_key(|(id, _)| match id.as_str() {
+            "light" => 0,
+            "dark" => 1,
+            _ => 2,
+        });
+    }
     choices
 }
 
@@ -5145,6 +5159,112 @@ mod tests {
         assert!(state.night && state.tone == Some(true));
         state.aim(false);
         assert!(!state.night && state.tone == Some(false));
+    }
+
+    /// #8637: Light and Dark stay first; the theme files follow by name, ignoring case, built in
+    /// and imported together, whatever the built-in `order` says.
+    #[test]
+    fn theme_choices_keep_the_modes_first_and_sort_the_files_by_name() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for name in ["Zz last", "aardvark"] {
+            let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1", "name":name, "base":"dark"})).unwrap();
+            crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
+        }
+        let choices = theme_choices(&app);
+        let ids: Vec<&str> = choices.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids[..2], ["light", "dark"], "{ids:?}");
+        let names: Vec<String> = choices[2..].iter().map(|(_, name)| name.to_lowercase()).collect();
+        assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
+        // Built-in names starting with a digit (1-bit) come before it.
+        let first_letter = names.iter().find(|n| n.starts_with(|c: char| c.is_alphabetic()));
+        assert_eq!(first_letter.map(String::as_str), Some("aardvark"), "imported files sort with the built-in ones");
+        assert_eq!(names.last().map(String::as_str), Some("zz last"));
+        assert_eq!(choices.len(), crate::theme_files::builtin().len() + 4);
+    }
+
+    fn theme_file_sort_fixture() -> SolveApp {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for name in ["Zz imported first", "aardvark imported second"] {
+            let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1", "name":name, "base":"dark"})).unwrap();
+            crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
+        }
+        app
+    }
+
+    /// Disabling the sort restores modes, built-ins in their declared order, then imported
+    /// files in stored order. JSON loading makes this a behavioral RED before the field exists.
+    #[test]
+    fn theme_file_sort_preference_restores_the_previous_file_order_after_reopening() {
+        let mut app = theme_file_sort_fixture();
+        let mut saved = serde_json::to_value(&app.preferences).unwrap();
+        saved["theme_files_by_name"] = json!(false);
+        app.preferences = serde_json::from_value(saved).unwrap();
+        let old_ids: Vec<_> = ["light".to_string(), "dark".to_string()]
+            .into_iter()
+            .chain(crate::theme_files::builtin().iter().map(|theme| theme.id.clone()))
+            .chain(app.preferences.custom_themes.iter().map(|theme| theme.id.clone()))
+            .collect();
+        let ids = |app: &SolveApp| theme_choices(app).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids(&app), old_ids, "the disabled preference restores the actual old theme order");
+        let selected = app.preferences.theme.clone();
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert_eq!(ids(&restored), old_ids, "reopening settings retains the previous ordering policy");
+        assert_eq!(restored.preferences.theme, selected, "sorting does not choose another theme");
+    }
+
+    #[test]
+    fn theme_file_sort_preference_control_is_typed_and_resets_only_on_appearance() {
+        let mut app = theme_file_sort_fixture();
+        let original_themes = app.preferences.custom_themes.clone();
+        for enabled in [false, true, false] {
+            let reply = control(&mut app, &json!({"theme_files_by_name":enabled})).unwrap();
+            assert_eq!(reply["theme_files_by_name"], enabled);
+            let ids = theme_choices(&app).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+            assert_eq!(reply["theme_ids"], json!(ids), "control discovery and the picker share the selected order");
+        }
+        for bad in [json!("false"), json!(0), json!(null), json!([])] {
+            let before = app.preferences.clone();
+            assert!(control(&mut app, &json!({"theme_files_by_name":bad})).is_err(), "{bad}");
+            assert_eq!(app.preferences, before, "a rejected policy changes no preferences");
+        }
+        reset_preferences(&mut app.preferences, PAGE_GENERAL);
+        assert_eq!(control(&mut app, &json!({})).unwrap()["theme_files_by_name"], false, "another page keeps the explicit old order");
+        reset_preferences(&mut app.preferences, PAGE_APPEARANCE);
+        assert_eq!(control(&mut app, &json!({})).unwrap()["theme_files_by_name"], true, "Appearance restores alphabetical sorting");
+        assert_eq!(app.preferences.custom_themes, original_themes, "resetting ordering keeps imported themes");
+    }
+
+    #[test]
+    fn theme_file_sort_preference_ui_obeys_apply_cancel_and_persistence() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en", "open":"Appearance"}));
+        h.frames(4);
+        let key = "prefs:theme_files_by_name";
+        reveal_preference(&mut h, key);
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["theme_files_by_name"], true, "alphabetical order remains the default");
+        let selected = h.app.preferences.theme.clone();
+        h.step(&json!({"click":{"handle":key}})).unwrap();
+        h.settle();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["theme_files_by_name"], false);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["theme_files_by_name"], true, "Cancel restores the opening policy");
+        h.call("ui.prefs", json!({"open":"Appearance"}));
+        reveal_preference(&mut h, key);
+        h.step(&json!({"click":{"handle":key}})).unwrap();
+        h.settle();
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["theme_files_by_name"], false);
+        reveal_preference(&mut h, key);
+        h.step(&json!({"click":{"handle":key}})).unwrap();
+        h.settle();
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["theme_files_by_name"], false, "Cancel after Apply restores the applied policy");
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(control(&mut restored, &json!({})).unwrap()["theme_files_by_name"], false, "the applied choice persists");
+        assert_eq!(h.app.preferences.theme, selected, "the ordering control does not change the active theme");
     }
 
     #[test]
