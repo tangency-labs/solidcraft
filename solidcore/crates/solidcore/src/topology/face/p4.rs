@@ -91,7 +91,9 @@
 //!   `SetProps_Stage2` keeps in the face properties hold the handles only: a later
 //!   caller that resolves their curves needs the curves of the `SeamCheck`.
 //!   `SplitAtSeam`'s merges (`merge_seam_intervals`) rebuild them from the face's
-//!   surface as this function builds them.
+//!   surface as this function builds them. Both, and the closure checks, take the seam's
+//!   3d curve from [`Surface::seam_curve`] (not upstream): a native cone's ruling as a line
+//!   (tangency-labs/solidcraft#11574), every other seam the curve on the surface.
 //! - **[`BrepSeamObjects`] as merge objects.** Over `&mut Brep`
 //!   ([`BrepSeamObjects::for_merge`]) they are the [`MergeIntervalBrep`] of
 //!   `SplitAtSeam`'s `MergeIntervals`: its edits notify into the objects' own empty
@@ -112,7 +114,11 @@
 //! - **`GetLoopCrossings`** (`intersect.curve_class_p4`) returns its touch lists, which
 //!   `HasSeamProblem` stores in the face properties' U or V lists; its status is ignored
 //!   as upstream (an ignored error leaves both lists empty, as its own initialisation
-//!   does).
+//!   does). Not upstream (tangency-labs/solidcraft#11574): it runs only when something
+//!   reads the lists. Properties `HasSeamProblem` makes for itself and drops
+//!   (`FaceProps::touch_lists_read` false) are read only by its doubly periodic cases, so
+//!   on a surface periodic in one direction the classification leaves them empty. The
+//!   lists change no classification and no seam verdict there.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -138,11 +144,13 @@ use crate::math::{Point3, Vec3};
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::profile::profile_scope;
 use crate::query::face::p2::{
     curve_on_classify_mut, face_cache_tree, face_surface_cache, point_classify, BrepCacheFace,
     CurveOnClassifyBrep, CurveOnClassifyCache, CurveOnClassifyObjects, FaceBrep, FaceSurfaceCache,
     PointClassifyOptions, SnapshotObjects,
 };
+use crate::surface::surface::p4::SeamCurve;
 use crate::surface::surface::p5::{SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::surface::surface::p8::{FaceSolveCache, HeldSolveCache};
 use crate::surface::surface::Surface;
@@ -976,11 +984,11 @@ fn closure_of(k: &Kernel, surface: &Surface, uv_domain: &Extent2d) -> Result<Clo
         .is_closed(k, uv_domain, SurfParamType::V, None, false)?
         .0;
     let seam_u = surface
-        .create_seam_curve(k, SurfParamType::U, closed_u)?
-        .map(Curve::from);
+        .seam_curve(k, SurfParamType::U, closed_u)?
+        .map(|s| s.curve);
     let seam_v = surface
-        .create_seam_curve(k, SurfParamType::V, closed_v)?
-        .map(Curve::from);
+        .seam_curve(k, SurfParamType::V, closed_v)?
+        .map(|s| s.curve);
     Ok(Closure {
         closed_u,
         closed_v,
@@ -1587,10 +1595,10 @@ pub(crate) fn merge_seam_intervals<O: LoopObject>(
 ) -> Result<core::result::Result<MergedTopology<O>, PartialMergeError<O>>> {
     // (a failure to rebuild the seam leaves it unresolved, as above)
     let seam = match b.face(f)?.surface.as_ref() {
-        Some(s) => s.create_seam_curve(k, dir, true).ok().flatten(),
+        Some(s) => s.seam_curve(k, dir, true).ok().flatten(),
         None => None,
     };
-    let seam = seam.map(|s| (s.uv_curve().clone(), Curve::from(s)));
+    let seam = seam.map(|s| (s.uv_curve, s.curve));
     let (ci, ui) = if dir == SurfParamType::V {
         SEAM_V_TEMPS
     } else {
@@ -1745,16 +1753,19 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     outer_loop_only: bool,
     loops: &[LoopId],
     props: &mut FaceProps<O>,
+    touches_read: bool,
 ) -> Result<(CurveClassification<O>, bool, bool, bool, SeamCurves)> {
-    // Build SeamConst curve
-    let seam = objects
+    profile_scope!(k, "topology::face::classify_seam");
+    // Build SeamConst curve (a cone's ruling as a line, `Surface::seam_curve`)
+    let SeamCurve {
+        curve: seam,
+        uv_curve: seam_uv,
+        interval,
+    } = objects
         .classify_surface(f)?
         .ok_or_else(|| null("HasSeamProblem: face without surface"))?
-        .create_seam_curve(k, dir, periodic)?
+        .seam_curve(k, dir, periodic)?
         .ok_or_else(|| null("HasSeamProblem: periodic surface without seam curve"))?;
-    let seam_uv = seam.uv_curve().clone();
-    let interval = seam.natural_interval();
-    let seam = Curve::from(seam);
     let temp = |i: usize| -> Result<O> {
         O::temporary(i, ClassObjectKind::Curve).ok_or_else(|| {
             null("HasSeamProblem: classification handles cannot name the seam curve")
@@ -1792,8 +1803,12 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         _ => {}
     }
 
-    // How many times is the Seam crossed by loop
-    get_loop_crossings(k, &objects, &class, loops, props, dir)?;
+    // How many times is the Seam crossed by loop (the touch lists, for a reader of them:
+    // `has_seam_problem_mut`'s `touches_read`)
+    if touches_read {
+        profile_scope!(k, "topology::face::seam_loop_crossings");
+        get_loop_crossings(k, &objects, &class, loops, props, dir)?;
+    }
 
     // Find and Fix False SeamEdge EndPoint Classifications (status ignored)
     match review_start_and_stop_on_seam_crv_classifies(k, &objects, &mut class) {
@@ -1951,6 +1966,9 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         p
     } else {
         local_props = FaceProps::new();
+        // made for this call and dropped after it: nothing reads its touch lists past
+        // this call's own doubly periodic cases (`touches_read` below)
+        local_props.touch_lists_read = false;
         &mut local_props
     };
     if props.prop_stage < PropStage::Stage2A {
@@ -2014,6 +2032,12 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
 
     // arrive here when HasSeamProblems() is called from SetProps_Stage2
 
+    // Not upstream: the seams' touch lists are read by the doubly periodic cases below and
+    // by the properties' later stages (`LoopProps::set_props`, stage 3's loop
+    // classification). Properties made for this call alone reach neither, unless the
+    // surface is doubly periodic by the flags used below.
+    let touches_read = props.touch_lists_read || (periodic_u && periodic_v);
+
     // periodic in U
     if periodic_u {
         let (class, crossed, missing, near_miss, curves) = classify_seam(
@@ -2026,6 +2050,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
             outer_loop_only,
             &loops,
             props,
+            touches_read,
         )?;
         out.class_u = class;
         out.seam_u = Some(curves);
@@ -2044,6 +2069,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
             outer_loop_only,
             &loops,
             props,
+            touches_read,
         )?;
         out.class_v = class;
         out.seam_v = Some(curves);
