@@ -73,7 +73,10 @@
 //!   helpers `sm_CoonsSideNormal`, `sm_CoonsSideAngle`, `sm_RefineToSpans` and
 //!   `sm_ProjectCoonsSideRows`, all private). Its refinement is bounded (8 to 64 spans).
 //!   `sm_CoonsSideAngle` makes the patch normal unit by its own length, not `Unitize`
-//!   (tangency-labs/smlib@701da4b, same option).
+//!   (tangency-labs/smlib@701da4b, same option). Not the fork's (WR-613):
+//!   `sm_ProjectCoonsSideRows` moves a point next to a face side and a blend side into
+//!   the face side's plane, not onto the two planes' mean, as the Coons corner twist
+//!   there is the blend side's (`create_coons_srf`'s face sides).
 
 use crate::curve::curve::p1::{SpanAccuracy, MAX_APPROX_SPANS};
 use crate::curve::curve::p2::Curve as SmCurve;
@@ -964,9 +967,24 @@ impl BSplineSurface {
         // If we have 4 curves then we need to reverse opposite ones and make them
         // compatible
         if boundaries.len() == 4 {
+            // Not upstream (WR-613): the given 3D curves, as the body's edges run along
+            // them, that the face-sided patch's guard reads its seams along
+            let originals: Vec<SmCurve> = if face_sides != 0 && !create_bilinear_patch {
+                curves_3d
+                    .iter()
+                    .map(|c| {
+                        c.map(|c| SmCurve::from(c.clone())).ok_or_else(|| {
+                            SolidError::b_spline(OP, BSplineFailure::Missing("a boundary curve"))
+                        })
+                    })
+                    .collect::<Result<_>>()?
+            } else {
+                Vec::new()
+            };
             return corner_blend_4(
                 k,
                 boundaries,
+                &originals,
                 uv_crvs,
                 curve_orients,
                 surfaces,
@@ -2022,6 +2040,7 @@ const TOP: usize = 3;
 fn corner_blend_4(
     k: &crate::kernel::Kernel,
     mut boundaries: Vec<BSplineCurve>,
+    originals: &[SmCurve],
     mut uv_crvs: Vec<Option<BSplineCurve>>,
     curve_orients: &[OrientType],
     surfaces: &[Option<&SmSurface>],
@@ -2202,24 +2221,94 @@ fn corner_blend_4(
     if face_sides & (1 << TOP) != 0 {
         coons_face_sides |= COONS_FACE_TOP;
     }
+    // the face-sided patch's sides, before the mean-twist patch consumes them. Only where
+    // every side has a surface: the guard proves each side's seam with that side's
+    // surface, and a side without one (a triangular patch's) would be left unheld
+    let surfaced = (0..4).all(|ii| matches!(surfaces.get(ii), Some(Some(_))));
+    let face_sided = (coons_face_sides != 0 && !create_bilinear_patch && surfaced)
+        .then(|| (bounds.clone(), tans.clone()));
     let coons = BSplineSurface::create_coons_patch_on_faces(
         tol,
         create_bilinear_patch,
         &mut bounds,
         &mut tans,
-        coons_face_sides,
+        0,
     )?;
+    if create_bilinear_patch {
+        return Ok(vec![coons]);
+    }
 
     // Not upstream (WR-547; tangency-labs/smlib@cae8618): the patch tangent to its sides'
     // surfaces
-    if !create_bilinear_patch {
-        if let Some(tangent) =
-            make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?
-        {
-            return Ok(vec![tangent]);
-        }
+    let tangent =
+        make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?;
+
+    // Not upstream (WR-613): a patch that meets its face sides exactly, where every side
+    // is proved within the largest angle the patch that ships otherwise is proved to
+    // reach, so the largest angle over the sides is no larger
+    let bar = tangent.unwrap_or(coons);
+    let Some(face_sided) = face_sided else {
+        return Ok(vec![bar]);
+    };
+    let sides = CoonsSides {
+        curves: originals,
+        uv_curves: &uv_crvs,
+        surfaces,
+        face_sides,
+    };
+    // the seam check's tangent angle (`make_coons_patch_tangent_to_sides`' target)
+    let target = (ANG_TOL_DEG * (PI / 180.0)).min(tangency_tol_radians);
+    let patch = face_sided_or_bar(k, tol, face_sided, coons_face_sides, &sides, bar, target)?;
+    Ok(vec![patch])
+}
+
+/// Not the fork's (WR-613): the face-sided corner patch ([`face_sided_patch`]) built from
+/// `face_sided` (the sides and cross tangents before the mean-twist patch consumed them,
+/// with `coons_face_sides` in [`BSplineSurface::create_coons_patch_on_faces`]' bits) where
+/// a candidate is taken, else `bar` (the patch that ships otherwise) bit for bit.
+///
+/// The attempt is an addition to the shipped patch, so it never fails a corner the shipped
+/// patch builds, save for work given up ([`keep_bar_on_error`]): an error anywhere in it (building the face-sided patch, refining or
+/// grading a candidate, projecting its rows, reading or proving a seam) keeps `bar`, as
+/// no candidate taken would ([`keep_bar_on_error`]).
+///
+/// # Errors
+///
+/// The statuses [`SolidError::is_unported_or_cancelled`] passes on (an unported call, a
+/// cancellation, face trims unavailable, a spent certification budget) from the attempt.
+fn face_sided_or_bar(
+    k: &crate::kernel::Kernel,
+    tol: f64,
+    (mut face_bounds, mut face_tans): (Vec<BSplineCurve>, Vec<BSplineCurve>),
+    coons_face_sides: u32,
+    sides: &CoonsSides<'_, '_>,
+    bar: BSplineSurface,
+    target: f64,
+) -> Result<BSplineSurface> {
+    let attempt = (|| -> Result<Option<BSplineSurface>> {
+        let twisted = BSplineSurface::create_coons_patch_on_faces(
+            tol,
+            false,
+            &mut face_bounds,
+            &mut face_tans,
+            coons_face_sides,
+        )?;
+        face_sided_patch(k, &twisted, &bar, sides, target)
+    })();
+    Ok(keep_bar_on_error(attempt)?.unwrap_or(bar))
+}
+
+/// Not the fork's (WR-613): the face-sided attempt's outcome ([`face_sided_or_bar`]), with
+/// every error other than those [`SolidError::is_unported_or_cancelled`] passes on (an
+/// unported call, a cancellation, face trims unavailable, a spent certification budget)
+/// read as no candidate taken, so the caller keeps the patch that ships otherwise. Those
+/// are passed on: work given up never becomes a result.
+fn keep_bar_on_error(attempt: Result<Option<BSplineSurface>>) -> Result<Option<BSplineSurface>> {
+    match attempt {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+        Ok(taken) => Ok(taken),
     }
-    Ok(vec![coons])
 }
 
 // ---- the fork's Coons patch tangency (tangency-labs/smlib@cae8618) ----------------------
@@ -3130,11 +3219,20 @@ fn refinement_knots(knots: &[f64], spans: usize) -> Vec<f64> {
 /// corner) onto the mean of their planes. Needs at least 5 control points each way, so
 /// that no point is next to two opposite sides. Every plane is read from the unmoved
 /// net before any point is written.
+///
+/// Not the fork's (WR-613): `face_sides` marks the sides on a face of the body (bit
+/// `i` for side `i`: left, bottom, right, top), as `CreateCornerBlend`'s `lFaceSides`.
+/// A point next to exactly one marked side and one unmarked side goes into the marked
+/// side's plane alone, as the Coons corner twist there is the unmarked side's: the patch
+/// keeps its tangency to the body's face exactly and the blend side takes the miss. On
+/// the mean plane the point stood off the face's tangent plane by half the two planes'
+/// separation there, so a patch along a plane face crossed it.
 fn project_coons_side_rows(
     k: &crate::kernel::Kernel,
     patch: &mut BSplineSurface,
     uv_curves: &[Option<BSplineCurve>],
     surfaces: &[Option<&SmSurface>],
+    face_sides: u32,
 ) -> Result<()> {
     const OP: &str = OP_CORNER;
     let nu = patch.number_control_points(SurfParamType::U);
@@ -3202,8 +3300,9 @@ fn project_coons_side_rows(
 
             let (mut pnt, _) = patch.control_point(ControlPointForm::NonRational, i, j)?;
 
-            // each side's plane: unit normal and the signed distance of pnt from it
-            let mut planes: Vec<(Vec3, f64)> = Vec::with_capacity(2);
+            // each side's plane: unit normal, the signed distance of pnt from it, and
+            // whether the side is on a face of the body
+            let mut planes: Vec<(Vec3, f64, bool)> = Vec::with_capacity(2);
             for &(side, anchor_u, anchor_v) in &sides {
                 let Some((uv_curve, surface)) = coons_side(uv_curves, surfaces, side) else {
                     continue;
@@ -3218,12 +3317,20 @@ fn project_coons_side_rows(
                     patch.control_point(ControlPointForm::NonRational, anchor_u, anchor_v)?;
                 let normal =
                     coons_side_normal(k, uv_curve, surface, if along_u { &su } else { &sv }, s)?;
-                planes.push((normal, normal.dot(pnt - anchor)));
+                let on_face = u32::try_from(side)
+                    .ok()
+                    .and_then(|side| 1u32.checked_shl(side))
+                    .is_some_and(|bit| face_sides & bit != 0);
+                planes.push((normal, normal.dot(pnt - anchor), on_face));
             }
             match planes.as_slice() {
                 [] => continue,
-                [(normal, dist)] => pnt -= *normal * *dist,
-                [(normal0, dist0), (normal1, dist1), ..] => {
+                // next to one side, or to a face side and a blend side: into the (face)
+                // side's plane
+                [(normal, dist, _)]
+                | [(normal, dist, true), (_, _, false), ..]
+                | [(_, _, false), (normal, dist, true), ..] => pnt -= *normal * *dist,
+                [(normal0, dist0, _), (normal1, dist1, _), ..] => {
                     // next to two sides at a corner: both planes are near the corner's
                     // tangent plane, their line far off; onto their mean plane, which
                     // leaves each a second-order miss
@@ -3339,7 +3446,7 @@ fn make_coons_patch_tangent_to_sides(
         let mut attempt = patch.clone();
         refine_to_spans(&mut attempt, SurfParamType::U, spans)?;
         refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
-        project_coons_side_rows(k, &mut attempt, uv_curves, surfaces)?;
+        project_coons_side_rows(k, &mut attempt, uv_curves, surfaces, 0)?;
         let angle = coons_side_angle(&attempt, &frames, logging.then_some(&mut stations))?;
         if logging {
             candidates.push(record(spans, &attempt, std::mem::take(&mut stations)));
@@ -3363,6 +3470,350 @@ fn make_coons_patch_tangent_to_sides(
         }
     }
     Ok(best)
+}
+
+/// A Coons corner patch's sides (left, bottom, right, top): each side's 3D curve, UV curve
+/// and surface, and which sides lie on faces of the body (bit `i` for side `i`; WR-613).
+struct CoonsSides<'c, 's> {
+    /// Each side's 3D curve as `CreateCornerBlend` was given it: the curve the body's edge
+    /// at that side runs along (not its non-rational approximation the patch interpolates).
+    curves: &'c [SmCurve],
+    /// Each side's UV curve on its surface.
+    uv_curves: &'c [Option<BSplineCurve>],
+    /// Each side's surface.
+    surfaces: &'c [Option<&'s SmSurface>],
+    /// The sides on faces of the body.
+    face_sides: u32,
+}
+
+/// The most times [`face_sided_patch`] halves a candidate's first knot span toward a
+/// corner between a face side and a blend side ([`grade_corner_spans`]). With the blend
+/// side's twist at that corner the blend side's extra angle sits in that span, so each
+/// halving confines it to half the side length; three take a 64-span patch's corner span
+/// to 1/512 of the side.
+const MAX_CORNER_GRADE: u32 = 3;
+
+/// Not the fork's (WR-613): the most piece bounds one side's certification
+/// ([`coons_side_within`]) computes: 128 per starting piece ([`WITHIN_PIECES`]). A side
+/// whose normals turn with its neighbour's is bounded in long pieces by the along-seam
+/// bound (fact 4 of [`crate::query::seam_bound`]); the budget is for sides that only close
+/// in short pieces, such as near a collapsed corner. Past it the side is not certified, so
+/// the candidate is refused and the shipped patch kept: the budget bounds the work, never
+/// what is accepted.
+///
+/// [`WITHIN_PIECES`]: crate::query::seam_bound::WITHIN_PIECES
+const CERTIFY_PIECES: usize = 2048;
+
+/// Not the fork's (WR-613): a corner patch that meets every face side exactly (`twisted`,
+/// built with the blend side's twist at each corner between a face side and a blend side)
+/// and is proved, on every side with a surface, within the largest angle `bar` is proved
+/// to reach ([`seam_limit`], capped at `target`); `None` when no candidate is, and the
+/// caller keeps `bar`. `bar` is the patch that ships otherwise: the mean-twist patch as
+/// WR-547 leaves it.
+///
+/// Candidates, in order: `twisted` as built; then `twisted` refined to 8, 16, 32 and 64
+/// spans each way, each with 0 to [`MAX_CORNER_GRADE`] halvings of the first span along
+/// each blend side toward each face-side/blend-side corner, its side rows projected with
+/// the face sides ([`project_coons_side_rows`]). The first that passes the measured screen
+/// ([`read_within`]: each side's seam reading, [`coons_side_seams`], through
+/// [`seam_normal_angle`], the seam check's own function, stations and metric) and the
+/// proof ([`certified_within`]: on every side with a surface, its largest normal angle over
+/// the whole side, not only at the stations, is proved at most the limit,
+/// [`seam_angle_within`]) is taken. At most 1 + 4 x 4 candidates (the twisted patch, then
+/// four refinements by four gradings): bounded work.
+///
+/// The rule is on the largest angle over all sides, so the error is not moved: a side of
+/// the candidate may read higher than `bar`'s same side, but never above what `bar` is
+/// proved to reach on its worst side.
+///
+/// [`seam_angle_within`]: crate::query::seam_bound::seam_angle_within
+/// [`seam_normal_angle`]: crate::query::continuity::seam_normal_angle
+fn face_sided_patch(
+    k: &crate::kernel::Kernel,
+    twisted: &BSplineSurface,
+    bar: &BSplineSurface,
+    sides: &CoonsSides<'_, '_>,
+    target: f64,
+) -> Result<Option<BSplineSurface>> {
+    let CoonsSides {
+        uv_curves,
+        surfaces,
+        face_sides,
+        ..
+    } = *sides;
+    if twisted.is_rational() || bar.is_rational() {
+        return Ok(None);
+    }
+    let bar_lower = coons_side_lower_bounds(k, bar, sides)?;
+    let surfaced = std::array::from_fn(|i| matches!(surfaces.get(i), Some(Some(_))));
+    let Some(limit) = seam_limit(target, &bar_lower, surfaced) else {
+        return Ok(None);
+    };
+    let taken = |cand: &BSplineSurface| -> Result<bool> {
+        let cand_seams = coons_side_seams(k, cand, sides, limit)?;
+        if !read_within(&cand_seams, limit) {
+            return Ok(false);
+        }
+        certified_within(k, cand, &cand_seams, limit, sides, CERTIFY_PIECES)
+    };
+    if taken(twisted)? {
+        return Ok(Some(twisted.clone()));
+    }
+    for spans in COONS_REFINEMENTS {
+        for grade in 0..=MAX_CORNER_GRADE {
+            let mut attempt = twisted.clone();
+            refine_to_spans(&mut attempt, SurfParamType::U, spans)?;
+            refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
+            grade_corner_spans(&mut attempt, face_sides, grade)?;
+            project_coons_side_rows(k, &mut attempt, uv_curves, surfaces, face_sides)?;
+            if taken(&attempt)? {
+                return Ok(Some(attempt));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Not the fork's (WR-613): the bound a candidate corner patch is held to on every side
+/// ([`face_sided_patch`]): `target` (the angle the seam check calls tangent), or less where
+/// the patch that ships otherwise is proved better than that on all its sides: the largest
+/// of its proved lower bounds (`bar_lower`) over the sides with a surface. That patch's
+/// largest angle along its sides is at least that bound, so a candidate proved within it
+/// on every side has no larger largest angle (the error is not moved from one side to
+/// another past what ships). `None` where the bound is not positive (nothing proved of
+/// that patch, or a NaN).
+/// `surfaced[i]`: side `i` has a surface.
+fn seam_limit(target: f64, bar_lower: &[Option<f64>; 4], surfaced: [bool; 4]) -> Option<f64> {
+    let mut most = 0.0_f64;
+    for (lower, on) in bar_lower.iter().zip(surfaced) {
+        if let (Some(lower), true) = (*lower, on) {
+            most = most.max(lower);
+        }
+    }
+    let limit = target.min(most);
+    (limit > 0.0).then_some(limit)
+}
+
+/// A side's seam reading in [`coons_side_seams`]: no surface on that side, or the reading.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SideSeam {
+    /// The side has no surface: nothing to meet.
+    Free,
+    /// [`seam_normal_angle`](crate::query::continuity::seam_normal_angle) along the side;
+    /// `None` where it reads nothing (too few stations, or an angle not finite).
+    Read(Option<f64>),
+}
+
+/// Not the fork's (WR-613): each side's seam reading of `patch` (left, bottom, right,
+/// top): [`seam_normal_angle`](crate::query::continuity::seam_normal_angle) between the
+/// patch and the side's surface along the side's 3D curve as given ([`CoonsSides::curves`],
+/// the curve the body's edge runs along) over its natural interval, both in their surfaces'
+/// own senses (the reading folds the senses out). Along the non-rational approximation the
+/// patch interpolates instead, the reading misses a rise the body's edge shows (#18640:
+/// `corner3x2` read 5.92e-3 on both patches where the body's edge reads main's 3.836e-3
+/// and the candidate's 3.2e-7 above it). A
+/// reading that fails with an error other than an unported call or a cancellation reads
+/// nothing.
+///
+/// The sides after the first whose reading [`read_within`] refuses at `limit` are not
+/// read (left [`SideSeam::Free`]): the screen's answer is already no, and each reading is
+/// a nearest-point solve at every station.
+fn coons_side_seams(
+    k: &crate::kernel::Kernel,
+    patch: &BSplineSurface,
+    sides: &CoonsSides<'_, '_>,
+    limit: f64,
+) -> Result<[SideSeam; 4]> {
+    let patch = SmSurface::from(patch.clone());
+    let mut out = [SideSeam::Free; 4];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let (Some(Some(surface)), Some(curve)) = (sides.surfaces.get(i), sides.curves.get(i))
+        else {
+            continue;
+        };
+        let read = crate::query::continuity::seam_normal_angle(
+            k,
+            curve,
+            curve.natural_interval(),
+            [(&patch, 1.0), (surface, 1.0)],
+        );
+        let seam = SideSeam::Read(match read {
+            Ok(angle) => angle,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => None,
+        });
+        *slot = seam;
+        if !read_within(
+            &[seam, SideSeam::Free, SideSeam::Free, SideSeam::Free],
+            limit,
+        ) {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Not the fork's (WR-613): whether `cand` reads every side with a surface at or below
+/// `limit` ([`coons_side_seams`]). A reading is the angle at a station, so a reading above
+/// `limit` (or none, or a NaN) refuses `cand` without trying a proof: no upper bound of
+/// the largest angle could then be at most `limit`.
+fn read_within(cand: &[SideSeam; 4], limit: f64) -> bool {
+    cand.iter().all(|c| match c {
+        SideSeam::Free => true,
+        SideSeam::Read(Some(c)) => *c <= limit,
+        SideSeam::Read(None) => false,
+    })
+}
+
+/// Not the fork's (WR-613): whether the largest normal angle between `patch` and side
+/// `i`'s surface along side `i`'s 3D curve over its natural interval is proved at most
+/// `limit` ([`seam_angle_within`], at most `budget` piece bounds: [`CERTIFY_PIECES`] in
+/// [`face_sided_patch`]); `false` on a free side, a side whose curve is no B-spline, or
+/// where it is not proved within the budget.
+///
+/// [`seam_angle_within`]: crate::query::seam_bound::seam_angle_within
+fn coons_side_within(
+    k: &crate::kernel::Kernel,
+    patch: &SmSurface,
+    sides: &CoonsSides<'_, '_>,
+    i: usize,
+    limit: f64,
+    budget: usize,
+) -> Result<bool> {
+    let (Some(Some(surface)), Some(curve)) = (sides.surfaces.get(i), sides.curves.get(i)) else {
+        return Ok(false);
+    };
+    let Some(bs) = crate::query::seam_bound::curve_b_spline(curve) else {
+        return Ok(false);
+    };
+    crate::query::seam_bound::seam_angle_within(
+        k,
+        bs,
+        curve.natural_interval(),
+        [patch, surface],
+        limit,
+        budget,
+    )
+}
+
+/// Not the fork's (WR-613): on each side with a surface, a proved lower bound of the
+/// largest normal angle between `patch` and the side's surface along the side's 3D curve
+/// over its natural interval ([`seam_angle_lower_bound`]); `None` on a free side, a side
+/// whose curve is no B-spline, or where nothing is proved.
+///
+/// [`seam_angle_lower_bound`]: crate::query::seam_bound::seam_angle_lower_bound
+fn coons_side_lower_bounds(
+    k: &crate::kernel::Kernel,
+    patch: &BSplineSurface,
+    sides: &CoonsSides<'_, '_>,
+) -> Result<[Option<f64>; 4]> {
+    let patch = SmSurface::from(patch.clone());
+    let mut out = [None; 4];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let (Some(Some(surface)), Some(curve)) = (sides.surfaces.get(i), sides.curves.get(i))
+        else {
+            continue;
+        };
+        let Some(bs) = crate::query::seam_bound::curve_b_spline(curve) else {
+            continue;
+        };
+        *slot = crate::query::seam_bound::seam_angle_lower_bound(
+            k,
+            bs,
+            curve.natural_interval(),
+            [&patch, surface],
+        )?;
+    }
+    Ok(out)
+}
+
+/// Not the fork's (WR-613): whether `cand` is proved within `limit` ([`seam_limit`]) on
+/// every side with a surface: its proved upper bound of the largest normal angle there
+/// over the whole side ([`coons_side_within`], at most `budget` piece bounds a side) is
+/// at most `limit`. Where none is proved on such a side, the budget included, `cand` is
+/// refused. The side reading highest (`cand_seams`) is
+/// tried first, the likeliest to fail.
+fn certified_within(
+    k: &crate::kernel::Kernel,
+    cand: &BSplineSurface,
+    cand_seams: &[SideSeam; 4],
+    limit: f64,
+    sides: &CoonsSides<'_, '_>,
+    budget: usize,
+) -> Result<bool> {
+    let mut order: Vec<(usize, f64)> = Vec::new();
+    for (i, seam) in cand_seams.iter().enumerate() {
+        if !matches!(sides.surfaces.get(i), Some(Some(_))) {
+            continue;
+        }
+        match seam {
+            SideSeam::Read(Some(r)) if *r <= limit => order.push((i, *r)),
+            _ => return Ok(false),
+        }
+    }
+    order.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    let patch = SmSurface::from(cand.clone());
+    for (i, _) in order {
+        if !coons_side_within(k, &patch, sides, i, limit, budget)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Not the fork's (WR-613): knots inserted in `surface` that halve its first knot span
+/// toward each corner between a face side and a blend side, `grade` times, in the
+/// direction the blend side runs (the first span at that end becomes `1 / 2^grade` of
+/// what it was). Sides are left, bottom, right, top; `face_sides` has bit `i` for side
+/// `i`. The surface's shape is unchanged.
+fn grade_corner_spans(surface: &mut BSplineSurface, face_sides: u32, grade: u32) -> Result<()> {
+    if grade == 0 {
+        return Ok(());
+    }
+    let on_face = |side: usize| face_sides & (1 << side) != 0;
+    // the knots halving the first span at one end of a direction, `grade` times
+    let halvings = |param: SurfParamType, at_min: bool| -> Result<Vec<f64>> {
+        let (knots, _) = surface.knots(param, None)?;
+        let ends = if at_min {
+            knots.first().zip(knots.get(1))
+        } else {
+            knots
+                .last()
+                .zip(knots.len().checked_sub(2).and_then(|i| knots.get(i)))
+        };
+        let Some((&end, &next)) = ends else {
+            return Err(SolidError::b_spline(
+                OP_CORNER,
+                BSplineFailure::Failed("the surface has fewer than two knots"),
+            ));
+        };
+        let mut out = Vec::new();
+        let mut piece = next - end;
+        for _ in 0..grade {
+            piece *= 0.5;
+            out.push(end + piece);
+        }
+        Ok(out)
+    };
+    let (mut in_u, mut in_v) = (Vec::new(), Vec::new());
+    // each corner: (its side at constant u, its side at constant v)
+    for (side_u, side_v) in [(LEFT, BOT), (RIGHT, BOT), (RIGHT, TOP), (LEFT, TOP)] {
+        match (on_face(side_u), on_face(side_v)) {
+            // the blend side runs along u: halve the u span at the face side's end
+            (true, false) => in_u.extend(halvings(SurfParamType::U, side_u == LEFT)?),
+            // the blend side runs along v: halve the v span at the face side's end
+            (false, true) => in_v.extend(halvings(SurfParamType::V, side_v == BOT)?),
+            _ => {}
+        }
+    }
+    for (param, mut knots) in [(SurfParamType::U, in_u), (SurfParamType::V, in_v)] {
+        knots.sort_by(f64::total_cmp);
+        knots.dedup();
+        if !knots.is_empty() {
+            surface.insert_knots(param, &knots)?;
+        }
+    }
+    Ok(())
 }
 
 // ---- CreateCornerBlend: n curves --------------------------------------------------------
@@ -3774,6 +4225,251 @@ mod tests {
         assert!(r.is_err());
     }
 
+    /// WR-613: a corner control point next to a side on a face of the body and a blend
+    /// side goes into the face side's tangent plane, so the patch keeps its tangency to
+    /// the face exactly; next to two sides of one kind it goes onto their mean plane.
+    #[test]
+    fn wr_613_corner_point_goes_into_the_face_sides_plane() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::plane::Plane;
+
+        let k = crate::Kernel::default();
+        // a bicubic patch over [0, 1]^2, 5 x 5 control points, off both side planes
+        let net: Vec<Vec<CPoint>> = (0..5)
+            .map(|i| {
+                (0..5)
+                    .map(|j| {
+                        let z = 0.01 * f64::from((i + 1) * (j + 2));
+                        CPoint::new(f64::from(i) / 4.0, f64::from(j) / 4.0, z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let patch = BSplineSurface::from_nurb(
+            Surface::new(net, 3, 3, knots.clone(), knots).unwrap(),
+            false,
+        );
+        // left side (u = 0) on the plane z = 0, bottom side (v = 0) on a plane tilted
+        // about x, normal (0, -sin a, cos a)
+        let a = 0.3_f64;
+        let flat = SmSurface::from(Plane::create_canonical(&Axis2Placement::default()).unwrap());
+        let tilted = SmSurface::from(
+            Plane::create_canonical(&Axis2Placement::new(
+                Point3::ZERO,
+                Vec3::X,
+                Vec3::new(0.0, a.cos(), a.sin()),
+            ))
+            .unwrap(),
+        );
+        let n_bot = Vec3::new(0.0, -a.sin(), a.cos());
+        let uv = |x: f64| {
+            BSplineCurve::create_line_segment(2, Point3::new(x, 0.0, 0.0), Point3::new(x, 1.0, 0.0))
+                .unwrap()
+        };
+        let uv_curves = [Some(uv(0.0)), Some(uv(0.0)), None, None];
+        let surfaces = [Some(&flat), Some(&tilted), None, None];
+
+        let corner = |face_sides: u32| -> Point3 {
+            let mut p = patch.clone();
+            project_coons_side_rows(&k, &mut p, &uv_curves, &surfaces, face_sides).unwrap();
+            p.control_point(ControlPointForm::NonRational, 1, 1)
+                .unwrap()
+                .0
+        };
+        let anchor = |i, j| {
+            patch
+                .control_point(ControlPointForm::NonRational, i, j)
+                .unwrap()
+                .0
+        };
+        let off_left = |p: Point3| (p - anchor(0, 1)).dot(Vec3::Z);
+        let off_bot = |p: Point3| (p - anchor(1, 0)).dot(n_bot);
+
+        // left on a face, bottom a blend side: in the left side's plane
+        let left = corner(1 << LEFT);
+        assert!(off_left(left).abs() <= 1e-15, "{}", off_left(left));
+        assert!(off_bot(left).abs() > 1e-3, "{}", off_bot(left));
+        // bottom on a face, left a blend side: in the bottom side's plane
+        let bot = corner(1 << BOT);
+        assert!(off_bot(bot).abs() <= 1e-15, "{}", off_bot(bot));
+        assert!(off_left(bot).abs() > 1e-3, "{}", off_left(bot));
+        // no face side, or both: the mean plane, off each side's plane (upstream's)
+        let mean = corner(0);
+        assert_eq!(corner((1 << LEFT) | (1 << BOT)), mean);
+        assert!(off_left(mean).abs() > 1e-3, "{}", off_left(mean));
+        assert!(off_bot(mean).abs() > 1e-3, "{}", off_bot(mean));
+        // a point next to one side only goes into that side's plane either way
+        for face_sides in [0, 1 << LEFT, 1 << BOT] {
+            let mut p = patch.clone();
+            project_coons_side_rows(&k, &mut p, &uv_curves, &surfaces, face_sides).unwrap();
+            let q = p
+                .control_point(ControlPointForm::NonRational, 1, 2)
+                .unwrap()
+                .0;
+            assert!((q - anchor(0, 2)).dot(Vec3::Z).abs() <= 1e-15);
+        }
+
+        // WR-613's zero-sum transfer at the corner point. With `d_f`, `d_b` its signed
+        // distances from the face side's and the blend side's planes and `c` the cosine
+        // between their normals: the mean move keeps the gap `d_f - d_b` exactly (it moves
+        // along the bisector, as far from each plane), and the face move changes it by
+        // `(1 - c) d_f` exactly (it moves along the face normal: `d_b` drops by `c d_f`).
+        // So the blend side's miss after the face move is at most both sides' misses on
+        // the mean plane plus `(1 - c) |d_f|`: what the face side gains, the blend side
+        // loses, to within `1 - cos` of the angle between the sides.
+        let p = anchor(1, 1);
+        let (d_f, d_b) = (off_left(p), off_bot(p));
+        let c = Vec3::Z.dot(n_bot);
+        // each distance is a dot product of a unit normal with a difference of points of
+        // size at most 2 (error at most γ_3 of 2 + 2u), and each identity sums four of
+        // them plus each move's own rounding (a product and a difference per coordinate):
+        // 64 ε bounds the lot
+        let rnd = 64.0 * f64::EPSILON;
+        let gap = d_f - d_b;
+        let mean_gap = off_left(mean) - off_bot(mean);
+        assert!((mean_gap - gap).abs() <= rnd, "{mean_gap} vs {gap}");
+        let face_gap = off_left(left) - off_bot(left);
+        assert!(
+            (face_gap - (gap - (1.0 - c) * d_f)).abs() <= rnd,
+            "{face_gap} vs {gap} - (1 - {c}) {d_f}"
+        );
+        let rise = off_bot(left).abs() - off_bot(mean).abs();
+        assert!(
+            rise <= off_left(mean).abs() + (1.0 - c) * d_f.abs() + rnd,
+            "the blend side's miss rose by {rise}, more than the face side's {} gave up",
+            off_left(mean).abs()
+        );
+        // and the transfer is real: the face side's whole miss went to the blend side
+        assert!(rise > 0.5 * off_left(mean).abs(), "{rise}");
+    }
+
+    /// WR-613: `grade_corner_spans` halves the first knot span toward each corner between
+    /// a face side and a blend side, in the direction the blend side runs, `grade` times,
+    /// and leaves the surface's shape alone.
+    #[test]
+    fn wr_613_corner_spans_are_graded_along_the_blend_side() {
+        let net: Vec<Vec<CPoint>> = (0..5)
+            .map(|i| {
+                (0..5)
+                    .map(|j| {
+                        let z = 0.01 * f64::from((i + 1) * (j + 2));
+                        CPoint::new(f64::from(i) / 4.0, f64::from(j) / 4.0, z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let patch = BSplineSurface::from_nurb(
+            Surface::new(net, 3, 3, knots.clone(), knots).unwrap(),
+            false,
+        );
+        let graded = |face_sides: u32, grade: u32| {
+            let mut p = patch.clone();
+            grade_corner_spans(&mut p, face_sides, grade).unwrap();
+            let u = p.knots(SurfParamType::U, None).unwrap().0;
+            let v = p.knots(SurfParamType::V, None).unwrap().0;
+            (p, u, v)
+        };
+        // left a face side, bottom and top blend sides (running along u): u's first span
+        // halved twice
+        let (p, u, v) = graded(1 << LEFT, 2);
+        assert_eq!(u, [0.0, 0.125, 0.25, 0.5, 1.0]);
+        assert_eq!(v, [0.0, 0.5, 1.0]);
+        let k = crate::Kernel::default();
+        let at = |q: &BSplineSurface, s: f64, t: f64| {
+            crate::surface::surface::p1::evaluate_1st_derivatives(
+                &k,
+                q,
+                Point2::new(s, t),
+                Side::Left,
+                Side::Left,
+            )
+            .unwrap()
+            .0
+        };
+        for (s, t) in [(0.1, 0.2), (0.6, 0.9), (0.01, 0.99)] {
+            let (a, b) = (at(&patch, s, t), at(&p, s, t));
+            // knot insertion only re-expresses the surface: rounding on coordinates < 1
+            assert!(a.distance(b) <= 1e-14, "{a:?} {b:?}");
+        }
+        // top a face side, left and right blend sides (running along v): v's last span
+        // halved three times
+        let (_, u, v) = graded(1 << TOP, 3);
+        assert_eq!(u, [0.0, 0.5, 1.0]);
+        assert_eq!(v, [0.0, 0.5, 0.75, 0.875, 0.9375, 1.0]);
+        // no face side, every side one, or grade 0: no knot
+        for (face_sides, grade) in [(0, 3), (0b1111, 3), (1 << LEFT, 0)] {
+            let (_, u, v) = graded(face_sides, grade);
+            assert_eq!((u.len(), v.len()), (3, 3));
+        }
+        // a face side and its blend sides at both ends: both ends graded, each once
+        let (_, u, v) = graded((1 << BOT) | (1 << TOP), 1);
+        assert_eq!(u, [0.0, 0.5, 1.0]);
+        assert_eq!(v, [0.0, 0.25, 0.5, 0.75, 1.0]);
+    }
+
+    /// WR-613: the limit a candidate is held to is the largest proved lower bound of the
+    /// shipped patch's angle over its sides with a surface, capped at the target
+    /// ([`seam_limit`]; none where nothing is proved, or a NaN); the screen
+    /// ([`read_within`]) passes a candidate only where every side with a surface reads at
+    /// or below that limit, so one side may rise while the largest angle does not, and a
+    /// side that reads nothing, or a NaN, refuses it.
+    #[test]
+    fn wr_613_face_sided_patch_is_held_to_the_shipped_patchs_largest_angle() {
+        use SideSeam::{Free, Read};
+        let target = 8.7e-3;
+        let surfaced = [true, true, true, false];
+        // the shipped patch's proved lower bounds: its largest angle is at least 6.2e-3,
+        // so a candidate within that on every side has no larger largest angle
+        let bar = [Some(3.3e-3), Some(4.9e-3), Some(6.2e-3), None];
+        assert_eq!(seam_limit(target, &bar, surfaced), Some(6.2e-3));
+        // a free side's bound does not count; the target caps the limit
+        assert_eq!(
+            seam_limit(target, &[Some(1e-3), None, None, Some(9e-3)], surfaced),
+            Some(1e-3)
+        );
+        assert_eq!(
+            seam_limit(target, &[Some(9e-3), None, None, None], surfaced),
+            Some(target)
+        );
+        // nothing proved of the shipped patch (or a NaN): no limit, nothing is taken
+        assert_eq!(seam_limit(target, &[None; 4], surfaced), None);
+        assert_eq!(
+            seam_limit(target, &[Some(f64::NAN), None, None, None], surfaced),
+            None
+        );
+        // the screen: every side with a surface read at or below the limit; a side may
+        // rise (here the blend side, to the limit) while the largest angle falls
+        let limit = 6.2e-3;
+        assert!(read_within(
+            &[
+                Read(Some(5.9e-3)),
+                Read(Some(6.2e-3)),
+                Read(Some(1e-4)),
+                Free
+            ],
+            limit
+        ));
+        assert!(!read_within(
+            &[
+                Read(Some(5.9e-3)),
+                Read(Some(6.3e-3)),
+                Read(Some(1e-4)),
+                Free
+            ],
+            limit
+        ));
+        assert!(!read_within(
+            &[Read(None), Read(Some(1e-3)), Read(Some(1e-4)), Free],
+            limit
+        ));
+        assert!(!read_within(
+            &[Read(Some(f64::NAN)), Read(Some(1e-3)), Free, Free],
+            limit
+        ));
+    }
+
     /// A planar triangle as a cubic patch at `at`, its top side (v = 1) collapsed to the
     /// apex, in the plane `z = 0.3 x + 0.2 y` (relative to `at`), so its normal is
     /// computed with rounding; with the plane as neighbour on its other three sides (UV
@@ -3816,6 +4512,114 @@ mod tests {
         .unwrap();
         let uvs = vec![Some(uv.clone()), Some(uv.clone()), Some(uv), None];
         (patch, SmSurface::from(plane), uvs)
+    }
+
+    /// A candidate whose certification would need more piece bounds than its budget is
+    /// refused (WR-613): the budget only bounds the work. The triangle lies in its
+    /// neighbour's plane, so along a line in that plane the largest angle is proved 0 with
+    /// the kernel's budget, [`CERTIFY_PIECES`]; with fewer piece bounds than the
+    /// certification has starting pieces nothing is proved and the same candidate is not
+    /// taken ([`certified_within`] with that budget).
+    #[test]
+    fn wr_613_a_candidate_past_the_certification_budget_is_refused() {
+        use SideSeam::{Free, Read};
+        let k = &crate::Kernel::default();
+        let (patch, plane, uvs) = far_triangle(Vec3::new(0.0, 0.0, 0.0));
+        let plane_z = |x: f64, y: f64| 0.3 * x + 0.2 * y;
+        let line = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(0.3, 0.2, plane_z(0.3, 0.2)),
+            Point3::new(0.6, 0.4, plane_z(0.6, 0.4)),
+        )
+        .unwrap();
+        let curves = vec![SmCurve::from(line.clone()); 4];
+        let surfaces = [Some(&plane), None, None, None];
+        let sides = CoonsSides {
+            curves: &curves,
+            uv_curves: &uvs,
+            surfaces: &surfaces,
+            face_sides: 0,
+        };
+        let seams = [Read(Some(0.0)), Free, Free, Free];
+        let limit = 1.0e-3;
+        assert!(certified_within(k, &patch, &seams, limit, &sides, CERTIFY_PIECES).unwrap());
+        for budget in [0, crate::query::seam_bound::WITHIN_PIECES - 1] {
+            assert!(
+                !certified_within(k, &patch, &seams, limit, &sides, budget).unwrap(),
+                "budget {budget}"
+            );
+        }
+    }
+
+    /// The face-sided attempt never fails a corner the shipped patch builds (WR-613): an
+    /// error inside it (here building the face-sided patch from three sides, as
+    /// [`BSplineSurface::create_coons_patch_on_faces`] refuses) returns the shipped patch
+    /// bit for bit, while the kernel's unported and cancelled statuses are passed on and a
+    /// taken candidate is returned.
+    #[test]
+    fn wr_613_an_error_in_the_face_sided_attempt_keeps_the_shipped_patch() {
+        let k = &crate::Kernel::default();
+        let (bar, plane, uvs) = far_triangle(Vec3::new(0.0, 0.0, 0.0));
+        let side = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.3),
+        )
+        .unwrap();
+        let curves = vec![SmCurve::from(side.clone()); 4];
+        let surfaces = [Some(&plane); 4];
+        let sides = CoonsSides {
+            curves: &curves,
+            uv_curves: &uvs,
+            surfaces: &surfaces,
+            face_sides: 1 << LEFT,
+        };
+        // the attempt does fail: three sides are no Coons patch
+        let three = vec![side.clone(); 3];
+        assert!(BSplineSurface::create_coons_patch_on_faces(
+            1e-6,
+            false,
+            &mut three.clone(),
+            &mut Vec::new(),
+            COONS_FACE_LEFT,
+        )
+        .is_err());
+        let kept = face_sided_or_bar(
+            k,
+            1e-6,
+            (three, Vec::new()),
+            COONS_FACE_LEFT,
+            &sides,
+            bar.clone(),
+            1e-3,
+        )
+        .expect("an error in the attempt keeps the shipped patch");
+        assert_eq!(
+            kept.gw_nurb(),
+            bar.gw_nurb(),
+            "the shipped patch, bit for bit"
+        );
+        assert_eq!(kept.is_rational(), bar.is_rational());
+
+        // the mapping itself: any other error keeps the bar; unported and cancelled are
+        // passed on; a taken candidate is returned
+        let other = Err(SolidError::invalid_input("test", "a failed attempt"));
+        assert!(matches!(keep_bar_on_error(other), Ok(None)));
+        let unported = Err(SolidError::unported("sm_Test", "test.unit"));
+        assert!(matches!(
+            keep_bar_on_error(unported),
+            Err(SolidError::Unported { .. })
+        ));
+        let cancelled = Err(SolidError::Cancelled { operation: "test" });
+        assert!(matches!(
+            keep_bar_on_error(cancelled),
+            Err(SolidError::Cancelled { .. })
+        ));
+        let taken = keep_bar_on_error(Ok(Some(bar.clone()))).unwrap();
+        assert_eq!(
+            taken.map(|t| t.gw_nurb().cloned()),
+            Some(bar.gw_nurb().cloned())
+        );
     }
 
     /// Near a collapsed corner far from the origin the patch normal is lost in rounding:

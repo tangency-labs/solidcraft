@@ -37,7 +37,7 @@ mod component_clone;
 mod component_clone_assembly;
 mod construct;
 mod construct_auto;
-mod delete;
+pub(crate) mod delete;
 pub(crate) mod diagnostics;
 mod drawing;
 mod drawing_balloon;
@@ -57,6 +57,7 @@ mod drawing_table;
 mod drawing_ui;
 mod drawing_view;
 mod edit;
+mod envelopes;
 mod face;
 mod features;
 mod features_more;
@@ -213,8 +214,9 @@ pub type SchemaFn = fn() -> schemars::Schema;
 /// selection is not exactly what it takes.
 pub type FromSelection = fn(&Session) -> Option<Value>;
 
-/// The part of the design a command works on (#3890): the model (most commands), the open
-/// drawing, or either (files, undo, selection, diagnostics, choosing a drawing).
+/// The part of the design a command works on (#3890): the model (most commands, with a drawing
+/// open or not), the open drawing, or either (files, undo, selection, diagnostics, choosing a
+/// drawing).
 /// [`CommandSpec::allowed`] checks it before the command's own `enabled`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
@@ -352,7 +354,8 @@ impl CommandSpec {
         self.part = Part::Any;
         self
     }
-    /// Works with a drawing open or with none, and its undo step belongs to whichever is open.
+    /// Works with a drawing open or with none, and its undo step belongs to the part it changes:
+    /// the open drawing's for a delete of its objects, else the model's.
     pub const fn open_part(mut self) -> Self {
         self.part = Part::Open;
         self
@@ -373,12 +376,17 @@ impl CommandSpec {
         if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
             return Err("finish or cancel the sheet sketch before switching drawings".into());
         }
+        // Nothing a drawing does holds the model's commands: an open drawing, or a sheet sketch
+        // being edited in it, leaves them working, and the views they change wait for the
+        // drawing's Update. The model drives the drawing, never the reverse.
         match (self.part, s.open_drawing.is_some()) {
-            (Part::Model, true) => Err("a drawing is open: close it to change the model (drawing.close)".into()),
-            (Part::Drawing, false) => Err("open a drawing first (drawing.open, or drawing.create)".into()),
-            (Part::Sketch, true) if !s.active_sheet_sketch.as_ref().is_some_and(|entry| Some(entry.drawing) == s.open_drawing) => {
-                Err("a drawing is open: enter a sheet sketch first (drawing.sketch.create or drawing.sketch.edit)".into())
+            // A tool of the model's sketch has no sketch to work on while the sheet's is the one
+            // being edited (and the model's isn't): it isn't offered on a sheet. That holds no
+            // model command: entering a model sketch ends the sheet's (`Session::execute`).
+            (Part::Model, true) if s.sheet_sketching() && s.active_sketch.is_none() && std::ptr::fn_addr_eq(self.enabled, in_sketch as Enabled) => {
+                Err("not available on a sheet sketch".into())
             }
+            (Part::Drawing, false) => Err("open a drawing first (drawing.open, or drawing.create)".into()),
             _ => (self.enabled)(s),
         }
     }
@@ -445,11 +453,11 @@ pub fn always(_: &Session) -> std::result::Result<(), String> {
 }
 
 pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
-    let active = match s.open_drawing {
-        Some(drawing) => s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.drawing == drawing),
-        None => s.active_sketch.is_some(),
-    };
-    if active { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
+    if s.sheet_sketching() || s.active_sketch.is_some() {
+        Ok(())
+    } else {
+        Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into())
+    }
 }
 
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
