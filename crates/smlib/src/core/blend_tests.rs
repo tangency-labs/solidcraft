@@ -430,7 +430,7 @@ fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
     for (name, body, kind, points, size, reason, fit, [lo, hi]) in cases {
         let e = timed(name, move || blend(&body, kind, &points, &[size], TOL, &[], &[], Corners::Filled).map(|_| ()).err());
         let Some(e) = e else { panic!("{name}: built") };
-        let Error::TooLarge { size, kind, at: Some(_), why: Some(why) } = e else { panic!("{name}: {e:?}") };
+        let Error::TooLarge { size, kind, at: Some(_), why: Some(why), .. } = e else { panic!("{name}: {e:?}") };
         assert_eq!((why, kind), (reason, fit), "{name}");
         assert!(size > lo && size < hi, "{name}: {size} outside ({lo}, {hi})");
     }
@@ -448,7 +448,7 @@ fn a_distance_angle_chamfer_with_equal_setbacks_too_large_names_its_distance() {
     const TOP: [[f64; 3]; 2] = [[20.0, 0.0, 20.0], [20.0, 4.0, 20.0]];
     let sides = |d: f64| chamfer_sides(&RIB.core(), &TOP, TOL, d, ChamferSecond::Angle(PI / 4.0), [0.0, 0.0, 1.0]);
     let e = timed("angle_fit", move || sides(3.0).map(|_| ()).unwrap_err());
-    let Error::TooLarge { size, kind: crate::FitKind::Distance, at: Some(_), why: Some(crate::RoomReason::BandsOverlap) } = e else {
+    let Error::TooLarge { size, kind: crate::FitKind::Distance, at: Some(_), why: Some(crate::RoomReason::BandsOverlap), .. } = e else {
         panic!("{e:?}")
     };
     assert!((size - 2.0).abs() < 1e-9, "{size}");
@@ -553,7 +553,7 @@ fn a_knife_edge_chamfer_wider_than_the_part_keeps_nothing() {
     let tip = [TIP, 0.0, H / 2.0];
     let e =
         timed("knife_keeps_nothing", move || blend(&part, Blend::Chamfer, &[tip], &[200.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
-    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(_), why } = e else { panic!("{e:?}") };
+    let Error::TooLarge { size: d, kind: crate::FitKind::Distance, at: Some(_), why, .. } = e else { panic!("{e:?}") };
     assert_eq!(why, Some(crate::RoomReason::OverflowKeepsNothing));
     assert_ne!(why, Some(crate::RoomReason::CornersTakeWholeEdge));
     let closed = TIP * TIP / R - 0.01;
