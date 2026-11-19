@@ -619,6 +619,32 @@ fn open_sheet_menu(app: &mut SolveApp, drawing: u64, row: MenuRow, anchor: Rect)
     app.drawing_workspace.sheet_menu = Some(SheetMenu { owner: (app.session.uid, drawing), row, anchor, keyboard_row: None });
 }
 
+/// The sheet menu's Move up and Move down: entry id, label, why it is off at that end, and the
+/// step to the neighbour the sheet swaps with.
+const SHEET_MOVES: [(&str, &str, &str, isize); 2] = [
+    ("move_up", "ui.drawing_sheets.move_up", "ui.drawing_sheets.at_start", -1),
+    ("move_down", "ui.drawing_sheets.move_down", "ui.drawing_sheets.at_end", 1),
+];
+
+/// The drawing's sheet ids with `sheet` swapped with its neighbour `step` places on; `None` past
+/// either end, or for a sheet the drawing lacks.
+fn step_order(drawing: &solidcraft_engine::doc::drawing::Drawing, sheet: u64, step: isize) -> Option<Vec<u64>> {
+    let mut order: Vec<u64> = drawing.sheets.iter().map(|s| s.id).collect();
+    let at = order.iter().position(|id| *id == sheet)?;
+    let to = at.checked_add_signed(step).filter(|to| *to < order.len())?;
+    order.swap(at, to);
+    Some(order)
+}
+
+/// Put the open drawing's sheets in `order` (every sheet's id): one undo step, none for the same
+/// order. A refusal goes to the status line.
+pub(crate) fn reorder_sheets(app: &mut SolveApp, order: &[u64]) {
+    let sheets: Vec<String> = order.iter().copied().map(solidcraft_engine::doc::ids::encode).collect();
+    if let Err(error) = app.run("drawing.sheet.reorder", serde_json::json!({ "sheets": sheets })) {
+        app.set_status(error, true);
+    }
+}
+
 fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut menu) = app.drawing_workspace.sheet_menu.take() else { return };
     let (document, drawing_id) = menu.owner;
@@ -634,12 +660,17 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
         MenuRow::Drawing => (&drawing.name, vec![Item::action(drawing_settings::COMMAND, app.tr("cmd.drawing_set"), "settings")]),
         MenuRow::Sheet(sheet_id) => {
             let Some(sheet) = drawing.sheets.iter().find(|sheet| sheet.id == sheet_id) else { return };
+            let [up, down] = SHEET_MOVES.map(|(id, label, end, step)| {
+                Item::action(id, app.tr(label), "reorder").off_because(step_order(&drawing, sheet_id, step).is_none().then(|| app.tr(end).into()))
+            });
             let items = vec![
                 Item::action("settings", app.tr("cmd.drawing_sheet_set"), "settings"),
                 Item::action("rename", app.tr_label("Rename"), "rename"),
                 Item::action("duplicate", app.tr("ui.drawing_sheets.duplicate"), "copy")
                     .off_because(Some(app.tr("ui.drawing_first.unavailable").into())),
                 Item::action("add", app.tr("ui.drawing_sheets.add"), "plus"),
+                up,
+                down,
                 Item::sep(),
                 Item::action("delete", app.tr("cmd.drawing_sheet_delete"), "delete")
                     .off_because((drawing.sheets.len() <= 1).then(|| app.tr("ui.drawing_sheets.last_sheet").into())),
@@ -687,7 +718,13 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             "delete" => app.drawing_workspace.delete_sheet = Some((document, drawing_id, sheet_id)),
-            _ => {}
+            id => {
+                if let Some(&(.., step)) = SHEET_MOVES.iter().find(|(move_id, ..)| *move_id == id)
+                    && let Some(order) = step_order(&drawing, sheet_id, step)
+                {
+                    reorder_sheets(app, &order);
+                }
+            }
         }
         return;
     }
@@ -2156,6 +2193,99 @@ mod tests {
         h.step(&json!({"click":{"handle":"dialog:list:drawing_settings_language:de"}})).unwrap();
         h.frames(2);
         assert_eq!(the_drawing(&h).language, "de");
+        assert_eq!(h.app.session.undo.len(), steps + 2);
+    }
+
+    /// The open drawing's sheet ids, in order.
+    fn sheet_ids(h: &Harness) -> Vec<u64> {
+        the_drawing(h).sheets.iter().map(|sheet| sheet.id).collect()
+    }
+
+    fn sheet_row(sheet: u64) -> String {
+        format!("drawing:browser:sheet:{}", solidcraft_engine::doc::ids::encode(sheet))
+    }
+
+    /// A drawing of sheets A, B and C in the Browser, the sheet cards off: the harness and their ids.
+    fn three_sheets() -> (Harness, [u64; 3]) {
+        let mut h = drawing_open(serde_json::json!({}));
+        h.app.preferences.drawing_sheets_visibility = "off".into();
+        for name in ["B", "C"] {
+            h.app.run("drawing.sheet.add", serde_json::json!({ "name": name })).unwrap();
+        }
+        h.frames(8);
+        let ids = sheet_ids(&h);
+        (h, [ids[0], ids[1], ids[2]])
+    }
+
+    /// Drag the Browser row `from` onto the middle of the row `to`.
+    fn drag_row(h: &mut Harness, from: &str, to: &str) {
+        let (from, to) = (crate::scenario::handle_at(from).unwrap(), crate::scenario::handle_at(to).unwrap());
+        assert_eq!(h.call("ui.drag", serde_json::json!({"x0":from.x,"y0":from.y,"x1":to.x,"y1":to.y,"steps":12}))["ok"], true);
+    }
+
+    /// A sheet's row dragged onto another sheet's row goes before that sheet, in one undo step, and
+    /// the page stays on its sheet. An undo puts the order back.
+    #[test]
+    fn dragging_a_sheet_row_reorders_the_sheets_in_one_undo_step() {
+        let (mut h, [a, b, c]) = three_sheets();
+        select_sheet(&mut h.app, b);
+        h.frames(2);
+        let steps = h.app.session.undo.len();
+        drag_row(&mut h, &sheet_row(c), &sheet_row(a));
+        assert_eq!(sheet_ids(&h), [c, a, b]);
+        assert_eq!(h.app.session.undo.len(), steps + 1);
+        assert_eq!(active_sheet(&h.app), Some(b), "the page stays on its sheet");
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(sheet_ids(&h), [a, b, c]);
+    }
+
+    /// A sheet dropped on the drawing's own row goes last; the last sheet dropped there changes
+    /// nothing and makes no undo step.
+    #[test]
+    fn a_sheet_dropped_on_the_drawing_row_goes_last() {
+        let (mut h, [a, b, c]) = three_sheets();
+        let drawing = format!("drawing:browser:{}", solidcraft_engine::doc::ids::encode(the_drawing(&h).id));
+        let steps = h.app.session.undo.len();
+        drag_row(&mut h, &sheet_row(a), &drawing);
+        assert_eq!(sheet_ids(&h), [b, c, a]);
+        assert_eq!(h.app.session.undo.len(), steps + 1);
+        drag_row(&mut h, &sheet_row(a), &drawing);
+        assert_eq!(sheet_ids(&h), [b, c, a]);
+        assert_eq!(h.app.session.undo.len(), steps + 1, "the last sheet stays last, with no undo step");
+    }
+
+    /// Right-click the sheet's Browser row, click `entry` in its menu, and close the menu.
+    fn sheet_menu_entry(h: &mut Harness, sheet: u64, entry: &str) {
+        h.step(&serde_json::json!({"click":{"handle":sheet_row(sheet)},"button":"right"})).unwrap();
+        h.frames(3);
+        h.step(&serde_json::json!({ "widget": entry })).unwrap();
+        h.frames(3);
+        h.app.drawing_workspace.sheet_menu = None;
+        h.frames(2);
+    }
+
+    /// The sheet menu's Move up and Move down swap the sheet with its neighbour, one undo step
+    /// each. They are off at the first and last sheet, and with one sheet.
+    #[test]
+    fn sheet_menu_moves_a_sheet_up_and_down() {
+        let mut one = drawing_open(serde_json::json!({}));
+        one.app.preferences.drawing_sheets_visibility = "off".into();
+        one.frames(4);
+        let (only, steps) = (sheet_ids(&one)[0], one.app.session.undo.len());
+        for entry in ["Move up", "Move down"] {
+            sheet_menu_entry(&mut one, only, entry);
+        }
+        assert_eq!(one.app.session.undo.len(), steps, "one sheet moves nowhere");
+
+        let (mut h, [a, b, c]) = three_sheets();
+        let steps = h.app.session.undo.len();
+        sheet_menu_entry(&mut h, a, "Move up");
+        sheet_menu_entry(&mut h, c, "Move down");
+        assert_eq!((sheet_ids(&h), h.app.session.undo.len()), (vec![a, b, c], steps), "off at the first and the last sheet");
+        sheet_menu_entry(&mut h, b, "Move up");
+        assert_eq!(sheet_ids(&h), [b, a, c]);
+        sheet_menu_entry(&mut h, b, "Move down");
+        assert_eq!(sheet_ids(&h), [a, b, c]);
         assert_eq!(h.app.session.undo.len(), steps + 2);
     }
 

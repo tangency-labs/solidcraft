@@ -10,27 +10,48 @@ use solidcraft_theme::Tokens;
 use std::collections::HashMap;
 
 use crate::SolveApp;
+use crate::browser::Actions;
 use crate::ui_kit::{
     Mark, Row, Text,
-    browser::{Event, Node, NodeMenu, RowOut, Rows},
+    browser::{Dragged, Drops, Event, Node, NodeMenu, Payload, RowOut, Rows, Source, Zone, order_before},
 };
 
 use super::{MenuRow, active_sheet, edit_object, open_sheet_menu, select_sheet};
 
-pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
+/// What a drag of a sheet's row carries: the drawing and the sheet.
+#[derive(Clone, Copy, Debug)]
+struct SheetDrag {
+    drawing: u64,
+    sheet: u64,
+}
+
+pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>, acts: &mut Actions) {
     let t = Tokens::get();
     rows.ui().add_space(t.space_4);
     if let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() {
         let key = format!("drawing:browser:{}", encode(drawing.id));
-        let item = Row { icon: "ws_drawing", label: &drawing.name, name: true, ..Row::default() };
-        let (open, menu_at) = branch(app, rows, &key, item, true, NodeMenu::Host);
-        if let Some(at) = menu_at {
-            open_sheet_menu(app, drawing.id, MenuRow::Drawing, Rect::from_min_max(at, at));
+        // A sheet dropped on the drawing's row goes last, as an item dropped on a folder's row does.
+        let accept = |dragged: &Dragged, zone: Zone| zone == Zone::Into && takes(app, &drawing, dragged, None);
+        let node = Node {
+            key: &key,
+            row: Row { icon: "ws_drawing", label: &drawing.name, name: true, ..Row::default() },
+            drops: Drops { before: false, into: true },
+            menu: NodeMenu::Host,
+            accept: Some(&accept),
+            ..Node::default()
+        };
+        let (open, events) = branch(app, rows, node, true);
+        for event in events {
+            match event {
+                Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, MenuRow::Drawing, Rect::from_min_max(at, at)),
+                Event::Move { source, data, .. } => drop_sheet(acts, &drawing, source, data.as_ref(), None),
+                _ => {}
+            }
         }
         if open {
             let active = active_sheet(app);
             for sheet in &drawing.sheets {
-                show_sheet(app, rows, &drawing, sheet, active == Some(sheet.id));
+                show_sheet(app, rows, acts, &drawing, sheet, active == Some(sheet.id));
             }
         }
     } else {
@@ -38,13 +59,17 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     }
 
     let label = app.tr_label("Source design").to_string();
-    if branch(app, rows, "drawing:browser:source", Row { icon: "ws_design", label: &label, name: true, ..Row::default() }, false, NodeMenu::None).0 {
+    let source =
+        Node { key: "drawing:browser:source", row: Row { icon: "ws_design", label: &label, name: true, ..Row::default() }, ..Node::default() };
+    if branch(app, rows, source, false).0 {
         let name = app.session.doc.name.clone();
         let node = row(
             rows,
-            "drawing:browser:source-design",
-            Row { depth: 1, icon: "ws_design", label: &name, name: true, ..Row::default() },
-            NodeMenu::None,
+            Node {
+                key: "drawing:browser:source-design",
+                row: Row { depth: 1, icon: "ws_design", label: &name, name: true, ..Row::default() },
+                ..Node::default()
+            },
         );
         if node.clicked || node.double {
             app.start("document.metadata");
@@ -78,9 +103,10 @@ fn object_clicks(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, she
     }
 }
 
-fn row(rows: &mut Rows<'_>, key: &str, row: Row<'_>, menu: NodeMenu<'_>) -> RowOut {
-    let publish = matches!(menu, NodeMenu::Host);
-    let result = rows.row(Node { id: crate::browser::node_id(key), key, row, menu, ..Node::default() });
+/// Draw `node`, its id made from its key.
+fn row(rows: &mut Rows<'_>, node: Node<'_>) -> RowOut {
+    let (key, publish) = (node.key, matches!(node.menu, NodeMenu::Host));
+    let result = rows.row(Node { id: crate::browser::node_id(key), ..node });
     if publish
         && result.widget.is_some()
         && let Some(rect) = result.rect
@@ -94,44 +120,55 @@ fn fold_id(app: &SolveApp, rows: &mut Rows<'_>, key: &str) -> Id {
     rows.ui().make_persistent_id((app.session.uid, key))
 }
 
-/// A folding row: whether it is open, and where its menu was asked for, if it was.
-fn branch(app: &SolveApp, rows: &mut Rows<'_>, key: &str, mut item: Row<'_>, default_open: bool, menu: NodeMenu<'_>) -> (bool, Option<egui::Pos2>) {
-    let id = fold_id(app, rows, key);
+/// A folding row: whether it is open, and its other events.
+fn branch(app: &SolveApp, rows: &mut Rows<'_>, mut node: Node<'_>, default_open: bool) -> (bool, Vec<Event>) {
+    let id = fold_id(app, rows, node.key);
     let mut open = rows.ui().data(|data| data.get_temp::<bool>(id)).unwrap_or(default_open);
-    item.fold = Some(open);
-    let mut menu_at = None;
-    for event in row(rows, key, item, menu).events {
-        match event {
-            Event::Fold { open: next, .. } => {
-                rows.ui().data_mut(|data| data.insert_temp(id, next));
-                open = next;
-            }
-            Event::Menu { at, .. } => menu_at = Some(at),
-            _ => {}
+    node.row.fold = Some(open);
+    let mut events = Vec::new();
+    for event in row(rows, node).events {
+        if let Event::Fold { open: next, .. } = event {
+            rows.ui().data_mut(|data| data.insert_temp(id, next));
+            open = next;
+        } else {
+            events.push(event);
         }
     }
-    (open, menu_at)
+    (open, events)
 }
 
-fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet: &Sheet, selected: bool) {
+fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, acts: &mut Actions, drawing: &Drawing, sheet: &Sheet, selected: bool) {
     let key = format!("drawing:browser:sheet:{}", encode(sheet.id));
     let id = fold_id(app, rows, &key);
     let mut open = rows.ui().data(|data| data.get_temp::<bool>(id)).unwrap_or(selected);
+    // A sheet dropped on this row goes just before this sheet.
+    let before = Some(sheet.id);
+    let accept = |dragged: &Dragged, zone: Zone| zone == Zone::Before && takes(app, drawing, dragged, before);
     let hit = row(
         rows,
-        &key,
-        Row {
-            depth: 1,
-            fold: Some(open),
-            icon: "ws_drawing",
-            label: &sheet.name,
-            name: true,
-            selected,
-            mark: if selected { Mark::Here } else { Mark::None },
-            ..Row::default()
+        Node {
+            key: &key,
+            row: Row {
+                depth: 1,
+                fold: Some(open),
+                icon: "ws_drawing",
+                label: &sheet.name,
+                name: true,
+                selected,
+                mark: if selected { Mark::Here } else { Mark::None },
+                ..Row::default()
+            },
+            drag: Some(crate::browser::DRAG_SHEETS),
+            drops: Drops { before: true, into: false },
+            menu: NodeMenu::Host,
+            accept: Some(&accept),
+            ..Node::default()
         },
-        NodeMenu::Host,
     );
+    if hit.drag_started {
+        let dragged = SheetDrag { drawing: drawing.id, sheet: sheet.id };
+        rows.drag_with(vec![crate::browser::node_id(&key)], Some(Payload::new(dragged)));
+    }
     for event in hit.events {
         match event {
             Event::Fold { open: next, .. } => {
@@ -140,12 +177,41 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
             }
             Event::Click(_) | Event::Open(_) => select_sheet(app, sheet.id),
             Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, MenuRow::Sheet(sheet.id), Rect::from_min_max(at, at)),
+            Event::Move { source, data, .. } => drop_sheet(acts, drawing, source, data.as_ref(), before),
             _ => {}
         }
     }
     if open {
         show_objects(app, rows, drawing, sheet, &key);
     }
+}
+
+/// The sheet a drag carries, when it carries one.
+fn sheet_drag(data: Option<&Payload>) -> Option<&SheetDrag> {
+    data?.get::<SheetDrag>()
+}
+
+/// Whether `dragged` is a sheet of this drawing, from this document, whose drop before the sheet
+/// `before` (last without one) changes the order.
+fn takes(app: &SolveApp, drawing: &Drawing, dragged: &Dragged, before: Option<u64>) -> bool {
+    crate::browser::same_document(app, dragged)
+        && sheet_drag(dragged.data.as_ref()).is_some_and(|drag| drag.drawing == drawing.id && moved_order(drawing, drag.sheet, before).is_some())
+}
+
+/// A sheet dropped on a row (its drop rule took it): the new order goes with the Browser's other
+/// drops, run once the frame is drawn.
+fn drop_sheet(acts: &mut Actions, drawing: &Drawing, source: Source, data: Option<&Payload>, before: Option<u64>) {
+    if let Some(order) = sheet_drag(data).and_then(|drag| moved_order(drawing, drag.sheet, before)) {
+        acts.drop_sheets(source, order);
+    }
+}
+
+/// The drawing's sheet ids with `sheet` moved to just before `before` (last without one), when
+/// the drawing has that sheet and the order changes.
+fn moved_order(drawing: &Drawing, sheet: u64, before: Option<u64>) -> Option<Vec<u64>> {
+    let order: Vec<u64> = drawing.sheets.iter().map(|s| s.id).collect();
+    let moved = order_before(&order, &[sheet], before.as_ref());
+    (order.contains(&sheet) && moved != order).then_some(moved)
 }
 
 fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet: &Sheet, key: &str) {
@@ -156,7 +222,10 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
     ] {
         if present {
             let label = app.tr(label).to_string();
-            row(rows, &format!("{key}:{kind}"), Row { depth: 2, label: &label, icon, name: true, ..Row::default() }, NodeMenu::None);
+            row(
+                rows,
+                Node { key: &format!("{key}:{kind}"), row: Row { depth: 2, label: &label, icon, name: true, ..Row::default() }, ..Node::default() },
+            );
         }
     }
 
@@ -183,9 +252,12 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
             };
             let hit = row(
                 rows,
-                &format!("{key}:{kind}:{}", encode(object)),
-                Row { depth: 2, label: &label, icon, name: true, selected: picked(app, drawing, object), ..Row::default() },
-                NodeMenu::Host,
+                Node {
+                    key: &format!("{key}:{kind}:{}", encode(object)),
+                    row: Row { depth: 2, label: &label, icon, name: true, selected: picked(app, drawing, object), ..Row::default() },
+                    menu: NodeMenu::Host,
+                    ..Node::default()
+                },
             );
             object_clicks(app, rows, drawing, sheet.id, object, &hit);
             if let Some(editor) = editor
@@ -215,17 +287,20 @@ fn show_views(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
         let label = view_name(app, drawing, view, number);
         let hit = row(
             rows,
-            &key,
-            Row {
-                depth,
-                fold: nested.as_ref().map(|_| open),
-                icon: "drawing_base_view",
-                label: &label,
-                name: true,
-                selected: picked(app, drawing, view.id),
-                ..Row::default()
+            Node {
+                key: &key,
+                row: Row {
+                    depth,
+                    fold: nested.as_ref().map(|_| open),
+                    icon: "drawing_base_view",
+                    label: &label,
+                    name: true,
+                    selected: picked(app, drawing, view.id),
+                    ..Row::default()
+                },
+                menu: NodeMenu::Host,
+                ..Node::default()
             },
-            NodeMenu::Host,
         );
         object_clicks(app, rows, drawing, sheet, view.id, &hit);
         let mut open = open;
