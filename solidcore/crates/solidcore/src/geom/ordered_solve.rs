@@ -243,7 +243,7 @@ impl Normal {
         match self.0 {
             Storage::Band(m) => m.factor_rows()?.substitute(b),
             Storage::Dense(a, n) => cholesky(a, b, n),
-            Storage::Blocks(m) => m.solve(b),
+            Storage::Blocks(m) => m.solve(&b),
         }
     }
 }
@@ -262,6 +262,10 @@ struct BlockNormal {
     entries: std::collections::BTreeMap<(usize, usize), f64>,
     invalid_shape: bool,
 }
+
+/// One patch's factored interior block `A_kk`, with `g = A_kk⁻¹ b_k` and, for each shared
+/// column `j` coupled to the patch, `z_j = A_kk⁻¹ A_k,j`.
+type SolvedPart = (Band, Vec<f64>, Vec<(usize, Vec<f64>)>);
 
 impl BlockNormal {
     fn new(owner: Vec<Option<usize>>) -> Result<BlockNormal> {
@@ -286,7 +290,7 @@ impl BlockNormal {
         }
     }
 
-    fn solve(mut self, b: Vec<f64>) -> Result<Vec<f64>> {
+    fn solve(mut self, b: &[f64]) -> Result<Vec<f64>> {
         let n = self.owner.len();
         if self.invalid_shape
             || b.len() != n
@@ -382,9 +386,9 @@ impl BlockNormal {
             .iter()
             .map(|x| b.get(*x).copied().unwrap_or(0.0))
             .collect();
-        let mut solved_parts: Vec<(Band, Vec<f64>, Vec<(usize, Vec<f64>)>)> = Vec::new();
+        let mut solved_parts: Vec<SolvedPart> = Vec::new();
         for p in 0..patches {
-            let ids = interior.get(p).map(Vec::as_slice).unwrap_or(&[]);
+            let ids = interior.get(p).map_or(&[][..], Vec::as_slice);
             let k = ids.len();
             let blk = blocks.get(p).cloned().unwrap_or_default();
             let bw = blk.keys().map(|(r, c)| r.abs_diff(*c)).max().unwrap_or(0);
@@ -454,7 +458,7 @@ impl BlockNormal {
             }
         }
         for (p, (_, g, z)) in solved_parts.iter().enumerate() {
-            let ids = interior.get(p).map(Vec::as_slice).unwrap_or(&[]);
+            let ids = interior.get(p).map_or(&[][..], Vec::as_slice);
             for (r, id) in ids.iter().enumerate() {
                 let mut v = g.get(r).copied().unwrap_or(0.0);
                 for (j, zj) in z {
