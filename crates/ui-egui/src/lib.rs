@@ -1460,6 +1460,7 @@ impl SolveApp {
             self.settings_profiles.load(p);
         }
         self.view_gizmo.load(v.get("view_gizmo"));
+        let replaced = v.get("preferences").is_some_and(Value::is_object);
         if let Some(mut p) = v.get("preferences").filter(|p| p.is_object()).map(prefs::lenient) {
             if !prefs::MSAA.contains(&p.msaa) {
                 p.msaa = prefs::Prefs::default().msaa;
@@ -1499,8 +1500,13 @@ impl SolveApp {
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
         panel_runtime::load_preferences(self, &v);
-        // Loaded values are the person's own; the organization's policy still sets its settings.
-        policy::enforce_loaded(self);
+        // Loaded preferences are the person's own; the organization's policy still sets its
+        // settings. A load without preferences leaves the kept choices as they were.
+        if replaced {
+            policy::enforce_loaded(self);
+        } else {
+            policy::enforce(self);
+        }
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {

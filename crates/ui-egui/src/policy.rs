@@ -642,6 +642,10 @@ mod tests {
         h.app.load_prefs(&reload);
         assert_eq!(h.app.preferences.default_units, "in", "the policy's value stays in force");
         assert_eq!(saved(&h.app)["default_units"], json!("cm"));
+        // A load without preferences (another part of the file) keeps the person's choice.
+        h.app.load_prefs(r#"{"dark":false}"#);
+        assert_eq!(saved(&h.app)["default_units"], json!("cm"), "a load without preferences changes no kept choice");
+        assert_eq!(h.app.preferences.default_units, "in");
         let reload = file("mm", &h.app);
         h.app.load_prefs(&reload);
         // The control channel reports the stored choices, the values in force, and refuses a change.
