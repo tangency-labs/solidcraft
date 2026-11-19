@@ -9903,6 +9903,79 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
     })
 }
 
+/// The most faces the tools of the copies of a pattern may have for the kernel's union to join
+/// them ([`one_body_of`]): a union of a body with many faces costs more than the copies it
+/// would replace.
+const MAX_JOINED_FACES: usize = 16_384;
+
+/// The tools of `copies` as one body, so the kernel is asked about all of them at once (#18396).
+///
+/// Bodies that are apart join without any intersection work ([`kernel::union_apart`]); the rest
+/// are joined by the kernel's union, when they are not too many ([`MAX_JOINED_FACES`]). `None`
+/// when they cannot be one body (a mesh body, a union that fails): the copies are then asked
+/// about one by one, as before.
+fn one_body_of(copies: &[&[Traced]]) -> Option<Body> {
+    let bodies: Vec<Body> = copies.iter().flat_map(|c| c.iter().map(|t| t.body.clone())).collect();
+    match bodies.len() {
+        0 => None,
+        1 => Some(bodies[0].clone()),
+        _ => {
+            if let Some(one) = kernel::union_apart(&bodies).ok().flatten() {
+                return Some(one);
+            }
+            if bodies.iter().map(|b| b.face_count()).sum::<usize>() > MAX_JOINED_FACES {
+                return None;
+            }
+            let operands: Vec<&Body> = bodies.iter().collect();
+            kernel::union_all(&operands).ok()
+        }
+    }
+}
+
+/// The copies that the point test cannot place, as the bodies the kernel is asked about: each
+/// body holds the tools of some of the copies, so the kernel is asked about many copies at once
+/// instead of one copy at a time (#18396). A body with many faces makes every boolean cost
+/// seconds, and a design of many patterns pays that a copy at a time.
+///
+/// The bodies of a group are joined in groups of at most [`joined_tools_limit`] tools, as the
+/// tools of a cut are: the kernel's boolean takes far longer for a tool of many pieces than for
+/// several of fewer. The copies whose tools cannot be one body (a mesh body, a union that fails)
+/// are returned apart: they are asked about one by one, as before.
+fn copies_as_bodies<'a>(copies: &[&'a [Traced]]) -> (Vec<(Body, Vec<&'a [Traced]>)>, Vec<&'a [Traced]>) {
+    let limit = joined_tools_limit().max(1);
+    let mut groups: Vec<(Body, Vec<&'a [Traced]>)> = Vec::new();
+    let mut one_by_one: Vec<&'a [Traced]> = Vec::new();
+    let mut group: Vec<&'a [Traced]> = Vec::new();
+    let mut tools = 0;
+    for copy in copies {
+        let n = copy.len();
+        if n > limit {
+            // More tools than a probe may hold: the copy is asked about one tool at a time, as
+            // before.
+            one_by_one.push(*copy);
+            continue;
+        }
+        if !group.is_empty() && tools + n > limit {
+            let taken = std::mem::take(&mut group);
+            match one_body_of(&taken) {
+                Some(body) => groups.push((body, taken)),
+                None => one_by_one.extend(taken),
+            }
+            tools = 0;
+        }
+        group.push(*copy);
+        tools += n;
+    }
+    if !group.is_empty() {
+        let taken = std::mem::take(&mut group);
+        match one_body_of(&taken) {
+            Some(body) => groups.push((body, taken)),
+            None => one_by_one.extend(taken),
+        }
+    }
+    (groups, one_by_one)
+}
+
 /// How many of a pattern's cut copies (`instances`, ranges of `copies`) remove no material, and
 /// how many copies there are. [`copy_misses`] intersects a copy with every target, which on a
 /// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
@@ -9911,6 +9984,13 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
 /// intersected. The targets don't change while their copies are counted, so each one's exact box
 /// is worked out once, not once for every copy, and each copy's tool box once, not once for every
 /// target (#7942).
+///
+/// The copies that are intersected are asked about together (#18396): the tools of all of them
+/// are one body, and the kernel is asked about that body once a target, instead of once a copy.
+/// A body with many faces makes every boolean cost seconds, and a design of many patterns pays
+/// that a copy at a time. What is counted does not change: a copy that removes no material still
+/// counts as one, and the copies that do remove material are still found (the targets that take
+/// material from a copy are asked about copy by copy, as before).
 fn count_copy_misses(
     st: &ModelState,
     f: &Feature,
@@ -9922,6 +10002,8 @@ fn count_copy_misses(
     let scope: Vec<(&ModelBody, Option<solidcraft_geom::Aabb3>)> =
         miss_scope(st, f, targets).map(|b| (b, (!b.body.is_mesh()).then(|| more::exact_box(&b.body)).flatten())).collect();
     let (mut missed, mut total) = (0, 0);
+    // The copies the point test cannot place: they are asked about together.
+    let mut unsure: Vec<&[Traced]> = Vec::new();
     for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
         total += 1;
         let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
@@ -9929,8 +10011,54 @@ fn count_copy_misses(
             let tool_box = (!t.body.is_mesh()).then(|| more::exact_box(&t.body)).flatten();
             scope.iter().any(|(b, target_box)| shares_material(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), lines))
         });
-        if !takes && copy_misses(st, f, targets, tools) {
+        if !takes {
+            unsure.push(tools);
+        }
+    }
+    if unsure.is_empty() {
+        return (missed, total);
+    }
+    let (groups, one_by_one) = copies_as_bodies(&unsure);
+    // The targets that take material from the copies of a group: those copies are asked about
+    // one by one, as before.
+    let mut taking: Vec<Vec<usize>> = Vec::with_capacity(groups.len());
+    for (group, _) in &groups {
+        let mut hits = Vec::new();
+        for (i, (b, _)) in scope.iter().enumerate() {
+            #[cfg(test)]
+            cost_tests::count(|c| c.miss_intersects += 1);
+            if !matches!(kernel::boolean(&b.body, group, BoolOp::Intersect), Ok(None)) {
+                hits.push(i);
+            }
+        }
+        taking.push(hits);
+    }
+    // No target takes material from any of the copies: they all remove no material.
+    if taking.iter().all(|t| t.is_empty()) && one_by_one.is_empty() {
+        return (missed + unsure.len(), total);
+    }
+    // The copies whose tools could not be one body are asked about one by one, as before.
+    for tools in one_by_one {
+        if copy_misses(st, f, targets, tools) {
             missed += 1;
+        }
+    }
+    // Some target takes material from the copies of a group: they are asked about one by one,
+    // for those targets only.
+    for ((_, group), hits) in groups.iter().zip(&taking) {
+        for tools in group {
+            let removes = hits.iter().all(|&i| {
+                let (b, _) = scope[i];
+                tools.iter().all(|t| {
+                    #[cfg(test)]
+                    cost_tests::count(|c| c.miss_intersects += 1);
+                    // An inconclusive probe is not a miss: it must not reject an otherwise valid cut.
+                    matches!(kernel::boolean(&b.body, &t.body, BoolOp::Intersect), Ok(None))
+                })
+            });
+            if removes {
+                missed += 1;
+            }
         }
     }
     (missed, total)
