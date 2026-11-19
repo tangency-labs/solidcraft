@@ -7571,6 +7571,31 @@ fn perforation_outline_on_a_folded_sheet_stays_in_its_panel() {
     assert!(refused.is_err_and(|e| e.to_string().contains("must lie on a face of the sheet")));
 }
 
+/// #19631: an outline that lies clear of the sheet holds no holes, and the perforation says so instead of making none
+/// in silence: when it is made and when an edit moves the outline off the sheet. An outline on the sheet stays silent.
+#[test]
+fn perforation_outline_off_the_sheet_says_it_holds_no_holes() {
+    let mut s = Session::default();
+    sheet_with_a_field_outline(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Vent"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [200, 10], "p1": [240, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let params = |sketch: &str| json!({"diameter": "4", "pitch": "7", "sketch": sketch});
+    let made = run(&mut s, "sheet.perforate", params("Vent"));
+    assert!(made["warning"].as_str().is_some_and(|w| w.contains("outline") && w.contains("holds no holes")), "{made}");
+    assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(0), "an outline off the sheet holds no holes");
+    // The same field on an outline over the sheet: holes, and nothing to say.
+    let edit = |s: &mut Session, sketch: &str| {
+        run(s, "timeline.redefine", json!({"feature": made["feature"], "command": "sheet.perforate", "params": params(sketch)}));
+    };
+    edit(&mut s, "Field");
+    assert!(flat(&mut s)["perforations"][0]["count"].as_u64().is_some_and(|n| n > 0));
+    assert!(last_warning(&s).is_empty(), "{}", last_warning(&s));
+    // Moved off the sheet again by an edit, it warns again.
+    edit(&mut s, "Vent");
+    assert!(last_warning(&s).contains("holds no holes"), "{}", last_warning(&s));
+}
+
 /// #732: a mirrored copy's bounded field is the mirror image of its source's.
 #[test]
 fn a_mirrored_sheet_copy_mirrors_its_perforation_outline() {
