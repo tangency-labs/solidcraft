@@ -84,7 +84,7 @@
 //!   (tangency-labs/smlib@b5f2867, 7ac037e): `ClassifyExactBlend` and
 //!   `CalcExactFilletGeom` (`blend::fillet_exact`), whose failures are errors.
 
-use super::p1::{FilletSolver, FilletSolverOps};
+use super::p1::{bool_status, FilletSolver, FilletSolverOps};
 use super::p2::SolverErrorObject;
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_executive::p3::ErrorInfo;
@@ -104,6 +104,7 @@ use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -2246,6 +2247,22 @@ fn c3_trace_setup(
     Ok([surface1, surface2])
 }
 
+/// Not upstream (#17218): each surface's `[u, v]` period, `None` where not periodic.
+fn uv_periods_of(k: &Kernel, surfaces: &[Surface; 2]) -> Result<[[Option<f64>; 2]; 2]> {
+    let mut periods = [[None; 2]; 2];
+    for (surface, period) in surfaces.iter().zip(periods.iter_mut()) {
+        let [pu, pv] = period;
+        let nat = surface.natural_uv_domain_if_built();
+        if bool_status(surface.is_periodic(k, &nat, SurfParamType::U))? {
+            *pu = Some(nat.size().x);
+        }
+        if bool_status(surface.is_periodic(k, &nat, SurfParamType::V))? {
+            *pv = Some(nat.size().y);
+        }
+    }
+    Ok(periods)
+}
+
 /// :2037-2052: `SmFilletIntersector sFI(*pOffsetSrf1, sDomain1, *pOffsetSrf2,
 /// sDomain2, *this)`; with an extension flag set and an arc edge curve
 /// (`IsArc(5, m_dThisApproxTol3d, ..)`), `SetExtensionDistance(|5 * offset 0|)`.
@@ -2266,6 +2283,7 @@ fn c3_make_intersector<'s>(
     // the curve traced, compared in 3D, or it runs round past the trace's own span and the
     // fillet surface covers that span twice.
     fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
+    fi.base.base.uv_periods = uv_periods_of(k, &st.base_surfaces)?;
 
     // If we need to trace beyond the end and we are tracing along an arc, put a stop
     // tracing criterion to avoid possible infinite looping (`IsArc` only runs when an
