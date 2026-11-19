@@ -85,21 +85,24 @@ fn a_cylinder_shells_open_at_its_top() {
     assert!(rel(volume(&c), PI * 25.0 * 10.0 - PI * 16.0 * 9.0) < 1e-9);
 }
 
-/// Stress corpus S1983: the blind hole leaves 0.00002 mm at the outer rim of a
-/// half torus. Opening the annular bottom must produce a closed hollow body.
-#[test]
-#[ignore = "needs disappearing periodic seam reconstruction (#18803)"]
-fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
-    crate::test_corpus::rig_fixes();
+fn drilled_half_torus(center: f64) -> Body {
     let torus = crate::make_torus([0.0; 3], 30.0, 8.0).unwrap();
     let upper = make_box([-40.0, -40.0, 0.0], [80.0, 80.0, 16.0]).unwrap();
     let half = crate::boolean::boolean(torus, upper, crate::BooleanOp::Intersect)
         .unwrap()
         .unwrap();
-    let drill = make_cylinder([37.049_98, 0.0, 0.0], 0.95, 4.0).unwrap();
-    let body = crate::boolean::boolean(half, drill, crate::BooleanOp::Subtract)
+    let drill = make_cylinder([center, 0.0, 0.0], 0.95, 4.0).unwrap();
+    crate::boolean::boolean(half, drill, crate::BooleanOp::Subtract)
         .unwrap()
-        .unwrap();
+        .unwrap()
+}
+
+/// Stress corpus S1983: the blind hole leaves 0.00002 mm at the outer rim of a
+/// half torus. Opening the annular bottom must produce a closed hollow body.
+#[test]
+fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
+    crate::test_corpus::rig_fixes();
+    let body = drilled_half_torus(37.049_98);
     let input_report = body.copy().unwrap().check(crate::CheckLevel::All).unwrap();
     assert!(input_report.is_valid(), "{}", input_report.text);
     let o = order(&body);
@@ -111,7 +114,33 @@ fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
     assert!(report.is_valid(), "{}", report.text);
     // Half-torus wall volume minus the original drill/torus overlap, plus the
     // expanded drill/cavity overlap; the polar integral is derived in the finding.
-    assert!(rel(volume(&body), 3_607.142_961_425_14) < 1e-9);
+    let actual = volume(&body);
+    assert!(
+        rel(actual, 3_607.142_961_425_14) < 1e-9,
+        "shell volume {actual:.17}"
+    );
+}
+
+/// The same incidence graph before the seam disappears: the outer rim is
+/// 37.99 and the grown drill reaches 37.96, so their meridian still survives.
+#[test]
+fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
+    crate::test_corpus::rig_fixes();
+    let body = drilled_half_torus(37.0);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -0.01).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // The same polar integral as S1983, with a=37 and wall=0.01;
+    // its hand derivation and converged values are in the construction finding.
+    let actual = volume(&body);
+    assert!(
+        rel(actual, 47.498_020_998_403_7) < 1e-9,
+        "shell volume {actual:.17}"
+    );
 }
 
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
