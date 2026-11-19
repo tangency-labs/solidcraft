@@ -314,16 +314,19 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 out.actions.push(action);
             }
             if let Some(rect) = out.leading {
-                app_bar::paint_motion(ui, "documents", rect, |ui| {
-                    app_bar::movable_shadow(ui, rect, "documents");
-                    if customizing {
-                        let response = ui.interact(rect, ui.scope_id().with("documents_preview"), egui::Sense::hover());
-                        app_bar::paint_control(ui, rect, app_bar::Control::Documents, &response, app_bar::item_opacity(ui.ctx(), "documents"));
-                        crate::scenario::publish_target("library:toggle", rect);
-                    } else {
-                        crate::library::app_bar_toggle(app, ui, rect);
+                if customizing {
+                    let response = ui.interact(rect, ui.scope_id().with("documents_preview"), egui::Sense::hover());
+                    app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, app_bar::item_opacity(ui.ctx(), "documents"), "documents");
+                    crate::scenario::publish_target("library:toggle", rect);
+                } else {
+                    // Keep the browser's native interaction, tooltip and focus, while the
+                    // shared bar renderer owns the same shape in the bar and tray.
+                    let id = ui.scope_id().with("document_browser_toggle");
+                    let available = app_bar::interaction_only(ui, |ui| crate::library::app_bar_toggle(app, ui, rect));
+                    if available && let Some(response) = ui.ctx().read_response(id) {
+                        app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, 1.0, "documents");
                     }
-                });
+                }
             }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             let editing = customizing;
@@ -4970,6 +4973,52 @@ mod app_bar_tests {
     use super::*;
 
     #[test]
+    fn app_bar_default_separator_drag_removal_reset_and_grab_cursors() {
+        use crate::scenario::{Harness, handle_at, rect_of};
+        use ui_kit::app_bar_items::{Layout, Preset};
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1000}));
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        assert!(rect_of("appbar:tile:file").is_none());
+        assert!(rect_of("appbar:badge:file").is_none());
+        for id in ["separator:1", "separator:2"] {
+            assert!(handle_at(&format!("appbar:edit:{id}")).is_some());
+        }
+        let resting = rect_of("appbar:edit:separator:1").unwrap();
+        let at = resting.center();
+        h.step(&json!({"move":[at.x,at.y]})).unwrap();
+        h.frames(8);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Grab);
+        assert_eq!(rect_of("appbar:edit:separator:1"), Some(resting), "hover lift cannot move the hit target");
+        let press =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![press(at, true)]);
+        let away = pos2(at.x, 650.0);
+        h.frame_with(vec![egui::Event::PointerMoved(away)]);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Grabbing);
+        h.frame_with(vec![press(away, false)]);
+        h.frames(3);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().any(|p| p.id == "separator:1"));
+        let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
+        loaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(loaded.app_bar, h.app.toolbar_custom.app_bar);
+        h.step(&json!({"click":{"handle":"appbar:reset"}})).unwrap();
+        h.frames(4);
+        assert_eq!(h.app.toolbar_custom.app_bar, Layout::default());
+        let divider = rect_of("appbar:presets:divider").unwrap();
+        let compact = rect_of("appbar:preset:Compact").unwrap();
+        let custom = rect_of("appbar:preset:Custom").unwrap();
+        assert!(compact.right() < divider.left() && divider.right() < custom.left());
+        h.step(&json!({"click":{"handle":"appbar:preset:Custom"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.toolbar_custom.app_bar.preset(&Layout::default()), Preset::Default);
+        h.step(&json!({"move":[20,17]})).unwrap();
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Default, "fixed logo keeps the ordinary cursor");
+    }
+
+    #[test]
     fn app_bar_edit_cards_keep_normal_fit_and_visible_report_version() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -5022,14 +5071,14 @@ mod app_bar_tests {
             h.step(&json!({"click":{"handle":"appbar:tile:separator"}})).unwrap();
             h.frames(3);
         }
-        assert_eq!(h.app.toolbar_custom.app_bar.items.iter().filter(|p| p.id.starts_with("separator:")).count(), 2);
+        assert_eq!(h.app.toolbar_custom.app_bar.items.iter().filter(|p| p.id.starts_with("separator:")).count(), 4);
         assert!(crate::scenario::rect_of("appbar:badge:separator").is_none(), "repeatable tile never gets checked");
         let tile = crate::scenario::handle_at("appbar:tile:separator").unwrap();
         let settings = crate::scenario::handle_at("titlebar:preferences").unwrap();
         h.step(&json!({"drag":[[tile.x,tile.y],[settings.x,settings.y]]})).unwrap();
         h.frames(4);
         let ids: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter(|p| p.id.starts_with("separator:")).map(|p| p.id.clone()).collect();
-        assert_eq!(ids.len(), 3, "dragging the template creates another unique object");
+        assert_eq!(ids.len(), 5, "dragging the template creates another unique object");
         let id = ids.last().unwrap();
         let separator = crate::scenario::handle_at(&format!("appbar:edit:{id}")).unwrap();
         h.step(&json!({"drag":[[separator.x,separator.y],[separator.x,650.0]]})).unwrap();
@@ -5079,7 +5128,7 @@ mod app_bar_tests {
             assert!((card.top() - 46.0).abs() <= 1.0);
             let mut tiles = Vec::new();
             for (column, ids) in [
-                (0, &["file", "documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
+                (0, &["documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
                 (1, &["report", "donate", "discord", "version"][..]),
                 (2, &["separator"][..]),
             ] {
@@ -5372,7 +5421,9 @@ mod app_bar_tests {
         h.app.preferences.show_donate_button = false;
         h.app.preferences.show_discord_button = false;
         h.app.preferences.ai_toolbar_button = false;
-        let defaults = h.app.toolbar_custom.app_bar.clone();
+        // Reset restores canonical defaults, including the optional quick-access divider;
+        // adding a quick command to an existing list does not recreate removed dividers.
+        let defaults = ui_kit::app_bar_items::Layout::default_for(h.app.toolbar_custom.quick_access.iter().map(String::as_str));
         let mut custom = defaults.clone();
         custom.items.reverse();
         custom.items.iter_mut().find(|p| p.id == "save").unwrap().shown = false;

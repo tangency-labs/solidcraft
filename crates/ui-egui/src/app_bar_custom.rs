@@ -118,6 +118,7 @@ pub(crate) fn preview(app: &SolveApp, ctx: &egui::Context) -> Layout {
         None
     };
     app_bar::editing(ctx, app.toolbar_custom.app_bar_customizing, lifted);
+    app_bar::dragging(ctx, app.toolbar_custom.app_bar_customizing && drag.as_ref().is_some_and(|d| d.active));
     if let Some(drag) = drag.filter(|d| d.active && app.toolbar_custom.app_bar_customizing) {
         let defaults = defaults(app);
         if let Some(slot) = drag.slot {
@@ -221,6 +222,9 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
             continue;
         }
         let response = ui.interact(rect, Id::unique(("appbar_edit", &item.id)), Sense::click_and_drag());
+        if response.contains_pointer() && !drag.as_ref().is_some_and(|d| d.active) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label_icon(app, &item.id).0));
         crate::scenario::publish_target(&format!("appbar:edit:{}", item.id), rect);
         app_bar::paint_decoration(ui, &item.id, |painter| {
@@ -331,6 +335,11 @@ pub(crate) fn bar(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, out: &ap
             drag = None;
         }
     }
+    let active = drag.as_ref().is_some_and(|d| d.active);
+    app_bar::dragging(ui.ctx(), active);
+    if active {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
     ui.ctx().data_mut(|d| match drag {
         Some(drag) => {
             d.insert_temp(drag_key(), drag);
@@ -439,33 +448,37 @@ fn tile(app: &mut SolveApp, ui: &mut egui::Ui, id: &str, version: &str) {
     let returning = drag.as_ref().is_some_and(|d| d.active && d.from_bar && d.below && d.id == id);
     let empty = drag.as_ref().is_some_and(|d| d.active && !d.from_bar && d.id == id) || spring.as_ref().is_some_and(|s| !s.from_bar && s.id == id);
     let on_bar = app.toolbar_custom.app_bar.items.iter().any(|p| p.id == id && p.shown) && !returning;
-    ui.painter().rect_filled(cell, 9, t.app_bar);
-    if !empty {
-        if returning {
-            ui.painter().rect_stroke(cell.expand(2.0), 11, Stroke::new(4.0, t.accent.gamma_multiply(0.15)), egui::StrokeKind::Outside);
-        }
-        ui.painter().rect_stroke(
-            cell,
-            9,
-            Stroke::new(1.0, if returning || response.has_focus() { t.accent } else { t.border }),
-            egui::StrokeKind::Inside,
-        );
-        app_bar::preview_control(ui, cell.shrink(4.0), control(app, id, version), if on_bar { 0.5 } else { 1.0 }, false, false);
-        if on_bar || id == "file" {
-            let badge = app_bar::tray_badge(ui, cell, id == "file");
-            crate::scenario::publish_rect(&format!("appbar:badge:{id}"), badge);
-            ui.interact(badge, ui.scope_id().with(("badge", id)), Sense::hover()).widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::Image, true, app.tr(if id == "file" { "app_bar.locked" } else { "app_bar.on_bar" }))
-            });
-        }
+    let placeable = !on_bar && !empty;
+    if placeable && response.contains_pointer() && !app_bar::is_dragging(ui.ctx()) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    let label_rect = Rect::from_min_max(pos2(cell.left(), cell.bottom() + t.space_4), pos2(cell.right(), rect.bottom()));
-    crate::scenario::publish_rect(&format!("appbar:label:{id}"), label_rect);
-    ui_kit::paint_text(ui, label_rect, &label, FontId::proportional(t.font_small), t.text, false);
+    app_bar::paint_hover(ui, &format!("tray:{id}"), cell, 9, placeable && response.contains_pointer(), |ui| {
+        ui.painter().rect_filled(cell, 9, t.app_bar);
+        if !empty {
+            if returning {
+                ui.painter().rect_stroke(cell.expand(2.0), 11, Stroke::new(4.0, t.accent.gamma_multiply(0.15)), egui::StrokeKind::Outside);
+            }
+            ui.painter().rect_stroke(
+                cell,
+                9,
+                Stroke::new(1.0, if returning || response.has_focus() { t.accent } else { t.border }),
+                egui::StrokeKind::Inside,
+            );
+            app_bar::preview_control(ui, cell.shrink(4.0), control(app, id, version), if on_bar { 0.5 } else { 1.0 }, false, false);
+            if on_bar {
+                let badge = app_bar::tray_badge(ui, cell);
+                crate::scenario::publish_rect(&format!("appbar:badge:{id}"), badge);
+                ui.interact(badge, ui.scope_id().with(("badge", id)), Sense::hover())
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, app.tr("app_bar.on_bar")));
+            }
+        }
+        let label_rect = Rect::from_min_max(pos2(cell.left(), cell.bottom() + t.space_4), pos2(cell.right(), rect.bottom()));
+        crate::scenario::publish_rect(&format!("appbar:label:{id}"), label_rect);
+        ui_kit::paint_text(ui, label_rect, &label, FontId::proportional(t.font_small), t.text, false);
+    });
     if ui.input(|i| i.pointer.primary_pressed())
         && response.contains_pointer()
         && !on_bar
-        && id != "file"
         && let Some(p) = ui.input(|i| i.pointer.interact_pos())
     {
         response.request_focus();
@@ -492,10 +505,12 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
     let done_label = app.tr("app_bar.done");
     let done_width =
         ui.painter().layout_no_wrap(done_label.into(), FontId::proportional(t.font_label), t.on_accent).size().x + (t.space_12 + t.space_6) * 2.0;
+    let segment_gap = t.space_8 * 2.0 + 1.0;
     let natural_presets: f32 = options
         .iter()
         .map(|label| ui.painter().layout_no_wrap((*label).into(), ui_kit::type_face::semibold(t.font_label), t.text).size().x.ceil() + t.space_16)
-        .sum();
+        .sum::<f32>()
+        + segment_gap;
     let presets_width = natural_presets.min((width - done_width - t.space_8 - 166.0).max(80.0));
     let controls_width = presets_width + t.space_8 + done_width;
     let title_width = (width - controls_width - t.space_24 - t.space_2).max(0.0);
@@ -519,22 +534,49 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, width: f32) -> bool {
     let presets_rect =
         Rect::from_center_size(pos2(done_rect.left() - t.space_8 - presets_width / 2.0, rect.center().y), vec2(presets_width, ui_kit::row_height()));
     crate::scenario::publish_rect("appbar:header:presets", presets_rect);
-    let mut presets_ui =
-        ui.new_child(egui::UiBuilder::new().id_salt("appbar_presets").max_rect(presets_rect).layout(egui::Layout::top_down(egui::Align::Min)));
     let values = [Preset::Default, Preset::Minimal, Preset::Full, Preset::Compact, Preset::Custom];
     let matched = app.toolbar_custom.app_bar.preset(&defaults(app));
     let mut selected = values.iter().position(|p| *p == matched).unwrap_or(4);
-    if ui_kit::segmented(
+    // Both groups paint from one derived selection. Explicit states keep exactly one
+    // highlight even in the click frame; Custom is an indicator and never changes the list.
+    let states = values.map(|p| p == matched);
+    let custom_width = options.last().map_or(0.0, |label| {
+        ui.painter().layout_no_wrap((*label).into(), ui_kit::type_face::semibold(t.font_label), t.text).size().x.ceil() + t.space_16
+    });
+    let left = Rect::from_min_max(
+        presets_rect.min,
+        pos2((presets_rect.right() - custom_width - segment_gap).max(presets_rect.left()), presets_rect.bottom()),
+    );
+    let right = Rect::from_min_max(pos2(presets_rect.right() - custom_width, presets_rect.top()), presets_rect.max);
+    let mut presets_ui =
+        ui.new_child(egui::UiBuilder::new().id_salt("appbar_presets").max_rect(left).layout(egui::Layout::top_down(egui::Align::Min)));
+    let changed = ui_kit::segmented(
         &mut presets_ui,
         &mut selected,
-        &options,
+        options.get(..4).unwrap_or(&[]),
         ui_kit::Segments {
             intrinsic: true,
-            targets: &["appbar:preset:Default", "appbar:preset:Minimal", "appbar:preset:Full", "appbar:preset:Compact", "appbar:preset:Custom"],
+            states: states.get(..4).unwrap_or(&[]),
+            targets: &["appbar:preset:Default", "appbar:preset:Minimal", "appbar:preset:Full", "appbar:preset:Compact"],
             ..Default::default()
         },
-    ) && let Some(value) = values.get(selected)
-    {
+    );
+    let line = Rect::from_center_size(
+        pos2(left.right() + segment_gap / 2.0, presets_rect.center().y),
+        vec2(1.0, (presets_rect.height() - t.space_8).max(0.0)),
+    );
+    ui.painter().vline(line.center().x, line.y_range(), Stroke::new(1.0, t.border));
+    crate::scenario::publish_rect("appbar:presets:divider", line);
+    let mut custom_ui =
+        ui.new_child(egui::UiBuilder::new().id_salt("appbar_custom_indicator").max_rect(right).layout(egui::Layout::top_down(egui::Align::Min)));
+    let mut indicator = if matched == Preset::Custom { 0 } else { usize::MAX };
+    ui_kit::segmented(
+        &mut custom_ui,
+        &mut indicator,
+        options.get(4..).unwrap_or(&[]),
+        ui_kit::Segments { intrinsic: true, states: states.get(4..).unwrap_or(&[]), targets: &["appbar:preset:Custom"], ..Default::default() },
+    );
+    if changed && let Some(value) = values.get(selected) {
         preset(app, *value);
     }
     done.clicked()
@@ -581,7 +623,7 @@ fn body(app: &mut SolveApp, ui: &mut egui::Ui, width: f32, version: &str) {
     let t = solidcraft_theme::Tokens::get();
     let gap = t.space_24 + t.space_2;
     let sections = [
-        ("app_bar.commands", &["file", "documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
+        ("app_bar.commands", &["documents", "home", "save", "undo", "redo", "assistant", "settings", "help"][..]),
         ("app_bar.links", &["report", "donate", "discord", "version"][..]),
         ("app_bar.layout", &["separator"][..]),
     ];
@@ -759,6 +801,9 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         None => d.remove::<Spring>(spring_key()),
     });
     if let Some((id, pointer, outside)) = lifted {
+        if app_bar::is_dragging(ctx) {
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
         let warning = id == "file" && outside;
         let version = format!("v{}", crate::update::current_version());
         let visual = control(app, &id, &version);

@@ -618,7 +618,7 @@ pub mod application {
         let mut saved = saved.clone();
         saved.sanitize(&defaults);
         let (width, left, right) = dimensions;
-        if !saved.items.iter().any(|p| p.id.starts_with("separator:"))
+        if !saved.items.iter().any(|p| p.id.starts_with("separator:") && !defaults.items.iter().any(|d| d.id == p.id))
             && [SavedZone::Start, SavedZone::End].into_iter().all(|zone| {
                 saved
                     .items
@@ -670,7 +670,6 @@ pub mod application {
                 .collect::<Vec<_>>()
         };
         spec.items.extend(slots.iter().filter(|s| s.id == "logo").cloned());
-        spec.items.extend(slots.iter().filter(|s| s.id == "brand").cloned());
         spec.items.extend(movable(SavedZone::Start));
         spec.items.extend(slots.iter().filter(|s| matches!(s.id.as_str(), "tabs" | "managed")).cloned());
         let mut end = movable(SavedZone::End);

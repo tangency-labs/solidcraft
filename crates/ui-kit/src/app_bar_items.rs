@@ -271,6 +271,9 @@ impl Layout {
             };
         }
         self.items.extend(future);
+        if matches!(preset, Preset::Minimal | Preset::Compact) {
+            self.items.retain(|p| !p.id.starts_with("separator:"));
+        }
         self.sanitize(defaults);
     }
 
@@ -305,7 +308,7 @@ impl Layout {
     /// placements. Legacy visibility preferences remain an additional draw-time condition.
     pub fn default_for<'a>(quick: impl IntoIterator<Item = &'a str>) -> Self {
         let mut items = Vec::new();
-        for id in ["documents", "home", "file", "save", "undo", "redo"] {
+        for id in ["documents", "home", "separator:1", "file", "save", "undo", "redo"] {
             items.push(Placement { id: id.into(), zone: Zone::Start, shown: true });
         }
         for id in quick.into_iter().take(24) {
@@ -314,9 +317,13 @@ impl Layout {
             }
             let id = ItemId::Quick(id.to_string()).id();
             if valid_id(&id) && !items.iter().any(|p| p.id == id) {
+                if !items.iter().any(|p| p.id.starts_with("quick:")) {
+                    items.push(Placement { id: "separator:3".into(), zone: Zone::Start, shown: true });
+                }
                 items.push(Placement { id, zone: Zone::Start, shown: true });
             }
         }
+        items.push(Placement { id: "separator:2".into(), zone: Zone::Start, shown: true });
         for id in ["donate", "discord", "assistant", "search", "settings", "help", "report", "version"] {
             items.push(Placement { id: id.into(), zone: Zone::End, shown: true });
         }
@@ -327,7 +334,9 @@ impl Layout {
     /// ones. Missing known items go next to their default neighbours without moving saved ones.
     /// Work and output are bounded even for malformed files and ids.
     pub fn sanitize(&mut self, defaults: &Self) {
-        let known: Vec<_> = defaults.items.iter().filter(|p| placement_id(&p.id)).take(MAX_ITEMS).collect();
+        // Separator absence is intentional in current lists. Only the old-format loader
+        // inserts default separators; otherwise removing one would resurrect it on save.
+        let known: Vec<_> = defaults.items.iter().filter(|p| placement_id(&p.id) && !p.id.starts_with("separator:")).take(MAX_ITEMS).collect();
         let mut kept: Vec<Placement> = Vec::new();
         let mut unknown = 0;
         for p in self.items.iter().take(4096) {
@@ -408,11 +417,44 @@ impl Layout {
             .collect();
         let mut layout = Self { items };
         layout.sanitize(defaults);
+        if value.get("version").and_then(serde_json::Value::as_u64).unwrap_or(0) < 1 {
+            layout.migrate_separators(defaults);
+        }
         layout
     }
 
+    fn migrate_separators(&mut self, defaults: &Self) {
+        // Previously these ids could be tray-created objects. Preserve them with fresh ids
+        // rather than mistaking a user's placement for a newly introduced default divider.
+        let collisions: Vec<_> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| defaults.items.iter().any(|p| p.id == item.id && p.id.starts_with("separator:")))
+            .map(|(i, _)| i)
+            .collect();
+        for at in collisions {
+            let id = (0..=MAX_ITEMS + 3).map(|n| format!("separator:{n}")).find(|id| !self.items.iter().chain(&defaults.items).any(|p| &p.id == id));
+            if let (Some(item), Some(id)) = (self.items.get_mut(at), id) {
+                item.id = id;
+            }
+        }
+        for (i, p) in defaults.items.iter().enumerate().filter(|(_, p)| p.id.starts_with("separator:")) {
+            if self.items.len() >= MAX_ITEMS
+                && let Some(at) = self.items.iter().rposition(|p| !defaults.items.iter().any(|d| d.id == p.id))
+            {
+                self.items.remove(at);
+            }
+            let before = defaults.items.iter().skip(i + 1).find_map(|next| self.items.iter().position(|k| k.id == next.id && k.zone == p.zone));
+            let after = defaults.items.iter().take(i).rev().find_map(|prev| self.items.iter().position(|k| k.id == prev.id && k.zone == p.zone));
+            let at = before.or_else(|| after.map(|at| at + 1)).unwrap_or(self.items.len());
+            self.items.insert(at, p.clone());
+        }
+        self.sanitize(defaults);
+    }
+
     pub fn to_value(&self) -> serde_json::Value {
-        serde_json::json!({"items": self.items})
+        serde_json::json!({"version": 1, "items": self.items})
     }
 }
 

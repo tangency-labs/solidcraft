@@ -13,7 +13,6 @@
     "app_bar.keyboard_hint": "Enter adds · Delete removes · Alt+Left/Right moves · Esc cancels a drag or finishes",
     "app_bar.layout": "Layout",
     "app_bar.links": "Links and info",
-    "app_bar.locked": "File cannot be removed",
     "app_bar.minimal": "Minimal",
     "app_bar.move_end": "Move to End",
     "app_bar.move_left": "Move left",

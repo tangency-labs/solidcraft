@@ -177,6 +177,22 @@ pub fn paint_layers_motion<R>(ctx: &egui::Context, id: &str, rect: Rect, layers:
     result
 }
 
+/// Retain a native control's input, focus and tooltip while the shared bar painter owns its
+/// shape. Unlike zero opacity, discarding only its paint keeps the input widget visible.
+pub fn interaction_only<R>(ui: &mut egui::Ui, interact: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let (ctx, layer) = (ui.ctx().clone(), ui.layer_id());
+    let start = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+    let result = interact(ui);
+    ctx.graphics_mut(|g| {
+        let list = g.entry(layer);
+        let end = list.next_idx();
+        for i in start.0..end.0 {
+            list.mutate_shape(egui::layers::ShapeIdx(i), |s| s.shape = egui::Shape::Noop);
+        }
+    });
+    result
+}
+
 pub fn paint_decoration(ui: &egui::Ui, id: &str, paint: impl FnOnce(&Painter)) {
     let (ctx, layer) = (ui.ctx(), ui.layer_id());
     let start = ctx.graphics_mut(|graphics| graphics.entry(layer).next_idx());
@@ -191,20 +207,91 @@ pub fn paint_item(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response:
         paint_control(ui, rect, control, response, opacity);
     } else {
         paint_motion(ui, id, rect, |ui| {
-            movable_shadow(ui, rect, id);
-            paint_control(ui, rect, control, response, opacity);
+            let movable = editing_active(ui.ctx()) && id != "overflow";
+            let hovered = movable && ui.rect_contains_pointer(rect);
+            paint_hover(ui, id, item_rect(rect, control), control_radius(control), hovered, |ui| {
+                if movable {
+                    ui.painter().rect_filled(item_rect(rect, control), control_radius(control), Tokens::get().control_fill);
+                }
+                paint_control(ui, rect, control, response, opacity);
+            });
         });
     }
 }
 
-/// Paint-only elevation: never reserves space or changes the measured rectangle.
-pub fn movable_shadow(ui: &egui::Ui, rect: Rect, id: &str) {
-    if editing_active(ui.ctx()) && id != "overflow" && item_opacity(ui.ctx(), id) > 0.0 {
-        let t = Tokens::get();
-        let radius = if matches!(id, "donate" | "discord" | "report" | "version") { rect.height() / 2.0 } else { 7.0 };
-        let shadow = egui::Shadow { offset: [0, 2], blur: 4, spread: 0, color: t.figure_shadow.gamma_multiply(0.35) };
-        ui.painter().add(shadow.as_shape(rect, egui::CornerRadius::same(radius.min(255.0) as u8)));
+pub const ITEM_HEIGHT: f32 = 32.0;
+pub const PILL_HEIGHT: f32 = 28.0;
+pub const ITEM_RADIUS: u8 = 7;
+pub const ITEM_PILL_RADIUS: u8 = (PILL_HEIGHT / 2.0) as u8;
+const HOVER_TIME: f32 = 0.12;
+
+pub fn control_height(control: Control<'_>) -> f32 {
+    if matches!(control, Control::Pill { .. } | Control::Report { .. }) { PILL_HEIGHT } else { ITEM_HEIGHT }
+}
+
+pub fn item_rect(rect: Rect, control: Control<'_>) -> Rect {
+    Rect::from_center_size(rect.center(), vec2(rect.width(), control_height(control)))
+}
+
+pub fn control_radius(control: Control<'_>) -> u8 {
+    if matches!(control, Control::Pill { .. } | Control::Report { .. }) { ITEM_PILL_RADIUS } else { ITEM_RADIUS }
+}
+
+pub fn dragging(ctx: &egui::Context, active: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("appbar_drag_active"), active));
+}
+
+pub fn is_dragging(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("appbar_drag_active"))).unwrap_or(false)
+}
+
+#[derive(Clone, Default)]
+struct HoverLift {
+    from: f32,
+    to: f32,
+    drawn: f32,
+    started: f64,
+}
+
+/// Hover uses the same finite, snapping ease-out as layout displacement, with a shorter time.
+pub fn hover_step(from: f32, to: f32, elapsed: f32) -> f32 {
+    animated_step(from, to, elapsed, HOVER_TIME)
+}
+
+/// Only paint moves; callers retain their resting hit rectangle, preventing hover flicker.
+pub fn paint_hover<R>(ui: &mut egui::Ui, id: &str, rect: Rect, radius: u8, hovered: bool, paint: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let ctx = ui.ctx().clone();
+    let blocked = !editing_active(&ctx) || is_dragging(&ctx);
+    let now = ctx.input(|i| i.time);
+    let key = egui::Id::unique(("appbar_hover_lift", ctx.viewport_id(), id));
+    let (lift, moving) = ctx.data_mut(|d| {
+        let state = d.get_temp_mut_or_default::<HoverLift>(key);
+        let target = if hovered && !blocked { -2.0 } else { 0.0 };
+        if blocked {
+            *state = HoverLift::default();
+            return (0.0, false);
+        }
+        if state.to != target {
+            state.from = state.drawn;
+            state.to = target;
+            state.started = now;
+        }
+        state.drawn = hover_step(state.from, target, (now - state.started) as f32);
+        (state.drawn, state.drawn != target)
+    });
+    if moving {
+        ctx.request_repaint();
     }
+    let layer = ui.layer_id();
+    let start = ctx.graphics_mut(|g| g.entry(layer).next_idx());
+    if lift != 0.0 {
+        let shadow =
+            egui::Shadow { offset: [0, 2], blur: 4, spread: 0, color: Tokens::get().figure_shadow.gamma_multiply(0.15 * (lift.abs() / 2.0)) };
+        ui.painter().add(shadow.as_shape(rect, egui::CornerRadius::same(radius)));
+    }
+    let result = paint(ui);
+    translate_paint(&ctx, layer, start, vec2(0.0, lift));
+    result
 }
 
 /// Strong primary fill, rather than the softer workspace button surface.
@@ -267,7 +354,6 @@ pub mod brand {
     pub const DISCORD: Color32 = Color32::from_rgb(0x58, 0x65, 0xF2);
 }
 /// The pills' height, and the least width at which the bar gives the first pill its label.
-pub const PILL_HEIGHT: f32 = 24.0;
 pub const PILL_LABEL_MIN: f32 = 1100.0;
 /// The × inside a pill.
 const PILL_X: f32 = 16.0;
@@ -374,19 +460,13 @@ fn editing_active(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<(bool, Option<String>)>(egui::Id::unique("appbar_edit_paint"))).is_some_and(|s| s.0)
 }
 
-/// Tray state badges use the same check path as checkboxes and menus, and the host's lock
-/// glyph. Neither is an SVG alias: resolving them as icons would paint the placeholder.
-pub fn tray_badge(ui: &egui::Ui, cell: Rect, locked: bool) -> Rect {
+/// Tray badges use the same check path as checkboxes and menus.
+pub fn tray_badge(ui: &egui::Ui, cell: Rect) -> Rect {
     let t = Tokens::get();
     let radius = t.space_8;
     let badge = Rect::from_center_size(cell.right_top() + vec2(-t.space_2, t.space_2), vec2(radius * 2.0, radius * 2.0));
-    ui.painter().circle_filled(badge.center(), radius, if locked { t.control_fill.to_opaque() } else { tray_accent().0 });
-    if locked {
-        ui.painter().circle_stroke(badge.center(), radius, Stroke::new(1.0, t.border));
-        crate::icons::glyphs::badge(ui.painter(), badge.shrink(t.space_3), "lock", t.text);
-    } else {
-        crate::checks::paint_check_glyph(ui.painter(), badge.shrink(t.space_2), false, tray_accent().1);
-    }
+    ui.painter().circle_filled(badge.center(), radius, tray_accent().0);
+    crate::checks::paint_check_glyph(ui.painter(), badge.shrink(t.space_2), false, tray_accent().1);
     badge
 }
 
@@ -418,6 +498,7 @@ pub fn item_opacity(ctx: &egui::Context, id: &str) -> f32 {
 
 /// No feature-owned lookalikes: all bar/tray painting goes through this function.
 pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, response: &egui::Response, opacity: f32) {
+    let rect = item_rect(rect, control);
     {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         let ui = &mut child;
@@ -432,24 +513,31 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
         let hot = response.hovered() || response.has_focus();
         match control {
             Control::Separator => {
-                p.vline(rect.center().x, rect.center().y - 10.0..=rect.center().y + 10.0, Stroke::new(1.0, t.app_bar_separator));
+                p.vline(
+                    rect.center().x,
+                    rect.center().y - 10.0..=rect.center().y + 10.0,
+                    Stroke::new(1.0, t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)),
+                );
             }
             Control::Documents => {
                 if hot {
-                    p.rect_filled(rect, 4, t.app_bar_hover);
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
                 }
-                crate::icons::paint_app_bar(p, rect.shrink(4.0), "document_browser", 1.0);
+                if response.has_focus() {
+                    p.rect_stroke(rect.shrink(1.0), ITEM_RADIUS, Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Inside);
+                }
+                crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)), "document_browser", 1.0);
             }
             Control::Icon { icon, size, enabled } => {
                 let enabled = enabled || editing;
                 if enabled && hot {
-                    p.rect_filled(rect.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover_button);
                 }
                 crate::icons::paint_app_bar(p, Rect::from_center_size(rect.center(), vec2(size, size)), icon, if enabled { 1.0 } else { 0.35 });
             }
             Control::Command { icon, enabled } => {
                 if enabled && hot {
-                    p.rect_filled(rect.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover_button);
                 }
                 crate::icons::paint_on(
                     p,
@@ -461,7 +549,7 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
             }
             Control::File { label, enabled, open } => {
                 if enabled && (hot || open) {
-                    p.rect_filled(rect, t.radius_sm, t.app_bar_hover);
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
                 }
                 let galley = p.layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
                 p.galley(
@@ -479,7 +567,8 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 focused || response.has_focus(),
             ),
             Control::Report { label, labelled } => {
-                let capsule_rect = Rect::from_center_size(rect.center(), vec2(rect.width().min(if labelled { f32::MAX } else { 28.0 }), PILL_HEIGHT));
+                let capsule_rect =
+                    Rect::from_center_size(rect.center(), vec2(rect.width().min(if labelled { f32::MAX } else { PILL_HEIGHT }), PILL_HEIGHT));
                 let ink = t.app_bar_text;
                 capsule(ui, capsule_rect, t.app_bar.lerp_to_gamma(ink, 0.12), hot);
                 if labelled {
@@ -504,11 +593,20 @@ pub fn paint_control(ui: &mut egui::Ui, rect: Rect, control: Control<'_>, respon
                 let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(t.font_small), t.app_bar_text);
                 let text_rect = Rect::from_center_size(rect.center(), galley.size());
                 if hot {
-                    p.hline(text_rect.x_range(), text_rect.bottom(), Stroke::new(1.0, t.app_bar_text));
+                    p.rect_filled(rect, ITEM_RADIUS, t.app_bar_hover);
                 }
                 p.galley(text_rect.min, galley, t.app_bar_text);
             }
-            Control::Assistant { state, open } => crate::assistant_entry(ui, response, state, open, ui.ctx().global_style().animation_time > 0.0),
+            Control::Assistant { state, open } => {
+                if hot || open {
+                    p.rect_filled(rect, ITEM_RADIUS, if open { t.app_bar_hover_strong } else { t.app_bar_hover_button });
+                }
+                // Retain the shared icon and live status mark while the bar owns its uniform
+                // background. A passive response suppresses the entry's smaller hover frame.
+                let passive = ui.new_child(egui::UiBuilder::new().max_rect(rect).disabled());
+                let quiet = passive.interact(rect, passive.scope_id().with("assistant_mark"), Sense::hover());
+                crate::assistant_entry(&passive, &quiet, state, false, ui.ctx().global_style().animation_time > 0.0);
+            }
         }
     }
 }
@@ -518,14 +616,14 @@ pub fn control_size(ctx: &egui::Context, control: Control<'_>) -> egui::Vec2 {
     let text = |s: &str, size| ctx.fonts_mut(|f| f.layout_no_wrap(s.into(), FontId::proportional(size), t.app_bar_text)).size().x;
     let width = match control {
         Control::Separator => 9.0,
-        Control::Documents => 26.0,
+        Control::Documents => ITEM_HEIGHT,
         Control::File { label, .. } => text(label, t.font_button) + 16.0,
         Control::Pill { data, .. } => pill_width(ctx, &data),
         Control::Report { label, labelled: true } => REPORT_TEXT_X + text(label, t.font_button) + 11.0,
         Control::Version(label) => text(label, t.font_small) + 4.0,
-        _ => 32.0,
+        _ => ITEM_HEIGHT,
     };
-    vec2(width.max(1.0), if matches!(control, Control::Documents) { 26.0 } else { 32.0 })
+    vec2(width.max(1.0), control_height(control))
 }
 
 /// Render the very same widget into a fitted cell. Lifted controls are tessellated and rotated
@@ -541,7 +639,7 @@ pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opac
     if lifted {
         let t = Tokens::get();
         let host = crate::Container::new(ui.ctx(), crate::Surface::Window);
-        let mut frame = host.frame(ui.ctx(), t.app_bar, crate::frame::Side::Left);
+        let mut frame = host.frame(ui.ctx(), t.app_bar, crate::frame::Side::Left).corner_radius(control_radius(control));
         frame.stroke = Stroke::new(1.0, if warning { t.warning } else { t.form_primary });
         host.paint_background(child.painter(), frame, native.expand(t.space_3));
     }
@@ -566,11 +664,11 @@ fn paint_link_pill(ui: &egui::Ui, rect: Rect, p: &Pill<'_>, lift: f32, veil: f32
     let snap = |v: f32| (v * ppp).round() / ppp;
     let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
     let fill = p.fill.lerp_to_gamma(t.on_accent, 0.08 * lift);
-    ui.painter().rect_filled(rect, egui::CornerRadius::same((PILL_HEIGHT / 2.0) as u8), fill);
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(ITEM_PILL_RADIUS), fill);
     if focused {
         ui.painter().rect_stroke(
             rect.expand(1.5),
-            egui::CornerRadius::same((PILL_HEIGHT / 2.0 + 1.5) as u8),
+            egui::CornerRadius::same((f32::from(ITEM_PILL_RADIUS) + 1.5) as u8),
             Stroke::new(1.5, t.app_bar_text),
             egui::StrokeKind::Outside,
         );
@@ -797,21 +895,11 @@ fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions
     }
 }
 
-/// A short divider between the bar's groups.
-pub fn separator(ui: &egui::Ui, bar: Rect, x: f32, group: &str, handles: &Handles) {
-    let t = Tokens::get();
-    let rect = Rect::from_center_size(pos2(x, bar.center().y), vec2(1.0, 20.0));
-    paint_layers_motion(ui.ctx(), &format!("separator:{group}"), rect, &[ui.layer_id()], || {
-        ui.painter().line_segment([rect.center_top(), rect.center_bottom()], Stroke::new(1.0, t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)));
-    });
-    solidcraft_ui_registry::publish_rect(&handle(handles.separator, group), rect);
-}
-
 /// An icon button of the bar, dimmed and deaf to clicks when disabled (its tip still shows).
 /// Returns whether it was clicked.
 fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bool, handles: &Handles) -> bool {
     let width = if compact && b.narrow { 22.0 } else { 32.0 };
-    let br = Rect::from_center_size(pos2(at, bar.center().y), vec2(width, 32.0));
+    let br = Rect::from_center_size(pos2(at, bar.center().y), vec2(width, ITEM_HEIGHT));
     let resp = ui.interact(br, ui.scope_id().with(("ab", b.id)), if b.id == "overflow" { Sense::click() } else { Sense::click_and_drag() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, b.enabled, b.tip));
     for prefix in handles.button {
@@ -910,7 +998,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     }
     let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
     // Home.
-    let home = rect(geometry.home, 32.0);
+    let home = rect(geometry.home, ITEM_HEIGHT);
     let idle = data.home.enabled;
     if visible("home") {
         let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), Sense::click_and_drag());
@@ -933,9 +1021,6 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             actions.push(BarAction::Home);
         }
     }
-    if visible("brand") && geometry.brand_separator < geometry.file.left {
-        separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
-    }
     // The File menu's text button.
     let file = rect(geometry.file, 26.0);
     let clicked = visible("file") && text_button(ui, file, (data.file, data.file), data.file_open, idle, "file").1;
@@ -956,16 +1041,10 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             actions.push(BarAction::Button { id: b.id.to_string() });
         }
     }
-    if let Some(at) = geometry.quick_separator {
-        separator(ui, r, r.left() + at, "quick_access", h);
-    }
     let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
-    if visible("documents") {
-        separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
-    }
     let tabs_start = r.left() + geometry.tabs_start;
-    let report = rect(geometry.report, if data.report.icon_only { 32.0 } else { 26.0 });
+    let report = rect(geometry.report, if data.report.icon_only { ITEM_HEIGHT } else { 26.0 });
     let report_label = geometry.report_labeled;
     let search = geometry.search.map(|span| rect(span, 26.0));
     if let Some(search) = search {
@@ -1012,7 +1091,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     // Settings sits immediately left of Help.
-    let gear = rect(geometry.settings, 32.0);
+    let gear = rect(geometry.settings, ITEM_HEIGHT);
     if visible("settings") {
         let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click_and_drag());
         paint_item(
@@ -1029,7 +1108,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             actions.push(BarAction::Button { id: data.settings.id.to_string() });
         }
     }
-    let assistant = geometry.assistant.map(|span| rect(span, 32.0));
+    let assistant = geometry.assistant.map(|span| rect(span, ITEM_HEIGHT));
     if let Some((v, galley)) = version
         && let Some(span) = geometry.version
     {
@@ -1042,7 +1121,8 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             actions.push(BarAction::Version);
         }
     }
-    let overflow_button = placed.overflow_button.map(|(x, w)| Rect::from_center_size(pos2(r.left() + x + w / 2.0, r.center().y), vec2(w, 32.0)));
+    let overflow_button =
+        placed.overflow_button.map(|(x, w)| Rect::from_center_size(pos2(r.left() + x + w / 2.0, r.center().y), vec2(w, ITEM_HEIGHT)));
     if let Some(button) = overflow_button {
         let more = solidcraft_ui_text::tr("ui.app_bar_more");
         let b = BarButton { id: "overflow", icon: "chevron", tip: more, enabled: true, narrow: false, wide_only: false };
@@ -1061,6 +1141,39 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
         }
     }
     let overflow_items = overflow_items(data, &placed.overflow, overflow_button.map_or(r.left(), |b| b.left()));
+    // Project the established slots into ordinary separator controls. The legacy spans and
+    // registry aliases preserve default geometry; edited lists use independent nine-pixel slots.
+    let mut separators = Vec::new();
+    for (id, x) in [
+        ("separator:1", (visible("brand") && geometry.brand_separator < geometry.file.left).then_some(r.left() + geometry.brand_separator)),
+        ("separator:2", visible("documents").then_some(r.left() + geometry.documents_separator)),
+        ("separator:3", geometry.quick_separator.map(|x| r.left() + x)),
+    ] {
+        if let Some(x) = x {
+            separators.push((id.to_owned(), Rect::from_center_size(pos2(x, r.center().y), vec2(9.0, ITEM_HEIGHT))));
+        }
+    }
+    for (item, p) in spec.items.iter().zip(&placed.placements) {
+        if item.id.starts_with("separator:")
+            && let Some(p) = p
+        {
+            separators
+                .push((item.id.clone(), Rect::from_center_size(pos2(r.left() + p.x + p.width / 2.0, r.center().y), vec2(p.width, ITEM_HEIGHT))));
+        }
+    }
+    for (id, br) in &separators {
+        let response = ui.interact(*br, ui.scope_id().with(id), Sense::hover());
+        paint_item(ui, *br, Control::Separator, &response, item_opacity(ui.ctx(), id), id);
+        let group = match id.as_str() {
+            "separator:1" => Some("brand"),
+            "separator:2" => Some("documents"),
+            "separator:3" => Some("quick_access"),
+            _ => None,
+        };
+        if let Some(group) = group {
+            solidcraft_ui_registry::publish_rect(&handle(h.separator, group), Rect::from_center_size(br.center(), vec2(1.0, 20.0)));
+        }
+    }
     let mut edit_items = Vec::new();
     let mut edit_item = |id: String, br: Rect, locked: bool| {
         if br.is_positive() {
@@ -1068,9 +1181,12 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
             edit_items.push(crate::app_bar_items::DropItem { id, zone, left: br.left(), right: br.right(), locked });
         }
     };
-    for (id, br) in
-        [("home", home), ("settings", gear), ("report", report), ("help", Rect::from_center_size(pos2(help, r.center().y), vec2(32.0, 32.0)))]
-    {
+    for (id, br) in [
+        ("home", home),
+        ("settings", gear),
+        ("report", report),
+        ("help", Rect::from_center_size(pos2(help, r.center().y), vec2(ITEM_HEIGHT, ITEM_HEIGHT))),
+    ] {
         if visible(id) {
             edit_item(id.into(), br, false);
         }
@@ -1078,12 +1194,12 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     for (b, at) in data.actions.iter().zip(&geometry.actions) {
         if let Some(at) = at {
             let width = if compact && b.narrow { 22.0 } else { 32.0 };
-            edit_item(b.id.into(), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(width, 32.0)), false);
+            edit_item(b.id.into(), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(width, ITEM_HEIGHT)), false);
         }
     }
     for &(i, at) in &geometry.quick_slots {
         if let Some(id) = data.quick_ids.get(i) {
-            edit_item(format!("quick:{id}"), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(32.0, 32.0)), false);
+            edit_item(format!("quick:{id}"), Rect::from_center_size(pos2(r.left() + at, r.center().y), vec2(ITEM_HEIGHT, ITEM_HEIGHT)), false);
         }
     }
     for (p, span) in data.pills.iter().zip(&geometry.pills) {
@@ -1102,15 +1218,10 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     if let Some(br) = overflow_button {
         edit_item("more".into(), br, true);
     }
+    for (id, br) in separators {
+        edit_item(id, br, false);
+    }
     for (item, p) in spec.items.iter().zip(&placed.placements) {
-        if item.id.starts_with("separator:")
-            && let Some(p) = p
-        {
-            let br = Rect::from_center_size(pos2(r.left() + p.x + p.width / 2.0, r.center().y), vec2(p.width, 32.0));
-            let response = ui.interact(br, ui.scope_id().with(&item.id), Sense::hover());
-            paint_item(ui, br, Control::Separator, &response, item_opacity(ui.ctx(), &item.id), &item.id);
-            edit_item(item.id.clone(), br, false);
-        }
         if matches!(item.id.as_str(), "logo" | "managed" | "offered")
             && let Some(p) = p
         {
