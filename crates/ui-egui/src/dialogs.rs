@@ -8417,6 +8417,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // Not in the Hole window yet: an edit keeps it (`timeline.redefine`).
             thread_class: _,
             old_surface_start: _,
+            // A hardware hole is redefined by `sheet.hardware`, not this window (`timeline.redefine` says so).
+            hardware: _,
         } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);

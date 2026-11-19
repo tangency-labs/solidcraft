@@ -4132,6 +4132,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             to: to.map(FacePick),
             references,
             old_surface_start,
+            hardware: None,
         },
     )
 }
