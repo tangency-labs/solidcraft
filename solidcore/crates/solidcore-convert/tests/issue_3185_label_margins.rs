@@ -23,6 +23,9 @@
     clippy::disallowed_methods
 )] // test (the turn's cos and sin)
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -32,7 +35,7 @@ use solidcore::blend::fillet_section::station::as_b_spline;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector3d::{Point3, Vec3};
-use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::surface::from_parameters::from_parameters;
 use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -45,15 +48,8 @@ fn corpus() -> PathBuf {
 
 /// The corpus's kernel, its fixes on (as the parity run and SolidCraft run it).
 fn kernel() -> Kernel {
-    let v: Value =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    let mut fixes = UpstreamFixes::default();
-    for flag in v.as_array().unwrap() {
-        *fixes.flag_mut(flag.as_str().unwrap()).unwrap() = true;
-    }
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes = fixes;
+    k.fixes = solidcraft_fixes::solidcraft_fixes();
     k
 }
 

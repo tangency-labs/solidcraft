@@ -603,8 +603,12 @@ pub struct Dialog {
     pub(crate) picked_edges: Vec<Sel>,
     /// Whether `inputs[0]` currently includes the tangent chains of `picked_edges`.
     pub(crate) chain_applied: bool,
-    /// A pattern's objects of the Object Type not shown now, restored when it is chosen again.
-    pub(crate) other_objects: Vec<Sel>,
+    /// A pattern's (or Align's) objects of each Object Type not shown now, by its index in the
+    /// Object Type row, restored when it is chosen again.
+    pub(crate) other_objects: [Vec<Sel>; 3],
+    /// The placements a pattern's body objects make up whole, for its offer to pattern those
+    /// components instead ([`crate::pattern_components`]).
+    pub(crate) whole_components: Option<crate::pattern_components::WholeCache>,
     /// The multi-pick input whose picked items are listed under it, each removable (#3683).
     pub(crate) listed: Option<usize>,
     /// The listed item (and its input) whose row is under the pointer: the view lights it as a
@@ -848,7 +852,7 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
         // box selection and a pre-selection reach them the way a click already does.
         Sel::SketchPoint { .. } => a & (selection::POINTS | selection::SKETCH_POINTS) != 0,
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
-        Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
+        Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
     }
 }
 
@@ -891,7 +895,8 @@ impl Dialog {
             then_start: None,
             picked_edges: Vec::new(),
             chain_applied,
-            other_objects: Vec::new(),
+            other_objects: Default::default(),
+            whole_components: None,
             listed: None,
             list_hover: None,
             shell_chain: Default::default(),
@@ -1623,7 +1628,9 @@ impl Dialog {
 
     /// Does the active input pick component occurrences rather than bodies?
     pub(crate) fn takes_components(&self) -> bool {
-        matches!(self.kind, Kind::Align { components: true, .. }) && self.active == 0
+        self.active == 0
+            && (matches!(self.kind, Kind::Align { components: true, .. })
+                || (is_pattern(&self.kind) && self.inputs.first().is_some_and(|i| i.accept == selection::OCCURRENCES)))
     }
 
     /// Everything the inputs hold (for highlighting).
@@ -3089,7 +3096,11 @@ pub(crate) fn point_tri_dist(p: Vec3, [a, b, c]: [Vec3; 3]) -> f64 {
 
 /// The pattern objects' label: features are picked in the timeline.
 fn objects_label(accept: Accept) -> &'static str {
-    if accept == selection::FEATURES { "Features" } else { "Objects" }
+    match accept {
+        selection::FEATURES => "Features",
+        selection::OCCURRENCES => "Components",
+        _ => "Objects",
+    }
 }
 
 /// What a pattern or Mirror says when a sketch is clicked for its objects (#10057). It names what
@@ -3101,23 +3112,60 @@ fn is_pattern(k: &Kind) -> bool {
     matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. } | Kind::Mirror)
 }
 
-/// The Object Type row of a pattern: bodies (picked in the view) or features (picked in the
-/// timeline, e.g. a hole).
-fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
+/// The Object Type row of a pattern: bodies (picked in the view), features (picked in the
+/// timeline, e.g. a hole), or, for a pattern (not a mirror), components (placed again).
+fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
+    let components = !matches!(d.kind, Kind::Mirror);
     let Some(inp) = d.inputs.first_mut() else { return };
-    let cur = usize::from(inp.accept == selection::FEATURES);
+    let cur = match inp.accept {
+        selection::FEATURES => 1,
+        selection::OCCURRENCES => 2,
+        _ => 0,
+    };
     let mut ty = cur;
-    // What the two kinds are, and that a sketch is neither (#10057).
-    choice_row(ui, "Object Type", "pat_obj", &mut ty, &["Bodies", "Features"])
-        .backing_on_hover_text(solidcraft_ui_text::tr("ui.pattern_object_type_tip"));
+    let choices: &[&str] = if components { &["Bodies", "Features", "Components"] } else { &["Bodies", "Features"] };
+    // What the kinds are, and that a sketch is neither (#10057).
+    choice_row(ui, "Object Type", "pat_obj", &mut ty, choices).backing_on_hover_text(solidcraft_ui_text::tr("ui.pattern_object_type_tip"));
     if ty != cur {
-        inp.accept = if ty == 1 { selection::FEATURES } else { BODIES };
+        let from_bodies = cur == 0;
+        inp.accept = match ty {
+            1 => selection::FEATURES,
+            2 => selection::OCCURRENCES,
+            _ => BODIES,
+        };
         inp.label = objects_label(inp.accept);
         // The pre-selection moved into this input when the dialog opened, so switching back
-        // restores what the other type held instead of losing it.
-        let back = std::mem::take(&mut d.other_objects);
-        d.other_objects = std::mem::replace(&mut inp.items, back);
+        // restores what that type held instead of losing it; each type keeps its own. Bodies
+        // changed since Components was left become the placements they are in; Bodies left as
+        // they came back (or giving no placement) give the Components kept back; and Components
+        // with none kept take the placements of the Bodies kept.
+        let saved = d.other_objects.get_mut(ty).map(std::mem::take).unwrap_or_default();
+        let items = std::mem::take(&mut inp.items);
+        let next = if ty == 2 {
+            let unchanged = from_bodies && items == d.other_objects[0];
+            if !saved.is_empty() && (!from_bodies || unchanged) {
+                saved
+            } else {
+                let placed = crate::pattern_components::as_placements(s, if from_bodies { &items } else { &d.other_objects[0] });
+                if placed.is_empty() { saved } else { placed }
+            }
+        } else {
+            saved
+        };
+        if let Some(slot) = d.other_objects.get_mut(cur) {
+            *slot = items;
+        }
+        // Bodies keeps a copy of what it came back with, so that leaving it unchanged for
+        // Components can tell (the slot is written again when Bodies is left).
+        if ty == 0 {
+            d.other_objects[0].clone_from(&next);
+        }
+        inp.items = next;
         d.active = 0;
+        d.error = None;
+    }
+    if components && ty == 0 {
+        crate::pattern_components::offer_row(d, ui, s);
     }
 }
 
@@ -3130,8 +3178,11 @@ fn align_object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     if ty != cur {
         *components = ty == 1;
         inp.label = if *components { "Components" } else { "Bodies" };
-        let back = std::mem::take(&mut d.other_objects);
-        d.other_objects = std::mem::replace(&mut inp.items, back);
+        let back = d.other_objects.get_mut(ty).map(std::mem::take).unwrap_or_default();
+        let items = std::mem::replace(&mut inp.items, back);
+        if let Some(slot) = d.other_objects.get_mut(cur) {
+            *slot = items;
+        }
         d.active = 0;
         d.error = None;
     }
@@ -3142,7 +3193,7 @@ fn align_object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
 fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
     let session = &app.session;
     if matches!(d.kind, Kind::Mirror) {
-        object_type_row(d, ui);
+        object_type_row(d, ui, session);
         return;
     }
     if matches!(d.kind, Kind::Align { .. }) {
@@ -3199,7 +3250,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
             d.extra.clear();
             d.advance();
         }
-        object_type_row(d, ui);
+        object_type_row(d, ui, session);
         return;
     }
     if crate::hole_folder::active(d) {
@@ -3250,7 +3301,7 @@ pub(crate) fn body_placement_path(s: &Session, body: &str) -> Option<Vec<u64>> {
 
 /// How many ids of a body's full placement `path` a component pick keeps (see
 /// [`occurrence_path_of_body`]).
-fn pick_depth(s: &Session, path: &[u64]) -> usize {
+pub(crate) fn pick_depth(s: &Session, path: &[u64]) -> usize {
     let context = match &s.active_occurrence_path {
         Some(active) => Some(active.len()),
         // An active component without an exact placement: the placement of it on this path.
@@ -3359,6 +3410,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         // stands for. Where it is tells two picks on one body apart.
         Sel::Vertex { body, point } if !body.is_empty() => format!("{body} · {}", crate::snap_wake::label(*point)),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
+        Sel::Drawing { object, .. } => format!("Drawing object {object}"),
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
         Sel::Vertex { point, .. } => {
@@ -4019,6 +4071,7 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
             *direction = dir;
         }
     }
+    point_cut_into_body(app, d);
     let Kind::Extrude { direction, distance, .. } = &d.kind else { return };
     let Ok(dist) = crate::length_input::eval(&app.session.doc, distance, ValueKind::Length) else { return };
     let mut side = crate::smart_extrude::side(dist, *direction);
@@ -4089,6 +4142,31 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
     };
     if let Kind::Extrude { operation, smart, .. } = &mut d.kind {
         *operation = crate::smart_extrude::operation(fresh, *operation, side, &mut smart.latch);
+    }
+}
+
+/// Cut chosen by hand on a one-sided extrude that points away from the body turns to point into
+/// it (#18243). Asked once, when Cut is chosen; a direction set by hand is never changed.
+fn point_cut_into_body(app: &SolveApp, d: &mut Dialog) {
+    let Kind::Extrude { smart, direction, .. } = &mut d.kind else { return };
+    if !std::mem::take(&mut smart.point_cut) || smart.manual_dir || *direction > 1 {
+        return;
+    }
+    let cuts = |d: &Dialog| {
+        let params = dialog_commands(app, d).ok().and_then(|c| c.into_iter().next()).map(|(_, p)| p)?;
+        solidcraft_engine::auto_operation(&app.session, &params).ok().flatten()
+    };
+    if cuts(d) == Some("cut") {
+        return;
+    }
+    let mut flipped = d.clone();
+    if let Kind::Extrude { direction, .. } = &mut flipped.kind {
+        *direction = 1 - *direction;
+    }
+    if cuts(&flipped) == Some("cut")
+        && let Kind::Extrude { direction, .. } = &mut d.kind
+    {
+        *direction = 1 - *direction;
     }
 }
 
@@ -5012,8 +5090,11 @@ pub(crate) fn preset_to_object(d: &mut Dialog, on: bool) {
     }
 }
 
+/// A To or From Object input takes a face, a body vertex or a snap point: the end or middle of a
+/// sketch line or an edge, or a hole's centre, as Move's points do (#17394). The command takes
+/// any point there.
 fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
-    set_object_accepting(inputs, active, label, FACES | selection::VERTICES, on);
+    set_object_accepting(inputs, active, label, FACES | selection::VERTICES | selection::SNAP_POINTS, on);
 }
 
 /// Add or remove the pick input `label` accepting `accept`; the active input moves to it when it
@@ -7038,7 +7119,10 @@ fn set_thin(inputs: &mut [SelInput], thin: bool) {
 /// What a pattern or mirror copies: picked features are replayed; picked bodies are copied as
 /// they are now, with every feature that shaped them (a fillet after the extrude included).
 fn pattern_objects(s: &Session, objects: &[Sel], p: &mut Value) {
-    if objects.iter().any(|x| matches!(x, Sel::Feature { .. })) {
+    if objects.iter().any(|x| matches!(x, Sel::Occurrence { .. })) {
+        let paths: Vec<&Vec<u64>> = objects.iter().filter_map(|x| if let Sel::Occurrence { path } = x { Some(path) } else { None }).collect();
+        p["occurrences"] = json!(paths);
+    } else if objects.iter().any(|x| matches!(x, Sel::Feature { .. })) {
         p["features"] = json!(pattern_features(s, objects));
     } else {
         p["bodies"] = json!(objects.body_names());
@@ -8687,9 +8771,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = plane_sel(s, base).into_iter().collect();
             }
+            // The line's origin goes back as stored: numbers, or the length expressions it follows.
+            let at_zero = axis_origin.iter().all(|e| e.trim().parse::<f64>().is_ok_and(|v| v.abs() < 1e-9));
+            let origin: Vec<Value> =
+                axis_origin.iter().map(|e| e.trim().parse::<f64>().map_or_else(|_| json!(e.to_string()), |v| json!(v))).collect();
             let pick = match line {
                 Some(g) => model_axis_sel(s, g),
-                None => world_axis(*axis_dir).filter(|_| axis_origin.len() < 1e-9).map(|name| Sel::Axis { name }),
+                None => world_axis(*axis_dir).filter(|_| at_zero).map(|name| Sel::Axis { name }),
             };
             match (pick, line) {
                 (Some(pick), _) => {
@@ -8701,7 +8789,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d.extra.insert("axis".into(), serde_json::to_value(g).unwrap_or(Value::Null));
                 }
                 (None, None) => {
-                    d.extra.insert("axis".into(), json!({"origin": pt3(*axis_origin), "dir": pt3(*axis_dir)}));
+                    d.extra.insert("axis".into(), json!({"origin": origin, "dir": pt3(*axis_dir)}));
                 }
             }
             if *direction_only {
