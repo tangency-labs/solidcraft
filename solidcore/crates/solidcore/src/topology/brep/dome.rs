@@ -81,24 +81,32 @@ pub enum DomeShape {
 }
 
 /// Why a dome is refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DomeRefusal {
     /// The face is not planar.
+    #[error("the face is not planar")]
     NotPlanar,
     /// The face has holes; a dome takes one outline.
+    #[error("the face has holes, and a dome takes one outline")]
     Holes,
     /// The outline does not close, or an edge has no curve the kernel reads.
+    #[error("the face's outline does not close, or an edge has no curve the kernel can read")]
     OpenOutline,
     /// The outline is not star-shaped about its centroid, so the cap would fold (or the sign
     /// of its turn could not be proved).
+    #[error("the face's outline is not star-shaped about its centre, so the dome would fold over")]
     NotStar,
     /// The height is zero or negative.
+    #[error("the height must be positive")]
     NonPositiveHeight,
     /// The height is not a finite number.
+    #[error("the height is not a finite number")]
     NonFiniteHeight,
     /// A spherical dome needs a circular face.
+    #[error("a spherical dome needs a circular face")]
     SphericalNeedsCircle,
     /// A dome cut into the body is not built yet.
+    #[error("a dome cut into the body is not supported yet")]
     ReverseNotSupported,
 }
 

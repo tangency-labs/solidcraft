@@ -516,6 +516,7 @@ impl Error {
             Error::ChamferAngleTooLarge { .. } => "ChamferAngleTooLarge",
             Error::OffsetRefused { .. } => "OffsetRefused",
             Error::BlendFailed { .. } => "BlendFailed",
+            Error::Dome(..) => "Dome",
         }
     }
 }
@@ -899,7 +900,7 @@ impl std::fmt::Display for Error {
                 write!(f, "solidcore rejected the input (SM_ERR_INVALID_INPUT)")
             }
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
-            Error::Dome(refusal) => write!(f, "dome refused: {refusal:?}"),
+            Error::Dome(refusal) => write!(f, "{refusal}"),
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
