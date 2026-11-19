@@ -195,13 +195,19 @@ fn fine_stl_of_crossed_pointed_screw_keeps_its_closed_edges() {
     use solidcraft_io::{Format, MeshQuality, export_with_quality, read_stl};
 
     let mut s = Session::default();
-    let mut recipe: Value = serde_json::from_str(include_str!("../../../../examples/pointed-screw.json")).unwrap();
-    let commands = recipe["commands"].as_array_mut().unwrap();
-    let thread = commands.iter_mut().find(|c| c["command"] == "solid.thread").unwrap();
-    thread["params"]["hand"] = json!("both");
-    for command in commands {
-        run(&mut s, command["command"].as_str().unwrap(), command["params"].clone());
-    }
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 3, "body_name": "Pointed screw"}));
+    run(&mut s, "solid.cone", json!({"radius": 4, "height": -8, "operation": "join", "targets": ["Pointed screw"]}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 3], "radius": 6, "height": 2.5, "operation": "join", "targets": ["Pointed screw"]}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [-7, -0.65, 4.5], "length": 14, "width": 1.3, "height": 2, "operation": "cut", "targets": ["Pointed screw"]}),
+    );
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"faces": [{"body": "Pointed screw", "point": [4, 0, 1]}], "designation": "M8x1.25", "modeled": true, "point": "follow", "point_depth": "fade", "hand": "both"}),
+    );
     let bytes = export_with_quality(&s.model.state(), &[], Format::StlBinary, "Crossed M8 screw", &s.doc.metadata, MeshQuality::Fine).unwrap();
     let triangles = read_stl(&bytes).unwrap();
     assert!(!triangles.is_empty());

@@ -256,16 +256,8 @@ conical face directly, turn on **Modeled**, and leave **Point** set to **None**.
 **Up to** start at the wide rim. Limit the cut to the part of the cone where the cutting profile
 clears the axis. Leave **Start** set to **None** and **End** set to **Square**.
 
-The [pointed screw example](https://github.com/tangency-labs/solidcraft/blob/main/examples/pointed-screw.json)
-builds the shank, cone, slotted head, and thread with the built-in tools. Run it from the
-repository root, then open the saved design or import the STL into a slicer.
-
-```sh
-solidcraft-cli run examples/pointed-screw.json --save pointed-screw.sc --out pointed-screw.stl --quality fine
-```
-
-After creating the shank and joining the cone, use the shank's cylindrical side as the
-thread pick. This command cuts both hands on the example blank.
+To script the thread on the blank above, name the body `Pointed screw` or use its name in
+`faces`. This command picks the shank's cylindrical side and cuts both hands.
 
 ```json
 {
@@ -281,8 +273,14 @@ thread pick. This command cuts both hands on the example blank.
 }
 ```
 
-Omit `hand` for a right-hand thread, as in the example file. Set `point_depth` to
+Omit `hand` for a right-hand thread. Set `point_depth` to
 `"full"` for a flat tip with enough material around its axis.
+
+Save the finished design as `pointed-screw.sc` to export a Fine STL from the command line.
+
+```sh
+solidcraft-cli run --in pointed-screw.sc --out pointed-screw.stl --quality fine
+```
 
 For standard hardware, use **Insert Fastener** or the separately installed **Screw** plugin.
 Use **Follow point** when you need to model threads on the point of a custom screw blank.
