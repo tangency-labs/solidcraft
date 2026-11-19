@@ -1360,11 +1360,7 @@ fn move_with_z_joins_the_lifted_curves_where_they_meet() {
     let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
     assert_eq!(made.len(), 2, "{r}");
     let sk = s.doc.sketch(sketch).unwrap();
-    assert!(
-        sk.wire_constraints.iter().any(|c| made.iter().all(|w| c.kind.wires().contains(&w.as_str()))),
-        "{:?}",
-        sk.wire_constraints
-    );
+    assert!(sk.wire_constraints.iter().any(|c| made.iter().all(|w| c.kind.wires().contains(&w.as_str()))), "{:?}", sk.wire_constraints);
 }
 
 /// Points placed on the plane first move off it with Move/Copy's `z`: each becomes a drawn 3D
