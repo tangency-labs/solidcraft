@@ -7,7 +7,11 @@
 //! the piece's ends and middle, proves for every `t` in `T` exactly one root `y(t)` in
 //! `c(t) + Z`: `F(t, c(t))` is enclosed by its mean-value form about the middle and the
 //! partials over `T x (c(T) + Z)`. At a piece's end, a point, the root is in a small box
-//! (Krawczyk's at the point, about the same Newton root the piece's quadratic starts from). Each of the rib's three curves (3D; on the fillet surface's UV; on
+//! (Krawczyk's at the point, about the same Newton root the piece's quadratic starts from),
+//! and that box lies inside `c(t) + Y` there, `Y` the box the piece's test ran on, in which
+//! the root at each `t` is the only one, so the end's root is the path's (a piece where it
+//! does not is not bounded).
+//! Each of the rib's three curves (3D; on the fillet surface's UV; on
 //! the end surface's UV) has an error `e` against the root: its 3D point less the rib's
 //! point, its UV point less `(sigma, alpha)` or `(u, v)`. At the piece's ends `e` is
 //! enclosed from those small boxes; between them `|e(t)|` is at most the larger end's plus
@@ -49,7 +53,7 @@ use crate::blend::fillet_section::series::{v_add, v_scale, v_sub, V3};
 use crate::blend::fillet_section::station::{as_b_spline, knot, span, Nurbs, Partials};
 use crate::error::Result;
 use crate::geom::krawczyk::{
-    contraction, inverse_of_columns3, krawczyk, newton, plus_c_times, Linearised,
+    contraction, inverse_of_columns3, krawczyk, krawczyk_region, newton, plus_c_times, Linearised,
 };
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
@@ -74,6 +78,10 @@ const RING_BOXES: usize = 1 << 12;
 /// The most times the ring about the tangent end is widened ([`Rib::near_bound`]).
 const WIDENINGS: usize = 24;
 
+/// The most pieces of a face one enclosure covers ([`cells`]): a box over more is not
+/// enclosed.
+const CELLS: usize = 256;
+
 const ZERO: Ivl = Ivl::new(0.0, 0.0);
 
 const OP: &str = "blend::fillet_geom::tangent_end_rib::certificate";
@@ -86,8 +94,9 @@ pub(super) type Solve<'a> = dyn Fn(f64, [f64; 3]) -> Result<Option<[f64; 3]>> + 
 pub(super) enum Bound {
     /// Certified: the largest distance of the curves from the rib, within the tolerance.
     Within(f64),
-    /// A piece end farther from the rib than the tolerance, or a piece bounded only over it
-    /// after the last halving: the curves are off, and more stations move them.
+    /// A piece end whose error's enclosure (over Krawczyk's box there) is over the
+    /// tolerance, or a piece bounded only over it after the last halving: the curves are
+    /// not proved within it, and more stations move them.
     Over,
     /// A piece not bounded at all: the rib's root, its path or a derivative not enclosed
     /// (Krawczyk's test does not contract), or an error not enclosed over the box the
@@ -102,9 +111,11 @@ pub(super) enum Bound {
 
 /// A face of the rib as the certificate encloses it: the surface the kernel evaluates.
 pub(super) enum Face<'f> {
-    /// NURBS data: a NURBS face, a face that is one (plane, cone, revolution, ...), or a
-    /// blend inside a scope that answers by its net.
-    Nurbs(Nurbs),
+    /// NURBS data: a NURBS face, a face that is one (plane, revolution, sphere, ...), or a
+    /// blend inside a scope that answers by its net. `past_knots`: whether the face is
+    /// evaluated past its knots as its end piece continued; a plane clamps its parameters
+    /// to its domain, its net's knots, so a box past them is not enclosed.
+    Nurbs { net: Nurbs, past_knots: bool },
     /// A blend evaluated by its definition, enclosed by the definition
     /// ([`definition_enclosable`]); its net only seeds the enclosure's feet.
     Definition {
@@ -116,9 +127,11 @@ pub(super) enum Face<'f> {
 
 impl<'f> Face<'f> {
     /// The face `s` as the certificate encloses it, or `None` where it is not enclosed (a
-    /// STEP, offset, curve-bounded or in-volume face; a B-spline face in power-basis form;
-    /// a blend by its definition that [`definition_enclosable`] does not take, such as one
-    /// of contact order 2): the rib is then built without a bound (the maintainer's design on #18674).
+    /// STEP, offset, curve-bounded or in-volume face; a cone or cylinder, whose point the
+    /// kernel takes from its STEP form, not from its net; a B-spline face in power-basis
+    /// form; a blend by its definition that [`definition_enclosable`] does not take, such
+    /// as one of contact order 2): the rib is then built without a bound (the maintainer's
+    /// design on #18674).
     ///
     /// # Errors
     ///
@@ -131,11 +144,19 @@ impl<'f> Face<'f> {
                 .filter(|b| b.form() != BSplineSurfaceForm::Polynomial)
                 .and_then(|b| Nurbs::of(&b).ok()))
         };
+        let past_knots = match s.kind() {
+            // the point from the STEP form, at a parameter converted from the net's (not
+            // always in closed form) and clamped to its domain
+            SurfaceKind::Cone(_) => return Ok(None),
+            SurfaceKind::Plane(_) => false,
+            _ => true,
+        };
+        let nurbs = |net| Face::Nurbs { net, past_knots };
         let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
-            return Ok(net()?.map(Face::Nurbs));
+            return Ok(net()?.map(nurbs));
         };
         if pb.net_answers(k) {
-            return Ok(net()?.map(Face::Nurbs));
+            return Ok(net()?.map(nurbs));
         }
         if !definition_enclosable(s) {
             return Ok(None);
@@ -154,17 +175,21 @@ impl<'f> Face<'f> {
 }
 
 /// The parts of `[lo, hi]` on the pieces of a knot vector: inside the knots cut at the
-/// knot lines strictly inside ([`knot_cuts`]), past them the end piece continued.
+/// knot lines strictly inside ([`knot_cuts`]), past them the end piece continued (`None`
+/// there without `past_knots`, or for more than [`CELLS`] parts).
 fn cuts(
     knots: &[f64],
     p: usize,
     n: usize,
-    lo: f64,
-    hi: f64,
+    (lo, hi): (f64, f64),
     continuity: usize,
+    past_knots: bool,
 ) -> Option<Vec<(f64, f64, usize)>> {
     let first = knot(knots, isize::try_from(p).ok()?);
     let last = knot(knots, isize::try_from(n).ok()?);
+    if !past_knots && (lo < first || hi > last) {
+        return None;
+    }
     let mut out = Vec::new();
     if lo < first {
         out.push((lo, hi.min(first), p));
@@ -176,8 +201,20 @@ fn cuts(
     if hi > last {
         out.push((lo.max(last), hi, n.checked_sub(1)?));
     }
-    Some(out)
+    (out.len() <= CELLS).then_some(out)
 }
+
+/// The cuts of a box on a face's knots, `u` and `v` ([`cuts`]): `None` where they are
+/// not enclosed or the box covers more than [`CELLS`] pieces of the face, so that one
+/// enclosure does a fixed amount of work between the cancellation's polls.
+fn cells(n: &Nurbs, u: Ivl, v: Ivl, continuity: usize, past_knots: bool) -> Option<CellCuts> {
+    let us = cuts(&n.u, n.p, n.nu, (u.lo, u.hi), continuity, past_knots)?;
+    let vs = cuts(&n.v, n.q, n.nv, (v.lo, v.hi), continuity, past_knots)?;
+    (us.len().checked_mul(vs.len())? <= CELLS).then_some((us, vs))
+}
+
+/// A box's parts on a face's knots in `u` and in `v` ([`cells`]).
+type CellCuts = (Vec<(f64, f64, usize)>, Vec<(f64, f64, usize)>);
 
 /// The partials `P[a][b]`, `a + b <= lk`, of `S − o` over `u x v`, enclosed: for NURBS data
 /// the hull over the pieces the box covers ([`nurbs_partials_over_piece_about`]: a rational
@@ -185,8 +222,8 @@ fn cuts(
 /// origin); for a definition its enclosure ([`definition_partials`]) less `o`, which is
 /// not taken about `o`. `None` where a part is not enclosed.
 fn partials_about(f: &Face<'_>, u: Ivl, v: Ivl, lk: usize, o: [f64; 3]) -> Option<Partials<Ivl>> {
-    let n = match f {
-        Face::Nurbs(n) => n,
+    let (n, past_knots) = match f {
+        Face::Nurbs { net, past_knots } => (net, *past_knots),
         Face::Definition { .. } => {
             let mut p = definition_partials(f, u, v, lk)?;
             let [x, y, z] = o.map(Ivl::from);
@@ -195,8 +232,7 @@ fn partials_about(f: &Face<'_>, u: Ivl, v: Ivl, lk: usize, o: [f64; 3]) -> Optio
         }
     };
     let continuity = if lk >= 2 { CONTINUITY } else { 0 };
-    let us = cuts(&n.u, n.p, n.nu, u.lo, u.hi, continuity)?;
-    let vs = cuts(&n.v, n.q, n.nv, v.lo, v.hi, continuity)?;
+    let (us, vs) = cells(n, u, v, continuity, past_knots)?;
     let mut out: Option<Partials<Ivl>> = None;
     for &(a0, a1, ku) in &us {
         for &(b0, b1, kv) in &vs {
@@ -227,13 +263,12 @@ fn definition_partials(f: &Face<'_>, u: Ivl, v: Ivl, lk: usize) -> Option<Partia
 /// of `S − o` ([`partials_about`]) with `o` the face's point at the box's middle, `o` added
 /// back to `P[0][0]`; for a definition its enclosure. `None` where a part is not enclosed.
 fn partials_over(f: &Face<'_>, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> {
-    let n = match f {
-        Face::Nurbs(n) => n,
+    let (n, past_knots) = match f {
+        Face::Nurbs { net, past_knots } => (net, *past_knots),
         Face::Definition { .. } => return definition_partials(f, u, v, lk),
     };
     let (um, vm) = (u.mid(), v.mid());
-    let us = cuts(&n.u, n.p, n.nu, u.lo, u.hi, 0)?;
-    let vs = cuts(&n.v, n.q, n.nv, v.lo, v.hi, 0)?;
+    let (us, vs) = cells(n, u, v, 0, past_knots)?;
     let (&(_, _, ku), &(_, _, kv)) = (
         us.iter().find(|c| c.0 <= um && um <= c.1)?,
         vs.iter().find(|c| c.0 <= vm && vm <= c.1)?,
@@ -313,13 +348,47 @@ pub(super) struct Rib<'a, 'f> {
     pub curves: [NurbsCurve; 3],
 }
 
-/// A piece end: its parameter, the Newton root there and the errors' magnitudes (3D x, y,
-/// z; fillet sigma, alpha; end u, v).
+/// A piece end: its parameter, the Newton root there, the box Krawczyk's test proves to
+/// hold the one root there, and the errors' magnitudes over that box (3D x, y, z; fillet
+/// sigma, alpha; end u, v).
 #[derive(Clone, Copy)]
 struct End {
     t: f64,
     y: [f64; 3],
+    root: [Ivl; 3],
     e: [f64; 7],
+}
+
+/// The root's path over a piece ([`Rib::path_over`]): for every `t` of the piece the one
+/// root in `c(t) + region` (the box Krawczyk's test ran on), `c` the quadratic about `tm`
+/// with the coefficients `coef` (value, slope, half the second derivative, per unknown);
+/// `hull` holds them all.
+struct Path {
+    tm: f64,
+    coef: [(f64, f64, f64); 3],
+    region: [Ivl; 3],
+    hull: [Ivl; 3],
+}
+
+impl Path {
+    /// Whether the box `root` at `t` lies inside `c(t) + region` for the exact `c(t)`: the
+    /// one root it holds is then the path's, the only one there.
+    fn holds(&self, t: f64, root: [Ivl; 3]) -> bool {
+        let d = Ivl::from(t) - Ivl::from(self.tm);
+        self.coef
+            .iter()
+            .zip(&self.region)
+            .zip(&root)
+            .all(|((&(m, be, ga), y), r)| {
+                let c = Ivl::from(m) + Ivl::from(be) * d + Ivl::from(ga) * (d * d);
+                // the box for the exact c(t) is at least [c.hi + y.lo, c.lo + y.hi]
+                let (lo, hi) = (
+                    (Ivl::from(c.hi) + Ivl::from(y.lo)).hi,
+                    (Ivl::from(c.lo) + Ivl::from(y.hi)).lo,
+                );
+                lo <= r.lo && r.hi <= hi
+            })
+    }
 }
 
 impl Rib<'_, '_> {
@@ -403,7 +472,9 @@ impl Rib<'_, '_> {
     /// Krawczyk's test runs on `z = y − c(t)`, `c` the quadratic through the three Newton
     /// roots: `F(t, c(t))` is enclosed by its mean-value form about the middle, which
     /// shrinks with the piece's width squared where a fixed centre's shrinks with it once.
-    fn path_over(&self, a: &End, b: &End, mid: [f64; 3]) -> Result<Option<[Ivl; 3]>> {
+    /// `None` also where an end's box ([`End::root`]) is not inside the path there: its
+    /// errors are then not proved to be the path's.
+    fn path_over(&self, a: &End, b: &End, mid: [f64; 3]) -> Result<Option<Path>> {
         let tm = 0.5 * (a.t + b.t);
         let h = 0.5 * (b.t - a.t);
         // c(t) = mid + beta (t − t_m) + gamma (t − t_m)², per unknown
@@ -456,8 +527,18 @@ impl Rib<'_, '_> {
         let Some(inv) = inverse_of_columns3(&j.map(|col| col.map(Ivl::mid))) else {
             return Ok(None);
         };
-        let z = krawczyk([0.0; 3], inv, &value, &|z| Ok(self.columns(t, shift(z))))?;
-        Ok(z.map(shift))
+        let Some((z, region)) =
+            krawczyk_region([0.0; 3], inv, &value, &|z| Ok(self.columns(t, shift(z))))?
+        else {
+            return Ok(None);
+        };
+        let path = Path {
+            tm,
+            coef,
+            region,
+            hull: shift(z),
+        };
+        Ok((path.holds(a.t, a.root) && path.holds(b.t, b.root)).then_some(path))
     }
 
     /// The errors' magnitudes at `t`, the root in the box `y`.
@@ -567,10 +648,10 @@ impl Rib<'_, '_> {
     /// The piece end at `t` from the Newton root `y` there: the root proved in a point box
     /// and the errors there, or `None`.
     fn end_at(&self, t: f64, y: [f64; 3]) -> Result<Option<End>> {
-        let Some(b) = self.root_at(t, y)? else {
+        let Some(root) = self.root_at(t, y)? else {
             return Ok(None);
         };
-        Ok(self.errors_at(t, b).map(|e| End { t, y, e }))
+        Ok(self.errors_at(t, root).map(|e| End { t, y, root, e }))
     }
 
     /// The bound of the piece between `a` and `b` (the Newton root `mid` at its middle):
@@ -580,9 +661,10 @@ impl Rib<'_, '_> {
     /// about its middle, whichever is less.
     fn piece(&self, a: &End, b: &End, mid: [f64; 3], tol: f64) -> Result<Option<f64>> {
         let t = Ivl::new(a.t, b.t);
-        let Some(y) = self.path_over(a, b, mid)? else {
+        let Some(path) = self.path_over(a, b, mid)? else {
             return Ok(None);
         };
+        let y = path.hull;
         let w = Ivl::from(b.t) - Ivl::from(a.t);
         let mut c = [f64::INFINITY; 7];
         if let Some(e2) = self.second_over(t, y) {
@@ -597,7 +679,11 @@ impl Rib<'_, '_> {
         if first.is_some_and(|d| d <= tol) {
             return Ok(first);
         }
-        let Some(m) = self.end_at(0.5 * (a.t + b.t), mid)? else {
+        // the middle's errors only where its box is inside the path there
+        let Some(m) = self
+            .end_at(0.5 * (a.t + b.t), mid)?
+            .filter(|m| path.holds(m.t, m.root))
+        else {
             return Ok(first);
         };
         let Some(e1) = self.first_over(t, y) else {
@@ -654,7 +740,8 @@ impl Rib<'_, '_> {
         let (Some(a), Some(b)) = (self.end_at(t0, y0)?, self.end_at(t1, y1)?) else {
             return Ok(Bound::Unenclosed);
         };
-        // a piece end off the rib by more than tol: no finer cut bounds the span
+        // a piece end not within tol of the rib by its enclosure: no finer cut bounds the
+        // span (a cut moves no end)
         let off = |e: &End| {
             let [x, y, z, ..] = e.e;
             norm(V3 {
@@ -1010,4 +1097,66 @@ impl Rib<'_, '_> {
 struct Frame {
     p: [f64; 3],
     n: [f64; 3],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::extent2d::Extent2d;
+    use crate::geom::vector2d::Vec2;
+    use crate::geom::vector3d::{Point3, Vec3};
+    use crate::surface::cone::Cone;
+    use crate::surface::plane::Plane;
+
+    /// A face is enclosed where the kernel evaluates its net (review on #18674): a
+    /// cylinder takes its point from its STEP form, so it is not enclosed; a plane clamps
+    /// its parameters to its domain, its net's knots, so a box inside them is enclosed and
+    /// one past them is not.
+    #[test]
+    fn a_face_is_enclosed_only_where_the_kernel_evaluates_its_net() {
+        let k = Kernel::default();
+        let cylinder = Surface::from(Cone::new_cylinder_bounded(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            2.0,
+            0.0,
+            360.0,
+            3.0,
+            false,
+            false,
+            false,
+        ));
+        assert!(Face::of(&k, &cylinder).unwrap().is_none());
+        let plane = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, 1.0),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        let face = Face::of(&k, &plane).unwrap().unwrap();
+        let inside = Ivl::new(0.25, 0.5);
+        assert!(partials_over(&face, inside, inside, 1).is_some());
+        assert!(partials_over(&face, Ivl::new(0.75, 1.0 + 1e-9), inside, 1).is_none());
+        assert!(partials_over(&face, inside, Ivl::new(-1e-9, 0.25), 1).is_none());
+    }
+
+    /// A piece end's errors count only where its box lies inside the path there, `c(t) +
+    /// Y` for the exact `c(t)`, `Y` the box the path's test ran on (review on #18674):
+    /// the path `c(t) = 1 + 2 (t − 1/2)` per unknown with `Y` within 1e-9 is about 0.5 at
+    /// `t = 1/4`.
+    #[test]
+    fn an_end_box_counts_only_inside_the_path() {
+        let path = Path {
+            tm: 0.5,
+            coef: [(1.0, 2.0, 0.0); 3],
+            region: [Ivl::new(-1e-9, 1e-9); 3],
+            hull: [Ivl::new(0.0, 3.0); 3],
+        };
+        let around = |c: f64, r: f64| [Ivl::new(c - r, c + r); 3];
+        assert!(path.holds(0.25, around(0.5, 1e-12)));
+        assert!(!path.holds(0.25, around(0.5 + 2e-9, 1e-12)));
+        assert!(!path.holds(0.25, around(0.5, 2e-9)));
+    }
 }
