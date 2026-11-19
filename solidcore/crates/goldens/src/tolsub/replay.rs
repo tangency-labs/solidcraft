@@ -327,7 +327,7 @@ fn replay_trim_cover(unit_id: &str) -> usize {
                 ));
             }
             let as_is = run(u.as_ref(), case);
-            if !committed.is_some_and(|g| diff(g, &as_is, u.abs_floors()).is_none()) {
+            if committed.is_none_or(|g| diff(g, &as_is, u.abs_floors()).is_some()) {
                 failures.push(format!(
                     "{name}: the row as is does not agree with the committed line"
                 ));
