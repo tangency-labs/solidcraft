@@ -78,6 +78,10 @@ pub enum Error {
     Unsupported(&'static str),
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,
+    /// A dome the kernel refuses, and why (a non-planar face, holes, a non-star outline, a
+    /// height not positive and finite, a spherical dome on a face that is not a circle, a
+    /// reversed dome not supported yet).
+    Dome(solidcore::topology::brep::dome::DomeRefusal),
     /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
     /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
     /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
@@ -773,6 +777,7 @@ impl std::fmt::Display for Error {
                 write!(f, "solidcore rejected the input (SM_ERR_INVALID_INPUT)")
             }
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
+            Error::Dome(refusal) => write!(f, "dome refused: {refusal:?}"),
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),

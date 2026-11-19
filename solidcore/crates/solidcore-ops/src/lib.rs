@@ -53,6 +53,7 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dome;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;
@@ -121,6 +122,8 @@ pub use step_assembly::{placed_bodies, PlacedBody};
 
 #[cfg(test)]
 mod ball_corner_tests;
+#[cfg(test)]
+mod dome_tests;
 #[cfg(test)]
 mod noisy_round_tests;
 #[cfg(test)]
