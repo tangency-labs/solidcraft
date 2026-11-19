@@ -176,7 +176,8 @@ fn label(painter: &egui::Painter, clip: Rect, c: Pos2, (name, d, at, depth): Tip
     let (w, pad) = (galley.size().x, 9.0);
     let right = Rect::from_min_max(pos2(at.x - r, at.y - r), pos2(at.x + lead + w + pad, at.y + r));
     let left = Rect::from_min_max(pos2(at.x - lead - w - pad, at.y - r), pos2(at.x + r, at.y + r));
-    let rightward = if at.x >= c.x { right.max.x <= clip.max.x || left.min.x < clip.min.x } else { left.min.x < clip.min.x && right.max.x <= clip.max.x };
+    let rightward =
+        if at.x >= c.x { right.max.x <= clip.max.x || left.min.x < clip.min.x } else { left.min.x < clip.min.x && right.max.x <= clip.max.x };
     let pill = if rightward { right } else { left };
     painter.rect_filled(pill, r, colour);
     if positive {
@@ -413,17 +414,21 @@ mod tests {
     fn the_label_stays_inside_the_clip() {
         assert_eq!((opposite("x"), opposite("-x"), opposite("z"), opposite("-y")), ("-x", "x", "-z", "y"));
         let ctx = crate::test_support::context();
-        crate::test_support::raw_frame(&ctx, RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), ..Default::default() }, |ui| {
-            let c = pos2(350.0, 200.0);
-            let clip = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
-            let x = tips(&FRONT, c).into_iter().find(|t| t.0 == "x").unwrap();
-            let pill = label(ui.painter(), clip, c, x, Tokens::get());
-            assert!(clip.contains_rect(pill), "{pill:?} in {clip:?}");
-            assert!(pill.max.x <= x.2.x + 12.0, "it grew leftward from the right edge");
-            let minus_x = tips(&FRONT, pos2(200.0, 200.0)).into_iter().find(|t| t.0 == "-x").unwrap();
-            let pill = label(ui.painter(), clip, pos2(200.0, 200.0), minus_x, Tokens::get());
-            assert!(pill.max.x <= minus_x.2.x + 12.0, "a left tip grows leftward");
-        });
+        crate::test_support::raw_frame(
+            &ctx,
+            RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), ..Default::default() },
+            |ui| {
+                let c = pos2(350.0, 200.0);
+                let clip = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
+                let x = tips(&FRONT, c).into_iter().find(|t| t.0 == "x").unwrap();
+                let pill = label(ui.painter(), clip, c, x, Tokens::get());
+                assert!(clip.contains_rect(pill), "{pill:?} in {clip:?}");
+                assert!(pill.max.x <= x.2.x + 12.0, "it grew leftward from the right edge");
+                let minus_x = tips(&FRONT, pos2(200.0, 200.0)).into_iter().find(|t| t.0 == "-x").unwrap();
+                let pill = label(ui.painter(), clip, pos2(200.0, 200.0), minus_x, Tokens::get());
+                assert!(pill.max.x <= minus_x.2.x + 12.0, "a left tip grows leftward");
+            },
+        );
     }
 
     #[test]

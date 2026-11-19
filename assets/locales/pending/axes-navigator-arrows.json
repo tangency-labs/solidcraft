@@ -1,7 +1,5 @@
 {
   "ar": {
-    "prefs.axes_navigator_arrows": "أسهم التدوير على المحاور",
-    "prefs.axes_navigator_arrows_note": "يظهر سهمان منحنيان أعلى يمين المحاور الموجّهة يديران الصورة ربع دورة في اتجاه عقارب الساعة أو عكسها، كما في المستكشف المخصص. إيقاف: تظهر المحاور وحدها.",
     "ui.view_compass.back": "خلف",
     "ui.view_compass.bottom": "أسفل",
     "ui.view_compass.front": "أمام",
@@ -11,8 +9,6 @@
     "ui.view_compass_reverse": "{view} · انقر لعرض {opposite}"
   },
   "de": {
-    "prefs.axes_navigator_arrows": "Rollpfeile an den Achsen",
-    "prefs.axes_navigator_arrows_note": "Zwei gebogene Pfeile oben rechts an den Achsen drehen das Bild um eine Vierteldrehung im oder gegen den Uhrzeigersinn, wie beim eigenen Navigator. Aus: Die Achsen stehen allein.",
     "ui.view_compass.back": "Hinten",
     "ui.view_compass.bottom": "Unten",
     "ui.view_compass.front": "Vorne",
@@ -22,8 +18,6 @@
     "ui.view_compass_reverse": "{view} · Klick für {opposite}"
   },
   "en": {
-    "prefs.axes_navigator_arrows": "Roll arrows on the axes",
-    "prefs.axes_navigator_arrows_note": "Two curved arrows at the top right of the signed axes roll the picture a quarter turn clockwise or counterclockwise, as on the custom navigator. Off: the axes stand alone.",
     "ui.view_compass.back": "Back",
     "ui.view_compass.bottom": "Bottom",
     "ui.view_compass.front": "Front",
@@ -33,8 +27,6 @@
     "ui.view_compass_reverse": "{view} · click for {opposite}"
   },
   "he": {
-    "prefs.axes_navigator_arrows": "חיצי גלגול על הצירים",
-    "prefs.axes_navigator_arrows_note": "שני חצים מעוגלים בפינה הימנית העליונה של הצירים מגלגלים את התמונה ברבע סיבוב עם כיוון השעון או נגדו, כמו בנווט המותאם. כבוי: הצירים מוצגים לבדם.",
     "ui.view_compass.back": "אחור",
     "ui.view_compass.bottom": "תחתון",
     "ui.view_compass.front": "חזית",
@@ -44,8 +36,6 @@
     "ui.view_compass_reverse": "{view} · לחצו למעבר אל {opposite}"
   },
   "ja": {
-    "prefs.axes_navigator_arrows": "軸のロール矢印",
-    "prefs.axes_navigator_arrows_note": "軸の右上にある2つの曲がった矢印で、画面を時計回りまたは反時計回りに4分の1回転させます（カスタムナビゲーターと同じ）。オフ：軸だけを表示します。",
     "ui.view_compass.back": "背面",
     "ui.view_compass.bottom": "下",
     "ui.view_compass.front": "正面",
@@ -55,8 +45,6 @@
     "ui.view_compass_reverse": "{view} · クリックで{opposite}"
   },
   "ko": {
-    "prefs.axes_navigator_arrows": "축의 롤 화살표",
-    "prefs.axes_navigator_arrows_note": "축 오른쪽 위의 곡선 화살표 2개로 화면을 시계 방향 또는 반시계 방향으로 4분의 1 회전시킵니다(사용자 지정 내비게이터와 같음). 끄면 축만 표시됩니다.",
     "ui.view_compass.back": "뒤",
     "ui.view_compass.bottom": "아래",
     "ui.view_compass.front": "앞",
@@ -66,8 +54,6 @@
     "ui.view_compass_reverse": "{view} · 클릭하면 {opposite}"
   },
   "vi": {
-    "prefs.axes_navigator_arrows": "Mũi tên xoay trên các trục",
-    "prefs.axes_navigator_arrows_note": "Hai mũi tên cong ở góc trên bên phải các trục xoay hình một phần tư vòng theo hoặc ngược chiều kim đồng hồ, như ở bộ điều hướng tùy chỉnh. Tắt: chỉ hiện các trục.",
     "ui.view_compass.back": "Sau",
     "ui.view_compass.bottom": "Dưới",
     "ui.view_compass.front": "Trước",
@@ -77,8 +63,6 @@
     "ui.view_compass_reverse": "{view} · bấm để xem {opposite}"
   },
   "zh": {
-    "prefs.axes_navigator_arrows": "坐标轴上的滚转箭头",
-    "prefs.axes_navigator_arrows_note": "坐标轴右上角的两个弯曲箭头将画面顺时针或逆时针转动四分之一圈，与自定义导航器相同。关闭：只显示坐标轴。",
     "ui.view_compass.back": "后",
     "ui.view_compass.bottom": "下",
     "ui.view_compass.front": "前",
