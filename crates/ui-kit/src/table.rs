@@ -72,6 +72,8 @@ pub struct Table<'a> {
     reveal: Option<egui::Rect>,
     /// How far the table is scrolled sideways: frozen columns move right by this much.
     scroll_x: f32,
+    /// How wide the table's visible part is.
+    view_width: f32,
 }
 
 /// Table grid with caller-supplied header actions through Table::headers.
@@ -94,6 +96,7 @@ pub fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &st
                 empty_shown: false,
                 reveal: None,
                 scroll_x: viewport.left().max(0.0),
+                view_width: viewport.width(),
             };
             ui.spacing_mut().item_spacing.y = 0.0;
             let result = add(ui, &mut table);
@@ -324,7 +327,16 @@ impl Table<'_> {
             super::text(ui, &self.empty, super::Text::Note(&self.id));
             self.empty_shown = true;
         }
-        let (rect, response) = ui.allocate_exact_size(vec2(self.width(), row_height() - t.space_4), egui::Sense::click());
+        let size = vec2(self.width(), row_height() - t.space_4);
+        let (rect, response) = if self.frozen_count() == 0 {
+            ui.allocate_exact_size(size, egui::Sense::click())
+        } else {
+            // With frozen columns the button stays in view as the table scrolls sideways.
+            let (full, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+            let shown =
+                egui::Rect::from_min_size(full.min + vec2(self.scroll_x, 0.0), vec2(full.width().min(self.view_width).max(0.0), full.height()));
+            (shown, ui.interact(shown, ui.make_persistent_id((&self.id, "add_prompt")), egui::Sense::click()))
+        };
         paint_icon_button(ui, rect, &response, solidcraft_ui_text::tr_label(label), false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr_label(label)));
         solidcraft_ui_registry::publish_handle(&format!("dialog:table:{}:add", self.id), rect.center());
