@@ -2956,7 +2956,8 @@ mod tests {
     /// opposite sides), a box with its vertical edges rounded (a top edge, and a top and a bottom
     /// edge together), a box with one vertical edge rounded and the rounded plate with its boss,
     /// the chain is the one the scanning walk gives, edge for edge. Where the number of edges is
-    /// known it is checked too (0: not checked).
+    /// known it is checked too (0: not checked). On a flat pyramid, where two edges run on from
+    /// one vertex, it is checked from every lateral edge and every pair of them.
     #[test]
     fn a_tangent_chain_keeps_its_edges_and_their_order() {
         let (prism, pick) = polygon_prism(240);
@@ -2988,6 +2989,46 @@ mod tests {
                 assert_eq!(chain.len(), expected, "{name}: {chain:?}");
             }
         }
+        // A very flat pyramid over 8 base corners in near-opposite pairs: at the apex every
+        // lateral edge runs on into two others (each within 2°), so the chain's order there
+        // depends on the order the walk takes them in. From every lateral edge and every ordered
+        // pair of them.
+        let pyramid = flat_star_pyramid();
+        let rec = Faces::of(&pyramid).unwrap();
+        let apex = (0..rec.rec.vertices.len() as u32).find(|&v| rec.point(v).is_some_and(|p| p.z > 0.1)).unwrap();
+        let lateral: Vec<usize> = (0..rec.rec.edges.len()).filter(|&e| rec.rec.edges[e].vertices.contains(&apex)).collect();
+        assert_eq!(lateral.len(), 8);
+        let none = vec![false; rec.rec.edges.len()];
+        let mut most_at_apex = 0;
+        let mut seed_sets: Vec<Vec<usize>> = lateral.iter().map(|&e| vec![e]).collect();
+        for &a in &lateral {
+            seed_sets.extend(lateral.iter().filter(|&&b| b != a).map(|&b| vec![a, b]));
+        }
+        for seeds in seed_sets {
+            let chain = chain_of(&rec, &seeds, &none).unwrap();
+            assert_eq!(chain, chain_by_scan(&rec, &seeds, &none), "pyramid from {seeds:?}: the chain changed");
+            let at_apex = chain.iter().skip(seeds.len()).take_while(|&&e| rec.rec.edges[e].vertices.contains(&apex)).count();
+            most_at_apex = most_at_apex.max(at_apex);
+        }
+        assert!(most_at_apex >= 2, "no seed ran on into two edges at the apex");
+    }
+
+    /// A very flat pyramid (0.42 high over a base of radius 30) whose 8 base corners come in
+    /// near-opposite pairs, so from the apex every lateral edge runs on into two others, each
+    /// within 2°.
+    fn flat_star_pyramid() -> Body {
+        let (r, h) = (30.0, 0.42);
+        let angles = [0.0f64, 0.6, 89.7, 90.4, 179.6, 180.4, 269.6, 270.3];
+        let apex = Vec3::new(0.0, 0.0, h);
+        let p: Vec<Vec3> = angles.iter().map(|a| Vec3::new(r * a.to_radians().cos(), r * a.to_radians().sin(), 0.0)).collect();
+        let mut planes = vec![crate::HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 }];
+        for i in 0..p.len() {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            let n = (a - apex).cross(b - apex).normalized().unwrap();
+            let n = if n.z < 0.0 { n * -1.0 } else { n };
+            planes.push(crate::HalfSpace { n, d: n.dot(apex) });
+        }
+        crate::convex_polyhedron(&planes).unwrap()
     }
 
     /// Smoothness is decided all along an edge. A bar 40 × 16 × 10 whose front face runs tangent
