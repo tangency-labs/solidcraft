@@ -252,7 +252,22 @@ macro_rules! replay_trim_cover_tests {
     )*};
 }
 
-replay_trim_cover_tests! {}
+replay_trim_cover_tests! {
+    blend_feature_executive_rows_move_only_through_the_trim_cover: "blend.feature_executive", 3;
+    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 32;
+    blend_fillet_removal_rows_move_only_through_the_trim_cover: "blend.fillet_removal", 20;
+    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 8;
+    heal_stitch_p1_rows_move_only_through_the_trim_cover: "heal.stitch_p1", 4;
+    heal_stitch_p2_rows_move_only_through_the_trim_cover: "heal.stitch_p2", 8;
+    topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;
+    topology_brep_cutting_rows_move_only_through_the_trim_cover: "topology.brep_cutting", 2;
+    topology_brep_local_operation_rows_move_only_through_the_trim_cover: "topology.brep_local_operation", 28;
+    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 20;
+    topology_brep_p2_rows_move_only_through_the_trim_cover: "topology.brep_p2", 11;
+    topology_brep_p9_rows_move_only_through_the_trim_cover: "topology.brep_p9", 4;
+    topology_edgeuse_p3_rows_move_only_through_the_trim_cover: "topology.edgeuse_p3", 16;
+    topology_face_p3_rows_move_only_through_the_trim_cover: "topology.face_p3", 18;
+}
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:
 /// the row hash, the encoded row and every read's tolerances.
