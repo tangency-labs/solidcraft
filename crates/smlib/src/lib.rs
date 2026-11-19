@@ -68,8 +68,9 @@ pub enum Error {
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
-    /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
-    CornerUnsupported,
+    /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet: solidcore's
+    /// reason and the vertex's point, where it notes them.
+    CornerUnsupported { why: Option<String>, at: Option<[f64; 3]> },
     /// A swept turn ([`Turn::Swept`]) solidcore does not build at the corner `at`: `room` where
     /// no radius builds it (a sharp concave side edge between the rounds, solidcore's `NoRoom`),
     /// else not supported there (`CornerUnsupported`: unequal or variable rounds, a corner of
@@ -158,7 +159,16 @@ impl std::fmt::Display for Error {
                 }
             }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
-            Error::CornerUnsupported => write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends"),
+            Error::CornerUnsupported { why, at } => {
+                write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if let Some(why) = why {
+                    write!(f, ": {why}")?;
+                }
+                Ok(())
+            }
             Error::TurnRefused { why, at, .. } => {
                 write!(f, "the swept corner is not built")?;
                 if let Some([x, y, z]) = at {
