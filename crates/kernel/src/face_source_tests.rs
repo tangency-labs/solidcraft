@@ -376,7 +376,10 @@ fn union_with_a_surface_crossing_a_certified_face_keeps_the_circle_it_meets_it_a
     assert_eq!((r.shell_count(), r.face_count(), r.edge_count(), r.vertex_count()), (2, 8, 16, 11));
     let top_faces = (0..r.face_count())
         .filter(|i| {
-            matches!(r.face_sources().and_then(|s| s.get(*i)).and_then(Option::as_ref), Some(FaceSource::Box { producer: Some(42), axis: 2, high: true, .. }))
+            matches!(
+                r.face_sources().and_then(|s| s.get(*i)).and_then(Option::as_ref),
+                Some(FaceSource::Box { producer: Some(42), axis: 2, high: true, .. })
+            )
         })
         .count();
     assert_eq!(top_faces, 2, "the block's top, split along the circle the cone crosses it in");
