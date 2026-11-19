@@ -370,7 +370,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             || session.active_sketch != host.session.active_sketch
             || session.pending_moves != host.session.pending_moves
         {
-            session.accept_computed(host.session);
+            session.accept_computed(host.session)?;
         } else {
             for message in host.session.log {
                 session.echo(message);
@@ -532,7 +532,9 @@ impl PluginHost for SolidCraftHost {
             || self.session.active_sketch != computed.active_sketch
             || self.session.pending_moves != computed.pending_moves
         {
-            self.session.accept_computed(computed);
+            self.session
+                .accept_computed(computed)
+                .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;
         } else {
             for message in computed.log {
                 self.session.echo(message);

@@ -5820,7 +5820,7 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     let saved = s.doc.clone();
     let mut computed = s.scratch();
     run(&mut computed, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.path.as_deref(), Some("existing.solidcraft"));
     assert!(s.is_dirty());
     assert_eq!(s.model.state().bodies.len(), 2);
@@ -5917,7 +5917,7 @@ fn adopting_a_computed_component_keeps_its_warm_world_geometry() {
     for b in &prepared.bodies {
         let _ = b.mesh();
     }
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
     s.invalidate_view(100);
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));

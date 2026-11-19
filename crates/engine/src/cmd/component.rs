@@ -831,7 +831,7 @@ fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     // The steps above are this command's one undo step.
     scratch.undo.clear();
     scratch.selection = copies.iter().map(|name| crate::Sel::Body { name: name.clone() }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(json!({"bodies": copies, "component": to}))
 }
 
