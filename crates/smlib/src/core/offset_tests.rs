@@ -16,7 +16,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, shell, status, thicken};
+use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, refused, shell, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
@@ -38,52 +38,28 @@ fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
     });
     let words = error.to_string();
     assert!(matches!(error, Error::Refused(_) | Error::Solidcore(_)) && !words.contains("upstream status"), "{words}");
-    assert!(!words.contains("stage_failed") || words.contains("; caused by "), "{words}");
+    assert!(words.contains("stage_failed") && words.contains("; caused by "), "{words}");
+    assert!(words.contains("the joined offset edge could not be split at the gap bridge joint"), "{words}");
     eprintln!("{words}");
 }
 
 #[test]
-fn offset_failures_keep_the_kernel_reason_and_class() {
-    use solidcore::EntityRef;
-    use solidcore::error::Failure;
-    use solidcore::error::offset::OffsetFailure;
-    use solidcore::topology::FaceId;
+fn typed_offset_refusals_keep_their_nested_kernel_cause() {
     use solidcore_ops::{Error as Ops, OffsetRefusal};
 
-    for why in [
-        OffsetFailure::Failed("the offset edge has no intersection"),
-        OffsetFailure::Missing("the face's surface"),
-        OffsetFailure::InvalidValue("the offset distance is zero"),
-        OffsetFailure::Inconsistent("the edge's mate is absent"),
-    ] {
-        let error = Failure::new("offset::offset_executive::crossing_loops", why).at(EntityRef::Face(FaceId::from_index(2))).into_error();
-        let expected = Error::Refused(Ops::OffsetRefused {
-            face: None,
-            why: OffsetRefusal::Phrase { class: why.kind(), defect: why.is_defect(), phrase: error.to_string() },
-        });
-        assert_eq!(status(error), expected);
-    }
+    let refusal = Ops::OffsetRefused { face: None, why: OffsetRefusal::ExactCurveUncut };
+    let diagnostic = "offset::trim: exact_curve_uncut; caused by intersect::clip: the exact trim does not cross the face boundary".to_owned();
+    let error = refused(refusal.clone(), diagnostic.clone());
+    let words = error.to_string();
+    assert!(words.contains(&refusal.to_string()), "{words}");
+    assert!(words.contains(&diagnostic), "{words}");
+    assert_eq!(error, Error::RefusedWithDiagnostic { refusal, diagnostic });
 }
 
-/// Shelling also calls intersections and the Boolean. Their named failures, including the
-/// cause beneath an offset stage, must reach the caller instead of only their numeric status.
 #[test]
-fn offset_substages_keep_their_failure_reason() {
-    use solidcore::error::intersect::IntersectFailure;
-    use solidcore::error::offset::OffsetFailure;
-    use solidcore::error::{Failure, Reason};
-
-    let cause = Failure::new("intersect::surface_surface", IntersectFailure::Failed("the two face trims do not cross")).into_error();
-    let offset = Failure::new("offset::offset_executive", OffsetFailure::StageFailed).caused_by(cause.clone()).into_error();
-    let boolean = Failure::new("boolean::merge::p3", Reason::Failed("a Boolean of the tree failed")).caused_by(cause.clone()).into_error();
-    for error in [cause, offset, boolean] {
-        let words = status(error).to_string();
-        assert!(words.contains("the two face trims do not cross"), "{words}");
-    }
-    let unported = Failure::new("boolean::merge::p3", Reason::Failed("a Boolean of the tree failed"))
-        .caused_by(solidcore::SolidError::unported("test::callee", "test.unit"))
-        .into_error();
-    assert_eq!(status(unported), Error::Unsupported);
+fn offset_folds_keep_the_largest_wall() {
+    let refusal = solidcore_ops::Error::WallFolds { largest: Some(1.0) };
+    assert_eq!(refused(refusal, "offset::face: a folded wall".into()), Error::WallFolds { largest: Some(1.0) });
 }
 
 /// How near a pick point must be.
@@ -726,7 +702,10 @@ fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
     let prism = super::sweep::extrude(&profile, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
     let (tip, z, origin, angle) = ([[10.0, 18.0, 5.0]], [0.0, 0.0, 1.0], [0.0, 0.0, -100.0], (-2f64).to_radians());
     let vanishes = solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::EdgeVanishes };
-    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Refused(vanishes)));
+    assert!(matches!(
+        draft(&prism, &tip, TOL, origin, z, z, angle).err(),
+        Some(Error::RefusedWithDiagnostic { refusal, .. }) if refusal == vanishes
+    ));
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).

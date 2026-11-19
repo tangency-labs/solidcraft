@@ -53,6 +53,33 @@ pub fn refusal(e: &SolidError) -> Option<Error> {
     typed(e, &|_| None)
 }
 
+/// An offset call's failure as application data: its typed refusal where there is
+/// one, alongside the complete kernel diagnostic. A caller still holding a kernel
+/// error can retain its operation, entities and cause chain without interpreting it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Diagnostic {
+    /// The typed offset refusal, with any face unnamed as in [`refusal`]. Phrase
+    /// refusals carry the complete diagnostic in their phrase as well.
+    pub refusal: Option<Error>,
+    /// The kernel's complete statement, including nested causes.
+    pub detail: String,
+}
+
+/// Extracts an offset call's diagnostic, retaining its refusal as typed data.
+#[must_use]
+pub fn diagnostic(e: &SolidError) -> Diagnostic {
+    let detail = e.to_string();
+    let mut refusal = refusal(e);
+    if let Some(Error::OffsetRefused {
+        why: OffsetRefusal::Phrase { phrase, .. },
+        ..
+    }) = &mut refusal
+    {
+        phrase.clone_from(&detail);
+    }
+    Diagnostic { refusal, detail }
+}
+
 /// The offset refusal a kernel error is, the one routing [`status`] and [`refusal`] share: a
 /// refusal the kernel gives a reason for by that reason ([`offset_refused`]), its entity through
 /// `index`; one without by its kind ([`by_kind`]); `None` for any other error.
