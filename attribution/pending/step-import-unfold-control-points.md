@@ -1,0 +1,1 @@
+| tests/step-regressions/net_steps_back_within_tolerance.step | SolidCraft contributors | written entity by entity from formulas (a tetrahedron whose spline face's control net steps back 0.5 um); import regression fixture | MIT OR Apache-2.0 |
