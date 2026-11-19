@@ -39,6 +39,27 @@ impl Counters {
         self.live_bind_groups = 0;
         self.live_pipelines = 0;
     }
+
+    /// Add another window's counters, live ones included.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn add(&mut self, other: &Self) {
+        self.textures_created += other.textures_created;
+        self.buffers_created += other.buffers_created;
+        self.bind_groups_created += other.bind_groups_created;
+        self.pipelines_created += other.pipelines_created;
+        self.blur_passes += other.blur_passes;
+        self.blur_runs += other.blur_runs;
+        self.blur_pixels += other.blur_pixels;
+        self.composition_passes += other.composition_passes;
+        self.present_passes += other.present_passes;
+        self.markers_emitted += other.markers_emitted;
+        self.markers_drawn += other.markers_drawn;
+        self.live_bytes += other.live_bytes;
+        self.live_textures += other.live_textures;
+        self.live_buffers += other.live_buffers;
+        self.live_bind_groups += other.live_bind_groups;
+        self.live_pipelines += other.live_pipelines;
+    }
 }
 
 pub fn validate_radius(radius: f32) -> Result<f32, &'static str> {

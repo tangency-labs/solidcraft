@@ -278,6 +278,19 @@ mod test_support {
         queue: &super::wgpu::Queue,
         output: &super::wgpu::Texture,
     ) -> usize {
+        paint_egui_output_in(egui::ViewportId::ROOT, ctx, out, renderer, device, queue, output)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn paint_egui_output_in(
+        viewport: egui::ViewportId,
+        ctx: &egui::Context,
+        out: &mut egui::FullOutput,
+        renderer: &std::sync::Arc<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
+        device: &super::wgpu::Device,
+        queue: &super::wgpu::Queue,
+        output: &super::wgpu::Texture,
+    ) -> usize {
         use super::*;
         let jobs = ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [output.width(), output.height()], pixels_per_point: out.pixels_per_point };
@@ -289,7 +302,7 @@ mod test_support {
             }
         }
         if let Some(effect) = &renderer.frame_compositor {
-            effect.begin_viewport(egui::ViewportId::ROOT.0.value());
+            effect.begin_viewport(viewport.0.value());
         }
         let extra = renderer.update_buffers(device, queue, &mut encoder, &jobs, &screen);
         let target = output.create_view(&Default::default());
@@ -1727,6 +1740,40 @@ mod tests {
         assert_eq!(f.app.blur.counters().live_bind_groups, 0);
         assert_eq!(f.app.blur.counters().live_pipelines, 0);
         assert_eq!(f.app.blur.counters().live_buffers, 0);
+    }
+
+    /// A native pop-out window blurs behind its own translucent panels (#19213).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_pop_out_window_blurs_its_own_panels() {
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
+        f.radius(18.0);
+        let popout = egui::ViewportId::from_hash_of("blur_popout_fixture");
+        let ctx = crate::fonts::test_context();
+        for _ in 0..4 {
+            let mut raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(f.size[0] as f32, f.size[1] as f32))),
+                time: Some(1.0),
+                focused: true,
+                viewport_id: popout,
+                ..Default::default()
+            };
+            raw.viewports.insert(popout, Default::default());
+            let app = &mut f.app;
+            let mut out = ctx.run_ui(raw, |ui| {
+                let _blur = app.blur.begin(ui.ctx());
+                ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(200, 40, 40));
+                let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, 120)).corner_radius(8).inner_margin(12);
+                crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                    ui.label("pop-out panel");
+                });
+            });
+            super::test_support::paint_egui_output_in(popout, &ctx, &mut out, &f.renderer, &f.device, &f.queue, &f.output);
+        }
+        let counters = f.app.blur.counters();
+        assert!(counters.markers_drawn > 0, "the pop-out panel drew its backdrop");
+        assert!(counters.blur_runs > 0);
+        assert_eq!(f.app.blur.capability_for(popout), crate::blur::Capability::Available);
     }
 
     /// A layer transform applied after the UI was emitted moves the markers with it: the blur

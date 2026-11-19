@@ -2,13 +2,30 @@ use super::*;
 use crate::blur_plan::{self, PxRect, Run};
 use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-thread_local! { static CURRENT: RefCell<Option<Arc<Shared>>> = const { RefCell::new(None) }; }
+thread_local! { static CURRENT: RefCell<Option<Current>> = const { RefCell::new(None) }; }
 thread_local! { static SURFACE_ALPHA: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) }; }
+/// Target memory all windows may hold together.
 const BUDGET: u64 = 256 * 1024 * 1024;
 const MAX_MARKERS: usize = 256;
+/// A window that has not begun a frame for this many `begin` calls (of any window) has closed:
+/// its resources are released.
+const STALE_AFTER: u64 = 600;
 type Params = [f32; 12];
+
+/// The window being laid out on this thread: the one `begin` was called for.
+#[derive(Clone)]
+struct Current {
+    shared: Arc<Shared>,
+    window: u64,
+}
+
+/// A window's key: egui's viewport id as a number, as the renderer reports it to `begin_viewport`.
+fn key(viewport: egui::ViewportId) -> u64 {
+    viewport.0.value()
+}
 
 fn capability(adapter: &wgpu::Adapter, device_type: wgpu::DeviceType, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
     if device_type == wgpu::DeviceType::Cpu {
@@ -103,11 +120,13 @@ impl State {
 
     fn retire(&mut self) {
         if let Some(shared) = self.active.take() {
-            if let Ok(mut inner) = shared.inner.lock() {
-                self.retired = inner.counts;
+            if let Ok(mut windows) = shared.windows.lock() {
+                self.retired = windows.total();
                 self.retired.clear_live();
-                self.failure = inner.failure.or(self.failure);
-                inner.gpu = None;
+                if let Some(root) = windows.map.get(&key(egui::ViewportId::ROOT)) {
+                    self.failure = root.failure.or(self.failure);
+                }
+                windows.map.clear();
             }
             if let Some(renderer) = self.host.as_ref().and_then(|h| h.renderer.upgrade()) {
                 renderer.write().frame_compositor = None;
@@ -143,40 +162,44 @@ impl State {
             self.tier_cap = cap;
         }
     }
+    /// What the main window last painted with blur, for the quality guard.
     pub fn painted_frame(&self) -> Option<PaintedFrame> {
-        self.active.as_ref()?.inner.lock().ok()?.painted
+        self.active.as_ref()?.windows.lock().ok()?.map.get(&key(egui::ViewportId::ROOT))?.painted
     }
     pub fn capability(&self) -> Capability {
-        self.base_capability()
+        self.capability_for(egui::ViewportId::ROOT)
     }
+    /// Whether `viewport`'s window can blur: the device, and that window's own failures.
     pub fn capability_for(&self, viewport: egui::ViewportId) -> Capability {
-        if viewport != egui::ViewportId::ROOT {
-            return Capability::Unavailable("native pop-out source integration unavailable");
+        let base = self.host_capability();
+        if base != Capability::Available {
+            return base;
         }
-        self.capability()
-    }
-    fn base_capability(&self) -> Capability {
-        let Some(host) = &self.host else { return Capability::Unavailable("no GPU host") };
-        if host.lost.is_lost() {
-            return Capability::Unavailable("device lost");
-        }
-        let available = host.capability();
-        if available != Capability::Available {
-            return available;
-        }
-        if let Some(reason) = self.failure {
+        if viewport == egui::ViewportId::ROOT
+            && let Some(reason) = self.failure
+        {
             return Capability::Unavailable(reason);
         }
         if let Some(shared) = &self.active {
-            return match shared.inner.lock() {
-                Ok(inner) => inner.failure.map_or(Capability::Available, Capability::Unavailable),
+            return match shared.windows.lock() {
+                Ok(windows) => windows.map.get(&key(viewport)).and_then(|inner| inner.failure).map_or(Capability::Available, Capability::Unavailable),
                 Err(_) => Capability::Unavailable("blur state unavailable"),
             };
         }
         Capability::Available
     }
+    /// The device and its formats: what no window can change.
+    fn host_capability(&self) -> Capability {
+        let Some(host) = &self.host else { return Capability::Unavailable("no GPU host") };
+        if host.lost.is_lost() {
+            return Capability::Unavailable("device lost");
+        }
+        host.capability()
+    }
+    /// Every window's counters together.
     pub fn counters(&self) -> Counters {
-        self.active.as_ref().and_then(|s| s.inner.lock().ok().map(|i| i.counts)).unwrap_or(self.retired)
+        let Some(shared) = &self.active else { return self.retired };
+        shared.windows.lock().map_or(self.retired, |windows| windows.total())
     }
     /// Blur the whole frame at every marker, as before regions existed: the reference a fixture
     /// compares the region-scoped blur with. Takes effect on the next frame.
@@ -192,41 +215,64 @@ impl State {
         self.surface_alpha = alpha;
     }
 
+    /// Start `ctx`'s window frame: surfaces laid out until the returned scope drops may ask for a
+    /// backdrop. Call it at the top of each window's UI; scopes nest, so a window shown inside
+    /// another's UI hands the thread back when it ends.
     pub fn begin(&mut self, ctx: &egui::Context) -> Scope {
         let previous = CURRENT.with(|c| c.replace(None));
         let alpha = SURFACE_ALPHA.with(|a| a.replace(self.surface_alpha));
-        if ctx.viewport_id() != egui::ViewportId::ROOT {
-            return Scope { previous, alpha };
-        }
+        let scope = Scope { previous, alpha };
         if self.radius == 0.0 {
             self.retire();
-            return Scope { previous, alpha };
+            return scope;
         }
+        let window = ctx.viewport_id();
         let size = ctx.content_rect().size() * ctx.pixels_per_point();
-        if size.is_finite() && size.x > 0.0 && size.y > 0.0 {
-            let size_key = [size.x.round() as u32, size.y.round() as u32];
-            if self.last_size != Some(size_key) {
-                self.retire();
-                self.failure = None;
-                self.last_size = Some(size_key);
-            }
-        }
-        if !self.available || self.base_capability() != Capability::Available || !size.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
+        let valid = size.is_finite() && size.x > 0.0 && size.y > 0.0;
+        let size_key = valid.then(|| [size.x.round() as u32, size.y.round() as u32]);
+        if window == egui::ViewportId::ROOT
+            && let Some(size_key) = size_key
+            && self.last_size != Some(size_key)
+        {
+            // The main window changed size: a latched failure may no longer apply.
             self.retire();
-            return Scope { previous, alpha };
+            self.failure = None;
+            self.last_size = Some(size_key);
         }
-        let Some(host) = &self.host else { return Scope { previous, alpha } };
+        if !self.available || self.host_capability() != Capability::Available || !valid {
+            if window == egui::ViewportId::ROOT {
+                self.retire();
+            }
+            return scope;
+        }
+        let Some(host) = &self.host else { return scope };
         let shared = self.active.get_or_insert_with(|| {
             Arc::new(Shared {
                 host: host.clone(),
                 radius: self.radius,
                 tier_cap: self.tier_cap,
-                painting_owner: std::sync::atomic::AtomicBool::new(true),
                 whole_frame: self.whole_frame,
-                inner: Mutex::new(Inner { counts: self.retired, ..Inner::default() }),
+                windows: Mutex::new(Windows { base: self.retired, painting: key(egui::ViewportId::ROOT), ..Windows::default() }),
             })
         });
-        if let Ok(mut inner) = shared.inner.lock() {
+        let id = key(window);
+        if let Ok(mut windows) = shared.windows.lock() {
+            windows.clock = windows.clock.wrapping_add(1);
+            let clock = windows.clock;
+            let stale: Vec<u64> =
+                windows.map.iter().filter(|(k, inner)| **k != id && clock.wrapping_sub(inner.last_used) > STALE_AFTER).map(|(k, _)| *k).collect();
+            for gone in stale {
+                windows.forget(gone);
+            }
+            let inner = windows.map.entry(id).or_default();
+            if inner.size != size_key {
+                // A resized window gets fresh targets and a fresh chance after a failure.
+                inner.size = size_key;
+                inner.failure = None;
+                inner.gpu = None;
+                inner.counts.clear_live();
+            }
+            inner.last_used = clock;
             inner.markers.clear();
             inner.planned.clear();
             inner.serial = inner.serial.wrapping_add(1);
@@ -240,8 +286,8 @@ impl State {
         if let Some(renderer) = host.renderer.upgrade() {
             renderer.write().frame_compositor = Some(shared.clone());
         }
-        CURRENT.with(|c| *c.borrow_mut() = Some(shared.clone()));
-        Scope { previous, alpha }
+        CURRENT.with(|c| *c.borrow_mut() = Some(Current { shared: shared.clone(), window: id }));
+        scope
     }
 }
 
@@ -302,7 +348,7 @@ impl Drop for State {
 
 /// Restores the previous context even on early UI returns. No heap allocation.
 pub struct Scope {
-    previous: Option<Arc<Shared>>,
+    previous: Option<Current>,
     alpha: Option<u8>,
 }
 impl Drop for Scope {
@@ -331,11 +377,42 @@ struct Shared {
     host: Host,
     radius: f32,
     tier_cap: usize,
-    inner: Mutex<Inner>,
-    painting_owner: std::sync::atomic::AtomicBool,
     /// Every marker blurs the whole frame (a fixture's reference), not just its padded region.
     whole_frame: bool,
+    windows: Mutex<Windows>,
 }
+
+/// Per-window state. Each window has its own composition target, pyramid and markers; the
+/// renderer says which one it is painting.
+#[derive(Default)]
+struct Windows {
+    map: HashMap<u64, Inner>,
+    /// The window the renderer is painting now (`begin_viewport`).
+    painting: u64,
+    /// One tick per `begin`, to find windows that stopped painting.
+    clock: u64,
+    /// Counters of windows already forgotten, and of earlier blur sessions.
+    base: Counters,
+}
+
+impl Windows {
+    fn total(&self) -> Counters {
+        let mut total = self.base;
+        for inner in self.map.values() {
+            total.add(&inner.counts);
+        }
+        total
+    }
+
+    /// Release a window's resources, keeping what it counted.
+    fn forget(&mut self, id: u64) {
+        if let Some(mut inner) = self.map.remove(&id) {
+            inner.counts.clear_live();
+            self.base.add(&inner.counts);
+        }
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     frame: u64,
@@ -345,12 +422,18 @@ struct Inner {
     painted: Option<PaintedFrame>,
     submitted_at: Option<std::time::Instant>,
     gpu: Option<Gpu>,
+    /// Bytes of the targets in `gpu`, for the shared budget.
+    gpu_bytes: u64,
     markers: Vec<Marker>,
     /// Per marker of this frame: the planner gave it a region, so its blur is ready when it draws.
     planned: Vec<bool>,
     counts: Counters,
     failure: Option<&'static str>,
     serial: u64,
+    /// The window's size in pixels when it last began a frame.
+    size: Option<[u32; 2]>,
+    /// The `Windows::clock` of its last `begin`.
+    last_used: u64,
 }
 #[derive(Clone, Copy)]
 struct Marker {
@@ -376,48 +459,52 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
     }
     CURRENT.with(|c| {
         let kept = c.borrow();
-        let Some(shared) = kept.as_ref() else { return ordinary };
-        if painter.ctx().viewport_id() != egui::ViewportId::ROOT {
+        let Some(current) = kept.as_ref() else { return ordinary };
+        // A window that did not begin its own frame cannot hold markers.
+        if key(painter.ctx().viewport_id()) != current.window {
             return ordinary;
         }
         let rect = frame.widget_rect(content);
         if !rect.is_finite() || !rect.is_positive() {
             return ordinary;
         }
-        let callback = if let Ok(mut inner) = shared.inner.lock() {
-            if inner.markers.len() >= MAX_MARKERS {
-                inner.failure = Some("blur panel limit exceeded");
-                inner.gpu = None;
-                inner.counts.clear_live();
-                return ordinary;
-            }
-            let index = inner.markers.len();
-            let callback = egui_wgpu::Callback::new_paint_callback(rect, PanelMarker { shared: shared.clone(), index });
-            inner.markers.push(Marker {
-                rect,
-                corners: frame.corner_radius,
-                snap: painter.ctx().tessellation_options(|o| o.round_rects_to_pixels),
-                callback_id: Arc::as_ptr(&callback.callback) as *const () as usize,
-            });
-            inner.counts.markers_emitted += 1;
-            callback
-        } else {
+        let Ok(mut windows) = current.shared.windows.lock() else { return ordinary };
+        let Some(inner) = windows.map.get_mut(&current.window) else { return ordinary };
+        if inner.failure.is_some() {
             return ordinary;
-        };
+        }
+        if inner.markers.len() >= MAX_MARKERS {
+            inner.failure = Some("blur panel limit exceeded");
+            inner.gpu = None;
+            inner.gpu_bytes = 0;
+            inner.counts.clear_live();
+            return ordinary;
+        }
+        let index = inner.markers.len();
+        let callback = egui_wgpu::Callback::new_paint_callback(rect, PanelMarker { shared: current.shared.clone(), window: current.window, index });
+        inner.markers.push(Marker {
+            rect,
+            corners: frame.corner_radius,
+            snap: painter.ctx().tessellation_options(|o| o.round_rects_to_pixels),
+            callback_id: Arc::as_ptr(&callback.callback) as *const () as usize,
+        });
+        inner.counts.markers_emitted += 1;
         Shape::Vec(vec![Shape::Callback(callback), ordinary])
     })
 }
 
 struct PanelMarker {
     shared: Arc<Shared>,
+    window: u64,
     index: usize,
 }
 impl CallbackTrait for PanelMarker {
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, _: &CallbackResources) {
-        let Ok(mut inner) = self.shared.inner.lock() else { return };
-        if !self.shared.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
+        let Ok(mut windows) = self.shared.windows.lock() else { return };
+        if windows.painting != self.window {
             return;
         }
+        let Some(inner) = windows.map.get_mut(&self.window) else { return };
         if inner.failure.is_some() || self.shared.host.lost.is_lost() {
             return;
         }
@@ -466,27 +553,55 @@ impl CallbackTrait for PanelMarker {
 }
 
 impl Shared {
-    /// Make the frame's resources fit `size` and `steps`, and one binding per marker. `false`
-    /// leaves the failure on `inner` for the capability report.
-    fn ensure(&self, inner: &mut Inner, size: [u32; 2], steps: usize, offset: f32) -> bool {
+    /// Make window `id`'s resources fit `size` and `steps`, and give it one binding per marker.
+    /// `false` leaves the failure on the window for the capability report. Targets of other
+    /// windows are released, least recently painted first, to stay inside the shared budget.
+    fn ensure(&self, windows: &mut Windows, id: u64, size: [u32; 2], steps: usize, offset: f32) -> bool {
         let device = &self.host.device;
-        let Some(bytes) = target_bytes(size, steps, device.limits().max_texture_dimension_2d) else {
-            inner.failure = Some("blur target is empty, exceeds device limits or memory budget");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return false;
+        let fail = |windows: &mut Windows, reason: &'static str| {
+            if let Some(inner) = windows.map.get_mut(&id) {
+                inner.failure = Some(reason);
+                inner.gpu = None;
+                inner.gpu_bytes = 0;
+                inner.counts.clear_live();
+            }
+            false
         };
-        if inner.gpu.as_ref().is_none_or(|g| g.size != size || g.steps != steps) {
+        let Some(bytes) = target_bytes(size, steps, device.limits().max_texture_dimension_2d) else {
+            return fail(windows, "blur target is empty, exceeds device limits or memory budget");
+        };
+        let current = windows.map.get(&id).and_then(|inner| inner.gpu.as_ref()).is_some_and(|g| g.size == size && g.steps == steps);
+        if !current {
+            loop {
+                let others: u64 = windows.map.iter().filter(|(k, _)| **k != id).map(|(_, inner)| inner.gpu_bytes).sum();
+                if others.saturating_add(bytes) <= BUDGET {
+                    break;
+                }
+                let victim = windows
+                    .map
+                    .iter()
+                    .filter(|(k, inner)| **k != id && inner.gpu.is_some())
+                    .min_by_key(|(_, inner)| inner.last_used)
+                    .map(|(k, _)| *k);
+                let Some(victim) = victim else { return fail(windows, "blur target is empty, exceeds device limits or memory budget") };
+                if let Some(inner) = windows.map.get_mut(&victim) {
+                    inner.gpu = None;
+                    inner.gpu_bytes = 0;
+                    inner.counts.clear_live();
+                }
+            }
+        }
+        let Some(inner) = windows.map.get_mut(&id) else { return false };
+        if !current {
             inner.gpu = None;
             inner.counts.clear_live();
             let (gpu, failure) = egui_wgpu::capture_errors(device, || Gpu::new(device, self.host.format, size, steps, offset, &mut inner.counts));
             if let Some(error) = failure {
                 log::warn!("blur resources refused: {error}");
-                inner.failure = Some("GPU refused blur resources");
-                inner.counts.clear_live();
-                return false;
+                return fail(windows, "GPU refused blur resources");
             }
             inner.gpu = Some(gpu);
+            inner.gpu_bytes = bytes;
             inner.counts.live_bytes += bytes;
         }
         let count = inner.markers.len();
@@ -497,10 +612,7 @@ impl Shared {
         let (_, failed) = egui_wgpu::capture_errors(device, || gpu.grow_markers(device, count, counts));
         if let Some(error) = failed {
             log::warn!("blur marker resources refused: {error}");
-            inner.failure = Some("GPU refused blur marker resources");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return false;
+            return fail(windows, "GPU refused blur marker resources");
         }
         true
     }
@@ -508,15 +620,21 @@ impl Shared {
 
 impl FrameCompositor for Shared {
     fn begin_viewport(&self, viewport: u64) {
-        self.painting_owner.store(viewport == egui::ViewportId::ROOT.0.value(), std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut windows) = self.windows.lock() {
+            windows.painting = viewport;
+        }
     }
     fn suspend(&self) {
-        if !self.host.lost.is_lost() && !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.gpu = None;
-            inner.counts.clear_live();
+        let lost = self.host.lost.is_lost();
+        if let Ok(mut windows) = self.windows.lock() {
+            let painting = windows.painting;
+            for (id, inner) in windows.map.iter_mut() {
+                if lost || *id == painting {
+                    inner.gpu = None;
+                    inner.gpu_bytes = 0;
+                    inner.counts.clear_live();
+                }
+            }
         }
     }
     fn render(
@@ -528,19 +646,21 @@ impl FrameCompositor for Shared {
         screen: &ScreenDescriptor,
         clear: [f32; 4],
     ) -> bool {
-        if self.host.lost.is_lost() || !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
+        if self.host.lost.is_lost() {
             return false;
         }
         let Some((steps, offset)) = schedule_capped(self.radius, self.tier_cap) else { return false };
-        let marker_ids = {
-            let Ok(inner) = self.inner.lock() else { return false };
+        let (id, marker_ids) = {
+            let Ok(windows) = self.windows.lock() else { return false };
+            let id = windows.painting;
+            let Some(inner) = windows.map.get(&id) else { return false };
             // A frame with no marker has nothing to blur: it takes the ordinary pass.
             if inner.failure.is_some() || inner.markers.is_empty() {
                 return false;
             }
             let mut ids: Vec<(usize, usize)> = inner.markers.iter().enumerate().map(|(index, marker)| (marker.callback_id, index)).collect();
             ids.sort_unstable();
-            ids
+            (id, ids)
         };
         // The runs are planned before encoding: which markers share one snapshot, and which
         // pixels each of them needs.
@@ -550,15 +670,16 @@ impl FrameCompositor for Shared {
             return false;
         }
         let (composition, pipeline, binding) = {
-            let Ok(mut inner) = self.inner.lock() else { return false };
-            if !self.ensure(&mut inner, screen.size_in_pixels, steps, offset) {
+            let Ok(mut windows) = self.windows.lock() else { return false };
+            if !self.ensure(&mut windows, id, screen.size_in_pixels, steps, offset) {
                 return false;
             }
+            let Some(inner) = windows.map.get_mut(&id) else { return false };
             let count = inner.markers.len();
             inner.planned.clear();
             inner.planned.resize(count, false);
             for member in runs.iter().flat_map(|run| &run.members) {
-                let index = jobs.get(member.job).and_then(callback_identity).and_then(|id| marker_index(&marker_ids, id));
+                let index = jobs.get(member.job).and_then(callback_identity).and_then(|identity| marker_index(&marker_ids, identity));
                 if let Some(planned) = index.and_then(|index| inner.planned.get_mut(index)) {
                     *planned = true;
                 }
@@ -592,11 +713,10 @@ impl FrameCompositor for Shared {
                 // The preceding segment is complete before sampling its color target. One
                 // snapshot of it serves every member of the run; later markers of the run
                 // draw from the same blur because nothing painted since touches their regions.
-                if let Ok(mut inner) = self.inner.lock() {
-                    let Inner { gpu, counts, .. } = &mut *inner;
-                    if let Some(gpu) = gpu {
-                        blur_run(encoder, gpu, run, counts);
-                    }
+                if let Ok(mut windows) = self.windows.lock()
+                    && let Some(Inner { gpu: Some(gpu), counts, .. }) = windows.map.get_mut(&id)
+                {
+                    blur_run(encoder, gpu, run, counts);
                 }
             }
             start = end;
@@ -607,7 +727,9 @@ impl FrameCompositor for Shared {
             present.set_bind_group(0, &binding, &[]);
             present.draw(0..3, 0..1);
         }
-        if let Ok(mut inner) = self.inner.lock() {
+        if let Ok(mut windows) = self.windows.lock()
+            && let Some(inner) = windows.map.get_mut(&id)
+        {
             inner.counts.composition_passes += segment_passes;
             inner.counts.present_passes += 1;
             inner.rendered = true;
@@ -615,28 +737,28 @@ impl FrameCompositor for Shared {
         true
     }
     fn submitted(&self) {
-        if !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
+        let lost = self.host.lost.is_lost();
+        let Ok(mut windows) = self.windows.lock() else { return };
+        let id = windows.painting;
+        let Some(inner) = windows.map.get_mut(&id) else { return };
+        if inner.rendered && inner.counts.markers_drawn > inner.drawn_before && !lost {
+            let now = std::time::Instant::now();
+            inner.painted = Some(PaintedFrame {
+                frame: inner.frame,
+                interval_ms: inner.submitted_at.map(|at| now.duration_since(at).as_secs_f64() * 1000.0),
+                continuous: inner.continuous,
+            });
+            inner.submitted_at = Some(now);
+            inner.rendered = false;
+        } else {
+            inner.painted = None;
+            inner.submitted_at = None;
         }
-        if let Ok(mut inner) = self.inner.lock() {
-            if inner.rendered && inner.counts.markers_drawn > inner.drawn_before && !self.host.lost.is_lost() {
-                let now = std::time::Instant::now();
-                inner.painted = Some(PaintedFrame {
-                    frame: inner.frame,
-                    interval_ms: inner.submitted_at.map(|at| now.duration_since(at).as_secs_f64() * 1000.0),
-                    continuous: inner.continuous,
-                });
-                inner.submitted_at = Some(now);
-                inner.rendered = false;
-            } else {
-                inner.painted = None;
-                inner.submitted_at = None;
-            }
-            if self.host.lost.is_lost() {
-                inner.gpu = None;
-                inner.counts.clear_live();
-                inner.failure = Some("device lost");
-            }
+        if lost {
+            inner.gpu = None;
+            inner.gpu_bytes = 0;
+            inner.counts.clear_live();
+            inner.failure = Some("device lost");
         }
     }
 }
@@ -881,21 +1003,7 @@ impl Gpu {
             let target = Target::new(device, *dims, wgpu::TextureFormat::Rgba16Float, counts);
             chain.push(Step { target, binding, down: false, level: level as u32, dims: *dims });
         }
-        Self {
-            size,
-            steps,
-            composition,
-            chain,
-            presentation,
-            markers: Vec::new(),
-            down,
-            up,
-            panel,
-            present,
-            layout,
-            sampler,
-            ready_serial: 0,
-        }
+        Self { size, steps, composition, chain, presentation, markers: Vec::new(), down, up, panel, present, layout, sampler, ready_serial: 0 }
     }
     fn grow_markers(&mut self, device: &wgpu::Device, count: usize, counts: &mut Counters) {
         let Some(last) = self.chain.last() else { return };
