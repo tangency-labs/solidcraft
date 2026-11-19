@@ -58,6 +58,21 @@ enum Step {
     Finish(usize),
 }
 
+/// A failed request's phase and attachment. Include the file as well as the HTTP path:
+/// /api/uploads has no file name, and a timed-out request otherwise gives no clue which
+/// attachment the app was sending (#17932).
+fn step_context(step: Step, files: &[payload::File], missing: &std::collections::VecDeque<usize>) -> String {
+    let file =
+        |i: usize| files.get(i).map_or("attachment", |file| file.name.as_str()).chars().filter(|c| !c.is_control()).take(100).collect::<String>();
+    match step {
+        Step::Draft => "create report draft".into(),
+        Step::Open(i) => format!("start upload of {}", file(i)),
+        Step::Resume(i) => format!("resume upload of {}", file(i)),
+        Step::Chunk(i) => format!("upload part {} of {}", missing.front().copied().unwrap_or(1), file(i)),
+        Step::Finish(i) => format!("complete upload of {}", file(i)),
+    }
+}
+
 pub struct Sending {
     pub report: payload::Outgoing,
     /// Its queue folder, when it came from the queue.
@@ -301,7 +316,12 @@ fn tick_send(app: &mut SolveApp) {
     let token = s.draft.as_ref().map(|d| d.upload_token.clone()).unwrap_or_default();
     let Some(call) = s.call.take() else {
         let r = request(&s, &token);
-        s.asked = format!("{} {}", r.method, r.url.strip_prefix(&api::server()).unwrap_or_default());
+        s.asked = format!(
+            "{} ({} {})",
+            step_context(s.step, &s.report.files, &s.missing),
+            r.method,
+            r.url.strip_prefix(&api::server()).unwrap_or_default(),
+        );
         s.call = Some(Call::start(&http, r));
         app.tickets.sending = Some(s);
         return;
@@ -440,5 +460,41 @@ fn request(s: &Sending, token: &str) -> HttpRequest {
             api::upload_part(token, &upload(i), n, part(s, i, n))
         }
         Step::Finish(i) => api::finish_upload(token, &upload(i)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each offline request reports the phase and the file it was working on. File names
+    /// may contain control characters: these must not introduce extra log lines.
+    #[test]
+    fn timeout_step_context_names_the_phase_and_attachment() {
+        let files = [
+            payload::File {
+                name: "log.txt".into(),
+                content_type: "text/plain".into(),
+                kind: "log".into(),
+                bytes: vec![1],
+                upload: None,
+                done: false,
+            },
+            payload::File {
+                name: "screenshot\n.png".into(),
+                content_type: "image/png".into(),
+                kind: "screenshot".into(),
+                bytes: vec![2],
+                upload: None,
+                done: false,
+            },
+        ];
+        let parts = std::collections::VecDeque::from([3]);
+        assert_eq!(step_context(Step::Draft, &files, &parts), "create report draft");
+        assert_eq!(step_context(Step::Open(0), &files, &parts), "start upload of log.txt");
+        assert_eq!(step_context(Step::Resume(1), &files, &parts), "resume upload of screenshot.png");
+        assert_eq!(step_context(Step::Chunk(1), &files, &parts), "upload part 3 of screenshot.png");
+        assert_eq!(step_context(Step::Finish(1), &files, &parts), "complete upload of screenshot.png");
+        assert_eq!(step_context(Step::Open(5), &files, &parts), "start upload of attachment");
     }
 }

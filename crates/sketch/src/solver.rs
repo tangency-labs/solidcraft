@@ -357,10 +357,20 @@ impl State<'_> {
                 let y = delta.cross(u) / (a * r);
                 return (x.hypot(y) - 1.0) * a.min(r);
             }
-            Some(CurveKind::Spline { pts, periodic, .. }) => {
+            Some(CurveKind::Spline { pts, periodic, degree, nurbs, .. }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return q.dist(p.first().copied().unwrap_or_default());
+                }
+                // A general weighted spline has no Seg2 form. Its display chords pull an
+                // on-curve point off the spline, including points used as Break/Trim boundaries.
+                if let Some(record) = nurbs.as_ref().and_then(|n| n.rational_record(&p, *degree)) {
+                    let Some(hit) = solidcore_ops::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else { return f64::INFINITY };
+                    let Some((_, tangent)) = solidcraft_geom::brep::eval::CurveEval::new(&record).ok().and_then(|c| c.derivs(hit.parameter)) else {
+                        return f64::INFINITY;
+                    };
+                    let delta = q - Vec2::new(hit.point[0], hit.point[1]);
+                    return delta.len().copysign(Vec2::new(tangent.x, tangent.y).cross(delta));
                 }
                 self.segs(c)
             }
@@ -2012,14 +2022,32 @@ pub fn solve_after_edit(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
 /// [`solve_after_edit`] with only the requested diagnostics. Continuation, branch checks and
 /// geometry restoration are identical at every analysis level.
 pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
-    let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
     let drawn: Vec<Vec2> = stored.map_or_else(|| sk.points.iter().map(|p| p.pos).collect(), <[Vec2]>::to_vec);
+    // A constraint added since `old` has no value there. Measure what it reads on the drawn
+    // geometry and use that as the value it was edited from: otherwise neither the value's
+    // continuation nor the storage-side checks see the edit, and a sketch can turn over (a
+    // circle tangent to two lines jumping from inside their angle to outside it, #18364).
+    let mut old = old.clone();
+    if sk.constraints.iter().any(|c| !old.contains_key(&c.id)) {
+        let mut at_drawn = sk.clone();
+        for (p, pos) in at_drawn.points.iter_mut().zip(&drawn) {
+            p.pos = *pos;
+        }
+        for c in &sk.constraints {
+            if !old.contains_key(&c.id)
+                && let Some(value) = measure_dimension(&at_drawn, &c.kind)
+            {
+                old.insert(c.id.clone(), value);
+            }
+        }
+    }
+    let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
     let before = stored.is_none().then(|| sk.clone());
     let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full());
     let report = if report.keeps_orientation() {
         report
     } else {
-        match before.and_then(|before| solve_in_steps(&before, old, analysis)) {
+        match before.and_then(|before| solve_in_steps(&before, &old, analysis)) {
             Some((stepped, stepped_report)) => {
                 *sk = stepped;
                 stepped_report

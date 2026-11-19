@@ -53,6 +53,10 @@ Updates: WR-588
   solve (the control-point rules of #13753 are for a B-spline open both ways), and an
   unsolved cell at the limits counts with the net's hull raised by `unsolved_cell_top`'s
   own `net_gap`, not the bound a second time.
+- **After the merge with #18809:** rule 1 for a procedural blend's cell is #18809's
+  certified skip, `round_up(hull + rounding + bound) <= best` on the same subpatch (no
+  `EFF_ZERO_SQRT` allowance); a blend without a finite margin is not set aside on its hull.
+  A ball patch keeps `hull <= best + EFF_ZERO_SQRT`.
 - **Tests:** `trim_cover_of_a_square_tells_cells_outside_the_face` and
   `search_passes_over_cells_outside_the_trim_and_keeps_the_peak` (`query/face/p3.rs`). The
   crowned face, trimmed to `[-10, 10]^2` in `[-20, 20]^2` and rising to 50 at the outer corner,

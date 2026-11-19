@@ -692,7 +692,8 @@ fn trimming_at_a_held_midpoint_on_an_unrelated_line_adds_no_hold_to_that_line() 
 /// centre point, which stays where the diagonals cross.
 #[test]
 fn breaking_a_center_rectangle_diagonal_at_its_centre_keeps_one_centre() {
-    for (diagonal, at) in [(0, [7.5, 4.25]), (1, [7.5, -0.25])] {
+    // A click directly on the centre must reuse the same point as a break at the surrounding intersections.
+    for (diagonal, at) in [(0, [7.5, 4.25]), (1, [7.5, -0.25]), (0, [3.0, 2.0]), (1, [3.0, 2.0])] {
         let mut s = new_sketch();
         run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
         let sk = sketch(&s);
@@ -721,6 +722,69 @@ fn breaking_a_center_rectangle_diagonal_at_its_centre_keeps_one_centre() {
         for piece in pieces {
             let (c0, c1) = ends(piece);
             assert!(c0.dist(centre).min(c1.dist(centre)) < 1e-6, "diagonal {cut}: {c0:?} {c1:?}, centre {centre:?}");
+        }
+    }
+}
+
+#[test]
+fn a_midpoint_boundary_stays_halfway_along_the_broken_line() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0,0], [10,0]], "ids": ["side"], "connect": false, "infer": false}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "side.start"}));
+    let mid = run(&mut s, "sketch.point", json!({"point": "mid:side"}))["point"].as_str().unwrap().to_owned();
+    let before = sketch(&s);
+    let out = run(&mut s, "sketch.break", json!({"curve": "side", "at": [7,0]}));
+    let pieces = ids(&out["curves"]);
+    assert_eq!(pieces.len(), 2);
+    let sk = sketch(&s);
+    let (start, left_end) = sk.curves[sk.curve_index(&pieces[0]).unwrap()].kind.ends().unwrap();
+    let (right_start, end) = sk.curves[sk.curve_index(&pieces[1]).unwrap()].kind.ends().unwrap();
+    assert_eq!(Some(left_end), sk.resolve_point(&mid));
+    assert_eq!(right_start, left_end);
+    assert_eq!(sk.points.len(), before.points.len());
+
+    run(&mut s, "sketch.drag", json!({"entity": sk.points[end].id, "from": [10,0], "to": [14,4]}));
+    let sk = sketch(&s);
+    let outer_end = sk.point(end).unwrap();
+    assert!(outer_end.dist(Vec2::new(14.0, 4.0)) < 1e-5);
+    assert!(sk.point(left_end).unwrap().dist((sk.point(start).unwrap() + outer_end) * 0.5) < 1e-6);
+}
+
+#[test]
+fn trim_and_break_use_the_same_constrained_point_and_crossing() {
+    for command in ["sketch.break", "sketch.trim"] {
+        for kind in ["line", "arc", "circle"] {
+            let mut s = new_sketch();
+            let (make, args, held, crossing, pick, cutter) = match kind {
+                "line" => ("sketch.line", json!({"points": [[0,0],[100,0]], "infer": false}), [40, 0], [70, 0], [51, 0], [[70, -5], [70, 5]]),
+                "arc" => {
+                    ("sketch.arc.three_point", json!({"start":[10,0],"through":[0,10],"end":[-10,0]}), [8, 6], [6, 8], [7, 7], [[-12, 8], [12, 8]])
+                }
+                // Across the circle's parameter seam.
+                _ => ("sketch.circle.center", json!({"center":[0,0],"radius":10}), [8, -6], [8, 6], [10, 0], [[0, 6], [12, 6]]),
+            };
+            let curve = ids(&run(&mut s, make, args)["curves"])[0].clone();
+            let point =
+                run(&mut s, "sketch.point", json!({"point": format!("on:{curve}:{},{}", held[0], held[1])}))["point"].as_str().unwrap().to_owned();
+            run(&mut s, "sketch.line", json!({"points":cutter,"infer":false,"connect":false}));
+            run(&mut s, "sketch.point", json!({"point":pick,"id":"free","connect":false}));
+            let before = sketch(&s);
+            let pos = |[x, y]: [i32; 2]| Vec2::new(f64::from(x), f64::from(y));
+            let preview = super::trim_piece(&before, &curve, pos(pick)).unwrap();
+            let ends = [preview.first().unwrap(), preview.last().unwrap()];
+            for want in [held, crossing] {
+                assert!(ends.iter().any(|p| p.dist(pos(want)) < 1e-6), "{kind}: {ends:?} missing {want:?}");
+            }
+            let out = run(&mut s, command, json!({"curve":curve, "at":pick}));
+            let sk = sketch(&s);
+            let held = sk.resolve_point(&point).unwrap();
+            let ends_at_held = sk.curves.iter().filter_map(|c| c.kind.ends()).filter(|(a, b)| *a == held || *b == held).count();
+            assert_eq!(ends_at_held, if command == "sketch.break" { 2 } else { 1 }, "{kind} {command}: {out}");
+            let mid = before.shape(before.curve_index(&curve).unwrap()).unwrap().project(pos(pick));
+            let on_a_piece = (0..sk.curves.len()).filter_map(|ci| sk.shape(ci)).any(|sh| sh.dist(mid) < 1e-6);
+            assert_eq!(on_a_piece, command == "sketch.break", "{kind} {command}: {out}");
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(sketch(&s), before);
         }
     }
 }
@@ -2500,7 +2564,7 @@ fn trim_and_break_free_form_curves_exactly() {
     run(&mut s, "sketch.line", json!({"points": [[15, -10], [15, 20]]}));
     let r = run(&mut s, "sketch.break", json!({"curve": sp, "at": [15, 5]}));
     let pieces = ids(&r["curves"]);
-    assert_eq!(pieces.len(), 4, "three Béziers, the middle one split: {r}");
+    assert_eq!(pieces.len(), 2, "one crossing splits the spline into two pieces: {r}");
     let sk = sketch(&s);
     // Every original sample lies on one of the pieces.
     let polys: Vec<Vec<Vec2>> = pieces.iter().map(|id| sk.polyline(sk.curve_index(id).unwrap())).collect();
@@ -3432,6 +3496,47 @@ fn offset_side_is_read_off_the_picked_curve() {
     let out = o["curves"][0].as_str().unwrap();
     let CurveKind::Line { a, .. } = sk.curves[sk.curve_index(out).unwrap()].kind else { panic!("{out} is no line") };
     assert!(sk.points[a].pos.y < 1e8, "below, toward `side`: {:?}", sk.points[a].pos);
+}
+
+/// A rounded outline whose first curve is a corner arc: a point in the middle of the outline is
+/// outside that small arc's circle, yet `side` still means "inside the outline" (#18606).
+#[test]
+fn offset_side_of_a_chain_starting_with_a_fillet_arc_means_the_outline_not_the_arc_circle() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [37, 3], "start": [37, 0], "end": [40, 3]}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 3], [40, 27]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [37, 27], "start": [40, 27], "end": [37, 30]}));
+    run(&mut s, "sketch.line", json!({"points": [[37, 30], [3, 30]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [3, 27], "start": [3, 30], "end": [0, 27]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 27], [0, 3]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [3, 3], "start": [0, 3], "end": [3, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[3, 0], [37, 0]]}));
+    let inward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [20, 15]}));
+    let sk = sketch(&s);
+    let made = ids(&inward["curves"]);
+    assert!(box_is(&sk, &made, [2.0, 2.0], [38.0, 28.0]), "inward: {:?}", bounds(&sk, &made));
+    let outward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [100, 100]}));
+    let sk = sketch(&s);
+    let made = ids(&outward["curves"]);
+    assert!(box_is(&sk, &made, [-2.0, -2.0], [42.0, 32.0]), "outward: {:?}", bounds(&sk, &made));
+}
+
+/// An open L of a line, a fillet arc and a line: a point on the inner side but beyond the arc's
+/// circle is still inside the corner, read off the pieces nearest it (#18606).
+#[test]
+fn offset_side_of_an_open_chain_is_read_off_the_nearest_piece() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [5, 5], "start": [0, 5], "end": [5, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 5]]}));
+    run(&mut s, "sketch.line", json!({"points": [[5, 0], [20, 0]]}));
+    let inward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [11, 11]}));
+    let sk = sketch(&s);
+    let made = ids(&inward["curves"]);
+    assert!(box_is(&sk, &made, [2.0, 2.0], [20.0, 20.0]), "inward: {:?}", bounds(&sk, &made));
+    let outward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [-3, -3]}));
+    let sk = sketch(&s);
+    let made = ids(&outward["curves"]);
+    assert!(box_is(&sk, &made, [-2.0, -2.0], [20.0, 20.0]), "outward: {:?}", bounds(&sk, &made));
 }
 
 #[test]
@@ -5962,6 +6067,50 @@ fn trim_cuts_a_piece_of_an_offset_copy_made_from_several_curves() {
     assert!((gap(&s) - 2.0).abs() < 1e-7, "{}", gap(&s));
     run(&mut s, "parameters.change", json!({"name": parameter, "expression": "3 mm"}));
     assert!((gap(&s) - 3.0).abs() < 1e-7, "{}", gap(&s));
+}
+
+#[test]
+fn trim_offset_circle_and_source_releases_association_and_cuts() {
+    let mut s = new_sketch();
+    let circle = run(&mut s, "sketch.circle.two_point", json!({"p0": [0, 0], "p1": [20, 0]}));
+    let c = ids(&circle["curves"])[0].clone();
+    let offset = run(&mut s, "sketch.offset", json!({"curves": [c], "distance": "2 mm"}));
+    let copy = ids(&offset["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-10, 5], [30, 5]], "connect": false, "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[-10, -5], [30, -5]], "connect": false, "infer": false}));
+    let r1 = s.execute("sketch.trim", &json!({"curve": c, "at": [10, 10]}));
+    assert!(r1.is_ok(), "trimming offset circle source succeeds: {r1:?}");
+    let r2 = s.execute("sketch.trim", &json!({"curve": copy, "at": [10, 12]}));
+    assert!(r2.is_ok(), "trimming offset circle copy succeeds: {r2:?}");
+}
+
+#[test]
+fn trim_topology_offset_copy_and_source_releases_association_and_cuts() {
+    // Trimming the copy releases the association and cuts the piece
+    let mut s = new_sketch();
+    let rect = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 10]}));
+    let rect_curves = ids(&rect["curves"]);
+    let offset = run(&mut s, "sketch.offset", json!({"curves": rect_curves, "distance": "2 mm"}));
+    let copy = ids(&offset["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [20, 0]], "connect": false, "infer": false}));
+    let r = s.execute("sketch.trim", &json!({"curve": copy, "at": [12, 5]}));
+    assert!(r.is_ok(), "trimming offset copy succeeds: {r:?}");
+    let r = r.unwrap();
+    assert_eq!(r["sketch"]["solved"], json!(true));
+    assert!(sketch(&s).offsets.is_empty(), "offset association was released");
+
+    // Trimming the source of a topology offset also cleanly releases and cuts
+    let mut s = new_sketch();
+    let rect = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 10]}));
+    let rect_curves = ids(&rect["curves"]);
+    let src = rect_curves[0].clone();
+    run(&mut s, "sketch.offset", json!({"curves": rect_curves, "distance": "2 mm"}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [20, 0]], "connect": false, "infer": false}));
+    let r = s.execute("sketch.trim", &json!({"curve": src, "at": [10, 5]}));
+    assert!(r.is_ok(), "trimming offset source succeeds: {r:?}");
+    let r = r.unwrap();
+    assert_eq!(r["sketch"]["solved"], json!(true));
+    assert!(sketch(&s).offsets.is_empty(), "offset association was released");
 }
 
 /// All pick orders retain driving distances through repeated trims, dragging, parameter edits and native reload.

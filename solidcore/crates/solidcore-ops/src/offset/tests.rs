@@ -85,6 +85,41 @@ fn a_cylinder_shells_open_at_its_top() {
     assert!(rel(volume(&c), PI * 25.0 * 10.0 - PI * 16.0 * 9.0) < 1e-9);
 }
 
+/// The Dutchman stress corpus's Shell family (S0003, S0012, S0061): a feature no wider than
+/// twice the wall holds no cavity. A cylinder r 1.5, h 4 with a
+/// pin r 0.15, 1.2 high on its top, and a 30 x 20 x 10 block with a 2 x 2 x 3 boss on its
+/// top, each shelled closed with a wall wider than half the feature (0.18; 1.2). The pin's
+/// side's offset collapses and the boss's walls meet across it, which refused the shell; the
+/// hollow is the body's without the feature, the feature left solid on it.
+///
+/// Closed forms: pi 1.5^2 4 + pi 0.15^2 1.2 - pi (1.5 - 0.18)^2 (4 - 0.36), and
+/// 6000 + 12 - (30 - 2.4)(20 - 2.4)(10 - 2.4).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_feature_narrower_than_twice_the_wall_stays_solid() {
+    all_fixes();
+    let base = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+    let pin = make_cylinder([0.0, 0.0, 4.0], 0.15, 1.2).unwrap();
+    let b = crate::boolean::boolean(base, pin, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -0.18).unwrap();
+    let want = PI * 2.25 * 4.0 + PI * 0.0225 * 1.2 - PI * 1.32_f64.powi(2) * 3.64;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+
+    let boss = make_box([14.0, 9.0, 10.0], [2.0, 2.0, 3.0]).unwrap();
+    let b = crate::boolean::boolean(block(), boss, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -1.2).unwrap();
+    let want = ABC + 12.0 - 27.6 * 17.6 * 7.6;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
 /// 20 at its floor 20 down), shelled open at its bottom, each wall moved in by t with sharp
 /// edges. The cavity is the slab shrunk by t (open at z = 0) less the pocket grown by t, each
@@ -357,6 +392,52 @@ fn a_spheres_cap_moves_out_over_a_step() {
     );
     let v = 4.0 * PI / 3.0 * 125_000.0 + 2.0 * PI / 3.0 * (157_464.0 - 125_000.0) * 0.6;
     moved_to(&b, &[[0.0, 0.0, 50.0]], 4.0, v, [4, 8, 6]);
+}
+
+/// A sphere r 50 with its top cut off at z = 30: the flat cap, a disc of r 40, meets the
+/// sphere at an angle along its rim, and the sphere's top is 20 above it.
+fn cut_ball() -> Body {
+    let ball = make_sphere([0.0; 3], 50.0).unwrap();
+    let above = make_box([-60.0, -60.0, 30.0], [120.0, 120.0, 40.0]).unwrap();
+    crate::boolean::boolean(ball, above, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The cut ball's cap moved out 10, to z = 40, still meets the sphere: the ball below
+/// z = 40, V = pi (R + h)² (2R - h) / 3 = pi 90² 60 / 3.
+#[test]
+fn a_cut_balls_cap_moves_out_within_the_sphere() {
+    all_fixes();
+    let b = cut_ball();
+    let o = order(&b);
+    offset_faces(&b, &o, &[through(&b, &o, [0.0, 0.0, 30.0])], 10.0).unwrap();
+    let expected = PI * 8100.0 * 60.0 / 3.0;
+    assert!(rel(volume(&b), expected) < 1e-9, "{}", volume(&b));
+}
+
+/// The cut ball's cap moved out 25, to z = 55, past the sphere's top at z = 50: the sphere
+/// beside it can't be extended to meet it, so the move is refused before anything changes,
+/// naming the cap and how far it could move, 20 (#18564). It was refused late, as a body
+/// that is not a manifold solid (or, hollowed, as a move that moved no face).
+#[test]
+fn a_cut_balls_cap_moved_past_the_sphere_is_refused_with_the_room() {
+    all_fixes();
+    let b = cut_ball();
+    let o = order(&b);
+    let cap = through(&b, &o, [0.0, 0.0, 30.0]);
+    let before = volume(&b);
+    match offset_faces(&b, &o, &[cap], 25.0) {
+        Err(Error::OffsetRefused {
+            face,
+            why: crate::OffsetRefusal::PastSide { largest },
+        }) => {
+            assert_eq!(face, Some(cap));
+            assert!((largest - 20.0).abs() < 1e-9, "{largest}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
 }
 
 /// The upper half of a frustum's side (r 50 at z = 0 to r 30 at z = 100, split at z = 50)

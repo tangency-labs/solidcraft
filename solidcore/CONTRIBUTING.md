@@ -55,7 +55,10 @@ case, replacing the code they supersede. This page is the short version;
 - **No compatibility flags.** A fix changes the default result, with a test that fails without
   it; no old path is kept behind a flag, and a saved design rebuilds with today's correct result.
   Say in the PR which results change and show the evidence. Retiring the `UpstreamFixes` flags
-  left from the port (turn on, delete the old path) is welcome work.
+  left from the port (turn on, delete the old path and the flag's file
+  `crates/solidcore/src/kernel/fixes/<flag>.md`) is welcome work. A held-back flag is also
+  deleted from `HELD_BACK` in SolidCraft's `crates/smlib/src/core.rs` and from
+  `crates/solidcore/tests/kernel_cases/held_back.json`.
 - **Don't extend the old paths.** Improve the construction that replaces them.
 - **Keep history linear.** Rebase your branch onto `main`; never merge `main` into it.
 

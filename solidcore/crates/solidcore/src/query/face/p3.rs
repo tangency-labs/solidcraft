@@ -115,6 +115,9 @@
 //!   and at the limits it counts with its own bound; a way along which its control
 //!   values are level is not halved. The fork set a cell aside on its solve's value,
 //!   which the surface takes but need not be its greatest.
+//!   Not the fork's (#18809): a procedural blend cell whose net hull, raised by its
+//!   extraction rounding and definition certificate, cannot enlarge the box is skipped
+//!   before solving on the definition, whether the surface is open or closed.
 //!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
 //!   either way has one, halved both ways only once it lies within one span each way.
 //!   Not the fork's (#16394): a cell that no box of the face's UV trim curves meets
@@ -134,6 +137,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::blend::fillet_section::interval::round_up;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{euclidian_step_off, CurveKind, StepOff};
 use crate::curve::curve::Curve;
@@ -145,6 +149,7 @@ use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::point_set::PointContainment;
 use crate::geom::pseudo_box::PseudoBox;
+use crate::geom::solution_array::OperandObject;
 use crate::geom::tol::{is_degenerate_vec3, scaled_zero2, xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector2d::Vec2;
 use crate::heal::face_props::{ClassifyLoopIo, ContainmentType, FaceProps, LoopObject, SS_NONE};
@@ -177,6 +182,7 @@ use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::p7::{approx_derivative_lengths, drop_vectors_at};
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface_point_solve::p1::SurfPtGlobalSolver;
 use crate::surface::volume::Volume;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2::BinormalEval;
@@ -789,21 +795,58 @@ fn cell_directed_max(
     cell: &Extent2d,
     dir: Vec3,
 ) -> Result<CellDirectedMax> {
-    let net = solve_on
-        .number_control_points(k, SurfParamType::U)
-        .saturating_mul(solve_on.number_control_points(k, SurfParamType::V));
+    // A blend's net is a seed, never its definition. Restrict only that seed to
+    // the cell: repeatedly reading a whole closed blend's net also repeatedly
+    // starts exact solves beside the trim instead of in the current cell (#18809).
+    let seed = if matches!(solve_on.kind(), SurfaceKind::ProceduralBlend(_)) {
+        cell_patch(k, solve_on, cell)?
+    } else {
+        None
+    };
+    let net = seed.as_ref().map_or_else(
+        || {
+            solve_on
+                .number_control_points(k, SurfParamType::U)
+                .saturating_mul(solve_on.number_control_points(k, SurfParamType::V))
+        },
+        |net| {
+            net.number_control_points(SurfParamType::U)
+                .saturating_mul(net.number_control_points(SurfParamType::V))
+        },
+    );
     k.work_counters
         .add_face_extreme_control_points(u64::try_from(net).unwrap_or(u64::MAX));
-    let solutions = ignored(global_point_solve_starts(
-        k,
-        solve_on,
-        cell,
-        SolverOperation::Signed3dDirectedMaximize,
-        dir,
-        EFF_ZERO_SQRT,
-        SolutionRequested::All,
-    ))?
-    .unwrap_or_default();
+    let starts = || {
+        if let Some(seed) = &seed {
+            let solutions = SurfPtGlobalSolver::new(
+                k,
+                solve_on,
+                cell,
+                SolverOperation::Signed3dDirectedMaximize,
+                dir,
+                EFF_ZERO_SQRT,
+                None,
+                SolutionRequested::All,
+            )?
+            .with_seed_net(seed)
+            .solve(
+                k,
+                Some(OperandObject::Surface(0, solve_on.stand_in_key_domain(k)?)),
+            )?;
+            Ok(solutions.as_slice().iter().map(|s| s.start).collect())
+        } else {
+            global_point_solve_starts(
+                k,
+                solve_on,
+                cell,
+                SolverOperation::Signed3dDirectedMaximize,
+                dir,
+                EFF_ZERO_SQRT,
+                SolutionRequested::All,
+            )
+        }
+    };
+    let solutions = ignored(starts())?.unwrap_or_default();
     let mut out = CellDirectedMax {
         top: -crate::math::BIG_DOUBLE,
         in_face: false,
@@ -1365,7 +1408,9 @@ fn unsolved_cell_top(
 /// solve's value at a point in the face only raises `best`; 3. on their least, less the
 /// subpatch's rounding, above `best` and the zone tolerance, with every solution
 /// classified outside; at the limits it counts with its own bound; and a way along which
-/// its control values are level is not halved. Other faces keep the fork's rules.
+/// its control values are level is not halved. A procedural blend's cell is also skipped
+/// before solving when its net hull, extraction rounding and certificate bound it below
+/// `best` (#18809). Retained blend cells and other faces keep the fork's rules.
 /// `cover` is the face's [`TrimCover`], `None` where rule 5 is not taken.
 ///
 /// A blend face (a procedural blend or ball patch, #16394) is divided at its net's knots
@@ -1473,6 +1518,15 @@ fn face_directed_max_with<'b>(
     // (#16394) how far the face's greatest may lie above `best` for the blend cells passed
     // over as monotone by their net (4.): `2 x` the net's slack once any was, else 0
     let mut net_monotone_raise = 0.0_f64;
+    let is_procedural_blend = matches!(surface.kind(), SurfaceKind::ProceduralBlend(_));
+    let blend_margin = match surface.kind() {
+        SurfaceKind::ProceduralBlend(pb) if pb.bound().is_finite() && pb.bound() >= 0.0 => {
+            sub_patch_rounding(pb.net())
+                .map(|rounding| round_up(rounding + pb.bound()))
+                .filter(|margin| margin.is_finite())
+        }
+        _ => None,
+    };
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
@@ -1488,11 +1542,18 @@ fn face_directed_max_with<'b>(
             None
         };
         let slack = net_slack.unwrap_or(0.0);
-        // 1., from the control points: nothing in the cell is higher than `best`.
-        if patch
-            .as_ref()
-            .is_some_and(|(_, hull)| *hull + slack <= best + EFF_ZERO_SQRT)
-        {
+        // 1., from the control points: nothing in the cell is higher than `best`. For a
+        // procedural blend and a unit-axis direction, S . dir <= hull(B) + extraction
+        // rounding + |S - B|, both sums rounded upward: the certificate and the covering
+        // subpatch prove this even for a closed blend, so no solve or classification is
+        // needed when the entire cell cannot enlarge the box (#18809); without a finite
+        // margin a blend's cell is not set aside on its hull.
+        let below = patch.as_ref().is_some_and(|(_, hull)| match blend_margin {
+            Some(margin) => round_up(hull + margin) <= best,
+            None if is_procedural_blend => false,
+            None => *hull + slack <= best + EFF_ZERO_SQRT,
+        });
+        if below {
             continue;
         }
         // 5. (#16394) no trim curve reaches the cell and its middle is outside the face:
@@ -4138,6 +4199,46 @@ mod tests {
         let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let top = unsolved_cell_top(&k, &lb, f, &blend, &cell, Some(0.5), Vec3::Z).unwrap();
         assert!(top >= 0.5 + rounding + bound, "top {top}");
+
+        // The same enclosure decides whether a cell can skip its solve. Its hull
+        // alone is below all three starting values, but the certificate and the
+        // extraction rounding keep the first two cells eligible for an exact solve.
+        for (best, expected_calls) in [
+            (0.5 + bound / 2.0, 1),
+            (0.5 + bound + rounding / 2.0, 1),
+            (0.5 + 2.0 * bound, 0),
+        ] {
+            let mut lb: LazyBrep<'_> = (&b).into();
+            let mut calls = 0;
+            let got = face_directed_max_with(
+                &k,
+                &mut lb,
+                f,
+                &blend,
+                &cell,
+                0.0,
+                Vec3::Z,
+                best,
+                SearchLimits {
+                    max_depth: 0,
+                    max_cells: 0,
+                },
+                &mut |_, _, _, _| {
+                    calls += 1;
+                    Ok(CellDirectedMax {
+                        top: best,
+                        in_face: true,
+                        found: true,
+                        face_top: best,
+                        outside: false,
+                    })
+                },
+                &mut |_, _| Ok(false),
+            )
+            .unwrap();
+            assert_eq!(got, best);
+            assert_eq!(calls, expected_calls, "starting bound {best}");
+        }
     }
 
     /// The surface's global maximum lies inside the trim (no peak outside): the face's
