@@ -65,7 +65,7 @@ pub enum Error {
     /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
     WallFolds { largest: Option<f64> },
-    /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
+    /// SMLib cannot build this operation exactly.
     Unsupported,
     /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
     CornerUnsupported,
