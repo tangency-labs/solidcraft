@@ -207,6 +207,67 @@ fn double_click_edits_a_dimensions_or_a_notes_text_in_place() {
     assert!(!crate::dim_view::editing() && crate::drawing_workspace::inspector_visible(&h.app));
 }
 
+/// The one thing selected shows its options in the right panel, where a tool shows its own, and
+/// one Esc clears the selection and the panel with it, as in a sketch. A dimension's options apply:
+/// its offset changes in one undo step.
+#[test]
+fn the_selected_object_shows_its_options_and_a_dimensions_apply() {
+    let (mut h, _) = plate_sheet();
+    let encode = solidcraft_engine::doc::ids::encode;
+    let dimension = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let screen = |x: f64, y: f64| {
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+    };
+    let read = |h: &mut Harness| h.app.run("drawing.dimension.inspect", json!({"dimension": encode(dimension)})).unwrap();
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read(&mut h)["layout"]["text_boxes"][0].clone()).unwrap();
+    let (x, y) = corners.iter().fold((0.0, 0.0), |sum, p| (sum.0 + p[0] / 4.0, sum.1 + p[1] / 4.0));
+    assert!(!crate::drawing_workspace::inspector_visible(&h.app));
+
+    h.step(&json!({"click": screen(x, y)})).unwrap();
+    h.frames(4);
+    assert!(crate::drawing_workspace::inspector_visible(&h.app), "the selected dimension's options show");
+    assert_eq!(crate::drawing_workspace::inspector_title(&h.app), "Dimension");
+    let offset = read(&mut h)["record"]["offset_mm"].as_f64().unwrap();
+    let field = h.widget(&format!("{offset} mm")).expect("the Offset field shows the dimension's offset");
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click": field})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": format!("{}", offset * 2.0)})).unwrap();
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    h.frames(4);
+    assert_eq!(read(&mut h)["record"]["offset_mm"].as_f64(), Some(offset * 2.0), "Apply moves the dimension line");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+    assert!(crate::drawing_workspace::inspector_visible(&h.app), "Apply keeps the panel");
+
+    // One Esc, as in a sketch: the selection goes, and its options with it.
+    h.step(&json!({"click": screen(300.0, 250.0)})).unwrap();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(4);
+    assert!(h.app.session.selection.is_empty());
+    assert!(!crate::drawing_workspace::inspector_visible(&h.app));
+
+    // A view's options likewise; two things selected have no one panel.
+    h.step(&json!({"click": screen(140.0, 180.0)})).unwrap();
+    h.frames(4);
+    assert_eq!(crate::drawing_workspace::inspector_title(&h.app), "Edit View");
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read(&mut h)["layout"]["text_boxes"][0].clone()).unwrap();
+    let (x, y) = corners.iter().fold((0.0, 0.0), |sum, p| (sum.0 + p[0] / 4.0, sum.1 + p[1] / 4.0));
+    h.step(&json!({"click": screen(x, y), "shift": true})).unwrap();
+    h.frames(4);
+    assert_eq!(h.app.session.selection.len(), 2);
+    assert!(!crate::drawing_workspace::inspector_visible(&h.app));
+
+    // A tool in hand keeps its own panel whatever is selected.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.note"));
+    h.frames(2);
+    assert_eq!(crate::drawing_workspace::inspector_title(&h.app), "Note");
+    assert!(crate::drawing_workspace::placing_note(&h.app));
+}
+
 #[test]
 fn dimension_tool_places_a_view_edge_length() {
     let (mut h, front) = plate_sheet();

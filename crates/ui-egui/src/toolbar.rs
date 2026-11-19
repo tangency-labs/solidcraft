@@ -2682,7 +2682,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             // As in a sketch: the first Esc drops the Dimension tool's picks, the next leaves it.
             if cancel_unfinished(app)
                 || crate::drawing_workspace::dimension::clear_picks(app)
-                || crate::drawing_workspace::close_panel(app)
+                || crate::drawing_workspace::escape_panel(app)
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
