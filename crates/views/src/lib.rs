@@ -11,7 +11,7 @@ mod window_options;
 
 pub use tiles::{Axis, EMPTY, Edge, MAX_TILES, Placement, Preset, Rect, Splitter, Tiles};
 pub use view_set::{
-    CameraLinkMode, DesignView, MAX_NAME, MAX_POPOUTS, MAX_VIEWS, MoveError, Moved, PopOut, ViewKind, ViewSet, WindowArrangement, WindowId,
-    WindowLevel, WindowPlacement, WindowTarget, window_rect_for,
+    CameraLinkMode, DesignView, MAX_NAME, MAX_POPOUTS, MAX_VIEWS, MoveError, Moved, PopOut, SketchSession, ViewKind, ViewSet, WindowArrangement,
+    WindowId, WindowLevel, WindowPlacement, WindowTarget, window_rect_for,
 };
 pub use window_options::{CardHeaders, InterfaceSize, TopBar, WindowOptions};

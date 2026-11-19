@@ -1101,7 +1101,8 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -1452,7 +1453,8 @@ fn resize_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
