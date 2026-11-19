@@ -231,6 +231,9 @@ mod implementation {
     pub fn panel_fill(fill: Color32) -> Color32 {
         fill
     }
+    pub fn wants_backdrop(_: Color32, _: f32, _: bool) -> bool {
+        false
+    }
     pub fn decorate(_: &Painter, _: Frame, _: Rect, shape: Shape) -> Shape {
         shape
     }

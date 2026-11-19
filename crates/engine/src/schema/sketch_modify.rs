@@ -1484,8 +1484,7 @@ pub struct OffsetSide {
     pub distance: f64,
     /// The curves it made.
     pub curves: Vec<String>,
-    /// The parameter that drives it; `null` for a trimmed offset, which is not linked to its
-    /// source and has no distance to drive.
+    /// The parameter that drives it; `null` when this side has no distance of its own.
     pub param: Option<String>,
     /// Which instance it belongs to, counting from 1.
     pub instance: usize,
@@ -1505,8 +1504,8 @@ pub struct OffsetResult {
     pub sketch: Value,
     /// Each side of each instance.
     pub sides: Vec<OffsetSide>,
-    /// The parameter that drives the primary distance; `null` when only trimmed offsets were
-    /// made.
+    /// The parameter that drives the primary distance; `null` when the offset made no
+    /// distance of its own.
     pub param: Option<String>,
     /// How many instances were made.
     pub instances: usize,
@@ -1517,10 +1516,6 @@ pub struct OffsetResult {
     /// or several instances each side of `sides` has its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub association: Option<String>,
-    /// Set when a distance that names a parameter drives nothing, because the offset was trimmed
-    /// and so is not linked to its source (#12294).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warning: Option<String>,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,
