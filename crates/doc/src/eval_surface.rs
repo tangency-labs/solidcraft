@@ -582,6 +582,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     }
 }
 
+/// How many times a surface extrude to a curved or slanted face runs its walls out further, each
+/// time [`SHEET_REACH_GROWTH`] times as far, looking for where they meet the face's surface.
+const SHEET_REACH_TRIES: usize = 4;
+const SHEET_REACH_GROWTH: f64 = 8.0;
+
 /// A surface extrude that ends at the face, vertex or point at `to` (To Object), starting `start`
 /// along the sketch normal. A point, a vertex or a flat face square to the extrusion sets the
 /// length, moved past it by the To offset. Any other face (curved, or flat at a slant): the walls
@@ -630,26 +635,40 @@ fn sheet_to_object(
     }
     // The picked point lies on the face, so its level says which way the face is.
     let toward = if level_along(plane, to) >= start { 1.0 } else { -1.0 };
-    // Past the whole target body, so the walls cross the face wherever they meet it.
-    let reach = through_all_distance(&tst, plane, start, std::slice::from_ref(&target.name))?;
-    let far = start + toward * reach;
-    let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
     // Each wall's start: a point on each chain at the start level picks the pieces to keep.
-    let keep: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| plane.to_world(s.start()) + n * start).collect();
+    let start_plane = plane.offset(start);
+    let keep: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| start_plane.to_world(s.start())).collect();
     let tool = kernel::SplitTool::Face { body: &target.body, face: fi };
-    let kept = kernel::trim_keep(&long, &tool, kernel::TrimKeep::Regions(&keep))
-        .map_err(|e| DocError::Invalid(format!("the surface extrude never meets the To face's surface ({e})")))?;
-    // A wall that never met the face still runs out to `far`, and `reach` runs at least 1 past
-    // the target body. The kept walls' exact box in the sketch's own frame (its z: the level
-    // along the normal) says how far they reach.
-    let frame = |a: Vec3| [a.x, a.y, a.z, -a.dot(plane.origin)];
-    let in_sketch = kernel::transform_matrix(&kept, [frame(plane.x), frame(plane.y), frame(n), [0.0, 0.0, 0.0, 1.0]])?;
-    let bounds = in_sketch.exact_bounds()?;
-    let furthest = if toward > 0.0 { bounds.max.z } else { -bounds.min.z };
-    if furthest > toward * far - 0.5 {
-        return Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()));
+    // First past the whole target body. The face's surface runs on past the body, though (a
+    // slanted plane), so a wall beside the body can meet it further out: while a wall still
+    // runs to the far end, or none crosses the surface, the walls run out further.
+    let mut reach = through_all_distance(&tst, plane, start, std::slice::from_ref(&target.name))?;
+    for tries_left in (0..SHEET_REACH_TRIES).rev() {
+        let far = start + toward * reach;
+        extrude_within_reach([start, far])?;
+        let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
+        let last = tries_left == 0 || extrude_within_reach([start, start + toward * reach * SHEET_REACH_GROWTH]).is_err();
+        let kept = match kernel::trim_keep(&long, &tool, kernel::TrimKeep::Regions(&keep)) {
+            Ok(kept) => kept,
+            Err(_) if !last => {
+                reach *= SHEET_REACH_GROWTH;
+                continue;
+            }
+            Err(e) => return Err(DocError::Invalid(format!("the surface extrude never meets the To face's surface ({e})"))),
+        };
+        // A wall that never met the surface still runs out to `far`; `reach` runs at least 1 past
+        // the target body, so a kept wall ending within half of that met it.
+        let [low, high] = kernel::levels_along(&kept, plane)?;
+        let furthest = if toward > 0.0 { high } else { -low };
+        if furthest <= toward * far - 0.5 {
+            return Ok(kept);
+        }
+        if last {
+            break;
+        }
+        reach *= SHEET_REACH_GROWTH;
     }
-    Ok(kept)
+    Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()))
 }
 
 /// A surface builder's body, added to the model with what its faces came from.

@@ -939,6 +939,31 @@ mod tests {
         let bb = bounds(&s, "ToRod");
         assert!(bb.min.z.abs() < 1e-6 && (bb.max.z - 16.0).abs() < 1e-4, "{bb:?}");
 
+        // From a sketch 5 above the origin: the same wall, 5 shorter. Area: 6 * 15 - (3 * 4 + 25 * asin(3/5)).
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Raised"}));
+        run(&mut s, "sketch.create", json!({"plane": "Raised", "name": "Up"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, -3], [0, 3]], "ids": ["raised"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Up", "curves": ["raised"], "to": [0, 0, 15], "body_name": "FromRaised"}));
+        let want = 90.0 - (12.0 + 25.0 * (0.6f64).asin());
+        assert!((area(&s, "FromRaised") - want).abs() < want * 1e-4, "{} vs {want}", area(&s, "FromRaised"));
+        let bb = bounds(&s, "FromRaised");
+        assert!((bb.min.z - 5.0).abs() < 1e-6 && (bb.max.z - 16.0).abs() < 1e-4, "{bb:?}");
+
+        // A slanted face meets a wall far beside its body: a cube of side 2 at (0, 40, 10) turned
+        // 45 degrees about Y has a face on the plane z = x + 10 - sqrt 2, which the wall from
+        // x = 50 to 56 meets at z = 58.6 to 64.6, well past the cube.
+        // Area: the integral of x + 10 - sqrt 2 from 50 to 56 = 318 + 60 - 6 sqrt 2.
+        run(&mut s, "solid.box", json!({"center": [0, 40, 10], "length": 2, "width": 2, "height": 2, "body_name": "Tilted"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Tilted"], "axis": [0, 1, 0], "angle": "45 deg", "origin": [0, 40, 10]}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Far"}));
+        run(&mut s, "sketch.line", json!({"points": [[50, 0], [56, 0]], "ids": ["far"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        run(&mut s, "surface.extrude", json!({"sketch": "Far", "curves": ["far"], "to": [h, 40, 10.0 - h], "body_name": "ToSlant"}));
+        let want = 378.0 - 6.0 * std::f64::consts::SQRT_2;
+        assert!((area(&s, "ToSlant") - want).abs() < want * 1e-6, "{} vs {want}", area(&s, "ToSlant"));
+
         // The design keeps it: a cold rebuild gives the same walls.
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
         assert!((area(&cold, "ToRod") - area(&s, "ToRod")).abs() < 1e-9);

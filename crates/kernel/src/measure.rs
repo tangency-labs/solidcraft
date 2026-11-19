@@ -107,6 +107,23 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
     Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
 }
 
+/// How far `b` reaches along `plane`'s normal, measured from the plane: the least and greatest
+/// level of its points, `[low, high]`. The body is moved rigidly into the plane's own frame (the
+/// plane's x, y and normal become X, Y and Z) and its exact box read there, so the span is the
+/// body's own, not the shadow of its world box.
+pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2]> {
+    use solidcraft_geom::prelude::*;
+    let (x, y, n, o) = (plane.x, plane.y, plane.normal(), plane.origin);
+    // Column-major: world to plane coordinates, each column one world axis's image, the last
+    // the translation.
+    let to_plane = [[x.x, y.x, n.x, 0.0], [x.y, y.y, n.y, 0.0], [x.z, y.z, n.z, 0.0], [-x.dot(o), -y.dot(o), -n.dot(o), 1.0]];
+    let bounds = crate::transform_matrix(b, to_plane)?.exact_bounds()?;
+    if !(bounds.min.z.is_finite() && bounds.max.z.is_finite()) {
+        return Err(crate::KernelError::Invalid("the body's reach along the plane's normal can't be measured".into()));
+    }
+    Ok([bounds.min.z, bounds.max.z])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +148,23 @@ mod tests {
         let got = measure_mass(&ring).unwrap().volume;
         assert!((got - want).abs() < 1e-3 * want, "{got} against {want}");
         assert!(measure(&ring).unwrap().merged.faces > 0);
+    }
+
+    /// A box's reach along a plane's normal, from the plane: away from the origin, and on a
+    /// plane whose normal is not a world axis's direction (its world box would overstate it).
+    #[test]
+    fn levels_along_a_plane_are_the_bodys_own() {
+        let block = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let raised = solidcore_record::Plane { origin: Vec3::new(3.0, 4.0, 5.0), ..solidcore_record::Plane::XY };
+        let [lo, hi] = levels_along(&block, &raised).unwrap();
+        assert!((lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9, "{lo} {hi}");
+        // A plane through the origin whose normal is (1, 1, 0)/sqrt 2: the box's corners reach
+        // from 0 to 20/sqrt 2 along it.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let tilted = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::new(0.0, 0.0, 1.0), y: Vec3::new(s, -s, 0.0) };
+        assert!((tilted.normal() - Vec3::new(s, s, 0.0)).len() < 1e-12, "{:?}", tilted.normal());
+        let [lo, hi] = levels_along(&block, &tilted).unwrap();
+        assert!(lo.abs() < 1e-9 && (hi - 20.0 * s).abs() < 1e-9, "{lo} {hi}");
     }
 
     /// A body's exact box is measured once and its clones share it; a moved copy is a new body
