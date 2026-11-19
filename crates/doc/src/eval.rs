@@ -3503,6 +3503,16 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
+        // Copies of drawn tools meet their sources' targets where those are placed, from where the
+        // sources are placed.
+        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
+            for src in replayed_sources(doc, features).into_iter().filter(|g| drawn_tools_change_bodies(&g.kind)) {
+                reads.drawn_targets(st, src);
+                if src.component != f.component {
+                    reads.components.insert(src.component);
+                }
+            }
+        }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
         // So does a hole at sketch points, in its sketch's frame (#17623).
@@ -10982,6 +10992,9 @@ fn replay(
             }
             continue;
         }
+        // Copies of drawn tools are made in their source's frame and meet each target where it is
+        // shown, as the source's own tools do (#3383).
+        let _frames = if drawn_tools_change_bodies(&src.kind) { ToolFrames::install(doc, src, st) } else { None };
         let (op, targets) = feature_op(src);
         // A primitive's or a hole's targets are its participants (#1108): the copies change
         // those bodies only, like the feature itself (#2755).
@@ -11117,7 +11130,8 @@ fn replay(
             f
         };
         if op == Operation::Cut {
-            let (m, t) = count_copy_misses(st, f, &targets, &copies, &instances, &axes);
+            let shown = targets_as_shown(st, f, &targets)?;
+            let (m, t) = count_copy_misses(&shown, f, &targets, &copies, &instances, &axes);
             missed += m;
             total += t;
         }

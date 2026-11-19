@@ -1302,6 +1302,139 @@ fn copies_of_a_chamfer_and_a_later_hole_in_a_component_cut_its_body() {
     }
 }
 
+const BOTH: [&str; 2] = ["BoxA", "BoxB"];
+
+/// Two 40 × 40 × 10 parts: BoxA in A at x −20..20, y −20..20, z 0..10, not placed, and BoxB in B
+/// at x −10..30, y −20..20, z 0..10 in its own frame, B turned `angle` degrees about Z and lifted
+/// `lift`. A root cut of x 1..7, y 5..10, sketched 5 mm above B's floor, runs down through
+/// `targets`.
+fn root_cut_into_a_placed_part(angle: f64, lift: f64, targets: &[&str]) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "BoxA"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "operation": "new", "body_name": "BoxB"}));
+    for (part, body) in [("A", "BoxA"), ("B", "BoxB")] {
+        run(&mut s, "component.create", json!({"name": part, "parent": "root", "activate": false}));
+        run(&mut s, "component.move_bodies", json!({"bodies": [body], "component": part}));
+    }
+    let turn = json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": format!("{angle} deg"), "origin": [0, 0, 0], "translate": [0, 0, lift]});
+    run(&mut s, "occurrence.move", turn);
+    run(&mut s, "component.capture_position", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": lift + 5.0, "name": "CutSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 5], "p1": [7, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"through_all": true, "direction": "negative", "operation": "cut", "targets": targets, "name": "Cut"}));
+    s
+}
+
+/// A body's volume, its face count and the ends of its pockets (planar faces square to Z under
+/// 1000 mm²) as (area, centroid) where it is shown, in x order.
+fn pockets(s: &mut Session, body: &str) -> (f64, usize, Vec<(f64, [f64; 3])>) {
+    let v = s.model.state().body(body).map_or(f64::NAN, |b| b.measure().unwrap().volume);
+    let r = run(s, "model.faces", json!({"body": body}));
+    let faces = r["faces"].as_array().unwrap();
+    let mut ends: Vec<(f64, [f64; 3])> = faces
+        .iter()
+        .filter(|f| f["plane_normal"][2].as_f64().is_some_and(|z| z.abs() > 0.999) && f["area"].as_f64().is_some_and(|a| a < 1000.0))
+        .map(|f| (f["area"].as_f64().unwrap(), std::array::from_fn(|i| f["centroid"][i].as_f64().unwrap())))
+        .collect();
+    ends.sort_by(|a, b| a.1[0].total_cmp(&b.1[0]));
+    (v, faces.len(), ends)
+}
+
+/// BoxA and BoxB after a mirror of the cut across x = 5: one 8 × 5 pocket at x 1..9, y 5..10 in
+/// each where it is shown, 5 mm deep in B (z lift..lift + 5) and as deep in A as the cut reaches.
+fn assert_mirrored_into_both(s: &mut Session, angle: f64, lift: f64) {
+    let (a, _, a_ends) = pockets(s, "BoxA");
+    let (b, b_faces, b_ends) = pockets(s, "BoxB");
+    let a_depth = if lift > 0.0 { 10.0 } else { 5.0 };
+    let case = format!("turned {angle}, lifted {lift}: BoxA {a} {a_ends:?}, BoxB {b} {b_faces} faces {b_ends:?}");
+    assert!(rel(a, 16000.0 - 40.0 * a_depth) < 1e-9, "{case}");
+    assert!(rel(b, 15800.0) < 1e-9, "{case}");
+    assert_eq!((b_faces, b_ends.len(), a_ends.len()), (11, 1, usize::from(lift == 0.0)), "{case}");
+    let (area, at) = b_ends[0];
+    assert!(rel(area, 40.0) < 1e-9 && near(at, [5.0, 7.5, lift + 5.0]), "{case}");
+}
+
+fn near(p: [f64; 3], q: [f64; 3]) -> bool {
+    p.iter().zip(q).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt() < 1e-6
+}
+
+fn mirror_the_cut(s: &mut Session) {
+    run(s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    let r = run(s, "solid.mirror", json!({"features": ["Cut"], "plane": "MirrorPlane", "name": "Mirror"}));
+    assert!(r["warning"].is_null(), "{r}");
+}
+
+/// #19451: a root mirror of a root cut into a part placed turned and lifted cuts the world mirror
+/// image of the cut. It cut where the image would be in the part's own frame, turned with the part,
+/// and through the whole part, from where the cut started with the part not placed.
+#[test]
+fn a_mirrored_cut_into_a_turned_and_lifted_part_lands_at_its_world_image() {
+    for angle in [180.0, 90.0] {
+        let mut s = root_cut_into_a_placed_part(angle, 20.0, &BOTH);
+        mirror_the_cut(&mut s);
+        assert_mirrored_into_both(&mut s, angle, 20.0);
+    }
+}
+
+#[test]
+fn a_mirrored_cut_into_a_turned_part_lands_at_its_world_image() {
+    let mut s = root_cut_into_a_placed_part(180.0, 0.0, &BOTH);
+    mirror_the_cut(&mut s);
+    assert_mirrored_into_both(&mut s, 180.0, 0.0);
+}
+
+#[test]
+fn a_mirrored_cut_into_a_lifted_part_starts_where_the_cut_does() {
+    let mut s = root_cut_into_a_placed_part(0.0, 20.0, &BOTH);
+    mirror_the_cut(&mut s);
+    assert_mirrored_into_both(&mut s, 0.0, 20.0);
+}
+
+#[test]
+fn a_mirrored_cut_into_parts_not_placed_lands_at_its_image() {
+    let mut s = root_cut_into_a_placed_part(0.0, 0.0, &BOTH);
+    mirror_the_cut(&mut s);
+    assert_mirrored_into_both(&mut s, 0.0, 0.0);
+}
+
+/// Turning the part after the mirror moves the mirrored cut with the original.
+#[test]
+fn a_mirrored_cut_follows_its_part_turned_later() {
+    let mut s = root_cut_into_a_placed_part(0.0, 20.0, &BOTH);
+    mirror_the_cut(&mut s);
+    run(&mut s, "occurrence.move", json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    assert_mirrored_into_both(&mut s, 180.0, 20.0);
+}
+
+/// A copy cutting only the part placed turned and lifted is checked against it where it is shown:
+/// it removes material there, so the mirror says nothing of copies that remove none.
+#[test]
+fn a_mirrored_cut_into_a_turned_and_lifted_part_alone_removes_material_there() {
+    let mut s = root_cut_into_a_placed_part(180.0, 20.0, &["BoxB"]);
+    mirror_the_cut(&mut s);
+    let (b, b_faces, b_ends) = pockets(&mut s, "BoxB");
+    assert!(rel(b, 15800.0) < 1e-9 && b_faces == 11 && b_ends.len() == 1 && near(b_ends[0].1, [5.0, 7.5, 25.0]), "{b} {b_faces} {b_ends:?}");
+    assert!(rel(pockets(&mut s, "BoxA").0, 16000.0) < 1e-9);
+}
+
+/// #19451: a rectangular pattern of the cut 10 mm along −x copies it to x −9..−3 in the world, in
+/// a part turned and lifted too: two 6 × 5 pockets, through BoxA and 5 mm deep in BoxB.
+#[test]
+fn a_patterned_cut_into_a_turned_and_lifted_part_lands_at_its_world_copy() {
+    let mut s = root_cut_into_a_placed_part(180.0, 20.0, &BOTH);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Cut"], "dir1": [-1, 0, 0], "count1": 2, "spacing1": 10}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (a, _, a_ends) = pockets(&mut s, "BoxA");
+    let (b, b_faces, b_ends) = pockets(&mut s, "BoxB");
+    let case = format!("BoxA {a} {a_ends:?}, BoxB {b} {b_faces} faces {b_ends:?}");
+    assert!(rel(a, 16000.0 - 2.0 * 300.0) < 1e-9 && a_ends.is_empty(), "{case}");
+    assert!(rel(b, 16000.0 - 2.0 * 150.0) < 1e-9 && b_faces == 16, "{case}");
+    let want = [[-6.0, 7.5, 25.0], [4.0, 7.5, 25.0]];
+    assert!(b_ends.len() == 2 && b_ends.iter().zip(want).all(|((area, at), w)| rel(*area, 30.0) < 1e-9 && near(*at, w)), "{case}");
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
