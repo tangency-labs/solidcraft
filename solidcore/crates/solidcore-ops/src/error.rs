@@ -476,7 +476,7 @@ impl Error {
             Error::BlendNotCertified { .. } => "BlendNotCertified",
             Error::WallFolds { .. } => "WallFolds",
             Error::Unsupported(..) => "Unsupported",
-            Error::CornerUnsupported => "CornerUnsupported",
+            Error::CornerUnsupported { .. } => "CornerUnsupported",
             Error::TurnRefused { .. } => "TurnRefused",
             Error::CornerRefused { .. } => "CornerRefused",
             Error::RoundsCross { .. } => "RoundsCross",
