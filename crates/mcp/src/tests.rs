@@ -2990,6 +2990,7 @@ fn compact_batch_reply_of_parameters_export_and_script() {
     assert!(full["results"][8]["script"].is_object(), "{full}");
     assert!(exported.get("script").is_none(), "{r}");
     assert_eq!(exported["path"], json!(script), "{r}");
+    assert_eq!(exported["absolute_path"], json!(script), "the compact reply keeps the file's full path: {r}");
     assert_eq!(exported["bytes"], json!(written.len()), "{r}");
     assert!(written.contains("\"timeline.add\""), "the script is still written in full: {written}");
     // The compact reply is a fraction of the full one.
