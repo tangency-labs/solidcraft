@@ -44,7 +44,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
         assert!(ids.insert(slot.id), "duplicate catalogue id {}", slot.id);
         match slot.command {
             Some(command) => assert!(solidcraft_engine::find_command(command).is_some(), "{}", slot.id),
-            None => assert!(["projection", "display", "separator"].contains(&slot.id)),
+            None => assert!(["projection", "display", "sheet_zoom", "separator"].contains(&slot.id)),
         }
         if slot.kind != NavigationKind::Separator {
             assert!(!crate::icon_svg::resolve(slot.icon).placeholder, "{}: {}", slot.id, slot.icon);
@@ -65,7 +65,7 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
                 canvas,
                 &[],
                 1.0,
-                crate::prefs::NavigatorStyle::Cube,
+                crate::prefs::NavigatorStyle::Custom,
                 egui::Vec2::ZERO,
                 bar.rect,
             );
@@ -139,9 +139,9 @@ fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_
             }
             for corner in [egui::Vec2::ZERO, vec2(120.0, 32.0)] {
                 let layout =
-                    crate::viewport_layout::Layout::with_content(canvas, canvas, &[], 1.0, crate::prefs::NavigatorStyle::Cube, corner, bar.rect);
+                    crate::viewport_layout::Layout::with_content(canvas, canvas, &[], 1.0, crate::prefs::NavigatorStyle::Custom, corner, bar.rect);
                 // The axis view keeps its full size: on top, it moves down past the bar instead.
-                assert_eq!(layout.axis_view.width(), crate::viewport::axis_view_size(crate::prefs::NavigatorStyle::Cube));
+                assert_eq!(layout.axis_view.width(), crate::viewport::axis_view_size(crate::prefs::NavigatorStyle::Custom));
                 assert!(!layout.axis_view.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
                 assert!(!layout.confirm.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
                 assert!(!layout.confirm.intersect(layout.axis_view).is_positive(), "{position:?} {edge:?}");

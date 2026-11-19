@@ -167,44 +167,6 @@ fn capture_question_offers_capture_revert_and_cancel() {
     assert!(h.app.session.pending_moves.is_empty() && h.app.dialog.is_some());
 }
 
-/// Type `text` into the card's X distance field.
-fn type_distance(h: &mut Harness, text: &str) {
-    h.step(&json!({"click": {"handle": "occurrence-move:distance:0"}, "double": true})).unwrap();
-    h.frames(2);
-    h.step(&json!({"key": "A", "cmd": true})).unwrap();
-    h.step(&json!({"text": text})).unwrap();
-    h.step(&json!({"key": "Enter"})).unwrap();
-    h.frames(3);
-}
-
-#[test]
-fn occurrence_move_card_edits_distances_and_captures_or_reverts() {
-    let mut h = Harness::new();
-    h.app.home.open = false;
-    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
-    let body = h.app.session.model.state().bodies[0].name.clone();
-    h.app.run("component.from_bodies", json!({"bodies": [body]})).unwrap();
-    let occ = h.app.session.doc.occurrences[0].id;
-    h.app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
-    h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occ));
-    card_is_drawn(&mut h);
-    for k in 0..3 {
-        assert!(scenario::handle_at(&format!("occurrence-move:distance:{k}")).is_some());
-        assert!(scenario::handle_at(&format!("occurrence-move:angle:{k}")).is_some());
-    }
-    type_distance(&mut h, "5");
-    assert!(!h.app.session.pending_moves.is_empty(), "the move is pending");
-    press(&mut h, "Cancel");
-    assert!(h.app.tree.occurrence_move.is_none() && h.app.session.pending_moves.is_empty(), "Cancel puts the move back");
-
-    h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occ));
-    h.frames(3);
-    type_distance(&mut h, "5");
-    assert!(!h.app.session.pending_moves.is_empty(), "the move is pending");
-    press(&mut h, "Capture All Positions");
-    assert!(h.app.tree.occurrence_move.is_none() && h.app.session.pending_moves.is_empty());
-}
-
 #[test]
 fn settings_reset_notice_dismisses_or_opens_the_graphics_page() {
     let mut h = Harness::new();

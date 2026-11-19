@@ -5,6 +5,7 @@ use std::path::Path;
 
 use solidcore::boolean::api_brep::tessellate_boundaries;
 use solidcore::geom::attribute::AttributeStore;
+use solidcore::kernel::UpstreamFixes;
 use solidcore::query::edge::edge_faces;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::{p1, p10::TopologyEnv, p7};
@@ -47,11 +48,33 @@ pub struct Mesh {
     pub size: f64,
 }
 
+/// The fixes the app holds back from its preset of every fix on, as the kernel rig and
+/// solidcore's tests name them (`crates/smlib/src/core.rs` checks that the list equals the
+/// app's `HELD_BACK`).
+const APP_HELD_BACK: &str = include_str!("../../solidcore/tests/kernel_cases/held_back.json");
+
+/// The fix set the app runs with: every fix on except those [`APP_HELD_BACK`] names.
+fn app_fixes() -> Result<UpstreamFixes, String> {
+    let names: Vec<String> = serde_json::from_str(APP_HELD_BACK)
+        .map_err(|e| format!("reading the held-back fixes: {e}"))?;
+    let mut fixes = UpstreamFixes::all();
+    for name in &names {
+        *fixes
+            .flag_mut(name)
+            .ok_or_else(|| format!("the held-back fixes name an unknown fix `{name}`"))? = false;
+    }
+    Ok(fixes)
+}
+
 /// Reads `path` as `SmBrep::ReadFromFile` does, into a B-rep that names its geometry by
-/// arena identity, as a kernel-built one does.
+/// arena identity, as a kernel-built one does. The kernel runs with the app's fixes, so a body
+/// the app reads is read here too (#17756).
 pub fn read(path: &Path, binary: bool, rebuild: bool) -> Result<Body, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut kernel = Kernel::default();
+    let mut kernel = Kernel {
+        fixes: app_fixes()?,
+        ..Kernel::default()
+    };
     let fail = |e: solidcore::SolidError| format!("reading {}: {e}", path.display());
     let mut brep = Brep::new_with_infinite_region().map_err(fail)?;
     let mut attributes = AttributeStore::default();
@@ -197,5 +220,34 @@ fn surface_name(kind: &SurfaceKind) -> &'static str {
         SurfaceKind::SurfOfExtrusion(_) => "surface of extrusion",
         SurfaceKind::ProceduralBlend(_) => "procedural blend",
         SurfaceKind::BallPatch(_) => "ball patch",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A body is read with the fixes the app, the kernel rig and solidcore's tests run with,
+    /// not with every fix off: the tool sees a body as the app does (#17756).
+    #[test]
+    fn a_body_is_read_with_the_apps_fixes() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/topology.brep_p4/island_swap.smb");
+        let body = read(&path, false, false).unwrap();
+        let on: Vec<&str> = body
+            .kernel
+            .fixes
+            .flags()
+            .filter(|(_, on)| *on)
+            .map(|(name, _)| name)
+            .collect();
+        let held: Vec<String> = serde_json::from_str(APP_HELD_BACK).unwrap();
+        let preset: Vec<&str> = UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|name| !held.iter().any(|h| h == name))
+            .collect();
+        assert!(!preset.is_empty());
+        assert_eq!(on, preset);
     }
 }

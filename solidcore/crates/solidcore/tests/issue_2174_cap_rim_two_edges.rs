@@ -12,10 +12,14 @@
 //! (1043). Before gap closure became unconditional, disabling it instead returned
 //! a non-manifold body (volume -627.4 out, 0 in).
 //!
-//! `Kernel::fixes.offset_open_edge_second_trim_point` (WR-673; the fork's
-//! tangency-labs/smlib@7ee0876) refuses that twin by point. The second trim point is then
-//! not found, the half's offset edge is left to the merge, and the cap thickens to the
-//! sector between radii 10 and 11 (out) or 9 and 10 (in) over the cap's solid angle pi:
+//! WR-673 (the fork's tangency-labs/smlib@7ee0876; always on since its flag
+//! `offset_open_edge_second_trim_point` was removed) passes over that twin: a candidate
+//! that is the first trim point again reached round a closed 3D curve (the curve closed,
+//! and the span from the first point to the candidate closed too; `is_first_point_again`
+//! in `offset_geometry_creation.rs`), not every point near the first. The
+//! second trim point is then not found, the half's offset edge is left to the merge, and
+//! the cap thickens to the sector between radii 10 and 11 (out) or 9 and 10 (in) over
+//! the cap's solid angle pi:
 //! V = pi/3 (11^3 - 10^3) = 331 pi/3 and pi/3 (10^3 - 9^3) = 271 pi/3. The results are a
 //! manifold solid, clean at `check_brep` level 2, within 1e-6 of those (the issue's
 //! tolerance; they come within 1.3e-8).
@@ -56,9 +60,8 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, FaceId};
 
-/// The issue's flags: every fix on except `geometric_g2_continuity`, with or without
-/// this one.
-fn issue_kernel(fixed: bool) -> Kernel {
+/// The issue's flags: every fix on except `geometric_g2_continuity`.
+fn issue_kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
@@ -66,15 +69,7 @@ fn issue_kernel(fixed: bool) -> Kernel {
             *f.flag_mut(name).unwrap() = true;
         }
     }
-    f.offset_open_edge_second_trim_point = fixed;
     k.fixes = f;
-    k
-}
-
-/// The defaults and this fix alone.
-fn only_this_fix() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_open_edge_second_trim_point = true;
     k
 }
 
@@ -205,52 +200,32 @@ fn assert_sound(mut k: Kernel, sheet: fn(&mut Kernel) -> Brep, distance: f64) {
 
 #[test]
 fn intersected_cap_thickens_out() {
-    assert_sound(issue_kernel(true), intersected_cap, 1.0);
+    assert_sound(issue_kernel(), intersected_cap, 1.0);
 }
 
 #[test]
 fn intersected_cap_thickens_in() {
-    assert_sound(issue_kernel(true), intersected_cap, -1.0);
+    assert_sound(issue_kernel(), intersected_cap, -1.0);
 }
 
 #[test]
 fn turned_cap_thickens_out() {
-    assert_sound(issue_kernel(true), turned_cap, 1.0);
+    assert_sound(issue_kernel(), turned_cap, 1.0);
 }
 
 #[test]
 fn turned_cap_thickens_in() {
-    assert_sound(issue_kernel(true), turned_cap, -1.0);
+    assert_sound(issue_kernel(), turned_cap, -1.0);
 }
 
 #[test]
 fn solidcraft_cap_thickens_out() {
-    assert_sound(issue_kernel(true), solidcraft_cap, 1.0);
+    assert_sound(issue_kernel(), solidcraft_cap, 1.0);
 }
 
 #[test]
 fn solidcraft_cap_thickens_in() {
-    assert_sound(issue_kernel(true), solidcraft_cap, -1.0);
-}
-
-/// The fix alone, on the defaults, is enough.
-#[test]
-fn intersected_cap_thickens_with_this_fix_alone() {
-    assert_sound(only_this_fix(), intersected_cap, 1.0);
-    assert_sound(only_this_fix(), intersected_cap, -1.0);
-}
-
-/// Without this fix the gap is closed too: each rim half's offset ends at its vertices'
-/// images (WR-736, #2611, the only path since #2769), never at the first trim point's twin.
-/// Upstream refused the loop gap there (1043).
-#[test]
-fn flag_off_closes_the_gap_at_the_vertex_images() {
-    let sheets: [fn(&mut Kernel) -> Brep; 3] = [intersected_cap, turned_cap, solidcraft_cap];
-    for sheet in sheets {
-        for distance in [1.0, -1.0] {
-            assert_sound(issue_kernel(false), sheet, distance);
-        }
-    }
+    assert_sound(issue_kernel(), solidcraft_cap, -1.0);
 }
 
 /// At the defaults the sheet thickens to the sector both ways (upstream, the pinned C++

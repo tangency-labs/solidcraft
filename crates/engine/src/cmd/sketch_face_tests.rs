@@ -414,7 +414,7 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
     let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut s.doc_mut().feature_mut(id).unwrap().kind else { panic!("not sketch") };
     *plane = solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(plane.clone()),
-        axis_origin: Vec3::ZERO,
+        axis_origin: solidcraft_doc::point_expr(Vec3::ZERO),
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,
@@ -728,15 +728,16 @@ fn a_face_next_to_plane_is_refused_not_ignored() {
     assert_eq!(r["attachment"], "exact_face", "{r}");
 }
 
-/// #3248: a custom plane's `origin` that is present but not three numbers (an expression such as
-/// "w/2", a number with a unit, too few values) became [0, 0, 0] without a word. It is refused,
-/// like a bad `x_dir`, and nothing is added. A missing origin is still the world origin.
+/// #3248: a custom plane's `origin` that is present but not three numbers or length expressions
+/// (too few values, a bare name, a null entry) became [0, 0, 0] without a word. It is refused,
+/// like a bad `x_dir`, and nothing is added. A missing origin is still the world origin. (Length
+/// expressions are accepted since #8192.)
 #[test]
 fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "w", "expression": "40 mm"}));
     let features = s.doc.features.len();
-    for origin in [json!(["w/2", 0, 0]), json!(["20 mm", 0, 0]), json!([20, 0]), json!("w"), json!([20, 0, null])] {
+    for origin in [json!([20, 0]), json!("w"), json!([20, 0, null]), json!(["w/2", "nope", 0])] {
         let p = json!({"plane": {"origin": origin, "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}});
         let e = s.execute("sketch.create", &p).unwrap_err().to_string();
         assert!(e.contains("origin"), "{p}: {e}");
@@ -751,6 +752,12 @@ fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
     };
     assert_eq!(origin_of(&mut s, json!({"origin": [20, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([20.0, 0.0, 0.0]));
     assert_eq!(origin_of(&mut s, json!({"x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([0.0, 0.0, 0.0]));
+    // Since #8192 the inputs this test once refused are evaluated: `w` is 40 mm, so "w/2" is 20 mm
+    // and "20 mm" is 20 mm, and the sketch's plane sits there, not at the origin.
+    for x in ["w/2", "20 mm"] {
+        let o = origin_of(&mut s, json!({"origin": [x, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}));
+        assert_eq!(o, json!([20.0, 0.0, 0.0]), "origin [{x}, 0, 0]");
+    }
 }
 /// A sketch on a body's face projects that face's edges from the body's display mesh. The body
 /// it projects from is the model's own, not a copy that meshes it again: on a body whose curved

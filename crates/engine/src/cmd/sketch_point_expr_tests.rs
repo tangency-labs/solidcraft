@@ -269,6 +269,63 @@ fn a_circle_size_typed_as_an_expression_is_a_dimension_that_follows_its_paramete
     assert!((circle_radius(&s, "c") - 9.0).abs() < 1e-9 && (circle_radius(&s, "d") - 5.0).abs() < 1e-9);
 }
 
+/// A slot's `width` typed as an expression is a dimension driven by the parameters it names, as a
+/// circle's radius is; a number typed as text reads in the design's unit (#15857).
+#[test]
+fn a_slot_width_typed_as_an_expression_is_a_dimension_that_follows_its_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "slot_w", "expression": "6 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let slots = [
+        ("sketch.slot.overall", json!({"p0": [0, 0], "p1": [30, 0], "width": "slot_w"})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 20], "p1": [30, 20], "width": "slot_w"})),
+        ("sketch.slot.center_point", json!({"center": [15, 40], "end": [30, 40], "width": "slot_w"})),
+        ("sketch.slot.arc_center", json!({"center": [100, 0], "start": [120, 0], "end": [100, 20], "width": "slot_w"})),
+        ("sketch.slot.arc_three_point", json!({"start": [150, 0], "through": [170, 20], "end": [190, 0], "width": "slot_w"})),
+    ];
+    let mut caps = Vec::new();
+    for (command, params) in &slots {
+        let out = run(&mut s, command, params.clone());
+        caps.push(out["curves"][1].as_str().unwrap_or_default().to_string());
+    }
+    let text = run(&mut s, "sketch.slot.overall", json!({"p0": [0, 60], "p1": [30, 60], "width": "6"}));
+    let text_cap = text["curves"][1].as_str().unwrap_or_default().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    for cap in &caps {
+        assert!((arc_radius(&s, cap) - 3.0).abs() < 1e-6, "{cap}: {}", arc_radius(&s, cap));
+    }
+    run(&mut s, "parameters.change", json!({"name": "slot_w", "expression": "10 mm"}));
+    no_trouble(&s);
+    for cap in &caps {
+        assert!((arc_radius(&s, cap) - 5.0).abs() < 1e-6, "{cap}: {}", arc_radius(&s, cap));
+    }
+    // "6" names no parameter: the slot is 6 mm wide and follows nothing.
+    assert!((arc_radius(&s, &text_cap) - 3.0).abs() < 1e-6);
+    // A width that is no size is refused with its own message, and draws nothing.
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    let curves = s.doc.sketch(s.doc.find_feature("S").unwrap().id).unwrap().curves.len();
+    for (bad, why) in
+        [(json!("nope"), "width"), (json!("0 mm"), "must be positive"), (json!(-2), "must be positive"), (json!(true), "must be a number")]
+    {
+        let e =
+            s.execute("sketch.slot.overall", &json!({"p0": [0, 80], "p1": [30, 80], "width": bad})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(why), "{bad}: {e}");
+    }
+    assert_eq!(s.doc.sketch(s.doc.find_feature("S").unwrap().id).unwrap().curves.len(), curves);
+}
+
+/// The radius of arc `id` of sketch `S` in the evaluated model.
+fn arc_radius(s: &Session, id: &str) -> f64 {
+    let f = s.doc.find_feature("S").unwrap().id;
+    let st = s.model.state();
+    let sk = &st.sketch(f).unwrap().sketch;
+    match sk.curves.iter().find(|c| c.id == id).map(|c| &c.kind) {
+        Some(solidcraft_sketch::CurveKind::Arc { c, a, .. }) => sk.points[*c].pos.dist(sk.points[*a].pos),
+        _ => f64::NAN,
+    }
+}
+
 fn circle_radius(s: &Session, id: &str) -> f64 {
     let f = s.doc.find_feature("S").unwrap().id;
     let st = s.model.state();

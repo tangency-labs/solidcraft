@@ -5,9 +5,11 @@
 //! ([`solidcore::Transform::translation`], [`solidcore::Transform::rotation`],
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
-//! numbers and passes them on.
+//! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
+//! ([`distance_along`], [`span_along`]), as the kernel measures it.
 
 use solidcore::geom::certified::Verdict;
+use solidcore::geom::extent3d::Extent3d;
 use solidcore::{Transform, Vec3};
 
 use crate::body::REGULAR_RATIO;
@@ -145,6 +147,79 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
     taken(map.inverse())
 }
 
+/// How far `point` stands from `origin` along `direction`: the dot product of `point - origin`
+/// with `direction`, which is as many lengths as `direction` is long (a unit direction gives
+/// the distance itself). Negative behind `origin`.
+pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
+    Vec3::from(point).distance_along(Vec3::from(origin), Vec3::from(direction))
+}
+
+/// How far the box from `min` to `max` (a body's box, say) reaches from `origin` along
+/// `direction`, `[low, high]`: the least and the greatest [`distance_along`] of its points,
+/// through [`Extent3d::span_along`].
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite, or a reach not.
+pub fn span_along(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> Result<[f64; 2]> {
+    if !finite(&min) || !finite(&max) || !finite(&origin) || !finite(&direction) {
+        return Err(Error::Argument);
+    }
+    let span = Extent3d::from_bounds(min[0], min[1], min[2], max[0], max[1], max[2])
+        .span_along(vec3(origin), vec3(direction));
+    if !finite(&span) {
+        return Err(Error::Argument);
+    }
+    Ok(span)
+}
+
+/// The axis-aligned box around the corners of the box `lo`..`hi` moved by `matrix`, through
+/// [`Transform::moved_box`]: it holds the moved box, a little larger for a turn. An empty box
+/// (`lo` above `hi` on an axis) comes back as it is.
+///
+/// # Errors
+/// [`Error::Argument`] for a matrix with a number not finite, a NaN bound (an empty box's
+/// too), or a corner of a non-empty box that is not finite or does not map to finite numbers.
+pub fn moved_box(matrix: &Matrix, lo: [f64; 3], hi: [f64; 3]) -> Result<([f64; 3], [f64; 3])> {
+    if !finite(matrix.as_flattened()) || lo.iter().chain(&hi).any(|v| v.is_nan()) {
+        return Err(Error::Argument);
+    }
+    if lo.iter().zip(&hi).any(|(l, h)| l > h) {
+        return Ok((lo, hi));
+    }
+    if !finite(&lo) || !finite(&hi) {
+        return Err(Error::Argument);
+    }
+    let (a, b) = Transform { m: *matrix }.moved_box(vec3(lo), vec3(hi));
+    let (a, b) = ([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    if !finite(&a) || !finite(&b) {
+        return Err(Error::Argument);
+    }
+    Ok((a, b))
+}
+
+/// How far the turn in `matrix` (its rows 0 to 2; a translation in it is ignored) moves the
+/// point `pivot` that it is about, as the move to add to the turn about the origin to make it
+/// the turn about `pivot`, through [`Transform::pivot_displacement`].
+///
+/// # Errors
+/// [`Error::Argument`] for a matrix or pivot with a number not finite, or a displacement not.
+pub fn pivot_displacement(matrix: &Matrix, pivot: [f64; 3]) -> Result<[f64; 3]> {
+    if !finite(matrix.as_flattened()) || !finite(&pivot) {
+        return Err(Error::Argument);
+    }
+    let d = Transform { m: *matrix }.pivot_displacement(vec3(pivot));
+    let d = [d.x, d.y, d.z];
+    if !finite(&d) {
+        return Err(Error::Argument);
+    }
+    Ok(d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,6 +265,49 @@ mod tests {
             assert!(regular(&m));
             assert_eq!(then(&m, &m).unwrap(), IDENTITY);
         }
+    }
+
+    #[test]
+    fn the_displacement_of_a_pivot_is_what_a_turn_about_it_adds() {
+        let q = std::f64::consts::FRAC_PI_2;
+        let about_origin = rotation([0.0; 3], [0.0, 0.0, 1.0], q).unwrap();
+        let pivot = [0.0, 10.0, 0.0];
+        let d = pivot_displacement(&about_origin, pivot).unwrap();
+        // The turn about the pivot is the turn about the origin, then this move.
+        let about_pivot = rotation(pivot, [0.0, 0.0, 1.0], q).unwrap();
+        for p in [[1.0, 0.5, 0.5], [-3.0, 2.0, 7.0]] {
+            let turned = apply(&about_origin, p);
+            assert!(near(
+                [turned[0] + d[0], turned[1] + d[1], turned[2] + d[2]],
+                apply(&about_pivot, p),
+                1e-12
+            ));
+        }
+        assert_eq!(pivot_displacement(&IDENTITY, pivot).unwrap(), [0.0; 3]);
+        assert_eq!(
+            pivot_displacement(&about_origin, [f64::NAN, 0.0, 0.0]),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn a_moved_box_holds_the_moved_box_and_refuses_numbers_not_finite() {
+        let turn = then(
+            &rotation([0.0; 3], [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2).unwrap(),
+            &translation([10.0, 20.0, 30.0]).unwrap(),
+        )
+        .unwrap();
+        let (lo, hi) = moved_box(&turn, [0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+        assert!(near(lo, [8.0, 20.0, 30.0], 1e-12) && near(hi, [10.0, 21.0, 33.0], 1e-12));
+        let empty = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        assert_eq!(moved_box(&turn, empty.0, empty.1).unwrap(), empty);
+        assert!(moved_box(&turn, [f64::NAN, 0.0, 0.0], [1.0; 3]).is_err());
+        // a NaN on one axis is refused even when another axis is reversed (empty)
+        assert!(moved_box(&IDENTITY, [1.0, f64::NAN, 0.0], [0.0, 1.0, 1.0]).is_err());
+        assert!(moved_box(&IDENTITY, [1.0, 0.0, 0.0], [0.0, 1.0, f64::NAN]).is_err());
+        let mut bad = IDENTITY;
+        bad[3][0] = f64::NAN;
+        assert!(moved_box(&bad, [0.0; 3], [1.0; 3]).is_err());
     }
 
     #[test]
@@ -271,5 +389,38 @@ mod tests {
         // a stack whose numbers overflow
         let far = translation([1e308, 0.0, 0.0]).unwrap();
         assert_eq!(then(&far, &far), Err(Error::Argument));
+    }
+
+    #[test]
+    fn distance_along_is_signed_and_ignores_the_sideways_offset() {
+        let (o, d) = ([1.0, 2.0, 3.0], [0.0, 1.0, 0.0]);
+        assert!((distance_along(o, d, [9.0, 6.0, -4.0]) - 4.0).abs() < 1e-12);
+        assert!((distance_along(o, d, [1.0, -1.0, 3.0]) + 3.0).abs() < 1e-12);
+        assert_eq!(distance_along(o, d, o), 0.0);
+    }
+
+    #[test]
+    fn span_along_takes_the_box_corners_either_way_round_and_refuses_what_is_not_finite() {
+        let (o, d) = ([1.0, 1.0, 1.0], [1.0, 2.0, 2.0]);
+        assert_eq!(
+            span_along([-1.0, 0.0, 2.0], [3.0, 5.0, 4.0], o, d),
+            Ok([-2.0, 16.0])
+        );
+        assert_eq!(
+            span_along([3.0, 5.0, 4.0], [-1.0, 0.0, 2.0], o, d),
+            Ok([-2.0, 16.0])
+        );
+        assert_eq!(
+            span_along([0.0; 3], [1.0; 3], o, [0.0, f64::NAN, 1.0]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            span_along([0.0; 3], [f64::INFINITY; 3], o, d),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            span_along([0.0; 3], [f64::MAX; 3], o, d),
+            Err(Error::Argument)
+        );
     }
 }

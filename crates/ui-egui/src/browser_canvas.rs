@@ -145,7 +145,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         return false;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, &c) else {
+    let Ok(plane) = doc.canvas_plane(&vals, &c, &app.session.model.state()) else {
         return false;
     };
     let (origin, direction) = proj.ray(screen);
@@ -182,7 +182,7 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
         return;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, c) else {
+    let Ok(plane) = doc.canvas_plane(&vals, c, &app.session.model.state()) else {
         return;
     };
     let t = Tokens::get();
@@ -303,7 +303,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
@@ -352,7 +352,7 @@ mod tests {
         let proj = crate::viewport::projection(&h.app, rect);
         let c = h.app.session.doc.canvases[0].clone();
         let (vals, _) = h.app.session.doc.param_values();
-        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c, &h.app.session.model.state()).unwrap();
         let ax = c.center.x - 20.0;
         let bx = c.center.x + 20.0;
         let sa = proj.to_screen(plane.to_world(solidcore_record::Vec2::new(ax, c.center.y))).expect("point A on screen");

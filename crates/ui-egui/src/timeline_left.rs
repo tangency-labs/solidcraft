@@ -602,7 +602,7 @@ fn visible_order(
         let open = group_id.is_none_or(|group_id| group_is_open(app, groups, group_id));
         if open {
             order.push(TimelineItem::Feature(*id));
-            if !row.listed.is_empty() && crate::browser::is_open(app, &sketches_key(*id), false) {
+            if !row.listed.is_empty() && crate::browser::fold_open(app, &sketches_key(*id), false) {
                 order.extend(row.listed.iter().filter(|listed| !listed.reference).map(|listed| TimelineItem::Feature(listed.sketch)));
             }
         }
@@ -677,7 +677,12 @@ fn timeline_group_name(
     if escape {
         // Dropping the shared state cancels the edit and leaves the old name intact.
     } else if commit {
-        let _ = crate::context_menu::commit_rename(app, &rename);
+        // A refused name keeps the editor open, focused with the name selected; the status line
+        // says why.
+        if crate::context_menu::commit_rename(app, &rename).is_err() {
+            rename.focused = false;
+            app.menu.rename = Some(rename);
+        }
     } else {
         app.menu.rename = Some(rename);
     }
@@ -748,7 +753,7 @@ fn vertical_group_row(
         crate::scenario::publish_handle(&format!("timeline-folder-status:{}:{}", status.icon(), group.name), mark.center());
     }
     let response = match tip {
-        Some(tip) => response.backing_on_hover_text(tip),
+        Some(tip) => response.backing_on_hover_status(&tip),
         None => response,
     };
     let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
@@ -870,7 +875,7 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
     let (features, groups, plan) = (&table.features, &table.groups, &table.rows);
     let n = features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
-    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
+    let from_view = crate::timeline::from_view(app);
     let drag_id = ui.scope_id().with("tl_vertical_drag");
     let mut rows = Rows {
         sketch_states: crate::sketch_state::SketchStates::of(app),
@@ -879,15 +884,7 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
         table: &table,
         order: &order,
         marker,
-        selected: app
-            .session
-            .selection
-            .iter()
-            .filter_map(|selection| match selection {
-                solidcraft_engine::Sel::Feature { id } => Some(*id),
-                _ => None,
-            })
-            .collect(),
+        selected: app.session.selection.iter().filter_map(|selection| crate::timeline::feature_of_sel(&app.session.doc, selection)).collect(),
         results: crate::timeline::result_index(&app.session.model.results),
         reveal: app.tree.timeline_reveal,
         from_view,
@@ -1070,7 +1067,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         Some(_) => Some((sketches_key(id), false)),
         None => has_patterns.then(|| (format!("timeline/sketch/{id}/patterns"), true)),
     };
-    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::is_open(app, key, *default));
+    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::fold_open(app, key, *default));
     let style = if names { crate::ui_kit::HistoryStyle::Names } else { crate::ui_kit::HistoryStyle::Icons };
     // `allocate_exact_size` in two steps, so a row outside the view takes its place and no more.
     let size = vec2(ui.available_width(), style.height());
@@ -1180,10 +1177,8 @@ fn feature_row_body(
         .results
         .get(&id)
         .and_then(|at| app.session.model.results.get(*at).filter(|result| result.id == id).or_else(|| app.session.model.result(id)));
-    let elapsed = result.map(|r| r.ms);
     let error = result.and_then(|result| result.error.clone());
     let warning = result.and_then(crate::timeline::warning_text);
-    let status = (error.is_some() || warning.is_some()).then(|| crate::timeline::feature_status_text(name, ty, result));
     let rolled = match row_kind {
         RowKind::Reference { parent } => parent >= marker,
         RowKind::Own | RowKind::Nested => index >= marker,
@@ -1228,27 +1223,10 @@ fn feature_row_body(
     let mut tooltip = egui::Tooltip::for_enabled(&response);
     tooltip.popup = tooltip.popup.align(egui::RectAlign::RIGHT_START);
     crate::ui_kit::Container::show_tooltip(response.id, tooltip, |ui| {
-        let summary = app
-            .session
-            .doc
-            .features
-            .get(index)
-            .and_then(|f| f.kind.expressions().first().map(ToString::to_string))
-            .unwrap_or_else(|| elapsed.map_or_else(String::new, |ms| format!("{ms:.1} ms")));
-        let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
-        let mut tip = format!("{name} · {kind} · {summary}");
-        if let Some(status) = &status {
-            tip.push_str(&format!("\n{status}"));
-        }
-        // Greyed out says only "not shown": say why (#8100).
-        if rolled {
-            tip.push_str(&format!("\n{}", solidcraft_ui_text::tr("timeline.feature_rolled_back")));
-        }
-        if let Some(state) = sketch_state {
-            tip.push_str(&format!("\n{}", state.text()));
-        }
-        crate::ui_kit::text(ui, &tip, crate::ui_kit::Text::Value("history", false));
-        // A value row is one line: where the sketch is listed gets a row of its own.
+        // The tooltip the bottom History shows, so the two stay identical (#14027); written only
+        // while it shows.
+        crate::timeline::feature_tooltip(name, ty, app.session.model.result(id), rolled, sketch_state).show(ui);
+        // Where the sketch is listed gets a row of its own, under the shared tooltip.
         if let Some(host) = listed_under.filter(|_| reference) {
             let listed = solidcraft_ui_text::format("ui.history_sketch_listed_under", &[("feature", host)]);
             crate::ui_kit::text(ui, &listed, crate::ui_kit::Text::Value("history_listed_under", false));
@@ -1256,7 +1234,7 @@ fn feature_row_body(
     });
     if response.clicked() && on_fold {
         if let Some((key, default)) = fold {
-            crate::browser::toggle(app, key, *default);
+            crate::browser::toggle_fold(app, key, *default);
         }
     } else if response.clicked() && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
         select_item(app, ui, TimelineItem::Feature(id), order);
@@ -1287,6 +1265,13 @@ fn feature_row_body(
         }
         if crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
+            ui.close();
+        }
+        // An extra entry for the selection; the one above still acts on this feature alone.
+        if let Some((label, params)) = crate::timeline::suppress_selected(app, id)
+            && crate::ui_kit::menu::button(ui, &label, "suppress").clicked()
+        {
+            let _ = app.run_heavy("timeline.suppress", params);
             ui.close();
         }
         if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {
@@ -1328,6 +1313,38 @@ mod tests {
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text()).collect();
         assert!(texts.contains(&"フィーチャーと入れ子のフォルダーを履歴に残します"), "{texts:?}");
         assert_eq!(h.app.session.doc.timeline_groups.len(), 1, "hovering does not delete the folder");
+    }
+
+    /// Both Histories draw one shared tooltip: a feature's warning and its time appear in the
+    /// left History exactly as they do in the bottom one.
+    #[test]
+    fn feature_tooltips_show_the_same_warning_and_time_in_both_histories() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = left;
+            h.app.home.open = false;
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block","body_name":"Block"})).unwrap();
+            // R6 on a 10 × 10 × 10 box is reduced to 5, so the feature warns.
+            h.app.run("solid.fillet", json!({"edges":[[0,0,5],[10,0,5],[10,10,5],[0,10,5]],"radius":6,"fit":"reduce","body":"Block"})).unwrap();
+            h.settle();
+            let id = h.app.session.doc.find_feature("Fillet1").map(|f| f.id).expect("the fillet is in the timeline");
+            let warning = h.app.session.model.results.iter().find(|r| r.id == id).and_then(|r| r.warning.clone());
+            assert!(warning.as_deref().is_some_and(|w| w.contains("reduced")), "the fillet warns: {warning:?}");
+            h.app.session.model.results.iter_mut().find(|r| r.id == id).expect("the fillet has a result").ms = 12.5;
+            h.frames(4);
+            let at = handle_at("timeline:Fillet1").expect("the Fillet's chip");
+            h.app.synthetic.push(egui::Event::PointerMoved(at));
+            h.frames(90);
+            let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
+            let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_string()).collect();
+            assert!(texts.iter().any(|t| t == "Fillet1  (Fillet)"), "left={left}: the tooltip shows the name and type: {texts:?}");
+            assert!(texts.iter().any(|t| t.contains("12.5 ms")), "left={left}: the tooltip shows the time: {texts:?}");
+            assert!(texts.iter().any(|t| t.contains("reduced")), "left={left}: the tooltip shows the warning: {texts:?}");
+            assert!(
+                !texts.iter().any(|t| t.contains("FilletFeature")),
+                "left={left}: the tooltip shows the translated type, not the raw one: {texts:?}"
+            );
+        }
     }
 
     #[test]
@@ -1666,6 +1683,24 @@ mod tests {
         harness.step(&json!({"text": "Again"})).unwrap();
         harness.step(&json!({"key": "Enter"})).unwrap();
         assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Again"));
+
+        // A name the command refuses keeps the editor open and says why.
+        crate::context_menu::start_rename(&mut harness.app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
+        harness.frames(2);
+        harness.step(&json!({"text": "x".repeat(200)})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        harness.frames(2);
+        assert!(harness.app.menu.rename.is_some(), "the folder's editor stays open after a refused rename");
+        let (text, _, error) = harness.app.status.clone().expect("the refusal is shown");
+        assert!(error && text.contains("128 characters"), "{text}");
+        assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Again"));
+        harness.step(&json!({"text": "Fixed"})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        assert_eq!(
+            harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()),
+            Some("Fixed"),
+            "the name can be corrected at once"
+        );
     }
 
     /// The upright History can be on screen with `timeline_left` off (a side zone, a tall narrow

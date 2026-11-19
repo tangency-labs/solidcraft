@@ -271,6 +271,14 @@ impl Vec3 {
         (self.x * o.x) + (self.y * o.y) + (self.z * o.z)
     }
 
+    /// How far this point stands from `origin` along `direction`: `(self - origin) . direction`,
+    /// as many lengths as `direction` is long (a unit direction gives the distance itself).
+    /// Negative behind `origin`.
+    #[must_use]
+    pub fn distance_along(self, origin: Self, direction: Self) -> f64 {
+        (self - origin).dot(direction)
+    }
+
     /// Cross product `self × o` (upstream `operator*` on two vectors).
     #[must_use]
     pub fn cross(self, o: Self) -> Self {
@@ -307,6 +315,25 @@ impl Vec3 {
         } else {
             self.unitize_nonzero(len_sq)
         }
+    }
+
+    /// The length and the unit direction of a vector of any finite length (not upstream). The
+    /// vector is first divided by its largest absolute coordinate, so its squared length lies
+    /// in `[1, 3]` and neither overflows nor underflows, then made unit as [`Vec3::unitize`]
+    /// makes it. The direction is exact at every finite length; the length is infinite past
+    /// `f64::MAX` and rounds to 0 below the smallest positive `f64`.
+    ///
+    /// `None` for a coordinate that is not finite, or the zero vector.
+    #[must_use]
+    pub fn length_and_unit(self) -> Option<(f64, Self)> {
+        let finite = self.x.is_finite() && self.y.is_finite() && self.z.is_finite();
+        let scale = self.max_dimension();
+        if !(finite && scale > 0.0) {
+            return None;
+        }
+        let scaled = self / scale;
+        let len_sq = scaled.length_squared();
+        Some((scale * sqrt(len_sq), scaled.unitize_nonzero(len_sq)))
     }
 
     fn unitize_nonzero(self, len_sq: f64) -> Self {
@@ -967,6 +994,14 @@ impl DivAssign<f64> for Vec3 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distance_along_is_signed_and_ignores_the_sideways_offset() {
+        let (o, d) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
+        assert!((Vec3::new(9.0, 6.0, -4.0).distance_along(o, d) - 4.0).abs() < 1e-12);
+        assert!((Vec3::new(1.0, -1.0, 3.0).distance_along(o, d) + 3.0).abs() < 1e-12);
+        assert_eq!(o.distance_along(o, d), 0.0);
+    }
+
     use super::*;
 
     /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
@@ -1135,6 +1170,31 @@ mod tests {
             Vec3::new(3.0, 0.0, 4.0).unitize().unwrap(),
             Vec3::new(0.6, 0.0, 0.8)
         );
+    }
+
+    #[test]
+    fn length_and_unit_holds_at_any_finite_length() {
+        // (3, 0, 4) scaled so its squared length underflows or overflows
+        let unit = Vec3::new(0.6, 0.0, 0.8);
+        for s in [1.0, 1e-200, 1e200, 1e-300, 1e300] {
+            let (length, u) = Vec3::new(3.0 * s, 0.0, 4.0 * s).length_and_unit().unwrap();
+            assert!((length / s - 5.0).abs() < 1e-12, "{s:e}: {length:e}");
+            assert!((u - unit).length() < 1e-15, "{s:e}: {u:?}");
+        }
+        let (length, u) = Vec3::new(f64::MAX, f64::MAX, 0.0)
+            .length_and_unit()
+            .unwrap();
+        assert_eq!(length, f64::INFINITY);
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        assert!((u - Vec3::new(half, half, 0.0)).length() < 1e-15, "{u:?}");
+        for v in [
+            Vec3::ZERO,
+            Vec3::new(-0.0, 0.0, -0.0),
+            Vec3::new(f64::NAN, 0.0, 1.0),
+            Vec3::new(0.0, f64::NEG_INFINITY, 1.0),
+        ] {
+            assert_eq!(v.length_and_unit(), None, "{v:?}");
+        }
     }
 
     #[test]

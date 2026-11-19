@@ -967,7 +967,10 @@ impl AppPanelRuntime {
                 Err(reason)
             }
         };
-        self.last_error = result.as_ref().err().cloned();
+        // A successful service tick does not resolve a failed preference restore.
+        if result.is_err() || !self.preferences.as_ref().is_some_and(|state| state.failed) {
+            self.last_error = result.as_ref().err().cloned();
+        }
         result
     }
     /// Explicit teardown preflights all owners before any controller is destroyed.
@@ -1214,6 +1217,8 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         integration.last_error = Some(reason);
     }
     let direction = crate::i18n::panel_direction(&app.preferences.language);
+    // The Browser's search field takes its title's place while it is open (#1634).
+    let browser_header = crate::browser_search::bar_shown(app).then(crate::browser_search::header_min_width);
     if let Some(integration) = &mut app.panel_runtime {
         let frame = ctx.cumulative_frame_nr();
         if integration.last_tick_frame == Some(frame) {
@@ -1225,6 +1230,9 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            host.set_header_content(InstanceId("browser".into()), browser_header);
+            // The open search box holds the magnifier.
+            host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
         }
         let result = (|| {
@@ -1239,12 +1247,14 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = result.err();
         }
     }
-    if app
-        .panel_runtime
-        .as_ref()
-        .and_then(|integration| integration.preferences.as_ref())
-        .is_some_and(|state| state.failed || state.rejected.is_some() || !state.reset.is_empty())
-    {
+    if app.panel_runtime.as_ref().is_some_and(|integration| {
+        integration.preferences.as_ref().is_some_and(|state| {
+            // Startup bounds can change. A pending restore that needs more space will retry;
+            // it does not mean that the saved layout is unreadable.
+            let waiting_for_space = state.pending.is_some() && integration.last_error.as_ref().is_some_and(|reason| reason.rule == Rule::NoSpace);
+            (state.failed && !waiting_for_space) || state.rejected.is_some() || !state.reset.is_empty()
+        })
+    }) {
         super::preferences::report_notice(app);
     }
 }
@@ -1474,6 +1484,26 @@ impl crate::SolveApp {
                     self.panel_runtime = Some(integration);
                 }
             });
+        // Legacy drawing chrome needs the measured ribbon and Browser bounds.
+        if crate::drawing_workspace::active(self)
+            && self.preferences.drawing_sheets_visibility == "legacy"
+            && render_domain.is_positive()
+            && render_domain.is_finite()
+        {
+            let mut bounds = render_domain;
+            if let Some(bottom) = self.shell.cards.iter().map(egui::Rect::bottom).max_by(f32::total_cmp) {
+                bounds.min.y = bottom.clamp(bounds.top(), bounds.bottom());
+            }
+            if self.preferences.drawing_panel_side == "left"
+                && let Some(browser) = self.shell.browser
+            {
+                bounds.min.x = browser.right().clamp(bounds.left(), bounds.right());
+            }
+            let mut legacy = ui.new_child(egui::UiBuilder::new().id_salt("legacy_drawing_inspector").max_rect(bounds));
+            crate::drawing_workspace::panel(self, &mut legacy);
+            crate::drawing_workspace::chrome(self, ui, render_domain);
+        }
+        crate::drawing_workspace::show_add_sheet(self, ui.ctx());
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());
         }

@@ -54,7 +54,9 @@
 //!
 //! **Knots.** The source's net and knots are kept bit for bit (but for the Ruled product
 //! form past its reach, above): the end knot stays at multiplicity `p` as the joint, and the extension's
-//! spans follow it. No knot is removed.
+//! spans follow it. No knot is removed. A candidate whose ends make the knot fixup merge
+//! or spread a span is unproved. The solve can then name a distance from a net that keeps
+//! its knots.
 //!
 //! **Weights.** Every weight control point of the result is positive, which proves `w > 0` on
 //! it. An extension whose weights are not is refused ([`SolidError::ExtendRefused`]) naming a
@@ -172,6 +174,12 @@ pub enum ExtendRefusal {
     /// `1e-6` of the distance): the refusal names the longest distance found that is, if
     /// any.
     NotExact,
+    /// A curve made longer keeping its control polygon's proportions
+    /// ([`crate::nurbs::crv_basic::Curve::extend_keeping_proportion`]) whose growth in arc
+    /// length is not certified within its tolerance of the length asked: the stretch that
+    /// reaches it was not bracketed or not found, or the arc lengths' certified enclosures
+    /// were not narrow enough. Names no distance.
+    LengthNotMet,
 }
 
 /// An extended surface and its certified bounds.
@@ -331,6 +339,9 @@ impl Surface {
             }
             let bound = grown.bound();
             let out = grown.surface(side)?;
+            if !knot_fixup_preserves(out.u_knots()) || !knot_fixup_preserves(out.v_knots()) {
+                return Ok(Some((None, f64::INFINITY)));
+            }
             Ok(Some((
                 Some(Surface::from(BSplineSurface::from_gw_nurb(&out))),
                 bound,
@@ -2011,6 +2022,21 @@ fn merge_scale(a: f64, end: f64) -> f64 {
     EFF_ZERO_PARAM.max(scaled_zero2(&a, &end))
 }
 
+/// Every distinct span must survive both knot fixup passes at the scale of the final ends.
+/// The two tests use the same floating-point subtraction and scale as the fixup. Check the
+/// actual result knots, including any interior spans made by the extension.
+fn knot_fixup_preserves(knots: &[f64]) -> bool {
+    let Some((&first, &last)) = knots.first().zip(knots.last()) else {
+        return false;
+    };
+    let scale = merge_scale(first, last);
+    knots.iter().all(|knot| knot.is_finite())
+        && knots.windows(2).all(|pair| match pair {
+            [a, b] => a.to_bits() == b.to_bits() || b - a >= scale,
+            _ => false,
+        })
+}
+
 /// The row's `w_(n-1) / w_n`.
 fn end_ratio(row: &[H]) -> Option<f64> {
     let mut back = row.iter().rev();
@@ -2160,4 +2186,4 @@ pub(crate) use sides::round_the_axis;
 pub use sides::{ExtendedSides, SideExtension};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

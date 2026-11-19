@@ -21,6 +21,20 @@ Setting `SOLIDCRAFT_SAFE_MODE=1` does the same. From 0.10.2, if two launches in 
 before the window opens, the next one starts in safe mode by itself. `SOLIDCRAFT_RENDERER=cpu`
 uses only the software renderer and keeps your settings.
 
+## Safe graphics mode
+
+If a launch stops before it is up, or the graphics device is lost (the driver was reset), the
+next launch starts in safe graphics mode: your graphics card and settings, but drawn the plain way
+early versions did. The graphics API is the one wgpu picks by itself (no Direct3D 12 first, no
+retries), with no anti-aliasing, ambient occlusion, blur behind panels, studio shading or GPU
+path tracer. The view says "Started in safe graphics mode"; **Try full graphics** goes back to
+full graphics at the next start and offers a restart.
+
+The launch after a single failure tries full graphics again. If two full-graphics launches in a
+row fail, safe graphics mode stays on until you click **Try full graphics**. A full-graphics
+launch that runs a minute without losing its device clears the failures. To try it yourself, tick
+Preferences › Graphics › **Start in safe graphics mode**; it applies to the next launch only.
+
 ## A design won't open or hangs while opening
 
 - **A design that stopped the app while it was being reopened is skipped once.** If SolidCraft
@@ -55,8 +69,7 @@ with a bug report.
 | Linux (Flatpak) | `~/.var/app/io.tangencylabs.solidcraft/data/solidcraft` | (the same folder) |
 
 On Windows, paste `%APPDATA%` or `%LOCALAPPDATA%` into the Explorer address bar to open the
-folder. Releases before the rename used `SolveCraft` folders next to these; SolidCraft only
-reads them, so you can leave them alone.
+folder.
 
 - The **`recovery`** folder holds autosaves of designs that were never saved. Rename the data
   folder rather than deleting it, so you can still open those autosaves (`.sc` files, or `.solidcraft` from earlier releases)
@@ -76,7 +89,7 @@ be opened at all, SolidCraft tries the software renderer once and otherwise show
 saying what failed (earlier versions closed without a word).
 
 On Windows, if the graphics API cannot create the window's renderer, SolidCraft tries the
-remaining APIs in order: Direct3D 12 → Vulkan → OpenGL, then software rendering. The status
+remaining APIs in order: Vulkan → Direct3D 12 → OpenGL, then software rendering. The status
 message and **Preferences › Graphics** say which API failed and why. The saved graphics
 preference stays unchanged. With an explicit `WGPU_BACKEND`, a failed start shows the error
 and exits without switching; change or remove that variable to try another API.
@@ -138,10 +151,12 @@ A graphics driver can crash the app while it starts, before SolidCraft can show 
 old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the driver under
 *Windows Logs › Application* ("Faulting module name").
 
-From 0.11.1, SolidCraft on Windows starts Direct3D 12 first and loads no other graphics API
-when Direct3D 12 has a graphics card; Vulkan and then OpenGL are tried only on a computer
-without one. Earlier versions started Vulkan, Direct3D 12 and OpenGL together and preferred
-Vulkan.
+SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
+graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
+graphics, virtual machines, Remote Desktop). A Vulkan device that fails to start falls back to
+Direct3D 12, then to software rendering. From 0.11.1 until this change Direct3D 12 came first;
+before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together. If the Vulkan driver
+crashes the app while it starts, choose **Direct3D 12** below.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps

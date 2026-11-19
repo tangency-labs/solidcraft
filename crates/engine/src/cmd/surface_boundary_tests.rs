@@ -265,3 +265,117 @@ fn an_edit_turns_a_loop_into_a_network_and_back() {
     assert!(matches!(kind(&s), Some(solidcraft_doc::FeatureKind::SurfaceBoundary { .. })), "{:?}", kind(&s));
     assert!((areas(&mut s, &body).0 - 100.0).abs() < 1e-6);
 }
+
+/// #16508: a boundary surface and a loft built on one arc stitch into one sheet. The case is the
+/// issue's: a half circle (R 13.8 about z = 5.5) on the plane x = 6 is lofted to the same half
+/// circle on x = 60, and is also one of the four sides of a boundary network whose other sides
+/// are an arc on x = -9 and two lines in the XZ plane. The two surfaces are fitted to the arc each
+/// on its own, and their edges along it end up about 7e-5 apart, so before the fix the stitch was
+/// refused ("Bad Gap ... offset=6.81e-05") at any stitch tolerance.
+///
+/// Edge count: each surface is one four-sided face, 4 + 4 = 8 edges, and the stitch makes the
+/// arc they share one edge, so the sheet has 8 - 1 = 7 edges on 2 faces.
+#[test]
+fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
+    let mut s = Session::default();
+    let mut arc = |name: &str, offset: f64, start: [f64; 2], end: [f64; 2], through: [f64; 2]| {
+        run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": offset, "name": name}));
+        run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": through}));
+        run(&mut s, "sketch.finish", json!({}));
+    };
+    let half = ([0.0, -8.3], [0.0, 19.3], [-13.8, 5.5]);
+    arc("Shared", 6.0, half.0, half.1, half.2);
+    arc("Far", 60.0, half.0, half.1, half.2);
+    // The issue's back arc: centre (1.5255, 0.9839), through both ends and its point farthest out.
+    let (centre, start, end): ([f64; 2], [f64; 2], [f64; 2]) =
+        ([1.5254923566139873, 0.9839315653407356], [0.0, -8.888970788629825], [0.0, 10.856833919298804]);
+    let r = (centre[0] - start[0]).hypot(centre[1] - start[1]);
+    arc("Back", -9.0, start, end, [centre[0] - r, centre[1]]);
+    // The two rails in the XZ plane (a sketch point (u, v) is the model point (u, 0, -v)).
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Rails"}));
+    let low = line(&mut s, [6.0, 8.3], [-9.0, -start[1]]);
+    let high = line(&mut s, [-9.0, -end[1]], [6.0, -19.3]);
+    run(&mut s, "sketch.finish", json!({}));
+    let curve = |sketch: &str, id: &str| json!({"sketch": sketch, "curves": [id]});
+    let loft = run(&mut s, "surface.loft", json!({"sections": [curve("Shared", "a1"), curve("Far", "a1")]}));
+    let boundary = run(
+        &mut s,
+        "surface.boundary",
+        json!({"u": [curve("Rails", &low), curve("Rails", &high)], "v": [curve("Shared", "a1"), curve("Back", "a1")]}),
+    );
+    let (a, b) = (first(&boundary["created_bodies"]), first(&loft["created_bodies"]));
+    assert!(!a.is_empty() && !b.is_empty() && a != b, "{boundary} / {loft}");
+    for body in [&a, &b] {
+        let edges = run(&mut s, "model.edges", json!({"body": body}));
+        assert_eq!(edges["edges"].as_array().map(Vec::len), Some(4), "each surface is four-sided: {edges}");
+    }
+    let stitched = run(&mut s, "surface.stitch", json!({"bodies": [a, b]}));
+    let bodies: Vec<&Value> = ["created_bodies", "changed_bodies"].iter().filter_map(|k| stitched[*k].as_array()).flatten().collect();
+    assert_eq!(bodies.len(), 1, "one sheet: {stitched}");
+    let body = bodies[0].as_str().unwrap_or_default();
+    let faces = run(&mut s, "model.faces", json!({"body": body}));
+    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(2), "{faces}");
+    let edges = run(&mut s, "model.edges", json!({"body": body}));
+    assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
+}
+
+/// #17197: a boundary curve made of two sketch lines that meet at a sharp corner can't be fitted
+/// smoothly, so the surface is refused, and the refusal names the corner and how sharply the
+/// curve turns there. The V runs from (0, 0) to (10, 0) and then back up to (4, 6): it turns by
+/// 135° at (10, 0, 0).
+#[test]
+fn a_curve_with_a_corner_is_refused_naming_the_corner() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Vee"}));
+    let out = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let back = line(&mut s, [10.0, 0.0], [4.0, 6.0]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "High"}));
+    let high = line(&mut s, [0.0, 0.0], [10.0, 6.0]);
+    run(&mut s, "sketch.finish", json!({}));
+    let params = json!({"u": [{"sketch": "Vee", "curves": [out, back]}, {"sketch": "High", "curves": [high]}]});
+    let e = match s.execute("surface.boundary", &params) {
+        Ok(v) => panic!("a curve with a corner was built: {v}"),
+        Err(e) => e.to_string(),
+    };
+    assert!(e.contains("can't be fitted closely enough; its curves meet at (10, 0, 0) turning by 135.0°"), "{e}");
+}
+
+/// #17053: a boundary surface through two curves that meet at one end (a quarter arc on the
+/// ground and a straight side rising from one of its ends) is a loft whose side between them
+/// collapses to that point. Each side's distance from the surface is proved; a side starting at
+/// the collapsed corner was refused ("gap is not enclosed") when its first nearest point fell
+/// elsewhere along the collapsed side, which rounding decided: before the fix 7 of these 32
+/// cases were refused. Every placement and direction builds the one face.
+#[test]
+fn two_curves_meeting_at_a_corner_bound_their_distance_from_the_surface() {
+    let q = std::f64::consts::FRAC_PI_2;
+    for r in [15.0, 7.3] {
+        for t0 in [0.1f64, 0.37, 1.0, 5.5] {
+            let at = |t: f64| [r * t.cos(), r * t.sin()];
+            let corner = [r * t0.cos(), r * t0.sin(), 0.0];
+            let far = [2.0 * r * (t0 - 0.4).cos(), 2.0 * r * (t0 - 0.4).sin(), 3.3 * r];
+            for (start, end) in [(at(t0), at(t0 + q)), (at(t0 + q), at(t0))] {
+                for (a, b) in [(corner, far), (far, corner)] {
+                    let mut s = Session::default();
+                    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Ground"}));
+                    let arc = run(&mut s, "sketch.arc.three_point", json!({"start": start, "end": end, "through": at(t0 + 0.5 * q)}));
+                    let arc = first(&arc["created"]["curves"]);
+                    run(&mut s, "sketch.finish", json!({}));
+                    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Side"}));
+                    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+                    let side = line3d(&mut s, a, b);
+                    run(&mut s, "sketch.finish", json!({}));
+                    let made =
+                        s.execute("surface.boundary", &json!({"u": [{"sketch": "Ground", "curves": [arc]}, {"sketch": "Side", "curves": [side]}]}));
+                    let made = match made {
+                        Ok(v) => v,
+                        Err(e) => panic!("r {r}, arc from {start:?}, side from {a:?}: {e}"),
+                    };
+                    let faces = run(&mut s, "model.faces", json!({"body": first(&made["created_bodies"])}));
+                    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(1), "r {r}, arc from {start:?}, side from {a:?}: {faces}");
+                }
+            }
+        }
+    }
+}

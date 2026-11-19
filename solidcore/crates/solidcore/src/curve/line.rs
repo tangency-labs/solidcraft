@@ -844,17 +844,44 @@ impl Line {
     /// rounding. `None` for numbers not finite.
     #[must_use]
     pub(crate) fn segment_over(&self, interval: &Extent1d) -> Option<[(Point3, f64); 2]> {
-        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
         let end = |t: f64| {
-            let (s, ds) = self.step_param_enclosure(t)?;
             let q = self.evaluate_point(t);
-            let e = (gamma(3) * (size(self.point) + (s * self.scale).abs() * size(self.vector))
-                + ds * self.scale.abs() * size(self.vector))
-                * (1.0 + gamma(3));
-            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && e.is_finite())
-                .then_some((q, e))
+            let e = self.point_error(t)?;
+            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite()).then_some((q, e))
         };
         Some([end(interval.min())?, end(interval.max())?])
+    }
+
+    /// Not upstream: the error bound of each coordinate of [`Self::evaluate_point`] at
+    /// NURB parameter `t`, as derived for [`Self::segment_over`]. `None` for numbers not
+    /// finite.
+    #[must_use]
+    pub(crate) fn point_error(&self, t: f64) -> Option<f64> {
+        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let (s, ds) = self.step_param_enclosure(t)?;
+        let e = (gamma(3) * (size(self.point) + (s * self.scale).abs() * size(self.vector))
+            + ds * self.scale.abs() * size(self.vector))
+            * (1.0 + gamma(3));
+        e.is_finite().then_some(e)
+    }
+
+    /// Not upstream: an upper bound on the speed of [`Self::evaluate_point`] in its NURB
+    /// parameter. The point is `P + s(t) scale V` with `s` affine in `t`
+    /// ([`Self::convert_t_from_nurbs_to_step`]): slope `A / L` (analytic over NURB domain
+    /// length) on a bounded line with `L` not zero, otherwise `±1`. So the speed is
+    /// `|scale| |V| |A / L|` exactly; the computed lengths, quotient, norm and products
+    /// are each within a few roundings, covered by widening by `1 + γ_8`. `None` for
+    /// numbers not finite.
+    #[must_use]
+    pub(crate) fn speed_bound(&self) -> Option<f64> {
+        let nurb_ivl = self.natural_interval();
+        let slope = if self.is_bounded() && !is_zero(nurb_ivl.length()) {
+            (self.anal_domain.length() / nurb_ivl.length()).abs()
+        } else {
+            1.0
+        };
+        let b = self.scale.abs() * self.vector.length() * slope * (1.0 + gamma(8));
+        b.is_finite().then_some(b)
     }
 
     /// The point at the analytic domain start and the line vector over the domain
@@ -1325,9 +1352,9 @@ impl Line {
 
     /// Intersections of this line over `interval` with the ellipse `other` over
     /// `other_interval` (`IntersectWithEllipse`: [`Ellipse::intersect_with_line`] with
-    /// the objects and parameters of every solution swapped). Solutions name
-    /// `this_obj` and `other_obj`; `start.parameters` holds `[this param, other
-    /// param]`.
+    /// the objects and parameters of every solution swapped; `contact_tol` as there).
+    /// Solutions name `this_obj` and `other_obj`; `start.parameters` holds `[this param,
+    /// other param]`.
     ///
     /// # Errors
     ///
@@ -1339,6 +1366,7 @@ impl Line {
         other: &Ellipse,
         other_interval: &Extent1d,
         tol: f64,
+        contact_tol: f64,
         this_obj: Option<O>,
         other_obj: Option<O>,
     ) -> Result<LineLineIntersection<O>> {
@@ -1349,6 +1377,7 @@ impl Line {
             self,
             interval,
             tol,
+            contact_tol,
             other_obj,
             this_obj,
         )?;

@@ -33,6 +33,12 @@ pub fn largest_fit_note(size: &str, largest: f64) -> String {
     format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
 }
 
+/// The note naming the largest scale of a two-sided chamfer's distances that fits: "the largest
+/// that fits is 0.6 times the distances given".
+pub fn scale_fit_note(scale: f64) -> String {
+    format!("the largest that fits is {} times the distances given", trimmed_mm(scale))
+}
+
 /// Whether a refusal already names the largest size that fits ([`largest_fit_note`]).
 pub fn names_largest_fit(why: &str) -> bool {
     why.contains("that fits is ")
@@ -308,17 +314,21 @@ fn fillet_turning(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) ->
 /// [`fillet`], its rounds turning at side edges as `turn` says, with the picks whose edges are
 /// gone: where some of the rounds overflow their faces, those are built first, and a picked edge
 /// one of them removes whole is not rounded (the others round what is left of their edges).
+/// Where SMLib refuses the round of a single edge as too large or fails it as an operation, the
+/// concave round whose contact line runs off the flat face it rolls on is built by carrying that
+/// face on ([`concave_overflow_round`]); where that does not apply, SMLib's error.
 pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
     let _span = solidcraft_profile::span("kernel", "fillet");
     body.require_brep("fillet")?;
     match crate::blend_smlib::fillet_removing(body, edges, radius, turn) {
         Ok((b, gone)) => Ok((closed(body, b)?, gone)),
-        Err(KernelError::TooLarge(why)) => match edges {
-            [pick] => match concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn))? {
-                Some(b) => Ok((b, Vec::new())),
-                None => Err(KernelError::TooLarge(why)),
-            },
-            _ => Err(KernelError::TooLarge(why)),
+        // Just past the largest round that fits, SMLib fails it as an operation (its status 1001)
+        // rather than sizing it as too large, as it does the chamfer ([`chamfer_carrying_face`]).
+        Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))) => match edges {
+            [pick] => concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn))?
+                .map(|b| (b, Vec::new()))
+                .ok_or(e),
+            _ => Err(e),
         },
         Err(e) => Err(e),
     }
@@ -326,7 +336,8 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 
 /// A concave blend (a round or a chamfer) on one straight edge whose contact line runs off the
 /// flat face it rolls on (the face's outline turns away there, into a rounded corner or an
-/// opening), which SMLib refuses (solidcore#3252): `blend` of the edge on the body with that face
+/// opening), which SMLib refuses (solidcore#3252), or just past the largest blend that fits fails
+/// as an operation: `blend` of the edge on the body with that face
 /// carried on as a slab behind its plane, over the edge's length, and of the material that blend
 /// adds, what stands over the face's outline (its sheet thickened along its normal) and what
 /// stands past the edge's line, on the other face's side of it (a box on that side of the line,
@@ -353,6 +364,19 @@ fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&B
     // Each step checked as it is built: one whose result the check refuses fails that step, so
     // the caller never gets a body the feature's check refuses later.
     crate::validation::validating(crate::Validation::EachStep, || carried_on_round(body, pick, reach, blend)).0
+}
+
+/// `rounded` (the blend of `body` with `slab` joined to it) less what lies outside `body`, `slab`
+/// and `keep` within a box `room` larger each way than `bounds` (the added material's box):
+/// `body` joined to the added material within `keep`, without taking that material on its own.
+/// `None` where a step fails.
+fn blended_within(body: &Body, slab: &Body, rounded: &Body, keep: &Body, bounds: solidcraft_geom::Aabb3, room: f64) -> Option<Body> {
+    let pad = Vec3::new(room, room, room);
+    let block = crate::box_solid(bounds.min - pad, bounds.max + pad).ok()?;
+    let outside = crate::boolean(&block, keep, crate::BoolOp::Cut).ok()??;
+    let waste = crate::boolean(&outside, slab, crate::BoolOp::Union).ok()??;
+    let waste = crate::boolean(&waste, body, crate::BoolOp::Cut).ok()??;
+    crate::boolean(rounded, &waste, crate::BoolOp::Cut).ok()?
 }
 
 /// A step of [`carried_on_round`] that failed, and why.
@@ -416,13 +440,24 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let what = "joining the face's prism and the box past the edge's line";
         let keep = crate::boolean(&prism, &beyond, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
         let what = "keeping the added material within the face's outline";
-        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
-        let what = "joining the added material to the body";
-        let joined = crate::boolean(body, &kept, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?;
+        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).map_err(failed(what)).and_then(|k| k.ok_or_else(|| nothing(what)));
+        let (joined, history) = match kept {
+            Ok(kept) => {
+                let what = "joining the added material to the body";
+                (crate::boolean(body, &kept, crate::BoolOp::Union).map_err(failed(what))?.ok_or_else(|| nothing(what))?, true)
+            }
+            // Where the contact line runs only just past the face's outline, the added material
+            // is thinner there than the boolean's tolerance and cutting it at the outline fails.
+            // The blended body less what lies outside the body, the slab and the kept region is
+            // the same body and does not cut that sliver on its own. Deliberate: where that fails
+            // too, the first route's failure is the one reported. Its history would run through
+            // four more booleans and is not composed: the result has none.
+            Err(first) => (blended_within(body, &slab, &rounded, &keep, bounds, room).ok_or(first)?, false),
+        };
         let joined = closed(body, joined).map_err(failed("checking that the result is closed"))?;
         let what = "measuring the result";
         if volume(&joined).map_err(failed(what))? > volume(body).map_err(failed(what))? {
-            Ok(over_body_alone(joined, body, e))
+            Ok(if history { over_body_alone(joined, body, e) } else { joined.without_history() })
         } else {
             Err(Some(("checking that the result adds material", "it adds none".to_owned())))
         }
@@ -756,12 +791,11 @@ fn radius_step(radius: f64) -> f64 {
 
 /// The largest radius below `radius` (to three significant digits) at which the fillet of
 /// these edges works, with its result; `Ok(None)` when none does. Each candidate is a real fillet
-/// of the edges, so the radius returned is one that was built; the search runs up to 16 of
-/// them, plus up to 6 led by the sizes the refusals name (a refusal of a fillet feature's exact
-/// fit runs it to name the largest that fits, and so does `fit: reduce`). Only a refusal as too
-/// large ([`KernelError::TooLarge`]) narrows the search: any other failure of a candidate is the
-/// search's error, since a smaller radius would not be the largest that fits. The rounds turn at
-/// side edges as `turn` says.
+/// of the edges, so the radius returned is one that was built; the search runs up to 22 of
+/// them, with up to 6 led by the sizes the refusals name (a refusal of a fillet feature's exact
+/// fit runs it to name the largest that fits, and so does `fit: reduce`). No further candidate
+/// starts after 30 seconds. A refusal as too large or a failed operation permits another size;
+/// bad input and kernel faults stop the search. The rounds turn at side edges as `turn` says.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(f64, Body)>> {
     fillet_max_why(body, edges, radius, turn, None).map(|search| search.found)
 }
@@ -786,6 +820,23 @@ pub fn chamfer_max_why(body: &Body, edges: &[Vec3], distance: f64, hint: Option<
     largest_that_fits(distance, hint, |d| chamfer(body, edges, d))
 }
 
+/// The largest scale below 1 (to three significant digits) of both of a two-sided chamfer's
+/// sizes at which [`chamfer_sides_carrying_face`] builds, with its result: by distance and
+/// distance both scale, by angle the distance does (the angle stays). Each candidate is a real
+/// chamfer of the edges, as for [`chamfer_max_why`]: where SMLib fails a chamfer too large for
+/// the faces beside its edges inside the blend (status 1001) instead of refusing it as too large,
+/// a candidate that builds says it was its size (#18545).
+pub fn chamfer_sides_max_why(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<FitSearch> {
+    let _span = solidcraft_profile::span("kernel", "chamfer_sides_max");
+    largest_that_fits(1.0, None, |scale| {
+        let side = match side {
+            ChamferSide::Distance(d2) => ChamferSide::Distance(d2 * scale),
+            angle => angle,
+        };
+        chamfer_sides_carrying_face(body, edges, d1 * scale, side, flip)
+    })
+}
+
 /// The largest size in mm a refusal names ([`largest_fit_note`]): 3 for "...; the largest radius
 /// that fits is 3 mm". `None` where it names none, or names a scale ("2 times the distances").
 pub fn named_fit(why: &str) -> Option<f64> {
@@ -795,8 +846,8 @@ pub fn named_fit(why: &str) -> Option<f64> {
 }
 
 /// What [`largest_that_fits`] found: the largest size it built, with its result, or (none built)
-/// the smallest size it tried and that candidate's own refusal, so a caller can say why nothing
-/// smaller builds instead of repeating the first refusal's estimate.
+/// the smallest size it tried and that candidate's own refusal, so a caller can describe what
+/// was tried instead of repeating the first refusal's estimate.
 pub struct FitSearch {
     /// The largest size built, with its result.
     pub found: Option<(f64, Body)>,
@@ -813,8 +864,14 @@ pub struct FitSearch {
 /// next size up, n·q + q, was refused. With none built, the smallest size tried and its failure are
 /// kept ([`FitSearch::smallest_refused`]). Bad input and the kernel's own faults are errors.
 ///
-/// The search brackets the largest size between the largest built (`lo`) and the smallest refused
-/// (`hi`), and each candidate narrows the bracket, by bisection where nothing better is known. A
+/// The usual first midpoint keeps the established fast path, but its refusal does not discard
+/// the upper half. Before anything builds, the search samples integer geometric midpoints between
+/// halving levels. Halving skipped the entire working band in the fuzzer's seed 242. These probes are
+/// capped by the number of grid intervals the remaining probes can bisect, so even the smallest
+/// grid size stays reachable. A failed estimate does not discard larger untested sizes, and
+/// suspends following estimates until a candidate builds.
+/// Once a candidate builds, the search brackets it with the nearest larger refusal and refines
+/// by bisection. This finds a validated local maximum, not every disconnected band. A
 /// refusal as too large names the largest size it estimates fits ([`named_fit`]; `hint` for the
 /// request's own refusal), usually within a step or two of it: that size is tried next (unless it
 /// is within 1% of the size refused, which says nothing of where the largest lies), and once
@@ -822,7 +879,21 @@ pub struct FitSearch {
 /// close estimate settles the search in two or three blends where bisection takes eleven or
 /// more. Where building is monotone in the size (everything below the largest that fits builds),
 /// the size found is the one bisection finds; it never depends on how the bracket narrowed.
+///
+/// Building is not monotone in the size: a narrow band of sizes can build between sizes that fail,
+/// so a search that found nothing has not shown that nothing smaller builds.
 fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result<Body>) -> Result<FitSearch> {
+    let started = web_time::Instant::now();
+    largest_that_fits_while(size, hint, blend, || started.elapsed() < std::time::Duration::from_secs(30))
+}
+
+/// The same search with a work budget, independent of wall-clock timing in tests.
+fn largest_that_fits_while(
+    size: f64,
+    hint: Option<f64>,
+    blend: impl Fn(f64) -> Result<Body>,
+    keep_searching: impl Fn() -> bool,
+) -> Result<FitSearch> {
     if !(size.is_finite() && size > 1e-6) {
         return Ok(FitSearch { found: None, smallest_refused: None, tried: 0 });
     }
@@ -832,6 +903,7 @@ fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result
     let mut lo = 0u64;
     let mut best: Option<Body> = None;
     let mut smallest_refused: Option<(f64, KernelError)> = None;
+    let mut attempted = BTreeSet::new();
     // The step on the grid at or below an estimate (a hair over, so 1.24 / 0.001 is 1240), for an
     // estimate that says where the largest size lies: one at least 1% below the size refused. An
     // estimate a margin below it (2.99 for 3: solidcore names the size less a margin where the
@@ -842,12 +914,14 @@ fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result
     let mut next_hint = hint.and_then(|e| lead(e, size));
     // Steps up from `lo` while climbing from a built estimate.
     let mut climb: Option<u64> = None;
-    // log2(10⁴) bisection steps reach the step size, and the estimates lead at most 6 more; the
-    // caps keep a slow body from stalling.
-    let (mut bisections, mut led, mut tried) = (0, 0, 0);
-    while hi - lo > 1 {
-        let guided = if led < 6 {
-            match next_hint.take().filter(|h| lo < *h && *h < hi) {
+    // Share the existing 22-call cap between exploration and refinement. Reserve enough
+    // calls to bisect the remaining grid even when an estimate fails without narrowing it.
+    let (mut led, mut tried) = (0, 0);
+    let mut failed_hint = false;
+    while hi - lo > 1 && tried < 22 && keep_searching() {
+        let cap = 2u64.saturating_pow(21u32.saturating_sub(tried as u32));
+        let guided = if led < 6 && hi - lo <= cap && (best.is_some() || !failed_hint) {
+            match next_hint.take().filter(|h| lo < *h && *h < hi && !attempted.contains(h)) {
                 Some(h) => Some((h, true)),
                 None => climb.map(|step| (lo.saturating_add(step).min(hi - 1), false)),
             }
@@ -859,13 +933,26 @@ fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result
                 led += 1;
                 g
             }
-            None if bisections < 16 => {
-                bisections += 1;
-                (lo + (hi - lo) / 2, false)
+            None => {
+                let n = if best.is_some() || tried == 0 {
+                    lo + (hi - lo) / 2
+                } else {
+                    // floor(hi / sqrt(2)) places a probe between each pair of halving
+                    // levels using exact integer arithmetic. Either outcome leaves at
+                    // most `cap` grid intervals for the remaining calls to bisect.
+                    (hi.saturating_mul(hi) / 2).isqrt().min(cap)
+                };
+                (n, false)
             }
-            None => break,
         };
         let was_guided = guided.is_some();
+        if !attempted.insert(n) {
+            // A previously refused estimate can also be an ordinary probe. Its refusal
+            // already supplies this bound; rebuilding the same candidate adds no evidence.
+            hi = n;
+            climb = None;
+            continue;
+        }
         tried += 1;
         // A candidate fits only as a body SMLib's check accepts: each is checked as it is built,
         // whatever the evaluation's validation mode (`crate::validation`).
@@ -874,6 +961,9 @@ fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result
                 let step = n - lo;
                 lo = n;
                 best = Some(b);
+                // Estimates below the working band failed without narrowing exploration.
+                // Only refusals above this validated success bound its upward refinement.
+                hi = attempted.range(n.saturating_add(1)..).next().copied().unwrap_or(hi).min(hi);
                 // Climb from a built estimate, doubling the step each time one builds.
                 climb = if from_hint {
                     Some(1)
@@ -884,12 +974,23 @@ fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result
                 };
             }
             Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))) => {
-                hi = n;
+                // The initial midpoint can fail below a working band. Keep the upper
+                // interval for exploration, as with an unvalidated estimate. Its width
+                // fits in 14 bits, within the remaining calls' initial cap of 2^21.
+                if best.is_some() || (!from_hint && tried > 1) {
+                    hi = n;
+                } else if from_hint {
+                    // A failed estimate is not evidence for another estimate chain.
+                    // Resume exploring the grid until there is a validated bracket.
+                    failed_hint = true;
+                }
                 climb = None;
                 if let KernelError::TooLarge(why) = &e {
                     next_hint = named_fit(why).and_then(|est| lead(est, n as f64 * q));
                 }
-                smallest_refused = Some((n as f64 * q, e));
+                if smallest_refused.as_ref().is_none_or(|(at, _)| n as f64 * q < *at) {
+                    smallest_refused = Some((n as f64 * q, e));
+                }
             }
             // Not a size the blend could not take: bad input, or the kernel's own fault.
             Err(e) => return Err(e),
@@ -905,7 +1006,7 @@ fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result
 /// reduced for a tight edge elsewhere. The radius per edge (in `edges`' order) and the result,
 /// `Ok(None)` when no radius fits. One radius for all (as [`fillet_max`]) when the groups,
 /// each reduced to fit, are too large together, or there are too many to search (each search is
-/// up to 16 fillets, and this runs in the live preview). Any failure other than a refusal as too
+/// up to 22 fillets, and this runs in the live preview). Any failure other than a refusal as too
 /// large is the error.
 pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(Vec<f64>, Body)>> {
     let _span = solidcraft_profile::span("kernel", "fillet_max_each");
@@ -1128,6 +1229,14 @@ pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     crate::blend_smlib::picked_edges(body, picks).map(|(edges, _)| edges)
 }
 
+/// Whether each pick takes a smooth edge, as a blend takes it ([`blend_edges`]): its faces meet
+/// tangentially all along it, so a blend of it is refused (there is nothing to round).
+pub fn smooth_picks(body: &Body, picks: &[Vec3]) -> Result<Vec<bool>> {
+    let (edges, _) = crate::blend_smlib::picked_edges(body, picks)?;
+    let rec = Faces::of(body)?;
+    edges.into_iter().map(|e| smooth_join(&rec, e)).collect()
+}
+
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
 /// nearest edge of `body` to it), then a point on every other edge that continues one of them
 /// tangentially (within 2°, [`solidcraft_geom::TANGENT_CHAIN`], at a shared vertex), until no more do. Each pick takes its edge as a
@@ -1147,11 +1256,47 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     Ok(out)
 }
 
+/// The point halfway along the edge each of `picks` takes, as a blend takes it ([`blend_edges`]),
+/// one per pick and in their order: where a moved copy of the body finds the same edge again. A
+/// pick itself need not: at the vertex two edges share (the halves of a rim a seam splits) it is
+/// as near to each, and on a copy rounding takes either (#16934). The middle is on the edge's own
+/// curve, at the middle of its parameter interval. Picks that find no edge are refused.
+pub fn blend_edge_middles(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
+    let rec = Faces::of(body)?;
+    let (edges, _) = crate::blend_smlib::picked_edges(body, picks)?;
+    edges.into_iter().map(|e| edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a picked edge".into()))).collect()
+}
+
 /// [`tangent_chain`] as the record's edge indices (the display's edge indices,
 /// [`Body::edges`]): the edges `picks` take, each once, then the edges that continue them.
 /// For a caller that shows the chain: it needs no point looked up on a tessellated edge.
 pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     picked_chain(body, picks).map(|(_, chain, _)| chain)
+}
+
+/// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
+/// themselves ([`tangent_chain`]): one list per such edge, in chain order, of `per_edge` points
+/// spread evenly inside the edge, never at its ends (solidcore's
+/// [`solidcore_ops::Body::edge_points`]; `per_edge` is held to 1 … its
+/// [`solidcore_ops::EDGE_POINTS_MAX`]). For a caller that
+/// checks which of those edges a blend left as they were: a blend may take part of an edge it
+/// runs past the end of, so its middle alone does not tell. Picks that find no edge are
+/// refused; a mesh body has no chain.
+pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize) -> Result<Vec<Vec<Vec3>>> {
+    let (_, chain, picked) = picked_chain(body, picks)?;
+    let most = usize::try_from(solidcore_ops::EDGE_POINTS_MAX).unwrap_or(1);
+    let per_edge = if per_edge == 0 { 1 } else { per_edge.min(most) };
+    let Some((ops, order)) = body.ops_body() else {
+        return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
+    };
+    chain
+        .into_iter()
+        .skip(picked)
+        .map(|e| {
+            let points = ops.edge_points(order, e, per_edge).map_err(|err| KernelError::Failed(format!("points along a chain edge: {err}")))?;
+            Ok(points.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect())
+        })
+        .collect()
 }
 
 /// The body's record, the picked edges' tangent chain as its edge indices (the picked edges
@@ -1766,6 +1911,35 @@ mod tests {
         }
     }
 
+    /// A round likewise: rounded 5.29 its contact on the plate's front face stays short of x 32.5
+    /// (at 32.4970) and the body is SMLib's; just past there SMLib fails the round as an
+    /// operation instead of sizing it, and carried on it builds and grows with its radius. Its
+    /// contact reaches under 0.05 past x 32.5, where the round stands under 2e-4 off the plate
+    /// and the corner's arc drops under 1e-4: what it leaves out past the arc is far under the
+    /// tolerance, and its material is its section over the boss's 24 mm.
+    #[test]
+    fn a_concave_round_just_past_its_face_builds() {
+        let body = boss_on_rounded_plate();
+        assert!(matches!(fillet(&body, &[BOSS_EDGE], 5.32), Err(KernelError::Failed(_))));
+        let (fits, _) = fillet_removing(&body, &[BOSS_EDGE], 5.29, FilletTurn::Mitre).unwrap();
+        let plain = fillet(&body, &[BOSS_EDGE], 5.29).unwrap();
+        assert_eq!(crate::encode_native_body(&fits).unwrap(), crate::encode_native_body(&plain).unwrap());
+        let before = crate::measure(&body).unwrap();
+        let mut last = before.volume;
+        for r in [5.29, 5.32, 5.33, 5.34] {
+            let (out, gone) = fillet_removing(&body, &[BOSS_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("r {r}: {e}"));
+            assert!(gone.is_empty());
+            let (p, _, area) = boss_round_section(r);
+            assert!(p.0 < 32.55, "r {r}: contact at x {}", p.0);
+            let m = crate::measure(&out).unwrap();
+            let added = m.volume - before.volume;
+            assert!(m.shells == 1 && m.volume > last && (24.0 * area - added).abs() < 1e-3, "r {r}: added {added}");
+            assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "r {r}: {:?}", m.bbox);
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "r {r}");
+            last = m.volume;
+        }
+    }
+
     /// What carrying the face on leaves out of a chamfer with contacts `p` on the plate and `q`
     /// on the boss: the part of its section past the r16 corner's arc, none where `p` is short of
     /// x 32.5. At x = 32.5 + u the section is as thick as the chamfer's line stands off the plate
@@ -1879,10 +2053,13 @@ mod tests {
     /// x 30. A chamfer `d` is the triangle of its two sides, `d^2 sin(wedge) / 2`, and past the
     /// end it loses its tip there, `d - 10` long and as high as its line stands off the top at
     /// x 30. Up to 10 it is SMLib's; past it SMLib refuses it and carrying the top on builds it.
-    /// A round whose contacts are 12 from the edge (radius `12 tan(wedge / 2)`) is the kite of
+    /// A round whose contacts are `c` from the edge (radius `c tan(wedge / 2)`) is the kite of
     /// the edge, its contacts and its centre less its sector, and loses what stands past x 30:
-    /// `r - sqrt(r^2 - w^2)` off the top, `w` from 0 to 2 short of its contact. Each blend is one
-    /// face, in one shell.
+    /// `r - sqrt(r^2 - w^2)` off the top, `w` from 0 to `c - 10` short of its contact. With its
+    /// contacts 10.01 and 10.02 from the edge that is under 5e-5 thick at x 30, thinner than the
+    /// boolean that cuts it there takes, and the round is built without cutting it on its own
+    /// (with no history). Each blend is in one shell and none stands past x 30; the chamfers and
+    /// the round 12 from the edge are one face each.
     fn wall_blends_run_on_past_the_tops_end(wedge: f64) {
         let body = walled_plate(wedge);
         let before = crate::measure(&body).unwrap().volume;
@@ -1910,16 +2087,30 @@ mod tests {
             last = m.volume;
         }
         let half = wedge.to_radians() / 2.0;
-        let r = 12.0 * half.tan();
-        assert!(matches!(fillet(&body, &[WALL_EDGE], r), Err(KernelError::TooLarge(_))), "{wedge}°: SMLib refuses r {r}");
-        let (out, gone) = fillet_removing(&body, &[WALL_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("{wedge}°, r {r}: {e}"));
-        assert!(gone.is_empty());
-        let section = 12.0 * r - r * r * (std::f64::consts::FRAC_PI_2 - half);
-        let past = 2.0 * r - (r * r - 4.0).sqrt() - 0.5 * r * r * (2.0 / r).asin();
-        let m = crate::measure(&out).unwrap();
-        let full = 20.0 * (section - past);
-        assert!(m.shells == 1 && (full - (m.volume - before)).abs() < 1e-6, "{wedge}°, r {r}: added {} of {full}", m.volume - before);
-        assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, r {r}");
+        let bbox = crate::measure(&body).unwrap().bbox;
+        let mut last = before;
+        for c in [10.01, 10.02, 12.0] {
+            let r = c * half.tan();
+            assert!(matches!(fillet(&body, &[WALL_EDGE], r), Err(KernelError::TooLarge(_))), "{wedge}°: SMLib refuses r {r}");
+            let (out, gone) = fillet_removing(&body, &[WALL_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("{wedge}°, r {r}: {e}"));
+            assert!(gone.is_empty());
+            let section = c * r - r * r * (std::f64::consts::FRAC_PI_2 - half);
+            let w = c - 10.0;
+            let past = w * r - 0.5 * w * (r * r - w * w).sqrt() - 0.5 * r * r * (w / r).asin();
+            let m = crate::measure(&out).unwrap();
+            let full = 20.0 * (section - past);
+            assert!(
+                m.shells == 1 && m.volume > last && (full - (m.volume - before)).abs() < 1e-6,
+                "{wedge}°, r {r}: added {} of {full}",
+                m.volume - before
+            );
+            // nothing of it stands past the top's end
+            assert!(m.bbox.min.dist(bbox.min) < 1e-9 && m.bbox.max.dist(bbox.max) < 1e-9, "{wedge}°, r {r}: {:?}", m.bbox);
+            if c == 12.0 {
+                assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, r {r}");
+            }
+            last = m.volume;
+        }
     }
 
     /// With the wall's side leaning back 30° (a wedge of 120°) a blend stands over the wall's
@@ -2336,15 +2527,139 @@ mod tests {
     }
 
     /// A search where every candidate is refused as too large keeps the smallest size it tried
-    /// and that candidate's own refusal, and builds nothing: the caller can say why nothing
-    /// smaller builds instead of repeating the first refusal's estimate.
+    /// and that candidate's own refusal, and builds nothing: the caller can describe the
+    /// smallest candidate's failure instead of repeating the first refusal's estimate.
     #[test]
     fn a_search_that_builds_nothing_keeps_its_smallest_refusal() {
         let search = largest_that_fits(0.3, None, |d| Err(KernelError::TooLarge(format!("refused at {d}")))).unwrap();
         assert!(search.found.is_none());
         let (at, e) = search.smallest_refused.expect("a refusal");
-        assert!(at > 0.0 && at < 0.001, "the bisection goes down to the step: {at}");
+        assert_eq!(at, radius_step(0.3), "the search reaches the smallest grid size");
         assert_eq!(e.to_string(), KernelError::TooLarge(format!("refused at {at}")).to_string());
+    }
+
+    /// The fuzzer's seed 242 builds only in a band between failures. Refusing 0.078 must not
+    /// discard the interval up to the previous refusal at 0.156: 0.1 builds there.
+    #[test]
+    fn a_band_of_sizes_that_build_between_failures_is_found() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let in_band = |r: f64| (0.08..=1166.0 * 0.0001).contains(&r);
+        // q is 0.001 for requests above 1, and 0.0001 for 0.625 and 0.15. The greatest grid index
+        // in [0.08, 0.1166] is respectively 116 and 1166, independent of the search.
+        for (asked, expected) in
+            [(9.999, 116.0 * 0.001), (2.5, 116.0 * 0.001), (2.02, 116.0 * 0.001), (0.625, 1166.0 * 0.0001), (0.15, 1166.0 * 0.0001)]
+        {
+            for (hint, estimate_chain) in
+                [(None, false), (Some(0.01), false), (Some(0.05), false), (Some(0.1), false), (Some(0.2), false), (Some(9.0), true)]
+            {
+                let tried = std::cell::RefCell::new(Vec::new());
+                let search = largest_that_fits(asked, hint, |r| {
+                    tried.borrow_mut().push(r);
+                    if in_band(r) {
+                        Ok(body.clone())
+                    } else {
+                        // Even the estimate can point below the band. It is a candidate,
+                        // never proof that every larger radius fails.
+                        // At 9.999, the chain 9, 8, 7, ... must not consume the
+                        // exploration budget before the search reaches the band.
+                        let estimate = if estimate_chain { (r - 1.0).max(0.01) } else { 0.01 };
+                        Err(KernelError::TooLarge(format!("too large; {}", largest_fit_note("radius", estimate))))
+                    }
+                })
+                .unwrap();
+                let (radius, _) = search.found.expect("the search must find the band");
+                assert_eq!(radius, expected, "request {asked}, hint {hint:?}, chain {estimate_chain}");
+                assert!(tried.borrow().contains(&radius));
+                assert!(search.smallest_refused.is_none());
+                assert_eq!(search.tried, tried.borrow().len());
+                assert!(search.tried <= 22, "{} blends", search.tried);
+                let mut unique = tried.borrow().clone();
+                unique.sort_by(f64::total_cmp);
+                unique.dedup();
+                assert_eq!(unique.len(), search.tried, "no candidate is rebuilt");
+            }
+        }
+    }
+
+    /// Exploring between halving levels still reserves enough attempts to reach the smallest
+    /// grid size: ceil(log2(9999)) = 14 fits within the shared 22-call budget.
+    #[test]
+    fn exploring_a_band_keeps_the_smallest_grid_size_reachable() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        for hint in [None, Some(0.01)] {
+            let search = largest_that_fits(9.999, hint, |r| {
+                if r == 0.001 { Ok(body.clone()) } else { Err(KernelError::TooLarge(format!("too large; {}", largest_fit_note("radius", r * 0.5)))) }
+            })
+            .unwrap();
+            assert_eq!(search.found.map(|f| f.0), Some(0.001), "hint {hint:?}");
+            assert!(search.tried <= 22, "{} blends", search.tried);
+        }
+    }
+
+    #[test]
+    fn a_fit_search_stops_starting_candidates_when_its_budget_is_spent() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        for builds in [false, true] {
+            let calls = std::cell::Cell::new(0);
+            let search = largest_that_fits_while(
+                0.3,
+                None,
+                |r| {
+                    calls.set(calls.get() + 1);
+                    if builds { Ok(body.clone()) } else { Err(KernelError::TooLarge(format!("refused at {r}"))) }
+                },
+                || calls.get() < 1,
+            )
+            .unwrap();
+            assert_eq!(calls.get(), 1);
+            assert_eq!(search.tried, 1);
+            if builds {
+                assert_eq!(search.found.map(|f| f.0), Some(1500.0 * 0.0001));
+                assert!(search.smallest_refused.is_none());
+            } else {
+                assert!(search.found.is_none());
+                assert_eq!(search.smallest_refused.unwrap().0, 1500.0 * 0.0001);
+            }
+        }
+        let search = largest_that_fits_while(0.3, None, |_| panic!("no time remains for a candidate"), || false).unwrap();
+        assert_eq!(search.tried, 0);
+        assert!(search.found.is_none() && search.smallest_refused.is_none());
+    }
+
+    /// Replay seed 242's selected edges, including tangent propagation as the command does.
+    /// This asserts search behaviour, not a geometry golden: its returned body must be one of
+    /// the validated blends it actually built, regardless of where the kernel's limit moves.
+    #[test]
+    fn a_fit_search_finds_a_round_on_the_revolved_shelled_ring() {
+        let region = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(10.0, 0.0), Vec2::new(17.5, 0.0), Vec2::new(17.5, 12.5), Vec2::new(10.0, 12.5)]),
+            holes: vec![],
+        };
+        let body = crate::revolve_whole(&Plane::XZ, &[region], Vec2::ZERO, Vec2::new(0.0, -1.0), 270f64.to_radians()).unwrap().pop().unwrap();
+        let picks = tangent_chain(&body, &[Vec3::new(-7.071067811865474, 7.071067811865479, -12.5)]).unwrap();
+        let body = fillet_removing(&body, &picks, 1.0, FilletTurn::Mitre).unwrap().0;
+        let sphere = crate::sphere(Vec3::new(-17.482601617349225, -10.0, -2.5), 2.5).unwrap();
+        let body = crate::boolean(&body, &sphere, crate::BoolOp::Cut).unwrap().unwrap();
+        let body = crate::shell(&body, &[Vec3::new(-2.6309939538324246e-15, -13.758822069107328, -6.234902807648744)], 2.0).unwrap();
+        let picks = tangent_chain(
+            &body,
+            &[
+                Vec3::new(-2.847303808017596e-15, -15.5, -6.25),
+                Vec3::new(-6.791408865864247e-15, -10.292893218813452, -12.207106781186546),
+                Vec3::new(-2.525834023241417e-15, -13.749999999999996, -2.0),
+            ],
+        )
+        .unwrap();
+        let why = fillet_removing(&body, &picks, 2.5, FilletTurn::Mitre).unwrap_err();
+        assert!(matches!(why, KernelError::TooLarge(_)), "{why}");
+        let hint = named_fit(&why.to_string());
+        // Test the candidate schedule without depending on the shared machine's load. The
+        // deterministic budget test above checks that a spent budget stops further calls.
+        let search = largest_that_fits_while(2.5, hint, |r| fillet_turning(&body, &picks, r, FilletTurn::Mitre), || true).unwrap();
+        let (radius, rounded) = search.found.expect("a working radius between the failures");
+        assert!(radius > 0.0 && radius < 2.5, "{radius}");
+        assert!(rounded.validity().is_empty(), "{:?}", rounded.validity());
+        assert!(search.tried <= 22, "{} blends", search.tried);
     }
 
     /// A search that builds a candidate reports it and no refusal.
@@ -2371,8 +2686,8 @@ mod tests {
     }
 
     /// A refusal that names an estimate within a step of the largest size that fits settles the
-    /// search in two blends (the estimate builds, the next step up is refused) where bisection
-    /// takes eleven, and finds the same size. Work counter: `FitSearch::tried`.
+    /// search in two blends (the estimate builds, the next step up is refused) where the ordinary
+    /// search takes more, and finds the same size. Work counter: `FitSearch::tried`.
     #[test]
     fn a_close_estimate_settles_the_search_in_two_blends() {
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
@@ -2381,13 +2696,13 @@ mod tests {
         let blend = |r: f64| {
             if r <= 1.9045 { Ok(body.clone()) } else { Err(KernelError::TooLarge(format!("too large; {}", largest_fit_note("radius", 1.904762)))) }
         };
-        // Bisection alone: the same refusals, naming no estimate.
+        // The ordinary search: the same refusals, naming no estimate.
         let unnamed = |r: f64| if r <= 1.9045 { Ok(body.clone()) } else { Err(KernelError::TooLarge("too large".into())) };
         let plain = largest_that_fits(2.0, None, unnamed).unwrap();
         let led = largest_that_fits(2.0, Some(1.904762), blend).unwrap();
         assert_eq!(plain.found.as_ref().map(|f| f.0), Some(1904.0 * 0.001));
         assert_eq!(led.found.as_ref().map(|f| f.0), Some(1904.0 * 0.001));
-        assert!(plain.tried >= 11, "bisection alone: {}", plain.tried);
+        assert!(plain.tried > led.tried, "ordinary search: {}", plain.tried);
         assert_eq!(led.tried, 2);
         // With no estimate of its own, the first candidate refused leads with its estimate.
         let after_one = largest_that_fits(2.0, None, blend).unwrap();
@@ -2999,6 +3314,23 @@ mod tests {
         let actual = crate::measure(&body).unwrap().volume - crate::measure(&out).unwrap().volume;
         assert!((actual - removed).abs() < 1e-3, "{actual} vs {removed}");
         assert_eq!(out.face_count(), body.face_count() + 4);
+        assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
+
+    /// A cylinder r 10, h 50 whose top rim is chamfered 10, the top's radius (#17198): the
+    /// chamfer takes the whole top and is a cone with its apex on the axis, as a round of 10
+    /// is a dome. It was refused as larger than the faces allow. The cone removes the ring
+    /// between the r 10, h 10 cylinder and the cone in it, two thirds of that cylinder; the
+    /// body keeps the side, the bottom and the cone.
+    #[test]
+    fn a_chamfer_as_large_as_a_cylinder_top_makes_a_cone_to_its_centre() {
+        let can = crate::build::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 50.0).unwrap();
+        let out = chamfer(&can, &[Vec3::new(10.0, 0.0, 50.0)], 10.0).unwrap();
+        let pi = std::f64::consts::PI;
+        let want = pi * 100.0 * 50.0 - 2.0 / 3.0 * pi * 100.0 * 10.0;
+        let got = crate::measure(&out).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+        assert_eq!(out.face_count(), 3);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
     }
 }

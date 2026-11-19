@@ -273,7 +273,7 @@ pub(super) fn bspline_curve_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<
 fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSplineSurface>> {
     Ok(match s.kind_with_nurb(k).map_err(sc("SmSurface::GetOrCreateGwNurbPointer"))? {
         SurfaceKind::BSpline(b) => Some(b),
-        // A procedural round (solidcore#2274, `fixes.fillet_round_as_definition`) and a Ball corner's
+        // A procedural round (solidcore#2274) and a Ball corner's
         // patch (solidcore#2319, `fixes.fillet_blend_corner`) are their nets, as the fork casts them
         // to `SmBSplineSurface`: the face goes out as that NURBS, exactly.
         SurfaceKind::BallPatch(bp) => Some(bp.net()),
@@ -592,7 +592,7 @@ fn classify(k: &Kernel, c: &Curve, ivl: &Extent1d) -> std::result::Result<Option
         let Some(x) = answer(c.evaluate_point(k, ivl.max()))? else { return Ok(None) };
         x
     };
-    let tol = 1e-9 * (1.0 + e.r1 + e.r2 + a.max_dimension() + b.max_dimension());
+    let tol = conic_match_tol(e.r1, e.r2, a, b);
     let mut affine = true;
     for step in 0..=8 {
         let f = f64::from(step) / 8.0;
@@ -2095,9 +2095,17 @@ fn make_edge_curve(k: &Kernel, ty: i64, d_min: f64, d_max: f64, e: &EdgeIn<'_>, 
     )
 }
 
+/// How far a conic edge's NURBS may lie from the conic its record names, export and import alike:
+/// 1e-9 of the radii plus the edge's distance from the origin (its ends `a` and `b`), so the
+/// rounding of coordinates far from the origin counts as it does at the export's check. An edge the
+/// export writes as a conic is read back as one, wherever it lies.
+fn conic_match_tol(r1: f64, r2: f64, a: Point3, b: Point3) -> f64 {
+    1e-9 * (1.0 + r1 + r2 + a.max_dimension() + b.max_dimension())
+}
+
 /// `ConicDomainOfNurbs`: the domain in degrees of the conic (centre `o`, axis `z`, reference `x`,
 /// radii `rx`, `ry`) the NURBS traces, `z` and `x` made an orthonormal frame; `None` when a point
-/// is off that conic or the NURBS turns clockwise about `z`.
+/// is off that conic by more than [`conic_match_tol`] or the NURBS turns clockwise about `z`.
 fn conic_domain_of_nurbs(nurbs: &BSplineCurve, o: Point3, z: &mut Vec3, x: &mut Vec3, rx: f64, ry: f64) -> Option<Extent1d> {
     *z = z.unitize().ok()?;
     *x = (*x - *z * x.dot(*z)).unitize().ok()?;
@@ -2106,11 +2114,13 @@ fn conic_domain_of_nurbs(nurbs: &BSplineCurve, o: Point3, z: &mut Vec3, x: &mut 
     }
     let y = z.cross(*x);
     let ivl = nurbs.natural_interval();
+    let tol = conic_match_tol(rx, ry, nurbs.evaluate_point(ivl.min()).ok()?, nurbs.evaluate_point(ivl.max()).ok()?);
     let angle = |t: f64| -> Option<f64> {
         let p = nurbs.evaluate_point(t).ok()?;
         let d = p - o;
         let (u, v) = (d.dot(*x) / rx, d.dot(y) / ry);
-        let on = ((u.hypot(v)) - 1.0).abs() <= 1e-9 && d.dot(*z).abs() <= 1e-9 * (1.0 + rx + ry);
+        // (hypot - 1) scaled by the larger radius bounds the point's distance off the conic in its plane
+        let on = ((u.hypot(v)) - 1.0).abs() * rx.max(ry) <= tol && d.dot(*z).abs() <= tol;
         on.then(|| v.atan2(u) * 180.0 / std::f64::consts::PI)
     };
     let n = 16;
@@ -2533,7 +2543,7 @@ pub(crate) fn from_arrays(a: &Arrays) -> Result<Body> {
     let f = In(a);
     let s = validate(&f).ok_or(Error::Record(crate::import::Unsupported::Invalid("flat arrays")))?;
     let b = run("BrepFromFlat", |k| Ok(brep_from_flat(k, &f, &s)))??;
-    Ok(Body::new(b))
+    Ok(Body::from_kernel(b))
 }
 
 fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape) -> Result<Brep> {

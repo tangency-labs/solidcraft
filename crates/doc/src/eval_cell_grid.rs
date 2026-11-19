@@ -31,6 +31,9 @@ pub(crate) fn tools(
         angle,
         anchor,
         clip,
+        keepout_clip,
+        snap_inset,
+        margin,
         depth,
         through_all,
         direction,
@@ -40,10 +43,11 @@ pub(crate) fn tools(
     else {
         return Err(DocError::Invalid("not a cell grid".into()));
     };
-    // Sheet metal cuts become cut-outs of the flat pattern, which a grid of cells cannot be. Only
-    // the bodies the cut reaches count: its targets, else its participants, else its component.
+    // A cut of a sheet metal body is read back onto the sheet's panels, which a grid of cells is not
+    // yet. Only the bodies the cut reaches count: its targets, else its participants, else its
+    // component.
     let (_, scope) = boolean_scope(st, f, &crate::plain(targets));
-    if st.sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
+    if st.surface_sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
         return Err(DocError::Invalid("not supported yet: a cell grid cannot cut sheet metal; use sheet.perforate".into()));
     }
     let ss = constructor_profile_in_frame(
@@ -80,6 +84,24 @@ pub(crate) fn tools(
         },
         anchor,
         clip: *clip,
+        keepout_clip: *keepout_clip,
+        snap_inset: match snap_inset {
+            Some(e) => {
+                let n = val(vals, e, Kind::Unitless)?;
+                if !(n.is_finite() && n.fract() == 0.0 && (0.0..=f64::from(crate::CELL_GRID_MAX_SNAP_INSET)).contains(&n)) {
+                    return Err(DocError::Invalid(format!(
+                        "the snap inset is a whole number of lattice lines from 0 to {}, not {n}",
+                        crate::CELL_GRID_MAX_SNAP_INSET
+                    )));
+                }
+                n as u32
+            }
+            None => 0,
+        },
+        margin: match margin {
+            Some(e) => val(vals, e, Kind::Length)?,
+            None => 0.0,
+        },
     };
     let loops: Vec<solidcore_record::Loop2> = regions.iter().flat_map(|r| r.loops().cloned()).collect();
     let plan = solidcore_ops::cell_grid::plan_cell_grid(&loops, &spec).map_err(|e| DocError::Invalid(e.to_string()))?;
@@ -122,7 +144,7 @@ pub(crate) fn tools(
     for cell in &plan.cells {
         let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
         for region in &pieces {
-            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false)?);
+            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false, None)?);
         }
     }
     // The cells lie apart by the web, so the kernel's own check of their boxes (which a
