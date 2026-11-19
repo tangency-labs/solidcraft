@@ -292,6 +292,7 @@ pub mod semantic_content;
 pub mod settings_profiles;
 #[cfg(test)]
 mod settings_profiles_tests;
+pub mod sheet_rule_library;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
@@ -2208,6 +2209,8 @@ impl SolveApp {
             && !id.starts_with("drawing.")
             && !matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata" | "document.metadata.set" | "view.layout")
             && !matches!(id, "view.fit" | "view.home" | "view.tool" | "view.tool.zoom")
+            // Undo and Redo take the open drawing's steps here, from a menu as from their keys.
+            && !matches!(id, "edit.undo" | "edit.redo")
         {
             self.set_status(self.tr_label("Return to Design to use this command.").to_string(), true);
             return;

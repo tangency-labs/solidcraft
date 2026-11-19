@@ -81,6 +81,93 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
 }
 
+/// Two diagonal 1 × 1 × 2 lobes touch along x = y = 0, 0 <= z <= 1. A unit
+/// cube joins them above z = 1: volume 2 + 2 + 1 = 5. Two of the contact faces
+/// continue above the contact and share another edge there. Face-list order is
+/// deliberately different from radial order round the four-face contact edge.
+#[test]
+fn a_partial_edge_contact_is_ordered_by_geometry_instead_of_face_order() {
+    let polygons: &[&[[f64; 3]]] = &[
+        &[[0., 0., 0.], [0., 0., 1.], [0., 0., 2.], [1., 0., 2.], [1., 0., 0.]],
+        &[[0., -1., 0.], [0., -1., 1.], [0., 0., 1.], [0., 0., 0.]],
+        &[[0., 0., 0.], [0., 1., 0.], [0., 1., 2.], [0., 0., 2.], [0., 0., 1.]],
+        &[[-1., 0., 0.], [0., 0., 0.], [0., 0., 1.], [-1., 0., 1.]],
+        &[[0., -1., 0.], [0., 0., 0.], [1., 0., 0.], [1., -1., 0.]],
+        &[[-1., 0., 0.], [-1., 1., 0.], [0., 1., 0.], [0., 0., 0.]],
+        &[[-1., -1., 2.], [1., -1., 2.], [1., 0., 2.], [0., 0., 2.], [0., 1., 2.], [-1., 1., 2.]],
+        &[[0., -1., 0.], [1., -1., 0.], [1., -1., 2.], [-1., -1., 2.], [-1., -1., 1.], [0., -1., 1.]],
+        &[[-1., 0., 0.], [-1., 0., 1.], [-1., -1., 1.], [-1., -1., 2.], [-1., 1., 2.], [-1., 1., 0.]],
+        &[[0., 1., 0.], [-1., 1., 0.], [-1., 1., 2.], [0., 1., 2.]],
+        &[[1., -1., 0.], [1., 0., 0.], [1., 0., 2.], [1., -1., 2.]],
+        &[[-1., -1., 1.], [-1., 0., 1.], [0., 0., 1.], [0., -1., 1.]],
+    ];
+    let mut asm = Assembly::new(1e-6, None);
+    let mut points = Vec::new();
+    let mut vertices = Vec::new();
+    let mut edges = HashMap::new();
+    let mut faces = Vec::new();
+    for (f, polygon) in polygons.iter().enumerate() {
+        let mut corners = Vec::new();
+        for &p in *polygon {
+            let c = points.iter().position(|&q| p == q).unwrap_or_else(|| {
+                points.push(p);
+                vertices.push(asm.add_vertex(p).unwrap());
+                points.len() - 1
+            });
+            corners.push(c);
+        }
+        let mut uses = Vec::new();
+        for i in 0..corners.len() {
+            let (a, b) = (corners[i], corners[(i + 1) % corners.len()]);
+            let key = (a.min(b), a.max(b));
+            let e = *edges.entry(key).or_insert_with(|| {
+                asm.add_edge(
+                    (key.0 * 100 + key.1) as u64,
+                    BCurve::Line { start: points[key.0], end: points[key.1] },
+                    [0., 1.],
+                    [vertices[key.0], vertices[key.1]],
+                )
+                .unwrap()
+                .0
+            });
+            uses.push((e, a == key.0));
+        }
+        let p = |i: usize| {
+            let [x, y, z] = polygon[i];
+            solidcore::Vec3::new(x, y, z)
+        };
+        // The first side may contain the contact's collinear split vertex.
+        let u = (p(1) - p(0)).unitize().unwrap();
+        let n = u.cross(p(polygon.len() - 1) - p(0)).unitize().unwrap();
+        let v = n.cross(u);
+        let surface = BSurface::Plane { origin: polygon[0], u_axis: [u.x, u.y, u.z], v_axis: [v.x, v.y, v.z] };
+        faces.push((asm.add_face(f as u64, surface, vec![Bound::Edges(uses)], Some(0), true).unwrap(), true));
+    }
+    let solid = asm.finish(0, "partial contact".into(), vec![faces], Kind::Solid).unwrap();
+    assert_eq!(solid.brep.edges.iter().filter(|e| e.uses.len() == 4).count(), 1);
+    let contact = solid.brep.edges.iter().find(|e| e.uses.len() == 4).unwrap();
+    let ends = |e: &solidcore_record::brep::Edge| e.vertices.map(|v| solid.brep.vertices[v as usize].point);
+    assert_eq!(ends(contact), [[0., 0., 0.], [0., 0., 1.]]);
+    let continuation = solid.brep.edges.iter().find(|e| ends(e) == [[0., 0., 1.], [0., 0., 2.]]).unwrap();
+    assert_eq!(continuation.uses.iter().map(|u| solid.face_origin[u.face as usize]).collect::<Vec<_>>(), [0, 2]);
+    // About +z the inward rays are +x, +y, -x, -y, with material in the
+    // southeast and northwest quadrants. The two faces ending at z = 1
+    // must separate the two faces that continue above it.
+    assert_eq!(contact.uses.iter().map(|u| solid.face_origin[u.face as usize]).collect::<Vec<_>>(), [0, 2, 3, 1]);
+    // Restoring the file's face order reproduces the old export refusal on the
+    // very same geometry. A material-alternation check cannot repair that order.
+    let mut unordered = solid.brep.clone();
+    unordered.edges.iter_mut().find(|e| e.uses.len() == 4).unwrap().uses.sort_unstable_by_key(|u| u.face);
+    let (bad, _) = solidcore_ops::Body::from_record(&unordered, false).unwrap();
+    let refused = bad.to_record().unwrap_err().to_string();
+    assert!(refused.contains("faces do not alternate between material and space"), "{refused}");
+    let (body, _) = solidcore_ops::Body::from_record(&solid.brep, false).unwrap();
+    let (record, _) = body.to_record().unwrap();
+    record.validate_built().unwrap();
+    assert_eq!(record.faces.len(), 12);
+    assert!((body.volume(1e-9).unwrap() - 5.).abs() < 1e-9);
+}
+
 #[test]
 fn an_edge_written_against_its_vertices_is_turned_round_and_noted() {
     let (solid, alongs) = assembled_box().unwrap();

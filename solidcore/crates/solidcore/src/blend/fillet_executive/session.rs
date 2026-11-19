@@ -110,7 +110,6 @@ mod keep_features;
 mod law_corners;
 mod original_merge;
 mod original_trim;
-mod outline_rims;
 mod overflow_first;
 mod piecewise;
 mod surface;
@@ -2079,9 +2078,6 @@ impl<'target> FilletSession<'target> {
         // solvers loaded since the last sync (`SetFilletParameters`) read the handler
         // during the corners' traces
         self.sync_self_intersection_handler();
-        // (not upstream, solidcore #2541) a lone round's solver takes the rims it may end
-        // on before the corners trace it
-        self.end_round_on_outline(k)?;
         // (not upstream) a round rolls over its faces' smooth far edges, the whole length
         self.roll_over_tangent_edges(k)?;
         let SessionObjects {
@@ -3961,14 +3957,123 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         {
             return Ok(None);
         }
-        let Some(cut) = band_cuts::band_breaks_through_the_part_cached(
+        // judged against the part alone first: the fills below are built only for a blend
+        // that would break through without them
+        let Some(alone) = band_cuts::band_breaks_through_the_part_cached(
             k,
             self.target,
             current,
+            Vec::new(),
             &mut self.band_cut_cache,
         )?
         else {
             return Ok(None);
+        };
+        // the material the concave rounds of the same blend add, which the section may run
+        // through (the rig's 1668-fillet-both-sides-of-thin-wall-r7). Counted only where
+        // the round adds its whole section along its whole edge:
+        // - not in the Roll-over's second pass, whose concave overflow across the cliff is
+        //   accepted and trimmed flush with the cliff (`choose_cliff_overflow`); anywhere
+        //   else a concave round whose rail leaves its face is refused there
+        //   (`ConcaveOverflow`), so a fillet that builds has every rail on its face;
+        // - not where an end of its edge is a set-back vertex, by either door (marked, or
+        //   asked a fill), or meets the edge of another blend of this fillet: a corner or
+        //   set-back patch replaces the round there, and its shape is not known yet (the
+        //   corners are made after this judgement);
+        // - and only where both ends of its edge are closed square (`ConcaveFill::of_round`)
+        let mut fills = Vec::new();
+        if self.roll_over_ends.is_empty() {
+            let mut edges = Vec::new();
+            for (index, solver) in self.solvers.iter().enumerate() {
+                // only a solver the executive loaded (`LoadFilletSolver` binds it to the
+                // executive): one allocated but never loaded is never built, so its round
+                // adds nothing
+                let Some(solver) = solver
+                    .as_ref()
+                    .filter(|solver| solver.base().fillet_executive().is_some())
+                else {
+                    continue;
+                };
+                if let Some(edge) = solver
+                    .base()
+                    .edgeuse(0)?
+                    .map(|edgeuse| crate::topology::edgeuse::p1::edge(self.target, edgeuse))
+                    .transpose()?
+                    .flatten()
+                {
+                    edges.push((index, edge));
+                }
+            }
+            let set_back = |v: VertexId| {
+                self.set_back_vertices.contains(&v)
+                    || crate::blend::blend_corner::setback::set_back_fill_of(
+                        &self.set_back_fills,
+                        v,
+                    )
+                    .is_some()
+            };
+            let mut candidates = Vec::new();
+            for &(index, other_edge) in &edges {
+                if index == id.0 as usize
+                    || !crate::blend::fillet_solver::p5::is_concave_edge(
+                        k,
+                        self.target,
+                        other_edge,
+                    )?
+                {
+                    continue;
+                }
+                let (start, end) =
+                    crate::topology::edge::start_end_vertices(self.target, other_edge)?;
+                let (Some(start), Some(end)) = (start, end) else {
+                    continue;
+                };
+                let mut alone = !set_back(start) && !set_back(end);
+                for &(j, edge) in &edges {
+                    if !alone || j == index {
+                        continue;
+                    }
+                    let (s, e) = crate::topology::edge::start_end_vertices(self.target, edge)?;
+                    alone = ![s, e].iter().flatten().any(|v| *v == start || *v == end);
+                }
+                if alone {
+                    candidates.push(index);
+                }
+            }
+            for index in candidates {
+                let Some(other) = self.solvers.get_mut(index).and_then(Option::as_mut) else {
+                    continue;
+                };
+                // a failure to solve the round's section counts no fill (the refusing side)
+                if let Some(fill) = crate::error::native_failure(band_cuts::ConcaveFill::of_round(
+                    k,
+                    self.target,
+                    other,
+                ))?
+                .flatten()
+                {
+                    fills.push(fill);
+                }
+            }
+        }
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let cut = if fills.is_empty() {
+            alone
+        } else {
+            match band_cuts::band_breaks_through_the_part_cached(
+                k,
+                self.target,
+                current,
+                fills,
+                &mut self.band_cut_cache,
+            )? {
+                Some(cut) => cut,
+                None => return Ok(None),
+            }
         };
         let chamfer = current.base().fsg.as_ref().is_some_and(|fsg| {
             fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear

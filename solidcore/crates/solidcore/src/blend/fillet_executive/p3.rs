@@ -173,8 +173,7 @@ pub enum NoRoomReason {
     CutsThePart,
     /// A convex blend's section would leave the part between its rails and come back into
     /// it through an inner face: the blend would break through a wall into the hollow
-    /// behind (a round on a wall thinner than it reaches; not the fork's,
-    /// `fixes.fillet_refuse_rounds_breaking_through`, WR-707, #2299).
+    /// behind (a round on a wall thinner than it reaches; not the fork's, WR-707, #2299).
     BreaksThrough,
     /// A cliff overflow runs past a fillet end whose end face is not planar (WR-631).
     CliffEndFaceNotPlanar,
@@ -3832,7 +3831,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): after
+    /// Not the fork's (WR-707, #2299): after
     /// `BandCutsThePart`, a convex blend whose section between its rails leaves the part and
     /// comes back into it through an inner face would break through a wall into the hollow
     /// behind; the one whose largest size that does not is least is refused with
@@ -4365,10 +4364,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // into pieces, refused naming the largest size that keeps it whole
         self.refuse_blends_cutting_the_part(k, access)?;
         // not the fork's (WR-707, #2299): a convex blend whose section would break through a
-        // wall into the hollow behind, refused naming the largest size that does not
-        if k.fixes.fillet_refuse_rounds_breaking_through {
-            self.refuse_blends_breaking_through(k, access)?;
-        }
+        // wall into the hollow behind, refused naming the largest size that does not (a
+        // hollow that a concave round of the same blend fills is no break-through)
+        self.refuse_blends_breaking_through(k, access)?;
         // not the fork's (#2401): a polygon face its blends take whole, refused before the
         // trace that its rails of no length would fail
         if k.fixes.fillet_refuse_face_consuming_blends {

@@ -586,11 +586,11 @@ impl<'t> Assembly<'t> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
-        // A face on a torus that is the rest of it round a patch its loop bounds gets the
-        // torus's seams, its loop a hole in it.
+        // A face on a sphere or torus that is the rest of it round a patch its loop bounds gets
+        // the surface's seams, its loop a hole in it.
         let outsides = self.complete_outsides()?;
         if outsides > 0 {
-            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+            notes.push(format!("{outsides} faces on a sphere or torus that are the outside of their loops given the surface's seams"));
         }
         // A torus face's seams where its torus starts, so its (u, v) box is read whole.
         self.seat_torus_seams()?;
@@ -971,6 +971,28 @@ impl<'t> Assembly<'t> {
                 faces.push(OrientedFace { face: fmap(f)?, forward });
             }
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
+        }
+        // The file lists faces, not their radial order. At an edge more than two
+        // faces use, order their inward directions on the actual shared segment.
+        // Keep two-use edges in their existing order, including periodic seams.
+        for edge in &mut edges {
+            if edge.uses.len() <= 2 {
+                continue;
+            }
+            let radial_faces = edge
+                .uses
+                .iter()
+                .map(|u| {
+                    let face = faces.get(u.face as usize).ok_or("radial face reference")?;
+                    let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {
+                        return Err("radial loop reference");
+                    };
+                    let oriented = edges.get(u.position as usize).ok_or("radial edge use reference")?;
+                    Ok((face.parameters(), &oriented.pcurve, oriented.forward))
+                })
+                .collect::<Result<Vec<_>, &str>>()?;
+            let order = crate::kernel::radial_order(edge.parameters(), edge.interval, &radial_faces)?;
+            edge.uses = order.into_iter().map(|i| edge.uses.get(i).copied().ok_or("radial edge use reference")).collect::<Result<Vec<_>, &str>>()?;
         }
         let mut brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
         if reoriented {
