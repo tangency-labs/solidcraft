@@ -115,7 +115,8 @@ pub fn unstoppable<R>(f: impl FnOnce() -> R) -> R {
     scoped(None, f)
 }
 
-/// solidcore's token of the work on this thread.
-pub(crate) fn token() -> Option<CancelToken> {
+/// solidcore's token of the work on this thread: for work that runs solidcore through another
+/// door (solidcore-ops' calls, `solidcore_ops::cancel::within`), so it stops with this work too.
+pub fn token() -> Option<CancelToken> {
     CURRENT.with(|c| c.borrow().as_ref().map(|s| s.0.cancel.clone()))
 }

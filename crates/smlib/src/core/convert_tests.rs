@@ -363,3 +363,19 @@ fn nurbs_weights_far_from_the_origin_compare_within_their_rounding() {
     w[1] += 1e-9;
     assert!(!super::convert::same_nurbs(s.gw_nurb().unwrap(), make(&w).gw_nurb().unwrap(), 0.01));
 }
+
+/// A Ø1 × 1000 cylinder 1600 below the origin drafted 0.02° in about its base: its top circle (r
+/// 0.15 at z = -600) is written as a circle whose NURBS lies about 3e-10 off it, rounding of the
+/// coordinates' size that the export's own check allows. The import reads it back with the same
+/// allowance instead of refusing "a conic NURBS off its conic", and the frustum keeps its volume.
+#[test]
+fn a_drafted_circle_far_from_the_origin_comes_back_as_written() {
+    let (big, h, angle) = (0.5, 1000.0, 0.02f64.to_radians());
+    let small = big - h * angle.tan();
+    let cyl = make_cylinder([0.0, 0.0, -1600.0], big, h).unwrap();
+    let drafted = super::offset::draft(&cyl, &[[big, 0.0, -1100.0]], 1e-5, [0.0, 0.0, -1600.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], angle).unwrap();
+    let back = from_arrays(&to_arrays(&drafted).unwrap()).unwrap();
+    let want = PI * h * (big * big + big * small + small * small) / 3.0;
+    let v = volume(&back, 1e-9).unwrap();
+    assert!(rel(v, want) < 1e-7, "{v} vs {want}");
+}

@@ -42,6 +42,14 @@
 //! or deletes that row's [`DATA`] entry and lowers the unit's row count in the tests
 //! below. Each failure message names [`MAIN_COMMIT`].
 //!
+//! The mass integrator's knot-line split (a piece ends where its trim crosses a surface
+//! knot line) moved 14 of the 16 `blend.fillet_executive_p3` rows: six past the goldens
+//! comparator (re-blessed, each moved entry classified against a certified enclosure in
+//! `tests/mass_knot_line_moved_rows_are_classified.rs`) and eight in their last mass bits,
+//! under it (their committed lines stay main's). Their entries are deleted; the two left,
+//! `stubs3-union-overhang-corner-edges15-22-r1` and `stubs4-degenerate-brepForFillet2-e7-r0.5`,
+//! still replay.
+//!
 //! [`Surface::find_degen_param_for_direction`]: solidcore::surface::surface::Surface::find_degen_param_for_direction
 //! [`Surface::invert_point_near_singularity`]: solidcore::surface::surface::Surface::invert_point_near_singularity
 
@@ -369,7 +377,7 @@ macro_rules! replay_tests {
 }
 
 replay_tests! {
-    fillet_executive_p3_rows_move_only_through_the_wr57_answers: "blend.fillet_executive_p3", 16, cert::EXECUTIVE_P3;
+    fillet_executive_p3_rows_move_only_through_the_wr57_answers: "blend.fillet_executive_p3", 2, cert::EXECUTIVE_P3;
     fillet_geom_p2_rows_move_only_through_the_wr57_answers: "blend.fillet_geom_p2", 1, cert::GEOM_P2;
     fillet_standard_solver_p1_rows_move_only_through_the_wr57_answers: "blend.fillet_standard_solver_p1", 1, cert::STANDARD_SOLVER_P1;
     heal_data_p3_rows_move_only_through_the_wr57_answers: "heal.heal_data_p3", 5, cert::HEAL_DATA_P3;
@@ -393,6 +401,8 @@ type Loaded = (Box<dyn UnitDiff>, BTreeMap<String, Case>);
 /// is dropped or moved to the next call and the encoded row is still main's (that
 /// answer does not reach it). On 5 `fillet_executive_p3` rows, moving every entry one
 /// call later also leaves main's row. Both were measured on #17856's r7 tape.
+/// That tape had 52 rows; the 14 `fillet_executive_p3` rows the mass integrator's
+/// knot-line split moved are dropped since, as the module doc says.
 #[test]
 fn without_the_tape_no_row_is_mains() {
     let mut by_unit: BTreeMap<&str, Loaded> = BTreeMap::new();
@@ -416,7 +426,7 @@ fn without_the_tape_no_row_is_mains() {
         "(tape of main {MAIN_COMMIT})\n{}",
         failures.join("\n")
     );
-    assert_eq!(DATA.len(), 52);
+    assert_eq!(DATA.len(), 38);
 }
 
 /// Main's error from its `Debug` text: a surface routine's `Failed` phrase (the only kind

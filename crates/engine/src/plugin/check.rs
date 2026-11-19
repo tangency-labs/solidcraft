@@ -72,9 +72,11 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
     let mut pending = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, prefix)) = pending.pop() {
         solidcraft_io::vfs::check(&dir.to_string_lossy()).map_err(|e| unreadable(&dir, &e))?;
-        let mut entries: Vec<_> = std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))?.flatten().collect();
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
+        // Counted while listing, so one huge folder is not listed in full before the limit
+        // applies; an entry the listing cannot read is an error, not a file left out.
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))? {
+            let entry = entry.map_err(|e| unreadable(&dir, &e))?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || (prefix.is_empty() && name == TESTS_FOLDER) {
                 continue;
@@ -83,7 +85,17 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
             if seen > super::MAX_FILES {
                 return Err(too_big(format!("the package holds more than {} files and folders", super::MAX_FILES)));
             }
-            let relative = format!("{prefix}{name}");
+            entries.push((name, entry));
+        }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, entry) in entries {
+            let relative = safe_zip::checked_path(&format!("{prefix}{name}")).map_err(|reason| {
+                error_problem(
+                    "package",
+                    format!("{prefix}{name} has {reason}"),
+                    "Rename the file to a plain name: Install refuses a .zip entry with this name.",
+                )
+            })?;
             let kind = entry.file_type().map_err(|e| unreadable(&entry.path(), &e))?;
             if kind.is_symlink() {
                 return Err(error_problem(
