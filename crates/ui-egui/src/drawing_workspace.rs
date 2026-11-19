@@ -1270,7 +1270,9 @@ mod tests {
         let hover = &crate::drawing_sheet_page::inspect(&h.app)["hover"];
         assert_eq!(hover["object"], created["view"]);
         assert_eq!(hover["on_edge"], false);
-        assert_eq!(hover["outlined"], true);
+        // The hovered view is lit in the accent colour, as a sketch shows what the pointer is over
+        // (it was outlined with a box before).
+        assert_eq!(hover["lit"], true);
         h.step(&json!({"click":[x,y]})).unwrap();
         h.frames(3);
         // Selected, with its options on the right and nothing floating over the sheet: what the
