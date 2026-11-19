@@ -24,6 +24,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, r12: &mut bool) {
             *r12 = value;
         }
     }
+    crate::ui_kit::text(ui, app.tr("dxf.sketch_version_help"), crate::ui_kit::Text::Note("version help"));
 }
 
 /// Remember the version, then ask where to write the file. A cancelled picker writes nothing.
