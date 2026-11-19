@@ -1,5 +1,6 @@
 //! Manage configuration table. Commands and cell decoding remain in dialogs_motion.
 use super::{cell_value, column_parts, configuration_rules_ui, table, unit_of};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::DEFAULT_MATERIAL;
@@ -46,8 +47,12 @@ pub(super) fn configurations_rows(
         .collect();
     let gap = ui.spacing().item_spacing.x;
     let name_width = tb.rows.iter().map(|(name, _)| ui_kit::ContentWidth::name(ui, name)).fold(0.0, f32::max);
-    let status_width = (ui_kit::ContentWidth::label(ui, "Active") + gap + ui_kit::ContentWidth::button(ui, "Apply"))
-        .max(ui_kit::ContentWidth::button(ui, "Activate"));
+    let status_width = (ui_kit::ContentWidth::label(ui, "Active")
+        + gap
+        + ui_kit::ContentWidth::button(ui, "Apply")
+        + gap
+        + ui_kit::ContentWidth::button(ui, solidcraft_ui_text::tr("config.update")))
+    .max(ui_kit::ContentWidth::button(ui, "Activate"));
     // Widths the user dragged a column's header divider to, by column key, so a column keeps its
     // width when others are added or removed (T-693). The shared table stores them by index.
     let keys: Vec<&str> = std::iter::once(NAME_KEY).chain(tb.columns.iter().map(String::as_str)).collect();
@@ -143,6 +148,26 @@ pub(super) fn configurations_rows(
                             crate::scenario::publish_handle(&format!("config:activate:{name}"), apply.rect.center());
                             if apply.clicked() {
                                 *error = app.run_heavy("config.activate", json!({"row":name})).err();
+                            }
+                            // The other way round: the row takes the design's current values (T-686).
+                            let update = ui_kit::button(ui, solidcraft_ui_text::tr("config.update"), ui_kit::Button::Small)
+                                .backing_on_hover_text(solidcraft_ui_text::tr("config.update_tip"));
+                            crate::scenario::publish_handle(&format!("config:update:{name}"), update.rect.center());
+                            if update.clicked() {
+                                match app.run("config.update_from_design", json!({"row":name})) {
+                                    Ok(reply) => {
+                                        *error = None;
+                                        let missed: Vec<String> = reply["not_captured"]
+                                            .as_array()
+                                            .into_iter()
+                                            .flatten()
+                                            .filter_map(Value::as_str)
+                                            .map(str::to_owned)
+                                            .collect();
+                                        rule_editor.not_captured = (!missed.is_empty()).then(|| (app.session.revision, missed));
+                                    }
+                                    Err(e) => *error = Some(e),
+                                }
                             }
                         }
                     } else {
@@ -335,6 +360,20 @@ pub(super) fn configurations_rows(
     }
     if let Some(message) = v["style_error"].as_str() {
         ui_kit::text(ui, message, ui_kit::Text::Error("style_error"));
+    }
+    if let Some((_, missed)) = rule_editor.not_captured.as_ref().filter(|(at, _)| *at == app.session.revision) {
+        let names: Vec<String> = missed
+            .iter()
+            .map(|key| match column_parts(key) {
+                ("suppress", name) => format!("{} {name}", solidcraft_ui_text::tr_label("Suppress")),
+                (_, name) => name.to_owned(),
+            })
+            .collect();
+        ui_kit::text(
+            ui,
+            &solidcraft_ui_text::format("config.not_captured", &[("names", &names.join(", "))]),
+            ui_kit::Text::Report("not_captured", false),
+        );
     }
     if let Some(message) = error {
         ui_kit::text(ui, message, ui_kit::Text::Error("config_error"));
