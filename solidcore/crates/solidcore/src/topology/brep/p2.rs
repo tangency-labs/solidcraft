@@ -521,11 +521,14 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
 ///    form, a trim that cannot be evaluated over the interval) is dropped, as the end check
 ///    drops a trim it refuses, and is made again when it is next asked for.
 ///
+/// A part file's read (`part_file::read_part_from_db`) runs no end check; each B-rep it
+/// builds is covered the same way.
+///
 /// Both passes run after every end check, so the raised tolerances do not change which trims
 /// the end check keeps. Each gap is enclosed once, in the first pass; only the uses of an edge
 /// whose trim was made again are enclosed again (a proved gap does not depend on the
 /// tolerance, which decides only how tightly it is enclosed).
-fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
+pub(crate) fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
     let mut gaps = Vec::new();
     // edges whose trim was made again: their uses' gaps are enclosed again below
     let mut rebuilt = Vec::new();
@@ -3861,74 +3864,312 @@ mod tests {
         }
     }
 
-    /// Every UV trim curve a read keeps lies within its edge's tolerance of the edge, by a
-    /// proved bound (`trim_gap_bound` with nothing accepted early, closed to a thousandth of
-    /// the tolerance). The read's end check (`sm_CheckUVTrimCurve`) compares only a trim's
-    /// ends: without [`cover_kept_uv_trim_curves`], `Defeature/LShape_I.smb` keeps the trims
-    /// of edge uses 242 and 246 bounded at 1.1458e-5 from their edges under a tolerance of
-    /// 1e-5.
-    #[test]
-    fn every_kept_trim_is_within_its_edge_tolerance() {
-        use crate::query::curve_surface_gap::polynomial_pieces::trim_gap_bound;
+    /// The bytes of the upstream test file `name`.
+    fn test_file(name: &str) -> Vec<u8> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../upstream/TestFiles/pt_TestFiles")
+            .join(name);
+        std::fs::read(path).unwrap()
+    }
+
+    /// B-rep file `name` as a read leaves it.
+    fn read_brep_file(k: &mut Kernel, name: &str) -> Brep {
         use crate::topology::database_io::FileType;
         use crate::topology::loopuse::notify_ref;
         use crate::topology::topology::NotifyRecords;
-        for name in ["Defeature/LShape_I.smb"] {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../upstream/TestFiles/pt_TestFiles")
-                .join(name);
-            let bytes = std::fs::read(path).unwrap();
-            let mut k = Kernel::default();
-            let mut b = Brep::new_with_infinite_region().unwrap();
-            let mut records = NotifyRecords::new();
-            let mut attributes = AttributeStore::default();
-            let mut env = crate::topology::brep::p10::TopologyEnv {
-                all_attributes: &[],
-                attributes: &mut attributes,
-                key_of: &notify_ref,
-                records: &mut records,
-                next_key: 1 << 50,
-            };
-            crate::topology::brep::p7::read_from_file(
-                &mut k,
-                &mut b,
-                bytes,
-                FileType::Ascii,
-                false,
-                &mut env,
-            )
-            .unwrap();
-            let mut kept = 0;
-            let mut failures = Vec::new();
-            for eu in edgeuses(&b, None).unwrap() {
-                let Some(trim) = eu1::uv_trim_curve_pointer(&b, eu).unwrap() else {
-                    continue;
-                };
-                kept += 1;
-                let e = eu1::edge(&b, eu).unwrap().unwrap();
-                let f = eu1::face(&b, eu).unwrap().unwrap();
-                let s = face2::surface(&b, f).unwrap().unwrap();
-                let c = edge::curve(&b, e).unwrap().unwrap();
-                let tol = edge::tolerance(&b, e).unwrap();
-                let i = edge::interval(&b, e).unwrap();
-                let net = s.procedural_definition().map_or(0.0, |d| d.bound());
-                let gap = match (nurb_form(c).unwrap(), nurb_form(trim).unwrap()) {
-                    (Some(c), Some(w)) => {
-                        let range = [i.min(), i.max()];
-                        trim_gap_bound(&k, &c, &w, s, range, tol / 1000.0, 0.0).unwrap()
-                    }
-                    _ => None,
-                };
-                match gap {
-                    Some(g) if g + net <= tol => {}
-                    _ => failures.push(format!(
-                        "{name} eu {}: gap {gap:?} net {net:e} tolerance {tol:e}",
-                        eu.index()
-                    )),
-                }
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::brep::p10::TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut attributes,
+            key_of: &notify_ref,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        let bytes = test_file(name);
+        crate::topology::brep::p7::read_from_file(
+            k,
+            &mut b,
+            bytes,
+            FileType::Ascii,
+            false,
+            &mut env,
+        )
+        .unwrap();
+        b
+    }
+
+    /// The B-reps of part file `name` as a read leaves them.
+    fn read_part_file(k: &mut Kernel, name: &str) -> Vec<Brep> {
+        use crate::topology::database_io::FileType;
+        use crate::topology::loopuse::notify_ref;
+        use crate::topology::topology::NotifyRecords;
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let key_of = |_: usize, e: EntityRef| notify_ref(e);
+        let mut env = crate::topology::part_file::PartEnv {
+            attributes: &mut attributes,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        crate::topology::part_file::read_part_from_file(
+            k,
+            test_file(name),
+            FileType::Ascii,
+            &mut env,
+        )
+        .unwrap()
+        .breps
+    }
+
+    /// The bound `curve_uv_gap_bound` (the hull bisection, not the cover's
+    /// `trim_gap_bound`) proves on edge use `eu`'s own trim's gap to its edge, plus the
+    /// net's own bound; `None` without a trim, infinite when it is not enclosed.
+    fn independent_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Option<f64> {
+        use crate::query::curve_surface_gap::curve_uv_gap_bound;
+        let trim = eu1::uv_trim_curve_pointer(b, eu).unwrap()?;
+        let e = eu1::edge(b, eu).unwrap().unwrap();
+        let f = eu1::face(b, eu).unwrap().unwrap();
+        let s = face2::surface(b, f).unwrap().unwrap();
+        let c = edge::curve(b, e).unwrap().unwrap();
+        let tol = edge::tolerance(b, e).unwrap();
+        let i = edge::interval(b, e).unwrap();
+        let net = s.procedural_definition().map_or(0.0, |d| d.bound());
+        Some(match (nurb_form(c).unwrap(), nurb_form(trim).unwrap()) {
+            (Some(c), Some(w)) => {
+                let range = [i.min(), i.max()];
+                curve_uv_gap_bound(k, &c, &w, s, range, tol / 1000.0)
+                    .unwrap()
+                    .map_or(f64::INFINITY, |g| g + net)
             }
-            assert!(kept > 0, "{name}: no trims kept");
-            assert!(failures.is_empty(), "{failures:#?}");
+            _ => f64::INFINITY,
+        })
+    }
+
+    /// The edge uses of `b` whose kept trim is not proved within its edge's tolerance by
+    /// [`independent_gap`], and how many trims are kept.
+    fn trims_over_tolerance(k: &Kernel, b: &Brep) -> (usize, Vec<String>) {
+        let mut kept = 0;
+        let mut failures = Vec::new();
+        for eu in edgeuses(b, None).unwrap() {
+            let Some(gap) = independent_gap(k, b, eu) else {
+                continue;
+            };
+            kept += 1;
+            let e = eu1::edge(b, eu).unwrap().unwrap();
+            let tol = edge::tolerance(b, e).unwrap();
+            if gap.is_nan() || gap > tol {
+                failures.push(format!("eu {}: gap {gap:e} tolerance {tol:e}", eu.index()));
+            }
         }
+        (kept, failures)
+    }
+
+    /// The largest gap between edge use `eu`'s edge curve and its own trim's image at 1025
+    /// parameters across the edge: a check that can disprove a bound, never prove one.
+    fn sampled_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> f64 {
+        let trim = eu1::uv_trim_curve_pointer(b, eu).unwrap().unwrap();
+        let e = eu1::edge(b, eu).unwrap().unwrap();
+        let f = eu1::face(b, eu).unwrap().unwrap();
+        let s = face2::surface(b, f).unwrap().unwrap();
+        let c = edge::curve(b, e).unwrap().unwrap();
+        let i = edge::interval(b, e).unwrap();
+        let mut worst = 0.0_f64;
+        for j in 0..=1024 {
+            let t = i.evaluate(f64::from(j) / 1024.0);
+            let w = trim.evaluate_point(k, t).unwrap();
+            let on = s.evaluate_point(k, Point2::new(w.x, w.y)).unwrap();
+            worst = worst.max(c.evaluate_point(k, t).unwrap().distance(on));
+        }
+        worst
+    }
+
+    /// Every UV trim curve a read keeps lies within its edge's tolerance of the edge. The
+    /// read's end check (`sm_CheckUVTrimCurve`) compares only a trim's ends: without
+    /// [`cover_kept_uv_trim_curves`], `Defeature/LShape_I.smb` keeps the trims of edge uses
+    /// 242 and 246 1.1458e-5 from their edges under a tolerance of 1e-5.
+    ///
+    /// The check is independent of the cover's `trim_gap_bound` wherever it can be: each
+    /// trim is bounded by `curve_uv_gap_bound`'s hull bisection ([`independent_gap`]), and
+    /// edge uses 242 and 246 must be proved that way. Where the hull bisection is too loose to
+    /// decide (its second-order term does not close before the piece budget: `LShape_I`'s
+    /// edge uses 96, 98, 124 and 126, bounded at 0.26 to 1.24), the cover's own bound is
+    /// checked against the tolerance and against a dense sample of the gap, which could
+    /// disprove it.
+    #[test]
+    fn every_kept_trim_is_within_its_edge_tolerance() {
+        use crate::query::curve_surface_gap::polynomial_pieces::trim_gap_bound;
+        let name = "Defeature/LShape_I.smb";
+        let mut k = Kernel::default();
+        let b = read_brep_file(&mut k, name);
+        let mut kept = 0;
+        let mut failures = Vec::new();
+        let mut loose = Vec::new();
+        for eu in edgeuses(&b, None).unwrap() {
+            let Some(gap) = independent_gap(&k, &b, eu) else {
+                continue;
+            };
+            kept += 1;
+            let e = eu1::edge(&b, eu).unwrap().unwrap();
+            let tol = edge::tolerance(&b, e).unwrap();
+            if gap <= tol {
+                continue;
+            }
+            loose.push(eu.index());
+            let trim = eu1::uv_trim_curve_pointer(&b, eu).unwrap().unwrap();
+            let f = eu1::face(&b, eu).unwrap().unwrap();
+            let s = face2::surface(&b, f).unwrap().unwrap();
+            let c = edge::curve(&b, e).unwrap().unwrap();
+            let i = edge::interval(&b, e).unwrap();
+            let net = s.procedural_definition().map_or(0.0, |d| d.bound());
+            let (c, w) = (
+                nurb_form(c).unwrap().unwrap(),
+                nurb_form(trim).unwrap().unwrap(),
+            );
+            let own = trim_gap_bound(&k, &c, &w, s, [i.min(), i.max()], tol / 1000.0, 0.0)
+                .unwrap()
+                .map(|g| g + net);
+            let sampled = sampled_gap(&k, &b, eu);
+            if !matches!(own, Some(g) if g <= tol && sampled <= g) {
+                failures.push(format!(
+                    "eu {}: hull {gap:e} own {own:?} sampled {sampled:e} tolerance {tol:e}",
+                    eu.index()
+                ));
+            }
+        }
+        assert!(kept > 0, "no trims kept");
+        assert!(failures.is_empty(), "{failures:#?}");
+        assert!(!loose.contains(&242) && !loose.contains(&246), "{loose:?}");
+    }
+
+    /// `ss_plane_sph1.smp`'s sheet on the sphere about (10, 2, 2) of radius 2: a part file's
+    /// read covers its kept trims as a B-rep file's does (the trims of edges 0, 1, 4 and 5
+    /// lie 1.268e-6 from their edges under a tolerance of 1e-6), so the direct read and the
+    /// round trip through a B-rep file agree.
+    ///
+    /// The face's area, enclosed, is then that of the region the edges' own 3D curves bound,
+    /// 25.144566844852648 (the edges' curves, within 1e-7 of the sphere, projected radially
+    /// onto it and the region between them integrated, computed apart from the kernel's
+    /// face integrator): each trim's image lies within its edge's tolerance of the edge's
+    /// curve (the cover's proved bound, checked here by [`independent_gap`]), so the two
+    /// regions differ by a strip at most that wide along a boundary no longer than the
+    /// sphere's great circle, `4 pi`, with the curves' 1e-7 off the sphere added to the
+    /// width. Before the cover the face read 25.215347, 0.0708 off.
+    #[test]
+    fn the_plane_sphere_sheet_area_is_bounded_by_its_edges() {
+        const EDGES_AREA: f64 = 25.144566844852648;
+        let mut k = Kernel::default();
+        let mut breps = read_part_file(&mut k, "ss_plane_sph1.smp");
+        let b = breps.first_mut().unwrap();
+        let (kept, failures) = trims_over_tolerance(&k, b);
+        assert!(kept > 0 && failures.is_empty(), "{kept}: {failures:#?}");
+        let mut widest = 0.0_f64;
+        for (e, _) in b.edges().iter() {
+            widest = widest.max(edge::tolerance(b, e).unwrap());
+        }
+        let faces: Vec<FaceId> = b.faces().iter().map(|(f, _)| f).collect();
+        let area = crate::mass::enclosure::enclose_face_area_relative(&k, b, &faces, 1e-9).unwrap();
+        let strip = 4.0 * PI * (widest + 1e-7);
+        assert!(
+            area.lo - strip <= EDGES_AREA && EDGES_AREA <= area.hi + strip,
+            "[{}, {}] strip {strip:e}",
+            area.lo,
+            area.hi
+        );
+    }
+
+    /// `Solids/fillet_ts.smb`: every kept trim is proved within its edge's tolerance
+    /// ([`independent_gap`]), and the area enclosed for those trims holds the area its goldens
+    /// record (605.235155804), and not the 605.252490899 of the trims kept before the cover
+    /// (some 0.017 off: the area moved with the trims the cover made again, not with the
+    /// integration).
+    #[test]
+    fn the_fillet_ts_area_is_enclosed_for_its_proved_trims() {
+        let mut k = Kernel::default();
+        let mut b = read_brep_file(&mut k, "Solids/fillet_ts.smb");
+        let (kept, failures) = trims_over_tolerance(&k, &b);
+        assert!(kept > 0 && failures.is_empty(), "{kept}: {failures:#?}");
+        let faces: Vec<FaceId> = b.faces().iter().map(|(f, _)| f).collect();
+        let area =
+            crate::mass::enclosure::enclose_face_area_relative(&k, &mut b, &faces, 1e-8).unwrap();
+        assert!(
+            area.lo <= 605.235155804 && 605.235155804 <= area.hi,
+            "[{}, {}]",
+            area.lo,
+            area.hi
+        );
+        assert!(area.hi < 605.252490899, "[{}, {}]", area.lo, area.hi);
+    }
+
+    /// A seam's trim moved a whole period along `u` (its image the same, its parameters past
+    /// the surface's net) cannot be enclosed: the cover drops it, and the trim made again
+    /// from the edge lies on the seam's side the moved one came from and is proved within the
+    /// edge's tolerance.
+    #[test]
+    fn a_seam_trim_past_the_net_is_dropped_and_made_again_on_its_side() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        let mut k = Kernel::default();
+        let mut breps = read_part_file(&mut k, "ss_plane_sph1.smp");
+        let b = breps.first_mut().unwrap();
+        // an edge whose two uses are on one face, with a trim of its own on the first
+        let mut seam = None;
+        for eu in edgeuses(b, None).unwrap() {
+            let Some(mate) = eu1::mate(b, eu).unwrap() else {
+                continue;
+            };
+            if eu1::face(b, eu).unwrap() == eu1::face(b, mate).unwrap()
+                && eu1::uv_trim_curve_pointer(b, eu).unwrap().is_some()
+            {
+                seam = Some(eu);
+                break;
+            }
+        }
+        let eu = seam.expect("the sheet has a seam");
+        let e = eu1::edge(b, eu).unwrap().unwrap();
+        let f = eu1::face(b, eu).unwrap().unwrap();
+        let domain = face2::surface(b, f)
+            .unwrap()
+            .unwrap()
+            .step_uv_domain_with_nurb(&k)
+            .unwrap();
+        let period = domain.x_length();
+        let mid = edge::interval(b, e).unwrap().evaluate(0.5);
+        let at = |b: &Brep| {
+            let w = eu1::uv_trim_curve_pointer(b, eu).unwrap().unwrap();
+            w.evaluate_point(&k, mid).unwrap()
+        };
+        let before = at(b);
+        let mut moved = eu1::uv_trim_curve_pointer(b, eu).unwrap().unwrap().clone();
+        let shift = Axis2Placement::new(
+            Point3::new(period, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        moved.transform(&k, &shift, None).unwrap();
+        let _ =
+            eu1::set_uv_trim_curve(b, eu, UvTrimCurveArg::New(Box::new(moved)), 0.0, true, None)
+                .unwrap();
+        cover_kept_uv_trim_curves(&k, b).unwrap();
+        assert!(
+            eu1::uv_trim_curve_pointer(b, eu).unwrap().is_none(),
+            "the moved trim is kept"
+        );
+        let made = eu3::get_or_create_uv_trim_curve(&k, b, eu, false, false, true).unwrap();
+        assert!(made.status.is_ok(), "{:?}", made.status);
+        let owner = eu1::uv_trim_curve(b, eu).unwrap().1.unwrap();
+        let after = {
+            let w = eu1::uv_trim_curve_pointer(b, owner).unwrap().unwrap();
+            w.evaluate_point(&k, mid).unwrap()
+        };
+        assert!(
+            (after.x - before.x).abs() <= 1e-6 * period
+                && (after.y - before.y).abs() <= 1e-6 * period,
+            "{before:?} -> {after:?}"
+        );
+        let tol = edge::tolerance(b, e).unwrap();
+        let gap = independent_gap(&k, b, owner).unwrap();
+        assert!(gap <= tol, "{gap:e} {tol:e}");
     }
 }

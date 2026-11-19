@@ -573,6 +573,8 @@ pub(crate) fn trim_gap_bound(
             },
         };
         match bounded {
+            // (a NaN from either bound would vanish in `f64::max`: refuse it instead)
+            Some((_, bound, _)) if !bound.is_finite() => return Ok(None),
             Some((ends, bound, term)) => {
                 if bound <= accept
                     || last
@@ -729,6 +731,73 @@ mod tests {
                 assert!(g >= lift && g <= most, "{w1} {accept:e}: {g:e}");
             }
         }
+    }
+
+    /// The ramp z = x over x, y in 0..1 as a bilinear net (one cell); a B-spline surface does
+    /// not continue past its net, so a box past its end takes `NetSurface::partials`' slack.
+    fn ramp() -> Surface {
+        let mut points = Vec::new();
+        for i in 0..2 {
+            for j in 0..2 {
+                let x = f64::from(i);
+                points.push(Point3::new(x, f64::from(j), x));
+            }
+        }
+        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        Surface::from(net)
+    }
+
+    /// A UV line running `over` past the ramp's end u = 1 (a seam's parameters a little out,
+    /// within what `NetSurface::of`'s probe takes for the surface's own point), its curve on
+    /// the ramp's plane continued (`(u, 0.5, u)`): the continued polynomial puts the gap at
+    /// 0, but the surface is read at the clamped point `(1, 0.5, 1)`, so the true gap at the
+    /// far end is `over * sqrt(2)` (the distance from `(1 + over, 0.5, 1 + over)` to
+    /// `(1, 0.5, 1)`, in closed form). The bound holds it only with
+    /// `NetSurface::partials`' slack. A line far past the end is refused.
+    #[test]
+    fn a_trim_past_the_net_end_takes_the_slack() {
+        let k = Kernel::default();
+        let s = ramp();
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let c = NurbCurve::new(
+                vec![
+                    CPoint::new(a[0], a[1], a[2], NOW),
+                    CPoint::new(b[0], b[1], b[2], NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(c, 3, false)
+        };
+        let end = 1.0 + 1e-10;
+        let truth = (end - 1.0) * std::f64::consts::SQRT_2;
+        let curve = line([0.5, 0.5, 0.5], [end, 0.5, end]);
+        let uv = line([0.5, 0.5, 0.0], [end, 0.5, 0.0]);
+        for accept in [0.0, 1e-5] {
+            let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-14, accept)
+                .unwrap()
+                .unwrap();
+            assert!(g >= truth, "{accept:e}: {g:e} < {truth:e}");
+        }
+        let far = 1.1;
+        let curve = line([0.5, 0.5, 0.5], [far, 0.5, far]);
+        let uv = line([0.5, 0.5, 0.0], [far, 0.5, 0.0]);
+        let g = trim_gap_bound(&k, &curve, &uv, &s, [0.0, 1.0], 1e-9, 1e-5).unwrap();
+        assert_eq!(g, None);
     }
 
     /// `shifted` re-centres a polynomial: `(x + 2)^2 = x^2 + 4 x + 4`.
