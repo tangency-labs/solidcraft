@@ -1465,6 +1465,60 @@ mod tests {
         assert!(placing_dimension(&h.app), "Ctrl+M starts it once Sketch Dimension is bound to it");
     }
 
+    /// Delete on a view that other views are projected from asks first, in the shared Delete
+    /// question, listing those views by what they are called; then it deletes it and them together,
+    /// in one undo step, and one Ctrl+Z brings all of them back. Nothing shown names a view by its id.
+    #[test]
+    fn delete_takes_a_view_with_the_views_projected_from_it() {
+        use serde_json::json;
+        use solidcraft_engine::doc::ids::encode;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":10})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        let base = h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[150,150]})).unwrap();
+        for side in ["right", "above"] {
+            h.app.run("drawing.view.projected", json!({"parent": base["view"], "side": side})).unwrap();
+        }
+        h.frames(8);
+        let views: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().views.iter().map(|view| view.id).collect();
+        assert_eq!(views.len(), 3);
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        let at = [paper.left() + paper.width() * (150.0 / 420.0), paper.bottom() - paper.height() * (150.0 / 297.0)];
+        h.step(&json!({"click": at})).unwrap();
+        h.frames(3);
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.settle();
+        let asked = h.call("ui.confirm", json!({}));
+        let listed: Vec<&str> =
+            asked["result"]["pending"]["deleted"].as_array().expect("the Delete question is open").iter().filter_map(|name| name.as_str()).collect();
+        assert_eq!(listed.len(), 2, "the two views projected from it are listed: {asked}");
+        let mut named = listed.clone();
+        named.sort_unstable();
+        assert_eq!(named, ["Above Front", "Right of Front"], "by what they are called");
+        assert!(views.iter().all(|view| listed.iter().all(|name| !name.contains(&encode(*view)))), "never by an id: {listed:?}");
+        assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().views.len(), 3, "nothing is deleted before the answer");
+        // On screen they read as the browser names them.
+        h.frames(2);
+        for name in ["Top View", "Right View"] {
+            assert!(h.widget(&format!("  • {name}")).is_some(), "the question lists {name}");
+        }
+        h.call("ui.confirm", json!({"accept": true}));
+        h.settle();
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().views.is_empty(), "the view and the two projected from it are gone");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+        assert!(h.app.menu.confirm.is_none(), "with no question left open");
+        h.step(&json!({"key":"Z", "cmd": true})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().views.len(), 3, "one Ctrl+Z brings all three back");
+        let said = h.call("ui.messages", json!({})).to_string();
+        for view in views {
+            assert!(!said.contains(&encode(view)), "no message names a view by its id: {said}");
+        }
+    }
+
     #[test]
     fn base_view_places_projected_views_until_escape() {
         use solidcraft_engine::doc::drawing::view::{ViewKind, ViewPlace};
