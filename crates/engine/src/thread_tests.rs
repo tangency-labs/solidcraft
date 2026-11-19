@@ -76,7 +76,7 @@ fn conical_thread_follows_the_same_helix_across_the_shank_rim() {
 }
 
 #[test]
-fn conical_thread_fades_from_the_rim_at_the_same_depth_across_the_root() {
+fn conical_thread_keeps_full_depth_until_the_core_gets_thin() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
     run(&mut s, "solid.cone", json!({"radius":4,"top_radius":1.25,"height":-8,"operation":"join","targets":["Screw"]}));
@@ -86,7 +86,8 @@ fn conical_thread_fades_from_the_rim_at_the_same_depth_across_the_root() {
     let depth = 5.0 * 3f64.sqrt() / 16.0 * 1.25;
     for z in [0.5_f64, -0.05, -2.0, -4.0, -6.0, -7.5, -7.98] {
         let stock = 4.0 + z.min(0.0) * 2.75 / 8.0;
-        let root = stock - depth * ((z + 8.0) / 8.0).min(1.0);
+        // Fade starts when R(z) - depth is one depth above the end radius.
+        let root = stock - depth.min((stock - 1.25) / 2.0);
         for across in [-0.08, 0.0, 0.08] {
             let phase = 2.0 * PI * (z / 1.25 + across);
             let at = |r| Vec3::new(-phase.sin() * r, phase.cos() * r, z);
@@ -122,10 +123,10 @@ fn conical_thread_fades_on_a_sharp_point_and_refuses_a_full_depth_there() {
     let state = s.model.state();
     let body = &state.body("Screw").unwrap().body;
     let depth = 5.0 * 3f64.sqrt() / 16.0 * 1.25;
-    for h in [0.05_f64, 0.2, 2.0, 6.0] {
+    for h in [0.05_f64, 0.2, 2.0, 4.0, 6.0] {
         let z = h - 8.0;
         let stock = h / 2.0;
-        let root = stock - depth * h / 8.0;
+        let root = stock - depth.min(stock / 2.0);
         let at = |radius, offset: f64| {
             let a = 2.0 * PI * (z / 1.25 + offset);
             Vec3::new(-a.sin() * radius, a.cos() * radius, z)
@@ -149,6 +150,92 @@ fn conical_thread_sharp_point_mesh_includes_all_of_its_faces() {
 }
 
 #[test]
+fn crossed_conical_thread_reaches_a_sharp_point() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":4,"height":-8,"operation":"join","targets":["Screw"]}));
+    run(&mut s, "solid.thread", json!({"face":[4,0,1],"designation":"M8x1.25","modeled":true,"point":"follow","hand":"both"}));
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+
+    // A quarter turn from where the grooves coincide, each hand cuts
+    // its own side to the same root, even this close to the point.
+    let z = -7.8125;
+    let root = (z + 8.0) / 4.0;
+    for side in [-1.0, 1.0] {
+        let at = |r| Vec3::new(side * r, 0.0, z);
+        assert_eq!(body.classify_point(at(root - 0.0005)).unwrap(), Inside);
+        assert_eq!(body.classify_point(at(root + 0.0005)).unwrap(), Outside);
+    }
+
+    // Where the grooves coincide, their shared cut leaves a crest on
+    // the opposite side. A cutter that clears the whole point loses it.
+    assert_eq!(body.classify_point(Vec3::new(0.0, -0.249, -7.5)).unwrap(), Inside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, 0.249, -7.5)).unwrap(), Outside);
+    assert_eq!(body.unmeshed_faces(), 0);
+}
+
+#[test]
+fn crossed_conical_thread_keeps_a_crest_at_the_apex_and_respects_length() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+    // Six pitches put both groove centers at the same angle at the apex.
+    run(&mut s, "solid.cone", json!({"radius":4,"height":-7.5,"operation":"join","targets":["Screw"]}));
+    run(&mut s, "solid.thread", json!({"face":[4,0,1],"designation":"M8x1.25","modeled":true,"point":"follow","hand":"both","length":2}));
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+    let z = -7.491;
+    assert_eq!(body.classify_point(Vec3::new(0.0, 0.004, z)).unwrap(), Outside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, -0.004, z)).unwrap(), Inside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, 0.001, z)).unwrap(), Inside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, 3.99, 2.7)).unwrap(), Inside);
+    assert_eq!(body.unmeshed_faces(), 0);
+}
+
+#[test]
+fn crossed_conical_buttress_thread_follows_both_flank_angles() {
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":4,"height":3,"body_name":"Screw"}));
+    run(&mut s, "solid.cone", json!({"radius":4,"height":-8,"operation":"join","targets":["Screw"]}));
+    run(&mut s, "solid.thread", json!({"face":[4,0,1],"designation":"S8x1.25","modeled":true,"point":"follow","hand":"both","length":2.4}));
+    let state = s.model.state();
+    let body = &state.body("Screw").unwrap().body;
+
+    // DIN 513 has 3° and 30° flanks and 0.86777 P depth. The other hand
+    // mirrors the flank angles.
+    let pitch = 1.25_f64;
+    let depth = 0.86777 * pitch;
+    let slopes = [30_f64, 3_f64].map(|a| a.to_radians().tan());
+    let flat = ((1.0 - 0.26384) * pitch - depth * (slopes[0] + slopes[1])) / 2.0;
+    for z in [-7.8125_f64, -5.75, -3.25, -0.5, 0.4] {
+        let stock = (z + 8.0).min(8.0) / 2.0;
+        let cut = depth.min(stock / 2.0);
+        for radial in [0.3, 0.78] {
+            let r = stock - (1.0 - radial) * cut;
+            let in_groove = (r - stock) + depth;
+            let [lo, hi] = slopes.map(|tan| flat + in_groove * tan);
+            for turn in [0.07, 0.21, 0.39, 0.51, 0.69, 0.86] {
+                let along = turn * pitch;
+                let [right, left] = [along - z, -along - z].map(|d| d.rem_euclid(pitch));
+                if [right, left].iter().any(|d| (d - hi).abs() < 0.025 || (d - (pitch - lo)).abs() < 0.025) {
+                    continue;
+                }
+                let expected = if [right, left].iter().any(|&d| d < hi || d > pitch - lo) { Outside } else { Inside };
+                let a = 2.0 * PI * turn;
+                assert_eq!(body.classify_point(Vec3::new(-a.sin() * r, a.cos() * r, z)).unwrap(), expected, "z={z}, r={r}, turn={turn}");
+            }
+        }
+    }
+    assert_eq!(body.unmeshed_faces(), 0);
+}
+
+#[test]
 fn conical_thread_keeps_its_profile_on_a_narrow_flat_tip() {
     let depth = 5.0 * 3f64.sqrt() / 16.0 * 1.25;
     for (tip_radius, mode) in [(0.2, "fade"), (0.7, "full")] {
@@ -160,7 +247,7 @@ fn conical_thread_keeps_its_profile_on_a_narrow_flat_tip() {
         let body = &state.body("Screw").unwrap().body;
         let z = -7.5;
         let stock = tip_radius + (4.0 - tip_radius) / 16.0;
-        let root = stock - if mode == "fade" { depth / 16.0 } else { depth };
+        let root = stock - if mode == "fade" { (stock - tip_radius) / 2.0 } else { depth };
         let at = |radius, offset: f64| {
             let phase = 2.0 * PI * (z / 1.25 + offset);
             Vec3::new(-phase.sin() * radius, phase.cos() * radius, z)

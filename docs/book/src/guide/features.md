@@ -243,9 +243,10 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
 3. Open **Thread** and select the shank's cylindrical side. Choose the size and pitch, such
    as `M8x1.25` for this example. Turn on **Modeled** and choose **Follow point** under **Point**.
    If both ends have a cone, use **Start end (optional)** to pick the rim of the one to follow.
-4. Leave **Point depth** at **Fade** and apply the thread. The groove continues across the rim,
-   then gets shallower toward the tip and keeps the tooth crests narrow. **Length** and **Up to**
-   limit the run along the shank, measured from the point's rim.
+4. Leave **Point depth** at **Fade** and apply the thread. The groove keeps its full depth across
+   the rim until the core gets thin, then fades to zero at the tip while keeping the tooth crests
+   narrow. **Length** and **Up to** limit the run along the shank, measured from the point's rim.
+   Choose **Both** under **Hand** to cut crossed grooves.
 
 Choose **Full depth** for a point with enough material around its axis to keep the full groove
 depth. A sharp point needs **Fade**. To cut a constant-depth groove on a cone alone, select its
@@ -261,7 +262,26 @@ repository root, then open the saved design or import the STL into a slicer.
 solidcraft-cli run examples/pointed-screw.json --save pointed-screw.sc --out pointed-screw.stl --quality fine
 ```
 
-Scripts use `point: "follow"` and `point_depth: "fade"` or `"full"` on `solid.thread`.
+After creating the shank and joining the cone, use the shank's cylindrical side as the
+thread pick. This command cuts both hands on the example blank.
+
+```json
+{
+  "command": "solid.thread",
+  "params": {
+    "faces": [{"body": "Pointed screw", "point": [4, 0, 1]}],
+    "designation": "M8x1.25",
+    "modeled": true,
+    "point": "follow",
+    "point_depth": "fade",
+    "hand": "both"
+  }
+}
+```
+
+Omit `hand` for a right-hand thread, as in the example file. Set `point_depth` to
+`"full"` for a flat tip with enough material around its axis.
+
 For standard hardware, use **Insert Fastener** or the separately installed **Screw** plugin.
 Use **Follow point** when you need to model threads on the point of a custom screw blank.
 The example uses nominal thread geometry. For a printed part, check the fit with the intended

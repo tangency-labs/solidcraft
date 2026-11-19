@@ -2230,10 +2230,10 @@ mod imp {
         loft_through(sections, first, &curves, degree)
     }
 
-    pub(crate) fn loft_aligned(sections: &[(Plane, Loop2)], apex: Option<Vec3>) -> Result<Body> {
+    pub(crate) fn loft_aligned(sections: &[(Plane, Loop2)], degree: u32, apex: Option<Vec3>) -> Result<Body> {
         let curves =
             sections.iter().map(|(plane, lp)| lp.segs.iter().map(|seg| curve(plane, seg)).collect::<Result<Vec<_>>>()).collect::<Result<Vec<_>>>()?;
-        let loft = body_of(Brep::loft(&curves, 3, true).map_err(|e| failed("aligned loft", e))?, "aligned loft")?;
+        let loft = body_of(Brep::loft(&curves, degree, true).map_err(|e| failed("aligned loft", e))?, "aligned loft")?;
         let Some(apex) = apex else {
             return Ok(loft);
         };

@@ -1015,32 +1015,258 @@ fn point_rim_blend(at: f64, rim: f64, width: f64) -> f64 {
     at - width * t * t + 4.0 * width * (t * (1.0 - t)).powi(2)
 }
 
+/// Start easing the depth when the taper has only one groove depth of
+/// core left above the radius at the end of the point.
+fn point_fade_length(height: f64, slope: f64, depth: f64) -> f64 {
+    height.min(2.0 * depth / slope)
+}
+
+/// Fair the depth law just before it reaches the full-depth plateau so
+/// the loft does not overshoot into the core across the change in slope.
+fn point_depth_fraction(at: f64, fade_length: f64, width: f64) -> f64 {
+    let start = fade_length - width;
+    if at <= start || at >= fade_length {
+        return (at / fade_length).min(1.0);
+    }
+    let t = (at - start) / width;
+    (start + width * (t + t * t * (1.0 - t))) / fade_length
+}
+
+fn polar_arc(radius: f64, start: f64, end: f64) -> solidcore_record::Seg2 {
+    solidcore_record::Seg2::Arc { center: Vec2::ZERO, radius, start, sweep: end - start }
+}
+
+fn polar_flank([r, s]: [f64; 2], [start, end]: [f64; 2]) -> solidcore_record::Seg2 {
+    let [u, v] = [start, end].map(|angle| Vec2::new(angle.cos(), angle.sin()));
+    let tangent = |p: Vec2, radius| p * (s - r) + Vec2::new(-p.y, p.x) * (radius * (end - start));
+    solidcore_record::Seg2::Cubic { p0: u * r, p1: u * r + tangent(u, r) / 3.0, p2: v * s - tangent(v, s) / 3.0, p3: v * s }
+}
+
+fn polar_spiral(r: [f64; 2], a: [f64; 2]) -> impl Iterator<Item = solidcore_record::Seg2> {
+    (0..5).map(move |i| {
+        let lerp = |pair: [f64; 2], i| pair[0] + (pair[1] - pair[0]) * (f64::from(i) / 5.0);
+        polar_flank([lerp(r, i), lerp(r, i + 1)], [lerp(a, i), lerp(a, i + 1)])
+    })
+}
+
 /// One cross-section of a groove. Keep the standard crest opening as the
 /// groove shallows and bring the root flat out to meet the flanks.
 fn point_groove_section(root: f64, outer: f64, low: [f64; 2], high: [f64; 2]) -> solidcore_record::Loop2 {
-    use solidcore_record::{Loop2, Seg2};
-    let flank = |radius: [f64; 2], angle: [f64; 2]| {
-        let [a, b] = angle.map(|a| Vec2::new(a.cos(), a.sin()));
-        let [r, s] = radius;
-        let tangent = |u: Vec2, r| u * (s - radius[0]) + Vec2::new(-u.y, u.x) * (r * (angle[1] - angle[0]));
-        Seg2::Cubic { p0: a * r, p1: a * r + tangent(a, r) / 3.0, p2: b * s - tangent(b, s) / 3.0, p3: b * s }
-    };
-    let arc = |radius, start, end: f64| Seg2::Arc { center: Vec2::ZERO, radius, start, sweep: end - start };
-    let spiral = |r: [f64; 2], a: [f64; 2]| {
-        (0..5).map(move |i| {
-            let lerp = |pair: [f64; 2], i| pair[0] + (pair[1] - pair[0]) * (f64::from(i) / 5.0);
-            flank([lerp(r, i), lerp(r, i + 1)], [lerp(a, i), lerp(a, i + 1)])
-        })
-    };
     let [lo_root, lo_outer] = low.map(|a| -a);
     let [hi_root, hi_outer] = high;
-    Loop2 {
-        segs: spiral([root, outer], [lo_root, lo_outer])
-            .chain([arc(outer, lo_outer, 0.0), arc(outer, 0.0, hi_outer)])
-            .chain(spiral([outer, root], [hi_outer, hi_root]))
-            .chain([arc(root, hi_root, 0.0), arc(root, 0.0, lo_root)])
+    solidcore_record::Loop2 {
+        segs: polar_spiral([root, outer], [lo_root, lo_outer])
+            .chain([polar_arc(outer, lo_outer, 0.0), polar_arc(outer, 0.0, hi_outer)])
+            .chain(polar_spiral([outer, root], [hi_outer, hi_root]))
+            .chain([polar_arc(root, hi_root, 0.0), polar_arc(root, 0.0, lo_root)])
             .collect(),
     }
+}
+
+/// The stock and depth laws used by transverse grooves, measured from the small end.
+struct PointGroove {
+    tip_radius: f64,
+    slope: f64,
+    height: f64,
+    depth: f64,
+    fade: Option<(f64, f64)>,
+    runout: Option<(f64, f64)>,
+    pitch: f64,
+}
+
+impl PointGroove {
+    fn stock(&self, h: f64) -> f64 {
+        self.tip_radius + h.min(self.height) * self.slope
+    }
+
+    fn depth_at(&self, h: f64) -> f64 {
+        self.depth * self.fade.map_or(1.0, |(length, width)| point_depth_fraction(h, length, width))
+    }
+
+    fn runout_at(&self, h: f64) -> f64 {
+        self.runout.map_or(1.0, |(start, end)| {
+            let length = end - start;
+            point_depth_fraction((end - h).max(0.0), length, (0.12 * self.pitch).min(length * 0.25))
+        })
+    }
+}
+
+/// Find a lobe's end just inside the core, where its remaining volume is
+/// buried. A finite cap there keeps the skin away from a degenerate section.
+fn crossed_lobe_end(mut outside: f64, mut inside: f64, exposed: impl Fn(f64) -> f64) -> Option<f64> {
+    if exposed(inside) <= 0.0 {
+        return None;
+    }
+    if exposed(outside) >= 0.0 {
+        return Some(outside);
+    }
+    for _ in 0..36 {
+        let mid = (outside + inside) * 0.5;
+        if exposed(mid) > 0.0 {
+            inside = mid;
+        } else {
+            outside = mid;
+        }
+    }
+    Some(inside)
+}
+
+fn crossed_lobe_section(skirt: f64, base: f64, [a, b]: [f64; 2], [lo, hi]: [f64; 2], scale: f64) -> solidcore_record::Loop2 {
+    let width = (a - lo * (skirt - base)).min(b - hi * (skirt - base));
+    let top = base + (a / lo).min(b / hi);
+    let symmetric = (lo - hi).abs() < 1e-12;
+    if symmetric {
+        let width = width * scale;
+        return solidcore_record::Loop2 {
+            segs: polar_spiral([skirt, top], [-width, 0.0])
+                .chain(polar_spiral([top, skirt], [0.0, width]))
+                .chain(std::iter::once(polar_arc(skirt, width, -width)))
+                .collect(),
+        };
+    }
+    // With unequal flanks the tighter bound can change across the slice.
+    // Align the skin by angle to keep the profiles in the same order.
+    let radius = |w: f64| (base + ((a - w) / lo).min((b - w) / hi)).clamp(skirt, top);
+    let side = |from, to, sign: f64| {
+        (0..5).map(move |i| {
+            let at = |j| from + (to - from) * (f64::from(j) / 5.0);
+            let angles = [at(i), at(i + 1)];
+            polar_flank(angles.map(radius), angles.map(|w| w * sign * scale))
+        })
+    };
+    let arc_angle = |i| width * scale * (1.0 - f64::from(i) * 0.5);
+    solidcore_record::Loop2 {
+        segs: side(width, 0.0, -1.0).chain(side(0.0, width, 1.0)).chain((0..4).map(|i| polar_arc(skirt, arc_angle(i), arc_angle(i + 1)))).collect(),
+    }
+}
+
+/// Build the complement of the two crossing grooves as a round core and
+/// the crests left between opposite flanks. Cutting with its complement
+/// avoids intersecting two spline roots that nearly coincide at the apex.
+fn crossed_point_groove(t: &ThreadInfo, groove: &PointGroove, meridian: Plane, finish: f64, dir: f64, flat: f64, tangents: [f64; 2]) -> Result<Body> {
+    use solidcore_record::{Loop2, Seg2};
+
+    let pitch = groove.pitch;
+    let starts = t.starts.max(1);
+    let period = std::f64::consts::TAU / f64::from(starts);
+    let scale = period / pitch;
+    let axis = meridian.y * dir;
+    let y = axis.cross(meridian.x);
+    let point = |h| meridian.origin + meridian.y * h;
+    let baseline = |h| groove.stock(h) - groove.depth * groove.runout_at(h);
+    let root = |h| groove.stock(h) - groove.depth_at(h) * groove.runout_at(h);
+
+    let revolve = |outer| -> Result<Body> {
+        kernel::revolve(&meridian, &[Region2 { outer, holes: Vec::new() }], Vec2::ZERO, Vec2::new(0.0, 1.0), std::f64::consts::TAU)?
+            .pop()
+            .ok_or_else(|| DocError::Invalid("the crossed thread has no volume".into()))
+    };
+    let blend = groove.fade.map(|(end, width)| (end - width, end));
+    let ease = groove.runout.map(|(start, end)| (start, start + (0.12 * pitch).min((end - start) * 0.25)));
+    let mut knots = vec![0.0, groove.height, finish];
+    knots.extend(blend.into_iter().flat_map(|(a, b)| [a, b]));
+    knots.extend(ease.into_iter().flat_map(|(a, b)| [a, b]));
+    knots.extend(groove.runout.map(|(_, end)| end));
+    knots.sort_by(f64::total_cmp);
+    knots.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    let at = |h| Vec2::new(root(h), h);
+    let line = |a, b| Seg2::Line { a, b };
+    let mut segs = Vec::new();
+    if root(0.0) > 1e-9 {
+        segs.push(line(Vec2::ZERO, at(0.0)));
+    }
+    for pair in knots.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if [blend, ease].into_iter().flatten().any(|(lo, hi)| a >= lo && b <= hi) {
+            // Four samples recover the cubic meridian exactly within a blend.
+            let (p0, p3) = (at(a), at(b));
+            let (q1, q2) = (at(a + (b - a) / 3.0) * 27.0 - p0 * 8.0 - p3, at(b - (b - a) / 3.0) * 27.0 - p0 - p3 * 8.0);
+            segs.push(Seg2::Cubic { p0, p1: (q1 * 2.0 - q2) / 18.0, p2: (q2 * 2.0 - q1) / 18.0, p3 });
+        } else {
+            segs.push(line(at(a), at(b)));
+        }
+    }
+    segs.extend([line(at(finish), Vec2::new(0.0, finish)), line(Vec2::new(0.0, finish), Vec2::ZERO)]);
+    let core = revolve(Loop2 { segs })?;
+
+    let skirt_depth = |h| (0.043 * pitch).min(0.12 * root(h));
+    let [lo, hi] = tangents;
+    // A quadratic skin stays monotone where the tighter asymmetric flank
+    // changes across successive sections.
+    let degree = if (lo - hi).abs() < 1e-12 { 3 } else { 2 };
+    let flank_peak = (pitch - 2.0 * flat) * (lo / (lo + hi) - 0.5);
+    let mut lobes = Vec::new();
+    for spoke in 0..2 * starts {
+        let angle = 0.5 * period * f64::from(spoke);
+        let x = meridian.x * angle.cos() + y * angle.sin();
+        let phase = 0.5 * f64::from(1 - spoke % 2);
+        let first_turn = (-groove.height / pitch - phase - 0.5).ceil() as i32;
+        let last_turn = ((finish - groove.height) / pitch - phase + 0.5).floor() as i32;
+        for turn in first_turn..=last_turn {
+            let center = groove.height + pitch * (f64::from(turn) + phase);
+            let peak = center + dir * flank_peak;
+            let search = [(center - 0.5 * pitch).max(0.0), (center + 0.5 * pitch).min(finish)];
+            if search[0] >= search[1] {
+                continue;
+            }
+            // Each bisector sees a mirrored pair of flanks on either side.
+            // At any radius the tighter pair sets the crest's half-width.
+            let gap = |h: f64| {
+                let shift = dir * (h - center);
+                [pitch * 0.5 + shift - flat, pitch * 0.5 - shift - flat]
+            };
+            let top = |h| {
+                let [a, b] = gap(h);
+                baseline(h) + (a / lo).min(b / hi)
+            };
+            let exposed = |h| top(h) - (root(h) - 0.22 * skirt_depth(h));
+            let mid = peak.clamp(search[0], search[1]);
+            let (Some(a), Some(b)) = (crossed_lobe_end(search[0], mid, exposed), crossed_lobe_end(search[1], mid, exposed)) else {
+                continue;
+            };
+            let apex = (a <= 1e-9 && groove.tip_radius <= 1e-6).then(|| point(0.0));
+            let first = if apex.is_some() { (0.012 * pitch).max(0.015).min(b * 0.1) } else { a };
+            let mut splits = [first, peak, groove.height, b].into_iter().filter(|h| *h >= first && *h <= b).collect::<Vec<_>>();
+            splits.sort_by(f64::total_cmp);
+            splits.dedup_by(|a, b| (*a - *b).abs() < 1e-8);
+            let mut pieces = Vec::new();
+            for pair in splits.windows(2) {
+                let (a, b) = (pair[0], pair[1]);
+                let sections = (0..=8)
+                    .map(|i| {
+                        let h = a + (b - a) * f64::from(i) / 8.0;
+                        let skirt = root(h) - skirt_depth(h);
+                        let section = crossed_lobe_section(skirt, baseline(h), gap(h), tangents, scale);
+                        (Plane { origin: point(h), x, y: axis.cross(x) }, section)
+                    })
+                    .collect::<Vec<_>>();
+                pieces.push(kernel::loft_aligned(&sections, degree, apex.filter(|_| a == first))?);
+            }
+            if let [one] = pieces.as_slice() {
+                lobes.push(one.clone());
+            } else if !pieces.is_empty() {
+                lobes.push(kernel::union_all(&pieces.iter().collect::<Vec<_>>())?);
+            }
+        }
+    }
+    let keep = lobes.chunks(256).try_fold(core, |core, chunk| {
+        let teeth = if let [one] = chunk {
+            one.clone()
+        } else {
+            kernel::join_apart(chunk)?.ok_or_else(|| DocError::Invalid("the crossed thread has no crests".into()))?
+        };
+        kernel::boolean(&core, &teeth, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("the crossed thread core is empty".into()))
+    })?;
+    let margin = 0.055 * pitch;
+    let stock = revolve(Loop2::polygon(&[
+        Vec2::new(0.0, -margin),
+        Vec2::new(groove.tip_radius + margin, -margin),
+        Vec2::new(groove.tip_radius + margin, 0.0),
+        Vec2::new(groove.stock(groove.height) + margin, groove.height),
+        Vec2::new(groove.stock(finish) + margin, finish),
+        Vec2::new(0.0, finish),
+    ]))?;
+    kernel::boolean(&stock, &keep, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the crossed thread's grooves are empty".into()))
 }
 
 /// Near the axis a full-size meridian cutter would pass through the axis.
@@ -1069,7 +1295,17 @@ fn narrow_point_grooves(
     // Keep the end of the ruled apex cap large enough for its trimmed
     // faces to tessellate on fine pitches as well.
     let sharp = tip_radius <= 1e-6;
-    let fade = cone.point_depth == Some(ThreadPointDepth::Fade);
+    let fade_length = point_fade_length(height, cone.slope.abs(), depth);
+    let fade_width = (0.12 * pitch).min(fade_length * 0.25);
+    let groove = PointGroove {
+        tip_radius,
+        height,
+        slope: cone.slope.abs(),
+        depth,
+        fade: (cone.point_depth == Some(ThreadPointDepth::Fade)).then_some((fade_length, fade_width)),
+        runout: (!rest.is_empty()).then_some((fixed_end, end_at)),
+        pitch,
+    };
     let first = if sharp { (0.012 * pitch).max(0.015) } else { 0.0 };
     let finish = end_at + if end == End::Free { 0.016 * pitch } else { 0.0 };
     if height <= first || finish <= height || (finish - first) / lead > 190.0 || radius <= depth {
@@ -1085,45 +1321,37 @@ fn narrow_point_grooves(
     let y = k.cross(x);
     let axis_at = |z| t.axis_point + t.axis * z;
     let span = (0.12 * pitch).min(height * 0.25);
-    let hands: &[f64] = match t.hand {
-        ThreadHand::Right => &[1.0],
-        ThreadHand::Left => &[-1.0],
-        ThreadHand::Both => &[1.0, -1.0],
-    };
+    if t.hand == ThreadHand::Both {
+        let plane = Plane { origin: axis_at(tip), x, y: k * dir };
+        return Ok(vec![crossed_point_groove(t, &groove, plane, finish, dir, flat, [flank_hi.tan(), flank_lo.tan()])?]);
+    }
+    let hand = if t.hand == ThreadHand::Left { -1.0 } else { 1.0 };
     let scale = std::f64::consts::TAU / lead;
     let mut tools = Vec::new();
-    for &hand in hands {
-        let (lo, hi) = if hand > 0.0 { (flank_hi.tan(), flank_lo.tan()) } else { (flank_lo.tan(), flank_hi.tan()) };
-        let clearance = ((0.98 * pitch - 2.0 * flat) / (lo + hi) - depth).min(0.045 * pitch);
-        for start in 0..starts {
-            let sections = stations(first, height, 0)
-                .chain(stations(height, if rest.is_empty() { finish } else { fixed_end }, 1))
-                .chain(rest.iter().flat_map(|_| stations(fixed_end, finish, 1)))
-                .map(|h| {
-                    let z = tip + dir * h;
-                    let phase = scale * (hand * (z - cone.wide) + f64::from(start) * pitch);
-                    let u = x * phase.cos() + y * phase.sin();
-                    let fraction = point_rim_blend(h, height, span) / height;
-                    let stock = if sharp { radius * fraction } else { tip_radius + (radius - tip_radius) * fraction };
-                    let d = if fade { depth * fraction } else { depth };
-                    let runout = if rest.is_empty() {
-                        1.0
-                    } else {
-                        let length = end_at - fixed_end;
-                        let fade = h - point_rim_blend(h, fixed_end, (0.12 * pitch).min(length * 0.25));
-                        (1.0 - fade / length).clamp(0.0, 1.0)
-                    };
-                    // The cutter stays open outside a flat tip where its depth
-                    // reaches zero. A sharp tip's cutter collapses onto the pole.
-                    let open = if sharp { d } else { d + tip_radius.min(depth) * (1.0 - fraction).max(0.0) };
-                    let overshoot = clearance * (1.0 - (-10.0 * open).exp());
-                    let extents = |tan| [(flat + (depth * runout - d * runout) * tan) * scale, (flat + (depth * runout + overshoot) * tan) * scale];
-                    let section = point_groove_section(stock - d * runout, stock + overshoot, extents(lo), extents(hi));
-                    (Plane { origin: axis_at(z), x: u, y: k.cross(u) }, section)
-                })
-                .collect::<Vec<_>>();
-            tools.push(kernel::loft_aligned(&sections, sharp.then(|| axis_at(tip)))?);
-        }
+    let (lo, hi) = if hand > 0.0 { (flank_hi.tan(), flank_lo.tan()) } else { (flank_lo.tan(), flank_hi.tan()) };
+    let clearance = ((0.98 * pitch - 2.0 * flat) / (lo + hi) - depth).min(0.045 * pitch);
+    for start in 0..starts {
+        let sections = stations(first, height, 0)
+            .chain(stations(height, if rest.is_empty() { finish } else { fixed_end }, 1))
+            .chain(rest.iter().flat_map(|_| stations(fixed_end, finish, 1)))
+            .map(|h| {
+                let z = tip + dir * h;
+                let phase = scale * (hand * (z - cone.wide) + f64::from(start) * pitch);
+                let u = x * phase.cos() + y * phase.sin();
+                let fraction = point_rim_blend(h, height, span) / height;
+                let stock = if sharp { radius * fraction } else { tip_radius + (radius - tip_radius) * fraction };
+                let d = groove.depth_at(h);
+                let runout = groove.runout_at(h);
+                // The cutter stays open outside a flat tip where its depth
+                // reaches zero. A sharp tip's cutter collapses onto the pole.
+                let open = if sharp { d } else { d + tip_radius.min(depth) * (1.0 - fraction).max(0.0) };
+                let overshoot = clearance * (1.0 - (-10.0 * open).exp());
+                let extents = |tan| [(flat + (depth * runout - d * runout) * tan) * scale, (flat + (depth * runout + overshoot) * tan) * scale];
+                let section = point_groove_section(stock - d * runout, stock + overshoot, extents(lo), extents(hi));
+                (Plane { origin: axis_at(z), x: u, y: k.cross(u) }, section)
+            })
+            .collect::<Vec<_>>();
+        tools.push(kernel::loft_aligned(&sections, 3, sharp.then(|| axis_at(tip)))?);
     }
     Ok(tools)
 }
@@ -1205,7 +1433,14 @@ fn conical_groove_tools(
         if !(root > 0.0) {
             return Err(invalid("there is not enough material around the shank's axis for the thread"));
         }
-        spans.push(RootSpan::new((base, root), (tip, r(tip))));
+        let height = (base - tip).abs();
+        let fade_length = point_fade_length(height, slope, depth);
+        let knee = if fade_length < height { tip + (base - tip).signum() * fade_length } else { base };
+        let knee_root = r(knee) - depth;
+        if knee != base {
+            spans.push(RootSpan::new((base, root), (knee, knee_root)));
+        }
+        spans.push(RootSpan::new((knee, knee_root), (tip, r(tip))));
     } else {
         let margin = if cone.point_depth.is_some() { 2e-6 } else { slope * width + 2e-6 };
         if r(tip) - depth <= margin {
