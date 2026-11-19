@@ -36,7 +36,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.proto_vertex_miss_is_false = true;
@@ -55,7 +54,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.ssi_tangent_curve_tracer = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {

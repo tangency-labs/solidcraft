@@ -113,6 +113,7 @@ fn traced_records(
     let mut warnings = Vec::new();
     let mut unplaced = Vec::with_capacity(read.read.len());
     let looks = colours.then(|| Looks::of(ir));
+    let layers = HiddenLayers::of(ir);
     for r in read.read {
         let body = by_id.get(r.body.as_str());
         let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
@@ -125,16 +126,66 @@ fn traced_records(
             // which is not how Rhino shades it.
             color,
             paint,
-            hidden: body.is_some_and(|b| b.visible == Some(false)),
+            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(r.body.as_str()),
             placement: r.placement,
             brep: Some(r.solid.brep),
             face_origin: r.solid.face_origin,
             sheet: r.solid.sheet,
             copy_of: None,
+            mesh: None,
         };
         unplaced.push(assembly::Unplaced { body: r.body, record });
     }
     warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
+    // Parts the file gives as triangles alone (AP242 tessellated parts): a mesh body each, placed
+    // as any other part. A tessellation of a body that has a B-rep is how the file shows that
+    // body, not a part of its own.
+    for t in &ir.model.tessellations {
+        // A tessellation the model ties to no body (cadmpeg reads a part given as triangles alone
+        // so) is a part of its own, where the file defines it, under the root of bodies no
+        // occurrence reaches; in an assembly that is not where the assembly puts it, which the
+        // warning says.
+        let (id, body) = match t.body.as_ref().map(|b| b.as_str()) {
+            Some(id) => match by_id.get(id) {
+                Some(body) if body.regions.is_empty() => (id, Some(*body)),
+                _ => continue,
+            },
+            None => (t.id.as_str(), None),
+        };
+        let name = body.and_then(|b| b.name.clone()).or_else(|| t.source_object.as_ref().and_then(|s| s.name.clone())).unwrap_or_default();
+        if body.is_none() && !ir.model.occurrences.is_empty() {
+            let named = if name.trim().is_empty() { format!("triangles {id}") } else { name.clone() };
+            warnings.push(format!("{named}: a part given as triangles comes in where the file defines it, not placed in the assembly: the file's reader does not say which part it is"));
+        }
+        let placement = match body.and_then(|b| b.transform) {
+            None => None,
+            Some(m) if m.is_proper_rigid() => Some(assembly::column_major(&m)),
+            Some(_) => {
+                warnings.push(format!("{}: not imported: not supported yet: a placement that mirrors or scales", label(id)));
+                continue;
+            }
+        };
+        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, id, &[]));
+        let record = RecordBody {
+            name,
+            path: vec![product.to_string()],
+            instance: None,
+            color,
+            paint,
+            // On a hidden layer: its body, or the tessellation itself (a layer names it by its id).
+            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(id) || layers.bodies.contains(t.id.as_str()),
+            placement,
+            brep: None,
+            face_origin: Vec::new(),
+            sheet: false,
+            copy_of: None,
+            mesh: Some(solidcraft_kernel::RecordMesh {
+                positions: t.vertices().iter().map(|p| p.coordinates().map(|c| c.get())).collect(),
+                triangles: t.triangles(),
+            }),
+        };
+        unplaced.push(assembly::Unplaced { body: id.to_string(), record });
+    }
     let (bodies, tree, origins) = if ir.model.occurrences.is_empty() {
         let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
         let origins = unplaced.iter().map(|u| validation::Origin { body: u.body.clone(), world: identity }).collect();
@@ -149,13 +200,53 @@ fn traced_records(
         }];
         (bodies, tree, origins)
     } else {
-        assembly::placed(ir, product, unplaced, &mut warnings)
+        assembly::placed(ir, product, unplaced, &layers, &mut warnings)
     };
     (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
 }
 
 mod assembly;
 mod validation;
+
+/// What the file's hidden presentation layers hide (CADIR ids): bodies (with the bodies of the
+/// products on them, and the parts given as triangles on them), and the occurrences and products
+/// whose placements, with all they hold, start hidden.
+#[derive(Default)]
+pub(crate) struct HiddenLayers {
+    pub bodies: std::collections::HashSet<String>,
+    pub occurrences: std::collections::HashSet<String>,
+    pub definitions: std::collections::HashSet<String>,
+}
+
+impl HiddenLayers {
+    fn of(ir: &cadmpeg_ir::document::CadIr) -> Self {
+        use cadmpeg_ir::presentation::PresentationItem;
+        let mut out = HiddenLayers::default();
+        for layer in ir.model.presentation_layers.iter().filter(|l| l.visible == Some(false)) {
+            for item in &layer.items {
+                match item {
+                    PresentationItem::Body { body } => {
+                        out.bodies.insert(body.as_str().to_string());
+                    }
+                    PresentationItem::Tessellation { tessellation } => {
+                        out.bodies.insert(tessellation.clone());
+                    }
+                    PresentationItem::Occurrence { occurrence } => {
+                        out.occurrences.insert(occurrence.as_str().to_string());
+                    }
+                    PresentationItem::Product { product } => {
+                        out.definitions.insert(product.as_str().to_string());
+                        if let Some(d) = ir.model.product_definitions.iter().find(|d| d.id == *product) {
+                            out.bodies.extend(d.bodies.iter().map(|b| b.as_str().to_string()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out
+    }
+}
 
 /// A file's appearances by what they colour: whole bodies and single faces (CADIR ids).
 struct Looks<'a> {

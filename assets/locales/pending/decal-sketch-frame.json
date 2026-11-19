@@ -1,0 +1,50 @@
+{
+  "en": {
+    "browser.canvas_anchored": "The canvas follows points of a sketch. Change that sketch instead.",
+    "browser.canvas_follow_frame": "Follow a frame in the sketch",
+    "cmd.canvas_frame_sketch": "Frame Sketch",
+    "ui.palette_frame_image": "Frame the image in the sketch"
+  },
+  "ar": {
+    "browser.canvas_anchored": "تتبع اللوحة نقاط رسم. غيّر ذلك الرسم بدلًا من ذلك.",
+    "browser.canvas_follow_frame": "اتباع إطار في الرسم",
+    "cmd.canvas_frame_sketch": "رسم إطار",
+    "ui.palette_frame_image": "تأطير الصورة في الرسم"
+  },
+  "de": {
+    "browser.canvas_anchored": "Die Leinwand folgt Punkten einer Skizze. Ändern Sie stattdessen diese Skizze.",
+    "browser.canvas_follow_frame": "Einem Rahmen in der Skizze folgen",
+    "cmd.canvas_frame_sketch": "Rahmenskizze",
+    "ui.palette_frame_image": "Bild in der Skizze einrahmen"
+  },
+  "he": {
+    "browser.canvas_anchored": "הקנבס עוקב אחר נקודות של סקיצה. שנה את הסקיצה במקום זאת.",
+    "browser.canvas_follow_frame": "לעקוב אחר מסגרת בסקיצה",
+    "cmd.canvas_frame_sketch": "סקיצת מסגרת",
+    "ui.palette_frame_image": "מסגור התמונה בסקיצה"
+  },
+  "ja": {
+    "browser.canvas_anchored": "キャンバスはスケッチの点に従っています。代わりにそのスケッチを変更してください。",
+    "browser.canvas_follow_frame": "スケッチ内の枠に従う",
+    "cmd.canvas_frame_sketch": "フレームスケッチ",
+    "ui.palette_frame_image": "スケッチ内で画像を枠で囲む"
+  },
+  "ko": {
+    "browser.canvas_anchored": "캔버스가 스케치의 점을 따릅니다. 대신 그 스케치를 변경하세요.",
+    "browser.canvas_follow_frame": "스케치 안의 프레임을 따름",
+    "cmd.canvas_frame_sketch": "프레임 스케치",
+    "ui.palette_frame_image": "스케치 안에서 이미지에 프레임 두르기"
+  },
+  "vi": {
+    "browser.canvas_anchored": "Canvas đi theo các điểm của một bản phác thảo. Hãy thay đổi bản phác thảo đó.",
+    "browser.canvas_follow_frame": "Đi theo một khung trong bản phác thảo",
+    "cmd.canvas_frame_sketch": "Phác thảo khung",
+    "ui.palette_frame_image": "Đóng khung ảnh trong bản phác thảo"
+  },
+  "zh": {
+    "browser.canvas_anchored": "画布跟随草图中的点。请改为修改该草图。",
+    "browser.canvas_follow_frame": "跟随草图中的边框",
+    "cmd.canvas_frame_sketch": "框架草图",
+    "ui.palette_frame_image": "在草图中为图像加边框"
+  }
+}
