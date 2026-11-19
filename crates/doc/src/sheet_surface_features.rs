@@ -3030,6 +3030,7 @@ mod tests {
     use std::f64::consts::PI;
 
     use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+    use solidcraft_develop::prelude::*;
     use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Panel, Relief, Rigid2, Rigid3, Sheet, Tail, ZoneEnds, develop, fold};
     use solidcraft_geom::prelude::*;
 
