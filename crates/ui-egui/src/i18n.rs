@@ -108,8 +108,9 @@ pub trait LocaleNames {
     /// multi-word Hebrew or Arabic name reads from the right like the interface's own labels (#10471).
     fn given_name(self, text: &str) -> String;
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
-    /// another component, a feature's request to reselect a reference it lost, and an open
-    /// Stitch result are translated where they are shown. Other text is returned unchanged.
+    /// another component, a feature's request to reselect a reference it lost, an open Stitch
+    /// result and a profile pick with too many curves are translated where they are shown. Other
+    /// text is returned unchanged.
     fn diagnostic(self, text: &str) -> String;
     /// Translate generated browser names and labels, preserving custom names otherwise.
     fn dynamic(self, text: &str) -> String;
@@ -162,6 +163,11 @@ impl LocaleNames for Locale {
             let body = self.given_name(body);
             let message = self.format("diagnostic.stitch_open_edges", &[("body", &body), ("count", count)]);
             return format!("{before}{message}{after}");
+        }
+        // A profile pick with more curves than a design keeps track of, after anything naming
+        // the feature or command in front.
+        if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
+            return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -689,6 +695,20 @@ mod tests {
                 assert!(translated.contains(feature) && translated.contains(shown), "{language}: {translated}");
                 assert!(!translated.contains(" more"), "the count of the rest is translated too: {language}: {translated}");
             }
+        }
+    }
+
+    #[test]
+    fn a_profile_pick_with_too_many_curves_reads_in_the_interface_language() {
+        install();
+        let message = format!("solid.extrude: {}", solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES);
+        let english = Locale::for_language("en").diagnostic(&message);
+        assert_eq!(english, format!("solid.extrude: {}", Locale::for_language("en").text("diagnostic.whole_profile_too_many_curves")));
+        assert!(english.contains("Pick fewer profiles"), "{english}");
+        for language in ["ar", "de", "he", "ja", "ko", "pt-BR", "vi", "zh"] {
+            let translated = Locale::for_language(language).diagnostic(&message);
+            assert!(translated.starts_with("solid.extrude: "), "{language}: {translated}");
+            assert_ne!(translated, english, "{language}: the refusal must be translated");
         }
     }
 
