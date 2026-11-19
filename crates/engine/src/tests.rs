@@ -1320,7 +1320,12 @@ fn hostile_params_never_panic() {
                                         || id == "timeline.export_script"
                                         || matches!(
                                             id,
-                                            "file.export_3mf" | "file.export_obj" | "file.export_step" | "file.export_stl" | "file.export_urdf"
+                                            "file.export_3mf"
+                                                | "file.export_obj"
+                                                | "file.export_sdf"
+                                                | "file.export_step"
+                                                | "file.export_stl"
+                                                | "file.export_urdf"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
