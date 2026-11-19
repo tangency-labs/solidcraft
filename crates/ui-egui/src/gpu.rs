@@ -1330,7 +1330,7 @@ mod tests {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.radius(18.0);
         f.frame();
-        let _scope = f.app.blur.begin(&f.ctx, true);
+        let _scope = f.app.blur.begin(&f.ctx);
         assert!(crate::blur::enabled());
         let fill = egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180);
         let frame = egui::Frame::NONE.fill(fill);
