@@ -25,7 +25,22 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<OpenParams>(),
-        &["folder", "history", "max_points", "names", "origin", "path", "read_only", "reuse_import", "units", "up", "verify"],
+        &[
+            "folder",
+            "format",
+            "history",
+            "max_points",
+            "names",
+            "options",
+            "origin",
+            "path",
+            "read_only",
+            "reader",
+            "reuse_import",
+            "units",
+            "up",
+            "verify",
+        ],
     );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
@@ -414,6 +429,14 @@ fn export_replies_match_the_output_schema() {
             assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
             assert!(conforms(schema, schema, &reply), "{p}: {reply} doesn't match {schema}");
         }
+        // #18780: ExportResult with skipped bodies conforms to schema
+        let reply_with_skipped = json!({
+            "path": at("k.3mf"),
+            "bytes": 1024,
+            "format": "ThreeMf",
+            "skipped": ["BrokenBody"]
+        });
+        assert!(conforms(schema, schema, &reply_with_skipped));
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

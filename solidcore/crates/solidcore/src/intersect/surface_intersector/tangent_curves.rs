@@ -1,6 +1,7 @@
 //! The tangential intersection curve pass of the surface/surface intersector: traces the
 //! curves along which the two surfaces touch, and the crossing branches through the
-//! contact points where crossing curves meet (opt-in, WR-75).
+//! contact points where crossing curves meet (opt-in, WR-75; not run in a self intersection
+//! whose two domains overlap or touch).
 //!
 //! Upstream: the SolidCraft fork's `source/SMLib/src/SmTangentCurveTracer.cpp`
 //! (tangency-labs/smlib ef4ab25, e9fde8f, d8c61db, 1693c9d; not in the pinned SMLib).
@@ -163,7 +164,7 @@ fn covers_crossing(
 
 /// Removes curve `ii` from the five output arrays (`delete pC; RemoveAt(ii)` and the
 /// guarded `RemoveAt`s of the associated arrays).
-fn remove_curve(out: &mut TsectCurves, ii: usize) {
+pub(super) fn remove_curve(out: &mut TsectCurves, ii: usize) {
     if ii < out.curves_3d.len() {
         out.curves_3d.remove(ii);
     }

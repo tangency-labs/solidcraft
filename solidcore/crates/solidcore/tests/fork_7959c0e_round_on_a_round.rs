@@ -19,7 +19,7 @@
 //! is a slice by a one-face sheet on the tool surface turned over (`SwapUV`), as the capi
 //! makes it; an edge is picked as the nearest within 0.1 of a point; the rounds are
 //! [`fillet_edges`] (circular, constant radius, then `StitchAndOrient`), on the kernel
-//! SolidCraft runs (every fix on but `geometric_g2_continuity`).
+//! SolidCraft runs (every fix on).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -61,14 +61,12 @@ use solidcore::{Brep, Kernel};
 /// `TWIST_TAN`: tan 30 degrees.
 const TWIST_TAN: f64 = 0.577_350_269_189_625_76;
 
-/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`.
+/// The kernel SolidCraft runs: every fix on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k

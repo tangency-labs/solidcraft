@@ -12,6 +12,8 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::blend_corner::{BlendCornerEvent, BlendEnd};
 use solidcore::blend::fillet_corner::p3::FilletCornerKind;
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -32,14 +34,12 @@ use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -121,9 +121,16 @@ fn at(cs: &[Corner], p: [f64; 3]) -> (FilletCornerKind, Option<Event>) {
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
-    volume_at(k, b, 1e-12)
-        .or_else(|_| volume_at(k, b, 1e-9))
-        .unwrap()
+    volume_and_accuracy(k, b).0
+}
+
+/// [`volume`] and the accuracy it was integrated to (1e-12, or 1e-9 where that fails), for
+/// checks that must measure at the same accuracy.
+fn volume_and_accuracy(k: &Kernel, b: &mut Brep) -> (f64, f64) {
+    match volume_at(k, b, 1e-12) {
+        Ok(v) => (v, 1e-12),
+        Err(_) => (volume_at(k, b, 1e-9).unwrap(), 1e-9),
+    }
 }
 
 /// `SmApiBrepComputeVolume` at `accuracy`.
@@ -233,14 +240,17 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     assert_eq!(kind, FilletCornerKind::NByOne);
     assert_eq!(event, Some((BlendCornerEvent::End, BlendEnd::OnEndFace)));
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
-    let v = volume(&k, &mut b);
+    let (v, accuracy) = volume_and_accuracy(&k, &mut b);
     let off = nearest_vertex(&b, Point3::new(396.0_f64.sqrt(), 0.0, 8.0));
     eprintln!("volume {v:.15} want {want:.15}; rail end off {off:.3e}");
     clean(&mut k, &mut b);
     assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
     assert!(off <= 1e-13, "{off}");
+    // the fork's 21407.602511807886913, pinned here to 1e-10 until `brep_volume` closed
+    // tolerant edges' gaps (#16735): it leaks through them as this integrator did
     let fork = 21407.602511807886913;
-    assert!((v - fork).abs() <= 1e-10, "{v} vs the fork's {fork}");
+    assert!((v - 21_407.602_507_916_15).abs() <= 1e-10, "{v} vs {fork}");
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, fork, v, accuracy);
 }
 
 /// The step with its upper block's profile (0, 10), (20, 10), (17, 20), (0, 20) swept
@@ -532,11 +542,17 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 /// volumes moved by 5.5e-7 (r 0.5, from 7133.840421559223614) and 8.9e-6 (r 1, from
 /// 7140.722593330715): each net, sampled at 401 x 9 points of each face, is within its
 /// bound of its definition (r 0.5: 2.3e-6 of 3.9e-6; r 1: 3.2e-6 of 4.0e-6), and the
-/// areas times the bounds (1.3e-4 and 2.7e-4) hold both moves.
+/// areas times the bounds (1.3e-4 and 2.7e-4) hold both moves. Since `brep_volume` closes
+/// tolerant edges' gaps (#16735) they are 7133.840430093693 (from 7133.840421010035243) and
+/// 7140.722600128098 (from 7140.722584425828245), each move checked within the old integrator's leak
+/// bound.
 #[test]
 fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
     let foot = [[15.5, 0.0, 0.0]];
-    for (r, want) in [(0.5, 7133.840421010035243), (1.0, 7140.722584425828245)] {
+    for (r, was, want) in [
+        (0.5, 7133.840421010035243, 7133.840430093693),
+        (1.0, 7140.722584425828245, 7140.722600128098),
+    ] {
         let mut k = all_fixes();
         let mut b = teardrop_boss(&mut k);
         let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &foot, r);
@@ -551,11 +567,12 @@ fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
             )
         );
         round(&mut k, &mut b, &foot, r);
-        let v = volume(&k, &mut b);
+        let (v, accuracy) = volume_and_accuracy(&k, &mut b);
         eprintln!("r {r}: volume {v:.15}, {} faces", faces(&b));
         clean(&mut k, &mut b);
         assert_eq!(faces(&b), 10);
         assert!((v - want).abs() <= 1e-12 * want, "{v} vs {want}");
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, v, accuracy);
     }
 }
 
@@ -568,11 +585,9 @@ use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::face::p2 as face2;
 
-/// The step's front edge rounded r 2 into an End on `wall`, with or without
-/// `fillet_round_as_definition`.
-fn end_on(wall: fn(&mut Kernel) -> Brep, definition: bool) -> (Kernel, Brep) {
+/// The step's front edge rounded r 2 into an End on `wall`.
+fn end_on(wall: fn(&mut Kernel) -> Brep) -> (Kernel, Brep) {
     let mut k = all_fixes();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = wall(&mut k);
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
     (k, b)
@@ -588,30 +603,6 @@ fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
             s.procedural_blend()
                 .and_then(|d| d.corner())
                 .is_some_and(|c| c.kind() == kind)
-        })
-        .collect()
-}
-
-/// Every face's surface over a 9 x 9 grid of its natural domain, as bits.
-fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    get_faces(b)
-        .unwrap()
-        .into_iter()
-        .filter_map(|f| face2::surface(b, f).unwrap())
-        .map(|s| {
-            let d = s.natural_uv_domain_with_nurb(k).unwrap();
-            let mut pts = Vec::new();
-            for i in 0..=8 {
-                for j in 0..=8 {
-                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
-                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
-                    let p = s
-                        .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
-                        .unwrap();
-                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
-                }
-            }
-            pts
         })
         .collect()
 }
@@ -634,7 +625,7 @@ fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
 #[test]
 fn the_end_patches_are_their_definitions() {
     for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
-        let (k, mut b) = end_on(wall, true);
+        let (k, b) = end_on(wall);
         let ends = corner_faces(&b, CornerKind::End);
         assert_eq!(ends.len(), 1);
         for s in &ends {
@@ -644,18 +635,13 @@ fn the_end_patches_are_their_definitions() {
             assert!(d.support(0).is_some());
             assert_eq!(d.recertify(&k).unwrap(), 0.0);
         }
-        // the volume and every surface bit for bit as without the definition
-        let (k0, mut b0) = end_on(wall, false);
-        assert!(corner_faces(&b0, CornerKind::End).is_empty());
-        assert_eq!(volume(&k, &mut b).to_bits(), volume(&k0, &mut b0).to_bits());
-        assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
     }
 }
 
 #[test]
 fn an_end_patch_round_trips_through_its_record() {
     for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
-        let (k, b) = end_on(wall, true);
+        let (k, b) = end_on(wall);
         for s in corner_faces(&b, CornerKind::End) {
             let rec = corner_to_record(&k, &s).unwrap();
             let json = serde_json::to_string(&rec).unwrap();
@@ -672,7 +658,7 @@ fn an_end_patch_round_trips_through_its_record() {
 #[test]
 fn an_end_patch_off_its_support_is_refused() {
     for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
-        let (k, b) = end_on(wall, true);
+        let (k, b) = end_on(wall);
         let s = &corner_faces(&b, CornerKind::End)[0];
         let CornerRecord::End(rec) = corner_to_record(&k, s).unwrap() else {
             panic!("not an end's record");

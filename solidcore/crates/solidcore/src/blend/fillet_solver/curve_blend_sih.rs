@@ -300,8 +300,8 @@ fn half_interval(ivl: Extent1d) -> Extent1d {
 /// The blend from the end of `prev` (at `prev_t`) to the start of `next` (at
 /// `next_t`): `FairBlendCurveDerivatives` on the two ends, then
 /// `CreateInterpolatingCurve(SM_CP_UNIFORM, dim, 3, .., TRUE)` and `InsertKnots`
-/// of the nine interior knots `0.1 .. 0.9` (its status ignored, or returned with
-/// `pass_on`, `fixes.fillet_statuses_pass_on`).
+/// of the nine interior knots `0.1 .. 0.9` (its status returned, as the fork does;
+/// upstream ignores it, WR-661).
 fn blend_curve(
     dim: u64,
     prev: &BSplineCurve,
@@ -309,7 +309,6 @@ fn blend_curve(
     next: &BSplineCurve,
     next_t: f64,
     new_knots: &[f64],
-    pass_on: bool,
 ) -> Result<BSplineCurve> {
     let mut points: Vec<Point3> = Vec::new();
     let mut vectors: Vec<Vec3> = Vec::new();
@@ -337,9 +336,8 @@ fn blend_curve(
         None,
         true,
     )?;
-    // (status ignored upstream)
-    // fork 66b02de passes this on (SER)
-    crate::error::passed_on(blend.insert_knots(new_knots), pass_on)?.ok();
+    // (status ignored upstream; fork 66b02de passes it on, SER)
+    blend.insert_knots(new_knots)?;
     Ok(blend)
 }
 
@@ -368,16 +366,11 @@ fn lift<S: SmoothingSolver + ?Sized>(
 }
 
 /// `pTarget->SetFromGwNurb(0, pSource->GetOrCreateGwNurbPointer())` (status ignored
-/// upstream; returned with `pass_on`, `fixes.fillet_statuses_pass_on`).
-fn set_from_nurb_of(
-    target: &mut BSplineCurve,
-    source: &mut BSplineCurve,
-    pass_on: bool,
-) -> Result<()> {
+/// upstream; returned here, as the fork does, WR-661).
+fn set_from_nurb_of(target: &mut BSplineCurve, source: &mut BSplineCurve) -> Result<()> {
     let nurb = source.get_or_create_gw_nurb()?.clone();
     // fork 66b02de passes this on (SER)
-    crate::error::passed_on(target.set_from_gw_nurb(Some(&nurb)), pass_on)?.ok();
-    Ok(())
+    target.set_from_gw_nurb(Some(&nurb))
 }
 
 impl MakeCurveBlendSih {
@@ -660,7 +653,6 @@ impl MakeCurveBlendSih {
             &next_center_curve,
             next_trim_ivl.min(),
             &new_knots,
-            k.fixes.fillet_statuses_pass_on,
         )?;
 
         let mut blend_arc_leng = 0.0;
@@ -707,7 +699,6 @@ impl MakeCurveBlendSih {
                 next_uv,
                 next_trim_ivl.min(),
                 &new_knots,
-                k.fixes.fillet_statuses_pass_on,
             )?;
 
             // lift UVCurve to 3D curve and accumulate its arc length
@@ -733,11 +724,7 @@ impl MakeCurveBlendSih {
         let mut joined = BSplineCurve::create_by_joining(&mut segments, None)?;
 
         // replace Prev CenterLine piece Nurb with joint Nurb curve
-        set_from_nurb_of(
-            &mut prev_center_line,
-            &mut joined,
-            k.fixes.fillet_statuses_pass_on,
-        )?;
+        set_from_nurb_of(&mut prev_center_line, &mut joined)?;
         pseudo.geom_mut(geom)?.center_line_curve = Some(Curve::from(prev_center_line.clone()));
 
         // set output - joined centerline (the geometry's own object upstream)
@@ -773,11 +760,7 @@ impl MakeCurveBlendSih {
             let mut joined_uv = BSplineCurve::create_by_joining(&mut segments, None)?;
 
             // replace PrevUVCurve with pUVBlend NURB definition
-            set_from_nurb_of(
-                &mut prev_uv_curve,
-                &mut joined_uv,
-                k.fixes.fillet_statuses_pass_on,
-            )?;
+            set_from_nurb_of(&mut prev_uv_curve, &mut joined_uv)?;
             store_mate_uv(pseudo, prev_mate_eu, &prev_uv_curve)?;
 
             // add to sNewCurves array
@@ -791,11 +774,7 @@ impl MakeCurveBlendSih {
 
             // lift railUVCurve and add to to output
             let mut lift_3d = lift(fs, k, iii, &prev_uv_curve)?;
-            set_from_nurb_of(
-                &mut prev_rail_curve,
-                &mut lift_3d,
-                k.fixes.fillet_statuses_pass_on,
-            )?;
+            set_from_nurb_of(&mut prev_rail_curve, &mut lift_3d)?;
             store_rail_curve(pseudo, prev_rail_edge, &prev_rail_curve)?;
 
             out_3d.push(prev_rail_curve.clone());
@@ -812,13 +791,8 @@ impl MakeCurveBlendSih {
         // Make sure all curves are syncronized
         BSplineCurve::synchronize_knots_of_curves(&mut new_curves, EFF_ZERO * 100.0)?;
         for curve in &mut new_curves {
-            // (status ignored upstream)
-            // fork 66b02de passes this on (SER)
-            crate::error::passed_on(
-                curve.dampen_knot_spacing(2.0, 3),
-                k.fixes.fillet_statuses_pass_on,
-            )?
-            .ok();
+            // (status ignored upstream; fork 66b02de passes it on, SER)
+            curve.dampen_knot_spacing(2.0, 3)?;
         }
         store_new_curves(
             pseudo,
@@ -945,15 +919,14 @@ mod tests {
     use super::*;
 
     /// Fork 66b02de (`SER( pBlend->InsertKnots(..) )` of the blend piece): a knot past
-    /// the interpolant's `[0, 1]` cannot be inserted. Upstream drops the status; with
-    /// `fillet_statuses_pass_on` (`pass_on`) the error is returned.
+    /// the interpolant's `[0, 1]` cannot be inserted. Upstream drops the status;
+    /// the error is returned (WR-661).
     #[test]
-    fn fillet_statuses_pass_on_blend_returns_a_failed_knot_insertion() {
+    fn blend_returns_a_failed_knot_insertion() {
         let prev = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap();
         let next = BSplineCurve::create_line_segment(3, Vec3::X * 2.0, Vec3::X * 3.0).unwrap();
-        assert!(blend_curve(3, &prev, 1.0, &next, 0.0, &[5.0], false).is_ok());
-        assert!(blend_curve(3, &prev, 1.0, &next, 0.0, &[5.0], true).is_err());
-        assert!(blend_curve(3, &prev, 1.0, &next, 0.0, &[0.5], true).is_ok());
+        assert!(blend_curve(3, &prev, 1.0, &next, 0.0, &[5.0]).is_err());
+        assert!(blend_curve(3, &prev, 1.0, &next, 0.0, &[0.5]).is_ok());
     }
     use crate::blend::fillet_corner::p3::IndexedSolvers;
     use crate::blend::fillet_solver::p1::{FilletExecutiveRef, FilletSolver};

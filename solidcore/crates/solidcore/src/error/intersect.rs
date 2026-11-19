@@ -14,6 +14,7 @@
 //! | [`IntersectFailure::OutsideDomain`] | `SM_ERR_OUTSIDE_OF_DOMAIN` |
 //! | [`IntersectFailure::Inconsistent`]  | `SM_ERR_ASSERT_FAILURE`    |
 //! | [`IntersectFailure::StepTangentTooShort`] | `SM_ERR`             |
+//! | [`IntersectFailure::PointsWhereAPlaneCrosses`] | `SM_ERR`        |
 //! | [`IntersectFailure::StageFailed`]   | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
 //!
 //! **The record** (#15034). A check that refuses builds a typed cause; a stage that fails
@@ -33,7 +34,7 @@ use super::{
 };
 
 /// Why an intersection or classification fails.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum IntersectFailure {
     /// The routine could not continue, as the phrase says (for example "the ray hits no
@@ -51,6 +52,20 @@ pub enum IntersectFailure {
     /// stepping's parallel tolerance: the surfaces are (nearly) tangent there, so the step
     /// has no direction.
     StepTangentTooShort,
+    /// A surface/surface intersection found touching points only, farther from one of the
+    /// surfaces than their default tolerance (and than the caller's tolerance, when it
+    /// gave a larger one), but the other surface has points
+    /// strictly on both sides of the plane it was intersected with, over the plane's
+    /// domain: the plane crosses it along curves the intersection missed. `tolerance` is the
+    /// approximation tolerance the intersection ran at; `surface_tolerance` is the
+    /// surfaces' default tolerance (the intersector's, the same in either order), the
+    /// tolerance the touching points had to be within.
+    PointsWhereAPlaneCrosses {
+        /// The approximation tolerance the intersection ran at.
+        tolerance: f64,
+        /// The surfaces' default approximation tolerance.
+        surface_tolerance: f64,
+    },
     /// A stage of an intersection routine failed with no reason the kernel names: a defect
     /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
     /// reports (for the goldens only), where it was built, and the error of the call it made
@@ -62,7 +77,10 @@ impl IntersectFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::StepTangentTooShort | Self::StageFailed => SM_ERR,
+            Self::Failed(_)
+            | Self::StepTangentTooShort
+            | Self::PointsWhereAPlaneCrosses { .. }
+            | Self::StageFailed => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
@@ -72,11 +90,13 @@ impl IntersectFailure {
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
     /// [`IntersectFailure::StageFailed`], a defect; [`ErrorKind::Missing`] for
     /// [`IntersectFailure::Missing`], [`ErrorKind::OutsideDomain`] for
-    /// [`IntersectFailure::OutsideDomain`], [`ErrorKind::Failed`] otherwise.
+    /// [`IntersectFailure::OutsideDomain`], [`ErrorKind::NotWithinTolerance`] for
+    /// [`IntersectFailure::PointsWhereAPlaneCrosses`], [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::StageFailed => ErrorKind::StageFailed,
+            Self::PointsWhereAPlaneCrosses { .. } => ErrorKind::NotWithinTolerance,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -90,6 +110,15 @@ impl core::fmt::Display for IntersectFailure {
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::StepTangentTooShort => f.write_str(
                 "the intersection curve's tangent at the next point is shorter than the parallel tolerance",
+            ),
+            Self::PointsWhereAPlaneCrosses {
+                tolerance,
+                surface_tolerance,
+            } => write!(
+                f,
+                "the intersection found only touching points, but the plane crosses the other \
+                 surface: at the tolerance {tolerance:e} they lie farther from the surfaces than \
+                 their default tolerance {surface_tolerance:e}"
             ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
         }

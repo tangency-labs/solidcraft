@@ -9,7 +9,8 @@ use solidcraft_doc::point_cloud::{MAX_COORD, MAX_POINTS};
 
 use crate::{IoError, Result};
 
-/// Largest point cloud file read.
+/// Largest point cloud file read when the preference has not raised the limit. The limit in
+/// force is [`crate::limits::Kind::PointCloud`]'s.
 pub const MAX_POINT_CLOUD_BYTES: usize = 1 << 30;
 /// Points kept from a file unless asked for another number.
 pub const DEFAULT_MAX_POINTS: usize = 5_000_000;
@@ -76,9 +77,7 @@ impl Keep {
 /// Read a PLY or XYZ file (by `file`'s extension; a file starting with `ply` is PLY whatever its
 /// name) whose lengths are `scale` millimetres each, keeping at most `max_points` points.
 pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize) -> Result<CloudFile> {
-    if bytes.len() > MAX_POINT_CLOUD_BYTES {
-        return Err(IoError::Invalid(format!("point cloud file too large ({} MB, limit {} MB)", bytes.len() >> 20, MAX_POINT_CLOUD_BYTES >> 20)));
-    }
+    crate::limits::check(crate::limits::Kind::PointCloud, bytes.len() as u64).map_err(IoError::Invalid)?;
     if !(scale.is_finite() && scale > 0.0 && scale <= 1e6) {
         return Err(IoError::Invalid("the point cloud's scale must be positive".into()));
     }

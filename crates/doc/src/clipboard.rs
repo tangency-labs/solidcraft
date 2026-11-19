@@ -46,9 +46,10 @@ pub fn remap_topology(name: &str, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<St
     let mut at = 0;
     while at < name.len() {
         let rest = &name[at..];
-        // A feature token starts a name, or one inside it: after `@`, `:` or `|`, or in a
-        // piece's list of the faces around it (`[`, `,`).
-        if rest.starts_with('F') && (at == 0 || matches!(name.as_bytes().get(at - 1), Some(b'@' | b':' | b'|' | b'[' | b','))) {
+        // A feature token starts a name, or one inside it: after `@`, `:` or `|`, in a piece's
+        // list of the faces around it (`[`, `,`), or in a sheet panel's name after the panel it
+        // was made on (`.`: `F15.F12.base.l2.far`).
+        if rest.starts_with('F') && (at == 0 || matches!(name.as_bytes().get(at - 1), Some(b'@' | b':' | b'|' | b'[' | b',' | b'.'))) {
             let end = rest.as_bytes().iter().skip(1).take_while(|b| b.is_ascii_digit()).count() + 1;
             if end > 1
                 && matches!(rest.as_bytes().get(end), Some(b':') | Some(b'.'))
@@ -382,7 +383,8 @@ impl crate::Feature {
             }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
-            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
+            | K::Move { rotate_about: Some(geo), .. } => checked_geo(geo, 0)?,
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -410,10 +412,8 @@ impl crate::Feature {
         match &mut self.kind {
             K::Sketch { plane, sketch } => {
                 remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
-                for c in &mut sketch.constraints {
-                    if let Some(n) = &mut c.param {
-                        mapped_name(n, parameters);
-                    }
+                for n in sketch.dimension_params_mut().into_iter().flatten() {
+                    mapped_name(n, parameters);
                 }
                 for e in sketch.text_exprs_mut() {
                     *e = clone_expression(e, parameters);
@@ -426,6 +426,11 @@ impl crate::Feature {
                 }
                 for link in &mut sketch.links {
                     remap_link(&mut link.source, ids, names, bodies, 0);
+                    for pin in &mut link.sketch_placements {
+                        if let Some(id) = ids.get(&pin.sketch) {
+                            pin.sketch = *id;
+                        }
+                    }
                     for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name) {
                         *n = remap_topology(n, ids, bodies);
                     }
@@ -457,9 +462,8 @@ impl crate::Feature {
             }
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
-            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => {
-                remap_geo(geo, ids, bodies, 0, occurrences, doc)?
-            }
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
+            | K::Move { rotate_about: Some(geo), .. } => remap_geo(geo, ids, bodies, 0, occurrences, doc)?,
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
             // own face names are found.
             K::Align { from_frame, to_frame, .. } => {

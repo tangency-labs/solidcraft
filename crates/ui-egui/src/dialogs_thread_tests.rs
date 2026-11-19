@@ -416,6 +416,45 @@ fn ordinary_thread_face_clicks_replace_the_previous_face() {
     }
 }
 
+/// A size filled in for a Ø150 shaft is replaced by the next face's automatic size, while a typed one stays.
+#[test]
+fn a_filled_in_large_size_gives_way_to_the_next_faces_automatic_size_but_a_typed_one_stays() {
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"radius":75,"height":10,"body_name":"Big"})).unwrap();
+    h.app.run("solid.cylinder", json!({"base":[200,0,0],"radius":10,"height":10,"body_name":"Small"})).unwrap();
+    let big = thread_face(&h.app, "Big");
+    let small = thread_face(&h.app, "Small");
+    let designation = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Thread { designation, suggested, .. } => (designation.clone(), suggested.clone()),
+        _ => panic!("Thread"),
+    };
+    let pick = |h: &mut Harness, sel: &Sel| {
+        let Sel::Face { body, index, point } = sel else { panic!("face") };
+        let hit = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: *point };
+        crate::viewport::dialog_pick(&mut h.app, &hit, sel.clone());
+    };
+    h.app.session.selection = vec![big.clone()];
+    h.app.start("solid.thread");
+    assert_eq!(designation(&h), ("M150x4".to_string(), None));
+    pick(&mut h, &small);
+    assert_eq!(designation(&h), ("M20".to_string(), Some("M20".to_string())));
+    pick(&mut h, &big);
+    assert_eq!(designation(&h).0, "M150x4");
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["designation"], "M150x4");
+    pick(&mut h, &small);
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(commands[0].1.get("designation").is_none());
+    if let Kind::Thread { designation, suggested, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *designation = "M12".into();
+        *suggested = None;
+    }
+    pick(&mut h, &big);
+    pick(&mut h, &small);
+    assert_eq!(designation(&h).0, "M12");
+    crate::dialogs::cancel(&mut h.app);
+}
+
 /// Marquee replacement keeps one face until an explicit add enables grouped selection.
 #[test]
 fn thread_box_selection_keeps_one_face_until_explicit_add() {

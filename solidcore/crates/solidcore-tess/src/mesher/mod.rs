@@ -187,9 +187,10 @@ pub(crate) struct SplitSide {
 const MAX_UNTANGLE: u32 = 16;
 
 /// An error's own words, without its kind's prefix, for a message that names where it happened.
-fn detail(e: &TessError) -> &str {
+fn detail(e: &TessError) -> std::borrow::Cow<'_, str> {
     match e {
-        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => m,
+        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => std::borrow::Cow::Borrowed(m),
+        TessError::TooManyVertices { .. } => std::borrow::Cow::Owned(e.to_string()),
     }
 }
 
@@ -2307,11 +2308,12 @@ fn plan_face(
     }
     let mut all = uvs;
     all.extend(extra);
-    // Whatever the layout, no triangle leaves the surface by more than the tolerance.
+    // Whatever the layout, refine the curvature of the support while keeping the shared boundary fixed.
     if !planar {
         // Which nodes are poles, asked once per node over both passes.
         let poles = sag::Poles::new(s, reach);
-        if sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE) {
+        let refinement = sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE);
+        if refinement.capped {
             caps.push(crate::Cap::Refine);
         }
         // The mesh path's triangles are the surface's Delaunay ones, shaped in 3D: flips toward
@@ -2319,8 +2321,9 @@ fn plan_face(
         if matches!(purpose, Purpose::Display) {
             sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
         }
-        // A face a bound limited is named with the sag its triangles reach.
-        if !caps.is_empty() {
+        // Measure finished triangles with their held positions when a bound or a remaining
+        // departure involving the shared boundary can leave them outside the tolerance.
+        if !caps.is_empty() || refinement.boundary_has_residual(s, tol, &poles, &fixed, &all, &triangles) {
             let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
             stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
         }

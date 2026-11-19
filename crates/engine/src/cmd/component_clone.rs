@@ -325,6 +325,7 @@ pub(super) fn build(
         o.transform = transform;
         // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
         o.grounded = false;
+        o.bom_type = source_occurrence.as_ref().and_then(|o| o.bom_type);
     }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);
@@ -339,6 +340,7 @@ pub(super) fn build(
         let id = scratch.doc_mut().add_occurrence(child, owner, pose)?;
         if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
             o.grounded = old.grounded;
+            o.bom_type = old.bom_type;
         }
         occurrences.insert(old.id, id);
     }
@@ -413,7 +415,7 @@ pub(super) fn build(
             unique(&format!("{} Base", body.name), &mut used_features, false)
         };
         let id = scratch.doc_mut().add_feature(
-            FeatureKind::Import { file: format!("{} independent base", body.name), step, components: Vec::new(), skip: Vec::new() },
+            FeatureKind::Import { file: format!("{} independent base", body.name), step, components: Vec::new(), skip: Vec::new(), records: None },
             Some(&feature_name),
         )?;
         if let Some(f) = scratch.doc_mut().feature_mut(id) {
@@ -480,9 +482,8 @@ pub(super) fn build(
     // Constraint dimensions own independent generated parameters; public user parameters stay shared.
     for f in &feats {
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-            for c in &sketch.constraints {
-                if let Some(name) = &c.param
-                    && !parameters.contains_key(name)
+            for name in sketch.dimension_params() {
+                if !parameters.contains_key(name)
                     && let Some(p) = source_parameters.get(name.as_str())
                     && p.model
                 {
@@ -543,7 +544,10 @@ pub(super) fn build(
         {
             face.author_path = cloned_path(source, &face.author_path, component, &clone_path, &occurrences)?;
         }
-        if let (FeatureKind::Sketch { plane, .. }, FeatureKind::Sketch { plane: old_plane, .. }) = (&mut f.kind, &old.kind)
+        if let (
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane },
+            FeatureKind::Sketch { plane: old_plane, .. } | FeatureKind::ConstructionPlane { plane: old_plane },
+        ) = (&mut f.kind, &old.kind)
             && let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(plane), super::sketch::face::anchor(old_plane))
         {
             if bodies.contains_key(&original.target.body) {
@@ -699,7 +703,7 @@ pub(super) fn build(
                 }
             }
         }
-        if let FeatureKind::Sketch { plane, .. } = &feature.kind
+        if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &feature.kind
             && let Some(anchor) = super::sketch::face::anchor(plane)
             && !bodies.contains_key(&anchor.target.body)
         {
@@ -911,12 +915,22 @@ fn outside_references(notices: &[String], feats: &[Feature], bodies: &BTreeMap<S
     out
 }
 
-/// The user parameters copied features use (their expressions and their dimensions'), and the
-/// ones those use, copied from `source` into `scratch`: named as they were where that name is
-/// free, else `w_2`, `w_3`…; `parameters` maps each to its copy.
+/// The user parameters copied features use (their expressions, their dimensions' and those placing
+/// 3D sketch points), and the ones those use, copied from `source` into `scratch`: named as they
+/// were where that name is free, else `w_2`, `w_3`…; `parameters` maps each to its copy.
 fn copy_user_parameters(scratch: &mut Session, source: &Document, feats: &[Feature], parameters: &mut BTreeMap<String, String>) -> Result<()> {
     let user: BTreeMap<&str, &solidcraft_doc::Param> = source.params.iter().filter(|p| !p.model).map(|p| (p.name.as_str(), p)).collect();
     let mut pending: Vec<String> = feats.iter().flat_map(|f| f.kind.expressions()).map(str::to_string).collect();
+    // The expressions placing 3D sketch points (#10608), which `remap_clone` renames with the rest.
+    pending.extend(
+        feats
+            .iter()
+            .filter_map(|f| match &f.kind {
+                FeatureKind::Sketch { sketch, .. } => Some(sketch.wire_point_exprs().into_iter().map(|(_, e)| e.clone()).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .flatten(),
+    );
     pending.extend(parameters.keys().filter_map(|old| source.params.iter().find(|p| p.model && p.name == *old)).map(|p| p.expr.clone()));
     let mut used: BTreeSet<&str> = BTreeSet::new();
     let mut work = 0usize;

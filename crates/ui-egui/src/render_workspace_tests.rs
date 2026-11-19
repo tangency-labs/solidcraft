@@ -1963,7 +1963,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
-    s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
+    s.section = vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::ZERO, normal: solidcore_record::Vec3::X }];
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(gpu_scene(&after).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
@@ -3705,6 +3705,21 @@ fn numeric_editor_save_refreshes_only_unchanged_runtime_binding_sources() {
         setups::persist_editor(&mut h.app, &before).unwrap();
         assert!(image_request(&h.app).is_err(), "hidden or moved targets must remain stale");
     }
+}
+
+/// The CPU render's body picker takes any body name a rename takes: a hundred CJK characters
+/// are 300 bytes, which the picker greyed out when it counted 128 bytes.
+#[test]
+fn a_body_with_a_long_multibyte_name_can_be_a_reflection_target() {
+    use solidcraft_engine::render::job::ReflectionMode;
+    let mut h = Harness::new();
+    let long = "中".repeat(100);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":3,"body_name":long})).unwrap();
+    enter(&mut h.app, true).unwrap();
+    select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    cpu::set_reflection(&mut h.app, &long, Some(ReflectionMode::Mirror)).unwrap();
+    let bodies = h.app.render_workspace.view.raytrace.reflections.as_ref().map(|r| r.bodies.iter().map(|b| b.body.clone()).collect::<Vec<_>>());
+    assert_eq!(bodies, Some(vec![long]));
 }
 
 #[test]
@@ -7282,6 +7297,7 @@ fn output_viewer_r_starts_active_setup_and_escape_returns_to_model_without_cance
     h.frames(2);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(!h.app.render_workspace.view.result);
+    assert!(h.app.render_workspace.view.live_paused, "Escape must return to the fast model preview");
     assert!(ribbon::busy(&h.app), "closing the image never cancels the job");
     h.app.run("render.result.view", json!({"view":"image"})).unwrap();
     h.app.viewport.nav = Some(crate::viewport::NavMode::Pan);
@@ -8769,6 +8785,94 @@ fn automatic_live_cpu_pixels_refresh_without_replacing_final_export_or_saved_set
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn returning_to_model_preview_clears_live_pixels_and_resumes_only_on_request() {
+    use solidcraft_engine::render::job::{JobId, Phase};
+    for (command, params) in [("render.result.close", json!({})), ("render.result.view", json!({"view":"model"}))] {
+        let Some(mut h) = live_cpu_fixture() else { return };
+        let reply = h
+            .app
+            .session
+            .execute(
+                "render.start",
+                &json!({"settings":{"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":82}}}}}),
+            )
+            .unwrap();
+        let final_job: JobId = serde_json::from_value(reply["job"].clone()).unwrap();
+        let handle = h.app.session.render_job_handle(final_job).unwrap();
+        assert_eq!(handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap().progress.phase, Phase::Completed);
+        let final_png = handle.frame().unwrap().unwrap().png().to_vec();
+        live::advance(&mut h.app, &h.ctx, 1.0);
+        wait_live_complete(&mut h, 1.3);
+        assert!(live::has_picture(&h.app));
+        // Ordinary Pause keeps the last image; returning to Model Preview must remove it.
+        h.app.run("view.render_live", json!({"paused":true})).unwrap();
+        assert!(live::has_picture(&h.app));
+        h.app.run("view.render_live", json!({"paused":false})).unwrap();
+        h.app.run("render.result.select", json!({"index":0})).unwrap();
+        assert!(result_active(&h.app));
+        h.app.pending_fit = None;
+        h.app.cancel_view_animation();
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let settings = image_request(&h.app).unwrap();
+        let camera = h.app.cam;
+
+        h.app.run(command, params).unwrap();
+        assert!(!live::has_picture(&h.app), "{command} must show the fast model preview, not retained Live pixels");
+        assert!(!result_active(&h.app));
+        assert_eq!(live::inspect(&h.app)["paused"], true);
+        assert!(live::picking_current(&h.app), "the model preview remains pickable");
+        h.frames(2);
+        assert!(inspect_state(&h.app)["displayed_receipt"].is_null(), "the model preview must not paint a Live image");
+        assert_eq!(h.app.render_workspace.view.completed, Some(final_job));
+        assert_eq!(handle.frame().unwrap().unwrap().png(), final_png);
+        assert_eq!(h.app.session.render_retained_results().unwrap().len(), 1);
+        assert_eq!(image_request(&h.app).unwrap(), settings);
+        assert_eq!(h.app.cam, camera);
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+
+        h.app.cam.yaw += 0.3;
+        live::advance(&mut h.app, &h.ctx, 2.0);
+        live::advance(&mut h.app, &h.ctx, 2.3);
+        let state = live::inspect(&h.app);
+        assert_eq!(state["pending"], false);
+        assert_eq!(state["running"], false);
+        assert!(!live::has_picture(&h.app), "navigation must not restart Live");
+        h.app.viewport.rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(8.0, 8.0)));
+        h.app.run("view.render_live", json!({"paused":false})).unwrap();
+        live::advance(&mut h.app, &h.ctx, 3.0);
+        wait_live_complete(&mut h, 3.3);
+        assert!(live::has_picture(&h.app));
+        assert_eq!(handle.frame().unwrap().unwrap().png(), final_png);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn returning_to_model_preview_drains_a_pending_live_capture_without_displaying_it() {
+    let Some(mut h) = live_cpu_fixture() else { return };
+    live::advance(&mut h.app, &h.ctx, 1.0);
+    live::advance(&mut h.app, &h.ctx, 1.3);
+    assert_eq!(live::inspect(&h.app)["pending"], true);
+    h.app.run("render.result.close", json!({})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        live::advance(&mut h.app, &h.ctx, 2.0);
+        let state = live::inspect(&h.app);
+        assert!(!live::has_picture(&h.app));
+        assert_eq!(state["running"], false);
+        assert_eq!(state["paused"], true);
+        if state["pending"] == false && state["draining"] == 0 {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "late Live capture did not drain: {state}");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn cancelled_first_manual_cpu_checkpoint_resumes_live_without_retaining_or_exporting_it() {
     use solidcraft_engine::render::job::Phase;
     let Some(mut h) = live_cpu_fixture() else { return };
@@ -8860,6 +8964,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
         samples: 1,
         tess: false,
         oit: false,
+        edges: false,
     });
     h.app.render_workspace.host = Some(host_executor(4096, true, 1).unwrap());
     sync_backend(&mut h.app);
@@ -15070,10 +15175,13 @@ fn host_bounded_results_and_comparison_actions_are_visible_and_clickable() {
         assert!(h.dir.join("render.png").is_file(), "Export must receive the click and use the harness picker");
         click(&mut h, "render:result-model");
         assert!(!result_active(&h.app));
+        assert!(h.app.render_workspace.view.live_paused, "Return to Model Preview must pause Live");
         assert!(h.app.render_workspace.view.compare.is_none());
         select(&mut h);
+        h.app.run("view.render_live", json!({"paused":false})).unwrap();
         click(&mut h, "render:result-close");
         assert!(!result_active(&h.app));
+        assert!(h.app.render_workspace.view.live_paused, "Close Render Image must pause Live");
         assert!(h.app.render_workspace.view.compare.is_none());
         assert_eq!(h.app.render_workspace.view.completed, Some(selected));
         assert_eq!(h.app.viewport.rect, Some(canvas));
@@ -16253,6 +16361,10 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     let host = CpuHost::for_platform().unwrap();
     h.app.session.set_render_job_host(Some(host.clone())).unwrap();
     h.app.render_workspace.image_host = Some(host);
+    if image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+        eprintln!("render quality denoise mask test requires raytrace-cpu");
+        return;
+    }
     h.app.run("solid.box", json!({"length":5,"width":4,"height":3,"body_name":"Mask subject"})).unwrap();
     let request = json!({"settings":{"width":16,"height":8,"camera":h.app.cam,"job":{"method":"cpu_raytrace",
         "options":{"threads":1,"progressive":{"samples_per_pixel":2,"seed":81},

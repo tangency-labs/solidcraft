@@ -16,8 +16,9 @@
 //! arena's identities, with the context the caller selected. Edge-use marks are read
 //! from the caller's mark source. The extension cache is keyed by the face's
 //! identity (upstream: the face surface's pointer); a new extension is copied into
-//! the adapter's store, where its handle resolves. The shared creator algorithm and
-//! concrete curve kinds are unchanged. No new recursion.
+//! the adapter's store, where its handle resolves. Successfully mated uses and selected
+//! periodic-boundary events pass to the native executive independently of traversal
+//! marks. Concrete curve kinds are unchanged. No new recursion.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -420,7 +421,7 @@ pub(super) struct EdgeCap {
     pub(super) trim_curves: Vec<Curve>,
     /// `sTrimOrientations`.
     pub(super) trim_orientations: Vec<OrientType>,
-    /// Not upstream (`bClosingWall`, opt-in `Kernel::fixes.local_operation_step_walls`):
+    /// Not upstream (`bClosingWall`, the WR-530 addendum's step walls):
     /// the cap is a step wall, kept out of the face extensions.
     pub(super) closing_wall: bool,
 }
@@ -1209,6 +1210,59 @@ struct Executive<'a> {
 }
 
 impl CreatorExecutive<Handle> for Executive<'_> {
+    fn has_mated_edgeuse(&self, original: Handle) -> bool {
+        match original.object {
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) => {
+                self.inner.mated_edgeuses.contains(&u)
+            }
+            _ => false,
+        }
+    }
+
+    fn note_mated_edgeuse(&mut self, original: Handle) -> Result<()> {
+        let Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) = original.object else {
+            return Err(SolidError::port_invariant(
+                OP,
+                "mated edge use outside the source arena",
+            ));
+        };
+        self.inner.mated_edgeuses.insert(u);
+        Ok(())
+    }
+
+    fn note_periodic_boundary_end(
+        &mut self,
+        event: crate::offset::offset_geometry_creation::PeriodicBoundaryEnd<Handle>,
+    ) -> Result<()> {
+        let (
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(edgeuse)),
+            Object::Topology(Arena::Original, EntityRef::Vertex(vertex)),
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(seam)),
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(across)),
+        ) = (
+            event.edgeuse.object,
+            event.vertex.object,
+            event.seam.object,
+            event.across.object,
+        )
+        else {
+            return Err(SolidError::port_invariant(
+                OP,
+                "periodic boundary event outside the source arena",
+            ));
+        };
+        self.inner
+            .periodic_boundary_ends
+            .push(super::periodic_boundary::BoundaryEnd {
+                edgeuse,
+                vertex,
+                seam,
+                across,
+                point: event.point,
+            });
+        Ok(())
+    }
+
     fn inset(&self) -> bool {
         self.inner.inset()
     }
