@@ -2285,6 +2285,53 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
     sum.normalized().unwrap_or(flat)
 }
 
+/// Whole-body outlines already traced, newest first. Each is kept with what it was traced from,
+/// which is all it depends on ([`exact_silhouette_traced`]): the body (kept, so its shared data
+/// stays alive and no other body is taken for it), its record as written (JSON, which tells
+/// `-0.0` from `0.0`), its size, whether it is a mesh, and the sketch plane as written. A re-evaluation that makes the
+/// very same body ([`solidcraft_kernel::Body::same_shape`]), or one with the same record and
+/// size (recomputing the timeline, opening the design again), reuses the outline.
+struct TracedOutline {
+    body: solidcraft_kernel::Body,
+    record: String,
+    size: u64,
+    plane: String,
+    outline: Option<Vec<LinkGeom>>,
+}
+static OUTLINES: std::sync::Mutex<Vec<TracedOutline>> = std::sync::Mutex::new(Vec::new());
+const OUTLINES_KEPT: usize = 16;
+/// Records written longer than this (bytes) are not kept: comparing them would cost more than
+/// it saves, and they would hold too much memory.
+const OUTLINE_RECORD_MAX: usize = 4 << 20;
+
+/// [`exact_silhouette_traced`], kept for each body and plane ([`OUTLINES`]).
+fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+    // A mesh body has no exact outline, whatever its record.
+    let plane_text = format!("{plane:?}|{}", body.body.is_mesh());
+    let size = body.body.size().to_bits();
+    let mut record: Option<Option<String>> = None;
+    let mut written =
+        || record.get_or_insert_with(|| serde_json::to_string(body.body.record()).ok().filter(|r| r.len() <= OUTLINE_RECORD_MAX)).clone();
+    if let Ok(kept) = OUTLINES.lock() {
+        let mut hit = kept.iter().filter(|k| k.plane == plane_text && k.size == size).find(|k| k.body.same_shape(&body.body));
+        if hit.is_none() && kept.iter().any(|k| k.plane == plane_text && k.size == size) {
+            let now = written();
+            hit = kept.iter().find(|k| k.plane == plane_text && k.size == size && now.as_ref() == Some(&k.record));
+        }
+        if let Some(k) = hit {
+            return k.outline.clone();
+        }
+    }
+    let outline = exact_silhouette_traced(body, plane);
+    if let Some(written) = written()
+        && let Ok(mut kept) = OUTLINES.lock()
+    {
+        kept.insert(0, TracedOutline { body: body.body.clone(), record: written, size, plane: plane_text, outline: outline.clone() });
+        kept.truncate(OUTLINES_KEPT);
+    }
+    outline
+}
+
 /// The outline of a solid seen along the sketch normal, from its exact faces and edges: the
 /// stretches of its edges between a face that faces the sketch and one that does not (and of an
 /// open sheet's border where its face faces the sketch; the kernel's
@@ -2301,7 +2348,7 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
 /// then ([`silhouette`]).
 ///
 /// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
-fn exact_silhouette(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
+fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
     use solidcraft_geom::hlr;
     if body.body.is_mesh() {
         return None;
