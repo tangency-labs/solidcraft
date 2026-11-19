@@ -1,0 +1,74 @@
+{
+  "ar": {
+    "ui.drawing_template.built_in": "القوالب المدمجة",
+    "ui.drawing_template.changes": "ستتغير {sheet} لتطابق القالب.",
+    "ui.drawing_template.file": "ملف قالب…",
+    "ui.drawing_template.lost": "سيُحذف النص المكتوب من: {cells}",
+    "ui.drawing_template.saved": "تم حفظ القالب {path}",
+    "ui.drawing_template.stay": "تبقى المساقط في مواضعها.",
+    "ui.drawing_template.unchanged": "تستخدم هذه اللوحة هذا القالب بالفعل."
+  },
+  "de": {
+    "ui.drawing_template.built_in": "Integrierte Vorlagen",
+    "ui.drawing_template.changes": "{sheet} wird an die Vorlage angepasst.",
+    "ui.drawing_template.file": "Vorlagendatei…",
+    "ui.drawing_template.lost": "Eingegebener Text entfällt in: {cells}",
+    "ui.drawing_template.saved": "Vorlage gespeichert: {path}",
+    "ui.drawing_template.stay": "Die Ansichten bleiben an ihrer Position.",
+    "ui.drawing_template.unchanged": "Diese Zeichnung verwendet diese Vorlage bereits."
+  },
+  "en": {
+    "ui.drawing_template.built_in": "Built-in templates",
+    "ui.drawing_template.changes": "{sheet} changes to match the template.",
+    "ui.drawing_template.file": "Template file…",
+    "ui.drawing_template.lost": "Typed text is dropped from: {cells}",
+    "ui.drawing_template.saved": "Saved template {path}",
+    "ui.drawing_template.stay": "Views stay where they are.",
+    "ui.drawing_template.unchanged": "This drawing already uses this template."
+  },
+  "he": {
+    "ui.drawing_template.built_in": "תבניות מובנות",
+    "ui.drawing_template.changes": "{sheet} ישתנה כדי להתאים לתבנית.",
+    "ui.drawing_template.file": "קובץ תבנית…",
+    "ui.drawing_template.lost": "הטקסט שהוקלד יוסר מ: {cells}",
+    "ui.drawing_template.saved": "התבנית נשמרה: {path}",
+    "ui.drawing_template.stay": "המבטים נשארים במקומם.",
+    "ui.drawing_template.unchanged": "השרטוט הזה כבר משתמש בתבנית הזו."
+  },
+  "ja": {
+    "ui.drawing_template.built_in": "組み込みテンプレート",
+    "ui.drawing_template.changes": "{sheet} はテンプレートに合わせて変更されます。",
+    "ui.drawing_template.file": "テンプレートファイル…",
+    "ui.drawing_template.lost": "入力したテキストが削除されるセル: {cells}",
+    "ui.drawing_template.saved": "テンプレートを保存しました: {path}",
+    "ui.drawing_template.stay": "ビューの位置は変わりません。",
+    "ui.drawing_template.unchanged": "この図面はすでにこのテンプレートを使用しています。"
+  },
+  "ko": {
+    "ui.drawing_template.built_in": "기본 제공 템플릿",
+    "ui.drawing_template.changes": "{sheet}이(가) 템플릿에 맞게 바뀝니다.",
+    "ui.drawing_template.file": "템플릿 파일…",
+    "ui.drawing_template.lost": "입력한 텍스트가 삭제되는 칸: {cells}",
+    "ui.drawing_template.saved": "템플릿을 저장했습니다: {path}",
+    "ui.drawing_template.stay": "뷰의 위치는 바뀌지 않습니다.",
+    "ui.drawing_template.unchanged": "이 도면은 이미 이 템플릿을 사용합니다."
+  },
+  "vi": {
+    "ui.drawing_template.built_in": "Mẫu có sẵn",
+    "ui.drawing_template.changes": "{sheet} sẽ thay đổi theo mẫu.",
+    "ui.drawing_template.file": "Tệp mẫu…",
+    "ui.drawing_template.lost": "Văn bản đã nhập sẽ bị bỏ khỏi: {cells}",
+    "ui.drawing_template.saved": "Đã lưu mẫu {path}",
+    "ui.drawing_template.stay": "Các hình chiếu sẽ giữ nguyên vị trí.",
+    "ui.drawing_template.unchanged": "Bản vẽ này đã dùng mẫu này."
+  },
+  "zh": {
+    "ui.drawing_template.built_in": "内置模板",
+    "ui.drawing_template.changes": "{sheet} 将按模板更改。",
+    "ui.drawing_template.file": "模板文件…",
+    "ui.drawing_template.lost": "以下单元格中输入的文字将被删除：{cells}",
+    "ui.drawing_template.saved": "已保存模板 {path}",
+    "ui.drawing_template.stay": "视图保持原有位置。",
+    "ui.drawing_template.unchanged": "此绘图已在使用此模板。"
+  }
+}

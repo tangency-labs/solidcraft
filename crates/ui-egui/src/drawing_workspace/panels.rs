@@ -735,16 +735,42 @@ fn change_sheet(app: &mut SolveApp, sheet: u64, key: &str, value: Value) {
     let mut params = json!({"sheet": ids::encode(sheet)});
     params[key] = value;
     match app.run("drawing.sheet.set", params) {
-        Ok(reply) => {
-            let views = reply["outside"].as_array().into_iter().flatten().filter_map(|view| ids::decode(view["view"].as_str()?)).collect::<Vec<_>>();
-            app.drawing_workspace.sheet_notice = app.session.open_drawing.filter(|_| !views.is_empty()).map(|drawing| SheetNotice {
-                owner: (app.session.uid, drawing, sheet),
-                revision: app.session.revision,
-                views,
-            });
-        }
+        Ok(reply) => note_outside(app, sheet, &reply),
         Err(error) => app.set_status(error, true),
     }
+}
+
+/// Keeps the views a reply lists as `outside` (`drawing.sheet.set`, `drawing.template.apply`) that
+/// are on `sheet`, so Sheet Settings warns about them until the next change.
+pub(super) fn note_outside(app: &mut SolveApp, sheet: u64, reply: &Value) {
+    let listed = reply["outside"].as_array().into_iter().flatten().filter_map(|view| ids::decode(view["view"].as_str()?));
+    let views: Vec<u64> = match app.session.drawing("drawing.inspect") {
+        Ok(drawing) => listed.filter(|id| drawing.views.iter().any(|view| view.id == *id && view.sheet == sheet)).collect(),
+        Err(_) => Vec::new(),
+    };
+    app.drawing_workspace.sheet_notice = app.session.open_drawing.filter(|_| !views.is_empty()).map(|drawing| SheetNotice {
+        owner: (app.session.uid, drawing, sheet),
+        revision: app.session.revision,
+        views,
+    });
+}
+
+/// The warning box about views left outside the drawing area, as Sheet Settings and Apply Drawing
+/// Template show it: how many, then what `add` puts under that.
+pub(super) fn outside_box<R>(ui: &mut egui::Ui, count: usize, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let t = Tokens::get();
+    let message = solidcraft_ui_text::format("ui.drawing_settings.outside", &[("count", &count.to_string())]);
+    let container = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel);
+    let frame =
+        container.edge_frame(t.pref_note_fill).stroke(t.control_border_stroke(t.pref_note)).corner_radius(t.radius_md).inner_margin(t.space_12);
+    let area = ui.available_rect_before_wrap();
+    container
+        .show_frame(ui, frame, area, |ui| {
+            ui.set_width((area.width() - 2.0 * t.space_12).max(0.0));
+            ui.label(egui::RichText::new(message).strong().color(t.pref_note));
+            add(ui)
+        })
+        .inner
 }
 
 fn sheet_notice(app: &mut SolveApp, ui: &mut egui::Ui, drawing: &Drawing, sheet: &Sheet) {
@@ -752,32 +778,22 @@ fn sheet_notice(app: &mut SolveApp, ui: &mut egui::Ui, drawing: &Drawing, sheet:
     if notice.owner != (app.session.uid, drawing.id, sheet.id) || notice.revision != app.session.revision {
         return;
     }
-    let t = Tokens::get();
-    let message = solidcraft_ui_text::format("ui.drawing_settings.outside", &[("count", &notice.views.len().to_string())]);
-    let container = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel);
-    let frame =
-        container.edge_frame(t.pref_note_fill).stroke(t.control_border_stroke(t.pref_note)).corner_radius(t.radius_md).inner_margin(t.space_12);
-    let area = ui.available_rect_before_wrap();
-    let picked = container
-        .show_frame(ui, frame, area, |ui| {
-            ui.set_width((area.width() - 2.0 * t.space_12).max(0.0));
-            ui.label(egui::RichText::new(message).strong().color(t.pref_note));
-            ui.label(tr("ui.drawing_settings.unmoved"));
-            ui.horizontal_wrapped(|ui| {
-                let mut picked = None;
-                for (index, view) in drawing.views.iter().filter(|view| view.sheet == sheet.id).enumerate() {
-                    if notice.views.contains(&view.id) {
-                        let label = solidcraft_ui_text::format("ui.drawing_settings.view", &[("number", &(index + 1).to_string())]);
-                        if ui_kit::button(ui, label, Button::Small).clicked() {
-                            picked = Some(view.id);
-                        }
+    let picked = outside_box(ui, notice.views.len(), |ui| {
+        ui.label(tr("ui.drawing_settings.unmoved"));
+        ui.horizontal_wrapped(|ui| {
+            let mut picked = None;
+            for (index, view) in drawing.views.iter().filter(|view| view.sheet == sheet.id).enumerate() {
+                if notice.views.contains(&view.id) {
+                    let label = solidcraft_ui_text::format("ui.drawing_settings.view", &[("number", &(index + 1).to_string())]);
+                    if ui_kit::button(ui, label, Button::Small).clicked() {
+                        picked = Some(view.id);
                     }
                 }
-                picked
-            })
-            .inner
+            }
+            picked
         })
-        .inner;
+        .inner
+    });
     if let Some(view) = picked {
         super::edit_object(app, "view", view);
     }

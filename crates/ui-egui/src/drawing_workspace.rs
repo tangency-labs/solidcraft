@@ -21,6 +21,7 @@ pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
 pub(crate) mod print;
+mod templates;
 
 use panels::Tool;
 
@@ -45,6 +46,7 @@ pub struct State {
     selection_seen: Option<u64>,
     add_sheet: Option<panels::AddSheet>,
     drawing_settings: Option<drawing_settings::Settings>,
+    apply_template: Option<templates::ApplyTemplate>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
     /// The sheet or drawing waiting on its delete Confirm: (document, drawing, row).
@@ -96,6 +98,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.selection_seen = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.drawing_settings = None;
+        app.drawing_workspace.apply_template = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
         app.drawing_workspace.delete = None;
@@ -180,7 +183,7 @@ pub(crate) fn counterpart(command: &'static str) -> Option<&'static str> {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.set")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set" | "drawing.set" | templates::APPLY | templates::SAVE)
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
@@ -189,6 +192,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
         || app.drawing_workspace.options.is_some()
         || app.drawing_workspace.add_sheet.is_some()
         || app.drawing_workspace.drawing_settings.is_some()
+        || app.drawing_workspace.apply_template.is_some()
         || app.drawing_workspace.first_sheet.is_some();
     app.drawing_workspace.settings_open = false;
     app.drawing_workspace.sheet_menu = None;
@@ -204,6 +208,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.shown_for = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.drawing_settings = None;
+    app.drawing_workspace.apply_template = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
     open
@@ -279,11 +284,17 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
     if !active(app) || !can_open_options(id) {
         return false;
     }
+    if id == templates::SAVE {
+        // Only the save picker opens, so the panels open stay open.
+        templates::save(app);
+        return true;
+    }
     close_panel(app);
     match id {
         "drawing.sheet.add" => open_add_sheet(app),
         "drawing.sheet.set" => app.drawing_workspace.settings_open = true,
         drawing_settings::COMMAND => app.drawing_workspace.drawing_settings = drawing_settings::open(app),
+        templates::APPLY => app.drawing_workspace.apply_template = templates::ApplyTemplate::open(app),
         "drawing.view.base" | "drawing.view.base.planned" => {
             app.drawing_workspace.placement = placement::Placement::new(app);
             app.drawing_workspace.options = Some(Tool::Base);
@@ -633,12 +644,16 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
     use ui_kit::Item;
     let (heading, items) = match menu.row {
         MenuRow::Drawing => {
-            // Off with the engine's own refusal (a sheet sketch open).
-            let refusal = solidcraft_engine::find_command("drawing.delete").and_then(|spec| spec.allowed(&app.session).err());
+            // Each is off with the engine's own refusal (a sheet sketch open).
+            let refusal = |id: &str| {
+                solidcraft_engine::find_command(id).and_then(|spec| spec.allowed(&app.session).err()).map(|why| crate::i18n::tr_diagnostic(&why))
+            };
             let items = vec![
                 Item::action(drawing_settings::COMMAND, app.tr("cmd.drawing_set"), "settings"),
+                Item::action(templates::APPLY, app.tr("cmd.drawing_template_apply"), "import").off_because(refusal(templates::APPLY)),
+                Item::action(templates::SAVE, app.tr("cmd.drawing_template_save"), "save").off_because(refusal(templates::SAVE)),
                 Item::sep(),
-                Item::action("delete", app.tr("cmd.drawing_delete"), "delete").off_because(refusal.map(|why| crate::i18n::tr_diagnostic(&why))),
+                Item::action("delete", app.tr("cmd.drawing_delete"), "delete").off_because(refusal("drawing.delete")),
             ];
             (&drawing.name, items)
         }
@@ -681,8 +696,8 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
         let MenuRow::Sheet(sheet_id) = menu.row else {
-            if action.id == drawing_settings::COMMAND {
-                start(app, drawing_settings::COMMAND);
+            if matches!(action.id.as_str(), drawing_settings::COMMAND | templates::APPLY | templates::SAVE) {
+                start(app, &action.id);
             }
             return;
         };
@@ -925,6 +940,7 @@ pub(crate) fn show_add_sheet(app: &mut SolveApp, ctx: &egui::Context) {
     show_sheet_menu(app, ctx);
     show_delete(app, ctx);
     drawing_settings::show(app, ctx);
+    templates::show(app, ctx);
     if active(app)
         && let Some(form) = app.drawing_workspace.add_sheet.take()
     {
@@ -2272,5 +2288,134 @@ mod tests {
         h.frames(3);
         assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &doc));
         assert_eq!((h.app.session.undo.len(), h.app.session.open_drawing), (steps, open));
+    }
+
+    /// Right-clicks the Browser's drawing row and picks `item` from its menu.
+    fn drawing_menu(h: &mut Harness, item: &str) {
+        let row = format!("drawing:browser:{}", solidcraft_engine::doc::ids::encode(the_drawing(h).id));
+        h.step(&serde_json::json!({"click":{"handle":row},"button":"right"})).unwrap();
+        h.frames(3);
+        h.step(&serde_json::json!({"widget":item})).unwrap();
+        h.frames(3);
+    }
+
+    /// Apply Drawing Template on the Browser's drawing row shows what its dry run says before
+    /// anything changes: here, the view the smaller sheet leaves outside. Apply is one undo step that
+    /// moves no view, and an undo puts the paper back. Running the command opens no window.
+    #[test]
+    fn drawing_menu_applies_a_template_after_its_dry_run() {
+        use serde_json::json;
+        use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
+
+        let mut h = drawing_open(json!({}));
+        let view = h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[310,180]})).unwrap();
+        h.frames(4);
+        let size = |h: &Harness| the_drawing(h).sheets[0].sheet.size;
+        assert_eq!(size(&h), SheetSize::Standard(PaperSize::A3));
+        h.app.run("drawing.template.apply", json!({"template":"iso-a4-part","dry_run":true})).unwrap();
+        h.frames(2);
+        assert!(h.app.drawing_workspace.apply_template.is_none(), "a command run by a program opens no window");
+
+        let (doc, steps) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        drawing_menu(&mut h, "Apply Drawing Template");
+        h.step(&json!({"click":{"handle":"drawing:template:iso-a4-part"}})).unwrap();
+        h.frames(3);
+        assert!(h.widget("Views outside the drawing area (1)").is_some(), "the dry run's answer shows first");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &doc), "nothing changes before Apply");
+        assert_eq!(h.app.session.undo.len(), steps);
+
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert_eq!(size(&h), SheetSize::Standard(PaperSize::A4));
+        assert!(h.app.drawing_workspace.apply_template.is_none(), "Apply closes the window");
+        let inspected = h.app.run("drawing.view.inspect", json!({"view":view["view"]})).unwrap();
+        assert_eq!(inspected["place"], json!({"at":[310.0,180.0]}), "the view stays where it was");
+        assert_eq!(h.app.session.undo.len(), steps + 1, "one undo step");
+
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(size(&h), SheetSize::Standard(PaperSize::A3));
+    }
+
+    /// Save as Drawing Template writes the open drawing to the `.scdwg` file the save picker names, as
+    /// no undo step; a `.json` name typed there keeps the engine's note that it went beside as `.scdwg`.
+    /// Apply Drawing Template's Template file… offers `.scdwg` and older `.json` templates, then
+    /// restyles the changed drawing from that file in one step; a cancelled pick changes nothing, and a
+    /// file that is not a template shows the engine's message with Apply off.
+    #[test]
+    fn the_open_drawing_saves_as_a_template_and_a_template_file_applies() {
+        use serde_json::json;
+        use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
+        use std::{cell::RefCell, rc::Rc};
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let size = |h: &Harness| the_drawing(h).sheets[0].sheet.size;
+        let status = |h: &Harness| h.app.status.clone().map(|(text, ..)| text).unwrap_or_default();
+
+        // The pickers answer as a person would, each noting the file types it offers.
+        let offered: Rc<RefCell<Vec<Vec<String>>>> = Rc::default();
+        let next: Rc<RefCell<Option<String>>> = Rc::default();
+        let types = |extensions: &[&str]| extensions.iter().map(|e| e.to_string()).collect::<Vec<_>>();
+        let (dir, seen) = (h.dir.clone(), offered.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            seen.borrow_mut().push(types(extensions));
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        let (seen, answer) = (offered.clone(), next.clone());
+        h.app.services.pick_open = Some(Box::new(move |extensions| {
+            seen.borrow_mut().push(types(extensions));
+            Box::pin(std::future::ready(answer.borrow_mut().take()))
+        }));
+        let folder = h.dir.clone();
+        let choose = move |name: &str| Some(folder.join(name).to_string_lossy().into_owned());
+
+        let steps = h.app.session.undo.len();
+        drawing_menu(&mut h, "Save as Drawing Template");
+        h.frames(3);
+        assert!(h.dir.join("Bracket template.scdwg").is_file(), "the .scdwg file the save picker names is written");
+        assert!(status(&h).contains("Bracket template.scdwg"), "{}", status(&h));
+        assert_eq!(h.app.session.undo.len(), steps, "saving a template is no undo step");
+
+        let sheet = solidcraft_engine::doc::ids::encode(the_drawing(&h).sheets[0].id);
+        h.app.run("drawing.sheet.set", json!({"sheet": sheet, "size": SheetSize::Standard(PaperSize::A4)})).unwrap();
+        let steps = h.app.session.undo.len();
+        drawing_menu(&mut h, "Apply Drawing Template");
+        *next.borrow_mut() = choose("Bracket template.scdwg");
+        h.step(&json!({"click":{"handle":"drawing:template:file"}})).unwrap();
+        h.frames(4);
+        let changes = format!("{} changes to match the template.", the_drawing(&h).sheets[0].name);
+        assert!(h.widget(&changes).is_some(), "the file's dry run shows");
+
+        // No file chosen: the picker is cancelled.
+        h.step(&json!({"click":{"handle":"drawing:template:file"}})).unwrap();
+        h.frames(4);
+        assert_eq!((size(&h), h.app.session.undo.len()), (SheetSize::Standard(PaperSize::A4), steps), "a cancelled pick changes nothing");
+        assert!(h.widget(&changes).is_some(), "and keeps the file picked before");
+
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert_eq!((size(&h), h.app.session.undo.len()), (SheetSize::Standard(PaperSize::A3), steps + 1));
+
+        // A `.json` name typed in the save picker: the template goes beside it as `.scdwg`, and the
+        // status line is the engine's note saying so, not a "saved" naming the `.json` file.
+        let old = h.dir.join("Old.json").to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(old.clone())))));
+        drawing_menu(&mut h, "Save as Drawing Template");
+        h.frames(3);
+        assert!(h.dir.join("Old.scdwg").is_file());
+        assert_eq!(status(&h), solidcraft_ui_text::format("drawing.template_saved_as_scdwg", &[("name", "Old.scdwg")]));
+
+        std::fs::write(h.dir.join("notes.json"), r#"{"notes":[]}"#).unwrap();
+        let doc = h.app.session.doc.clone();
+        drawing_menu(&mut h, "Apply Drawing Template");
+        *next.borrow_mut() = choose("notes.json");
+        h.step(&json!({"click":{"handle":"drawing:template:file"}})).unwrap();
+        h.frames(4);
+        assert!(crate::scenario::rect_of("dialog:report:drawing_template_error").is_some(), "the engine's message shows");
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(0.0), "Apply is off");
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &doc), "nothing changes");
+        let template_types = vec!["scdwg", "json"];
+        assert_eq!(*offered.borrow(), [vec!["scdwg"], template_types.clone(), template_types.clone(), template_types], "save offers .scdwg");
     }
 }

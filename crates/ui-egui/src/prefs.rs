@@ -4587,6 +4587,12 @@ pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
     template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
 }
 
+/// The built-in templates of an assembly's drawings (`assembly`) or a part's, smallest paper first:
+/// the ones Preferences and Apply Drawing Template list.
+pub(crate) fn templates_for(assembly: bool) -> Vec<&'static str> {
+    template::BUILT_INS.iter().copied().filter(|name| is_template_for(name, assembly)).collect()
+}
+
 /// Saved preferences, keeping every one that still reads. A value this version doesn't
 /// understand (a setting a newer or older release saved differently, a hand edit) falls back to
 /// its default on its own instead of discarding all of them.
@@ -4715,8 +4721,7 @@ fn prepare_preferences(
         [("part_drawing_template", &new.part_drawing_template, false), ("assembly_drawing_template", &new.assembly_drawing_template, true)]
     {
         if !is_template_for(chosen, assembly) {
-            let kind: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| is_template_for(name, assembly)).collect();
-            return Err(format!("`{key}` must be one of {}", kind.join(", ")));
+            return Err(format!("`{key}` must be one of {}", templates_for(assembly).join(", ")));
         }
     }
     if !accepted::home_fit_size(&new) {
