@@ -52,20 +52,23 @@ The STEP reader reads its own surfaces of linear extrusion and of revolution, an
    - from the edge's own angle and height, on a face that winds more than one turn about its axis.
 7. Picks the outer loops, and turns over a face whose outer loop runs clockwise about its side.
 8. Raises edge and vertex tolerances to the gaps the geometry measurably has.
-9. Turns inside out a void that encloses volume of the outer shell's sign.
-10. Builds the regions and puts everything in the record's canonical order.
-11. Checks the record's structure (`record_check::validate`) and its geometry against its topology (`record_check::agreement`).
+9. Orients an inconsistent closed solid shell by shared-edge parity: the two physical traversals of each shared edge must oppose. This determines relative face sides.
+10. Turns inside out a void that encloses volume of the outer shell's sign when no shell needed parity repair.
+11. Builds the regions and puts everything in the record's canonical order. After parity repair, certifies every shell's signed volume with the kernel's volume enclosure, turns the outer shell outward and the cavities inward, and restores canonical order.
+12. Checks the record's structure (`record_check::validate`) and its geometry against its topology (`record_check::agreement`).
 
 The result is a `Solid`: the record, each face's origin, whether it is a sheet, the notes on what was repaired, and the faces turned over.
 
 ## What it refuses
 
-A body is refused, with the face named, when:
+A body is refused when (face-local refusals name the face):
 
 - a vertex or edge lies off its curve or surface by more than 1 mm;
 - a loop is not closed in its surface's parameters and cannot be given a seam;
 - a face winds more than one turn about its axis on a surface that is not a cylinder or a cone;
 - the pcurves of a use cannot be made;
+- a closed solid shell needs orientation repair but has a nonmanifold edge, disconnected faces, or contradictory shared-edge parity;
+- a repaired shell's absolute orientation cannot be certified by its volume enclosure;
 - the finished record fails its checks.
 
 What a reader does with a refusal is up to it: the STEP reader may read the body's faces one by one instead, and the CADIR reader refuses that body region and keeps the others.
