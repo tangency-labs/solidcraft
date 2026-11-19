@@ -1113,7 +1113,7 @@ fn ladder_021_volume_converges_as_its_edges_tighten() {
             blend(&mut k, &mut b, Kind::Round, &[[60.0, 20.0, 20.0]], 3.0).unwrap();
             for &p in &chain {
                 let e = pick(&k, &b, p);
-                solidcore::topology::edge::set_tolerance(&mut b, e, t, false, false).unwrap();
+                edge::set_tolerance(&mut b, e, t, false, false).unwrap();
             }
             blend(&mut k, &mut b, Kind::Round, &chain, 2.0).unwrap();
             let (counts, v) = measured(&mut k, &mut b);
