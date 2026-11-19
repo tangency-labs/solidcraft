@@ -1656,6 +1656,88 @@ fn exact_curve_data(c: &Curve, is_2d: bool) -> Result<Option<(NurbsCurve, f64)>>
     Ok(line_nurb_slack(l, &cn, is_2d).map(|slack| (cn, slack)))
 }
 
+/// A bound `L` with `|S(p) - S(q)| <= L d` for the plane `s` and UV points `p`, `q` within `d`
+/// of each other in each coordinate, both within `d` of the segment between the UV points
+/// `ends` (a UV line's NURB): `None` unless `s` is a plane whose NURB is a polynomial bilinear
+/// patch. Over its domain `[u0, u1] x [v0, v1]` with corners `P_ij`, `S_u` at the `v` fraction
+/// `β` is `((1 - β)(P_10 - P_00) + β (P_11 - P_01)) / (u1 - u0)`, whose norm is convex in `β`,
+/// so over any `β` range it is at most the larger of its values at the range's ends; the range
+/// taken is the segment's box widened by `d`, joined with `[0, 1]`. Likewise `S_v`, and
+/// `|S(p) - S(q)| <= (max |S_u| + max |S_v|) d`. A difference of two floats rounds by at most
+/// `ε` of itself, a quotient, product or square root likewise; each is covered by a factor
+/// `1 + 16 ε` (and an absolute `8 ε` of the box's coordinates for its fractions).
+///
+/// Not upstream (#18166): it carries a UV line's evaluation slack ([`line_evaluation_slack`])
+/// to the plane, for a trim that is a line.
+#[must_use]
+pub fn plane_uv_lipschitz(
+    s: &Surface,
+    ends: &[crate::nurbs::math::CPoint],
+    d: f64,
+) -> Option<f64> {
+    use crate::nurbs::math::{CPoint, NOW};
+    use crate::surface::surface::p2::SurfaceKind;
+    let SurfaceKind::Plane(plane) = s.kind() else {
+        return None;
+    };
+    let base = plane.base_with_nurb().ok()?;
+    let net = base.gw_nurb()?;
+    let [u0, _, _, u1] = <[f64; 4]>::try_from(net.u_knots()).ok()?;
+    let [v0, _, _, v1] = <[f64; 4]>::try_from(net.v_knots()).ok()?;
+    let rows = net.cpts();
+    if net.degrees() != (1, 1)
+        || !(u1 > u0 && v1 > v0)
+        || rows.len() != 2
+        || rows.iter().any(|r| r.len() != 2)
+    {
+        return None;
+    }
+    let polynomial = |c: &CPoint| c.w == NOW || c.w == 1.0;
+    let pt = |i: usize, j: usize| -> Option<[f64; 3]> {
+        let c = rows.get(i)?.get(j)?;
+        polynomial(c).then_some([c.x, c.y, c.z])
+    };
+    let (p00, p10, p01, p11) = (pt(0, 0)?, pt(1, 0)?, pt(0, 1)?, pt(1, 1)?);
+    let grow = 1.0 + 16.0 * f64::EPSILON;
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for c in ends {
+        if !polynomial(c) {
+            return None;
+        }
+        for (k, x) in [c.x, c.y].into_iter().enumerate() {
+            lo[k] = lo[k].min(x - d);
+            hi[k] = hi[k].max(x + d);
+        }
+    }
+    // the fraction of `x` in `[a, b]`, moved out by its rounding (`lower` toward -inf)
+    let frac = |x: f64, a: f64, b: f64, lower: bool| {
+        let r = (x - a) / (b - a);
+        let e = (r.abs() * 16.0 + (x.abs() + a.abs()) / (b - a) * 8.0) * f64::EPSILON;
+        if lower {
+            (r - e).min(0.0)
+        } else {
+            (r + e).max(1.0)
+        }
+    };
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    // `|(1 - t) a + t b|` rounded up: each term within `(|a| + |b|)(1 + |t|) 4 ε` of exact
+    let norm_at = |a: [f64; 3], b: [f64; 3], t: f64| {
+        let v = [0, 1, 2].map(|k| (1.0 - t) * a[k] + t * b[k]);
+        let m = a.iter().chain(&b).fold(0.0_f64, |m, x| m.max(x.abs()));
+        ((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+            + m * (1.0 + t.abs()) * 16.0 * f64::EPSILON)
+            * grow
+    };
+    let su = |t: f64| norm_at(sub(p10, p00), sub(p11, p01), t) * grow;
+    let sv = |t: f64| norm_at(sub(p01, p00), sub(p11, p10), t) * grow;
+    let (b_lo, b_hi) = (frac(lo[1], v0, v1, true), frac(hi[1], v0, v1, false));
+    let (a_lo, a_hi) = (frac(lo[0], u0, u1, true), frac(hi[0], u0, u1, false));
+    let lu = su(b_lo).max(su(b_hi)) / ((u1 - u0) / grow);
+    let lv = sv(a_lo).max(sv(a_hi)) / ((v1 - v0) / grow);
+    let l = (lu + lv) * grow;
+    l.is_finite().then_some(l)
+}
+
 /// Not upstream: [`line_nurb_slack`] of the line `l` and its NURB (made on a copy when it has
 /// none), a UV line when `is_2d`: how far its analytic point can be from its NURB's exact point
 /// at the same parameter. `None` where that NURB's data is not two control points of weight

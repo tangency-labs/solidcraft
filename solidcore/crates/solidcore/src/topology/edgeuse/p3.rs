@@ -1979,7 +1979,7 @@ fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
                 continue;
             };
             let tol = b.edge(e)?.tolerance;
-            match trim_deviation_bound(k, b, x, &trim, tol, [tol, f64::INFINITY], None)? {
+            match raised_trim_bound(k, b, x, &trim, tol)? {
                 Some(again) if again.is_finite() && again > tol => {
                     crate::topology::edge::set_tolerance(b, e, again, true, true)?;
                     raised = true;
@@ -1992,6 +1992,54 @@ fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The proved bound of the UV trim `trim` of `eu` ([`trim_deviation_bound`] at the fit `tol`),
+/// for [`cover_raised_trims`]. A UV line is bounded as its NURB, plus how far the line's
+/// analytic evaluation can be from that NURB in UV (`line_evaluation_slack`) carried to the
+/// surface where it is a plane (`plane_uv_lipschitz`): its own rounding moves its parameters,
+/// which `trim_image_gap_bound` refuses. `None` where it is not enclosed (a UV line on
+/// another surface).
+///
+/// # Errors
+///
+/// Those of [`trim_deviation_bound`].
+fn raised_trim_bound(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    trim: &Curve,
+    tol: f64,
+) -> Result<Option<f64>> {
+    use crate::query::curve_surface_gap::{line_evaluation_slack, plane_uv_lipschitz};
+    let over = [tol, f64::INFINITY];
+    let CurveKind::Line(l) = trim.kind() else {
+        return trim_deviation_bound(k, b, eu, trim, tol, over, None);
+    };
+    let Some(f) = faceuse(b, eu)?.and_then(|fu| faceuse_face(b, fu).ok().flatten()) else {
+        return Ok(None);
+    };
+    let Some(surface) = b.face(f)?.surface.as_ref() else {
+        return Ok(None);
+    };
+    let nurb = l.base_with_nurb()?.into_owned();
+    let cpts = nurb.control_points()?.to_vec();
+    let Some(d) = line_evaluation_slack(l, true) else {
+        return Ok(None);
+    };
+    let Some(lip) = plane_uv_lipschitz(surface, &cpts, d) else {
+        return Ok(None);
+    };
+    let slack = lip * d * (1.0 + 4.0 * f64::EPSILON);
+    let Some(x) = trim_deviation_bound(k, b, eu, &Curve::from(nurb), tol, over, None)? else {
+        return Ok(None);
+    };
+    let bound = if slack == 0.0 {
+        x
+    } else {
+        (x + slack) * (1.0 + 4.0 * f64::EPSILON)
+    };
+    Ok(bound.is_finite().then_some(bound))
 }
 
 /// Not upstream (#18166): raises each vertex of `e` to cover its distance to the ends of all
