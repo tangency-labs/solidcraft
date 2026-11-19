@@ -98,10 +98,11 @@ fn finish_h(i: u32, hatch: u32) -> u32 {
     return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
 }
 
-/// Palette entry `slot`'s wood grain coordinates at `p`: the offset across the fibre axis (xyz,
-/// whose length is the distance from the growth axis) and the distance along it (w). An original
-/// cylindrical growth field: continuous on every face, with rings on the end faces. Zero where the
-/// entry has no wood frame, which keeps its uniform colour exactly.
+/// Palette entry `slot`'s wood grain coordinates at `p`: the offset across the fibre axis (xy, in
+/// a fixed pair of directions square to the axis, so its length is the distance from the growth
+/// axis; z is zero) and the distance along it (w). An original cylindrical growth field:
+/// continuous on every face, with rings on the end faces. Zero where the entry has no wood frame,
+/// which keeps its uniform colour exactly.
 fn wood_coordinates(p: vec3<f32>, slot: u32) -> vec4<f32> {
     let at = vec2<u32>(slot & 2047u, (slot >> 11u) * 4u);
     // An entry past the material texture has none (a load out of range is not defined).
@@ -110,7 +111,14 @@ fn wood_coordinates(p: vec3<f32>, slot: u32) -> vec4<f32> {
     let axis = textureLoad(pbr_materials, at + vec2<u32>(0u, 3u), 0);
     let delta = (p - origin) * axis.w;
     let along = dot(delta, axis.xyz);
-    return vec4<f32>(delta - along * axis.xyz, along);
+    // Two unit directions square to the axis and to each other, the same for every point of the
+    // entry (the sign keeps the division away from zero for an axis near -Z).
+    let s = select(-1.0, 1.0, axis.z >= -1e-4);
+    let a = -1.0 / (s + axis.z);
+    let b = axis.x * axis.y * a;
+    let e1 = vec3<f32>(1.0 + s * axis.x * axis.x * a, s * b, -s * axis.x);
+    let e2 = vec3<f32>(b, s + axis.y * axis.y * a, -axis.y);
+    return vec4<f32>(dot(delta, e1), dot(delta, e2), 0.0, along);
 }
 
 /// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
@@ -489,12 +497,14 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let k = curvature(i);
     let ndv = dot(normalize(i.n), normalize(u.back.xyz));
     let fw = fwidth(ndv);
+    let wood_dx = dpdx(i.wood);
+    let wood_dy = dpdy(i.wood);
     if (clipped(i.wp)) { discard; }
     if (!front && sectioned()) { return cap_color(i); }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
         return analysis(i, k);
     }
-    let c = lit(i, occlusion(i));
+    let c = lit(i, occlusion(i), wood_dx, wood_dy);
     // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
     // about 1.5 px wide, on the visible surface only (depth-correct).
     if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
@@ -825,14 +835,133 @@ fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
     return mat2x3<f32>(direction,colour.xyz*weight);
 }
 
+/// A repeatable value in 0..1 for a lattice point (an integer hash; the same on every GPU).
+fn wood_hash(x: i32, y: i32, z: i32, seed: u32) -> f32 {
+    var h = (bitcast<u32>(x) * 0x8da6b343u) ^ (bitcast<u32>(y) * 0xd8163841u) ^ (bitcast<u32>(z) * 0xcb1ab31fu) ^ seed;
+    h = h ^ (h >> 16u);
+    h = h * 0x7feb352du;
+    h = h ^ (h >> 15u);
+    h = h * 0x846ca68bu;
+    h = h ^ (h >> 16u);
+    return f32(h >> 8u) / 16777216.0;
+}
+
+/// Smooth value noise in 0..1 over the unit lattice.
+fn wood_noise(p: vec3<f32>, seed: u32) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let t = f * f * (vec3<f32>(3.0) - 2.0 * f);
+    let x = i32(i.x);
+    let y = i32(i.y);
+    let z = i32(i.z);
+    let x00 = mix(wood_hash(x, y, z, seed), wood_hash(x + 1, y, z, seed), t.x);
+    let x10 = mix(wood_hash(x, y + 1, z, seed), wood_hash(x + 1, y + 1, z, seed), t.x);
+    let x01 = mix(wood_hash(x, y, z + 1, seed), wood_hash(x + 1, y, z + 1, seed), t.x);
+    let x11 = mix(wood_hash(x, y + 1, z + 1, seed), wood_hash(x + 1, y + 1, z + 1, seed), t.x);
+    return mix(mix(x00, x10, t.y), mix(x01, x11, t.y), t.z);
+}
+
+/// A grain point (along, across, across) scaled for a noise lookup: fibres are long, so every
+/// feature is stretched along the grain.
+fn wood_scaled(g: vec3<f32>, along: f32, across: f32) -> vec3<f32> {
+    return vec3<f32>(g.x * along, g.y * across, g.z * across);
+}
+
+/// The wood figure of a face in colour `base` at grain coordinates `w` (`wood_coordinates`), whose
+/// change across one pixel is `dx` and `dy`: growth rings of uneven width around a wandering
+/// growth axis, each with pale early wood and a dark late-wood band, pores, fibres and long dark
+/// streaks. An original procedural field, not measured from any timber. Every feature fades to
+/// its average as it shrinks below a pixel, so a distant or steeply seen board stays calm.
+fn wood_figure(base: vec3<f32>, w: vec4<f32>, dx: vec4<f32>, dy: vec4<f32>) -> vec3<f32> {
+    // Millimetres between rings, late-wood depth, wander of the growth axis, pores, streaks.
+    let ring_mm = 3.5;
+    let contrast = 0.6;
+    let figure_mm = 3.0;
+    let pores = 0.5;
+    let streaks = 0.3;
+    let late_colour = base * vec3<f32>(0.74, 0.66, 0.60);
+    let light_colour = min(base * vec3<f32>(1.12, 1.17, 1.25), vec3<f32>(1.0));
+    let streak_colour = base * vec3<f32>(0.62, 0.56, 0.54);
+    let g = vec3<f32>(w.w, w.x, w.y);
+    let fx = vec3<f32>(dx.w, dx.x, dx.y);
+    let fy = vec3<f32>(dy.w, dy.x, dy.y);
+    // A pixel's size in millimetres across and along the grain.
+    let across = max(length(fx.yz), length(fy.yz));
+    let along = max(abs(fx.x), abs(fy.x));
+    // The growth axis wanders: a slow drift and a slower, larger one.
+    let n1 = wood_scaled(g, 0.004, 0.02);
+    let d1 = vec2<f32>(wood_noise(n1, 0u), wood_noise(n1 + vec3<f32>(17.0, 31.0, 47.0), 0x9e3779b9u)) - vec2<f32>(0.5);
+    let n2 = wood_scaled(g, 0.0012, 0.006);
+    let d2 = vec2<f32>(wood_noise(n2 + vec3<f32>(5.0, 11.0, 23.0), 0x510e527fu), wood_noise(n2 + vec3<f32>(41.0, 3.0, 29.0), 0x9b05688cu)) - vec2<f32>(0.5);
+    let yz = g.yz + figure_mm * (2.0 * d1 + 9.0 * d2);
+    let r = length(yz);
+    let q = vec3<f32>(g.x, yz);
+    // Rings per pixel: past one the rings blur to their average, well below it they are drawn sharp.
+    let fr = (abs(dot(yz, fx.yz)) + abs(dot(yz, fy.yz))) / (max(r, 1e-3) * ring_mm);
+    let rings = 1.0 - smoothstep(0.35, 1.0, fr);
+    let thin = 1.0 - smoothstep(0.08, 0.35, fr);
+    // Rings are not round: lobes around the axis, a slight taper along it.
+    let around = yz / (r + 1e-3);
+    let lobe = wood_noise(vec3<f32>(g.x * 0.0015 + 3.0, 1.3 * around + vec2<f32>(7.0, 13.0)), 0x243f6a88u) - 0.5;
+    let lobe2 = wood_noise(vec3<f32>(g.x * 0.004 + 11.0, 3.1 * around + vec2<f32>(5.0, 29.0)), 0xb7e15162u) - 0.5;
+    let rr = r * (1.0 + 0.22 * lobe + 0.07 * lobe2 * smoothstep(5.0, 60.0, r)) + 0.006 * g.x;
+    let ring0 = rr / ring_mm;
+    // Good and lean decades and years, and a fine waviness of each ring.
+    let decade = wood_noise(vec3<f32>(ring0 * 0.11 + 3.0, g.x * 0.0008, 2.0 * around.x + 2.0 * around.y), 0x13c6ef37u) - 0.5;
+    let year = wood_noise(vec3<f32>(ring0 * 0.37 + 9.0, g.x * 0.0015, 3.0 * around.x - 3.0 * around.y), 0x5be0cd19u) - 0.5;
+    let ring = ring0 + 3.6 * decade + 0.7 * year
+        + 0.6 * (wood_noise(wood_scaled(q, 0.01, 0.04), 0x85ebca6bu) - 0.5)
+        + 0.25 * (wood_noise(wood_scaled(q, 0.03, 0.12), 0x1b873593u) - 0.5);
+    // Each ring's own width: its two edges are moved by a hash of their numbers.
+    let n0 = floor(ring);
+    let ni = i32(n0);
+    let e0 = n0 + 0.6 * (wood_hash(ni, 0, 7, 0x6c62272eu) - 0.5);
+    let e1 = n0 + 1.0 + 0.6 * (wood_hash(ni + 1, 0, 7, 0x6c62272eu) - 0.5);
+    var lo = e0;
+    var hi = e1;
+    var nr = ni;
+    if (ring < e0) {
+        lo = n0 - 1.0 + 0.6 * (wood_hash(ni - 1, 0, 7, 0x6c62272eu) - 0.5);
+        hi = e0;
+        nr = ni - 1;
+    } else if (ring >= e1) {
+        lo = e1;
+        hi = n0 + 2.0 + 0.6 * (wood_hash(ni + 2, 0, 7, 0x6c62272eu) - 0.5);
+        nr = ni + 1;
+    }
+    let t = clamp((ring - lo) / (hi - lo), 0.0, 1.0);
+    // Where in the ring its late wood starts, and how dark that ring's is.
+    let share = 0.3 + 0.5 * wood_hash(nr, 1, 7, 0x6c62272eu);
+    let depth = 0.5 + 0.7 * wood_hash(nr, 2, 7, 0x6c62272eu);
+    let wrap = 1.0 - smoothstep(1.0 - clamp(fr, 0.02, 0.5), 1.0, t);
+    let late = mix(0.25, min(smoothstep(share, 0.95, t) * wrap * depth, 1.0), rings) * contrast;
+    let line = smoothstep(0.88, 0.97, t) * wrap * thin * contrast * min(depth, 1.0);
+    // Paler zones and long dark streaks, both following the rings.
+    let turn = 20.0 * yz.x / (r + 1.0);
+    let zone = smoothstep(0.35, 0.8, wood_noise(vec3<f32>(g.x * 0.0015, r * 0.05, turn * 0.05), 0x165667b1u));
+    let streak = smoothstep(0.6, 0.92, wood_noise(vec3<f32>(g.x * 0.004, r * 0.25, turn * 0.03), 0xc2b2ae35u)) * streaks;
+    // Fine detail, each kind shown only while a pixel is small enough to hold it.
+    let fine = 1.0 - smoothstep(0.08, 0.25, across);
+    let coarse = 1.0 - smoothstep(0.25, 0.8, across);
+    let mid = 1.0 - smoothstep(0.8, 2.5, across);
+    let pore = smoothstep(1.0 - 0.3 * pores, 1.0, wood_noise(wood_scaled(q, 0.1, 1.8), 0x27d4eb2fu)) * pores * (1.0 - 0.5 * late) * coarse * (1.0 - smoothstep(3.0, 10.0, along));
+    let fleck = smoothstep(0.8, 0.97, wood_noise(wood_scaled(q, 0.3, 1.6), 0x6a09e667u)) * (0.25 + 0.5 * pores) * coarse * (1.0 - smoothstep(1.0, 3.3, along));
+    let fibre = mix(1.0, 0.92 + 0.16 * wood_noise(wood_scaled(q, 0.03, 1.2), 0x3c6ef372u), coarse)
+        * mix(1.0, 0.94 + 0.12 * wood_noise(wood_scaled(q, 0.05, 4.0), 0xbb67ae85u), fine)
+        * mix(1.0, 0.95 + 0.1 * wood_noise(wood_scaled(q, 0.012, 0.45), 0xa54ff53au), mid);
+    let ripple = mix(1.0, 0.95 + 0.1 * wood_noise(wood_scaled(g, 0.06, 0.012), 0x1f83d9abu), 1.0 - smoothstep(5.0, 16.0, along));
+    let ringed = mix(mix(base, light_colour, zone), late_colour, late);
+    let streaked = mix(ringed, streak_colour, streak);
+    let flecked = mix(streaked, light_colour, 0.35 * fleck);
+    return clamp(flecked * (1.0 - 0.7 * pore) * (1.0 - 0.2 * line) * fibre * ripple, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 /// An opaque face, with its material finish where the viewport shows them, and the wood figure
-/// where its entry has a wood frame (`wood_coordinates`).
-fn lit(i: TOut, visibility: f32) -> vec4<f32> {
+/// (`wood_figure`) where its entry has a wood frame (`wood_coordinates`). `wood_dx` and `wood_dy`:
+/// the screen derivatives of `i.wood`, taken by the caller before its first branch.
+fn lit(i: TOut, visibility: f32, wood_dx: vec4<f32>, wood_dy: vec4<f32>) -> vec4<f32> {
     if (all(i.wood == vec4<f32>(0.0))) { return lit_color(i, visibility, i.c, true); }
-    let radius = length(i.wood.xyz);
-    let phase = 6.2831853 * (radius / 4.0 + 0.12 * sin(i.wood.w / 60.0));
-    let figure = 1.0 + 0.13 * sin(phase) + 0.035 * sin(phase * 5.0);
-    return lit_color(i, visibility, vec4<f32>(i.c.rgb * figure, i.c.a), true);
+    return lit_color(i, visibility, vec4<f32>(wood_figure(i.c.rgb, i.wood, wood_dx, wood_dy), i.c.a), true);
 }
 
 /// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).

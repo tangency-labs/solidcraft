@@ -1029,6 +1029,73 @@ fn wood_finish_images_follow_grain_in_light_and_dark_themes() {
     solidcraft_theme::set_dark(original_dark);
 }
 
+/// The figure's fine detail (ring lines, pores, fibres) fades to its average once it is smaller
+/// than a pixel: a board seen from far away is calm, not a shimmer of aliased lines.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn wood_finish_detail_fades_as_the_board_shrinks() {
+    const SIZE: u32 = 256;
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.ui.visual_style = 1;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"Wood - Oak"})).unwrap();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    app.fit_view();
+    app.cam.set_view(solidcraft_viewport::StandardView::Top);
+    app.cam.fov = 0.;
+    let picture = |app: &SolveApp| {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(SIZE as f32, SIZE as f32));
+        let proj = super::projection(app, rect);
+        let eye = proj.cam.eye().to_f32();
+        crate::gpu::render_offscreen(
+            build_scene(app).merged(),
+            None,
+            proj.vp.to_f32(),
+            proj.cam.back().to_f32(),
+            [eye[0], eye[1], eye[2], 0.],
+            SIZE,
+            None,
+            [0.; 8],
+            crate::gpu::analysis_colors(&solidcraft_theme::Tokens::get().analysis),
+        )
+    };
+    // The largest step in red between a board pixel and the one below it, both well inside the
+    // board (the picture's corner pixel is the background).
+    let roughest = |picture: &[u8]| {
+        let size = SIZE as usize;
+        let at = |x: usize, y: usize| &picture[(y * size + x) * 4..(y * size + x) * 4 + 4];
+        let background = at(0, 0).to_vec();
+        let board = |x: usize, y: usize| (y.saturating_sub(2)..=(y + 2).min(size - 1)).all(|v| at(x, v) != background.as_slice());
+        let mut most = 0;
+        let mut pixels = 0;
+        for y in 2..size - 3 {
+            for x in 0..size {
+                if board(x, y) && board(x, y + 1) {
+                    most = most.max((i32::from(at(x, y)[0]) - i32::from(at(x, y + 1)[0])).abs());
+                    pixels += 1;
+                }
+            }
+        }
+        (most, pixels)
+    };
+    let Some(near) = picture(&app) else {
+        eprintln!("skipping wood finish image check: no GPU adapter");
+        return;
+    };
+    app.cam.distance *= 10.0;
+    let far = picture(&app).unwrap();
+    let (near_step, near_pixels) = roughest(&near);
+    let (far_step, far_pixels) = roughest(&far);
+    assert!(
+        near_pixels > 2000 && far_pixels > 20 && far_pixels * 20 < near_pixels,
+        "the far board is much smaller: {near_pixels} and {far_pixels} pixels"
+    );
+    assert!(near_step >= 12, "up close the ring lines are drawn sharp: {near_step}");
+    assert!(far_step * 2 <= near_step, "far away the figure is calm: {far_step} against {near_step}");
+}
+
 #[test]
 fn wood_finish_repeated_parts_keep_each_placements_axis_and_origin() {
     let mut app = SolveApp::new(Session::default(), Services::default());
