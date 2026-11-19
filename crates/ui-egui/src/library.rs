@@ -774,7 +774,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         }
     }
     if app.library.root.is_none() {
-        egui::Frame::NONE.fill(solidcraft_theme::Tokens::get().field).inner_margin(8.0).corner_radius(4.0).show(ui, |ui| {
+        egui::Frame::NONE.fill(solidcraft_theme::Tokens::get().field).inner_margin(8.0).corner_radius(0.0).show(ui, |ui| {
             ui.label(solidcraft_ui_text::tr("library.samples_note"));
         });
         ui.add_space(6.0);

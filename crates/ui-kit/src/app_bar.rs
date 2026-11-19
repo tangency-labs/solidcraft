@@ -378,6 +378,8 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     use crate::app_bar_layout::{application, layout};
 
     let t = Tokens::get();
+    ui.painter().rect_filled(bar, 0.0, t.app_bar);
+    ui.painter().hline(bar.x_range(), bar.bottom(), Stroke::new(1.0, t.app_bar.lerp_to_gamma(t.app_bar_separator, 0.4)));
     let h = &data.handles;
     let r = bar;
     let report_font = FontId::proportional(t.font_button);

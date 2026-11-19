@@ -69,20 +69,20 @@ impl Tokens {
             file_content_inset_y: 32.0,
             file_section_gap: 28.0,
             font_start_title: 28.0,
-            space_2: 2.0,
-            space_3: 3.0,
-            space_4: 4.0,
-            space_6: 6.0,
-            space_8: 8.0,
-            space_10: 10.0,
-            space_12: 12.0,
-            space_14: 14.0,
-            space_16: 16.0,
-            space_24: 24.0,
-            radius_sm: 4,
-            radius_md: 6,
-            radius_lg: 8,
-            radius_xl: 10,
+            space_2: 1.0,
+            space_3: 2.0,
+            space_4: 3.0,
+            space_6: 4.0,
+            space_8: 6.0,
+            space_10: 8.0,
+            space_12: 10.0,
+            space_14: 12.0,
+            space_16: 14.0,
+            space_24: 20.0,
+            radius_sm: 0,
+            radius_md: 0,
+            radius_lg: 0,
+            radius_xl: 0,
             font_badge: 9.5,
             font_micro: 10.0,
             font_panel: 10.5,
@@ -109,7 +109,7 @@ impl Tokens {
             form_error_fill: Color32::from_rgb(252, 239, 237),
             form_success: Color32::from_rgb(39, 107, 44),
             form_success_fill: Color32::from_rgb(229, 242, 230),
-            control_radius: 6,
+            control_radius: 0,
             form_label_width: 70.0,
             form_gap_y: 5.0,
             form_footer_height: 48.0,
@@ -124,7 +124,7 @@ impl Tokens {
             form_button_height: 28.0,
             sketch_palette_width: 232.0,
             sketch_mode_size: 36.0,
-            sketch_mode_radius: 7,
+            sketch_mode_radius: 0,
             sketch_mode_border: 1.5,
             sketch_palette_alpha: 0.96,
             sketch_mode_tint: 0.12,
@@ -132,7 +132,7 @@ impl Tokens {
             font_section_tracking: 0.04,
             app_bar: Color32::from_rgb(52, 56, 64),
             app_bar_separator: Color32::from_rgb(136, 145, 160),
-            toolbar: Color32::from_rgb(246, 247, 249),
+            toolbar: Color32::from_rgb(236, 238, 242),
             panel: Color32::from_rgb(250, 251, 252),
             panel_header: Color32::from_rgb(236, 238, 242),
             border: Color32::from_rgb(208, 212, 220),
@@ -329,7 +329,7 @@ impl Tokens {
         t.font_title = 22.0;
         t.font_display = 26.0;
         t.control_height = 28.0;
-        t.control_radius = 6;
+        t.control_radius = 0;
         t.form_label_width = 70.0;
         t.form_gap_y = 5.0;
         t.form_footer_height = 48.0;
@@ -344,7 +344,7 @@ impl Tokens {
         t.form_button_height = 28.0;
         t.sketch_palette_width = 232.0;
         t.sketch_mode_size = 36.0;
-        t.sketch_mode_radius = 7;
+        t.sketch_mode_radius = 0;
         t.sketch_mode_border = 1.5;
         t.sketch_palette_alpha = 0.96;
         t.sketch_mode_tint = 0.12;
@@ -364,7 +364,7 @@ impl Tokens {
         t.file_recovery_ink = Color32::from_rgb(245, 204, 137);
         t.file_recovery_border = Color32::from_rgb(115, 88, 43);
         t.app_bar = Color32::from_rgb(28, 31, 38);
-        t.toolbar = Color32::from_rgb(39, 43, 52);
+        t.toolbar = Color32::from_rgb(44, 48, 56);
         t.panel = Color32::from_rgb(39, 43, 52);
         t.panel_header = Color32::from_rgb(47, 52, 62);
         t.border = Color32::from_rgb(63, 69, 82);

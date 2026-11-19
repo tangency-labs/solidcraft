@@ -642,7 +642,7 @@ impl Container {
             ctx,
             |ui| {
                 let frame =
-                    container.frame(ctx, t.dialog_body, Side::Left).corner_radius(t.space_24 as u8).shadow(t.shell_shadow()).inner_margin(t.space_3);
+                    container.frame(ctx, t.dialog_body, Side::Left).corner_radius(0).shadow(t.shell_shadow()).inner_margin(t.space_3);
                 container.show_frame(ui, frame, bounds, |ui| super::scope(ui, add)).inner
             },
         )
@@ -758,7 +758,7 @@ impl Container {
             Surface::Palette => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_xl).shadow(t.shell_shadow()),
             Surface::Panel | Surface::Chrome => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_lg).shadow(t.shell_shadow()),
             Surface::Navigation => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_md),
-            Surface::ViewportStatus => flat.stroke(t.primary_border(t.border)).corner_radius((t.control_height / 2.0 + t.space_4) as u8),
+            Surface::ViewportStatus => flat.stroke(t.primary_border(t.border)).corner_radius(0),
             Surface::Toast => flat.stroke(t.primary_border(t.border)).corner_radius(t.radius_md).shadow(t.shell_shadow()),
             Surface::Popup => Self::popup_frame(&ctx.global_style()).fill(fill),
             Surface::ApplicationBar | Surface::Canvas | Surface::Viewport | Surface::InputShield => flat,
@@ -1081,7 +1081,11 @@ impl Container {
             Edge::Top => egui::Panel::top(salt),
             Edge::Bottom => egui::Panel::bottom(salt),
         };
-        if self.adaptive() && !self.floating() { panel.show_separator_line(false) } else { panel }
+        match edge {
+            Edge::Left | Edge::Right if self.adaptive() && !self.floating() => panel.show_separator_line(true),
+            _ if self.adaptive() && !self.floating() => panel.show_separator_line(false),
+            _ => panel,
+        }
     }
 
     /// Stock Panel owns layout, persistence, interaction and its unmodified semantic Frame.

@@ -1659,7 +1659,7 @@ mod tests {
                 ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(20.0, 600.0)), 0.0, color);
             }
             let alpha = if translucent { 120 } else { 255 };
-            let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, alpha)).corner_radius(8).inner_margin(12);
+            let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, alpha)).corner_radius(0).inner_margin(12);
             crate::ui_kit::Container::show_backing(ui, frame, |ui| {
                 ui.set_min_size(egui::vec2(300.0, 200.0));
             });
@@ -1734,7 +1734,7 @@ mod tests {
             let mut out = ctx.run_ui(raw, |ui| {
                 let _blur = app.blur.begin(ui.ctx());
                 ui.painter().rect_filled(ui.max_rect(), 0.0, egui::Color32::from_rgb(200, 40, 40));
-                let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, 120)).corner_radius(8).inner_margin(12);
+                let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, 120)).corner_radius(0).inner_margin(12);
                 crate::ui_kit::Container::show_backing(ui, frame, |ui| {
                     ui.label("pop-out panel");
                 });

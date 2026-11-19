@@ -91,8 +91,8 @@ pub struct NavigationMetrics {
 impl NavigationMetrics {
     pub fn for_size(size: NavigationSize) -> Self {
         match size {
-            NavigationSize::Regular => Self { button: 32.0, icon: 18.0, radius: 10, button_radius: 7 },
-            NavigationSize::Compact => Self { button: 26.0, icon: 16.0, radius: 9, button_radius: 6 },
+            NavigationSize::Regular => Self { button: 32.0, icon: 18.0, radius: 0, button_radius: 0 },
+            NavigationSize::Compact => Self { button: 26.0, icon: 16.0, radius: 0, button_radius: 0 },
         }
     }
     pub fn height(self) -> f32 {

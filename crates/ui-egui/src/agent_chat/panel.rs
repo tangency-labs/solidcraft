@@ -607,7 +607,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, gone: &[bool], handle: &s
                             let is_gone = gone.get(*place).copied().unwrap_or(false);
                             let chip = egui::Frame::NONE
                                 .stroke(Stroke::new(1.0, t.text_dim.gamma_multiply(0.5)))
-                                .corner_radius(8.0)
+                                .corner_radius(0.0)
                                 .inner_margin(egui::Margin::symmetric(5, 1))
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.x = 3.0;
