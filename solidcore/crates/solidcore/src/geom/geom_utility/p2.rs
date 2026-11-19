@@ -1069,11 +1069,31 @@ fn minor_3x3(a: &[[f64; 4]; 4], row: usize, col: usize) -> [[f64; 3]; 3] {
 
 // ---- curve differential geometry -------------------------------------------------------
 
+/// The power of two that brings `m` into `[1, 2)` (into `[2, 4)` from `2^1023` on;
+/// `2^1023` for zero or a subnormal, `2^-1022` for a value that is not finite). Scaling
+/// by a power of two is exact while the scaled values stay normal, so a product or
+/// quotient on the scaled values has the same bits as on the originals wherever neither
+/// overflows nor underflows.
+fn pow2_unit_scale(m: f64) -> f64 {
+    let biased_exponent = (m.abs().to_bits() >> 52) & 0x7ff;
+    f64::from_bits(2046_u64.saturating_sub(biased_exponent).max(1) << 52)
+}
+
+/// `v.length()` taken on `v` scaled by a power of two: finite for every finite `v`
+/// whose length is at most `f64::MAX`, and the same value as `v.length()` wherever
+/// no square overflows or underflows (before or after the scaling).
+fn scaled_length(v: Vec3) -> f64 {
+    let scale = pow2_unit_scale(v.max_dimension());
+    (v * scale).length() / scale
+}
+
 /// Frenet quantities from curve derivatives `vals = [P, P', P'', P''']`
 /// (`smgu_FrenetFromDerivatives`): returns `n + 1` vectors `[position, first
 /// derivative, curvature vector, torsion vector]` (`n <= 3`); the curvature vector
 /// has magnitude `k` along the normal, the torsion vector magnitude `tau` along the
-/// binormal.
+/// binormal. The curvature `P' x P'' x P' / |P'|^4` is taken with `P'` scaled by a power
+/// of two, so `|P'|^4` does not overflow for a long tangent (upstream's then reads 0);
+/// wherever upstream's products neither overflow nor underflow the value is the same.
 ///
 /// # Errors
 ///
@@ -1103,9 +1123,13 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
     if tan_len_sq < EFF_ZERO_SQ {
         return Err(SolidError::geom_failed(OP, "the tangent has zero length"));
     }
-    let tan_len_fourth = tan_len_sq * tan_len_sq;
+    let scale = pow2_unit_scale(d1.max_dimension());
+    let d1_scaled = d1 * scale;
+    let scaled_len_sq = d1_scaled.length_squared();
     let d2 = get(2);
-    let curvature = d1.cross(d2).cross(d1) / tan_len_fourth;
+    let curvature = d1_scaled.cross(d2).cross(d1_scaled) / (scaled_len_sq * scaled_len_sq)
+        * scale
+        * scale;
     out.push(curvature);
     if n == 2 {
         return Ok(out);
@@ -1146,8 +1170,11 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 /// lengths are compared relative to the larger (`SM_EFF_ZERO_SQRT / 10 * (1 + max)`), and
 /// the angle is between the two normals, where both curvatures exceed that gap; a smaller
 /// one is zero at it and has no normal, and then the two curvature vectors must lie within
-/// the gap of each other. A curvature whose length is not finite (it overflows) grades the
-/// join below G2. Upstream takes the curvatures as the lengths of
+/// the gap of each other. Tangent and curvature lengths are taken on vectors scaled by a
+/// power of two, so a square past `f64::MAX` does not make them infinite; a tangent or
+/// curvature length that is still not finite grades the join below G1 or G2, and a G3
+/// gap or tolerance that is not finite grades it below G3. Upstream takes the curvatures
+/// as the lengths of
 /// the raw second derivatives (which depend on the parameter speed), compares them with
 /// an absolute `SM_EFF_ZERO_SQRT / 10`, and measures the angle of the first normal with
 /// itself (always 0).
@@ -1196,12 +1223,17 @@ pub fn evaluate_curve_continuity(
     let mut kind = ContinuityType::C0;
 
     // zero tangents stay C0
-    let vec1_len = vec1.length();
+    let vec1_len = scaled_length(vec1);
     if vec1_len < EFF_ZERO * (1.0 + vec1_max) {
         return Ok(kind);
     }
-    let vec2_len = vec2.length();
+    let vec2_len = scaled_length(vec2);
     if vec2_len < EFF_ZERO * (1.0 + vec2_max) {
+        return Ok(kind);
+    }
+    // a length that is not finite has no unit tangent (it would read as zero, and the
+    // angle as 0)
+    if !(vec1_len.is_finite() && vec2_len.is_finite()) {
         return Ok(kind);
     }
 
@@ -1230,9 +1262,9 @@ pub fn evaluate_curve_continuity(
         .get(2)
         .copied()
         .unwrap_or(Vec3::ZERO);
-    let curvature1 = k1.length();
-    let curvature2 = k2.length();
-    // A length that overflows (or is NaN) has no gap to compare against: an infinite
+    let curvature1 = scaled_length(k1);
+    let curvature2 = scaled_length(k2);
+    // A length past `f64::MAX` (or NaN) has no gap to compare against: an infinite
     // tolerance would accept any pair (`inf <= inf`), so the join is not G2.
     if !(curvature1.is_finite() && curvature2.is_finite()) {
         return Ok(kind);
@@ -1288,7 +1320,8 @@ pub fn evaluate_curve_continuity(
         scaled_zero = max2(scaled_zero, this_scaled_zero);
         let g3_target = t1 - a1 * a1 * a1 * t2 - 3.0 * a1 * a2 * second2;
         let (g3_gap, _) = line_point_distance(Point3::ZERO, vec2, g3_target);
-        if g3_gap > scaled_zero {
+        // an overflow makes the gap NaN or the tolerance infinite: neither passes
+        if !(scaled_zero.is_finite() && g3_gap <= scaled_zero) {
             return Ok(kind);
         }
         kind = match kind {
@@ -1540,9 +1573,9 @@ mod tests {
         let b = ev(v(1.0 + 1e-7, 0.0, 0.0), v(600.0, 9.0, 0.0));
         assert_eq!(c(&a, &b), ContinuityType::C1);
 
-        // a curvature whose length overflows (|P''| 1e200 squares past f64::MAX) makes
-        // the gap tolerance infinite, and `inf <= inf` would accept any pair: opposite
-        // normals, and a unit curvature against an overflowing one, are not G2
+        // a curvature of length 1e200, whose square is past f64::MAX: an infinite length
+        // would make the gap tolerance infinite, and `inf <= inf` would accept any pair:
+        // opposite normals, and a unit curvature against the long one, are not G2
         let huge_up = ev(v(1.0, 0.0, 0.0), v(0.0, 1e200, 0.0));
         let huge_down = ev(v(1.0, 0.0, 0.0), v(0.0, -1e200, 0.0));
         assert_eq!(c(&huge_up, &huge_down), ContinuityType::C1);
@@ -1576,6 +1609,34 @@ mod tests {
         let g3_ahead = ev3(v(1e200, 1.0, 0.0));
         let g3_behind = ev3(v(-1e200, 1.0, 0.0));
         assert_eq!(c(&g3_ahead, &g3_behind), ContinuityType::C1G2);
+    }
+
+    /// The power-of-two scale at the ends of the `f64` range, and lengths of a 3-4-5
+    /// vector from the smallest normal to the largest finite exponent.
+    #[test]
+    fn scaled_length_is_exact_and_does_not_overflow() {
+        assert_eq!(pow2_unit_scale(1.0), 1.0);
+        assert_eq!(pow2_unit_scale(1.5), 1.0);
+        assert_eq!(pow2_unit_scale(-3.0), 0.5);
+        assert_eq!(pow2_unit_scale(0.0), 2f64.powi(1023));
+        assert_eq!(pow2_unit_scale(f64::MIN_POSITIVE / 4.0), 2f64.powi(1023));
+        assert_eq!(pow2_unit_scale(f64::MAX), f64::MIN_POSITIVE);
+        assert_eq!(pow2_unit_scale(f64::INFINITY), f64::MIN_POSITIVE);
+        assert_eq!(pow2_unit_scale(f64::NAN), f64::MIN_POSITIVE);
+
+        // where the plain length is finite and normal, the same bits
+        for (x, y, z) in [(3.0, 4.0, 0.0), (0.1, 0.2, 0.3), (1e150, -2e149, 7e148)] {
+            let a = v(x, y, z);
+            assert_eq!(scaled_length(a).to_bits(), a.length().to_bits());
+        }
+        // 3-4-5 at 2^e for e from -1020 to 1020: exactly 5 * 2^e
+        for e in (-1020..=1020).step_by(17) {
+            let p = 2f64.powi(e);
+            assert_eq!(scaled_length(v(3.0 * p, 4.0 * p, 0.0)), 5.0 * p);
+        }
+        assert_eq!(scaled_length(Vec3::ZERO), 0.0);
+        assert_eq!(scaled_length(v(f64::MAX, f64::MAX, 0.0)), f64::INFINITY);
+        assert!(scaled_length(v(f64::NAN, 1.0, 0.0)).is_nan());
     }
 
     /// WR-10: an oblique collinear set is Linear with the line tangent (pinned v1.0.1:
