@@ -5133,7 +5133,7 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
     let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
     let after = b.volume(1e-11).unwrap();
     assert!(
-        (before - after - removed).abs() <= 1e-9 * before,
+        (before - after - removed).abs() <= 1e-9 * removed,
         "removed {}, the closed form {removed}",
         before - after
     );
