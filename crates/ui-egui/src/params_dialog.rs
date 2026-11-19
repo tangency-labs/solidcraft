@@ -1442,7 +1442,9 @@ pub(crate) fn unit_token(ctx: &egui::Context, word: &str) -> bool {
 /// number in it with Up/Down or the wheel (`value_step`, #2320).
 /// Returns true when either changed the text; callers must not submit that frame.
 pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> bool {
-    crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text)
+    let changed = crate::expression_complete::complete(ui, resp, text) || crate::value_step::step(ui, resp, text);
+    ui_kit::note_numeric_edit(ui, resp, Some(text), resp.changed(), changed);
+    changed
 }
 
 /// SolidCraft's expression language for the kit's value fields: literals and units as
@@ -1456,6 +1458,11 @@ impl ui_kit::Expressions for DocExpressions {
 
     fn is_unit(&self, unit: &str) -> bool {
         solidcraft_engine::doc::expr::unit_info(unit).is_some()
+    }
+
+    fn unit_is_prefix(&self, unit: &str) -> bool {
+        let unit = if unit == "μ" { "µ" } else { unit };
+        !unit.is_empty() && solidcraft_engine::doc::expr::UNITS.iter().any(|(name, _, _)| *name != unit && name.starts_with(unit))
     }
 
     fn complete(&self, ui: &mut egui::Ui, response: &egui::Response, text: &mut String) -> bool {
@@ -1504,6 +1511,44 @@ pub(crate) fn install_expressions(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_field_waits_for_unit_completion() {
+        let ctx = crate::fonts::test_context();
+        install_expressions(&ctx);
+        let mut value = String::new();
+        let mut id = egui::Id::NULL;
+        let mut draw = |time, text: &str| {
+            let events = if text.is_empty() { vec![] } else { vec![egui::Event::Text(text.into())] };
+            let mut ready = true;
+            let output = ui_kit::test_support::raw_frame(&ctx, egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+                id = ui_kit::checked_field(ui, &mut value, "", false).1.id;
+                ready = ui_kit::numeric_preview_ready(ui.ctx());
+            });
+            ctx.memory_mut(|m| m.request_focus(id));
+            (value.clone(), ready, output)
+        };
+        draw(0.0, "");
+        assert_eq!(draw(0.01, "2").0, "2", "a complete number updates immediately");
+        let (text, ready, output) = draw(0.02, "m");
+        assert_eq!(text, "2m", "completion and caret handling retain the draft");
+        assert!(!ready, "m may still become mm or mil; do not preview two metres");
+        assert!(ui_kit::test_support::text_shapes(&output).any(|s| s.galley.text() == "2m"), "the draft remains visible");
+        let (text, ready, _) = draw(0.03, "m");
+        assert_eq!(text, "2mm");
+        assert!(ready, "a completed unit updates immediately");
+    }
+
+    #[test]
+    fn numeric_unit_prefixes_follow_the_expression_languages_units() {
+        let host: &dyn ui_kit::Expressions = &DocExpressions;
+        for unit in ["m", "mi", "i", "in", "r", "µ", "μ"] {
+            assert!(host.unit_is_prefix(unit), "{unit}");
+        }
+        for unit in ["", "mm", "cm", "rad", "inch", "R"] {
+            assert!(!host.unit_is_prefix(unit), "{unit}");
+        }
+    }
 
     #[test]
     fn parameter_names_show_one_tooltip_and_only_repeat_clipped_names() {
