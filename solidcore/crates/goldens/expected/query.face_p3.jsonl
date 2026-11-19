@@ -537,7 +537,7 @@
 {"case":"gen0085","deferred":null,"error":null,"ints":{"sector":[1,0,0]},"topology":null,"values":{}}
 {"case":"gen0086","deferred":null,"error":null,"ints":{"sector":[1,0,0]},"topology":null,"values":{}}
 {"case":"gen0087","deferred":null,"error":null,"ints":{},"topology":null,"values":{"point":[-14.147331939086682,4.348587548900197,1.3980045196029978]}}
-{"case":"gen0088","deferred":null,"error":null,"ints":{},"topology":null,"values":{"max":[0.0014729126801314965,0.0014729126801314965,0.0018145657424669742],"min":[-0.0014729126801314965,-0.0014729126801314965,0.00039258433153128644]}}
+{"case":"gen0088","deferred":null,"error":null,"ints":{},"topology":null,"values":{"max":[0.0014729126801314967,0.0014729126801314967,0.001814565621316433],"min":[-0.0014729126801314965,-0.0014729126801314965,0.000392584331531286]}}
 {"case":"gen0089","deferred":null,"error":null,"ints":{},"topology":null,"values":{"max":[0.0008918451858768851,0.0021032282286646982,0.0002765015534359033],"min":[0.0003802638135964174,0.0008967717713353021,-0.00014436417902092627]}}
 {"case":"gen0090","deferred":null,"error":null,"ints":{},"topology":null,"values":{"max":[2199.4665701339736,722.2009431106296,-930.5010590260467],"min":[1186.2059784771418,158.61470975004198,-1951.028668314923]}}
 {"case":"gen0091","deferred":null,"error":null,"ints":{},"topology":null,"values":{"max":[13.000000000000002,7.0,7.000000000000001],"min":[-2.0,-5.362311101832848,0.0]}}

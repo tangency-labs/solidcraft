@@ -4012,8 +4012,8 @@ fn flat_view(s: &mut Session, p: Value) -> (u64, Value) {
     (ids::decode(reply["view"].as_str().unwrap()).unwrap(), reply)
 }
 
-/// `sheet.flat_pattern`'s reply. It's a model command, so while a drawing is open it runs with the
-/// drawing closed.
+/// `sheet.flat_pattern`'s reply, read with the drawing closed while one is open, as these tests
+/// have always read it.
 fn flat_pattern(s: &mut Session) -> Value {
     if s.open_drawing.is_none() {
         return run(s, "sheet.flat_pattern", json!({}));

@@ -101,6 +101,7 @@ struct BodyKey {
     feature: u64,
     component: u64,
     transferred: bool,
+    envelope: bool,
     name: String,
     source_name: Option<String>,
     source_transform: [u64; 16],
@@ -120,6 +121,7 @@ impl BodyKey {
             feature: b.feature,
             component: b.component,
             transferred: b.transferred,
+            envelope: b.envelope,
             name: b.name.clone(),
             source_name: b.source_name.clone(),
             source_transform,
@@ -272,6 +274,9 @@ impl Writer {
         }
         if b.transferred {
             r["transferred"] = json!(true);
+        }
+        if b.envelope {
+            r["envelope"] = json!(true);
         }
         if let Some(look) = &b.imported {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
@@ -557,6 +562,7 @@ impl SavedModel {
                 b.source_transform = m;
             }
             b.transferred = r.get("transferred").and_then(Json::as_bool).unwrap_or(false);
+            b.envelope = r.get("envelope").and_then(Json::as_bool).unwrap_or(false);
             // Measured once here, so every state holding it adds it up for the cache's budget.
             b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {

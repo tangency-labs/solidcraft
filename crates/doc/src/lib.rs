@@ -32,6 +32,7 @@ pub mod drafting_profile;
 pub mod drawing;
 pub mod drawing_view;
 pub mod end_cap;
+mod envelope;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -45,6 +46,7 @@ pub mod gpu_plan;
 mod history_names;
 pub mod hole_reference;
 pub mod ids;
+pub mod import_defects;
 mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
@@ -69,6 +71,7 @@ pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
+mod point_expr;
 mod points;
 mod profile_refs;
 pub mod progress;
@@ -92,6 +95,7 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
+pub mod sheet_library;
 mod sheet_surface;
 mod sheet_surface_convert;
 mod sheet_surface_cuts;
@@ -294,6 +298,8 @@ mod feature_walk_tests;
 mod named_projection_tests;
 #[cfg(test)]
 mod old_cap_anchor_tests;
+#[cfg(test)]
+mod saved_text_font_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -535,8 +535,14 @@ fn whole_body_highlight_cost_from_the_models_own_triangles() {
     let bodies = names.len();
     h.app.viewport.hover_bodies = names;
     let copied = ms(|| drop(crate::viewport::build_highlight(&h.app)));
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: true,
+        oit: false,
+        edges: false,
+    });
     let planned = ms(|| drop(crate::viewport::build_highlight(&h.app)));
     println!("HIGHLIGHT bodies={bodies} triangles={triangles} cpu_copy_ms={copied:.2} model_triangles_ms={planned:.2}");
 }
@@ -713,8 +719,14 @@ fn many_selected_bodies_hover_cost() {
     };
     let modes: [(&str, Option<bool>); 3] = [("headless", None), ("gpu_plans", Some(true)), ("gpu_blocks", Some(false))];
     for (mode, tess) in modes {
-        h.app.viewport.gpu =
-            tess.map(|tess| crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+        h.app.viewport.gpu = tess.map(|tess| crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess,
+            oit: false,
+            edges: false,
+        });
         drop(crate::viewport::build_scene(&h.app));
         for (selected, biggest) in [(false, false), (true, false), (false, true), (true, true)] {
             h.app.session.selection =
@@ -853,7 +865,14 @@ fn orbit_frame_cost() {
     let mut frames = crate::gpu::OffscreenFrames::new(SIZE, true);
     h.app.viewport.gpu = match &frames {
         Some(f) => f.target(),
-        None => Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false }),
+        None => Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: true,
+            oit: false,
+            edges: false,
+        }),
     };
     h.app.fit_view();
     h.frames(5);
