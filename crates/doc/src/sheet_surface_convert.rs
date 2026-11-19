@@ -54,13 +54,13 @@ use solidcore_record::brep::history::FaceOrigin;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{
     Anchor, Bend, Corner, CornerRelief, Cut, Datum, Development, Fold, Joint, JointKind, Lap, Panel, Query, Relief, Rigid2, Rigid3, Rip, Sheet,
-    Surface, Tail, ZoneEnds, curve_through, develop, fold,
+    Surface, Tail, ZoneEnds, curve_through, develop, fold, tear_slit,
 };
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
 use crate::sheet::FlatWork;
 
-use crate::sheet::ReliefShape;
+use crate::sheet::{BendReliefShape, ReliefShape};
 use crate::sheet_surface::{Piece, entry};
 use crate::{DocError, ModelBody, Result};
 
@@ -82,6 +82,8 @@ pub struct ConvertRule {
     /// how far inside the base's tangent line it is cut from.
     pub relief_width: f64,
     pub relief_depth: f64,
+    /// The bend relief's shape.
+    pub bend_relief: BendReliefShape,
 }
 
 /// What a sheet's bends end with (see [`settle`]): the gap a rip leaves between its panels, the
@@ -95,6 +97,9 @@ pub struct Reliefs {
     pub corner_size: f64,
     pub width: f64,
     pub depth: f64,
+    /// The bend relief's shape: a sheet saved before it could be chosen cuts the slot.
+    #[serde(default, skip_serializing_if = "BendReliefShape::is_rectangular")]
+    pub shape: BendReliefShape,
 }
 
 impl Reliefs {
@@ -105,6 +110,7 @@ impl Reliefs {
             corner_size: rule.corner_relief_size,
             width: rule.relief_width,
             depth: rule.relief_depth,
+            shape: rule.bend_relief,
         }
     }
 
@@ -112,7 +118,18 @@ impl Reliefs {
     /// slot `width` wide cut from `depth` inside the panel's tangent line. The joint holds it (see
     /// [`settle`]); a feature that ends a bend short of its edge cuts nothing itself.
     pub fn bend_end(&self) -> Relief {
-        Relief::Slot { width: self.width, depth: self.depth }
+        self.bend_end_as(self.shape)
+    }
+
+    /// The bend relief of `shape` at a free end of a bend that a panel runs on past (see
+    /// [`Reliefs::bend_end`]): the slot, the slot with a round inner end, or nothing cut, so that
+    /// the panel is torn from the bend along the end.
+    pub fn bend_end_as(&self, shape: BendReliefShape) -> Relief {
+        match shape {
+            BendReliefShape::Rectangular => Relief::Slot { width: self.width, depth: self.depth },
+            BendReliefShape::Obround => Relief::Obround { width: self.width, depth: self.depth },
+            BendReliefShape::Tear => Relief::None,
+        }
     }
 }
 
@@ -2353,7 +2370,7 @@ fn read_surfaces(
         model.cuts.push(Cut { panel, region });
     }
     let reliefs = Reliefs::of(rule);
-    let mut notes = settle(&mut model, &places, &reliefs, &|_| None, &|_, _| false, tol, &at)?;
+    let mut notes = settle(&mut model, &places, &reliefs, &|_| None, &|_| None, &|_, _| false, tol, &at, &mut Vec::new())?;
     // Where the rule's tooling changes the body, say so.
     if let Some(own) = own.filter(|own| (own - t).abs() > tol) {
         notes.insert(0, format!("the body is {own:.3} mm thick: the sheet is the rule's {t:.3} mm"));
@@ -2500,7 +2517,8 @@ type Overlaps = (Option<(Part, Part, Vec3)>, Vec<(Part, Part, String)>);
 /// and is cut nothing. A free end carries on the outline of each panel that ends there (see
 /// [`outline_ends`]); where both panels' sides run on across their tangent lines, neither runs on,
 /// and both stop at their tangent lines past the end. Elsewhere the rule's bend relief
-/// ([`Reliefs::bend_end`]) is cut in whichever panel runs on past the end. A bend's edge is its
+/// ([`Reliefs::bend_end`], or the shape `shaped` gives the bend's joint, a feature's own) is cut
+/// in whichever panel runs on past the end. A bend's edge is its
 /// anchors' first [`Bend::length`], so a sheet settled again ends its bends where it did; the
 /// corners are the sheet's again. Why any relief asked for was not cut comes back; `at` names a
 /// point in what is said.
@@ -2509,17 +2527,24 @@ pub(crate) fn settle(
     places: &[Rigid3],
     reliefs: &Reliefs,
     chosen: &dyn Fn([usize; 2]) -> Option<(CornerRelief, f64)>,
+    shaped: &dyn Fn(usize) -> Option<BendReliefShape>,
     butt: &dyn Fn(usize, bool) -> bool,
     tol: f64,
     at: &dyn Fn(Vec3) -> String,
+    torn: &mut Vec<(usize, usize, bool)>,
 ) -> Result<Vec<String>> {
     let t = sheet.thickness;
     let (bent, rips) = in_space(sheet, places);
     // Where each bend ends, and what is cut there: (along its `a` anchor, along its `b` anchor,
     // the relief), at its start and at its end.
     let near = |p: Vec3, q: Vec3| p.dist(q) <= tol * 10.0;
-    let slot = reliefs.bend_end();
-    let mut ends: Vec<[(f64, f64, Relief); 2]> = bent.iter().map(|e| [(0.0, 0.0, slot), (e.len, e.len, slot)]).collect();
+    let mut ends: Vec<[(f64, f64, Relief); 2]> = bent
+        .iter()
+        .map(|e| {
+            let slot = shaped(e.joint).map_or_else(|| reliefs.bend_end(), |shape| reliefs.bend_end_as(shape));
+            [(0.0, 0.0, slot), (e.len, e.len, slot)]
+        })
+        .collect();
     let (mut notes, mut corners) = (Vec::new(), Vec::new());
     // Whether bend `i`'s end `e` (0 at its anchors' origin, 1 at their length) butts the next
     // bend of a split edge.
@@ -2675,6 +2700,12 @@ pub(crate) fn settle(
                     if let (Some((_, true)), Some((_, true))) = (n, f) {
                         slot.2 = Relief::Outline;
                     }
+                    // A tear bend relief cuts nothing: the panel that runs on past the end parts
+                    // from the bend along it (see [`tear_slits`]).
+                    let shape = shaped(b.joint).unwrap_or(reliefs.shape);
+                    if matches!(slot.2, Relief::None) && matches!(shape, BendReliefShape::Tear) && n.is_none() != f.is_none() {
+                        torn.push((b.joint, e, n.is_none()));
+                    }
                 }
             }
         }
@@ -2736,6 +2767,28 @@ fn junction_slits(sheet: &Sheet, dev: &Development, junctions: &[[usize; 2]]) ->
             let along = near_x.dot(n);
             out.push([near_x + n * (start - along), near_x + n * (end - along)]);
         }
+    }
+    out
+}
+
+/// Where the flat `dev` of `sheet` is cut at each bend end a tear bend relief parts (`torn`, see
+/// [`SurfaceSheet::torn`]): along the zone's end, from `depth` inside the tangent line of the
+/// panel that runs on past it (as deep as the rule's slot would reach) out to the far edge of the
+/// panel that ends there, its farthest corner on that line. The cut has no width: the tear takes
+/// no metal, and the panel that runs on parts from the bend along it. Each cut is solidcore's
+/// ([`tear_slit`]): this only picks the zone's end, the panel that ends there and its place.
+fn tear_slits(sheet: &Sheet, dev: &Development, torn: &[(usize, usize, bool)], depth: f64) -> Vec<[Vec2; 2]> {
+    let mut out = Vec::new();
+    for &(joint, e, a_runs_on) in torn {
+        let Some(Joint { a, b, kind: JointKind::Bend(bend), .. }) = sheet.joints.get(joint) else { continue };
+        let Some(z) = dev.zones.iter().find(|z| z.joint == joint) else { continue };
+        let (Some(&near), Some(&far)) = (z.near.get(e), z.far.get(e)) else { continue };
+        let pick = |p: (f64, f64)| if e == 0 { p.0 } else { p.1 };
+        // From the panel that runs on toward the one that ends at the bend's end.
+        let (from, to, ends, at) = if a_runs_on { (near, far, b, pick(bend.ends.far)) } else { (far, near, a, pick(bend.ends.near)) };
+        let Some(place) = dev.placements.get(ends.panel).copied().flatten() else { continue };
+        let Some(region) = sheet.panels.get(ends.panel).map(|p| &p.region) else { continue };
+        out.extend(tear_slit(from, to, depth, ends, at, &region.outer, &place));
     }
     out
 }
@@ -3249,6 +3302,10 @@ pub struct SurfaceSheet {
     /// evaluated later overrides); two bends of one feature ask for one relief.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub corner_reliefs: Vec<(usize, CornerRelief, f64, usize)>,
+    /// A feature's own bend relief shape, in place of the rule's, at the free ends of a bend it
+    /// made: the bend's joint and the shape.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bend_reliefs: Vec<(usize, BendReliefShape)>,
     /// Where the stretches of a split edge meet (`sheet.flange`'s `segments`, see
     /// [`SurfaceSheet::flanges_on`]), the two bends there: the joint of the bend that ends at the
     /// junction (at its anchors' length) and the joint of the bend that starts there (at their
@@ -3263,6 +3320,11 @@ pub struct SurfaceSheet {
     /// either side of it, and the two stretches part along it, as they do folded.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub slits: Vec<[Vec2; 2]>,
+    /// The bend ends a tear bend relief parts, as last settled (see [`settle`]): each bend's
+    /// joint, the end (0 at its anchors' origin, 1 at their length), and whether its `a` panel is
+    /// the one that runs on past the end. The flat is cut along each (see [`tear_slits`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub torn: Vec<(usize, usize, bool)>,
     /// Why a relief asked for was not cut, as the sheet was last built.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
@@ -3648,6 +3710,8 @@ impl SurfaceSheet {
             roll_lines: Vec::new(),
             reliefs: c.reliefs,
             corner_reliefs: Vec::new(),
+            bend_reliefs: Vec::new(),
+            torn: Vec::new(),
             junctions: Vec::new(),
             slits: Vec::new(),
             notes: c.notes.clone(),
@@ -3849,6 +3913,8 @@ impl SurfaceSheet {
             roll_lines: Vec::new(),
             reliefs: Reliefs::of(rule),
             corner_reliefs: Vec::new(),
+            bend_reliefs: Vec::new(),
+            torn: Vec::new(),
             junctions: Vec::new(),
             slits: Vec::new(),
             notes: Vec::new(),
@@ -4346,9 +4412,13 @@ impl SurfaceSheet {
             };
             later.map(|(_, r, s, _)| (r, s))
         };
+        let shapes = self.bend_reliefs.clone();
+        let shaped = move |joint: usize| shapes.iter().rev().find(|(j, _)| *j == joint).map(|(_, shape)| *shape);
         let junctions = self.junctions.clone();
         let butt = move |joint: usize, at_end: bool| butts(&junctions, joint, at_end);
-        self.notes = settle(&mut self.sheet, &places, &self.reliefs, &chosen, &butt, (reach * 1e-6).max(1e-6), &at)?;
+        let mut torn = Vec::new();
+        self.notes = settle(&mut self.sheet, &places, &self.reliefs, &chosen, &shaped, &butt, (reach * 1e-6).max(1e-6), &at, &mut torn)?;
+        self.torn = torn;
         Ok(())
     }
 
@@ -4416,7 +4486,11 @@ impl SurfaceSheet {
             })
             .collect();
         self.regions = regions;
-        self.slits = junction_slits(&self.sheet, dev, &self.junctions).into_iter().flat_map(|s| in_material(&self.regions, s)).collect();
+        self.slits = junction_slits(&self.sheet, dev, &self.junctions)
+            .into_iter()
+            .chain(tear_slits(&self.sheet, dev, &self.torn, self.reliefs.depth))
+            .flat_map(|s| in_material(&self.regions, s))
+            .collect();
         self.rolls = self.sheet.panels.iter().filter(|p| p.surface != Surface::Plane).count();
         self.roll_lines =
             if self.rolls > 0 { roll_lines(&self.sheet, &fold_onto(&self.sheet, dev, &self.places)?, &self.regions) } else { Vec::new() };

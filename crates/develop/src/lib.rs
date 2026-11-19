@@ -64,6 +64,7 @@ pub use solidcraft_kernel::services::develop::crossings;
 pub use solidcraft_kernel::services::develop::curve_through;
 pub use solidcraft_kernel::services::develop::hermite;
 pub use solidcraft_kernel::services::develop::segment_in_region;
+pub use solidcraft_kernel::services::develop::tear_slit;
 pub use solidcraft_kernel::services::query::Query;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.

@@ -3770,6 +3770,7 @@ mod tests {
             corner_relief_size: 0.0,
             relief_width: 0.0,
             relief_depth: 0.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
         };
         let (r, x0) = (3.05, 50.0);
         let v = Vec2::new;
@@ -3879,6 +3880,7 @@ mod tests {
             corner_relief_size: 0.0,
             relief_width: 0.0,
             relief_depth: 0.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
         };
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 60.0), Vec2::new(0.0, 60.0)];
         let plate = Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() };

@@ -22,7 +22,8 @@ use solidcore_convert::{
     record_region2, record_seg2, record_vec2, record_vec3, region2, seg2, vec2, vec3,
 };
 use solidcore_record::develop::{
-    Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface,
+    Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet,
+    Surface,
 };
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
@@ -79,6 +80,34 @@ pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> 
 pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
     let points: Vec<solidcore::math::Vec2> = points.iter().copied().map(vec2).collect();
     cv::record_segs(&k::curve_through(&points))
+}
+
+/// Where the flat is cut at one end of a bend's zone that a tear bend relief parts
+/// ([`solidcore::develop::tear_slit`]): along the zone's end from `from` (on the tangent line of
+/// the panel that runs on past it) toward `to` (on the tangent line of the panel that ends there),
+/// from `depth` back inside the panel that runs on out to the farthest corner of the ending
+/// panel's `outline` on the line square to its anchor `ends` at `at`, that panel laid in the flat
+/// by `place`. `None` when the zone's end has no way or no corner reaches past `from`.
+#[must_use]
+pub fn tear_slit(
+    from: Vec2,
+    to: Vec2,
+    depth: f64,
+    ends: &Anchor,
+    at: f64,
+    outline: &Loop2,
+    place: &Rigid2,
+) -> Option<[Vec2; 2]> {
+    k::tear_slit(
+        vec2(from),
+        vec2(to),
+        depth,
+        &cv::anchor(ends),
+        at,
+        &solidcore_convert::loop2(outline),
+        &cv::rigid2(place),
+    )
+    .map(|s| s.map(record_vec2))
 }
 
 /// A developed sheet folded ([`fold`]).
@@ -518,4 +547,41 @@ pub fn segment_in_region(region: &Region2, a: Vec2, b: Vec2) -> Option<bool> {
 /// The kernel's [`BeadRefusal`]: a crown width not at least 0 and less than the width.
 pub fn bead_flank_angle(depth: f64, width: f64, crown_width: f64) -> Result<f64, BeadRefusal> {
     k::bead_flank_angle(depth, width, crown_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tear_slit_on_record_values_is_the_kernels() {
+        // A flange 30 along its anchor and 20 out, laid in the flat 5 up from the base's tangent
+        // line; the zone's end at the anchor's length, from the base's tangent line to the
+        // flange's, cut 2 deep into the base.
+        let ends = Anchor {
+            panel: 1,
+            origin: Vec2::new(0.0, 0.0),
+            dir: Vec2::new(1.0, 0.0),
+        };
+        let outline = Loop2::polygon(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(30.0, 0.0),
+            Vec2::new(30.0, 20.0),
+            Vec2::new(0.0, 20.0),
+        ]);
+        let place = Rigid2 {
+            cos: 1.0,
+            sin: 0.0,
+            shift: Vec2::new(0.0, 5.0),
+        };
+        let (from, to) = (Vec2::new(30.0, 0.0), Vec2::new(30.0, 5.0));
+        assert_eq!(
+            tear_slit(from, to, 2.0, &ends, 30.0, &outline, &place),
+            Some([Vec2::new(30.0, -2.0), Vec2::new(30.0, 25.0)])
+        );
+        assert_eq!(
+            tear_slit(from, from, 2.0, &ends, 30.0, &outline, &place),
+            None
+        );
+    }
 }
