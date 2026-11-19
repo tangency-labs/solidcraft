@@ -562,7 +562,9 @@ fn issue_395_high_order_contact_is_one_tangent_curve() {
 
 /// The second-order line and circle contacts of the corpus (cylinder, parabolic
 /// cylinder, parallel cylinders, torus, sphere in a cylinder) are one `Tangent` curve each,
-/// covering the contact (the marcher traces them; the tracer leaves them as they are).
+/// covering the contact (the marcher traces them; their `surface.surface_p2` goldens
+/// rows, `tc_cylinder_plane_line` and the others, did not move when the tracer came on
+/// by default).
 #[test]
 fn issue_395_second_order_contacts_are_one_tangent_curve() {
     for name in [

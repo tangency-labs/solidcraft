@@ -356,8 +356,10 @@ fn nurbs_round_crease_builds_with_the_tracer() {
     }
 }
 
+/// The as-built crease round with the tracer. Its volume was compared bit for bit with
+/// the round built without the tracer, which no longer exists (#18930).
 #[test]
-fn revolution_round_crease_is_unchanged() {
+fn revolution_round_crease_builds_with_the_tracer() {
     let (code, on) = crease_round(Form::AsBuilt);
     assert_eq!(code, 0);
     assert_valid(Form::AsBuilt, &on.unwrap());

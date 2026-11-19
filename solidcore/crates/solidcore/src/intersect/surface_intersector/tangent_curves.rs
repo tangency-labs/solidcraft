@@ -219,7 +219,9 @@ struct NewCurve {
 /// # Errors
 ///
 /// Those of `FlushCurve` and of the evaluations upstream checks;
-/// [`crate::SolidError::Unported`] from any callee.
+/// [`crate::SolidError::Unported`] from any callee; [`crate::SolidError::Cancelled`],
+/// polled for every seed, node and refinement pass and in the march (not the fork's: the
+/// pass runs on every intersection, #18930).
 #[allow(clippy::too_many_lines)] // one fork routine
 pub(crate) fn find_tangent_curves(
     k: &Kernel,
@@ -301,6 +303,7 @@ pub(crate) fn find_tangent_curves(
     let mut contacts: Vec<Vec3> = Vec::new(); // contact points already classified
     let near_tol = smax(100.0 * tol, 1e-4 * size);
     for seed in &seeds {
+        k.check_cancelled(OP)?;
         let mut x = [seed[0].x, seed[0].y, seed[1].x, seed[1].y];
         let Some(e1) = tr.eval(k, 0, x[0], x[1])? else {
             continue;
@@ -365,7 +368,13 @@ pub(crate) fn find_tangent_curves(
             let num_cross = tr.probe(k, &p, &mut cross_dirs)?;
             tr.tangent = true;
             let node_known = nodes.iter().any(|n| len(n.p - p.p) < near_tol);
-            if num_cross >= 2 && !node_known && !along_one_line(&cross_dirs) {
+            // nor is a contact where the surfaces only come within tolerance of each
+            // other, between crossing branches that pass it (#18930)
+            if num_cross >= 2
+                && !node_known
+                && !along_one_line(&cross_dirs)
+                && tr.meets(k, &p.x)? != Some(false)
+            {
                 nodes.push(p);
                 node_dirs.push(cross_dirs);
             }
@@ -422,6 +431,7 @@ pub(crate) fn find_tangent_curves(
     tr.tangent = false;
     let mut in_ = 0;
     while in_ < nodes.len() && in_ < 50 {
+        k.check_cancelled(OP)?;
         let node = *nodes
             .get(in_)
             .ok_or_else(|| crate::SolidError::invalid_input(OP, "node index"))?;
@@ -549,6 +559,7 @@ pub(crate) fn find_tangent_curves(
         tr.sign = nc.sign;
         let rc = &mut nc.pts;
         for _pass in 0..12 {
+            k.check_cancelled(OP)?;
             let (tan, fd) = tc_tangents(rc, nc.closed)?;
             let mut refined: Vec<TcPt> = Vec::new();
             let mut inserted = false;
