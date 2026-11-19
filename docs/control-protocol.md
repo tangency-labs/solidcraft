@@ -582,6 +582,7 @@ version has, so a client can find out before it relies on it: `{"param_check": [
 advertises the `plugin.tools` command. Clients query that command only when advertised;
 an absent or false flag means there are no plugin tools to list or call.
 `joint_drive: true` advertises [interactive joint driving](#driving-a-joint-interactively).
+`joint_pose: true` advertises [reading the solved joint pose](#reading-the-solved-joint-pose).
 
 Any request's `params` may carry `allow_paths: ["/abs/folder", …]`: every file that request
 reads, writes or deletes (command paths such as `file.export`'s `path` or `doc.recovery_*`'s
@@ -704,6 +705,35 @@ history. Another edit keeps its own history and discards any pending movement. A
 change, a local editing tool or dialog, leaving the design tab, and Cancel also discard the
 preview. The movement ID expires. Closing the connection without sending Finish discards the
 preview. A Finish already running can still commit. Reconnect with a fresh Begin.
+
+### Reading the solved joint pose
+
+A client that follows a joint while someone adjusts Drive Joints asks `control.joint_pose`,
+which says what the preview shows: the joints it posed and the values the solver reached.
+
+```text
+{"id":1,"method":"control.joint_pose","token":"…"}
+→ {"id":1,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","revision":3,"busy":false,"error":null,"pose":{"source":"joint.drive","generation":2,"joints":[{"joint":1,"name":"Hinge","values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}]}]}}}
+```
+
+- `document_id` and `revision` are the active design's, as `document.revision` gives them.
+- `busy` is true while a newer preview is computing. The pose is then the one on show: the last
+  that finished, with its own generation.
+- `error` says why the current inputs make no preview (null when there is none).
+- `pose` is null when no solved joint preview is up. Otherwise:
+  - `source` is what posed it: the command that opened the preview (`joint.drive` for Drive
+    Joints, `control.joint_drive` for a movement over this channel).
+  - `generation` counts the completed poses: it moves when the pose moves, and is not the
+    design's revision.
+  - `joints` are the joints the preview posed: the ones it drove and the ones it moved with
+    them (a motion link's follower, a joint a closed loop moved). Each gives its id, its name
+    and its values, as `joint.inspect` and `joint.drive` give them (`deg` for an angle, `mm` for
+    a distance, rounded for reading).
+
+The pose is read, not computed: it is the state the viewport shows, so reading it changes
+nothing in the design, its history, its dirty state or its revision. A preview that poses no
+joint leaves no pose. Cancelling the movement, closing the dialog, switching design and
+changing the design all drop it.
 
 ### Following the design
 

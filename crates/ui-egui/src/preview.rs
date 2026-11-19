@@ -139,6 +139,21 @@ pub struct Built {
     /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
     /// (a Move). `scene` is not read then.
     pub layer: Option<Layer>,
+    /// The joints the preview posed, with their effective values now: the ones it drove and the
+    /// ones it moved (a motion link's follower, a joint a closed loop moved). Empty when the
+    /// preview posed no joint.
+    pub joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>,
+}
+
+/// The solved joint pose a preview shows: the joints it posed, with what posed them and the
+/// generation that counts the completed poses.
+pub struct JointPose {
+    /// What posed it: the command that opened the preview (`None`: nothing named it).
+    pub source: Option<&'static str>,
+    /// The generation of the completed pose: each pose applied to the preview a new one.
+    pub generation: u64,
+    /// The joints the pose posed, with their effective values now.
+    pub joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>,
 }
 
 /// What a preview only moves, as a layer of its own ([`crate::gpu::MovingLayer`]): scenes built
@@ -234,6 +249,17 @@ pub struct PreviewState {
     /// the ghost), and the renderer keeps the moving one only as long as every frame draws it
     /// ([`PreviewState::layer_not_drawn`]).
     layer: Option<(u64, solidcraft_engine::doc::Mat)>,
+    /// The solved joint pose the preview shows: the joints it posed, with what posed them and
+    /// the generation that counts the completed poses. `None`: no joint preview is up.
+    pub pose: Option<JointPose>,
+    /// Counts the completed poses: each pose applied to the preview a new generation, so a
+    /// reader can tell one pose from the next. It is not the design's revision.
+    generation: u64,
+    /// What poses the preview: the command that opened it (`None`: nothing named it).
+    source: Option<&'static str>,
+    /// The design's public revision (`document.revision`) the preview was computed against: a
+    /// pose of another revision is not the pose of this design.
+    base_revision: Option<u64>,
 }
 
 impl PreviewState {
@@ -332,6 +358,9 @@ impl PreviewState {
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
+        self.pose = None;
+        self.source = None;
+        self.base_revision = None;
         self.hide_scene();
     }
 
@@ -340,9 +369,25 @@ impl PreviewState {
     /// state (another slot, empty) would leave the old preview drawn over the next design.
     pub fn reset(&mut self) {
         self.detach();
-        let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
-        *self = PreviewState { slot, key, detached, layer_serial: self.layer_serial, ..PreviewState::default() };
+        let (slot, key, detached, generation) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached), self.generation);
+        *self = PreviewState { slot, key, detached, layer_serial: self.layer_serial, generation, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
+    }
+
+    /// The pose the preview shows, when it belongs to the design of `revision`: a pose of
+    /// another revision is not the pose of this design, and goes.
+    pub(crate) fn pose(&mut self, revision: u64) -> Option<&JointPose> {
+        if self.base_revision != Some(revision) {
+            self.pose = None;
+        }
+        self.pose.as_ref()
+    }
+
+    /// What poses the preview, and the design it was computed against: a reader of the pose
+    /// knows what posed it and which design it belongs to.
+    pub(crate) fn set_source(&mut self, source: Option<&'static str>, revision: u64) {
+        self.source = source;
+        self.base_revision = Some(revision);
     }
 
     fn set_scene(&mut self, sc: GpuScene) {
@@ -352,9 +397,21 @@ impl PreviewState {
         self.key = self.key.wrapping_add(1);
     }
 
-    pub(crate) fn show_joint_drive(&mut self, key: u64, start: f64, built: Built) {
+    pub(crate) fn show_joint_drive(&mut self, key: u64, start: f64, built: Built, source: &'static str, revision: u64) {
         self.started = start;
+        self.set_source(Some(source), revision);
         self.apply(key, Ok(built));
+    }
+
+    /// The pose a completed preview shows: the joints it posed. A preview that poses no joint
+    /// leaves no pose: what it shows is the design as it was.
+    fn set_pose(&mut self, joints: Vec<solidcraft_engine::schema::joints::ReachedJoint>) {
+        if joints.is_empty() {
+            self.pose = None;
+            return;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.pose = Some(JointPose { source: self.source, generation: self.generation, joints });
     }
 
     fn apply(&mut self, key: u64, job: Job) {
@@ -374,6 +431,7 @@ impl PreviewState {
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
                 self.points = b.points;
+                self.set_pose(b.joints);
                 match b.layer {
                     // The scenes of this key are up: only the motion changes, nothing is uploaded.
                     Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
@@ -411,6 +469,7 @@ impl PreviewState {
                 self.mirror_meets = None;
                 self.mirror_decided = None;
                 self.points.clear();
+                self.pose = None;
             }
         }
     }
@@ -615,7 +674,12 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
+    // What poses the preview, and the design it was computed against: a reader of the pose knows
+    // what posed it and which design it belongs to.
+    let source = app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).and_then(|d| d.command());
+    let revision = app.session.design_revision();
     let pv = &mut app.preview;
+    pv.set_source(source, revision);
     pv.poll(key, stream_key);
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
@@ -933,6 +997,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         points: Vec::new(),
         placed: None,
         layer: None,
+        joints: Vec::new(),
     }
 }
 
@@ -985,6 +1050,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         points: Vec::new(),
         placed: None,
         layer: None,
+        joints: Vec::new(),
     }
 }
 
@@ -1251,6 +1317,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         points,
         placed: None,
         layer: None,
+        joints: Vec::new(),
     }
 }
 
@@ -1607,6 +1674,7 @@ mod tests {
             points: Vec::new(),
             placed: None,
             layer: None,
+            joints: Vec::new(),
         }
     }
 

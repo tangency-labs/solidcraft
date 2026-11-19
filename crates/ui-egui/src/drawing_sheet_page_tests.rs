@@ -499,6 +499,93 @@ fn text_of(h: &mut Harness, id: u64) -> (Vec2, Value) {
     (centre, read)
 }
 
+/// With the Dimension tool in hand a placed dimension still drags, as in a sketch: its text
+/// follows the pointer in one undo step, the tool stays in hand, and nothing is picked or added.
+/// Over the dimension's text it is the dimension that lights up, not the edge under it.
+#[test]
+fn a_placed_dimension_drags_while_the_dimension_tool_is_in_hand() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let (from, before) = text_of(&mut h, id);
+    h.step(&json!({"move": on_screen(from.x, from.y)})).unwrap();
+    h.frames(2);
+    assert_eq!(page(&mut h)["hover"]["object"], solidcraft_engine::doc::ids::encode(id), "the dimension is what lights up");
+    assert_eq!(crate::drawing_workspace::dimension::hovered_shape(&h.app), None, "no edge is shaded under its text");
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + 15.0, from.y + 12.0)], "steps": 6})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+    let (to, after) = text_of(&mut h, id);
+    assert!((to - (from + Vec2::new(15.0, 12.0))).len() < 1.0, "the text followed the pointer: {from:?} -> {to:?}");
+    assert!(number(&after["record"]["offset_mm"]) > number(&before["record"]["offset_mm"]) + 10.0, "{before}\n{after}");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+    assert!(crate::drawing_workspace::placing_dimension(&h.app), "the tool is still in hand");
+    assert!(crate::drawing_workspace::dimension::picked_shapes(&h.app).is_empty(), "nothing was picked");
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), 1, "and no dimension was added");
+
+    // A click on an edge still picks for a new dimension: the edge the placed dimension measures
+    // too, which lies inside its box but is not its text.
+    click_paper(&mut h, 150.0, 185.0);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1, "the top edge, under the dimension's lines");
+}
+
+/// With the Dimension tool in hand a double-click changes no mode. On a placed dimension's text it
+/// opens the box its text is typed in, and the tool is still in hand after Enter and after Esc. On
+/// an edge it is one pick, not a pick and a dimension dropped on the edge. On a view's inside and
+/// on empty paper it does nothing.
+#[test]
+fn a_double_click_with_the_dimension_tool_in_hand_changes_no_mode() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let tool = |h: &Harness| crate::drawing_workspace::placing_dimension(&h.app) && crate::drawing_workspace::inspector_title(&h.app) == "Dimension";
+    let count = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    let double = |h: &mut Harness, x: f64, y: f64| {
+        h.step(&json!({"move": on_screen(x, y)})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": on_screen(x, y), "double": true})).unwrap();
+        h.frames(4);
+    };
+
+    // Its text: the box, with the tool kept through Enter and through Esc.
+    let (text, _) = text_of(&mut h, id);
+    double(&mut h, text.x, text.y);
+    assert!(crate::dim_view::editing() && tool(&h), "the box opens and the tool stays");
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "100 REF"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(4);
+    assert_eq!(text_of(&mut h, id).1["text"], "100 REF");
+    assert!(!crate::dim_view::editing() && tool(&h), "Enter keeps the tool");
+    let (text, _) = text_of(&mut h, id);
+    double(&mut h, text.x, text.y);
+    assert!(crate::dim_view::editing());
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(4);
+    assert!(!crate::dim_view::editing() && tool(&h), "Esc closes the box and keeps the tool");
+    assert_eq!(count(&h), 1);
+
+    // An edge: picked once, and nothing placed on it.
+    double(&mut h, 140.0, 175.0);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1, "one pick");
+    assert_eq!(count(&h), 1, "no dimension dropped on the edge");
+    assert!(tool(&h));
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(tool(&h) && crate::drawing_workspace::dimension::picked_shapes(&h.app).is_empty(), "Esc dropped the pick only");
+
+    // A view's inside and empty paper: nothing at all.
+    for (x, y) in [(140.0, 180.0), (300.0, 60.0)] {
+        double(&mut h, x, y);
+        assert!(tool(&h) && !crate::dim_view::editing(), "({x}, {y}): still the tool, no editor");
+        assert!(crate::drawing_workspace::dimension::picked_shapes(&h.app).is_empty() && count(&h) == 1, "({x}, {y}): nothing picked or added");
+        assert!(h.app.session.selection.is_empty(), "({x}, {y}): nothing selected");
+    }
+}
+
 /// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the
 /// same drag (`dim_view`), and the whole drag is one undo step.
 #[test]
