@@ -1258,5 +1258,14 @@ mod tests {
             matches!(&stopped, Err(e) if e.is_cancelled()),
             "{stopped:?}"
         );
+        // (a cancelled kernel stops the trim bound before any range it would refuse)
+        for range in [[0.0, 1.0], [0.7, 0.3], [f64::NAN, 1.0]] {
+            let stopped =
+                trim_distance_bound(&cancelled, &curve, range, &uv, [0.0, 1.0], &s, 1e-9, 1e-5);
+            assert!(
+                matches!(&stopped, Err(e) if e.is_cancelled()),
+                "{range:?} {stopped:?}"
+            );
+        }
     }
 }

@@ -4130,4 +4130,39 @@ mod tests {
         b.edge_mut(e).unwrap().tolerance = after * 2.0;
         assert_eq!(fit_tolerance(&k, &mut b, e).unwrap(), after * 2.0);
     }
+
+    /// A cancelled kernel stops the cover before it measures any edge use (those with no
+    /// trim of their own included), and it raises no tolerance: `Solids/fillet_ts.smb`'s
+    /// edge 29, which the cover raises on a read, keeps its tolerance from the file.
+    #[test]
+    fn a_cancelled_cover_raises_nothing() {
+        let mut k = Kernel::default();
+        let mut b = read_brep_file(&mut k, "Solids/fillet_ts.smb");
+        let e = EdgeId::from_index(29);
+        let &(before, after) = b.trim_cover_raises().edges.get(&e).unwrap();
+        assert!(after > before, "{before:e} {after:e}");
+        b.edge_mut(e).unwrap().tolerance = before;
+        let tolerances = |b: &Brep| -> Vec<u64> {
+            let edges = p1::edges(b, None).unwrap().into_iter();
+            let edges = edges.map(|e| edge::tolerance(b, e).unwrap().to_bits());
+            let vertices = b.vertices().iter().map(|(_, r)| r.tolerance.to_bits());
+            edges.chain(vertices).collect()
+        };
+        let held = tolerances(&b);
+        let token = crate::kernel::CancelToken::default();
+        token.cancel();
+        let cancelled = Kernel {
+            cancel: Some(token),
+            ..Kernel::default()
+        };
+        let stopped = cover_kept_uv_trim_curves(&cancelled, &mut b);
+        assert!(
+            matches!(&stopped, Err(err) if err.is_cancelled()),
+            "{stopped:?}"
+        );
+        assert_eq!(tolerances(&b), held);
+        // (not cancelled, the same cover raises the edge again)
+        cover_kept_uv_trim_curves(&k, &mut b).unwrap();
+        assert_eq!(edge::tolerance(&b, e).unwrap(), after);
+    }
 }
