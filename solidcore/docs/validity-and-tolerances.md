@@ -137,6 +137,13 @@ The tests that decide each property, by the test numbers the check reports:
 | closed shells | a region's outer shell is a closed face-use shell (Brep 10, 11), its inner shells lie inside it (Brep 12), every region is reached across face uses (Brep 18, 19) | `assert_valid/brep.rs` | 0 |
 | no coincident topology | no two vertices, edges or faces coincide (`contains_coincident_topology`) | `validation/coincidence.rs` | 0 |
 
+Two loops of a face share no vertex, but one loop may pass through a vertex more than once. Where
+a hole touches its face's outer boundary at one point, or two holes touch, the face's boundary
+there is one loop: along the first to the vertex, round the second and on along the first. Tests
+32, 38 and 39 compare the vertices of a loop once each and loops in pairs, so they pass it. Import
+makes a file's loops that touch at one vertex that one loop
+([import-assembly.md](import-assembly.md), `finish`).
+
 A shell is closed (`Shell::is_closed`, `topology/shell.rs`) when a face use's mate lies in another
 shell: in the radial-edge structure the two sides of a closed shell's faces belong to the shells of
 two different regions.
