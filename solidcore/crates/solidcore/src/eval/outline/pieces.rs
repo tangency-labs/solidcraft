@@ -171,11 +171,17 @@ pub fn conic_spans(g: Piece) -> Vec<Piece> {
         if !(wm.is_finite() && wm > 0.0 && w0 > &0.0 && w2 > &0.0) {
             return vec![g];
         }
+        let rho = wm / (1.0 + wm);
+        // Past this a conic's middle weight no longer survives its shape (`conic_point` caps
+        // it): the spline stays as it is.
+        if !(rho < 1.0 - 1e-6) {
+            return vec![g];
+        }
         out.push(Piece::Conic {
             a: *a,
             apex: *apex,
             b: *b,
-            rho: wm / (1.0 + wm),
+            rho,
         });
     }
     out
@@ -232,10 +238,22 @@ pub fn round_conics(geom: Vec<Piece>) -> Vec<Piece> {
             Piece::Arc { c, a: b, b: a }
         }
     };
-    let mut out: Vec<Piece> = Vec::new();
-    for g in geom.into_iter().map(as_arc) {
+    // Each arc's counter-clockwise sweep, kept beside it: two ends that meet close a whole turn
+    // only when the arcs joined there sweep more than half of one (a tiny arc's ends meet too).
+    let sweep_of = |g: &Piece| match *g {
+        Piece::Conic { rho, .. } => {
+            let w = rho / (1.0 - rho);
+            2.0 * w.clamp(-1.0, 1.0).acos()
+        }
+        Piece::Arc { c, a, b } => (angle(b - c) - angle(a - c)).rem_euclid(std::f64::consts::TAU),
+        _ => 0.0,
+    };
+    let mut out: Vec<(Piece, f64)> = Vec::new();
+    for g in geom {
+        let sweep = sweep_of(&g);
+        let g = as_arc(g);
         if let (
-            Some(Piece::Arc { c, a, b }),
+            Some((Piece::Arc { c, a, b }, swept)),
             Piece::Arc {
                 c: c2,
                 a: a2,
@@ -247,19 +265,23 @@ pub fn round_conics(geom: Vec<Piece>) -> Vec<Piece> {
             if dist(*c, *c2) <= tol {
                 if dist(*b, *a2) <= tol {
                     *b = *b2;
+                    *swept += sweep;
                     continue;
                 }
                 if dist(*a, *b2) <= tol {
                     *a = *a2;
+                    *swept += sweep;
                     continue;
                 }
             }
         }
-        out.push(g);
+        out.push((g, sweep));
     }
     out.into_iter()
-        .map(|g| match g {
-            Piece::Arc { c, a, b } if dist(a, b) <= 1e-9 * (1.0 + dist(c, a)) => {
+        .map(|(g, swept)| match g {
+            Piece::Arc { c, a, b }
+                if swept > std::f64::consts::PI && dist(a, b) <= 1e-9 * (1.0 + dist(c, a)) =>
+            {
                 Piece::Circle(c, dist(c, a))
             }
             g => g,
@@ -362,7 +384,17 @@ pub fn drop_coincident(geom: Vec<Piece>, tol: f64) -> Vec<Piece> {
                 a: a2,
                 b: b2,
             },
-        ) => same(*c, *c2) && same(*a, *a2) && same(*b, *b2),
+        ) => {
+            // Counter-clockwise from the same start to the same end: the same arc, unless the
+            // ends are so close that one sweeps a hair and the other nearly a whole turn.
+            let sweep = |c: Vec2, a: Vec2, b: Vec2| {
+                (angle(b - c) - angle(a - c)).rem_euclid(std::f64::consts::TAU)
+            };
+            same(*c, *c2)
+                && same(*a, *a2)
+                && same(*b, *b2)
+                && (sweep(*c, *a, *b) - sweep(*c2, *a2, *b2)).abs() < std::f64::consts::PI
+        }
         (
             Piece::Conic { a, apex, b, rho },
             Piece::Conic {
@@ -496,6 +528,37 @@ mod tests {
             panic!("{out:?}")
         };
         assert!(len(*c) < 1e-12 && (r - 1.0).abs() < 1e-12, "{out:?}");
+    }
+
+    #[test]
+    fn a_tiny_arc_whose_ends_meet_stays_an_arc() {
+        let at = |t: f64| v(t.cos(), t.sin());
+        let tiny = Piece::Arc {
+            c: v(0.0, 0.0),
+            a: at(0.0),
+            b: at(1e-10),
+        };
+        assert_eq!(round_conics(vec![tiny.clone()]), vec![tiny]);
+    }
+
+    #[test]
+    fn arcs_over_opposite_parts_of_a_circle_are_both_kept() {
+        let at = |t: f64| v(t.cos(), t.sin());
+        let short = Piece::Arc {
+            c: v(0.0, 0.0),
+            a: at(0.0),
+            b: at(5e-8),
+        };
+        let long = Piece::Arc {
+            c: v(0.0, 0.0),
+            a: at(5e-8),
+            b: at(0.0),
+        };
+        assert_eq!(
+            drop_coincident(vec![short.clone(), long.clone()], 1e-7).len(),
+            2
+        );
+        assert_eq!(drop_coincident(vec![short.clone(), short], 1e-7).len(), 1);
     }
 
     #[test]
