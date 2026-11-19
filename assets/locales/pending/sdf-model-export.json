@@ -1,0 +1,34 @@
+{
+  "en": {
+    "Export SDF Model…": "Export SDF Model…",
+    "cmd.file.export_sdf": "Export SDF Model"
+  },
+  "ar": {
+    "Export SDF Model…": "تصدير نموذج SDF…",
+    "cmd.file.export_sdf": "تصدير نموذج SDF"
+  },
+  "de": {
+    "Export SDF Model…": "SDF-Modell exportieren…",
+    "cmd.file.export_sdf": "SDF-Modell exportieren"
+  },
+  "he": {
+    "Export SDF Model…": "ייצוא מודל SDF…",
+    "cmd.file.export_sdf": "ייצוא מודל SDF"
+  },
+  "ja": {
+    "Export SDF Model…": "SDF モデルをエクスポート…",
+    "cmd.file.export_sdf": "SDF モデルをエクスポート"
+  },
+  "ko": {
+    "Export SDF Model…": "SDF 모델 내보내기…",
+    "cmd.file.export_sdf": "SDF 모델 내보내기"
+  },
+  "vi": {
+    "Export SDF Model…": "Xuất mô hình SDF…",
+    "cmd.file.export_sdf": "Xuất mô hình SDF"
+  },
+  "zh": {
+    "Export SDF Model…": "导出 SDF 模型…",
+    "cmd.file.export_sdf": "导出 SDF 模型"
+  }
+}

@@ -48,6 +48,88 @@ fn top_front(b: &Body) -> usize {
     edge_at(b, [15.0, 0.0, 10.0])
 }
 
+/// Closed forms recorded in
+/// `plan/findings/blend.fillet_solver_p5--neighbouring-chamfers-closed-forms.md`.
+/// The overlap of the two removed triangular prisms is integrated over depth w.
+fn neighbouring_chamfer_measures(l: f64, a: f64, b: f64, c: f64, d: f64) -> (f64, f64) {
+    let m = b.min(d);
+    let overlap = a * c * (m - m * m * (1.0 / b + 1.0 / d) / 2.0 + m * m * m / (3.0 * b * d));
+    let volume = l * l * l - l * a * b / 2.0 - l * c * d / 2.0 + overlap;
+    let area = l * l + (l - c) * (l - a) + l * (l - b) - c * (d - b).max(0.0).powi(2) / (2.0 * d)
+        + l * l
+        - c * d / 2.0
+        + l * l
+        - a * b / 2.0
+        + l * (l - d)
+        - a * (b - d).max(0.0).powi(2) / (2.0 * b)
+        + a.hypot(b) * (l - c / b * (m - m * m / (2.0 * d)))
+        + c.hypot(d) * (l - a / d * (m - m * m / (2.0 * b)));
+    (volume, area)
+}
+
+#[test]
+fn neighbouring_unequal_chamfers_build_in_either_history_order() {
+    all_fixes();
+    let mut failures = Vec::new();
+    for scale in [1.0, 0.5, 2.0] {
+        for flip_angle in [true, false] {
+            for flip_distances in [false, true] {
+                for reverse in [false, true] {
+                    let case = (scale, flip_angle, flip_distances, reverse);
+                    let b = make_box([0.0; 3], [10.0 * scale; 3]).unwrap();
+                    let angle = || {
+                        chamfer_sides_facing(
+                            &b,
+                            &[edge_at(&b, [5.0 * scale, 0.0, 10.0 * scale])],
+                            scale,
+                            ChamferSecond::Angle(PI / 6.0),
+                            [0.0, 0.0, if flip_angle { -1.0 } else { 1.0 }],
+                        )
+                    };
+                    let distances = || {
+                        chamfer_sides_facing(
+                            &b,
+                            &[edge_at(&b, [10.0 * scale, 5.0 * scale, 10.0 * scale])],
+                            scale,
+                            ChamferSecond::Distance(3.0 * scale),
+                            [0.0, 0.0, if flip_distances { -1.0 } else { 1.0 }],
+                        )
+                    };
+                    let result = if reverse {
+                        distances().unwrap();
+                        angle()
+                    } else {
+                        angle().unwrap();
+                        distances()
+                    };
+                    if let Err(error) = result {
+                        failures.push((case, error));
+                        continue;
+                    }
+                    let depth = scale * (PI / 6.0).tan();
+                    let (a, front) = if flip_angle {
+                        (depth, scale)
+                    } else {
+                        (scale, depth)
+                    };
+                    let (c, right) = if flip_distances {
+                        (3.0 * scale, scale)
+                    } else {
+                        (scale, 3.0 * scale)
+                    };
+                    let (want_volume, want_area) =
+                        neighbouring_chamfer_measures(10.0 * scale, a, front, c, right);
+                    assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{case:?}");
+                    assert_eq!(b.counts().unwrap()[0], 8, "{case:?}");
+                    assert!(rel(volume(&b), want_volume) < 1e-9, "{case:?}");
+                    assert!(rel(b.area(1e-8).unwrap(), want_area) < 1e-9, "{case:?}");
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
 #[test]
 fn rounds_and_chamfers_take_their_closed_forms() {
     all_fixes();
@@ -2423,6 +2505,96 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
         solidcore_ops::carried_faces(&b, inner, 0.0),
         Err(Error::Argument)
     ));
+}
+
+/// The L of legs 40 and width 20, `height` high, less what lies above the plane through
+/// (`x0`, `z0`) and (`x1`, `z1`) in the side view (x across, z up), from `x0` to `x1`.
+fn l_cut_by_a_slope(height: f64, [x0, z0]: [f64; 2], [x1, z1]: [f64; 2]) -> Body {
+    let l = [
+        (0.0, 0.0),
+        (40.0, 0.0),
+        (40.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 40.0),
+        (0.0, 40.0),
+    ];
+    let profile: Vec<_> = (0..l.len())
+        .map(|i| segment(l[i], l[(i + 1) % l.len()]))
+        .collect();
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], -1.0, a[1]],
+        end: [b[0], -1.0, b[1]],
+    };
+    let top = z0.max(z1) + height;
+    let above = extrude(
+        &[
+            line([x0, z0], [x1, z1]),
+            line([x1, z1], [x1, top]),
+            line([x1, top], [x0, top]),
+            line([x0, top], [x0, z0]),
+        ],
+        [0.0, 1.0, 0.0],
+        42.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    solidcore_ops::boolean::boolean(
+        swept(&profile, height),
+        above,
+        solidcore_ops::BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap()
+}
+
+/// The L above, 30 high, its top cut off by the plane z = 15 + x / 4: the inner upright edge
+/// at (20, 20) now runs from the flat bottom to that plane, 20 up. The plane holds the normal
+/// of the edge's face y = 20 and not that of its face x = 20, so a round is carried on past
+/// the first only. Its slab's outline lies in y = 20 with two corners on the bottom and two
+/// on the sloped plane. The traces of the bottom and the plane cross at x = -60, 80 from the
+/// edge, on the side x falls: a round of 6 has its slab reach (6 + 80) / 2 = 43 that way, to
+/// x = -23 where the plane is 9.25 up, and the full reach the other way. A round of 81 has
+/// its contact line past the crossing and nothing to carry on.
+///
+/// Cut off instead by a plane that rises 2 for 1 (z = 2 x - 10, from x = 10 on), 63.4
+/// degrees from square to the edge, past the 60 the kernel takes, the edge carries nothing.
+#[test]
+fn a_round_is_carried_on_between_a_flat_end_and_a_sloped_one() {
+    all_fixes();
+    let b = l_cut_by_a_slope(30.0, [-1.0, 14.75], [41.0, 25.25]);
+    let inner = nearest_edge(&b, [20.0, 20.0, 10.0]);
+    let found = solidcore_ops::carried_faces(&b, inner, 6.0).unwrap();
+    assert_eq!(found.len(), 1);
+    let c = found[0];
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let (along, across) = (v(c.along), v(c.across));
+    assert!((along.cross(across) - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-9);
+    let corners = c.outline.map(|[a, x]| v(c.origin) + along * a + across * x);
+    let has = |x: f64, z: f64| {
+        corners
+            .iter()
+            .any(|p| (*p - Vec3::new(x, 20.0, z)).length() < 1e-6)
+    };
+    let far = 20.0 + c.reach;
+    assert!(
+        has(-23.0, 0.0) && has(-23.0, 9.25) && has(far, 0.0) && has(far, 15.0 + far / 4.0),
+        "{corners:?}"
+    );
+    assert_eq!(c.depth, [-c.reach, 0.0]);
+    assert_eq!(
+        solidcore_ops::carried_faces(&b, inner, 79.0).unwrap().len(),
+        1
+    );
+    assert!(solidcore_ops::carried_faces(&b, inner, 81.0)
+        .unwrap()
+        .is_empty());
+    let steep = l_cut_by_a_slope(70.0, [10.0, 10.0], [41.0, 72.0]);
+    let inner = nearest_edge(&steep, [20.0, 20.0, 10.0]);
+    assert!(solidcore_ops::carried_faces(&steep, inner, 6.0)
+        .unwrap()
+        .is_empty());
 }
 
 /// The kernel rig's fix set (SolidCraft's preset, `solidcraft_fixes.rs`), as the rig runs its

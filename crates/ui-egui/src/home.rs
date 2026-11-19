@@ -1174,6 +1174,7 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("glb", "GLB", None, FileAction::Export("glb")),
         ("usd", "OpenUSD", None, FileAction::Export("usd")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
+        ("sdf", "SDF", None, FileAction::Export("sdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
     let tiles = formats
@@ -1218,7 +1219,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
             }
         }),
         FileAction::Import => app.pick_open_for(
-            &["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "usd", "usda", "usdc", "usdz", "ply", "xyz", "pts"],
+            &["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "usd", "usda", "usdc", "usdz", "ply", "pcd", "xyz", "pts", "asc"],
             |app, path| {
                 if let Some(path) = path {
                     app.open_path_async(&path);
