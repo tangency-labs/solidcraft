@@ -3450,6 +3450,134 @@ fn in_the_model(s: &mut Session, id: &str, p: Value) {
     run(s, "drawing.open", json!({"drawing": drawing}));
 }
 
+fn two_live_drawing_pages() -> (Session, [(u64, u64); 2]) {
+    let (s, first_sheet, _) = front_and_top();
+    let first = s.open_drawing.unwrap();
+    let (mut s, second_sheet, [second_front, _]) = front_and_top_of(s);
+    let second = s.open_drawing.unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(second_front),"set":{"scale":"1:4"}}));
+    let context = crate::ViewContext::new(
+        vec![
+            crate::ViewDescriptor { id: 1, kind: solidcraft_views::ViewKind::Model, window: 0, subject: None },
+            crate::ViewDescriptor {
+                id: 2,
+                kind: solidcraft_views::ViewKind::Sheet,
+                window: 0,
+                subject: Some(format!("{}/{}", ids::encode(first), ids::encode(first_sheet))),
+            },
+            crate::ViewDescriptor {
+                id: 3,
+                kind: solidcraft_views::ViewKind::Sheet,
+                window: 1,
+                subject: Some(format!("{}/{}", ids::encode(second), ids::encode(second_sheet))),
+            },
+        ],
+        2,
+        vec![2, 3, 1],
+    )
+    .unwrap();
+    s.set_view_context(context).unwrap();
+    (s, [(first, first_sheet), (second, second_sheet)])
+}
+
+#[test]
+fn jobs_for_two_live_drawings_finish_in_their_own_caches_after_other_pages_paint() {
+    let (mut s, pages) = two_live_drawing_pages();
+    let original = (s.doc.to_json(), s.undo.len(), s.revision);
+    for _ in 0..4 {
+        for (index, (drawing, sheet)) in pages.iter().copied().enumerate() {
+            s.open_drawing = Some(drawing);
+            extract(&mut s, sheet).unwrap();
+            if let Some(job) = begin(&mut s) {
+                let (other, other_sheet) = pages[1 - index];
+                s.open_drawing = Some(other);
+                extract(&mut s, other_sheet).unwrap();
+                assert!(finish(&mut s, job.run()), "painting another drawing preserves this request");
+                assert_eq!(s.open_drawing, Some(other), "worker acceptance restores the focused receiver");
+            }
+        }
+    }
+    for (drawing, sheet) in pages {
+        s.open_drawing = Some(drawing);
+        let shown = extract(&mut s, sheet).unwrap();
+        assert!(shown.stale.is_empty());
+        assert_eq!(bytes(&shown.scene), bytes(&built(&s, sheet).scene));
+        assert!(begin(&mut s).is_none());
+        assert_eq!(s.drawing_scenes.projections, 2, "each drawing's two views complete once");
+        assert!(s.drawing_scenes.parked.values().all(|cache| cache.parked.is_empty()));
+    }
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.revision), original);
+}
+
+#[test]
+fn parallel_drawing_requests_keep_cancellation_and_latest_request_scoped_to_their_drawing() {
+    let (mut s, [(first, first_sheet), (second, second_sheet)]) = two_live_drawing_pages();
+    s.open_drawing = Some(first);
+    extract(&mut s, first_sheet).unwrap();
+    let cancelled = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    extract(&mut s, second_sheet).unwrap();
+    let second_done = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(first);
+    cancel(&mut s);
+    assert!(finish(&mut s, second_done), "cancelling one drawing preserves another's independent request");
+    assert_eq!(s.open_drawing, Some(first));
+    assert!(!finish(&mut s, cancelled));
+    let earlier = begin(&mut s).unwrap().run();
+    let latest = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    extract(&mut s, second_sheet).unwrap();
+    assert!(!finish(&mut s, earlier));
+    assert!(finish(&mut s, latest));
+    assert_eq!(s.open_drawing, Some(second));
+    s.open_drawing = Some(first);
+    extract(&mut s, first_sheet).unwrap();
+    let stale = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    run(&mut s, "drawing.set", json!({"name":"Changed during the worker"}));
+    assert!(!finish(&mut s, stale), "parked results retain the existing source-revision guard");
+    assert_eq!(s.open_drawing, Some(second));
+}
+
+#[test]
+fn closed_drawing_tiles_release_live_requests_and_parked_exports_use_their_own_lines() {
+    let (mut s, [(first, first_sheet), (second, second_sheet)]) = two_live_drawing_pages();
+    for (drawing, sheet) in [(first, first_sheet), (second, second_sheet)] {
+        s.open_drawing = Some(drawing);
+        extract(&mut s, sheet).unwrap();
+        while let Some(job) = begin(&mut s) {
+            assert!(finish(&mut s, job.run()));
+        }
+    }
+    s.open_drawing = Some(first);
+    let copied = s.scratch_as_shown();
+    let view = s.doc.drawing(first).unwrap().views[0].id;
+    assert_eq!(copied.drawing_scenes.views.get(&view).unwrap().view, s.doc.drawing(first).unwrap().resolve_view(view).unwrap());
+    assert!(copied.drawing_scenes.parked.is_empty());
+    extract(&mut s, first_sheet).unwrap();
+    // A changed view supplies a fresh request without changing its owning tile.
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(view),"set":{"scale":"1:3"}}));
+    extract(&mut s, first_sheet).unwrap();
+    let retired = begin(&mut s).unwrap().run();
+    s.open_drawing = Some(second);
+    extract(&mut s, second_sheet).unwrap();
+    let context = crate::ViewContext::new(
+        vec![crate::ViewDescriptor {
+            id: 3,
+            kind: solidcraft_views::ViewKind::Sheet,
+            window: 1,
+            subject: Some(format!("{}/{}", ids::encode(second), ids::encode(second_sheet))),
+        }],
+        3,
+        vec![3],
+    )
+    .unwrap();
+    s.set_view_context(context).unwrap();
+    assert!(!finish(&mut s, retired));
+    assert!(!s.drawing_scenes.parked.contains_key(&first));
+    assert!(s.drawing_scenes.kept.of(first).is_some(), "closed tiles retain the existing last-line fallback without world states");
+}
+
 /// Lines worked out beside the window (#4892 B7) on another thread are taken once they come back,
 /// a view at a time, until the provider's scene is the built one, byte for byte; then nothing is
 /// asked for. Taking them changes nothing authored and adds no undo step.

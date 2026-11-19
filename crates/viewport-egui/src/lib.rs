@@ -5,14 +5,22 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod rounded;
+
+pub use rounded::clip_card;
+
 use std::sync::Arc;
 
 use solidcraft_viewport_gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer};
 
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
+/// A frame of one of several views drawn in the same window (tiles): the view `.0` keeps its own
+/// picture on the GPU, so the tiles of one egui frame do not draw over each other
+/// ([`Renderer::prepare_view`]).
+pub struct TileCallback(pub u64, pub Frame);
 /// A transparent, depth-correct selection/hover layer over live product pixels.
-pub struct ProductHighlightCallback(pub Frame);
+pub struct ProductHighlightCallback(pub Frame, pub Option<u64>);
 
 /// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
 /// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host
@@ -153,6 +161,28 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
     }
 }
 
+impl egui_wgpu::CallbackTrait for TileCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &egui_wgpu::ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(res) = resources.get_mut::<Renderer>() {
+            res.prepare_view(self.0, device, queue, &self.1);
+        }
+        Vec::new()
+    }
+
+    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
+        let Some(res) = resources.get::<Renderer>() else { return };
+        let vp = info.viewport_in_pixels();
+        res.paint_view(self.0, &self.1, pass, [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32]);
+    }
+}
+
 impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
     fn prepare(
         &self,
@@ -163,24 +193,64 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(renderer) = resources.get_mut::<Renderer>() {
-            renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+            if let Some(tile) = self.1 {
+                renderer.prepare_product_highlights_view(tile, device, queue, &self.0);
+            } else {
+                renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+            }
         }
         Vec::new()
     }
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let Some(renderer) = resources.get::<Renderer>() else { return };
         let viewport = info.viewport_in_pixels();
-        renderer.paint_product_highlights(
-            &self.0,
-            pass,
-            [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32],
-        );
+        let pixels = [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32];
+        if let Some(tile) = self.1 {
+            renderer.paint_product_highlights_view(tile, &self.0, pass, pixels);
+        } else {
+            renderer.paint_product_highlights(&self.0, pass, pixels);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn card_paint_clips_rounded_corners_without_covering_the_picture_behind_it() {
+        for scale in [1.0, 1.1, 1.1458334, 1.25, 1.75, 2.0] {
+            for origin in [pos2(0.0, 0.0), pos2(12.3, 18.7), pos2(7.0, 31.0)] {
+                for header in [false, true] {
+                    let ctx = egui::Context::default();
+                    ctx.set_pixels_per_point(scale);
+                    let card = Rect::from_min_size(origin, vec2(240.0, 160.0));
+                    let radius = egui::CornerRadius { nw: if header { 0 } else { 8 }, ne: if header { 0 } else { 8 }, sw: 8, se: 8 };
+                    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                        let ctx = ui.ctx();
+                        let painter = ctx.layer_painter(egui::LayerId::background());
+                        let start = painter.add(egui::Shape::Noop);
+                        painter.rect_filled(card, 0, egui::Color32::RED);
+                        super::clip_card(&painter, start, card, radius);
+                    });
+                    let clips: Vec<_> =
+                        output.shapes.iter().filter(|entry| matches!(entry.shape, egui::Shape::Rect(_))).map(|entry| entry.clip_rect).collect();
+                    assert!(!clips.is_empty());
+                    assert!(clips.len() <= 35, "only corner rows need separate scissors");
+                    assert_eq!(clips.first().unwrap().top(), card.top());
+                    assert_eq!(clips.last().unwrap().bottom(), card.bottom());
+                    assert!(clips.iter().any(|clip| clip.left() == card.left() && clip.right() == card.right() && clip.height() > 100.0));
+                    for pair in clips.windows(2) {
+                        assert_eq!(pair[0].bottom(), pair[1].top(), "no seam or double-painted row");
+                    }
+                    if !header {
+                        assert!(clips.first().unwrap().left() > card.left(), "a hidden header exposes rounded top corners");
+                    }
+                    assert!(clips.last().unwrap().left() > card.left(), "the bottom corner contains no card pixels");
+                }
+            }
+        }
+    }
 
     /// The background is drawn from the two colours it is given, top edge then bottom edge, on a
     /// bare context: no theme is published or read.

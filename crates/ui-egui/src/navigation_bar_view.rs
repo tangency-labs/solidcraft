@@ -55,7 +55,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
     if !bar.rect.is_positive() {
         return bar;
     }
-    let Ok(region) = crate::shell::host_usable(app) else {
+    let Ok(region) = crate::viewport::control_region(app, content) else {
         bar.rect = Rect::NOTHING;
         bar.slots.clear();
         bar.more = Rect::NOTHING;
@@ -129,13 +129,21 @@ fn selected(app: &SolveApp, id: &str) -> bool {
 
 /// A sketch is always drawn orthographic, so the projection controls stay inert until it ends (#2144).
 fn projection_locked(app: &SolveApp) -> bool {
-    app.session.active_sketch.is_some()
+    crate::sketch_view::active_sketch(app).is_some()
 }
 
 /// #6143 will replace this single compatibility path with a registered command.
 fn toggle_projection(app: &mut SolveApp) {
     if !projection_locked(app) {
-        app.ui.perspective = !app.ui.perspective;
+        set_projection(app, !app.perspective_view());
+    }
+}
+
+fn set_projection(app: &mut SolveApp, perspective: bool) {
+    if !projection_locked(app) {
+        app.ui.auto_ortho_faces = false;
+        app.ui.perspective = perspective;
+        crate::render_workspace::apply_camera_projection(app);
     }
 }
 
@@ -432,7 +440,7 @@ fn display_menu(app: &SolveApp) -> Menu {
             app.tr(key),
             "perspective",
             if perspective { "view:projection" } else { "view:orthographic" },
-            app.ui.perspective == perspective,
+            !app.ui.auto_ortho_faces && app.ui.perspective == perspective,
         );
         item.enabled = !projection_locked(app);
         item.tip = projection_locked(app).then(|| app.tr("nav.perspective.sketch").to_owned());
@@ -463,9 +471,7 @@ fn display_pick(app: &mut SolveApp, item: &str) {
             let _ = app.run("view.graphics_preset", json!({"preset":item}));
         }
         "navbar.orthographic" | "navbar.perspective" => {
-            if app.ui.perspective != (item == "navbar.perspective") {
-                toggle_projection(app);
-            }
+            set_projection(app, item == "navbar.perspective");
         }
         "auto_ortho_faces" => app.ui.auto_ortho_faces = !app.ui.auto_ortho_faces,
         "tool_cursor" => app.ui.tool_cursor = !app.ui.tool_cursor,
@@ -513,6 +519,23 @@ mod tests {
         app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         let caps = canvas_caps(&app);
         assert!(find("visual_style").unwrap().available(caps.orbit, caps.pick), "the previous bar kept style available in a sketch");
+    }
+
+    #[test]
+    fn projection_lock_belongs_only_to_the_sketching_view() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let owner = app.session.sketching_view.unwrap();
+        let sketch = app.session.active_sketch;
+        let other = app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+        assert!(projection_locked(&app));
+        app.viewport.compass_view = Some(other);
+        assert!(!projection_locked(&app), "another view keeps its own projection control");
+        set_projection(&mut app, true);
+        assert!(app.ui.perspective);
+        assert_eq!(app.session.active_sketch, sketch);
+        app.viewport.compass_view = Some(owner);
+        assert!(projection_locked(&app), "the owning card retains sketch projection");
     }
 
     #[test]

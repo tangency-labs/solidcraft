@@ -6,6 +6,422 @@ use solidcraft_engine::geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
 use super::*;
 use crate::scenario::Harness;
 
+#[test]
+fn cell_fit_keeps_paper_inside_tiny_and_odd_cells_and_preserves_manual_framing() {
+    let paper = Vec2::new(420.0, 297.0);
+    for size in [vec2(800.0, 600.0), vec2(120.0, 80.0), vec2(3.0, 2.0), vec2(1200.0, 61.0)] {
+        let cell = Rect::from_min_size(pos2(17.0, 32.0), size);
+        let (target, scale) = sheet_fit(cell, paper, None, 96.0 / 25.4, 24.0).unwrap();
+        assert_eq!(target, paper * 0.5);
+        assert!(scale.is_finite() && scale > 0.0);
+        assert!(paper.x * scale <= f64::from(size.x) && paper.y * scale <= f64::from(size.y));
+        let manual = (Vec2::new(32.0, 19.0), 8.0);
+        assert_eq!(sheet_fit(cell, paper, Some(manual), 96.0 / 25.4, 24.0), Some(manual));
+    }
+    let cell = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0));
+    for bad in [Vec2::ZERO, Vec2::new(f64::NAN, 297.0), Vec2::new(420.0, f64::INFINITY)] {
+        assert!(sheet_fit(cell, bad, None, 1.0, 24.0).is_none());
+    }
+    assert!(sheet_fit(Rect::NOTHING, paper, None, 1.0, 24.0).is_none());
+    assert!(sheet_fit(cell, paper, Some((Vec2::ZERO, f64::NAN)), 1.0, 24.0).is_none());
+}
+
+#[test]
+fn sheet_page_cameras_are_independent_and_passive_paint_restores_the_command_receiver() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let model = h.app.docs.views.active().id;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let (drawing, sheet, size) = (drawing.id, drawing.sheets[0].id, drawing.sheets[0].sheet.size_mm().unwrap());
+    let subject = crate::sheet_views::subject(drawing, sheet);
+    let first = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject.clone()), false);
+    let second = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject), false);
+    let key = (sheet, [size.x.to_bits(), size.y.to_bits()]);
+    for (id, scale, target) in [(first, 2.5, Vec2::new(21.0, 34.0)), (second, 6.0, Vec2::new(90.0, 120.0))] {
+        activate_view(&mut h.app, id);
+        select_sheet(&mut h.app, sheet);
+        let page = &mut h.app.drawing_workspace.page;
+        page.scale = scale;
+        page.cam.target.x = target.x;
+        page.cam.target.y = target.y;
+        page.fitted = Some(key);
+        page.fitted_on = None;
+    }
+    crate::documents::view_activate(&mut h.app, model);
+    crate::sketch_view::sync(&mut h.app).unwrap();
+    let receiver = (h.app.session.open_drawing, h.app.session.model_focus, h.app.ui.tab.clone());
+    let focus = h.app.session.view_context.clone();
+    let camera = h.app.cam;
+    let descriptors = h.app.docs.views.views().to_vec();
+    let compass = h.app.viewport.compass_view;
+    let doc = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() }, |ui| {
+        for id in [first, second] {
+            ui.push_id(id, |ui| {
+                crate::documents::with_view_look(&mut h.app, id, |app| {
+                    assert_eq!(app.viewport.compass_view, Some(id), "passive Sheet paint keeps its exact tile identity");
+                    assert!(show_view(app, ui, id));
+                });
+            });
+        }
+    });
+    assert_eq!((h.app.session.open_drawing, h.app.session.model_focus, h.app.ui.tab.clone()), receiver);
+    assert_eq!(h.app.session.view_context, focus);
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.docs.views.views(), descriptors.as_slice(), "Sheet paint must not initialize or alter product camera descriptors");
+    assert_eq!(h.app.viewport.compass_view, compass);
+    assert!(Arc::ptr_eq(&h.app.session.doc, &doc));
+    assert_eq!(h.app.session.undo.len(), undo);
+    activate_view(&mut h.app, first);
+    assert!((h.app.drawing_workspace.page.scale - 2.5).abs() < 1e-9);
+    assert_eq!(h.app.drawing_workspace.page.cam.target.x, 21.0);
+    activate_view(&mut h.app, second);
+    assert!((h.app.drawing_workspace.page.scale - 6.0).abs() < 1e-9);
+    assert_eq!(h.app.drawing_workspace.page.cam.target.x, 90.0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sheet_page_cache_keeps_moved_and_hidden_views_but_retires_closed_views() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let subject = crate::sheet_views::subject(drawing.id, drawing.sheets[0].id);
+    let first = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject.clone()), false);
+    let second = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject), false);
+    activate_view(&mut h.app, first);
+    h.app.drawing_workspace.page.scale = 2.0;
+    activate_view(&mut h.app, second);
+    h.app.drawing_workspace.page.scale = 7.0;
+    h.app.run("tab.view.move_to_window", json!({"view":first})).unwrap();
+    activate_view(&mut h.app, 0);
+    assert_eq!(h.app.drawing_workspace.pages.get(&first).unwrap().scale, 2.0);
+    assert_eq!(h.app.drawing_workspace.pages.get(&second).unwrap().scale, 7.0);
+    h.app.run("tab.view.close", json!({"id":second})).unwrap();
+    activate_view(&mut h.app, 0);
+    assert!(h.app.drawing_workspace.pages.contains_key(&first));
+    assert!(!h.app.drawing_workspace.pages.contains_key(&second));
+}
+
+#[test]
+fn passive_sheet_wheel_keeps_the_focused_other_drawings_annotation_selected() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    h.app.run("drawing.create", json!({"name":"First drawing"})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let (first_drawing, first_sheet) = (drawing.id, drawing.sheets[0].id);
+    let note = h.app.run("drawing.note.add", json!({"anchor":{"sheet":"Sheet 1"},"at":[50,50],"content":"Selected annotation"})).unwrap();
+    let note = solidcraft_engine::doc::ids::decode(note["note"].as_str().unwrap()).unwrap();
+    let first = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(crate::sheet_views::subject(first_drawing, first_sheet)), false);
+    h.app.run("drawing.create", json!({"name":"Second drawing"})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let (second_drawing, second_sheet) = (drawing.id, drawing.sheets[0].id);
+    assert_ne!(first_drawing, second_drawing);
+    let second = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(crate::sheet_views::subject(second_drawing, second_sheet)), false);
+    crate::documents::view_activate(&mut h.app, first);
+    crate::sketch_view::sync(&mut h.app).unwrap();
+    let selection = vec![solidcraft_engine::Sel::Drawing { drawing: first_drawing, object: note }];
+    h.app.session.selection = selection.clone();
+    let receiver = (h.app.session.open_drawing, h.app.session.model_focus, h.app.ui.tab.clone());
+    let focus = h.app.session.view_context.clone();
+    let ctx = h.ctx.clone();
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0));
+    let mut frame = |time, events| {
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+            ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
+        });
+        assert_eq!(h.app.session.selection, selection, "a passive drawing cannot prune the focused drawing's pick");
+    };
+    frame(0.0, Vec::new());
+    let before = h.app.drawing_workspace.pages.get(&second).unwrap().scale;
+    let events = vec![
+        egui::Event::PointerMoved(canvas.center()),
+        egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 120.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        },
+    ];
+    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(1.0 / 60.0), events, ..Default::default() }, |ui| {
+        ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
+    });
+    assert_ne!(h.app.drawing_workspace.pages.get(&second).unwrap().scale, before, "the passive wheel actually runs camera navigation");
+    assert_eq!(h.app.session.selection, selection);
+    assert_eq!((h.app.session.open_drawing, h.app.session.model_focus, h.app.ui.tab.clone()), receiver);
+    assert_eq!(h.app.session.view_context, focus);
+    assert!(h.app.session.doc.drawing(first_drawing).unwrap().has_object(note));
+}
+
+#[test]
+fn two_sheet_cameras_share_drawing_view_selection() {
+    use solidcraft_views::ViewKind;
+    let (mut h, front) = plate_sheet();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let (drawing, sheet) = (drawing.id, drawing.sheets[0].id);
+    let front = solidcraft_engine::doc::ids::decode(&front).unwrap();
+    let subject = crate::sheet_views::subject(drawing, sheet);
+    let first = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject.clone()), false);
+    let second = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject), false);
+    activate_view(&mut h.app, first);
+    select_sheet(&mut h.app, sheet);
+    h.app.run("select.set", json!({"items": [solidcraft_engine::Sel::Drawing { drawing, object: front }]})).unwrap();
+    assert_eq!(selected_drawing_view(&h.app), Some(front));
+    activate_view(&mut h.app, second);
+    select_sheet(&mut h.app, sheet);
+    assert_eq!(selected_drawing_view(&h.app), Some(front));
+    h.app.run("select.clear", json!({})).unwrap();
+    activate_view(&mut h.app, first);
+    assert_eq!(selected_drawing_view(&h.app), None);
+}
+
+fn annotated_sheet_views() -> (Harness, u64, [(u64, u64, u64, u64); 3]) {
+    fn note(app: &mut crate::SolveApp, sheet: u64) -> u64 {
+        let made = app
+            .run("drawing.note.add", json!({"anchor":{"sheet":solidcraft_engine::doc::ids::encode(sheet)},"at":[50,50],"content":"Annotation"}))
+            .unwrap();
+        solidcraft_engine::doc::ids::decode(made["note"].as_str().unwrap()).unwrap()
+    }
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let model = h.app.docs.views.active().id;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    h.app.run("drawing.create", json!({"name":"First drawing"})).unwrap();
+    let first = h.app.session.drawing("drawing.inspect").unwrap();
+    let (drawing, sheet) = (first.id, first.sheets[0].id);
+    let first_note = note(&mut h.app, sheet);
+    let added = h.app.run("drawing.sheet.add", json!({"name":"Other sheet"})).unwrap();
+    let other = solidcraft_engine::doc::ids::decode(added["sheet"].as_str().unwrap()).unwrap();
+    let other_note = note(&mut h.app, other);
+    h.app.run("drawing.create", json!({"name":"Second drawing"})).unwrap();
+    let last = h.app.session.drawing("drawing.inspect").unwrap();
+    let (last_drawing, last_sheet) = (last.id, last.sheets[0].id);
+    let last_note = note(&mut h.app, last_sheet);
+    let mut records = [(drawing, sheet, first_note, 0), (drawing, other, other_note, 0), (last_drawing, last_sheet, last_note, 0)];
+    for (drawing, sheet, note, view) in &mut records {
+        *view =
+            crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Sheet, Some(crate::sheet_views::subject(*drawing, *sheet)), false);
+        assert!(h.app.session.selection.is_empty(), "another sheet's annotation must not stay selected");
+        h.app.session.selection = vec![solidcraft_engine::Sel::Drawing { drawing: *drawing, object: *note }];
+    }
+    (h, model, records)
+}
+
+#[test]
+fn committed_sheet_focus_restores_exact_sheet_picks_and_keeps_model_selection_separate() {
+    let (mut h, model, records) = annotated_sheet_views();
+    for (drawing, sheet, note, view) in [records[0], records[1], records[2], records[0]] {
+        assert!(crate::documents::view_activate(&mut h.app, view));
+        assert_eq!(h.app.session.open_drawing, Some(drawing));
+        assert_eq!(active_sheet(&h.app), Some(sheet));
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Drawing { drawing, object: note }]);
+        let copy =
+            crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Sheet, Some(crate::sheet_views::subject(drawing, sheet)), false);
+        assert_ne!(copy, view);
+        assert_eq!(
+            h.app.session.selection,
+            [solidcraft_engine::Sel::Drawing { drawing, object: note }],
+            "two views of the same sheet share all picks"
+        );
+    }
+    let (drawing, sheet, _, view) = records[1];
+    crate::documents::view_activate(&mut h.app, view);
+    let made = h
+        .app
+        .run("drawing.note.add", json!({"anchor":{"sheet":solidcraft_engine::doc::ids::encode(sheet)},"at":[80,80],"content":"Receiver check"}))
+        .unwrap();
+    let note = solidcraft_engine::doc::ids::decode(made["note"].as_str().unwrap()).unwrap();
+    assert!(h.app.session.doc.drawing(drawing).unwrap().on_sheet(sheet).notes.contains(&note));
+    crate::documents::view_activate(&mut h.app, model);
+    let model_picks = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
+    h.app.session.selection = model_picks.clone();
+    crate::documents::view_activate(&mut h.app, records[2].3);
+    assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Drawing { drawing: records[2].0, object: records[2].2 }]);
+    crate::documents::view_activate(&mut h.app, model);
+    assert_eq!(h.app.session.selection, model_picks);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn inactive_child_sheet_scope_restores_picks_focus_and_history_but_targeted_commands_adopt_its_sheet() {
+    let (mut h, _, records) = annotated_sheet_views();
+    let (drawing, _, note, view) = records[0];
+    let (other, _, other_note, child_view) = records[2];
+    crate::documents::view_activate(&mut h.app, view);
+    h.app.run("tab.view.move_to_window", json!({"view":child_view})).unwrap();
+    let window = h.app.docs.views.window_of(child_view).unwrap();
+    // Moving a view commits focus to its new window. Explicitly return to the
+    // root Sheet so this test really paints an inactive child receiver.
+    crate::view_windows::focus_view(&mut h.app, view, Some(0)).unwrap();
+    crate::sketch_view::sync(&mut h.app).unwrap();
+    assert_eq!(crate::view_windows::focused_view(&h.app), view);
+    assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Drawing { drawing, object: note }]);
+    let receiver = (h.app.session.open_drawing, h.app.session.model_focus, h.app.session.history_part());
+    let focus = h.app.session.view_context.clone();
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(
+        egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), focused: false, ..Default::default() },
+        |ui| {
+            crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+                assert_eq!(
+                    app.session.selection,
+                    [solidcraft_engine::Sel::Drawing { drawing: other, object: other_note }],
+                    "a command window borrows its correct sheet picks"
+                );
+                assert!(show_view(app, ui, child_view));
+                Ok(())
+            })
+            .unwrap();
+        },
+    );
+    assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Drawing { drawing, object: note }]);
+    assert_eq!((h.app.session.open_drawing, h.app.session.model_focus, h.app.session.history_part()), receiver);
+    assert_eq!(h.app.session.view_context, focus);
+    let other_sheet = records[2].1;
+    let made = crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+        app.run(
+            "drawing.note.add",
+            json!({"anchor":{"sheet":solidcraft_engine::doc::ids::encode(other_sheet)},"at":[90,90],"content":"Explicit window receiver"}),
+        )
+    })
+    .unwrap();
+    let made = solidcraft_engine::doc::ids::decode(made["note"].as_str().unwrap()).unwrap();
+    assert!(h.app.session.doc.drawing(other).unwrap().on_sheet(other_sheet).notes.contains(&made));
+    assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Drawing { drawing, object: note }]);
+    crate::view_windows::focus_view(&mut h.app, child_view, Some(window)).unwrap();
+    crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+        assert_eq!(app.session.open_drawing, Some(other));
+        assert_eq!(app.session.history_part(), Some(other));
+        assert_eq!(app.session.selection, [solidcraft_engine::Sel::Drawing { drawing: other, object: other_note }]);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn control_undo_and_sheet_tools_use_the_focused_child_after_returning_to_the_model_host() {
+    let (mut h, model, records) = annotated_sheet_views();
+    let (drawing, sheet, note, child) = records[2];
+    h.app.run("tab.view.move_to_window", json!({"view":child})).unwrap();
+    let window = h.app.docs.views.window_of(child).unwrap();
+    crate::documents::view_activate(&mut h.app, model);
+    crate::view_windows::focus_view(&mut h.app, child, Some(window)).unwrap();
+    crate::sketch_view::sync(&mut h.app).unwrap();
+    crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+        assert_eq!(app.session.open_drawing, Some(drawing));
+        assert_eq!(app.session.history_part(), Some(drawing));
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(h.app.ui.tab, "MODEL", "the main host restores its own ribbon after the child scope");
+    assert_eq!(h.app.session.view_context.focused(), child);
+    let first_notes: Vec<_> = h.app.session.doc.drawing(records[0].0).unwrap().notes.iter().map(|note| note.id).collect();
+    let reply = h.call("engine.execute", json!({"command":"edit.undo","params":{}}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(!h.app.session.doc.drawing(drawing).unwrap().has_object(note), "Undo takes the focused drawing's note");
+    assert_eq!(h.app.session.history_part(), Some(drawing));
+    assert_eq!(h.app.session.doc.drawing(records[0].0).unwrap().notes.iter().map(|note| note.id).collect::<Vec<_>>(), first_notes);
+    let reply = h.call(
+        "engine.execute",
+        json!({"command":"drawing.note.add","params":{
+            "anchor":{"sheet":solidcraft_engine::doc::ids::encode(sheet)},"at":[100,100],"content":"Focused child receiver"
+        }}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    let added = solidcraft_engine::doc::ids::decode(reply["result"]["note"].as_str().unwrap()).unwrap();
+    assert!(h.app.session.doc.drawing(drawing).unwrap().on_sheet(sheet).notes.contains(&added));
+    h.app.apply_off_thread = None;
+    h.app.run_heavy("edit.undo", json!({})).unwrap();
+    assert!(!h.app.session.doc.drawing(drawing).unwrap().has_object(added), "heavy history binds its source before taking an ahead copy");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn control_drawing_open_and_new_sheet_stay_in_the_focused_child_and_explicit_root_scope_wins() {
+    let (mut h, model, records) = annotated_sheet_views();
+    let (drawing, sheet, _, _) = records[0];
+    let child = records[2].3;
+    h.app.run("tab.view.move_to_window", json!({"view":child})).unwrap();
+    let window = h.app.docs.views.window_of(child).unwrap();
+    crate::documents::view_activate(&mut h.app, model);
+    crate::view_windows::focus_view(&mut h.app, child, Some(window)).unwrap();
+    crate::sketch_view::sync(&mut h.app).unwrap();
+    crate::view_windows::with_strip(&mut h.app, Some(window), |_| Ok(())).unwrap();
+    h.app.docs.views.set_spec(model, solidcraft_viewport::ViewSpec::new(h.app.cam));
+    let root_views = h.app.docs.views.views().to_vec();
+    let root_layout = h.app.docs.views.tiles().cloned();
+    let camera = h.app.cam;
+    let subject = crate::sheet_views::subject(drawing, sheet);
+    for _ in 0..2 {
+        let reply = h.call("engine.execute", json!({"command":"drawing.open","params":{"drawing":solidcraft_engine::doc::ids::encode(drawing)}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        let child_views = h.app.docs.views.views_of(window).unwrap();
+        assert_eq!(
+            child_views.views().iter().filter(|view| view.subject.as_deref() == Some(subject.as_str())).count(),
+            1,
+            "reuse happens in the focused child"
+        );
+        assert_eq!(child_views.active().subject.as_deref(), Some(subject.as_str()));
+        assert_eq!(h.app.docs.views.active().id, model);
+        assert_eq!(h.app.docs.views.views(), root_views.as_slice());
+        assert_eq!(h.app.docs.views.tiles(), root_layout.as_ref());
+        assert_eq!(h.app.cam, camera);
+    }
+    let reply = h.call("engine.execute", json!({"command":"drawing.sheet.add","params":{"name":"Child sheet"}}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let added = solidcraft_engine::doc::ids::decode(reply["result"]["sheet"].as_str().unwrap()).unwrap();
+    assert_eq!(h.app.docs.views.views_of(window).unwrap().active().subject.as_deref(), Some(crate::sheet_views::subject(drawing, added).as_str()));
+    assert_eq!(h.app.docs.views.active().id, model);
+    assert_eq!(h.app.docs.views.views(), root_views.as_slice());
+    assert_eq!(h.app.docs.views.tiles(), root_layout.as_ref());
+    assert_eq!(h.app.cam, camera);
+    let child_count = h.app.docs.views.views_of(window).unwrap().len();
+    crate::view_windows::with_strip(&mut h.app, Some(0), |app| {
+        app.run("drawing.open", json!({"drawing":solidcraft_engine::doc::ids::encode(drawing)}))
+    })
+    .unwrap();
+    assert_eq!(h.app.docs.views.active().subject.as_deref(), Some(subject.as_str()), "an explicit root scope overrides native child focus");
+    assert_eq!(h.app.docs.views.views_of(window).unwrap().len(), child_count);
+}
+
+#[test]
+fn public_drawing_open_effect_keeps_the_legacy_sheet_view_preference() {
+    let mut h = Harness::new();
+    h.app.preferences.design_sub_tab_sheets = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    let before = h.app.docs.views.to_json();
+    h.app.run("drawing.create", json!({})).unwrap();
+    assert_eq!(h.app.docs.views.to_json(), before);
+    assert!(h.app.session.open_drawing.is_some());
+}
+
+#[test]
+fn narrow_sheet_detail_keeps_view_outlines_but_omits_hatch_groups() {
+    let stroke = Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::new(20.0, 10.0) }], closed: false, width_mm: 0.25, pattern: None };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        fonts: Vec::new(),
+        clips: Vec::new(),
+        groups: vec![
+            Group { object: 1, kind: ObjectKind::View, items: vec![stroke.clone()] },
+            Group { object: 2, kind: ObjectKind::Fill, items: vec![stroke] },
+        ],
+    };
+    assert_eq!(marks_detail(&scene, 0.01, true).unwrap().len(), 2);
+    assert_eq!(marks_detail(&scene, 0.01, false).unwrap().len(), 1);
+}
+
 /// A 100 × 80 × 20 mm plate (W23's fixture without its bores) on ISO A3 at 1:2: its front view and
 /// the view right of it, the front's top edge dimensioned, in the Drawing workspace, with every view
 /// drawn. Returns the harness and the front view's id.
@@ -942,6 +1358,53 @@ fn pan_moves_the_sheet_and_leaves_the_design_camera() {
     assert!((after.width() - before.width()).abs() < 1e-3, "panning doesn't zoom");
     assert_eq!(h.app.cam, cam);
     assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc, undo));
+}
+
+#[test]
+fn panning_a_tiny_fitted_sheet_keeps_its_zoom_on_the_next_frame() {
+    use egui::{Event, Modifiers, PointerButton};
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    let subject = crate::sheet_views::subject(drawing.id, drawing.sheets[0].id);
+    let id = crate::documents::view_open(&mut h.app, ViewKind::Sheet, Some(subject), false);
+    crate::documents::view_activate(&mut h.app, id);
+    crate::sketch_view::sync(&mut h.app).unwrap();
+    activate_view(&mut h.app, id);
+    h.app.run("view.tool", json!({"tool":"pan"})).unwrap();
+    let ctx = h.ctx.clone();
+    let canvas = Rect::from_min_size(Pos2::ZERO, vec2(120.0, 80.0));
+    let mut time = 0.0;
+    let mut frame = |app: &mut crate::SolveApp, events| {
+        time += 1.0 / 60.0;
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+            assert!(show_view(app, ui, id));
+        });
+    };
+    frame(&mut h.app, Vec::new());
+    let before = h.app.drawing_workspace.page.scale;
+    let target = h.app.drawing_workspace.page.cam.target;
+    assert!(before < true_size_now(&h.app, &ctx) * ZOOM.start());
+    assert!(h.app.drawing_workspace.page.fitted_on.is_some());
+    let from = canvas.center();
+    let to = from + vec2(16.0, 10.0);
+    frame(
+        &mut h.app,
+        vec![
+            Event::PointerMoved(from),
+            Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+        ],
+    );
+    frame(&mut h.app, vec![Event::PointerMoved(to)]);
+    frame(&mut h.app, vec![Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+    assert_ne!(h.app.drawing_workspace.page.cam.target, target, "the pointer drag actually pans");
+    assert!(h.app.drawing_workspace.page.fitted_on.is_none());
+    frame(&mut h.app, Vec::new());
+    frame(&mut h.app, Vec::new());
+    assert!((h.app.drawing_workspace.page.scale / before - 1.0).abs() < 1e-8, "panning never raises a tiny fitted sheet to the manual zoom floor");
 }
 
 /// Each sheet colour is drawn in its tokens, standing off the backdrop, and is screen only: the

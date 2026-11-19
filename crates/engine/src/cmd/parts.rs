@@ -37,13 +37,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIBRARY_CONTRACT)
         .output(output_schema_for::<PartsLibrary>)
         .params("family? → families (name, standard, system: metric|inch, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic))
+    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
         .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
-    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
+    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic)).begins_edit()
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SEATS_CONTRACT)
         .output(output_schema_for::<PartsSeats>)
         .params("picks: face or edge selections on bore walls or rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
-    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
+    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic)).begins_edit()
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
         .output(output_schema_for::<ResizedPart>)
@@ -1101,7 +1101,8 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -1452,7 +1453,8 @@ fn resize_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
