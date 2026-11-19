@@ -551,6 +551,9 @@ crates/solidcore/src/heal/heal_data/p3.rs	HealData::fix_coin_vertices	int-div	1	
 crates/solidcore/src/heal/stitch/p1.rs	sort_by_param	Vec::insert	1	proven	insert(0, ii)	index 0 is never past the end
 crates/solidcore/src/heal/stitch/p1.rs	sort_by_param	Vec::insert	2	proven	insert(lmax, ii)	returns Err when lmax > sorted.len()
 crates/solidcore/src/heal/stitch/p1.rs	sort_by_param	int-div	1	proven	(lmin + lmax) / 2	constant non-zero divisor
+crates/solidcore/src/hlr.rs	context	Ord::clamp	1	proven	clamp(1, MAX_THREADS)	constant bounds, 1 <= MAX_THREADS
+crates/solidcore/src/hlr/curve.rs	on_both_surfaces	step_by	1	proven	step_by(stride)	stride is at least 1: (samples.len() / MAX_SAMPLES).max(1) just above
+crates/solidcore/src/hlr/surface.rs	sampled_box	chunks	1	proven	chunks(FORM_STEPS + 1)	constant non-zero size
 crates/solidcore/src/intersect/adv_surface_intersector.rs	AdvSurfaceIntersector::local_solve	copy_from_slice	1	proven	copy_from_slice(&[mn.x, mn.y, mn.z, mx.x, mx.y, mx.z, 1.0])	destination prefix and source array have identical literal lengths in fixed MAX_PARAMS = 10 storage
 crates/solidcore/src/intersect/adv_surface_intersector.rs	AdvSurfaceIntersector::local_solve	copy_from_slice	2	proven	copy_from_slice(&[a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y])	destination prefix and source array have identical literal lengths in fixed MAX_PARAMS = 10 storage
 crates/solidcore/src/intersect/adv_surface_intersector.rs	AdvSurfaceIntersector::local_solve	copy_from_slice	3	proven	copy_from_slice(&[mn.x, mn.y, mn.z, mx.x, mx.y, mx.z])	destination prefix and source array have identical literal lengths in fixed MAX_PARAMS = 10 storage

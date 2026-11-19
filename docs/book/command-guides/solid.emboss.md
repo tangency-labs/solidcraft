@@ -1,10 +1,10 @@
-Raise sketch text or a logo out of a face, or sink it in: an engraved part number, a serial or rev letter, a logo, or raised lettering on a casting pattern. It works on flat faces, and straight-line outlines can wrap around a cylinder.
+Raise sketch text or a logo out of a face, or sink it in: an engraved part number, a serial or rev letter, a logo, or raised lettering on a casting pattern. It works on flat faces, and text and outlines wrap around a cylinder.
 
 #### Before you start
 
 - You need a body and a sketch with closed profiles to emboss, usually text made with the sketch's Text tool. Sketch it on or parallel to the face it goes on.
 - Deboss sinks the profiles into the face: that's engraving. Emboss raises them out of it.
-- Only profiles made of straight lines running along and around the cylinder (orthogonal lines, such as a rectangular label or flat) wrap around it, sketched on a plane tangent to it. Text with curves or diagonals doesn't wrap; engrave it on a flat face instead. Pick the cylinder's wall as the Target Face to say which one when there is more than one.
+- To wrap text or an outline around a cylinder or a tube, sketch it on a plane tangent to the wall. It wraps when the body is a whole cylinder or tube with flat ends; a cylinder face of another shape, such as a groove in a block, is refused. Pick the cylinder's wall as the Target Face to say which one when there is more than one.
 
 #### Options
 

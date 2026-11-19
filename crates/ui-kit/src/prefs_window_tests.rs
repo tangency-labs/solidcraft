@@ -107,9 +107,6 @@ fn options(prefix: &'static str) -> Options<'static, Fake> {
             ok: "OK",
             cancel: "Cancel",
             apply: "Apply",
-            search: "Search",
-            no_results: "Nothing matches",
-            restore_defaults: "Restore Defaults",
             restore_defaults_hint: "Reset this page",
         },
         sidebar_footer: None,
@@ -340,4 +337,71 @@ fn restore_defaults_is_drawn_like_the_footer_buttons() {
         output.shapes.iter().find_map(|clipped| corners(&clipped.shape, rect)).unwrap_or_else(|| panic!("{name} is drawn on a frame"))
     };
     assert_eq!(of("test:defaults"), of("test:cancel"), "Restore Defaults has Cancel's corners");
+}
+
+/// Every `prefs.` id the kit's own code names (outside its tests) is in solidcraft-ui-text's
+/// English catalogue, so a host that shows the kit's Preferences window and pages gets the words
+/// from the shared crate rather than from its own catalogue (#17904).
+#[test]
+fn kit_prefs_ids_are_in_ui_text_for_english() {
+    use std::collections::BTreeSet;
+    use syn::visit::Visit;
+
+    /// `#[cfg(test)]` on an item: its literals are test fixtures, not words the kit shows.
+    fn is_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| a.path().is_ident("cfg") && a.meta.require_list().is_ok_and(|list| list.tokens.to_string() == "test"))
+    }
+
+    /// Collects the `prefs.` string literals of the items it visits, skipping test items.
+    #[derive(Default)]
+    struct PrefsIds(BTreeSet<String>);
+
+    impl<'ast> Visit<'ast> for PrefsIds {
+        fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+            if !is_test(&item.attrs) {
+                syn::visit::visit_item_mod(self, item);
+            }
+        }
+        fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+            if !is_test(&item.attrs) {
+                syn::visit::visit_item_fn(self, item);
+            }
+        }
+        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            if !is_test(&item.attrs) {
+                syn::visit::visit_impl_item_fn(self, item);
+            }
+        }
+        fn visit_lit_str(&mut self, lit: &'ast syn::LitStr) {
+            let value = lit.value();
+            if value.starts_with("prefs.") {
+                self.0.insert(value);
+            }
+        }
+    }
+
+    fn walk(dir: &std::path::Path, ids: &mut PrefsIds, files: &mut usize) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, ids, files);
+            } else if path.extension().is_some_and(|x| x == "rs") && !path.to_string_lossy().ends_with("_tests.rs") {
+                let source = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                let file = syn::parse_file(&source).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                ids.visit_file(&file);
+                *files += 1;
+            }
+        }
+    }
+
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut ids = PrefsIds::default();
+    let mut files = 0;
+    walk(&src, &mut ids, &mut files);
+    assert!(files > 0 && !ids.0.is_empty(), "the kit's sources name prefs ids to check");
+    let english: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(include_str!("../../ui-text/locales/en.json")).expect("the English catalogue is a JSON object");
+    let missing: Vec<&String> = ids.0.iter().filter(|id| !english.contains_key(id.as_str())).collect();
+    assert!(missing.is_empty(), "not in crates/ui-text/locales/en.json: {missing:?}");
 }
