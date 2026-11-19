@@ -295,6 +295,8 @@ mod named_projection_tests;
 #[cfg(test)]
 mod old_cap_anchor_tests;
 #[cfg(test)]
+mod saved_text_font_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tolerance_tests;
