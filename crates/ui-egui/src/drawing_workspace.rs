@@ -1176,7 +1176,19 @@ mod tests {
         h.app.run("drawing.create", json!({})).unwrap();
         h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[120,150]})).unwrap();
         h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[260,150],"view":"top"})).unwrap();
-        h.frames(8);
+        let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+        let began = std::time::Instant::now();
+        while began.elapsed() < std::time::Duration::from_secs(10) {
+            h.frame();
+            if crate::drawing_jobs::idle(&h.app)
+                && solidcraft_engine::drawing_scene::extract(&mut h.app.session, sheet)
+                    .is_ok_and(|v| v.objects.iter().filter(|o| o.kind == solidcraft_engine::geom::paper::ObjectKind::View).count() >= 2)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        h.frames(4);
         let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
         let [a, b] = [drawing.views[0].id, drawing.views[1].id];
         let size = drawing.sheets[0].sheet.size_mm().unwrap();
