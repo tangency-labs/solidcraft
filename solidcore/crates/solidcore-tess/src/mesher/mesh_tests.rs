@@ -16,7 +16,7 @@ use solidcore::Vec3;
 
 use crate::vec::VecExt as _;
 
-use super::{PoleCap, SplitSide, cap_fan, cap_ring, edges, on_edges, ring_off_boundary, size};
+use super::{Lenient, Planned, PoleCap, Purpose, Shape, Sides, SplitSide, cap_fan, cap_ring, edges, on_edges, plan_face, poles, ring_off_boundary, seam, size, uv};
 
 fn record(body: &solidcore_ops::Body) -> brep::Brep {
     body.to_record().expect("the body's record").0
@@ -636,6 +636,27 @@ fn a_pole_ring_is_even_round_the_pole_in_3d() {
     }
 }
 
+
+/// A face of a spline sphere whose only loop is 45 nodes all at its north pole (a manufacturer
+/// IGES fitting's face, #19469) has no area: the mesh path leaves the collapsed loop out and
+/// gives the face no triangles, where it refused the body with "a loop of 45 nodes all at one
+/// pole". The same face with a real loop beside it keeps meshing that loop.
+#[test]
+fn a_loop_collapsed_at_a_pole_bounds_no_area_on_the_mesh_path() {
+    let s = spline_sphere();
+    let face = poles::Face::new(s.clone(), 0.0);
+    let nodes: Vec<[f64; 2]> = (0..45).map(|k| [f64::from(k) / 45.0, 1.0]).collect();
+    let pts: Vec<Vec3> = nodes.iter().map(|q| s.derivs(q[0], q[1]).expect("evaluates").0).collect();
+    let collapsed = seam::Loop { uv: nodes, pts };
+    let rules = size::Rules::new(0.05, 22.9, None);
+    let (h, speed) = size::face_size(&s, &uv::domain(&s), &rules);
+    let shape = Shape { min_angle: 20.0, side: None, size_at: None, sides: Sides::Split };
+    let mut stats = PlanStats::default();
+    let plan = plan_face(3, "rational spline", &face, std::slice::from_ref(&collapsed), &rules, (h, speed), 1e-6, &mut stats, Lenient::No, Purpose::Mesh(shape));
+    let Ok(Planned::Face(fp)) = plan else { panic!("the collapsed loop is left out") };
+    assert_eq!(fp.face, 3);
+    assert!(fp.triangles.is_empty() && fp.uv.is_empty());
+}
 
 /// The (u, v) points and 3D points of a cap test: ring nodes 0..=5 along v = 0 from (0, 0) to
 /// (1, 0), and the run's nodes from 10 on, at the given (u, v) (their 3D points: the same, at

@@ -1576,6 +1576,13 @@ pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rule
     Ok(Polygons { uvs, fixed, ranges, seamed })
 }
 
+/// Whether every node of `l` is at a pole of the surface (within `reach`) and all of them lie
+/// within `reach` of the first node's point in 3D: the loop is one point.
+fn collapsed_at_pole(s: &poles::Face, l: &seam::Loop, reach: f64) -> bool {
+    let Some(first) = l.pts.first() else { return false };
+    !l.uv.is_empty() && l.uv.len() == l.pts.len() && l.uv.iter().all(|q| (0..2).any(|d| s.pole(*q, d, reach))) && l.pts.iter().all(|p| p.dist(*first) <= reach)
+}
+
 /// A pole of the surface on a face's boundary, which the mesh path fans on its own
 /// ([`pole_caps`]).
 struct PoleCap {
@@ -1997,6 +2004,19 @@ fn plan_face(
     // The memory bounds that limit this face, if any ([`crate::Cap`]).
     let mut caps: Vec<crate::Cap> = Vec::new();
     let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
+    // On the mesh path a loop whose every node is at a pole, all within the reach of one point
+    // in 3D, bounds no area: it is that point, not a boundary to mesh. The loop is left out; a
+    // face with no other loop has no area at all and gets no triangles.
+    let kept: Vec<seam::Loop>;
+    let loops = if matches!(purpose, Purpose::Mesh(_)) && loops.iter().any(|l| collapsed_at_pole(s, l, reach)) {
+        kept = loops.iter().filter(|l| !collapsed_at_pole(s, l, reach)).cloned().collect();
+        if kept.is_empty() {
+            return Ok(Planned::Face(FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() }));
+        }
+        kept.as_slice()
+    } else {
+        loops
+    };
     let Polygons { uvs, fixed, ranges, seamed } = polygons(s, loops, rules, h, reach).map_err(fail)?;
     if uvs.len() < 3 {
         return Err(fail("degenerate boundary"));
