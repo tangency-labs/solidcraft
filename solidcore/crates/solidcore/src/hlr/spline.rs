@@ -100,7 +100,11 @@ impl NurbsSurface {
         if pu == 0 || pv == 0 || rows.iter().any(|r| r.len() != nv) {
             return None;
         }
-        if rows.iter().flatten().any(|h| h.iter().any(|x| !x.is_finite()) || !(h[3] > 0.0)) {
+        if rows
+            .iter()
+            .flatten()
+            .any(|h| h.iter().any(|x| !x.is_finite()) || !(h[3] > 0.0))
+        {
             return None;
         }
         let mut ctrl = Vec::with_capacity(nu * nv);

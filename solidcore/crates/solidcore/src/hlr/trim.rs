@@ -3,12 +3,12 @@
 //! crossings on a path to a point known to be inside. Seams (an edge used twice by one face)
 //! are crossed twice, so they cancel without special cases.
 
+use super::body::{Face, Loop, OrientedEdge};
 use super::curve::C3;
 use super::surface::S3;
-use crate::eval::SurfaceEval;
 use super::vec::V3;
+use crate::eval::SurfaceEval;
 use crate::math::Vec3;
-use super::body::{Face, Loop, OrientedEdge};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Trim {
@@ -51,12 +51,20 @@ impl ChordGrid {
         }
         let ext = hi - lo;
         let longest = chords.iter().map(|(a, b)| a.dist(*b)).fold(0., f64::max);
-        let cell = longest.max(ext.len() / 256.).max(ext.x.max(ext.y).max(ext.z) / 512.);
+        let cell = longest
+            .max(ext.len() / 256.)
+            .max(ext.x.max(ext.y).max(ext.z) / 512.);
         if !(cell > 0. && cell.is_finite()) {
             return None;
         }
-        let n = [ext.x, ext.y, ext.z].map(|e| ((e / cell).floor() as usize).saturating_add(1).min(513));
-        let mut grid = ChordGrid { lo, cell, n, entries: Vec::with_capacity(chords.len() * 2) };
+        let n =
+            [ext.x, ext.y, ext.z].map(|e| ((e / cell).floor() as usize).saturating_add(1).min(513));
+        let mut grid = ChordGrid {
+            lo,
+            cell,
+            n,
+            entries: Vec::with_capacity(chords.len() * 2),
+        };
         for (i, (a, b)) in (0u32..).zip(chords) {
             let (c0, c1) = (grid.cell_of(a.min(*b)), grid.cell_of(a.max(*b)));
             for x in c0[0]..=c1[0] {
@@ -72,8 +80,14 @@ impl ChordGrid {
     }
 
     fn cell_of(&self, p: Vec3) -> [usize; 3] {
-        let at = |v: f64, l: f64, n: usize| (((v - l) / self.cell).floor().max(0.) as usize).min(n.saturating_sub(1));
-        [at(p.x, self.lo.x, self.n[0]), at(p.y, self.lo.y, self.n[1]), at(p.z, self.lo.z, self.n[2])]
+        let at = |v: f64, l: f64, n: usize| {
+            (((v - l) / self.cell).floor().max(0.) as usize).min(n.saturating_sub(1))
+        };
+        [
+            at(p.x, self.lo.x, self.n[0]),
+            at(p.y, self.lo.y, self.n[1]),
+            at(p.z, self.lo.z, self.n[2]),
+        ]
     }
 
     fn key(&self, c: [usize; 3]) -> u32 {
@@ -104,7 +118,11 @@ impl ChordGrid {
                         .unwrap_or_default()
                         .iter()
                         .take_while(|e| e.0 == k)
-                        .any(|(_, i)| chords.get(*i as usize).is_some_and(|(a, b)| p.dist_to_segment(*a, *b) <= tol));
+                        .any(|(_, i)| {
+                            chords
+                                .get(*i as usize)
+                                .is_some_and(|(a, b)| p.dist_to_segment(*a, *b) <= tol)
+                        });
                     if close {
                         return Some(true);
                     }
@@ -133,7 +151,9 @@ fn spans(x: f64, a: f64, b: f64) -> bool {
 fn index(segs: &[([f64; 2], [f64; 2])], period: [Option<f64>; 2], r: [f64; 2]) -> Index {
     let shifts = |k: usize| -> Vec<f64> {
         let Some(p) = period[k] else { return vec![0.] };
-        let (lo, hi) = segs.iter().fold((f64::MAX, f64::MIN), |(lo, hi), (a, b)| (lo.min(a[k]).min(b[k]), hi.max(a[k]).max(b[k])));
+        let (lo, hi) = segs.iter().fold((f64::MAX, f64::MIN), |(lo, hi), (a, b)| {
+            (lo.min(a[k]).min(b[k]), hi.max(a[k]).max(b[k]))
+        });
         let k0 = ((r[k] - p - hi) / p).floor() as i64;
         let k1 = ((r[k] + p - lo) / p).ceil() as i64;
         (k0.max(-8)..=k1.min(8)).map(|i| i as f64 * p).collect()
@@ -141,13 +161,23 @@ fn index(segs: &[([f64; 2], [f64; 2])], period: [Option<f64>; 2], r: [f64; 2]) -
     let mut copies = Vec::new();
     for dx in shifts(0) {
         for dy in shifts(1) {
-            copies.extend(segs.iter().map(|(a, b)| ([a[0] + dx, a[1] + dy], [b[0] + dx, b[1] + dy])));
+            copies.extend(
+                segs.iter()
+                    .map(|(a, b)| ([a[0] + dx, a[1] + dy], [b[0] + dx, b[1] + dy])),
+            );
         }
     }
-    let mut vcross: Vec<f64> =
-        copies.iter().filter(|(a, b)| spans(r[0], a[0], b[0])).map(|(a, b)| a[1] + (b[1] - a[1]) * (r[0] - a[0]) / (b[0] - a[0])).collect();
+    let mut vcross: Vec<f64> = copies
+        .iter()
+        .filter(|(a, b)| spans(r[0], a[0], b[0]))
+        .map(|(a, b)| a[1] + (b[1] - a[1]) * (r[0] - a[0]) / (b[0] - a[0]))
+        .collect();
     vcross.sort_by(f64::total_cmp);
-    let (v0, v1) = copies.iter().fold((f64::MAX, f64::MIN), |(lo, hi), (a, b)| (lo.min(a[1]).min(b[1]), hi.max(a[1]).max(b[1])));
+    let (v0, v1) = copies
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), (a, b)| {
+            (lo.min(a[1]).min(b[1]), hi.max(a[1]).max(b[1]))
+        });
     let n = ((copies.len() as f64).sqrt().ceil() as usize).clamp(1, 4096);
     let dv = ((v1 - v0) / n as f64).max(1e-300);
     let mut buckets = vec![Vec::new(); n];
@@ -158,7 +188,13 @@ fn index(segs: &[([f64; 2], [f64; 2])], period: [Option<f64>; 2], r: [f64; 2]) -
             bucket.push(i as u32);
         }
     }
-    Index { copies, vcross, buckets, v0, dv }
+    Index {
+        copies,
+        vcross,
+        buckets,
+        v0,
+        dv,
+    }
 }
 
 /// Every use of an edge in a face's loops.
@@ -174,12 +210,18 @@ pub(crate) fn uses(face: &Face) -> impl Iterator<Item = &OrientedEdge> {
 /// recognised patch's own chart): the side the face is on, walking its loops in the chart.
 fn loops_left(face: &Face, surface: &S3) -> f64 {
     let [[u0, u1], [v0, v1]] = face.domain;
-    let natural = SurfaceEval::new(face.parameters()).ok().and_then(|s| s.derivs(0.5 * (u0 + u1), 0.5 * (v0 + v1)));
+    let natural = SurfaceEval::new(face.parameters())
+        .ok()
+        .and_then(|s| s.derivs(0.5 * (u0 + u1), 0.5 * (v0 + v1)));
     let along = natural.and_then(|(p, su, sv)| {
         let chart = surface.inverse(p, None).and_then(|uv| surface.normal(uv))?;
         Some(su.cross(sv).dot(chart))
     });
-    if along.is_some_and(|a| a < 0.) { -1. } else { 1. }
+    if along.is_some_and(|a| a < 0.) {
+        -1.
+    } else {
+        1.
+    }
 }
 
 fn lift(x: f64, near: f64, p: Option<f64>) -> f64 {
@@ -195,7 +237,10 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
     let mut seam = Vec::new();
     let mut chords = Vec::new();
     let mut chord_error = 0f64;
-    let (mut lo, mut hi) = (Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN));
+    let (mut lo, mut hi) = (
+        Vec3::new(f64::MAX, f64::MAX, f64::MAX),
+        Vec3::new(f64::MIN, f64::MIN, f64::MIN),
+    );
     let mut counts = std::collections::BTreeMap::new();
     for u in self::uses(face) {
         *counts.entry(u.edge).or_insert(0usize) += 1;
@@ -206,7 +251,9 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
     let mut unsupported = None;
     for lp in &face.loops {
         // A vertex loop (a pole) bounds nothing in the chart.
-        let Loop::Edges { edges: lp } = lp else { continue };
+        let Loop::Edges { edges: lp } = lp else {
+            continue;
+        };
         let mut pts: Vec<([f64; 2], bool)> = Vec::new();
         let mut hint: Option<[f64; 2]> = None;
         for u in lp {
@@ -218,7 +265,9 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
             let mut ts = Vec::new();
             let b = c.breaks();
             for w in b.windows(2) {
-                let (Some(t0), Some(t1)) = (w.first(), w.get(1)) else { continue };
+                let (Some(t0), Some(t1)) = (w.first(), w.get(1)) else {
+                    continue;
+                };
                 for i in 0..per_break {
                     ts.push(t0 + (t1 - t0) * i as f64 / per_break as f64);
                 }
@@ -251,9 +300,14 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
                 pts.push((uv, is_seam));
             }
         }
-        let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else { continue };
+        let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else {
+            continue;
+        };
         // Close the loop at the lifted copy of its start (a wrapping loop ends a period away).
-        let close = [lift(first.0[0], last.0[0], period[0]), lift(first.0[1], last.0[1], period[1])];
+        let close = [
+            lift(first.0[0], last.0[0], period[0]),
+            lift(first.0[1], last.0[1], period[1]),
+        ];
         for k in 0..2 {
             if (close[k] - first.0[k]).abs() > 1e-9 {
                 wraps[k] = true;
@@ -261,7 +315,9 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
         }
         pts.push((close, last.1));
         for w in pts.windows(2) {
-            let (Some((a, _)), Some((b, s))) = (w.first(), w.get(1)) else { continue };
+            let (Some((a, _)), Some((b, s))) = (w.first(), w.get(1)) else {
+                continue;
+            };
             area_u -= 0.5 * (a[1] + b[1]) * (b[0] - a[0]);
             area_v += 0.5 * (a[0] + b[0]) * (b[1] - a[1]);
             segs.push((*a, *b));
@@ -280,16 +336,31 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
     // equator) close against the chart's own edge, so their area depends on where the chart
     // starts: there the face is taken on the loops' left seen from the natural normal (the B-rep
     // convention), and below the side within the surface's domain wins either way.
-    let net = segs.iter().fold([0f64; 2], |n, (a, b)| [n[0] + b[0] - a[0], n[1] + b[1] - a[1]]);
+    let net = segs.iter().fold([0f64; 2], |n, (a, b)| {
+        [n[0] + b[0] - a[0], n[1] + b[1] - a[1]]
+    });
     let open = (0..2).any(|k| period[k].is_some_and(|p| net[k].abs() > 0.5 * p));
-    let sigma = if open { loops_left(face, surface) } else { area.signum() };
+    let sigma = if open {
+        loops_left(face, surface)
+    } else {
+        area.signum()
+    };
     let dom = surface.domain();
     // Inside point: beside the longest non-seam segment, on the face's side.
     let mut inside = None;
-    let real: Vec<usize> = (0..segs.len()).filter(|i| !seam.get(*i).copied().unwrap_or(true)).collect();
+    let real: Vec<usize> = (0..segs.len())
+        .filter(|i| !seam.get(*i).copied().unwrap_or(true))
+        .collect();
     if !real.is_empty() && (open || area != 0.) {
-        let len = |i: usize| segs.get(i).map_or(0., |(a, b)| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt());
-        let best = real.iter().copied().max_by(|a, b| len(*a).total_cmp(&len(*b)));
+        let len = |i: usize| {
+            segs.get(i).map_or(0., |(a, b)| {
+                ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
+            })
+        };
+        let best = real
+            .iter()
+            .copied()
+            .max_by(|a, b| len(*a).total_cmp(&len(*b)));
         if let Some((a, b)) = best.and_then(|i| segs.get(i)) {
             let m = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
             let l = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
@@ -323,7 +394,9 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
                 s
             };
             let flip = [-n[0], -n[1]];
-            let pick = [(n, step(n)), (flip, step(flip))].into_iter().find(|(_, s)| *s > 0. && s.is_finite());
+            let pick = [(n, step(n)), (flip, step(flip))]
+                .into_iter()
+                .find(|(_, s)| *s > 0. && s.is_finite());
             if let Some((dir, s)) = pick {
                 inside = Some([m[0] + dir[0] * s, m[1] + dir[1] * s]);
             }
@@ -334,7 +407,18 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
     }
     let index = inside.map(|r| index(&segs, period, r));
     let grid = ChordGrid::new(&chords, lo, hi);
-    Trim { segs, period, inside, chords, chord_error, lo, hi, unsupported, index, grid }
+    Trim {
+        segs,
+        period,
+        inside,
+        chords,
+        chord_error,
+        lo,
+        hi,
+        unsupported,
+        index,
+        grid,
+    }
 }
 
 fn shifts(period: [Option<f64>; 2]) -> Vec<(f64, f64)> {
@@ -351,7 +435,11 @@ fn shifts(period: [Option<f64>; 2]) -> Vec<(f64, f64)> {
 fn point_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
     let l2 = ex * ex + ey * ey;
-    let t = if l2 > 0. { (((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / l2).clamp(0., 1.) } else { 0. };
+    let t = if l2 > 0. {
+        (((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / l2).clamp(0., 1.)
+    } else {
+        0.
+    };
     ((a[0] + t * ex - p[0]).powi(2) + (a[1] + t * ey - p[1]).powi(2)).sqrt()
 }
 
@@ -362,14 +450,22 @@ impl Trim {
         if self.unsupported.is_some() {
             return None;
         }
-        let (Some(r), Some(ix)) = (self.inside, self.index.as_ref()) else { return Some(true) };
-        let q = [lift(uv[0], r[0], self.period[0]), lift(uv[1], r[1], self.period[1])];
+        let (Some(r), Some(ix)) = (self.inside, self.index.as_ref()) else {
+            return Some(true);
+        };
+        let q = [
+            lift(uv[0], r[0], self.period[0]),
+            lift(uv[1], r[1], self.period[1]),
+        ];
         let mut crossings = 0usize;
         // Horizontal leg at v = q.v between q.u and r.u.
         let (ulo, uhi) = (q[0].min(r[0]), q[0].max(r[0]));
-        let k = (((q[1] - ix.v0) / ix.dv).floor().max(0.) as usize).min(ix.buckets.len().saturating_sub(1));
+        let k = (((q[1] - ix.v0) / ix.dv).floor().max(0.) as usize)
+            .min(ix.buckets.len().saturating_sub(1));
         for i in ix.buckets.get(k).map(Vec::as_slice).unwrap_or(&[]) {
-            let Some((a, b)) = ix.copies.get(*i as usize) else { continue };
+            let Some((a, b)) = ix.copies.get(*i as usize) else {
+                continue;
+            };
             if spans(q[1], a[1], b[1]) {
                 let u = a[0] + (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]);
                 if u > ulo && u <= uhi {
@@ -389,7 +485,12 @@ impl Trim {
     pub fn uv_bounds(&self) -> Option<([f64; 2], [f64; 2])> {
         let mut it = self.segs.iter().flat_map(|(a, b)| [a, b]);
         let first = *it.next()?;
-        Some(it.fold((first, first), |(lo, hi), p| ([lo[0].min(p[0]), lo[1].min(p[1])], [hi[0].max(p[0]), hi[1].max(p[1])])))
+        Some(it.fold((first, first), |(lo, hi), p| {
+            (
+                [lo[0].min(p[0]), lo[1].min(p[1])],
+                [hi[0].max(p[0]), hi[1].max(p[1])],
+            )
+        }))
     }
 
     /// Whether a 3D point is within `tol` of the sampled boundary: the boundary's box first,
@@ -399,9 +500,16 @@ impl Trim {
         if !(out.len() <= tol) {
             return false;
         }
-        match self.grid.as_ref().and_then(|g| g.near(&self.chords, p, tol)) {
+        match self
+            .grid
+            .as_ref()
+            .and_then(|g| g.near(&self.chords, p, tol))
+        {
             Some(close) => close,
-            None => self.chords.iter().any(|(a, b)| p.dist_to_segment(*a, *b) <= tol),
+            None => self
+                .chords
+                .iter()
+                .any(|(a, b)| p.dist_to_segment(*a, *b) <= tol),
         }
     }
 }

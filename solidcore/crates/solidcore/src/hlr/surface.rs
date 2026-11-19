@@ -3,15 +3,15 @@
 //! spline surfaces use Newton iterations seeded from a sample grid. Records' surfaces are unbounded:
 //! a cylinder, cone, sphere, torus or revolution gets its chart's bounds from its face.
 
-use super::HlrError;
-use super::curve::{C3, as_circle, frame_axes, v3};
-use crate::eval::SurfaceEval;
-use crate::eval::form;
+use super::body::Face;
+use super::curve::{as_circle, frame_axes, v3, C3};
 use super::spline::{project, NurbsSurface};
 use super::vec::V3;
-use crate::math::Vec3;
-use super::body::Face;
+use super::HlrError;
+use crate::eval::form;
+use crate::eval::SurfaceEval;
 use crate::eval::{Curve, Frame, Surface};
+use crate::math::Vec3;
 
 const TAU: f64 = std::f64::consts::TAU;
 
@@ -126,23 +126,53 @@ impl S3 {
     /// over the part its NURBS form spans ([`Face::domain`]).
     pub fn of_face(face: &Face) -> Result<S3, HlrError> {
         Ok(match &face.surface {
-            Surface::Plane { origin, u_axis, v_axis } => {
+            Surface::Plane {
+                origin,
+                u_axis,
+                v_axis,
+            } => {
                 let (u, v) = (v3(*u_axis), v3(*v_axis));
-                let n = u.cross(v).normalized().ok_or(HlrError::Unsupported("degenerate plane"))?;
-                S3::Plane { o: v3(*origin), u, v, n }
+                let n = u
+                    .cross(v)
+                    .normalized()
+                    .ok_or(HlrError::Unsupported("degenerate plane"))?;
+                S3::Plane {
+                    o: v3(*origin),
+                    u,
+                    v,
+                    n,
+                }
             }
             // The plane through three points: parameter (1, 0) at `u_point`, (0, 1) at `v_point`.
-            Surface::PlaneThrough { origin, u_point, v_point } => {
+            Surface::PlaneThrough {
+                origin,
+                u_point,
+                v_point,
+            } => {
                 let o = v3(*origin);
                 let (u, v) = (v3(*u_point) - o, v3(*v_point) - o);
-                let n = u.cross(v).normalized().ok_or(HlrError::Unsupported("degenerate plane"))?;
+                let n = u
+                    .cross(v)
+                    .normalized()
+                    .ok_or(HlrError::Unsupported("degenerate plane"))?;
                 S3::Plane { o, u, v, n }
             }
-            Surface::Spline { u_knots, v_knots, points } => {
-                let h = points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.]).collect()).collect::<Vec<Vec<_>>>();
+            Surface::Spline {
+                u_knots,
+                v_knots,
+                points,
+            } => {
+                let h = points
+                    .iter()
+                    .map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.]).collect())
+                    .collect::<Vec<Vec<_>>>();
                 S3::Nurbs(Box::new(Nurbs::new(u_knots, v_knots, &h)?))
             }
-            Surface::RationalSpline { u_knots, v_knots, homogeneous } => S3::Nurbs(Box::new(Nurbs::new(u_knots, v_knots, homogeneous)?)),
+            Surface::RationalSpline {
+                u_knots,
+                v_knots,
+                homogeneous,
+            } => S3::Nurbs(Box::new(Nurbs::new(u_knots, v_knots, homogeneous)?)),
             Surface::PlacedRevolution { .. } => placed_revolution(face)?,
             label => S3::bounded(label, form_box(face, label)?)?,
         })
@@ -155,23 +185,50 @@ impl S3 {
         let rev = match s {
             Surface::Cylinder { frame, radius } => {
                 let (o, x, _, z) = axes(frame);
-                let line = C3::Line { a: o + x * *radius + z * along[0], b: o + x * *radius + z * along[1] };
+                let line = C3::Line {
+                    a: o + x * *radius + z * along[0],
+                    b: o + x * *radius + z * along[1],
+                };
                 Rev::new(o, z, Some(x), line, angle)?
             }
-            Surface::Cone { frame, radius_at_origin, half_angle } => {
+            Surface::Cone {
+                frame,
+                radius_at_origin,
+                half_angle,
+            } => {
                 let (o, x, _, z) = axes(frame);
                 let r = |h: f64| radius_at_origin + h * half_angle.tan();
-                let line = C3::Line { a: o + x * r(along[0]) + z * along[0], b: o + x * r(along[1]) + z * along[1] };
+                let line = C3::Line {
+                    a: o + x * r(along[0]) + z * along[0],
+                    b: o + x * r(along[1]) + z * along[1],
+                };
                 Rev::new(o, z, Some(x), line, angle)?
             }
             Surface::Sphere { frame, radius } => {
                 let (o, x, _, z) = axes(frame);
-                let arc = C3::Arc { o, x, y: z, r: [*radius, *radius], range: along };
+                let arc = C3::Arc {
+                    o,
+                    x,
+                    y: z,
+                    r: [*radius, *radius],
+                    range: along,
+                };
                 Rev::new(o, z, Some(x), arc, angle)?
             }
-            Surface::Torus { frame, major_radius, minor_radius, .. } => {
+            Surface::Torus {
+                frame,
+                major_radius,
+                minor_radius,
+                ..
+            } => {
                 let (o, x, _, z) = axes(frame);
-                let arc = C3::Arc { o: o + x * *major_radius, x, y: z, r: [*minor_radius, *minor_radius], range: along };
+                let arc = C3::Arc {
+                    o: o + x * *major_radius,
+                    x,
+                    y: z,
+                    r: [*minor_radius, *minor_radius],
+                    range: along,
+                };
                 Rev::new(o, z, Some(x), arc, angle)?
             }
             _ => return Err(HlrError::Unsupported("surface chart")),
@@ -187,23 +244,65 @@ impl S3 {
         let rev = match *an {
             Analytic::Cylinder { p, a, r } => {
                 let e1 = perp(a);
-                Rev::new(p, a, Some(e1), C3::Line { a: p + e1 * r + a * h[0], b: p + e1 * r + a * h[1] }, [0., TAU])
+                Rev::new(
+                    p,
+                    a,
+                    Some(e1),
+                    C3::Line {
+                        a: p + e1 * r + a * h[0],
+                        b: p + e1 * r + a * h[1],
+                    },
+                    [0., TAU],
+                )
             }
             Analytic::Cone { apex, a, half } => {
                 let e1 = perp(a);
                 let at = |x: f64| apex + a * x + e1 * (x * half.tan());
-                Rev::new(apex, a, Some(e1), C3::Line { a: at(h[0].max(0.)), b: at(h[1].max(0.)) }, [0., TAU])
+                Rev::new(
+                    apex,
+                    a,
+                    Some(e1),
+                    C3::Line {
+                        a: at(h[0].max(0.)),
+                        b: at(h[1].max(0.)),
+                    },
+                    [0., TAU],
+                )
             }
             Analytic::Sphere { c, r } => {
                 // An axis square to the patch's direction keeps the poles off the patch.
                 let a = perp(toward);
                 let e1 = toward.normalized().unwrap_or_else(|| perp(a));
                 let half = std::f64::consts::FRAC_PI_2;
-                Rev::new(c, a, Some(e1), C3::Arc { o: c, x: e1, y: a, r: [r, r], range: [-half, half] }, [0., TAU])
+                Rev::new(
+                    c,
+                    a,
+                    Some(e1),
+                    C3::Arc {
+                        o: c,
+                        x: e1,
+                        y: a,
+                        r: [r, r],
+                        range: [-half, half],
+                    },
+                    [0., TAU],
+                )
             }
             Analytic::Torus { c, a, major, minor } => {
                 let e1 = perp(a);
-                Rev::new(c, a, Some(e1), C3::Arc { o: c + e1 * major, x: e1, y: a, r: [minor, minor], range: [0., TAU] }, [0., TAU])
+                Rev::new(
+                    c,
+                    a,
+                    Some(e1),
+                    C3::Arc {
+                        o: c + e1 * major,
+                        x: e1,
+                        y: a,
+                        r: [minor, minor],
+                        range: [0., TAU],
+                    },
+                    [0., TAU],
+                )
             }
             Analytic::Plane | Analytic::Other => return None,
         };
@@ -214,7 +313,9 @@ impl S3 {
     /// (weights are positive), the turned profile's hull for a revolution; `None` for planes.
     pub fn bound(&self) -> Option<(Vec3, Vec3)> {
         let hull = |pts: &mut dyn Iterator<Item = Vec3>| {
-            pts.fold(None, |acc: Option<(Vec3, Vec3)>, p| Some(acc.map_or((p, p), |(lo, hi)| (lo.min(p), hi.max(p)))))
+            pts.fold(None, |acc: Option<(Vec3, Vec3)>, p| {
+                Some(acc.map_or((p, p), |(lo, hi)| (lo.min(p), hi.max(p))))
+            })
         };
         match self {
             S3::Plane { .. } => None,
@@ -224,13 +325,22 @@ impl S3 {
                 let pts: Vec<Vec3> = match &r.profile {
                     C3::Line { a, b } => vec![*a, *b],
                     C3::Polyline(p) => p.clone(),
-                    C3::Spline { points, .. } => {
-                        points.iter().filter(|h| h[3] > 0.).map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect()
-                    }
-                    C3::Arc { o, x, y, r: rad, .. } => {
+                    C3::Spline { points, .. } => points
+                        .iter()
+                        .filter(|h| h[3] > 0.)
+                        .map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]))
+                        .collect(),
+                    C3::Arc {
+                        o, x, y, r: rad, ..
+                    } => {
                         // The whole circle's bounding square in its plane.
                         let m = rad[0].max(rad[1]);
-                        vec![*o + *x * m + *y * m, *o + *x * m - *y * m, *o - *x * m + *y * m, *o - *x * m - *y * m]
+                        vec![
+                            *o + *x * m + *y * m,
+                            *o + *x * m - *y * m,
+                            *o - *x * m + *y * m,
+                            *o - *x * m - *y * m,
+                        ]
                     }
                 };
                 let (mut rmax, mut h0, mut h1) = (0f64, f64::MAX, f64::MIN);
@@ -266,13 +376,24 @@ impl S3 {
         let S3::Nurbs(n) = self else { return None };
         let pts: Vec<Vec3> = n.s.homogeneous().iter().filter_map(project).collect();
         let o = *pts.first()?;
-        let far = |key: &dyn Fn(Vec3) -> f64| pts.iter().copied().max_by(|a, b| key(*a).total_cmp(&key(*b)));
+        let far = |key: &dyn Fn(Vec3) -> f64| {
+            pts.iter()
+                .copied()
+                .max_by(|a, b| key(*a).total_cmp(&key(*b)))
+        };
         let p1 = far(&|p| p.dist(o))?;
         let u = (p1 - o).normalized()?;
         let p2 = far(&|p| (p - o).cross(u).len())?;
         let nrm = u.cross(p2 - o).normalized()?;
         let size = (p1 - o).len();
-        pts.iter().all(|p| (*p - o).dot(nrm).abs() <= tol * size).then(|| S3::Plane { o, u, v: nrm.cross(u), n: nrm })
+        pts.iter()
+            .all(|p| (*p - o).dot(nrm).abs() <= tol * size)
+            .then(|| S3::Plane {
+                o,
+                u,
+                v: nrm.cross(u),
+                n: nrm,
+            })
     }
 
     pub fn domain(&self) -> [[f64; 2]; 2] {
@@ -285,7 +406,10 @@ impl S3 {
 
     pub fn periods(&self) -> [Option<f64>; 2] {
         match self {
-            S3::Rev(r) => [((r.theta[1] - r.theta[0]) >= TAU - 1e-9).then_some(TAU), r.closed.then_some(r.dom[1] - r.dom[0])],
+            S3::Rev(r) => [
+                ((r.theta[1] - r.theta[0]) >= TAU - 1e-9).then_some(TAU),
+                r.closed.then_some(r.dom[1] - r.dom[0]),
+            ],
             _ => [None, None],
         }
     }
@@ -306,12 +430,24 @@ impl S3 {
                 let fd = |k: usize| {
                     let span = d[k][1] - d[k][0];
                     let h = span * 1e-6;
-                    let lo = if self.periods()[k].is_some() { uv[k] - h } else { (uv[k] - h).max(d[k][0]) };
-                    let hi = if self.periods()[k].is_some() { uv[k] + h } else { (uv[k] + h).min(d[k][1]) };
+                    let lo = if self.periods()[k].is_some() {
+                        uv[k] - h
+                    } else {
+                        (uv[k] - h).max(d[k][0])
+                    };
+                    let hi = if self.periods()[k].is_some() {
+                        uv[k] + h
+                    } else {
+                        (uv[k] + h).min(d[k][1])
+                    };
                     let (mut a, mut b) = (uv, uv);
                     a[k] = lo;
                     b[k] = hi;
-                    if hi - lo <= 0. { Vec3::ZERO } else { (self.point(b) - self.point(a)) / (hi - lo) }
+                    if hi - lo <= 0. {
+                        Vec3::ZERO
+                    } else {
+                        (self.point(b) - self.point(a)) / (hi - lo)
+                    }
                 };
                 (fd(0), fd(1))
             }
@@ -359,7 +495,11 @@ impl S3 {
                 let lam = n.dot(self.point([0., 0.]) - p0) / nd;
                 if lam >= range[0] && lam <= range[1] {
                     if let Some(uv) = self.inverse(p0 + d * lam, None) {
-                        out.push(Hit { lam, uv, grazing: nd.abs() < 1e-6 });
+                        out.push(Hit {
+                            lam,
+                            uv,
+                            grazing: nd.abs() < 1e-6,
+                        });
                     }
                 }
             }
@@ -381,21 +521,33 @@ impl S3 {
                 let w = p0 - apex;
                 let c2 = half.cos().powi(2);
                 let (da, wa) = (d.dot(a), w.dot(a));
-                let roots = quadratic(da * da - c2, 2. * (da * wa - c2 * d.dot(w)), wa * wa - c2 * w.dot(w));
-                roots.into_iter().filter(|(l, _)| (w + d * *l).dot(a) >= 0.).collect()
+                let roots = quadratic(
+                    da * da - c2,
+                    2. * (da * wa - c2 * d.dot(w)),
+                    wa * wa - c2 * w.dot(w),
+                );
+                roots
+                    .into_iter()
+                    .filter(|(l, _)| (w + d * *l).dot(a) >= 0.)
+                    .collect()
             }
             Analytic::Sphere { c, r } => {
                 let w = p0 - c;
                 quadratic(1., 2. * d.dot(w), w.dot(w) - r * r)
             }
-            Analytic::Torus { c, a, major, minor } => torus_roots(p0 - c, d, a, major, minor, range),
+            Analytic::Torus { c, a, major, minor } => {
+                torus_roots(p0 - c, d, a, major, minor, range)
+            }
             Analytic::Plane | Analytic::Other => return self.ray(p0, d, range, out),
         };
         for (lam, grazing) in lams {
             if lam >= range[0] && lam <= range[1] {
                 // The analytic surface extends past this record's domain: keep hits on it only.
                 let p = p0 + d * lam;
-                if let Some(uv) = self.inverse(p, None).filter(|uv| self.point(*uv).dist(p) <= 1e-7 * (1. + p.len())) {
+                if let Some(uv) = self
+                    .inverse(p, None)
+                    .filter(|uv| self.point(*uv).dist(p) <= 1e-7 * (1. + p.len()))
+                {
                     out.push(Hit { lam, uv, grazing });
                 }
             }
@@ -416,7 +568,11 @@ impl S3 {
 pub(crate) fn quadratic(a: f64, b: f64, c: f64) -> Vec<(f64, bool)> {
     let scale = b * b + (a * c).abs();
     if a.abs() <= 1e-14 * (1. + b.abs()) {
-        return if b.abs() > 1e-300 { vec![(-c / b, false)] } else { Vec::new() };
+        return if b.abs() > 1e-300 {
+            vec![(-c / b, false)]
+        } else {
+            Vec::new()
+        };
     }
     let disc = b * b - 4. * a * c;
     if disc < -1e-12 * scale {
@@ -432,7 +588,14 @@ pub(crate) fn quadratic(a: f64, b: f64, c: f64) -> Vec<(f64, bool)> {
 
 /// Roots of the torus implicit function along a ray, by sampling and bisection; dips that
 /// touch zero without a sign change are grazing.
-pub(crate) fn torus_roots(w: Vec3, d: Vec3, a: Vec3, big: f64, small: f64, range: [f64; 2]) -> Vec<(f64, bool)> {
+pub(crate) fn torus_roots(
+    w: Vec3,
+    d: Vec3,
+    a: Vec3,
+    big: f64,
+    small: f64,
+    range: [f64; 2],
+) -> Vec<(f64, bool)> {
     // Signed distance from the tube: distance to the centre circle less the tube radius,
     // computed directly (no quartic), so a thin tube on a large ring keeps its precision.
     let g = |l: f64| {
@@ -463,9 +626,16 @@ pub(crate) fn torus_roots(w: Vec3, d: Vec3, a: Vec3, big: f64, small: f64, range
             return (qc <= r2).then_some([f64::NEG_INFINITY, f64::INFINITY]);
         }
         let disc = qb * qb - 4. * qa * (qc - r2);
-        (disc >= 0.).then(|| [(-qb - disc.sqrt()) / (2. * qa), (-qb + disc.sqrt()) / (2. * qa)])
+        (disc >= 0.).then(|| {
+            [
+                (-qb - disc.sqrt()) / (2. * qa),
+                (-qb + disc.sqrt()) / (2. * qa),
+            ]
+        })
     };
-    let Some(outer) = within((big + small + m).powi(2)) else { return Vec::new() };
+    let Some(outer) = within((big + small + m).powi(2)) else {
+        return Vec::new();
+    };
     span = [span[0].max(outer[0]), span[1].min(outer[1])];
     if !(span[1] > span[0]) {
         return Vec::new();
@@ -474,7 +644,10 @@ pub(crate) fn torus_roots(w: Vec3, d: Vec3, a: Vec3, big: f64, small: f64, range
     let mut pieces = vec![span];
     if big > small + m {
         if let Some(inner) = within((big - small - m).powi(2)) {
-            pieces = vec![[span[0], span[1].min(inner[0])], [span[0].max(inner[1]), span[1]]];
+            pieces = vec![
+                [span[0], span[1].min(inner[0])],
+                [span[0].max(inner[1]), span[1]],
+            ];
         }
     }
     // |g| is 1-Lipschitz along the ray: two samples whose values share a sign and add up to
@@ -522,7 +695,13 @@ pub(crate) fn torus_roots(w: Vec3, d: Vec3, a: Vec3, big: f64, small: f64, range
                 // Close to the tube without crossing it: a touch when it is a dip inside the shell.
                 let m = 0.5 * (lo0 + hi0);
                 let gm = g(m);
-                if gm > 0. && gm <= ga && gm <= gb && lo0 > s0 && hi0 < s1 && gm < 1e-4 * small.max(1e-9 * big) {
+                if gm > 0.
+                    && gm <= ga
+                    && gm <= gb
+                    && lo0 > s0
+                    && hi0 < s1
+                    && gm < 1e-4 * small.max(1e-9 * big)
+                {
                     out.push((m, true));
                 }
                 continue;
@@ -551,7 +730,10 @@ fn unwrapped(x: f64, near: f64) -> f64 {
 /// points over its domain lie on the label's frame, whichever way round the form runs.
 fn form_box(face: &Face, label: &Surface) -> Result<[[f64; 2]; 2], HlrError> {
     let frame = match label {
-        Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => frame,
+        Surface::Cylinder { frame, .. }
+        | Surface::Cone { frame, .. }
+        | Surface::Sphere { frame, .. }
+        | Surface::Torus { frame, .. } => frame,
         _ => return Err(HlrError::Unsupported("surface chart")),
     };
     let (o, x, y, z) = axes(frame);
@@ -580,20 +762,33 @@ fn form_box(face: &Face, label: &Surface) -> Result<[[f64; 2]; 2], HlrError> {
 /// of the face's domain; `at` gives a point's distance from the axis, angle and second coordinate,
 /// the second an angle too when `turns`. Angles are unwrapped from point to point, row after row, so
 /// a face that goes round comes to one turn. On the axis (a pole, an apex) there is no angle.
-fn sampled_box(face: &Face, turns: bool, at: &dyn Fn(Vec3) -> [f64; 3]) -> Result<([f64; 2], [f64; 2]), HlrError> {
-    let form = face.nurbs.as_ref().ok_or(HlrError::Invalid("analytic surface without its form"))?;
+fn sampled_box(
+    face: &Face,
+    turns: bool,
+    at: &dyn Fn(Vec3) -> [f64; 3],
+) -> Result<([f64; 2], [f64; 2]), HlrError> {
+    let form = face
+        .nurbs
+        .as_ref()
+        .ok_or(HlrError::Invalid("analytic surface without its form"))?;
     let eval = SurfaceEval::new(form).map_err(|_| HlrError::Invalid("surface form"))?;
     let [[u0, u1], [v0, v1]] = face.domain;
     let step = |a: f64, b: f64, k: usize| a + (b - a) * k as f64 / FORM_STEPS as f64;
     let mut samples = Vec::with_capacity((FORM_STEPS + 1) * (FORM_STEPS + 1));
     for j in 0..=FORM_STEPS {
         for i in 0..=FORM_STEPS {
-            let p = eval.point([step(u0, u1, i), step(v0, v1, j)]).filter(|p| p.is_finite()).ok_or(HlrError::Invalid("surface form"))?;
+            let p = eval
+                .point([step(u0, u1, i), step(v0, v1, j)])
+                .filter(|p| p.is_finite())
+                .ok_or(HlrError::Invalid("surface form"))?;
             samples.push(at(p));
         }
     }
     let widest = samples.iter().fold(0f64, |m, s| m.max(s[0]));
-    let (mut angle, mut second) = ([f64::INFINITY, f64::NEG_INFINITY], [f64::INFINITY, f64::NEG_INFINITY]);
+    let (mut angle, mut second) = (
+        [f64::INFINITY, f64::NEG_INFINITY],
+        [f64::INFINITY, f64::NEG_INFINITY],
+    );
     // Each row starts next to the start of the one before.
     let (mut row_a, mut row_s): (Option<f64>, Option<f64>) = (None, None);
     for row in samples.chunks(FORM_STEPS + 1) {
@@ -607,7 +802,11 @@ fn sampled_box(face: &Face, turns: bool, at: &dyn Fn(Vec3) -> [f64; 3]) -> Resul
                     row_a = Some(a);
                 }
             }
-            let s = if turns { last_s.map_or(s, |l| unwrapped(s, l)) } else { s };
+            let s = if turns {
+                last_s.map_or(s, |l| unwrapped(s, l))
+            } else {
+                s
+            };
             second = [second[0].min(s), second[1].max(s)];
             last_s = Some(s);
             if i == 0 {
@@ -635,11 +834,24 @@ impl Rigid {
     /// column 3 the translation), or `None` when its linear part scales, shears or reflects.
     fn of_matrix(m: &[[f64; 4]; 4]) -> Option<Rigid> {
         let [c0, c1, c2, c3] = *m;
-        if m.iter().flatten().any(|x| !x.is_finite()) || c0[3] != 0.0 || c1[3] != 0.0 || c2[3] != 0.0 || c3[3] != 1.0 {
+        if m.iter().flatten().any(|x| !x.is_finite())
+            || c0[3] != 0.0
+            || c1[3] != 0.0
+            || c2[3] != 0.0
+            || c3[3] != 1.0
+        {
             return None;
         }
-        let rotation = [[c0[0], c1[0], c2[0]], [c0[1], c1[1], c2[1]], [c0[2], c1[2], c2[2]]];
-        let columns = [[c0[0], c0[1], c0[2]], [c1[0], c1[1], c1[2]], [c2[0], c2[1], c2[2]]];
+        let rotation = [
+            [c0[0], c1[0], c2[0]],
+            [c0[1], c1[1], c2[1]],
+            [c0[2], c1[2], c2[2]],
+        ];
+        let columns = [
+            [c0[0], c0[1], c0[2]],
+            [c1[0], c1[1], c1[2]],
+            [c2[0], c2[1], c2[2]],
+        ];
         let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         for (i, ci) in columns.iter().enumerate() {
             for (j, cj) in columns.iter().enumerate() {
@@ -650,8 +862,12 @@ impl Rigid {
             }
         }
         let [a, b, c] = rotation;
-        let det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
-        ((det - 1.0).abs() <= ORTHONORMAL).then_some(Rigid { rotation, translation: [c3[0], c3[1], c3[2]] })
+        let det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0]);
+        ((det - 1.0).abs() <= ORTHONORMAL).then_some(Rigid {
+            rotation,
+            translation: [c3[0], c3[1], c3[2]],
+        })
     }
 }
 
@@ -659,26 +875,52 @@ impl Rigid {
 /// profile about the placed axis. Any other (which may scale it unevenly) is refused. The profile's
 /// range is `domain` along it: its own parameter, a conic's on its form's quarter grid.
 fn placed_revolution(face: &Face) -> Result<S3, HlrError> {
-    let Surface::PlacedRevolution { profile, origin, axis, matrix, forward } = &face.surface else {
+    let Surface::PlacedRevolution {
+        profile,
+        origin,
+        axis,
+        matrix,
+        forward,
+    } = &face.surface
+    else {
         return Err(HlrError::Unsupported("surface chart"));
     };
-    let Some(rigid) = Rigid::of_matrix(matrix) else { return Err(HlrError::Unsupported("placed revolution surface")) };
-    let along = if *forward { face.domain[0] } else { face.domain[1] };
+    let Some(rigid) = Rigid::of_matrix(matrix) else {
+        return Err(HlrError::Unsupported("placed revolution surface"));
+    };
+    let along = if *forward {
+        face.domain[0]
+    } else {
+        face.domain[1]
+    };
     let range = match profile.as_ref() {
-        Curve::Circle { .. } | Curve::Ellipse { .. } => [form::angle(along[0]), form::angle(along[1])],
+        Curve::Circle { .. } | Curve::Ellipse { .. } => {
+            [form::angle(along[0]), form::angle(along[1])]
+        }
         _ => along,
     };
-    if matches!(profile.as_ref(), Curve::Circle { .. } | Curve::Ellipse { .. }) && !(range[1] - range[0] <= TAU * (1. + 1e-9)) {
+    if matches!(
+        profile.as_ref(),
+        Curve::Circle { .. } | Curve::Ellipse { .. }
+    ) && !(range[1] - range[0] <= TAU * (1. + 1e-9))
+    {
         return Err(HlrError::Invalid("revolution profile range"));
     }
     let rows = rigid.rotation.map(v3);
     let direction = |d: Vec3| Vec3::new(rows[0].dot(d), rows[1].dot(d), rows[2].dot(d));
     let point = |p: Vec3| direction(p) + v3(rigid.translation);
     let curve = C3::bounded(profile, range)?.placed(&point, &direction)?;
-    let (o, a) = (point(v3(*origin)), direction(v3(*axis)).normalized().ok_or(HlrError::Unsupported("zero revolution axis"))?);
+    let (o, a) = (
+        point(v3(*origin)),
+        direction(v3(*axis))
+            .normalized()
+            .ok_or(HlrError::Unsupported("zero revolution axis"))?,
+    );
     let [t0, _] = curve.domain();
     let start = curve.at(t0) - o;
-    let e1 = (start - a * start.dot(a)).normalized().unwrap_or_else(|| perp(a));
+    let e1 = (start - a * start.dot(a))
+        .normalized()
+        .unwrap_or_else(|| perp(a));
     let e2 = a.cross(e1);
     let (angle, _) = sampled_box(face, false, &|p| {
         let w = p - o;
@@ -695,15 +937,24 @@ fn axes(f: &Frame) -> (Vec3, Vec3, Vec3, Vec3) {
 }
 
 impl Rev {
-    fn new(o: Vec3, axis: Vec3, e1: Option<Vec3>, profile: C3, angle: [f64; 2]) -> Result<Rev, HlrError> {
-        let a = axis.normalized().ok_or(HlrError::Unsupported("zero revolution axis"))?;
+    fn new(
+        o: Vec3,
+        axis: Vec3,
+        e1: Option<Vec3>,
+        profile: C3,
+        angle: [f64; 2],
+    ) -> Result<Rev, HlrError> {
+        let a = axis
+            .normalized()
+            .ok_or(HlrError::Unsupported("zero revolution axis"))?;
         let dom = profile.domain();
         let e1 = e1.unwrap_or_else(|| {
             let w = profile.at(dom[0]) - o;
             (w - a * w.dot(a)).normalized().unwrap_or_else(|| perp(a))
         });
         let e2 = a.cross(e1);
-        let closed = profile.at(dom[0]).dist(profile.at(dom[1])) <= 1e-9 * (1. + profile.at(dom[0]).dist(o));
+        let closed =
+            profile.at(dom[0]).dist(profile.at(dom[1])) <= 1e-9 * (1. + profile.at(dom[0]).dist(o));
         let n = 512;
         let mut samples = Vec::with_capacity(n + 1);
         let (mut rmax, mut hlo, mut hhi) = (0f64, f64::MAX, f64::MIN);
@@ -721,8 +972,24 @@ impl Rev {
             return Err(HlrError::Unsupported("non-finite revolution profile"));
         }
         // Chart theta is measured from e1; a full turn is [0, 2pi).
-        let theta = if angle[1] - angle[0] >= TAU - 1e-9 { [0., TAU] } else { angle };
-        Ok(Rev { o, a, e1, e2, profile, dom, theta, closed, samples, rmax, hrange: [hlo, hhi] })
+        let theta = if angle[1] - angle[0] >= TAU - 1e-9 {
+            [0., TAU]
+        } else {
+            angle
+        };
+        Ok(Rev {
+            o,
+            a,
+            e1,
+            e2,
+            profile,
+            dom,
+            theta,
+            closed,
+            samples,
+            rmax,
+            hrange: [hlo, hhi],
+        })
     }
 
     fn rh(&self, s: f64) -> [f64; 2] {
@@ -770,7 +1037,9 @@ impl Rev {
         let scale = vals.iter().fold(0f64, |m, v| m.max(v.abs())).max(1e-300);
         let zero = |v: f64| v.abs() <= 1e-12 * scale;
         let mut out: Vec<f64> = Vec::new();
-        let mut pairs: Vec<(usize, usize)> = (0..ss.len().saturating_sub(1)).map(|i| (i, i + 1)).collect();
+        let mut pairs: Vec<(usize, usize)> = (0..ss.len().saturating_sub(1))
+            .map(|i| (i, i + 1))
+            .collect();
         if self.closed && ss.len() > 2 {
             // The last sample repeats the first; the pair across the seam is (n-1, 1).
             pairs.push((ss.len() - 2, 1));
@@ -783,13 +1052,27 @@ impl Rev {
             }
         }
         for (i, j) in pairs {
-            let (Some(&a), Some(&b), Some(&sa), Some(&sb)) = (vals.get(i), vals.get(j), ss.get(i), ss.get(j)) else { continue };
+            let (Some(&a), Some(&b), Some(&sa), Some(&sb)) =
+                (vals.get(i), vals.get(j), ss.get(i), ss.get(j))
+            else {
+                continue;
+            };
             if zero(a) || zero(b) || a.signum() == b.signum() {
                 continue;
             }
             // Across the seam, walk sb forward a period so the interval is increasing.
-            let sb = if sb < sa { sb + (self.dom[1] - self.dom[0]) } else { sb };
-            let wrap = |x: f64| if x > self.dom[1] { x - (self.dom[1] - self.dom[0]) } else { x };
+            let sb = if sb < sa {
+                sb + (self.dom[1] - self.dom[0])
+            } else {
+                sb
+            };
+            let wrap = |x: f64| {
+                if x > self.dom[1] {
+                    x - (self.dom[1] - self.dom[0])
+                } else {
+                    x
+                }
+            };
             let (mut lo, mut hi, mut flo) = (sa, sb, a);
             for _ in 0..60 {
                 let mid = 0.5 * (lo + hi);
@@ -823,7 +1106,9 @@ impl Rev {
         let rho = (d1 * d1 + d2 * d2).sqrt();
         let phi = d2.atan2(d1);
         let n = 720usize;
-        let mut ss: Vec<f64> = (0..=n).map(|i| self.dom[0] + (self.dom[1] - self.dom[0]) * i as f64 / n as f64).collect();
+        let mut ss: Vec<f64> = (0..=n)
+            .map(|i| self.dom[0] + (self.dom[1] - self.dom[0]) * i as f64 / n as f64)
+            .collect();
         let mut out = Vec::new();
         if rho > 1e-12 {
             // The silhouette exists where |dr (a.d)| <= |dh| rho; near the axis direction those
@@ -838,7 +1123,16 @@ impl Rev {
             for s0 in self.roots(&ss, 0) {
                 let [r, h] = self.rh(s0);
                 if r > 1e-12 {
-                    out.push((C3::Arc { o: self.o + self.a * h, x: self.e1, y: self.e2, r: [r, r], range: [0., TAU] }, 0.));
+                    out.push((
+                        C3::Arc {
+                            o: self.o + self.a * h,
+                            x: self.e1,
+                            y: self.e2,
+                            r: [r, r],
+                            range: [0., TAU],
+                        },
+                        0.,
+                    ));
                 }
             }
             return out;
@@ -849,13 +1143,26 @@ impl Rev {
             for s0 in self.roots(&ss, 1) {
                 let [r, h] = self.rh(s0);
                 if r > 1e-12 {
-                    out.push((C3::Arc { o: self.o + self.a * h, x: self.e1, y: self.e2, r: [r, r], range: [0., TAU] }, 0.));
+                    out.push((
+                        C3::Arc {
+                            o: self.o + self.a * h,
+                            x: self.e1,
+                            y: self.e2,
+                            r: [r, r],
+                            range: [0., TAU],
+                        },
+                        0.,
+                    ));
                 }
             }
         }
         let c = |s: f64| {
             let t = self.rh_d(s);
-            if t[1].abs() <= 1e-300 { f64::INFINITY } else { t[0] * da / (t[1] * rho) }
+            if t[1].abs() <= 1e-300 {
+                f64::INFINITY
+            } else {
+                t[0] * da / (t[1] * rho)
+            }
         };
         let at = |sign: f64, s: f64| self.point([phi + sign * c(s).clamp(-1., 1.).acos(), s]);
         // The parameter between a (|c| <= 1) and b (|c| > 1) where |c| = 1.
@@ -883,10 +1190,14 @@ impl Rev {
                         let mut next = Vec::with_capacity(run.len() * 2);
                         let mut split = false;
                         for w in run.windows(2) {
-                            let (Some(&a), Some(&b)) = (w.first(), w.get(1)) else { continue };
+                            let (Some(&a), Some(&b)) = (w.first(), w.get(1)) else {
+                                continue;
+                            };
                             next.push(a);
                             let m = 0.5 * (a + b);
-                            if next.len() < 1 << 16 && at(sign, m).dist_to_segment(at(sign, a), at(sign, b)) > target {
+                            if next.len() < 1 << 16
+                                && at(sign, m).dist_to_segment(at(sign, a), at(sign, b)) > target
+                            {
                                 next.push(m);
                                 split = true;
                             }
@@ -902,7 +1213,11 @@ impl Rev {
                     let pts: Vec<Vec3> = run.iter().map(|s| at(sign, *s)).collect();
                     let mut dev = 0f64;
                     for (w, q) in run.windows(2).zip(pts.windows(2)) {
-                        let (Some(a), Some(b), Some(pa), Some(pb)) = (w.first(), w.get(1), q.first(), q.get(1)) else { continue };
+                        let (Some(a), Some(b), Some(pa), Some(pb)) =
+                            (w.first(), w.get(1), q.first(), q.get(1))
+                        else {
+                            continue;
+                        };
                         dev = dev.max(at(sign, 0.5 * (a + b)).dist_to_segment(*pa, *pb));
                     }
                     out.push((C3::Polyline(pts), dev));
@@ -941,7 +1256,11 @@ impl Rev {
             let (p0, p1) = (self.rh(self.dom[0]), self.rh(self.dom[1]));
             let e = [p1[0] - p0[0], p1[1] - p0[1]];
             let l2 = e[0] * e[0] + e[1] * e[1];
-            let t = if l2 > 0. { (((q[0] - p0[0]) * e[0] + (q[1] - p0[1]) * e[1]) / l2).clamp(0., 1.) } else { 0. };
+            let t = if l2 > 0. {
+                (((q[0] - p0[0]) * e[0] + (q[1] - p0[1]) * e[1]) / l2).clamp(0., 1.)
+            } else {
+                0.
+            };
             let s = self.dom[0] + (self.dom[1] - self.dom[0]) * t;
             let p = self.rh(s);
             return (s, (p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2));
@@ -954,7 +1273,11 @@ impl Rev {
                 best = (i, d2);
             }
         }
-        let mut best = (self.samples.get(best.0).map_or(self.dom[0], |s| s[0]), best.1, best.0);
+        let mut best = (
+            self.samples.get(best.0).map_or(self.dom[0], |s| s[0]),
+            best.1,
+            best.0,
+        );
         for i in best.2.saturating_sub(8)..(best.2 + 9).min(self.samples.len()) {
             if let Some(smp) = self.samples.get(i) {
                 let d2 = (smp[1] - q[0]).powi(2) + (smp[2] - q[1]).powi(2);
@@ -989,24 +1312,37 @@ impl Rev {
         let h = w.dot(self.a);
         let radial = w - self.a * h;
         let r = radial.len();
-        let theta = if r > 1e-12 * (1. + self.rmax) { radial.dot(self.e2).atan2(radial.dot(self.e1)) } else { hint.map_or(0., |u| u[0]) };
+        let theta = if r > 1e-12 * (1. + self.rmax) {
+            radial.dot(self.e2).atan2(radial.dot(self.e1))
+        } else {
+            hint.map_or(0., |u| u[0])
+        };
         let (s, _) = self.closest([r, h]);
         // Of a part of a turn, the copy nearest its middle: an end rounds either way.
-        let t =
-            if self.theta[1] - self.theta[0] >= TAU - 1e-9 { theta.rem_euclid(TAU) } else { unwrapped(theta, 0.5 * (self.theta[0] + self.theta[1])) };
+        let t = if self.theta[1] - self.theta[0] >= TAU - 1e-9 {
+            theta.rem_euclid(TAU)
+        } else {
+            unwrapped(theta, 0.5 * (self.theta[0] + self.theta[1]))
+        };
         Some([t, s])
     }
 
     /// Signed distance of `(r, h)` from the profile, or `None` beyond an open profile's ends.
     fn signed(&self, q: [f64; 2]) -> Option<f64> {
         let (s, d2) = self.closest(q);
-        let at_end = !self.closed && ((s - self.dom[0]).abs() <= 1e-12 * (1. + s.abs()) || (s - self.dom[1]).abs() <= 1e-12 * (1. + s.abs()));
+        let at_end = !self.closed
+            && ((s - self.dom[0]).abs() <= 1e-12 * (1. + s.abs())
+                || (s - self.dom[1]).abs() <= 1e-12 * (1. + s.abs()));
         let p = self.rh(s);
         let t = self.rh_d(s);
         if at_end {
             // Beyond the end the normal distance is undefined unless q projects onto it.
             let along = (q[0] - p[0]) * t[0] + (q[1] - p[1]) * t[1];
-            let outward = if (s - self.dom[0]).abs() < (s - self.dom[1]).abs() { -along } else { along };
+            let outward = if (s - self.dom[0]).abs() < (s - self.dom[1]).abs() {
+                -along
+            } else {
+                along
+            };
             if outward > 1e-12 * (1. + self.rmax) {
                 return None;
             }
@@ -1026,7 +1362,12 @@ impl Rev {
         let n = 400usize;
         let f = |lam: f64| {
             let q = rh(lam);
-            if q[0] > self.rmax + pad || q[1] < self.hrange[0] - pad || q[1] > self.hrange[1] + pad { None } else { self.signed(q) }
+            if q[0] > self.rmax + pad || q[1] < self.hrange[0] - pad || q[1] > self.hrange[1] + pad
+            {
+                None
+            } else {
+                self.signed(q)
+            }
         };
         // Values within the noise floor carry no sign (a ray tangent at its start, say).
         let floor = 1e-9 * (1. + self.rmax + (self.hrange[1] - self.hrange[0]));
@@ -1039,7 +1380,9 @@ impl Rev {
             let lam = at(i);
             let v = f(lam);
             match (prev, v) {
-                (Some((la, fa)), Some(fb)) if fa.abs() > floor && fb.abs() > floor && fa.signum() != fb.signum() => {
+                (Some((la, fa)), Some(fb))
+                    if fa.abs() > floor && fb.abs() > floor && fa.signum() != fb.signum() =>
+                {
                     let (mut lo, mut hi, mut flo) = (la, lam, fa);
                     for _ in 0..80 {
                         let mid = 0.5 * (lo + hi);
@@ -1055,7 +1398,11 @@ impl Rev {
                     let lam = 0.5 * (lo + hi);
                     if lam >= range[0] {
                         if let Some(uv) = self.inverse(p0 + d * lam, None) {
-                            out.push(Hit { lam, uv, grazing: false });
+                            out.push(Hit {
+                                lam,
+                                uv,
+                                grazing: false,
+                            });
                         }
                     }
                 }
@@ -1084,9 +1431,18 @@ impl Rev {
         // Near-tangent rays: a dip close to zero without a sign change.
         let tol = 1e-4 * (1. + self.rmax);
         for (lam, a) in minima {
-            if a < tol && lam >= range[0] && !out.iter().any(|h| (h.lam - lam).abs() < 2. * (range[1] - range[0]) / n as f64) {
+            if a < tol
+                && lam >= range[0]
+                && !out
+                    .iter()
+                    .any(|h| (h.lam - lam).abs() < 2. * (range[1] - range[0]) / n as f64)
+            {
                 if let Some(uv) = self.inverse(p0 + d * lam, None) {
-                    out.push(Hit { lam, uv, grazing: true });
+                    out.push(Hit {
+                        lam,
+                        uv,
+                        grazing: true,
+                    });
                 }
             }
         }
@@ -1095,14 +1451,23 @@ impl Rev {
     fn analytic(&self, tol: f64) -> Analytic {
         let size = self.rmax.max(self.hrange[1] - self.hrange[0]).max(1e-9);
         let pts: Vec<[f64; 2]> = self.samples.iter().map(|s| [s[1], s[2]]).collect();
-        let (Some(first), Some(last)) = (pts.first(), pts.last()) else { return Analytic::Other };
+        let (Some(first), Some(last)) = (pts.first(), pts.last()) else {
+            return Analytic::Other;
+        };
         // A straight profile: cylinder (constant r), cone, or a plane square to the axis.
         let e = [last[0] - first[0], last[1] - first[1]];
         let el = (e[0] * e[0] + e[1] * e[1]).sqrt();
-        let straight = el > 0. && pts.iter().all(|p| ((p[0] - first[0]) * e[1] - (p[1] - first[1]) * e[0]).abs() / el <= tol * size);
+        let straight = el > 0.
+            && pts.iter().all(|p| {
+                ((p[0] - first[0]) * e[1] - (p[1] - first[1]) * e[0]).abs() / el <= tol * size
+            });
         if straight {
             if e[0].abs() <= tol * el {
-                return Analytic::Cylinder { p: self.o, a: self.a, r: first[0] };
+                return Analytic::Cylinder {
+                    p: self.o,
+                    a: self.a,
+                    r: first[0],
+                };
             }
             if e[1].abs() <= tol * el {
                 return Analytic::Plane;
@@ -1112,7 +1477,11 @@ impl Rev {
             let h_apex = first[1] + t * e[1];
             let dir = if e[1] * e[0] > 0. { self.a } else { -self.a };
             let half = (e[0].abs() / el).asin();
-            return Analytic::Cone { apex: self.o + self.a * h_apex, a: dir, half };
+            return Analytic::Cone {
+                apex: self.o + self.a * h_apex,
+                a: dir,
+                half,
+            };
         }
         // A circular profile: sphere when its centre is on the axis, torus otherwise.
         if let Some((c, _, r)) = as_circle(&self.profile, tol) {
@@ -1120,9 +1489,17 @@ impl Rev {
             let h = w.dot(self.a);
             let rc = (w - self.a * h).len();
             if rc <= tol * size {
-                return Analytic::Sphere { c: self.o + self.a * h, r };
+                return Analytic::Sphere {
+                    c: self.o + self.a * h,
+                    r,
+                };
             }
-            return Analytic::Torus { c: self.o + self.a * h, a: self.a, major: rc, minor: r };
+            return Analytic::Torus {
+                c: self.o + self.a * h,
+                a: self.a,
+                major: rc,
+                minor: r,
+            };
         }
         Analytic::Other
     }
@@ -1135,7 +1512,12 @@ impl Nurbs {
         let s = NurbsSurface::new(u, v, rows).ok_or(HlrError::Unsupported("spline surface"))?;
         let dom = s.domain();
         let g = (4 * nu.max(nv)).clamp(16, 64);
-        let mut n = Nurbs { s, dom, g, grid: Vec::new() };
+        let mut n = Nurbs {
+            s,
+            dom,
+            g,
+            grid: Vec::new(),
+        };
         let mut grid = Vec::with_capacity((g + 1) * (g + 1));
         for j in 0..=g {
             for i in 0..=g {
@@ -1150,14 +1532,18 @@ impl Nurbs {
     }
 
     pub fn grid_uv(&self, i: usize, j: usize) -> [f64; 2] {
-        let f = |k: usize, x: usize| self.dom[k][0] + (self.dom[k][1] - self.dom[k][0]) * x as f64 / self.g as f64;
+        let f = |k: usize, x: usize| {
+            self.dom[k][0] + (self.dom[k][1] - self.dom[k][0]) * x as f64 / self.g as f64
+        };
         [f(0, i), f(1, j)]
     }
 
     fn point(&self, uv: [f64; 2]) -> Vec3 {
         let u = uv[0].clamp(self.dom[0][0], self.dom[0][1]);
         let v = uv[1].clamp(self.dom[1][0], self.dom[1][1]);
-        self.s.eval(u, v).unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN))
+        self.s
+            .eval(u, v)
+            .unwrap_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN))
     }
 
     fn partials(&self, uv: [f64; 2]) -> (Vec3, Vec3) {
@@ -1166,13 +1552,20 @@ impl Nurbs {
             let (mut a, mut b) = (uv, uv);
             a[k] = (uv[k] - h).max(self.dom[k][0]);
             b[k] = (uv[k] + h).min(self.dom[k][1]);
-            if b[k] - a[k] <= 0. { Vec3::ZERO } else { (self.point(b) - self.point(a)) / (b[k] - a[k]) }
+            if b[k] - a[k] <= 0. {
+                Vec3::ZERO
+            } else {
+                (self.point(b) - self.point(a)) / (b[k] - a[k])
+            }
         };
         (fd(0), fd(1))
     }
 
     fn clamp(&self, uv: [f64; 2]) -> [f64; 2] {
-        [uv[0].clamp(self.dom[0][0], self.dom[0][1]), uv[1].clamp(self.dom[1][0], self.dom[1][1])]
+        [
+            uv[0].clamp(self.dom[0][0], self.dom[0][1]),
+            uv[1].clamp(self.dom[1][0], self.dom[1][1]),
+        ]
     }
 
     fn inverse(&self, p: Vec3, hint: Option<[f64; 2]>) -> Option<[f64; 2]> {
@@ -1220,7 +1613,10 @@ impl Nurbs {
         for j in 0..g {
             for i in 0..g {
                 let corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)];
-                let pts: Vec<[f64; 2]> = corners.iter().filter_map(|(a, b)| proj.get(b * (g + 1) + a).copied()).collect();
+                let pts: Vec<[f64; 2]> = corners
+                    .iter()
+                    .filter_map(|(a, b)| proj.get(b * (g + 1) + a).copied())
+                    .collect();
                 let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
                 for p in &pts {
                     lo = [lo[0].min(p[0]), lo[1].min(p[1])];
@@ -1253,14 +1649,28 @@ impl Nurbs {
                 }
                 // Keep roots inside this cell (with slack) so neighbouring cells don't repeat them.
                 let slack = [(b[0] - a[0]) * 1e-6, (b[1] - a[1]) * 1e-6];
-                if !ok || uv[0] < a[0] - slack[0] || uv[0] > b[0] + slack[0] || uv[1] < a[1] - slack[1] || uv[1] > b[1] + slack[1] {
+                if !ok
+                    || uv[0] < a[0] - slack[0]
+                    || uv[0] > b[0] + slack[0]
+                    || uv[1] < a[1] - slack[1]
+                    || uv[1] > b[1] + slack[1]
+                {
                     continue;
                 }
                 let p = self.point(uv);
                 let lam = (p - p0).dot(d);
-                if lam >= range[0] && lam <= range[1] && !out.iter().skip(start).any(|h| (h.lam - lam).abs() <= 1e-9 * (1. + lam)) {
+                if lam >= range[0]
+                    && lam <= range[1]
+                    && !out
+                        .iter()
+                        .skip(start)
+                        .any(|h| (h.lam - lam).abs() <= 1e-9 * (1. + lam))
+                {
                     let (su, sv) = self.partials(uv);
-                    let grazing = su.cross(sv).normalized().is_none_or(|n| n.dot(d).abs() < 1e-6);
+                    let grazing = su
+                        .cross(sv)
+                        .normalized()
+                        .is_none_or(|n| n.dot(d).abs() < 1e-6);
                     out.push(Hit { lam, uv, grazing });
                 }
             }
@@ -1268,7 +1678,10 @@ impl Nurbs {
     }
 
     fn size_hint(&self) -> f64 {
-        self.grid.first().zip(self.grid.last()).map_or(1., |(a, b)| a.dist(*b))
+        self.grid
+            .first()
+            .zip(self.grid.last())
+            .map_or(1., |(a, b)| a.dist(*b))
     }
 
     /// The recognised form, checked over the whole patch: on each knot span the implicit
@@ -1282,29 +1695,50 @@ impl Nurbs {
             return an;
         }
         let pts: Vec<Vec3> = self.s.homogeneous().iter().filter_map(project).collect();
-        let hull = pts.iter().skip(1).fold(pts.first().map(|p| (*p, *p)), |acc, p| acc.map(|(lo, hi)| (lo.min(*p), hi.max(*p))));
+        let hull = pts
+            .iter()
+            .skip(1)
+            .fold(pts.first().map(|p| (*p, *p)), |acc, p| {
+                acc.map(|(lo, hi)| (lo.min(*p), hi.max(*p)))
+            });
         let size = hull.map_or(1., |(lo, hi)| (hi - lo).len()).max(1e-9);
         let [pu, pv] = self.s.degree();
         let d = an.implicit_degree();
         let spans = |k: usize| -> Vec<[f64; 2]> {
-            let (Some(ks), Some(dom)) = (self.s.knots().get(k), self.dom.get(k)) else { return Vec::new() };
-            let mut cuts: Vec<f64> = ks.iter().copied().filter(|x| *x > dom[0] && *x < dom[1]).collect();
+            let (Some(ks), Some(dom)) = (self.s.knots().get(k), self.dom.get(k)) else {
+                return Vec::new();
+            };
+            let mut cuts: Vec<f64> = ks
+                .iter()
+                .copied()
+                .filter(|x| *x > dom[0] && *x < dom[1])
+                .collect();
             cuts.push(dom[0]);
             cuts.push(dom[1]);
             cuts.sort_by(f64::total_cmp);
             cuts.dedup();
-            cuts.windows(2).filter_map(|w| Some([*w.first()?, *w.get(1)?])).collect()
+            cuts.windows(2)
+                .filter_map(|w| Some([*w.first()?, *w.get(1)?]))
+                .collect()
         };
         let nodes = |deg: usize, s: [f64; 2]| -> Vec<f64> {
             let n = d * deg + 3;
             let (mid, half) = (0.5 * (s[0] + s[1]), 0.5 * (s[1] - s[0]));
-            let inner = (0..n).map(move |k| mid + half * (std::f64::consts::PI * (2 * k + 1) as f64 / (2 * n) as f64).cos());
+            let inner = (0..n).map(move |k| {
+                mid + half * (std::f64::consts::PI * (2 * k + 1) as f64 / (2 * n) as f64).cos()
+            });
             [s[0], s[1]].into_iter().chain(inner).collect()
         };
         // As for circles (curve::as_circle): the largest distance at the points, times the
         // tensor Lebesgue constant (below 16) and the weights' spread to the power d, bounds the
         // distance anywhere on the patch.
-        let (w_min, w_max) = self.s.homogeneous().iter().fold((f64::MAX, f64::MIN), |(lo, hi), h| (lo.min(h[3]), hi.max(h[3])));
+        let (w_min, w_max) = self
+            .s
+            .homogeneous()
+            .iter()
+            .fold((f64::MAX, f64::MIN), |(lo, hi), h| {
+                (lo.min(h[3]), hi.max(h[3]))
+            });
         if !(w_min > 0. && w_max.is_finite()) {
             return Analytic::Other;
         }
@@ -1320,7 +1754,11 @@ impl Nurbs {
                 }
             }
         }
-        if 16. * (w_max / w_min).powi(d as i32) * far <= tol * size { an } else { Analytic::Other }
+        if 16. * (w_max / w_min).powi(d as i32) * far <= tol * size {
+            an
+        } else {
+            Analytic::Other
+        }
     }
 
     /// Cylinder/cone/sphere/torus candidates from iso-curves and grid samples.
@@ -1330,27 +1768,45 @@ impl Nurbs {
             let n = 24;
             let pts = (0..=n)
                 .map(|i| {
-                    let t = self.dom[k][0] + (self.dom[k][1] - self.dom[k][0]) * i as f64 / n as f64;
-                    if k == 0 { self.point([t, x]) } else { self.point([x, t]) }
+                    let t =
+                        self.dom[k][0] + (self.dom[k][1] - self.dom[k][0]) * i as f64 / n as f64;
+                    if k == 0 {
+                        self.point([t, x])
+                    } else {
+                        self.point([x, t])
+                    }
                 })
                 .collect();
             C3::Polyline(pts)
         };
         let straight = |c: &C3| {
             let C3::Polyline(p) = c else { return false };
-            let (Some(a), Some(b)) = (p.first(), p.last()) else { return false };
-            let Some(e) = (*b - *a).normalized() else { return false };
-            p.iter().all(|q| ((*q - *a) - e * (*q - *a).dot(e)).len() <= tol * size)
+            let (Some(a), Some(b)) = (p.first(), p.last()) else {
+                return false;
+            };
+            let Some(e) = (*b - *a).normalized() else {
+                return false;
+            };
+            p.iter()
+                .all(|q| ((*q - *a) - e * (*q - *a).dot(e)).len() <= tol * size)
         };
         let circle_of = |k: usize, x: f64| -> Option<(Vec3, Vec3, f64)> {
             // Fit through exact surface points, then verify densely.
             let at = |f: f64| {
                 let t = self.dom[k][0] + (self.dom[k][1] - self.dom[k][0]) * f;
-                if k == 0 { self.point([t, x]) } else { self.point([x, t]) }
+                if k == 0 {
+                    self.point([t, x])
+                } else {
+                    self.point([x, t])
+                }
             };
             let pts: Vec<Vec3> = (0..=32).map(|i| at(i as f64 / 32.)).collect();
             let sp = C3::Polyline(pts.clone());
-            let (a, m, b) = (pts.first().copied()?, pts.get(16).copied()?, pts.get(8).copied()?);
+            let (a, m, b) = (
+                pts.first().copied()?,
+                pts.get(16).copied()?,
+                pts.get(8).copied()?,
+            );
             let (u, v) = (m - a, b - a);
             let n = u.cross(v);
             let n2 = n.len2();
@@ -1362,26 +1818,40 @@ impl Nurbs {
             let nn = n.normalized()?;
             let r = c.dist(a);
             let ok = match &sp {
-                C3::Polyline(p) => p.iter().all(|q| (q.dist(c) - r).abs() <= tol * r && (*q - c).dot(nn).abs() <= tol * r),
+                C3::Polyline(p) => p
+                    .iter()
+                    .all(|q| (q.dist(c) - r).abs() <= tol * r && (*q - c).dot(nn).abs() <= tol * r),
                 _ => false,
             };
             ok.then_some((c, nn, r))
         };
         for (line_dir, circ_dir) in [(1usize, 0usize), (0, 1)] {
-            let mids = [0., 0.5, 1.].map(|f| self.dom[circ_dir][0] + (self.dom[circ_dir][1] - self.dom[circ_dir][0]) * f);
+            let mids = [0., 0.5, 1.].map(|f| {
+                self.dom[circ_dir][0] + (self.dom[circ_dir][1] - self.dom[circ_dir][0]) * f
+            });
             if !mids.iter().all(|x| straight(&iso(line_dir, *x))) {
                 continue;
             }
-            let ends = [0., 0.5, 1.].map(|f| self.dom[line_dir][0] + (self.dom[line_dir][1] - self.dom[line_dir][0]) * f);
+            let ends = [0., 0.5, 1.].map(|f| {
+                self.dom[line_dir][0] + (self.dom[line_dir][1] - self.dom[line_dir][0]) * f
+            });
             let circles: Option<Vec<_>> = ends.iter().map(|x| circle_of(circ_dir, *x)).collect();
             let Some(circles) = circles else { continue };
-            let (Some(c0), Some(c2)) = (circles.first(), circles.last()) else { continue };
-            let Some(axis) = (c2.0 - c0.0).normalized() else { continue };
+            let (Some(c0), Some(c2)) = (circles.first(), circles.last()) else {
+                continue;
+            };
+            let Some(axis) = (c2.0 - c0.0).normalized() else {
+                continue;
+            };
             if c0.1.cross(axis).len() > tol {
                 continue;
             }
             if (c0.2 - c2.2).abs() <= tol * c0.2 {
-                return Analytic::Cylinder { p: c0.0, a: axis, r: c0.2 };
+                return Analytic::Cylinder {
+                    p: c0.0,
+                    a: axis,
+                    r: c0.2,
+                };
             }
             let dr = (c2.2 - c0.2) / c0.0.dist(c2.0);
             let half = dr.abs().atan();
@@ -1399,13 +1869,24 @@ impl Nurbs {
             [(g / 3, 0), (0, g / 2), (2 * g / 3, g), (g, g / 3)],
         ];
         for q in spreads {
-            let (Some(a), Some(b), Some(c), Some(d)) = (pick(q[0].0, q[0].1), pick(q[1].0, q[1].1), pick(q[2].0, q[2].1), pick(q[3].0, q[3].1))
-            else {
+            let (Some(a), Some(b), Some(c), Some(d)) = (
+                pick(q[0].0, q[0].1),
+                pick(q[1].0, q[1].1),
+                pick(q[2].0, q[2].1),
+                pick(q[3].0, q[3].1),
+            ) else {
                 continue;
             };
-            let Some(centre) = sphere_centre(a, b, c, d) else { continue };
+            let Some(centre) = sphere_centre(a, b, c, d) else {
+                continue;
+            };
             let r = centre.dist(a);
-            if r > 0. && self.grid.iter().all(|p| (p.dist(centre) - r).abs() <= tol * r) {
+            if r > 0.
+                && self
+                    .grid
+                    .iter()
+                    .all(|p| (p.dist(centre) - r).abs() <= tol * r)
+            {
                 return Analytic::Sphere { c: centre, r };
             }
         }
@@ -1413,7 +1894,12 @@ impl Nurbs {
         // parallel the axis; then every grid point on that torus.
         let mid = |k: usize| self.dom.get(k).map_or(0., |d| 0.5 * (d[0] + d[1]));
         for (meridian, parallel) in [(0usize, 1usize), (1, 0)] {
-            let (Some(m), Some(p)) = (circle_of(meridian, mid(parallel)), circle_of(parallel, mid(meridian))) else { continue };
+            let (Some(m), Some(p)) = (
+                circle_of(meridian, mid(parallel)),
+                circle_of(parallel, mid(meridian)),
+            ) else {
+                continue;
+            };
             let (a, minor) = (p.1, m.2);
             let c = p.0 + a * (m.0 - p.0).dot(a);
             let major = m.0.dist(c);
@@ -1436,7 +1922,12 @@ impl Nurbs {
 fn sphere_centre(a: Vec3, b: Vec3, c: Vec3, d: Vec3) -> Option<Vec3> {
     // Solve 2(p_i - a).x = |p_i|^2 - |a|^2 for i = b, c, d.
     let rows = [b - a, c - a, d - a];
-    let rhs = [b.len2() - a.len2(), c.len2() - a.len2(), d.len2() - a.len2()].map(|v| v * 0.5);
+    let rhs = [
+        b.len2() - a.len2(),
+        c.len2() - a.len2(),
+        d.len2() - a.len2(),
+    ]
+    .map(|v| v * 0.5);
     let [r0, r1, r2] = rows;
     let det = r0.dot(r1.cross(r2));
     if det.abs() <= 1e-18 * (1. + r0.len() * r1.len() * r2.len()) {

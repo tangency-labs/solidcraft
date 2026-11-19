@@ -5,6 +5,7 @@
 //! a drawing).
 
 use crate::eval::{Curve, Surface};
+use crate::math::{Transform, Vec3};
 
 /// A vertex: its point.
 #[derive(Clone, Debug, PartialEq)]
@@ -99,27 +100,51 @@ fn homogeneous(h: [f64; 4], t: [f64; 3]) -> [f64; 4] {
     [h[0] + w * t[0], h[1] + w * t[1], h[2] + w * t[2], w]
 }
 
-fn frame(f: &crate::eval::geometry::Frame, t: [f64; 3]) -> crate::eval::geometry::Frame {
-    crate::eval::geometry::Frame {
+fn v3(p: [f64; 3]) -> Vec3 {
+    Vec3::new(p[0], p[1], p[2])
+}
+
+fn a3(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+/// The frame moved by `t`: its origin moved, its axes made orthonormal again as a rigid move of
+/// them is ([`Transform::orthonormal_frame`]); `None` where they are not finite or the kernel
+/// refuses them.
+fn frame(f: &crate::eval::geometry::Frame, t: [f64; 3]) -> Option<crate::eval::geometry::Frame> {
+    let [x, y] = Transform::orthonormal_frame(v3(f.x_axis), v3(f.y_axis)).ok()?;
+    Some(crate::eval::geometry::Frame {
         origin: point(f.origin, t),
-        x_axis: f.x_axis,
-        y_axis: f.y_axis,
+        x_axis: a3(x),
+        y_axis: a3(y),
+    })
+}
+
+/// The move by `t`, as a matrix (rows 0–2 the images of x, y and z, row 3 the translation).
+fn shift(t: [f64; 3]) -> Transform {
+    Transform {
+        m: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [t[0], t[1], t[2], 1.0],
+        ],
     }
 }
 
 /// `curve` moved by `t`.
-fn curve(c: &Curve, t: [f64; 3]) -> Curve {
-    match c {
+fn curve(c: &Curve, t: [f64; 3]) -> Option<Curve> {
+    Some(match c {
         Curve::Line { start, end } => Curve::Line {
             start: point(*start, t),
             end: point(*end, t),
         },
         Curve::Circle { frame: f, radius } => Curve::Circle {
-            frame: frame(f, t),
+            frame: frame(f, t)?,
             radius: *radius,
         },
         Curve::Ellipse { frame: f, radii } => Curve::Ellipse {
-            frame: frame(f, t),
+            frame: frame(f, t)?,
             radii: *radii,
         },
         Curve::Polyline { points } => Curve::Polyline {
@@ -129,7 +154,10 @@ fn curve(c: &Curve, t: [f64; 3]) -> Curve {
             knots: knots.clone(),
             points: points.iter().map(|p| point(*p, t)).collect(),
         },
-        Curve::RationalSpline { knots, homogeneous: h } => Curve::RationalSpline {
+        Curve::RationalSpline {
+            knots,
+            homogeneous: h,
+        } => Curve::RationalSpline {
             knots: knots.clone(),
             homogeneous: h.iter().map(|h| homogeneous(*h, t)).collect(),
         },
@@ -140,12 +168,12 @@ fn curve(c: &Curve, t: [f64; 3]) -> Curve {
         } => Curve::SurfaceIntersection {
             surfaces: {
                 let [a, b] = surfaces;
-                [Box::new(surface(a, t)), Box::new(surface(b, t))]
+                [Box::new(surface(a, t)?), Box::new(surface(b, t)?)]
             },
-            leader: Box::new(curve(leader, t)),
+            leader: Box::new(curve(leader, t)?),
             tolerance: *tolerance,
         },
-    }
+    })
 }
 
 /// `a · b` of column-major 4×4 matrices.
@@ -166,28 +194,37 @@ fn compose(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
 
 /// `surface` moved by `t`. A placed revolution keeps its profile and axis and takes the move into
 /// its matrix.
-fn surface(s: &Surface, t: [f64; 3]) -> Surface {
-    match s {
+fn surface(s: &Surface, t: [f64; 3]) -> Option<Surface> {
+    Some(match s {
         Surface::Plane {
             origin,
             u_axis,
             v_axis,
-        } => Surface::Plane {
-            origin: point(*origin, t),
-            u_axis: *u_axis,
-            v_axis: *v_axis,
-        },
+        } => {
+            let [u, v] = shift(t).rigid_plane_axes(v3(*u_axis), v3(*v_axis)).ok()?;
+            Surface::Plane {
+                origin: point(*origin, t),
+                u_axis: a3(u),
+                v_axis: a3(v),
+            }
+        }
+        // Carried as a rigid move carries it: an origin and axes.
         Surface::PlaneThrough {
             origin,
             u_point,
             v_point,
-        } => Surface::PlaneThrough {
-            origin: point(*origin, t),
-            u_point: point(*u_point, t),
-            v_point: point(*v_point, t),
-        },
+        } => {
+            let (o, [u, v]) = shift(t)
+                .rigid_plane_through(v3(*origin), v3(*u_point), v3(*v_point))
+                .ok()?;
+            Surface::Plane {
+                origin: a3(o),
+                u_axis: a3(u),
+                v_axis: a3(v),
+            }
+        }
         Surface::Cylinder { frame: f, radius } => Surface::Cylinder {
-            frame: frame(f, t),
+            frame: frame(f, t)?,
             radius: *radius,
         },
         Surface::Cone {
@@ -195,12 +232,12 @@ fn surface(s: &Surface, t: [f64; 3]) -> Surface {
             radius_at_origin,
             half_angle,
         } => Surface::Cone {
-            frame: frame(f, t),
+            frame: frame(f, t)?,
             radius_at_origin: *radius_at_origin,
             half_angle: *half_angle,
         },
         Surface::Sphere { frame: f, radius } => Surface::Sphere {
-            frame: frame(f, t),
+            frame: frame(f, t)?,
             radius: *radius,
         },
         Surface::BallPatch { center, radius } => Surface::BallPatch {
@@ -213,7 +250,7 @@ fn surface(s: &Surface, t: [f64; 3]) -> Surface {
             minor_radius,
             tube_start,
         } => Surface::Torus {
-            frame: frame(f, t),
+            frame: frame(f, t)?,
             major_radius: *major_radius,
             minor_radius: *minor_radius,
             tube_start: *tube_start,
@@ -248,30 +285,25 @@ fn surface(s: &Surface, t: [f64; 3]) -> Surface {
             axis,
             matrix,
             forward,
-        } => {
-            let shift = [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [t[0], t[1], t[2], 1.0],
-            ];
-            Surface::PlacedRevolution {
-                profile: profile.clone(),
-                origin: *origin,
-                axis: *axis,
-                matrix: compose(&shift, matrix),
-                forward: *forward,
-            }
-        }
-    }
+        } => Surface::PlacedRevolution {
+            profile: profile.clone(),
+            origin: *origin,
+            axis: *axis,
+            matrix: compose(&shift(t).m, matrix),
+            forward: *forward,
+        },
+    })
 }
 
 impl Brep {
-    /// The body moved by `t`: every point, frame origin and control point (a placed revolution
-    /// through its matrix); parameters, intervals, domains and loops as they are.
+    /// The body moved by `t` as a rigid move moves it: every point, frame origin and control
+    /// point moved, every frame's axes made orthonormal again and a plane's axes carried
+    /// ([`Transform::rigid_plane_axes`]; a plane through three points becomes one with an origin
+    /// and axes), a placed revolution through its matrix; parameters, intervals, domains and loops
+    /// as they are. `None` where a frame or plane cannot be carried.
     #[must_use]
-    pub fn moved(&self, t: [f64; 3]) -> Brep {
-        Brep {
+    pub fn moved(&self, t: [f64; 3]) -> Option<Brep> {
+        Some(Brep {
             vertices: self
                 .vertices
                 .iter()
@@ -282,22 +314,32 @@ impl Brep {
             edges: self
                 .edges
                 .iter()
-                .map(|e| Edge {
-                    curve: curve(&e.curve, t),
-                    nurbs: e.nurbs.as_ref().map(|n| curve(n, t)),
-                    interval: e.interval,
+                .map(|e| {
+                    Some(Edge {
+                        curve: curve(&e.curve, t)?,
+                        nurbs: match &e.nurbs {
+                            Some(n) => Some(curve(n, t)?),
+                            None => None,
+                        },
+                        interval: e.interval,
+                    })
                 })
-                .collect(),
+                .collect::<Option<_>>()?,
             faces: self
                 .faces
                 .iter()
-                .map(|f| Face {
-                    surface: surface(&f.surface, t),
-                    nurbs: f.nurbs.as_ref().map(|n| surface(n, t)),
-                    domain: f.domain,
-                    loops: f.loops.clone(),
+                .map(|f| {
+                    Some(Face {
+                        surface: surface(&f.surface, t)?,
+                        nurbs: match &f.nurbs {
+                            Some(n) => Some(surface(n, t)?),
+                            None => None,
+                        },
+                        domain: f.domain,
+                        loops: f.loops.clone(),
+                    })
                 })
-                .collect(),
-        }
+                .collect::<Option<_>>()?,
+        })
     }
 }
