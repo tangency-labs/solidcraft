@@ -7,6 +7,7 @@
 //! | Rust                                         | Upstream                                     |
 //! |----------------------------------------------|----------------------------------------------|
 //! | [`read_from_file`]                           | `SmBrep::ReadFromFile`                       |
+//! | [`read_from_data`]                           | `SmBrep::ReadFromFile` after the file is read |
 //! | [`make_face`], [`MakeFaceOptions`], [`NewFace`] | `SmBrep::MakeFace`                        |
 //! | [`make_face_with_curves`], [`make_face_with_curves_with_kernel_context`], [`make_face_with_curve_owners`], [`FaceCurvesInput`] | `SmBrep::MakeFaceWithCurves` |
 //! | [`glue_edges_general`]                       | `SmBrep::GlueEdgesGeneral`                   |
@@ -762,7 +763,23 @@ pub fn read_from_file(
     rebuild_uv_trim_curves_flag: bool,
     env: &mut TopologyEnv<'_>,
 ) -> Result<()> {
-    let mut brep_data = BrepData::read_from_file(k, data, file_type)?;
+    let brep_data = BrepData::read_from_file(k, data, file_type)?;
+    read_from_data(k, b, brep_data, rebuild_uv_trim_curves_flag, env)
+}
+
+/// [`read_from_file`] after its file is read into `brep_data`: the topology made from it,
+/// then the UV trim curves checked and fixed, or rebuilt with `rebuild_uv_trim_curves_flag`.
+///
+/// # Errors
+///
+/// As [`read_from_file`], less those of [`BrepData::read_from_file`].
+pub fn read_from_data(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mut brep_data: BrepData,
+    rebuild_uv_trim_curves_flag: bool,
+    env: &mut TopologyEnv<'_>,
+) -> Result<()> {
     // MakeTopologyFromData(pBrepData, sAttributes, FALSE, TRUE, TRUE)
     make_topology_from_data(k, b, &mut brep_data, env, false, true, true)?;
     drop(brep_data);

@@ -114,6 +114,77 @@ pub fn reading_label(kind: LabelKind, value: f64, units: &str, decimals: u8) -> 
     }
 }
 
+/// The token of a dimension's text that stands for its measured number as it reads with no text of
+/// its own: with its R or diameter sign, in the drawing's units, with the dimension's decimals.
+pub const VALUE_TOKEN: &str = "{value}";
+
+/// A piece of a dimension's text ([`Dimension::override_text`]): words as they are, or the
+/// measured number.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TextPiece {
+    Words(String),
+    Value,
+}
+
+/// A dimension's text read as a template: `{value}` is the measured number, `{{` and `}}` are a
+/// brace each, everything else is itself. A brace on its own, or a name in braces other than
+/// `value`, is refused, saying which.
+fn text_pieces(text: &str) -> std::result::Result<Vec<TextPiece>, String> {
+    let mut pieces = Vec::new();
+    let mut words = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(['{', '}']) {
+        words.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        if tail.starts_with("{{") || tail.starts_with("}}") {
+            words.push_str(&tail[..1]);
+            rest = &tail[2..];
+        } else if tail.starts_with('}') {
+            return Err("a `}` on its own: write `}}` for a brace".into());
+        } else {
+            let end = tail.find('}').ok_or("a `{` on its own: write `{{` for a brace, or `{value}` for the measured number")?;
+            let name = &tail[1..end];
+            if name != "value" {
+                return Err(format!("`{{{name}}}` is not something a dimension's text can show: `{{value}}` is its measured number"));
+            }
+            if !words.is_empty() {
+                pieces.push(TextPiece::Words(std::mem::take(&mut words)));
+            }
+            pieces.push(TextPiece::Value);
+            rest = &tail[end + 1..];
+        }
+    }
+    words.push_str(rest);
+    if !words.is_empty() {
+        pieces.push(TextPiece::Words(words));
+    }
+    Ok(pieces)
+}
+
+/// Whether `text` shows the measured number somewhere ([`VALUE_TOKEN`]): it then follows the model.
+/// A text without it is shown instead of the number. A text that can't be read shows none.
+pub fn text_shows_value(text: &str) -> bool {
+    text_pieces(text).is_ok_and(|pieces| pieces.contains(&TextPiece::Value))
+}
+
+/// `text` as a dimension shows it, with `number` where it says `{value}` (a question mark while
+/// there is nothing measured to show). A text that can't be read as a template is shown as typed.
+pub fn text_shown(text: &str, number: Option<&str>) -> String {
+    let Ok(pieces) = text_pieces(text) else { return text.to_owned() };
+    pieces
+        .iter()
+        .map(|piece| match piece {
+            TextPiece::Words(words) => words.as_str(),
+            TextPiece::Value => number.unwrap_or("?"),
+        })
+        .collect()
+}
+
+/// `text` written so that a template reads it back as these very characters: each brace doubled.
+pub fn text_literal(text: &str) -> String {
+    text.replace('{', "{{").replace('}', "}}")
+}
+
 /// The most dimensions a drawing may have.
 pub const MAX_DIMENSIONS: usize = 10_000;
 /// The most decimals a dimension shows.
@@ -405,9 +476,12 @@ impl Drawing {
             format!("the model dimension it shows is named in 1 to {MAX_MODEL_NAME_BYTES} bytes, without control characters")
         })?;
         match &d.override_text {
-            Some(text) => require(!text.is_empty() && text.len() <= MAX_TEXT_BYTES, || {
-                format!("the text shown instead of its number is 1 to {MAX_TEXT_BYTES} bytes")
-            }),
+            Some(text) => {
+                require(!text.is_empty() && text.len() <= MAX_TEXT_BYTES, || {
+                    format!("the text shown instead of its number is 1 to {MAX_TEXT_BYTES} bytes")
+                })?;
+                text_pieces(text).map(|_| ()).map_err(|why| DocError::Invalid(format!("its text: {why}")))
+            }
             None => Ok(()),
         }
     }
@@ -479,6 +553,9 @@ pub struct Resolved {
     /// units with its decimals (degrees for an angle, after R or Ø for a radius or a diameter, SR
     /// or SØ for a sphere's). `None` with neither, and for a chain, which shows its members'.
     pub text: Option<String>,
+    /// Its measured number as it reads with no text of its own (R, the diameter sign and the
+    /// degree sign included), whenever it was measured; none for a chain.
+    pub number: Option<String>,
     /// What its number is, whenever it was measured, a chain's members aside: a sphere's says
     /// whether it is drawn as a diameter or a radius.
     pub label: Option<LabelKind>,
@@ -949,7 +1026,11 @@ impl<'a> Lookup<'a> {
 
     fn resolve(&mut self, d: &Dimension, basis: &Plane, units: &str) -> Resolved {
         let (status, found) = match self.measure(d, basis) {
-            Ok(found) => (if d.override_text.is_some() { Status::Overridden } else { Status::Ok }, Some(found)),
+            // A text that shows the measured number follows the model, as a plain dimension does:
+            // only one that hides the number is typed over it.
+            Ok(found) => {
+                (if d.override_text.as_deref().is_some_and(|text| !text_shows_value(text)) { Status::Overridden } else { Status::Ok }, Some(found))
+            }
             Err(status) => (status, None),
         };
         let measured = found.as_ref().map(|f| f.measured);
@@ -959,7 +1040,11 @@ impl<'a> Lookup<'a> {
         let (members, points, exact) = found.map_or_else(Default::default, |f| (f.members, f.points, f.exact));
         Resolved {
             status,
-            text: d.override_text.clone().or(number),
+            text: match &d.override_text {
+                Some(text) => Some(text_shown(text, number.as_deref())),
+                None => number.clone(),
+            },
+            number,
             label,
             members: members.into_iter().map(|m| Member { measured: m, text: length(m) }).collect(),
             exact,

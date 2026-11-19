@@ -156,6 +156,11 @@ pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Result<
             let (mut lo, mut hi) = (lo, hi);
             for _ in 0..BISECTIONS {
                 let mid = 0.5 * (lo + hi);
+                // Neighbouring numbers: every further step finds `lo` or `hi` again, whose
+                // states are known, and changes nothing.
+                if mid == lo || mid == hi {
+                    break;
+                }
                 if state(mid)? == lo_state {
                     lo = mid;
                 } else {
