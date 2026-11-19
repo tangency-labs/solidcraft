@@ -204,8 +204,9 @@ pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
     true
 }
 
-/// Edit object `object` of the open drawing, as a double-click on it does (the menu's Edit).
-pub(crate) fn edit(app: &mut SolveApp, object: u64) {
+/// Edit object `object` of the open drawing, as a double-click on it at `at` does (the menu's Edit,
+/// with `at` where the menu was opened).
+pub(crate) fn edit(app: &mut SolveApp, object: u64, at: egui::Pos2) {
     let Ok(drawing) = app.session.drawing("drawing.inspect") else { return };
     let kind = if drawing.view(object).is_some() {
         "view"
@@ -218,7 +219,38 @@ pub(crate) fn edit(app: &mut SolveApp, object: u64) {
     } else {
         return;
     };
+    // A dimension's or a note's text is edited where it is drawn; the menu has no pointer on it,
+    // so the box opens where the menu was opened.
+    if edit_in_place(app, object, at) {
+        return;
+    }
     edit_object(app, kind, object);
+}
+
+/// A double-click on a dimension or a one-line note edits its text where it is, in the box a
+/// sketch dimension's value is typed in (true: the box opened at `at`). Anything else (a view, a
+/// table, a chain dimension, a note with fields or several lines) has no single text: its options
+/// open instead ([`edit_object`]).
+pub(crate) fn edit_in_place(app: &mut SolveApp, object: u64, at: egui::Pos2) -> bool {
+    use crate::dim_view::SheetText;
+    use solidcraft_engine::geom::cell::Part;
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return false };
+    let (target, title, text) = if drawing.dimension(object).is_some() {
+        let Ok(read) = app.run("drawing.dimension.inspect", serde_json::json!({"dimension": solidcraft_engine::doc::ids::encode(object)})) else {
+            return false;
+        };
+        let Some(text) = read["text"].as_str().filter(|text| !text.contains('\n')) else { return false };
+        (SheetText::Dimension(object), "ui.drawing_panel.dimension", text.to_owned())
+    } else if let Some(note) = drawing.notes.by_id(object) {
+        let text = note.content.0.iter().map(|part| if let Part::Text(text) = part { Some(text.as_str()) } else { None }).collect::<Option<String>>();
+        let Some(text) = text.filter(|text| !text.contains('\n')) else { return false };
+        (SheetText::Note(object), "ui.drawing_panel.note", text)
+    } else {
+        return false;
+    };
+    close_panel(app);
+    crate::dim_view::edit_sheet_text(target, solidcraft_ui_text::tr(title), text, at);
+    true
 }
 
 pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {

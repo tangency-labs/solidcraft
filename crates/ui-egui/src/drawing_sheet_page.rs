@@ -555,10 +555,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
             ObjectKind::PartsList => Some("parts_list"),
             _ => None,
         };
-        if let Some(kind) = kind {
+        // A dimension's or a note's text is edited where it is, as a sketch dimension's value is.
+        let at = response.interact_pointer_pos().or_else(|| response.hover_pos());
+        if let Some(kind) = kind
+            && !at.is_some_and(|at| crate::drawing_workspace::edit_in_place(app, hit.object, at))
+        {
             crate::drawing_workspace::edit_object(app, kind, hit.object);
         }
     }
+    crate::dim_view::show_sheet_editor(app, ui.ctx());
     if let Some(hit) = hit
         && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
     {

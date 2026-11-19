@@ -1743,7 +1743,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.drawingEdit" => {
             if let Some(object) = p.get("object").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
-                crate::drawing_workspace::edit(app, object);
+                crate::drawing_workspace::edit(app, object, at);
             }
         }
         "drawing.view.projected.planned" if item.params.is_some() => {
