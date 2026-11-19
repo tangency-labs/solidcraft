@@ -429,6 +429,22 @@ pub struct CadmpegOptions {
     pub physics: bool,
     /// OpenUSD: the image textures a render setup gives bodies, written into a `.usdz` package.
     pub surfaces: Vec<SurfacePlan>,
+    /// OpenUSD: the pictures shown on the model (decals), written into a `.usdz` package.
+    pub decals: Vec<DecalPlan>,
+}
+
+/// A picture shown on the model: its image on a quad.
+#[derive(Clone, Debug)]
+pub struct DecalPlan {
+    pub name: String,
+    /// The component it belongs to (0: the design itself).
+    pub component: u64,
+    /// Its corners (bottom-left, bottom-right, top-right, top-left) in its component's frame and
+    /// in the world, mm.
+    pub local: [[f64; 3]; 4],
+    pub world: [[f64; 3]; 4],
+    /// Its PNG or JPEG image, and the image's SHA-256 (hex), naming the file it is written as.
+    pub image: SurfaceMap,
 }
 
 /// One image map of a [`SurfacePlan`]: its SHA-256 (hex), naming the file it is written as, and its

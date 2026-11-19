@@ -115,12 +115,17 @@ pub(super) fn from_design(
     // Images go inside a package; a layer alone would name files the export does not write.
     let mut early = Vec::new();
     let unpackaged;
-    let options = if !options.surfaces.is_empty() && target != "usdz" {
-        early.push(format!(
-            "the images of render setup `{}` are written only in a .usdz package: the bodies are written with their looks",
-            options.surfaces.first().map(|p| p.setup.as_str()).unwrap_or_default()
-        ));
-        unpackaged = super::CadmpegOptions { surfaces: Vec::new(), ..options.clone() };
+    let options = if (!options.surfaces.is_empty() || !options.decals.is_empty()) && target != "usdz" {
+        if let Some(plan) = options.surfaces.first() {
+            early.push(format!(
+                "the images of render setup `{}` are written only in a .usdz package: the bodies are written with their looks",
+                plan.setup
+            ));
+        }
+        if !options.decals.is_empty() {
+            early.push("the pictures shown on the model are written only in a .usdz package: they are left out".into());
+        }
+        unpackaged = super::CadmpegOptions { surfaces: Vec::new(), decals: Vec::new(), ..options.clone() };
         &unpackaged
     } else {
         options
