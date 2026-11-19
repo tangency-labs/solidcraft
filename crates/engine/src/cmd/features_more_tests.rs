@@ -770,6 +770,34 @@ fn cylinder_small_chord_pick_is_saved_on_the_exact_surface() {
     assert_eq!(s.model.state().bodies.first().unwrap().body.shell_count(), 1);
 }
 
+/// Text wraps round a whole tube, outside and in its bore (#5358): each way it adds or removes
+/// the flat text's volume times `|rr² - r²| / 2r` per unit depth, the wrap keeping arc length.
+#[test]
+fn text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    for (r, mode, rr) in [(20.0_f64, "emboss", 21.0_f64), (20., "deboss", 19.), (16., "emboss", 15.), (16., "deboss", 17.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, r, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, r, 13.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+        let change = (volume(&mut s) - before).abs();
+        let want = area * (rr * rr - r * r).abs() / (2. * r);
+        assert!((change - want).abs() < 1e-4 * want, "{mode} at {r}: {change} vs {want}");
+    }
+}
+
 #[test]
 fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
     for (pick_offset, auto) in [(0., false), (80., false), (0., true), (80., true)] {
@@ -1413,7 +1441,7 @@ fn cylinder_auto_inference_retains_selected_holes_and_nested_islands() {
 }
 
 #[test]
-fn cylinder_auto_inference_refuses_ambiguity_curves_and_seam_crossing_atomically() {
+fn cylinder_auto_inference_refuses_ambiguity_and_seam_crossing_atomically_and_wraps_curves() {
     let mut s = cylinder_badge();
     run(&mut s, "solid.cylinder", json!({"radius":10,"height":20,"body_name":"Coincident"}));
     let before = s.doc.to_json();
@@ -1433,8 +1461,15 @@ fn cylinder_auto_inference_refuses_ambiguity_curves_and_seam_crossing_atomically
         run(&mut s, "sketch.finish", json!({}));
         let before = s.doc.to_json();
         let volume = exact_cylinder_volume(&s);
+        if circle {
+            // A circle wraps round the wall (#5358): its area times (11² - 10²) / 20.
+            run(&mut s, "solid.emboss", json!({"sketch":"Unsupported","depth":1}));
+            let want = std::f64::consts::PI * 21. / 20.;
+            assert!((exact_cylinder_volume(&s) - volume - want).abs() < 0.02, "{}", exact_cylinder_volume(&s) - volume);
+            continue;
+        }
         let error = s.execute("solid.emboss", &json!({"sketch":"Unsupported","depth":1})).unwrap_err().to_string();
-        assert!(error.contains(if circle { "orthogonal line" } else { "seam" }), "{error}");
+        assert!(error.contains("seam"), "{error}");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(exact_cylinder_volume(&s), volume);
     }
