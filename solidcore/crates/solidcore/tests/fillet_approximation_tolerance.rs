@@ -37,14 +37,12 @@ const L: f64 = 40.0;
 const W: f64 = 20.0;
 const H: f64 = 10.0;
 
-/// Every flag on, as SolidCraft's backend runs blends (`fillet_refuse_rounds_breaking_through`
-/// off, its preset).
+/// Every flag on, as SolidCraft's backend runs blends.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    k.fixes = fixes;
-    k
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: [f64; 3]) -> EdgeId {
