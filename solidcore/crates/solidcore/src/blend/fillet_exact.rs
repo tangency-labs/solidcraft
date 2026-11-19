@@ -35,12 +35,16 @@
 //!
 //! Deviations:
 //! - **A round of the ball's radius as a face (solidcore #2403, not in the fork).** A
-//!   torus is read too ([`QuadricKind::Torus`]; it has no class of
-//!   its own), so that a torus moved in by its tube radius is its tube-centre circle
+//!   torus is read too ([`QuadricKind::Torus`]), so that one moved in by its tube
+//!   radius is its tube-centre circle
 //!   ([`QuadricKind::Circle`]), as a cylinder so moved is its axis. An offset collapsed
 //!   onto such a curve that the other offset crosses is a point spine
 //!   ([`classify_ball_on_collapsed_offset`]): the round along an earlier round's end curve,
 //!   where that round has the ball's radius, is a piece of the ball.
+//! - **Coaxial torus supports (#19182).** A torus shares the circular-spine
+//!   construction of the other surfaces of revolution: intersect its circular meridian
+//!   with the other offset's meridian, then revolve the ball's exact section. Noncoaxial
+//!   tori stay traced; a torus collapsed onto its centre circle keeps its point-spine rule.
 //! - **An offset collapsed by its geometry (solidcore #2652, not in the fork).** With
 //!   a constant ball, a round on a face of no natural quadric (a
 //!   B-spline, as a round of the ball's radius built by a trace) and a surface quadric is
@@ -651,11 +655,12 @@ impl BlendQuadric {
         o
     }
 
-    /// Not the fork (#2405): the foot of `m` on a plane, cylinder, sphere or cone, the point
+    /// Not the fork (#2405, #19182): the foot of `m` on a plane, cylinder, sphere, cone or
+    /// torus, the point
     /// of it nearest `m` (on a cylinder, along `m`'s radial line from the axis; on a sphere,
-    /// along the line from its centre; on a cone, on the line of the nappe in the half-plane
-    /// through the axis and `m`, #17263); `None` for other kinds and for `m` on a cylinder's
-    /// or cone's axis or at a sphere's centre.
+    /// along the line from its centre; on a torus, from its nearest tube centre; on a cone,
+    /// on the line of the nappe in the half-plane through the axis and `m`, #17263); `None` for other kinds and for `m` on a cylinder's
+    /// or cone's axis, at a sphere's centre, or on a torus's axis or tube-centre circle.
     #[must_use]
     pub fn foot(&self, m: Point3) -> Option<Point3> {
         match self.kind {
@@ -668,6 +673,12 @@ impl BlendQuadric {
             QuadricKind::Sphere => {
                 let radial = (m - self.point).unitize().ok()?;
                 Some(self.point + radial * self.radius)
+            }
+            QuadricKind::Torus => {
+                let radial = across(m - self.point, self.dir).unitize().ok()?;
+                let centre = self.point + radial * self.radius;
+                let tube = (m - centre).unitize().ok()?;
+                Some(centre + tube * self.tube)
             }
             QuadricKind::Cone => {
                 let w = m - self.point;
@@ -996,8 +1007,8 @@ fn coaxial(a: &BlendQuadric, b: &BlendQuadric, tol: f64, reach: f64) -> Option<(
     use QuadricKind as Q;
     let point_a = matches!(a.kind, Q::Sphere | Q::Point);
     let point_b = matches!(b.kind, Q::Sphere | Q::Point);
-    let axis_a = matches!(a.kind, Q::Cylinder | Q::Cone | Q::Line);
-    let axis_b = matches!(b.kind, Q::Cylinder | Q::Cone | Q::Line);
+    let axis_a = matches!(a.kind, Q::Cylinder | Q::Cone | Q::Line | Q::Torus);
+    let axis_b = matches!(b.kind, Q::Cylinder | Q::Cone | Q::Line | Q::Torus);
     let ang_tol = tol / reach.max(tol);
 
     if point_a && point_b {
@@ -1283,8 +1294,8 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
     if a.kind == Q::None || b.kind == Q::None {
         return;
     }
-    // (solidcore #2403) a torus and its circle take no class of the fork's
-    if matches!(a.kind, Q::Torus | Q::Circle) || matches!(b.kind, Q::Torus | Q::Circle) {
+    // A collapsed torus's circle keeps its point-spine construction (#2403).
+    if a.kind == Q::Circle || b.kind == Q::Circle {
         return;
     }
 
@@ -1303,9 +1314,35 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
         if matches!(a.kind, Q::Cylinder | Q::Line) && matches!(b.kind, Q::Cylinder | Q::Line) {
             return;
         }
+        if a.kind == Q::Torus || b.kind == Q::Torus {
+            let (Some(ma), Some(mb)) = (
+                meridian(&a, axis_point, axis_dir),
+                meridian(&b, axis_point, axis_dir),
+            ) else {
+                return;
+            };
+            let near = Point2::new(
+                across(centre - axis_point, axis_dir).length(),
+                (centre - axis_point).dot(axis_dir),
+            );
+            let dist = |x: &Point2| (x.x - near.x).hypot(x.y - near.y);
+            let crossing = meridians_cross(ma, mb)
+                .into_iter()
+                .filter(|x| x.x >= 0.0)
+                .min_by(|x, y| dist(x).total_cmp(&dist(y)));
+            // Coincident meridians and an axis crossing supply no circle spine.
+            if !crossing.is_some_and(|x| x.x > 0.0) {
+                return;
+            }
+        }
         blend.spine = BlendSpine::Circle;
         blend.point = axis_point;
         blend.dir = axis_dir;
+        return;
+    }
+
+    // A noncoaxial torus is outside the remaining quadric intersection classes.
+    if a.kind == Q::Torus || b.kind == Q::Torus {
         return;
     }
 
@@ -1765,6 +1802,11 @@ fn meridian(q: &BlendQuadric, a: Point3, d: Vec3) -> Option<Meridian> {
         QuadricKind::Sphere => Meridian::Circle {
             c: Point2::new(rho(q.point), z(q.point)),
             r: q.radius,
+        },
+        // a coaxial torus: its tube's circle in the radial half-plane
+        QuadricKind::Torus => Meridian::Circle {
+            c: Point2::new(q.radius, z(q.point)),
+            r: q.tube,
         },
         // a coaxial cone: the line from its apex at its half-angle into its nappe
         QuadricKind::Cone => Meridian::Line {
@@ -3577,6 +3619,61 @@ mod tests {
     }
 
     #[test]
+    fn a_coaxial_torus_and_plane_have_circular_spines_and_exact_feet() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let support = torus(30.0, 8.0, 1.0);
+        let radius = 0.8;
+        let offset = support.offset(-radius, 1e-7);
+        let flat = plane(Point3::new(0.0, 0.0, radius), z);
+        let radial = (offset.tube * offset.tube - radius * radius).sqrt();
+        for sign in [-1.0, 1.0] {
+            let centre = Point3::new(30.0 + sign * radial, 0.0, radius);
+            for (a, b) in [(offset, flat), (flat, offset)] {
+                let blend = classify(a, b, radius, centre);
+                assert_eq!(blend.spine, BlendSpine::Circle);
+                let station = circle_spine_station(&blend, centre).unwrap();
+                assert!(station.distance(centre) < 1e-12, "{station:?}");
+                let foot = support.foot(station).unwrap();
+                let expected = Point3::new(
+                    30.0 + sign * 8.0 * radial / offset.tube,
+                    0.0,
+                    8.0 * radius / offset.tube,
+                );
+                assert!(foot.distance(expected) < 1e-12, "{foot:?}");
+                assert!((foot.distance(station) - radius).abs() < 1e-12);
+            }
+        }
+        // A plane through the axis does not give a circular spine.
+        let tilted = plane(Point3::ZERO, Vec3::new(1.0, 0.0, 0.0));
+        let blend = classify(offset, tilted, radius, Point3::new(radius, 30.0, 0.0));
+        assert_eq!(blend.spine, BlendSpine::Traced);
+        for kind in [QuadricKind::Point, QuadricKind::Line, QuadricKind::Circle] {
+            let collapsed = BlendQuadric {
+                kind,
+                dir: z,
+                ..BlendQuadric::default()
+            };
+            for (a, b) in [(offset, collapsed), (collapsed, offset)] {
+                assert_eq!(
+                    classify(a, b, radius, Point3::ZERO).spine,
+                    BlendSpine::Traced
+                );
+            }
+        }
+        assert_eq!(
+            classify(offset, offset, radius, Point3::new(37.2, 0.0, 0.0)).spine,
+            BlendSpine::Traced
+        );
+        let separate = cylinder(Point3::ZERO, z, 100.0, 1.0);
+        assert_eq!(
+            classify(offset, separate, radius, Point3::new(37.2, 0.0, 0.0)).spine,
+            BlendSpine::Traced
+        );
+        assert!(support.foot(Point3::ZERO).is_none());
+        assert!(support.foot(Point3::new(30.0, 0.0, 0.0)).is_none());
+    }
+
+    #[test]
     fn two_lines_meeting_are_a_point_and_coaxial_cylinders_no_spine() {
         let z = Vec3::new(0.0, 0.0, 1.0);
         let x = Vec3::new(1.0, 0.0, 0.0);
@@ -3708,8 +3805,10 @@ mod tests {
         assert_eq!((o.kind, o.tube, o.side), (QuadricKind::Torus, 1.0, 1.0));
         // no implicit form, no class of the fork's
         assert_eq!(t.implicit(), ([[0.0; 3]; 3], [0.0; 3], 0.0));
+        // a plane square to the torus's axis: by symmetry about the axis the rolling ball's
+        // centre runs on a circle about it, so the spine is that circle (exact), not traced
         let e = classify(t, plane(Point3::ZERO, z), 1.0, p);
-        assert_eq!(e.spine, BlendSpine::Traced);
+        assert_eq!(e.spine, BlendSpine::Circle);
     }
 
     #[test]

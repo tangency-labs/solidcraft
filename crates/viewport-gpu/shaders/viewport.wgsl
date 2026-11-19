@@ -25,6 +25,7 @@ struct U {
     hatch: array<vec4<f32>, 3>,
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
+    inv_vp: mat4x4<f32>, // the inverse of `vp`: a pixel's point in the world from its depth
     plane_hatch: array<vec4<f32>, 6>, // each section plane's hatch: stripe phase pixel · xy (`section_hatch`)
     sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
@@ -52,6 +53,7 @@ fn near_z(c: vec4<f32>) -> f32 {
 @group(1) @binding(2) var acc_t: texture_2d<f32>;
 @group(2) @binding(0) var ao_depth: texture_2d<u32>;
 @group(2) @binding(1) var ao_map: texture_2d<f32>;
+@group(2) @binding(2) var ao_normal: texture_2d<f32>;
 
 /// How far past a plane `p` may lie and still be kept: the f32 rounding of positions, so a face
 /// lying on a plane stays whole.
@@ -302,11 +304,6 @@ fn fs_ao_depth_flat(i: FOut, @builtin(front_facing) front: bool) -> AoDepth {
     return opaque_depth(t, front);
 }
 
-@fragment
-fn fs_ao_term_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
-    let t = flat_fragment(i, front);
-    return ao_term(t, front);
-}
 
 /// Opaque model surfaces: cut by the section, the inside shows as a hatched cap.
 @fragment
@@ -487,6 +484,9 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
 struct AoDepth {
     @builtin(frag_depth) depth: f32,
     @location(0) value: u32,
+    // The surface's normal (0..1 per axis), alpha 1 where the surface takes occlusion: not on a
+    // section's cut face (a back face of a sectioned body), nor where nothing is drawn (cleared).
+    @location(1) normal: vec4<f32>,
 };
 
 @fragment
@@ -506,19 +506,27 @@ fn fs_ground_ao(i: TOut) -> @location(0) vec4<f32> {
 /// wall in mid-air, darkening the faces beside the cut).
 fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
-    return AoDepth(i.pos.z, bitcast<u32>(i.pos.z));
+    let takes = select(0.0, 1.0, front || !sectioned());
+    return AoDepth(i.pos.z, bitcast<u32>(i.pos.z), vec4<f32>(normalize(i.n) * 0.5 + 0.5, takes));
 }
 
-/// The term for an opaque surface's fragment, on the prepass's depth. A section's cut face has none.
-fn ao_term(i: TOut, front: bool) -> vec4<f32> {
-    if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
-    if (!front && sectioned()) { return vec4<f32>(1.0); }
-    return vec4<f32>(occlusion_term(i));
-}
-
+/// The term of the surface the prepass left at this pixel of the maps: its point in the world from
+/// its depth, its normal from the normal map. A pixel with no surface, or a section's cut face,
+/// has none. Worked out once per pixel over the maps, without drawing the triangles again.
 @fragment
-fn fs_ao_term(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
-    return ao_term(i, front);
+fn fs_ao_term_screen(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let c = vec2<i32>(pos.xy);
+    let normal = textureLoad(ao_normal, c, 0);
+    if (normal.a < 0.5) { return vec4<f32>(1.0); }
+    let z = bitcast<f32>(textureLoad(ao_depth, c, 0).x);
+    let uv = pos.xy / vec2<f32>(textureDimensions(ao_depth));
+    let h = u.inv_vp * vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, z, 1.0);
+    if (abs(h.w) < 1e-30) { return vec4<f32>(1.0); }
+    var t: TOut;
+    t.pos = vec4<f32>(pos.xy, z, 1.0);
+    t.n = normal.xyz * 2.0 - 1.0;
+    t.wp = h.xyz / h.w;
+    return vec4<f32>(occlusion_term(t));
 }
 
 @vertex
@@ -1147,6 +1155,15 @@ fn fs_img(i: IOut) -> @location(0) vec4<f32> {
     let c = textureSample(img_t, img_s, i.uv);
     if (clipped(i.wp)) { discard; }
     return out_color(vec4<f32>(c.rgb, c.a * i.a));
+}
+
+/// The model's edges' depth alone (`line_depth`): where an edge covers the whole pixel, cut by a
+/// section as it is. A line thinner than a pixel (faded by the width it lacks) or a see-through one
+/// leaves the rest of the pixel to the faces behind it, so it writes none.
+@fragment
+fn fs_line_depth(i: LOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp) || i.c.a < 0.999) { discard; }
+    return vec4<f32>(0.0);
 }
 
 /// Lines the section never cuts (the grid, highlights drawn on top).

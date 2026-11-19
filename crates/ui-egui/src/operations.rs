@@ -445,7 +445,7 @@ impl Default for Panel {
 }
 
 impl Panel {
-    /// Take in the operations under way `now` (ms), oldest first: a new one goes on top, one
+    /// Take in the operations under way `now` (ms on [`frame_ms`]'s clock), oldest first: a new one goes on top, one
     /// still running is brought up to date where it is, and one gone starts fading; rows that
     /// faded out go.
     pub fn update(&mut self, rows: Vec<Row>, now: f64) {
@@ -512,11 +512,20 @@ impl Panel {
     }
 }
 
+/// The panel's clock (ms): the frames' own time (`input.time`), not the wall clock. The app's
+/// frames follow the wall clock, so nothing changes there; in a test harness, whose frames are
+/// 1/60 s apart however long each takes, a row's fade lasts the same frames on any machine. On
+/// the wall clock it lasted fewer frames on a loaded machine, and the toasts placed clear of the
+/// panel moved sooner.
+pub(crate) fn frame_ms(ctx: &egui::Context) -> f64 {
+    ctx.input(|i| i.time) * 1000.0
+}
+
 /// Bring the panel up to date and draw it in `view`'s bottom-right corner, above the frame-rate
 /// readout and its details, left of a pane over that corner. Off in Preferences: nothing.
 pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     app.operations.rect = None;
-    let now = crate::now_ms();
+    let now = frame_ms(ui.ctx());
     let mut rows = current(app);
     if !app.preferences.operations_panel {
         // Not shown, but the names are kept for `ui.operations`' list of those that ended.
@@ -578,6 +587,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
     }
     // Clicks on the panel are its own, not the view's.
     let _ = ui.interact(panel, egui::Id::unique("sc_operations"), Sense::click());
+    // The first surface outside the container hosts to ask for a blurred backdrop: the running-operations card.
+    painter.add(crate::blur::Backdrop::new(panel).corners(t.radius_sm).shape(&painter));
     painter.rect(panel, t.radius_sm, t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_rect("operations:panel", panel);
     app.operations.rect = Some(panel);
@@ -859,7 +870,13 @@ mod tests {
         let failed = outcome(&mut h, &key).expect("listed once it ended");
         assert_eq!(failed["outcome"], "failed", "{failed}");
         assert!(failed["error"].as_str().is_some_and(|e| !e.is_empty()), "{failed}");
-        let row = h.app.operations.rows(crate::now_ms()).find(|(r, _)| r.key == key).map(|(r, _)| r.clone()).expect("its row stays a while");
+        let row = h
+            .app
+            .operations
+            .rows(crate::operations::frame_ms(&h.ctx))
+            .find(|(r, _)| r.key == key)
+            .map(|(r, _)| r.clone())
+            .expect("its row stays a while");
         assert_eq!(row.status(), Some(solidcraft_ui_text::tr("operations.failed").to_string()));
         // Done within the app's wait (never a row): not listed.
         h.app.apply_off_thread = Some(std::time::Duration::from_secs(60));

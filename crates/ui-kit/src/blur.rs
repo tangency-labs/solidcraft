@@ -14,13 +14,15 @@ pub struct Counters {
     pub buffers_created: u64,
     pub bind_groups_created: u64,
     pub pipelines_created: u64,
-    pub source_passes: u64,
     pub blur_passes: u64,
+    /// Snapshots of the composition that were blurred: markers that share one count once.
+    pub blur_runs: u64,
+    /// Pixels the blur passes shaded, over every pyramid level.
+    pub blur_pixels: u64,
     pub composition_passes: u64,
     pub present_passes: u64,
     pub markers_emitted: u64,
     pub markers_drawn: u64,
-    pub cache_hits: u64,
     pub live_bytes: u64,
     pub live_textures: u64,
     pub live_buffers: u64,
@@ -36,6 +38,27 @@ impl Counters {
         self.live_buffers = 0;
         self.live_bind_groups = 0;
         self.live_pipelines = 0;
+    }
+
+    /// Add another window's counters, live ones included.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn add(&mut self, other: &Self) {
+        self.textures_created += other.textures_created;
+        self.buffers_created += other.buffers_created;
+        self.bind_groups_created += other.bind_groups_created;
+        self.pipelines_created += other.pipelines_created;
+        self.blur_passes += other.blur_passes;
+        self.blur_runs += other.blur_runs;
+        self.blur_pixels += other.blur_pixels;
+        self.composition_passes += other.composition_passes;
+        self.present_passes += other.present_passes;
+        self.markers_emitted += other.markers_emitted;
+        self.markers_drawn += other.markers_drawn;
+        self.live_bytes += other.live_bytes;
+        self.live_textures += other.live_textures;
+        self.live_buffers += other.live_buffers;
+        self.live_bind_groups += other.live_bind_groups;
+        self.live_pipelines += other.live_pipelines;
     }
 }
 
@@ -179,6 +202,32 @@ impl Session {
     }
 }
 
+/// A request for a blurred backdrop behind a surface that is not a `Container` host (those get it
+/// from the container). Add the shape before the surface's own translucent fill:
+/// `painter.add(Backdrop::new(rect).corners(radius).shape(&painter))`. It is `Shape::Noop` when
+/// blur is off, unavailable, the painter is faded (see-through never blurs), or the window did not begin a frame, so callers add it unconditionally.
+/// Which surfaces ask is the caller's policy: HUDs, toasts and input shields should not.
+#[derive(Clone, Copy, Debug)]
+pub struct Backdrop {
+    rect: Rect,
+    corners: egui::CornerRadius,
+}
+
+impl Backdrop {
+    pub fn new(rect: Rect) -> Self {
+        Self { rect, corners: egui::CornerRadius::ZERO }
+    }
+
+    pub fn corners(mut self, corners: impl Into<egui::CornerRadius>) -> Self {
+        self.corners = corners.into();
+        self
+    }
+
+    pub fn shape(&self, painter: &Painter) -> Shape {
+        implementation::mark(painter, self.rect, self.corners).unwrap_or(Shape::Noop)
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "blur_native.rs"]
 mod implementation;
@@ -212,7 +261,7 @@ mod implementation {
         pub fn counters(&self) -> Counters {
             Counters::default()
         }
-        pub fn begin(&mut self, _: &egui::Context, _: bool) -> Scope {
+        pub fn begin(&mut self, _: &egui::Context) -> Scope {
             Scope
         }
         pub fn set_surface_alpha(&mut self, _: Option<u8>) {}
@@ -231,11 +280,14 @@ mod implementation {
     pub fn panel_fill(fill: Color32) -> Color32 {
         fill
     }
+    pub fn wants_backdrop(_: Color32, _: f32, _: bool) -> bool {
+        false
+    }
     pub fn decorate(_: &Painter, _: Frame, _: Rect, shape: Shape) -> Shape {
         shape
     }
-    pub fn viewport(painter: &Painter, rect: Rect, cb: solidcraft_viewport_egui::ViewportCallback, _: Rect, _: [Color32; 2]) {
-        painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
+    pub(super) fn mark(_: &Painter, _: Rect, _: egui::CornerRadius) -> Option<Shape> {
+        None
     }
 }
 #[cfg(target_arch = "wasm32")]
