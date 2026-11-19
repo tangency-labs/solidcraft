@@ -123,6 +123,8 @@ struct App {
     gpu: Option<LostWatch>,
     /// The window's backend, and whether it is the software renderer.
     renderer: Option<(eframe::wgpu::Backend, bool)>,
+    /// APIs startup already found unusable, also skipped by an automatic hang restart.
+    skipped_backends: eframe::wgpu::Backends,
     /// A GPU that hangs after the window is up (`App::watch_for_a_hang`).
     hang: startup::HangWatch,
     /// Whether the GPU still finishes its work (`App::gpu_progressing`), on `progress_clock`.
@@ -703,7 +705,7 @@ impl App {
             Some(s) if s > 0.0 => format!("the surface refused its configuration for {s:.0} s"),
             _ => format!("{stalled} frames in a row waited out their acquire"),
         };
-        let Some(backend) = self.renderer.and_then(|(backend, cpu)| startup::after_hang(backend, cpu)) else {
+        let Some(backend) = self.renderer.and_then(|(backend, cpu)| startup::after_hang(backend, cpu, self.skipped_backends)) else {
             log::error!("graphics: {why}, on the software renderer");
             return;
         };
@@ -2011,6 +2013,7 @@ fn main() -> eframe::Result {
                 come_forward: come_forward::ComeForward::default(),
                 gpu,
                 renderer,
+                skipped_backends: skipped.crashed | skipped.failed,
                 hang: startup::HangWatch::default(),
                 progress: Default::default(),
                 progress_clock: std::time::Instant::now(),

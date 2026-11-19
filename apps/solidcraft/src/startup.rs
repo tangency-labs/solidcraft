@@ -890,11 +890,14 @@ impl GpuProgress {
 /// at most once on each: a safe-mode restart would leave the backend that hung saved for the
 /// next normal start. The next API isn't probed here, as that would load its drivers into the
 /// process whose GPU just hung: the new launch finds out, and falls back if it has no GPU.
-pub fn after_hang(backend: eframe::wgpu::Backend, cpu: bool) -> Option<&'static str> {
+/// APIs startup recorded as crashed or failed (`skipped`) stay out of this automatic choice:
+/// saving and passing one as a retry would otherwise override startup's guard as an explicit choice.
+pub fn after_hang(backend: eframe::wgpu::Backend, cpu: bool, skipped: eframe::wgpu::Backends) -> Option<&'static str> {
+    use eframe::wgpu::{Backend, Backends};
     match backend {
         _ if cpu => None,
-        eframe::wgpu::Backend::Vulkan => Some("dx12"),
-        eframe::wgpu::Backend::Dx12 => Some("gl"),
+        Backend::Vulkan if !skipped.contains(Backends::DX12) => Some("dx12"),
+        Backend::Vulkan | Backend::Dx12 if !skipped.contains(Backends::GL) => Some("gl"),
         _ => Some(SOFTWARE_BACKEND),
     }
 }
@@ -1990,10 +1993,11 @@ mod tests {
         assert!(refused_slow.hung(REFUSED_S_FOR_RESTART, true, 0, Some(REFUSED_S_FOR_RESTART), true));
 
         // Each API hangs at most once: Vulkan, then D3D12, then OpenGL, then software.
-        assert_eq!(after_hang(Backend::Vulkan, false), Some("dx12"));
-        assert_eq!(after_hang(Backend::Dx12, false), Some("gl"));
-        assert_eq!(after_hang(Backend::Gl, false), Some(SOFTWARE_BACKEND));
-        assert_eq!(after_hang(Backend::Dx12, true), None, "software: nothing to fall back to");
+        let none = eframe::wgpu::Backends::empty();
+        assert_eq!(after_hang(Backend::Vulkan, false, none), Some("dx12"));
+        assert_eq!(after_hang(Backend::Dx12, false, none), Some("gl"));
+        assert_eq!(after_hang(Backend::Gl, false, none), Some(SOFTWARE_BACKEND));
+        assert_eq!(after_hang(Backend::Dx12, true, none), None, "software: nothing to fall back to");
         assert!(cpu_renderer_env(Some(SOFTWARE_BACKEND)), "the saved software renderer starts as such");
         let note = hang_note("Dx12", false, Some("vulkan"), None);
         assert!(note.contains("on Direct3D 12") && note.contains("on Vulkan") && note.contains("offered for recovery"), "{note}");
@@ -2018,6 +2022,29 @@ full"
             Some("Bracket: disk full; Plate: autosave is off")
         );
         assert_eq!(unkept(&["x".repeat(5_000)]).map(|u| u.chars().count()), Some(1000));
+    }
+
+    #[test]
+    fn a_hang_restart_skips_backends_that_already_crashed_or_failed() {
+        use eframe::wgpu::{Backend, Backends};
+        let none = Backends::empty();
+        // The retry is automatic, even though it is saved and passed to the next process like
+        // an explicit choice. It must not load a driver startup already ruled out (#19176).
+        for skipped in [SkippedBackends { crashed: Backends::DX12, failed: none }, SkippedBackends { crashed: none, failed: Backends::DX12 }] {
+            assert_eq!(after_hang(Backend::Vulkan, false, skipped.crashed | skipped.failed), Some("gl"));
+        }
+        for skipped in [
+            SkippedBackends { crashed: Backends::DX12 | Backends::GL, failed: none },
+            SkippedBackends { crashed: Backends::DX12, failed: Backends::GL },
+            SkippedBackends { crashed: none, failed: Backends::DX12 | Backends::GL },
+        ] {
+            let avoid = skipped.crashed | skipped.failed;
+            assert_eq!(after_hang(Backend::Vulkan, false, avoid), Some(SOFTWARE_BACKEND));
+            assert_eq!(after_hang(Backend::Dx12, false, avoid), Some(SOFTWARE_BACKEND));
+        }
+        assert_eq!(after_hang(Backend::Vulkan, false, Backends::GL), Some("dx12"));
+        assert_eq!(after_hang(Backend::Gl, false, none), Some(SOFTWARE_BACKEND), "never return to an earlier API");
+        assert_eq!(after_hang(Backend::Dx12, true, Backends::all()), None, "software has no further fallback");
     }
 
     #[test]
