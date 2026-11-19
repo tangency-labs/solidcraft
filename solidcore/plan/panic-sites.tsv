@@ -18,22 +18,22 @@ crates/solidcore-step/src/topology.rs	Builder::face	with_capacity	1	proven	Vec::
 crates/solidcore-step/src/assembly.rs	Assembly::face_extent	with_capacity	1	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
 crates/solidcore-step/src/assembly.rs	Assembly::face_extent	with_capacity	2	proven	Vec::with_capacity(es.len())	the length of a collection already in memory
 crates/solidcore-step/src/assembly.rs	Assembly::face_pcurves	with_capacity	1	proven	Vec::with_capacity(l.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	1	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	2	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	3	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	4	proven	Vec::with_capacity(nf)	nf = self.faces.len(), already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	5	proven	Vec::with_capacity(self.edges.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	6	proven	Vec::with_capacity(self.vertices.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	7	proven	Vec::with_capacity(flipped)	flipped counts the entries of turned, a list in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	8	proven	Vec::with_capacity(vertex_order.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	9	proven	Vec::with_capacity(edge_order.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	10	proven	Vec::with_capacity(face_order.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	11	proven	Vec::with_capacity(face_order.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	12	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	13	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	14	proven	Vec::with_capacity(es.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	15	proven	Vec::with_capacity(shells.len())	the length of a collection already in memory
-crates/solidcore-step/src/assembly.rs	Assembly::finish	with_capacity	16	proven	Vec::with_capacity(s.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	1	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	2	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	3	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	4	proven	Vec::with_capacity(nf)	nf = self.faces.len(), already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	5	proven	Vec::with_capacity(self.edges.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	6	proven	Vec::with_capacity(self.vertices.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	7	proven	Vec::with_capacity(flipped)	flipped counts the entries of turned, a list in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	8	proven	Vec::with_capacity(vertex_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	9	proven	Vec::with_capacity(edge_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	10	proven	Vec::with_capacity(face_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	11	proven	Vec::with_capacity(face_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	12	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	13	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	14	proven	Vec::with_capacity(es.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	15	proven	Vec::with_capacity(shells.len())	the length of a collection already in memory
+crates/solidcore-step/src/assembly.rs	Assembly::finish_as_given	with_capacity	16	proven	Vec::with_capacity(s.len())	the length of a collection already in memory
 crates/solidcore-step/src/topology.rs	Builder::poly_loop	int-rem	1	proven	(k + 1) % pts.len()	pts.len() < 3 returns an Err just above, so the divisor is at least 3
 crates/solidcore-step/src/topology.rs	Builder::poly_loop	with_capacity	1	proven	Vec::with_capacity(pts.len())	the length of a collection already in memory
 crates/solidcore-step/src/topology.rs	Builder::shell	with_capacity	1	proven	Vec::with_capacity(faces.len())	the length of a collection already in memory

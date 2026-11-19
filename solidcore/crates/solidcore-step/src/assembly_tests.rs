@@ -784,3 +784,101 @@ fn a_disagreement_on_a_face_names_the_files_face() {
     // A face past the origins (no file face known) names none.
     assert_eq!(crate::topology::named_face(&disagreement(&on(Record::Face(5)), &origins)), None);
 }
+
+/// The box with the bottom face and the y = 0 face meeting across a sliver: the bottom face's
+/// edge from corner 0 to corner 1, the side's from corners 0 and 1 raised by `width`, and a face
+/// of the y = 0 plane between them, bounded by the two and the short edges joining their ends
+/// (which the x = 0 and x = 10 faces use too).
+fn box_with_sliver(width: f64) -> R<Solid> {
+    let tol = 1e-6;
+    let mut asm = Assembly::new(tol, None);
+    let raised = |c: usize| {
+        let mut p = corner(c);
+        p[2] += width;
+        p
+    };
+    // Corners 0..8, then corner 0 and 1 raised (8 and 9).
+    let mut vertices = Vec::new();
+    for c in 0..8 {
+        vertices.push(asm.add_vertex(corner(c))?);
+    }
+    vertices.push(asm.add_vertex(raised(0))?);
+    vertices.push(asm.add_vertex(raised(1))?);
+    let point = |v: usize| if v < 8 { corner(v) } else { raised(v - 8) };
+    let mut edges: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut edge = |asm: &mut Assembly<'_>, a: usize, z: usize| -> R<(u32, bool)> {
+        let key = (a.min(z), a.max(z));
+        let e = match edges.get(&key) {
+            Some(e) => *e,
+            None => {
+                let line = BCurve::Line { start: point(key.0), end: point(key.1) };
+                let (e, _) = asm.add_edge(key.0 as u64 * 16 + key.1 as u64, line, [0.0, 1.0], [vertices[key.0], vertices[key.1]])?;
+                edges.insert(key, e);
+                e
+            }
+        };
+        Ok((e, a < z))
+    };
+    // Each face's corners counter-clockwise about its outward normal, and its plane's axes.
+    let faces: [(Vec<usize>, [f64; 3], [f64; 3]); 7] = [
+        (vec![0, 2, 3, 1], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+        (vec![4, 5, 7, 6], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        (vec![8, 9, 5, 4], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        (vec![2, 6, 7, 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
+        (vec![8, 4, 6, 2, 0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+        (vec![1, 3, 7, 5, 9], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+        // The sliver.
+        (vec![0, 1, 9, 8], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    ];
+    let mut shell = Vec::new();
+    for (f, (corners, u_axis, v_axis)) in faces.into_iter().enumerate() {
+        let mut uses = Vec::new();
+        for k in 0..corners.len() {
+            uses.push(edge(&mut asm, corners[k], corners[(k + 1) % corners.len()])?);
+        }
+        let plane = BSurface::Plane { origin: point(corners[0]), u_axis, v_axis };
+        shell.push((asm.add_face(f as u64, plane, vec![Bound::Edges(uses)], Some(0), true)?, true));
+    }
+    asm.finish(0, "box".into(), vec![shell], Kind::Solid)
+}
+
+/// A face narrower than the tolerance between two faces, of no area (its pcurves meet), is left
+/// out, its two long sides made one edge and its short ones' vertices one, so the faces either
+/// side meet: the box is the box. One narrower than the tolerance that reads is kept, as is one
+/// ten tolerances wide.
+#[test]
+fn a_face_narrower_than_the_tolerance_that_cannot_be_read_is_left_out_its_sides_made_one() {
+    let solid = box_with_sliver(0.0).unwrap();
+    let brep = &solid.brep;
+    assert_eq!((brep.faces.len(), brep.edges.len(), brep.vertices.len()), (6, 12, 8), "{:?}", solid.notes);
+    assert!(!solid.sheet);
+    for e in &brep.edges {
+        assert_eq!(e.uses.len(), 2, "every edge bounds two faces");
+    }
+    assert!(!solid.face_origin.contains(&6), "{:?}", solid.face_origin);
+    assert!(solid.notes.iter().any(|n| n.contains("1 faces narrower than")), "{:?}", solid.notes);
+    assert!((volume(&solid) - 6000.0).abs() < 1e-3, "{}", volume(&solid));
+
+    for width in [1e-7, 1e-5] {
+        let kept = box_with_sliver(width).unwrap();
+        assert_eq!((kept.brep.faces.len(), kept.brep.edges.len(), kept.brep.vertices.len()), (7, 15, 10), "{width}");
+        assert!(!kept.notes.iter().any(|n| n.contains("narrower than")), "{:?}", kept.notes);
+    }
+}
+
+/// A side of a spline face 5 µm long that the file made one vertex, at its middle: a vertex
+/// whose tolerance takes in the whole side is raised to reach along it from its end, where the
+/// record check measures it; one whose tolerance does not take it in is left as it is.
+#[test]
+fn a_side_within_its_vertexs_tolerance_is_reached_from_its_end() {
+    let points = vec![vec![[0.0, 0.0, 0.0], [0.0, 10.0, 0.0]], vec![[0.005, 0.0, 0.0], [0.005, 10.0, 0.0]]];
+    let strip = BSurface::Spline { u_knots: vec![0.0, 0.0, 1.0, 1.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], points };
+    let eval = SurfaceEval::new(&strip).unwrap();
+    let vertex = Vec3::from([0.0025, 0.0, 0.0]);
+    let r = side_reach(&eval, [0.0, 0.0], 0, [0.0, 1.0], vertex, 0.003).expect("the side lies within the vertex's tolerance");
+    assert!((0.005..=0.0051).contains(&r), "{r}");
+    assert!(eval.pole_within([0.0, 0.0], r).unwrap()[0]);
+    assert_eq!(side_reach(&eval, [0.0, 0.0], 0, [0.0, 1.0], vertex, 0.002), None);
+    // Along v the side is 10 mm long, past any vertex.
+    assert_eq!(side_reach(&eval, [0.0, 0.0], 1, [0.0, 1.0], vertex, 0.003), None);
+}

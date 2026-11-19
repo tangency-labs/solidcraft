@@ -44,6 +44,7 @@ mod extend;
 mod frames;
 mod reseam;
 pub(crate) mod seams;
+mod slivers;
 mod touching;
 mod wound;
 
@@ -121,6 +122,7 @@ pub enum Kind {
 }
 
 /// A curve the edge can be read on, and how its parameter relates to its vertices.
+#[derive(Clone)]
 pub(crate) struct EdgeB {
     pub(crate) curve: BCurve,
     pub(crate) interval: [f64; 2],
@@ -140,6 +142,7 @@ pub enum Bound {
     Vertex(u32),
 }
 
+#[derive(Clone)]
 pub(crate) struct FaceB {
     /// What the reader names the face by in notes and refusals (`face #origin`), and what
     /// [`Solid::face_origin`] gives back.
@@ -190,6 +193,7 @@ pub enum SweptSurface {
 }
 
 /// Faces, edges and vertices being assembled into a record ([`Assembly::finish`]).
+#[derive(Clone)]
 pub struct Assembly<'t> {
     pub(crate) tol: f64,
     /// Makes the pcurves of uses that have no closed form; without it such a face is refused.
@@ -211,6 +215,8 @@ pub struct Assembly<'t> {
     pub(crate) loops_left_touching: Vec<(u64, P3)>,
     /// Spline patches continued past their knot range to their face's trims ([`extend`]).
     pub(crate) patches_extended: usize,
+    /// Loops run along a side of a spline face the file wrote as one vertex, its tolerance raised.
+    pub(crate) sides_in_vertices: usize,
     /// Faces on a closed spline patch whose seam was moved off them ([`reseam`]).
     pub(crate) reseamed: HashSet<usize>,
     /// Edges added with their vertices at the other ends of their intervals, turned round
@@ -246,6 +252,7 @@ impl<'t> Assembly<'t> {
             loops_joined: 0,
             loops_left_touching: Vec::new(),
             patches_extended: 0,
+            sides_in_vertices: 0,
             reseamed: HashSet::new(),
             edges_turned: 0,
             splines_closed: 0,
@@ -628,7 +635,26 @@ impl<'t> Assembly<'t> {
     /// Pcurves, outer loops, domains and the canonical order: the finished record of body item
     /// `item` named `name`, whose shells are `shells` (each a list of faces and whether the shell
     /// uses each on its side), making a body of `kind`.
+    ///
+    /// A body with faces narrower than the tolerance ([`slivers`]) is read with them first; where
+    /// that is refused (such a face has no area in its own parameters), they are left out, their
+    /// sides made one, and it is read again.
     pub fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
+        if !self.has_slivers()? {
+            return self.finish_as_given(item, name, shells, kind);
+        }
+        if let Ok(solid) = self.clone().finish_as_given(item, name.clone(), shells.clone(), kind) {
+            return Ok(solid);
+        }
+        let (shells, slivers) = self.collapse_slivers(shells)?;
+        let note = format!("{slivers} faces narrower than {} mm left out, their two sides made one edge", self.tol);
+        let mut solid = self.finish_as_given(item, name, shells, kind)?;
+        solid.notes.insert(0, note);
+        Ok(solid)
+    }
+
+    /// [`Self::finish`] with the faces as the reader gave them.
+    fn finish_as_given(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         let mut notes = Vec::new();
         let twins = self.merge_twin_edges()?;
         if twins > 0 {
@@ -680,15 +706,6 @@ impl<'t> Assembly<'t> {
                 "{} sides of spline surfaces that close to a point within {} mm made exact poles (their control points made one)",
                 self.poles_made_exact, self.tol
             ));
-        }
-        if !self.reseamed.is_empty() {
-            notes.push(format!("{} closed spline patches started elsewhere, off the face across their seam", self.reseamed.len()));
-        }
-        if self.patches_extended > 0 {
-            notes.push(format!("{} spline patches continued past their knot range to their faces' trims", self.patches_extended));
-        }
-        if self.inner_loops_turned > 0 {
-            notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
         }
         if self.lines_between_vertices > 0 {
             notes.push(format!("{} line edges whose vertices lie off their LINE read as the segment between them", self.lines_between_vertices));
@@ -761,6 +778,21 @@ impl<'t> Assembly<'t> {
             // Every face that failed is named (up to `MAX_NAMED_FAILURES`), the first first.
             let named = if failed > 1 { format!(" ({})", failed_faces.join(", ")) } else { String::new() };
             return Err(format!("pcurves failed on {failed} of {} faces{named}; first: {first}", self.faces.len()));
+        }
+        if !self.reseamed.is_empty() {
+            notes.push(format!("{} closed spline patches started elsewhere, off the face across their seam", self.reseamed.len()));
+        }
+        if self.patches_extended > 0 {
+            notes.push(format!("{} spline patches continued past their knot range to their faces' trims", self.patches_extended));
+        }
+        if self.inner_loops_turned > 0 {
+            notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
+        }
+        if self.sides_in_vertices > 0 {
+            notes.push(format!(
+                "{} sides of spline faces the file wrote as one vertex run along, the vertex's tolerance raised to reach along them",
+                self.sides_in_vertices
+            ));
         }
         if !self.raised_edges.is_empty() {
             let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
@@ -1477,6 +1509,23 @@ impl<'t> Assembly<'t> {
                             poles.as_ref().and_then(|s| s.point(q))
                         };
                         let closed = matches!((ends_at(*a), ends_at(*b)), (Some(p), Some(q)) if p.dist(q) <= reach);
+                        // A side of a spline face the file made one vertex (a corner patch's
+                        // side a few µm long, its two corners written as one): where every point
+                        // of it lies within the vertex's tolerance of the vertex, the loop runs
+                        // along it, as at a pole, the vertex's tolerance raised to reach along
+                        // it from the loop's point there, as the record check measures it.
+                        if !closed
+                            && form.is_none()
+                            && let Some(e) = &poles
+                            && let Some(x) = self.vertices.get(v as usize)
+                            && let Some(r) = side_reach(e, *start, d, [*a, *b], Vec3::from(x.point), reach)
+                        {
+                            if let Some(x) = self.vertices.get_mut(v as usize) {
+                                x.tolerance = x.tolerance.max(r);
+                            }
+                            self.sides_in_vertices += 1;
+                            continue;
+                        }
                         // The patch started instead inside the widest gap the face's boundary
                         // leaves round it ([`reseam`]), and the face's pcurves made on that
                         // (once: a face whose loop still jumps is refused).
@@ -1814,6 +1863,38 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
 /// The refusal of a record whose geometry disagrees with its topology: on a face (not an edge
 /// alone), naming the file's face too (`face #origin`, of `face_origin`), so a reader can leave it
 /// out.
+/// Points along a side of a spline face measured against the vertex it was made ([`side_reach`]).
+const SIDE_SAMPLES: usize = 32;
+
+/// The tolerance a vertex at `start` (its point `vertex`, its tolerance `tolerance`) needs for a
+/// loop to run along the face's side through `start` in direction `d` over `[a, b]` as at a pole:
+/// `None` unless every point of the side lies within `tolerance` of the vertex (so the vertex
+/// already stands for all of it): the least of a few steps past the side's farthest point from
+/// `start` at which the side, certified, stays within that of `start`
+/// ([`SurfaceEval::pole_within`], which the record check asks). That point is at most twice the
+/// tolerance away; a reach past two and a half times it is not taken.
+fn side_reach(surface: &SurfaceEval, start: [f64; 2], d: usize, [a, b]: [f64; 2], vertex: Vec3, tolerance: f64) -> Option<f64> {
+    let at = |x: f64| {
+        let mut q = start;
+        *q.get_mut(d)? = x;
+        surface.point(q)
+    };
+    let from = surface.point(start)?;
+    let mut far = 0.0f64;
+    for k in 0..=SIDE_SAMPLES {
+        let p = at(a + (b - a) * (k as f64 / SIDE_SAMPLES as f64))?;
+        if !(p.dist(vertex) <= tolerance) {
+            return None;
+        }
+        far = far.max(p.dist(from));
+    }
+    [1.01, 1.1, 1.25, 1.5]
+        .into_iter()
+        .map(|m| m * far)
+        .filter(|r| *r > 0.0 && *r <= 2.5 * tolerance)
+        .find(|r| surface.pole_within(start, *r).ok().and_then(|p| p.get(d).copied()).unwrap_or(false))
+}
+
 pub(crate) fn disagreement(e: &solidcore_ops::record_check::Mismatch, face_origin: &[u64]) -> String {
     use solidcore_ops::record_check::Record;
     let face = match e.record {
