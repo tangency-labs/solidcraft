@@ -1329,7 +1329,7 @@ fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
     assert_eq!(reply_to(&mut h, &single)["ok"], true);
     h.frames(1);
     let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
-    if h.app.operations.rows(crate::now_ms()).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
+    if h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
         assert_eq!(finished[0]["outcome"], "done", "{finished}");
     }
 }
@@ -1758,7 +1758,7 @@ fn many_waiting_agent_commands_keep_the_panel_and_fold_into_one_row() {
     h.frames(1);
     assert!(h.app.agent_computing().is_some());
     assert!(h.app.operations.panel_drew, "the panel is drawn with 40 commands waiting");
-    let shown = h.app.operations.rows(crate::now_ms()).count();
+    let shown = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).count();
     assert_eq!(shown, 1 + MAX_WAITING_SHOWN + 1, "the computing one, the first waiting ones and the summary row");
     let rows = agent_rows(&mut h);
     assert_eq!(rows.iter().filter(|r| r["queued"] == true).count(), 40, "all of them stay listed");
@@ -1794,9 +1794,11 @@ fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
     let first = rows.iter().rfind(|r| r["queued"] == true).unwrap()["key"].as_str().unwrap().to_string();
     crate::operations::cancel(&mut h.app, &first).unwrap();
     h.frames(1);
-    let shown: Vec<_> = h.app.operations.rows(crate::now_ms()).map(|(r, alpha)| (r.key.clone(), r.label.clone(), alpha)).collect();
+    let shown: Vec<_> = h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).map(|(r, _)| (r.key.clone(), r.label.clone(), r.queued)).collect();
     assert_eq!(shown.last().map(|r| r.0.as_str()), Some("agent:held:more"), "the summary row is the top one: {shown:?}");
-    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2 == 1.0).collect();
+    // Those still waiting: the cancelled one is fading out, no longer queued (fully opaque on the
+    // frame it went, since its fade starts on that frame's clock).
+    let live: Vec<_> = shown.iter().filter(|r| r.0.starts_with("agent:held:") && r.0 != "agent:held:more" && r.2).collect();
     let places: Vec<_> = live.iter().map(|r| r.1.split('.').next().unwrap().to_string()).collect();
     assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
 }
