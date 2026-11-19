@@ -1,0 +1,10 @@
+{
+  "en": { "Bend Relief Shape": "Bend Relief Shape", "Obround": "Obround" },
+  "ar": { "Bend Relief Shape": "شكل تفريغ الثني", "Obround": "مستطيل بطرف مستدير" },
+  "he": { "Bend Relief Shape": "צורת הקלת כיפוף", "Obround": "מלבן מעוגל" },
+  "ja": { "Bend Relief Shape": "ベンドリリーフ形状", "Obround": "長円形" },
+  "vi": { "Bend Relief Shape": "Hình dạng rãnh thoát uốn", "Obround": "Hình chữ nhật đầu tròn" },
+  "zh": { "Bend Relief Shape": "折弯止裂槽形状", "Obround": "长圆形" },
+  "de": { "Bend Relief Shape": "Form der Biegefreistellung", "Obround": "Langloch" },
+  "ko": { "Bend Relief Shape": "굽힘 릴리프 모양", "Obround": "장원형" }
+}
