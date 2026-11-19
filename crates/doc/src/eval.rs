@@ -5220,7 +5220,25 @@ fn absorb_sheet_cuts(
             *slot = sk;
         }
     }
+    note_press_in_hardware(before, after, f, warning);
     Ok(())
+}
+
+/// What the sheet can't hold of the press-in hardware a hole made in it (#17752) is a warning,
+/// never an error: a change of gauge or of a bend must not break the timeline. Every sheet the
+/// feature changed is read, whether it was cut straight into (a hole's prism) or built again from
+/// the body.
+fn note_press_in_hardware(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
+    let FeatureKind::Hole { hardware: Some(hardware), .. } = &f.kind else { return };
+    for sk in &after.surface_sheets {
+        let old = before.surface_sheets.iter().find(|b| b.body == sk.body);
+        if old.is_some_and(|o| o.regions == sk.regions) {
+            continue;
+        }
+        for note in crate::sheet_hardware::findings(old, sk, hardware) {
+            append_warning(warning, note);
+        }
+    }
 }
 
 /// Whether feature `f` takes material away (see [`absorb_sheet_cuts`]): a hole, a chamfer or
