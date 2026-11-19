@@ -1106,7 +1106,17 @@ pub(super) fn move_drawn(
                 .collect();
             moves.extend(moved.into_iter().map(|(i, to)| (wire.clone(), i, to)));
         }
+        if let Some((wire, index, _)) = moves.iter().find(|(w, i, _)| sk.wire_point_fixed(&WirePoint { wire: w.clone(), index: *i })) {
+            return Err(bad(cmd, format!("`{wire}` point {index} is fixed, or joined to a fixed point (unfix it to move it)")));
+        }
+        let held_before = sk.wire_constraints_holding();
         sk.move_drawn_points(&moves)?;
+        if !held_before.is_empty() {
+            let held_after = sk.wire_constraints_holding();
+            if held_before.iter().any(|id| !held_after.contains(id)) {
+                return Err(bad(cmd, "the sketch's 3D constraints cannot hold the moved points there"));
+            }
+        }
         Ok(moves.len())
     })
 }
