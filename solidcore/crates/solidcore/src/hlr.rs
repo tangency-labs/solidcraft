@@ -24,6 +24,8 @@ mod vec;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use serde::Serialize;
+
 use vec::V3;
 
 use curve::{C3, as_circle};
@@ -98,7 +100,8 @@ impl Placement {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
     Sharp,
     /// Between two faces that meet tangentially (or lie on one surface).
@@ -138,7 +141,7 @@ pub struct Prepared {
     pub report: PrepareReport,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct PrepareReport {
     pub faces: usize,
     pub edges: usize,
@@ -469,14 +472,16 @@ pub const MAX_COORDINATE: f64 = 1e12;
 /// Most worker threads.
 pub const MAX_THREADS: usize = 64;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Visible,
     Hidden,
     Uncertain,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Source {
     Edge {
         edge: usize,
@@ -515,14 +520,14 @@ pub struct Line {
 }
 
 /// A face left out of the supported subset, and why.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Unsupported {
     pub placement: usize,
     pub face: usize,
     pub reason: &'static str,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Stats {
     pub tracks: usize,
     pub silhouettes: usize,
