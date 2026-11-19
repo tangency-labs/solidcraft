@@ -4131,9 +4131,9 @@ mod tests {
         assert_eq!(fit_tolerance(&k, &mut b, e).unwrap(), after * 2.0);
     }
 
-    /// A cancelled kernel stops the cover before it measures any edge use (those with no
-    /// trim of their own included), and it raises no tolerance: `Solids/fillet_ts.smb`'s
-    /// edge 29, which the cover raises on a read, keeps its tolerance from the file.
+    /// A cancelled kernel stops the cover with the cancelled status, and it raises no
+    /// tolerance: `Solids/fillet_ts.smb`'s edge 29, which the cover raises on a read, keeps
+    /// its tolerance from the file.
     #[test]
     fn a_cancelled_cover_raises_nothing() {
         let mut k = Kernel::default();
