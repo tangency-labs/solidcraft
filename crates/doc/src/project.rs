@@ -381,23 +381,20 @@ fn resolve_uncached(
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
             match kind {
-                LinkKind::Intersect
-                    if matches!(
-                        ss.sketch.curves.get(ci).map(|c| &c.kind),
-                        Some(CurveKind::Line { .. } | CurveKind::Circle { .. } | CurveKind::Arc { .. })
-                    ) =>
-                {
+                LinkKind::Intersect => {
                     let mut points = Vec::new();
+                    // A linked point can anchor a guide rail, so intersect the curve pieces
+                    // themselves. Adjacent pieces can report the same endpoint.
                     for piece in sketch_curves(ss, ci) {
                         let hits = solidcore_ops::curve::plane_crossings(&piece.curve, piece.interval, plane)
                             .map_err(|e| DocError::Invalid(e.to_string()))?;
-                        points.extend(hits.into_iter().map(LinkGeom::Point));
+                        for hit in hits {
+                            if !points.iter().any(|point| matches!(point, LinkGeom::Point(p) if p.dist(hit) < 1e-7)) {
+                                points.push(LinkGeom::Point(hit));
+                            }
+                        }
                     }
                     points
-                }
-                LinkKind::Intersect => {
-                    let pts: Vec<Vec3> = ss.sketch.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| ss.plane.to_world(p)).collect();
-                    section_of_polyline(plane, &pts)
                 }
                 LinkKind::Include => {
                     let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
