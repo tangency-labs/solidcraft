@@ -429,6 +429,55 @@ fn dimension_tool_escape_drops_picks_then_the_tool() {
     assert!(!crate::drawing_workspace::placing_dimension(&h.app));
 }
 
+/// Paper millimetres (`x`, `y`) of the A3 sheet on screen.
+fn on_screen(x: f64, y: f64) -> [f32; 2] {
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+}
+
+/// The text centre of drawing dimension `id`, as inspect lays it out, and the whole answer.
+fn text_of(h: &mut Harness, id: u64) -> (Vec2, Value) {
+    let read = h.app.run("drawing.dimension.inspect", json!({"dimension": solidcraft_engine::doc::ids::encode(id)})).unwrap();
+    let corners: Vec<[f64; 2]> = serde_json::from_value(read["layout"]["text_boxes"][0].clone()).unwrap();
+    let centre = corners.iter().fold(Vec2::ZERO, |sum, p| sum + Vec2::new(p[0], p[1])) * 0.25;
+    (centre, read)
+}
+
+/// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the
+/// same drag (`dim_view`), and the whole drag is one undo step.
+#[test]
+fn a_drawing_dimensions_text_drags_like_a_sketch_dimensions() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let (from, before) = text_of(&mut h, id);
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + 15.0, from.y + 12.0)], "steps": 6})).unwrap();
+    h.frames(2);
+    assert!(crate::dim_view::dragged().is_none(), "the drag ended");
+    let (to, after) = text_of(&mut h, id);
+    assert!((to - (from + Vec2::new(15.0, 12.0))).len() < 1.0, "the text followed the pointer: {from:?} -> {to:?}\n{after}");
+    assert!(number(&after["record"]["offset_mm"]) > number(&before["record"]["offset_mm"]) + 10.0, "{before}\n{after}");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the whole drag");
+    h.app.run("edit.undo", json!({})).unwrap();
+    let (back, _) = text_of(&mut h, id);
+    assert!((back - from).len() < 1e-6, "undo puts it back: {from:?} {back:?}");
+}
+
+/// What the pointer is over, and what is selected, is lit in the accent colour as in a sketch,
+/// with no box round it.
+#[test]
+fn hover_lights_a_drawing_dimension_as_a_sketch_does() {
+    let (mut h, _) = plate_sheet();
+    let id = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    let (text, _) = text_of(&mut h, id);
+    let at = on_screen(text.x, text.y);
+    h.step(&json!({"move": at})).unwrap();
+    h.frames(2);
+    let hover = &page(&mut h)["hover"];
+    assert_eq!(hover["kind"], "dimension", "{hover}");
+    assert_eq!(hover["lit"], true, "{hover}");
+}
+
 /// Frames until no view or dimension is waiting to be drawn.
 fn settle(h: &mut Harness) {
     for _ in 0..5_000 {
