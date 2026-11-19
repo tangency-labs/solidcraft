@@ -1768,8 +1768,7 @@ impl FlatView {
             } else {
                 // One outline round the origin, moved to each hole as it is drawn.
                 let outline: Vec<Vec2> = shaped.hole_loop(Vec2::default()).polyline(1e-2).iter().copied().collect();
-                let reach = outline.iter().map(|p| p.len()).fold(0.0, f64::max);
-                self.perforation_outlines.push((outline, reach, holes));
+                self.perforation_outlines.push((outline, shaped.reach(), holes));
             }
         }
     }

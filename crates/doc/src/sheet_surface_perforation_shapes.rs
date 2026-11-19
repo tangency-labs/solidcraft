@@ -21,6 +21,14 @@ const MAX_SITES: f64 = 4_000_000.0;
 /// The most cells along each side of the grid that buckets the edges near each hole.
 const MAX_CELLS: f64 = 1024.0;
 
+/// The most entries that grid holds, an edge counted once in each cell near it: a work and
+/// memory limit, so a sheet whose edges are too many and too long for the field's grid is
+/// refused rather than bucketed without end.
+const MAX_ENTRIES: usize = 1 << 24;
+
+/// The most pieces a line or an arc is boxed in for that grid.
+const MAX_PIECES: f64 = 4096.0;
+
 /// How far inside its margin a hole may come and still be kept: a rounding, not room. The grid
 /// keeps a hole this close to an edge it keeps clear of, a bend zone's among them, so a hole may
 /// reach this far into such a zone and still lie on its panel (see
@@ -174,7 +182,12 @@ impl ShapedPerforation<'_> {
 
     /// The corners of a hexagonal hole round `c`, counter-clockwise from the one at 30°.
     fn hex_corners(&self, c: Vec2) -> [Vec2; 6] {
-        let r = self.field.diameter / 3f64.sqrt();
+        self.hex_corners_in(c, 0.0)
+    }
+
+    /// The corners of the hexagon `inset` in from every side of the hexagonal hole round `c`.
+    fn hex_corners_in(&self, c: Vec2, inset: f64) -> [Vec2; 6] {
+        let r = (self.field.diameter - 2.0 * inset) / 3f64.sqrt();
         std::array::from_fn(|k| c + Vec2::from_angle(PI / 6.0 + k as f64 * PI / 3.0) * r)
     }
 
@@ -206,7 +219,10 @@ impl ShapedPerforation<'_> {
         }
     }
 
-    /// How far the hole round `c` stays clear of the edge `e` (0 or less where it reaches it).
+    /// How far the hole round `c` stays clear of the edge `e`: 0 where the edge touches the hole,
+    /// less where it reaches into it. An edge that comes more than [`GRAZE`] into a hexagon (to
+    /// within GRAZE of the hexagon 2 GRAZE in from every side) reads as at least 2 GRAZE in, or as
+    /// far as it reaches into the hexagon's inscribed circle; one that comes less, as touching it.
     fn clearance(&self, c: Vec2, e: &Edge) -> f64 {
         let r = self.field.diameter / 2.0;
         match self.shape {
@@ -216,15 +232,29 @@ impl ShapedPerforation<'_> {
                 e.distance_to_segment(p, q) - r
             }
             PerforationShape::Hex => {
-                let k = self.hex_corners(c);
-                let sides: [(Vec2, Vec2); 6] = std::array::from_fn(|i| (k[i], k[(i + 1) % 6]));
-                let inside = |p: Vec2| sides.iter().all(|&(a, b)| (b - a).cross(p - a) >= 0.0);
-                if inside(e.start()) || inside(e.end()) {
-                    return 0.0;
+                let gap = self.hex_gap(c, 0.0, e);
+                if gap > 0.0 {
+                    gap
+                } else if self.hex_gap(c, 2.0 * GRAZE, e) > GRAZE {
+                    0.0
+                } else {
+                    (e.distance(c) - r).min(-2.0 * GRAZE)
                 }
-                sides.iter().map(|&(a, b)| e.distance_to_segment(a, b)).fold(f64::MAX, f64::min)
             }
         }
+    }
+
+    /// How far the edge `e` stays clear of the hexagon `inset` in from every side of the
+    /// hexagonal hole round `c`: to its nearest side, 0 where an end of the edge lies inside it or
+    /// the edge meets a side.
+    fn hex_gap(&self, c: Vec2, inset: f64, e: &Edge) -> f64 {
+        let k = self.hex_corners_in(c, inset);
+        let sides: [(Vec2, Vec2); 6] = std::array::from_fn(|i| (k[i], k[(i + 1) % 6]));
+        let inside = |p: Vec2| sides.iter().all(|&(a, b)| (b - a).cross(p - a) >= 0.0);
+        if inside(e.start()) || inside(e.end()) {
+            return 0.0;
+        }
+        sides.iter().map(|&(a, b)| e.distance_to_segment(a, b)).fold(f64::MAX, f64::min)
     }
 
     /// Whether the hole round `c`, less [`GRAZE`] all round, and `region` overlap: a loop of the
@@ -399,23 +429,7 @@ impl ShapedPerforation<'_> {
         let clear = self.reach() + margin;
         let Aabb2 { min: lo, max: hi } = flat;
         let cell = (2.0 * clear).max(pitch).max(1.0).max((hi.x - lo.x) / MAX_CELLS).max((hi.y - lo.y) / MAX_CELLS);
-        let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
-        let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); nx.saturating_mul(ny)];
-        let idx = |x: f64, y: f64| -> (usize, usize) {
-            (((x - lo.x) / cell).floor().clamp(0.0, (nx - 1) as f64) as usize, ((y - lo.y) / cell).floor().clamp(0.0, (ny - 1) as f64) as usize)
-        };
-        for (k, e) in edges.iter().enumerate() {
-            let b = e.bounds();
-            let (i0, j0) = idx(b.min.x - clear, b.min.y - clear);
-            let (i1, j1) = idx(b.max.x + clear, b.max.y + clear);
-            for j in j0..=j1 {
-                for i in i0..=i1 {
-                    if let Some(c) = buckets.get_mut(j * nx + i) {
-                        c.push(k);
-                    }
-                }
-            }
-        }
+        let buckets = Buckets::new(&edges, flat, cell, clear, MAX_ENTRIES)?;
         // The first and last rows and columns: a hole's half width (or height) and the margin in.
         let half = self.half_extent();
         let (cx, cy) = (half.x + margin, half.y + margin);
@@ -433,8 +447,7 @@ impl ShapedPerforation<'_> {
             while flo.x + cx + shift + step <= fhi.x - cx + 1e-9 {
                 let x = if p.from_right { fhi.x - cx - shift - step } else { flo.x + cx + shift + step };
                 let c = Vec2::new(x, y);
-                let (i, j) = idx(x, y);
-                let near = buckets.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
+                let near = buckets.near(c);
                 if regions.iter().any(|r| r.contains(c))
                     && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
                     && !avoid.iter().any(|z| z.contains(c))
@@ -447,6 +460,62 @@ impl ShapedPerforation<'_> {
             row += 1;
         }
         Ok(out)
+    }
+}
+
+/// The edges near each cell of a grid over a flat, so each hole only checks the edges near it.
+struct Buckets {
+    lo: Vec2,
+    cell: f64,
+    nx: usize,
+    ny: usize,
+    /// Each cell's edges, row by row from the flat's lower-left corner.
+    cells: Vec<Vec<usize>>,
+}
+
+impl Buckets {
+    /// The `edges` in the cells `cell` wide over the box `flat` that lie `clear` or nearer to
+    /// them: each edge's pieces boxed (see [`Edge::pieces`]), so a long line or arc fills cells
+    /// along itself rather than every cell of its box. Refused past `max_entries` in all.
+    fn new(edges: &[Edge], flat: Aabb2, cell: f64, clear: f64, max_entries: usize) -> Result<Self> {
+        let Aabb2 { min: lo, max: hi } = flat;
+        let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
+        let mut b = Buckets { lo, cell, nx, ny, cells: vec![Vec::new(); nx.saturating_mul(ny)] };
+        let reach = Vec2::new(clear, clear);
+        let mut entries = 0usize;
+        for (k, e) in edges.iter().enumerate() {
+            for piece in e.pieces(cell) {
+                let ((i0, j0), (i1, j1)) = (b.index(piece.min - reach), b.index(piece.max + reach));
+                for j in j0..=j1 {
+                    for i in i0..=i1 {
+                        let Some(near) = b.cells.get_mut(j * nx + i) else { continue };
+                        // The edge's pieces come in turn, so a cell holds it already if it is last.
+                        if near.last() != Some(&k) {
+                            entries += 1;
+                            if entries > max_entries {
+                                return Err(DocError::Invalid(format!(
+                                    "a perforation field whose sheet has edges near more than {max_entries} cells of its grid, each edge counted in every cell near it, exceeds the bounded processing budget: make its pitch larger"
+                                )));
+                            }
+                            near.push(k);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(b)
+    }
+
+    /// The cell that holds `p`, or the nearest one.
+    fn index(&self, p: Vec2) -> (usize, usize) {
+        let at = |v: f64, from: f64, n: usize| ((v - from) / self.cell).floor().clamp(0.0, (n - 1) as f64) as usize;
+        (at(p.x, self.lo.x, self.nx), at(p.y, self.lo.y, self.ny))
+    }
+
+    /// The edges near `p`.
+    fn near(&self, p: Vec2) -> &[usize] {
+        let (i, j) = self.index(p);
+        self.cells.get(j * self.nx + i).map(Vec::as_slice).unwrap_or(&[])
     }
 }
 
@@ -509,6 +578,29 @@ impl Edge {
             Edge::Line(..) => {}
         }
         b
+    }
+
+    /// Boxes that together hold the edge: a line or an arc in pieces at most `len` long (at
+    /// least one, at most [`MAX_PIECES`]), each piece's own box; another curve, its whole box.
+    fn pieces(&self, len: f64) -> Vec<Aabb2> {
+        let count = |length: f64| {
+            let n = (length / len).ceil();
+            if n >= 1.0 { n.min(MAX_PIECES) as usize } else { 1 }
+        };
+        match *self {
+            Edge::Line(a, b) => {
+                let n = count(a.dist(b));
+                let at = |i: usize| a + (b - a) * (i as f64 / n as f64);
+                (0..n).map(|i| [at(i), at(i + 1)].into_iter().collect()).collect()
+            }
+            Edge::Arc { center, radius, start, sweep } => {
+                let sweep = sweep.clamp(-TAU, TAU);
+                let n = count((radius * sweep).abs());
+                let step = sweep / n as f64;
+                (0..n).map(|i| Edge::Arc { center, radius, start: start + step * i as f64, sweep: step }.bounds()).collect()
+            }
+            Edge::Curve(_) => vec![self.bounds()],
+        }
     }
 
     /// The distance from the point `p`.
@@ -846,6 +938,65 @@ mod tests {
             let holes = s.perforation_holes(&s.perforations[0]);
             assert!(holes.iter().any(|c| c.dist(Vec2::new(22.0, 14.5)) < 1e-9), "R {radius}: the row is laid out: {holes:?}");
             assert_eq!(holes.iter().any(|c| c.dist(hole) < 1e-9), kept, "R {radius}: {holes:?}");
+        }
+    }
+
+    /// With no margin, a hexagon that a cut-out's edge crosses is not kept, whether the edge is a
+    /// line, an arc or another curve, with both its ends outside the hexagon. A hexagon that only
+    /// touches an edge is kept. Hexagons 2 across their flats, at a 6 pitch with rows 3 apart: the
+    /// first touches the plate's left and bottom edges, at (1, 2/√3). The one at (13, y2), two rows
+    /// up, spans x 12…14 and reaches 2/√3 up: its top corner comes 0.3 past a rectangle's bottom
+    /// edge. A circle of radius 5 comes 0.3 into its right side: two arcs from the circle's top, or
+    /// four conics.
+    #[test]
+    fn with_no_margin_a_hexagon_an_edge_crosses_is_not_kept() {
+        let y2 = 2.0 / 3f64.sqrt() + 6.0;
+        let (target, beside, first) = (Vec2::new(13.0, y2), Vec2::new(7.0, y2), Vec2::new(1.0, 2.0 / 3f64.sqrt()));
+        let rectangle =
+            Loop2::polygon(&[Vec2::new(10.0, y2 + 0.85), Vec2::new(16.0, y2 + 0.85), Vec2::new(16.0, y2 + 2.0), Vec2::new(10.0, y2 + 2.0)]);
+        let centre = Vec2::new(18.7, y2);
+        let arc = |start: f64| Seg2::Arc { center: centre, radius: 5.0, start, sweep: PI };
+        let arcs = Loop2 { segs: vec![arc(FRAC_PI_2), arc(-FRAC_PI_2)] };
+        for (name, cut_out) in [("line", rectangle), ("arc", arcs), ("curve", conic_circle(centre, 5.0))] {
+            let mut s = plate_with(50.0, 30.0, vec![cut_out.reversed()]);
+            s.perforations.push(field(2.0, 6.0, 0.0));
+            s.perforation_shapes.push((1, PerforationShape::Hex, Some(3.0)));
+            let s = s.shown();
+            let holes = s.perforation_holes(&s.perforations[0]);
+            let kept = |c: Vec2| holes.iter().any(|h| h.dist(c) < 1e-9);
+            assert!(kept(first) && kept(beside), "{name}: {holes:?}");
+            assert!(!kept(target), "{name}: the hexagon the edge crosses is kept");
+        }
+    }
+
+    /// A long line or arc goes into the cells near it, not into every cell of its box: across a
+    /// flat 1000 cells wide, a diagonal or a quarter circle fills thousands of cells rather than
+    /// a million, and every point less than the clearance from it finds it there. Past the
+    /// budget, the field is refused.
+    #[test]
+    fn a_long_edge_goes_into_the_cells_near_it() {
+        let flat = Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(1000.0, 1000.0) };
+        // Each edge, and its point and unit normal at t from 0 to 1.
+        let edges: [(Edge, fn(f64) -> (Vec2, Vec2)); 2] = [
+            (Edge::Line(Vec2::new(0.0, 0.0), Vec2::new(1000.0, 1000.0)), |t| {
+                (Vec2::new(1000.0 * t, 1000.0 * t), Vec2::new(-1.0, 1.0) * 0.5f64.sqrt())
+            }),
+            (Edge::Arc { center: Vec2::new(0.0, 0.0), radius: 1000.0, start: 0.0, sweep: FRAC_PI_2 }, |t| {
+                let u = Vec2::from_angle(t * FRAC_PI_2);
+                (u * 1000.0, u)
+            }),
+        ];
+        for (edge, at) in edges {
+            let b = Buckets::new(&[edge], flat, 1.0, 0.5, usize::MAX).unwrap();
+            let entries: usize = b.cells.iter().map(Vec::len).sum();
+            assert!(entries < 20_000, "{edge:?}: {entries} entries");
+            for k in 0..=4000 {
+                let (p, n) = at(f64::from(k) / 4000.0);
+                for off in [-0.49, 0.0, 0.49] {
+                    assert!(b.near(p + n * off).contains(&0), "{edge:?}: {:?}", p + n * off);
+                }
+            }
+            assert!(Buckets::new(&[edge], flat, 1.0, 0.5, 1000).is_err(), "{edge:?}: past the budget");
         }
     }
 
