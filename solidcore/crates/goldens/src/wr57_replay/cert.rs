@@ -278,14 +278,6 @@ pub(super) const EXECUTIVE_P3: &[(&str, usize)] = &[
     ),
     ("invert: proven nearer", 1),
 ];
-/// Of `blend.fillet_geom_p2`'s.
-pub(super) const GEOM_P2: &[(&str, usize)] = &[
-    ("invert: proven nearer", 6083),
-    (
-        "invert: this branch refuses main's answer, proven farther than the guess",
-        3,
-    ),
-];
 /// Of `blend.fillet_standard_solver_p1`'s.
 pub(super) const STANDARD_SOLVER_P1: &[(&str, usize)] =
     &[("degen: aligned equally to the rounding", 8)];

@@ -22,12 +22,17 @@
 //! [`DATA`] was made by [`record`] on main and on this branch (`TOLSUB_CASES`, a
 //! `unit<TAB>case` list, and `TOLSUB_OUT`), diffed read by read.
 //!
-//! The tape is a proof against the main it was recorded on, not kept in step with later
-//! code: a later change that re-blesses one of its rows records the tape again or deletes
-//! that row's entry and lowers the unit's row count below. #18162's lazy UV trim raise
-//! re-blessed `blend.fillet_executive_p3` `stubs4-delete-edge-bottle-e8-r0.1` and
-//! `topology.brep_p10` `gen0020` (their edge tolerances, each certified in
-//! `certify::trim_tolerance`), so their entries are deleted.
+//! **When a later change moves one of these rows** other than through the read
+//! tolerances, the substitution can no longer give main's row; such a row's entry is
+//! deleted and the unit's row count lowered. #17896 (exact shared coordinates,
+//! `CPoint::affine2`) moves the geometry of the `Fillet/bottle.smb` read itself; it deletes
+//! the 19 `blend.fillet_executive_p3` bottle rows whose fillet that read reaches. The read's
+//! moved values and those fillets' results are classified in `solidcore`'s
+//! `tests/heal_edge_tolerance_covers_edge_face_gap.rs`.
+//!
+//! #18162's lazy UV trim raise re-blesses `blend.fillet_executive_p3`
+//! `stubs4-delete-edge-bottle-e8-r0.1` and `topology.brep_p10` `gen0020` (their edge
+//! tolerances, each certified in `certify::trim_tolerance`), so their entries are deleted too.
 
 use std::collections::BTreeMap;
 
@@ -169,7 +174,7 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 29;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 10;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
     corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;

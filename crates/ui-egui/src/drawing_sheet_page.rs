@@ -193,6 +193,9 @@ pub struct Page {
     /// The sheet's pictures' pixels on the GPU: they change apart from the marks, as each is drawn.
     pictures: PictureTextures,
     view_tools: view_tools::State,
+    /// The object under the pointer on the last frame, as the selection names it: what a
+    /// right-click's menu is about.
+    hover: Option<solidcraft_engine::Sel>,
     /// What the last frame showed, for `ui.inspect`.
     shown: Option<Value>,
 }
@@ -210,6 +213,7 @@ impl Default for Page {
             marks: None,
             pictures: PictureTextures::default(),
             view_tools: Default::default(),
+            hover: None,
             shown: None,
         }
     }
@@ -239,8 +243,14 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
         page.marks = None;
         page.pictures = PictureTextures::default();
         page.view_tools = Default::default();
+        page.hover = None;
         page.shown = None;
     }
+}
+
+/// The object of the open drawing under the pointer on the last frame, as the selection names it.
+pub(crate) fn hovered(app: &SolveApp) -> Option<solidcraft_engine::Sel> {
+    app.drawing_workspace.page.hover.clone()
 }
 
 /// Fit Sheet: the sheet is framed again on the next frame.
@@ -358,7 +368,28 @@ fn framed(canvas: Rect, area: Rect, size: Vec2, true_size: f64) -> (Vec2, f64) {
 
 /// The part of the canvas no ribbon, Browser, History or navigation bar covers.
 fn free_area(app: &SolveApp, canvas: Rect) -> Rect {
-    let area = crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas));
+    let mut area = crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas));
+    // The ribbon, the Browser and the History float over the canvas in the classic layout: the
+    // sheet is framed beside them, not under them (#19070). Each takes the side it lies on.
+    let around = area;
+    for cover in app.shell.cards.iter().copied().chain(app.shell.browser.filter(|_| app.ui.show_browser)).chain(app.shell.history) {
+        if !cover.is_finite() || !cover.is_positive() || !cover.intersects(area) {
+            continue;
+        }
+        let (dx, dy) = (cover.center().x - around.center().x, cover.center().y - around.center().y);
+        // A wide strip (the ribbon, the History) takes the top or the bottom; a tall one (the
+        // Browser) takes the left or the right.
+        if cover.width() >= cover.height() {
+            if dy < 0.0 { area.min.y = area.min.y.max(cover.bottom()) } else { area.max.y = area.max.y.min(cover.top()) }
+        } else if dx < 0.0 {
+            area.min.x = area.min.x.max(cover.right());
+        } else {
+            area.max.x = area.max.x.min(cover.left());
+        }
+    }
+    if !area.is_positive() {
+        area = around;
+    }
     // Nor the navigation bar: Fit sheet puts the paper above it (below it when the bar is at the
     // top), as the design's layout board does. The compass's corner stays free: the sheet has none.
     let Some(bar) = app.viewport.layout.as_ref().map(|l| l.navigation).filter(|r| r.is_positive() && r.intersects(area)) else {
@@ -442,10 +473,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let page = &mut app.drawing_workspace.page;
     page.cam.distance = distance_for(page.scale, canvas.height());
     let before_navigation = OnScreen::of(&page.cam, canvas);
+    // As in the model, a primary drag the navigation does not take is a box selection.
+    let mut box_free = true;
     if !view_tools::owns_drag(app, &response, before_navigation, &view.objects) {
         with_sheet_camera(app, |app| {
-            crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+            let input = crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+            box_free = input.primary_nav.is_none() && input.mode.is_none();
         });
+    } else {
+        box_free = false;
     }
     let page = &mut app.drawing_workspace.page;
     let scale = OnScreen::of(&page.cam, canvas).scale;
@@ -492,7 +528,23 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let placing = placing || placing_note || placing_dimension;
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
         .show(app, ui, placing);
+    view_tools::box_select(app, ui, &painter, &response, at, &drawing, &view.objects, canvas, box_free && !placing);
     let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
+    app.drawing_workspace.page.hover =
+        hit.filter(|hit| drawing.has_object(hit.object)).map(|hit| solidcraft_engine::Sel::Drawing { drawing: drawing.id, object: hit.object });
+    // A right-click, as in the model and a sketch: it finishes the tool in hand, or else opens the
+    // menu on what is under the pointer.
+    if response.secondary_clicked()
+        && !crate::mouse_gesture::took_press(app)
+        && let Some(point) = response.interact_pointer_pos().filter(|point| !crate::shell::covered(app, *point))
+    {
+        if placing {
+            crate::drawing_workspace::close_panel(app);
+        } else {
+            let held = crate::tool_modifiers::Held::from_modifiers(ui.input(|input| input.modifiers));
+            crate::context_menu::open(app, point, held);
+        }
+    }
     if response.double_clicked()
         && let Some(hit) = hit
     {
@@ -503,16 +555,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
             ObjectKind::PartsList => Some("parts_list"),
             _ => None,
         };
-        if let Some(kind) = kind {
+        // A dimension's or a note's text is edited where it is, as a sketch dimension's value is.
+        let at = response.interact_pointer_pos().or_else(|| response.hover_pos());
+        if let Some(kind) = kind
+            && !at.is_some_and(|at| crate::drawing_workspace::edit_in_place(app, hit.object, at))
+        {
             crate::drawing_workspace::edit_object(app, kind, hit.object);
         }
     }
+    crate::dim_view::show_sheet_editor(app, ui.ctx());
     if let Some(hit) = hit
         && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
     {
         let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
         let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
         painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(t.space_2 * 0.5, t.accent), t.space_4, t.space_2));
+    }
+    let chosen = view_tools::selected(app, drawing.id);
+    for object in view.objects.iter().filter(|o| chosen.contains(&o.object)) {
+        let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
+        painter.rect_stroke(r, t.radius_sm, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
     }
     let states = view_states(&painter, &at, &view.views, &view.stale, &view.objects);
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.

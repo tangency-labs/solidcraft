@@ -97,6 +97,25 @@ pub(crate) fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>]
     k::face_flux(&s.0, v0, &borrowed, &|p| c::vec3(field(c::record_vec3(p))))
 }
 
+/// The sign of one closed shell, certified by the kernel's volume enclosure.
+/// No numerical estimate decides a repaired shell's absolute direction.
+pub(crate) fn shell_volume_positive(record: &solidcore_record::brep::Brep, shell: usize) -> Result<bool, Error> {
+    use solidcore::mass::enclosure::{VolumeSign, volume_sign};
+    use solidcore_record::brep::Region;
+
+    let shell = u32::try_from(shell).map_err(|_| "too many shells".to_string())?;
+    let mut single = record.clone();
+    single.regions = vec![Region { shells: vec![shell], void: false }, Region { shells: vec![shell], void: false }];
+    let single = single.canonical().map_err(|e| e.to_string())?.brep;
+    let mut kernel = solidcore::kernel::Kernel::default();
+    let mut body = c::brep::to_kernel_body(&mut kernel, &single, true).map_err(|e| e.to_string())?;
+    match volume_sign(&kernel, &mut body).map_err(|e| e.to_string())? {
+        VolumeSign::Positive(_) => Ok(true),
+        VolumeSign::Negative(_) => Ok(false),
+        VolumeSign::Undecided(_) => Err("the repaired shell's volume sign is not certified".into()),
+    }
+}
+
 /// The exact NURBS forms of the analytic kinds ([`k::form`]), over records.
 pub(crate) mod form {
     use super::{Curve, Frame, Surface, c, k};

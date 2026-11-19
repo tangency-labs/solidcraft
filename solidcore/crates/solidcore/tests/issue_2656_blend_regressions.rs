@@ -557,16 +557,13 @@ fn block_cylinder_both_pieces_round_the_half_circle() {
 }
 
 /// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope and the
-/// split at radius corners) with every fix but
-/// `geometric_g2_continuity`, as the blend's other End tests: the same torus, valid at level
+/// split at radius corners) with every fix, as the blend's other End tests: the same torus, valid at level
 /// 2 and a manifold solid, its volume at 1e-12.
 #[test]
 fn block_cylinder_both_pieces_round_through_do_fillet() {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
     let mut b = block_cylinder(&mut k);
     let pieces: Vec<EdgeId> = ARC_PIECES.iter().map(|&(p, _)| pick(&k, &b, p)).collect();

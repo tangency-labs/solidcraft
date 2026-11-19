@@ -400,6 +400,43 @@ fn a_held_views_balloon_is_out_of_date_as_a_balloon() {
     assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
 }
 
+/// A deferred drawing whose model moved on lists what its held view shows as out of date only: a
+/// balloon and a note on an edge a fillet takes away are not lost while the sheet shows them as they
+/// last were, as a dimension there is read as the sheet shows it, its typed text included. Once the
+/// drawing is updated, the balloon and the note are lost, and nothing is out of date.
+#[test]
+fn a_held_views_balloon_and_note_are_out_of_date_not_lost() {
+    let (mut s, view, _, at) = assembly();
+    let edge = json!({"point": [5, 0, 0], "path": [at]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": view, "edge": edge, "at": [80, 20]}))["balloon"].clone();
+    let anchor = json!({"edge": {"view": view, "edge": edge}});
+    let note = run(&mut s, "drawing.note.add", json!({"anchor": anchor, "at": [60, 40], "content": "Note"}))["note"].clone();
+    let top = json!({"length": {"edge": {"point": [5, 0, 40], "path": [at]}}});
+    let typed = run(&mut s, "drawing.dimension.add", json!({"view": view, "kind": top}))["dimension"].clone();
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": typed, "set": {"override_text": "SEE NOTE"}}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let before = checked(&mut s, json!({}));
+    assert_eq!((of_kind(&before, "out_of_date"), of_kind(&before, "lost")), (vec![], vec![]), "{before}");
+    with_model_changed(&mut s, |s| {
+        run(s, "component.activate", json!({"component": "Bolt"}));
+        run(s, "solid.fillet", json!({"edges": [[5, 0, 0]], "radius": 2, "body": "Shank"}));
+        run(s, "component.activate", json!({"component": "root"}));
+    });
+    let on_the_edge = |reply: &Value| found(reply).into_iter().filter(|(_, what, _)| what == "balloon" || what == "note").collect::<Vec<_>>();
+    let listed = |kind: &str| [named("balloon", &balloon), named("note", &note)].map(|(what, id)| (kind.to_string(), what, id)).to_vec();
+    let held = checked(&mut s, json!({}));
+    assert_eq!(on_the_edge(&held), listed("out_of_date"), "each once, as out of date: {held}");
+    let mut expected = vec![named("balloon", &balloon), named("dimension", &typed), named("note", &note), named("view", &view)];
+    expected.sort();
+    assert_eq!(of_kind(&held, "out_of_date"), expected, "{held}");
+    assert_eq!(of_kind(&held, "overridden"), [named("dimension", &typed)], "the dimension as the sheet shows it: {held}");
+    run(&mut s, "drawing.update", json!({}));
+    let now = checked(&mut s, json!({}));
+    assert!(of_kind(&now, "out_of_date").is_empty(), "{now}");
+    assert_eq!(on_the_edge(&now), listed("lost"), "{now}");
+}
+
 /// A view moved off its sheet's drawing space, a note on it with it, and an image off the paper, are outside the sheet;
 /// `sheet` narrows the check to one sheet, by id or name, a lost note in a view included.
 #[test]
