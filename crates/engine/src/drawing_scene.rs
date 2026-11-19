@@ -42,7 +42,9 @@
 //! gives it, and keeps it in the view's entry, centred on the view as its lines are. So a move draws
 //! nothing again. A picture is current while its view's drawing and the bodies' geometry and
 //! appearance are as they were (`Looks`). Otherwise [`extract`] hands the last one on, marked stale,
-//! until the new one is done: never a half-drawn one ([`SheetView::pictures`]).
+//! until the new one is done: never a half-drawn one ([`SheetView::pictures`]). Each image on the
+//! sheet, placed or a title block's logo, is handed on the same way, its file decoded beside the
+//! window and its rows made a band a step (`drawing_scene_images.rs`).
 //!
 //! A balloon (#3874) rides the same path as one more kind: read with its view, kept and read again
 //! by the same rules, and also after any change to the document, as its number reads a parts list and
@@ -108,6 +110,8 @@ use crate::title_block_text::{self, CellText, Set};
 use crate::{EngineError, Result, Session};
 
 pub mod fill;
+#[path = "drawing_scene_images.rs"]
+mod images;
 #[path = "drawing_scene_kept.rs"]
 mod kept;
 use kept::{Kept, KeptDimension, KeptFill, KeptLines, KeptSketch, KeptView};
@@ -421,8 +425,9 @@ pub struct SheetView {
     /// A title block's, a dimension's, a note's, a balloon's or a table's text waits for the search for a font to fall back to: the
     /// page extracts again on its next tick, and the text is set once the search has answered.
     pub waiting_for_fonts: bool,
-    /// The pixels of each picture in `scene` drawn so far ([`SheetPicture`]), by view and bottom first.
-    /// Made again for each answer, so a picture done shows without the scene changing.
+    /// The pixels of each picture in `scene` drawn so far ([`SheetPicture`]): each view's by view and
+    /// bottom first, then each image's, its placements by id and then its logos. Made again for each
+    /// answer, so a picture done shows without the scene changing.
     pub pictures: Arc<[SheetPicture]>,
     /// A picture is out of date: [`step`] is drawing it, so the page keeps ticking.
     pub drawing_pictures: bool,
@@ -434,6 +439,8 @@ pub struct SheetView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetPicture {
     pub source: u64,
+    /// The view it is a picture of; 0 for an image on the sheet, placed or a logo (its source names
+    /// it).
     pub view: u64,
     /// Where on the sheet its pixels lie: its rectangle at the sheet's dpi, or coarser for a large one.
     pub grid: PixelGrid,
@@ -1830,6 +1837,9 @@ pub struct Cache {
     bodies: Option<Bodies>,
     /// The picture being drawn.
     picturing: Option<Picturing>,
+    /// Each image's pixels on the sheet last extracted, by source, and the image being made.
+    images: images::Images,
+    imaging: Option<images::Imaging>,
     /// Views drawn, for tests: a move draws none.
     #[cfg(test)]
     projections: usize,
@@ -2535,9 +2545,10 @@ fn step_within(s: &mut Session, spent: &mut dyn FnMut() -> bool) -> bool {
         on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, view.clone())).collect();
     let Some((id, view)) = waiting.first().cloned() else {
         return match step_dimensions(s, &d, &on, &state, lettering) {
-            Some(more) => more || fills_waiting(s, &d) || sketches_waiting(s, &d) || waiting_picture(s, &on, &state).is_some(),
-            None if fills_waiting(s, &d) => step_fill(s, &d) || waiting_picture(s, &on, &state).is_some(),
-            None if sketches_waiting(s, &d) => step_sketch(s, &d) || waiting_picture(s, &on, &state).is_some(),
+            Some(more) => more || fills_waiting(s, &d) || sketches_waiting(s, &d) || pictures_waiting(s, &on, &state),
+            None if fills_waiting(s, &d) => step_fill(s, &d) || pictures_waiting(s, &on, &state),
+            None if sketches_waiting(s, &d) => step_sketch(s, &d) || pictures_waiting(s, &on, &state),
+            None if images::waiting(s) => images::step(s, spent) || waiting_picture(s, &on, &state).is_some(),
             None => step_pictures(s, &on, &state, spent),
         };
     };
@@ -2547,7 +2558,12 @@ fn step_within(s: &mut Session, spent: &mut dyn FnMut() -> bool) -> bool {
         || !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering, s.revision).is_empty()
         || fills_waiting(s, &d)
         || sketches_waiting(s, &d)
-        || waiting_picture(s, &on, &state).is_some()
+        || pictures_waiting(s, &on, &state)
+}
+
+/// Whether an image's pixels or a view's picture waits to be drawn.
+fn pictures_waiting(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>) -> bool {
+    images::waiting(s) || waiting_picture(s, on, state).is_some()
 }
 
 fn fills_waiting(s: &mut Session, d: &Arc<Drawing>) -> bool {
@@ -2624,13 +2640,14 @@ fn drawable(s: &mut Session) -> Option<(Arc<Drawing>, Vec<(u64, ResolvedView, Ve
 /// A shown set, and the world state it was worked out for.
 type ShownFor = (Arc<ModelState>, std::result::Result<ShownSet, Unmeasured>);
 
-/// Work beside the window, one view's lines or a picture's setup: [`begin`] asks for it,
-/// [`Job::run`] does it anywhere, and [`finish`] takes it.
+/// Work beside the window, one view's lines, a picture's setup or an image's decode: [`begin`] asks
+/// for it, [`Job::run`] does it anywhere, and [`finish`] takes it.
 pub struct Job(Work);
 
 enum Work {
     View(ViewJob),
     Picture(PictureJob),
+    Image(images::ImageJob),
 }
 
 /// A job's work, for [`finish`].
@@ -2640,6 +2657,7 @@ enum Worked {
     // Boxed: a view's lines and a picture's start are about 0.8 and 1.4 KB, and a `Done` moves between threads.
     View(Box<ViewDone>),
     Picture(Box<PictureDone>),
+    Image(Box<images::ImageDone>),
 }
 
 impl Job {
@@ -2656,6 +2674,7 @@ impl Job {
         Done(match self.0 {
             Work::View(job) => Worked::View(Box::new(job.run())),
             Work::Picture(job) => Worked::Picture(Box::new(job.run())),
+            Work::Image(job) => Worked::Image(Box::new(job.run())),
         })
     }
 }
@@ -2785,10 +2804,10 @@ pub(crate) mod copy_panics {
 }
 
 /// Asks for the work [`step`] would do next that takes long, to do beside the window: the first view
-/// out of date on the sheet last extracted or, once its dimensions are read too, the setup of the
-/// first picture out of date. None when nothing such is waiting (a picture set up draws its bands in
-/// [`step`]), or while a deferred drawing holds. One at a time: asking again replaces the earlier
-/// request.
+/// out of date on the sheet last extracted or, once its dimensions are read too, the decode of the
+/// first image waiting, then the setup of the first picture out of date. None when nothing such is
+/// waiting (an image decoded and a picture set up draw their bands in [`step`]), or while a deferred
+/// drawing holds. One at a time: asking again replaces the earlier request.
 pub fn begin(s: &mut Session) -> Option<Job> {
     let (d, on, state) = drawable(s)?;
     if let Some((id, view, _)) = on.iter().find(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).cloned() {
@@ -2797,6 +2816,9 @@ pub fn begin(s: &mut Session) -> Option<Job> {
     let lettering = Lettering::of(s, &d);
     if !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering, s.revision).is_empty() {
         return None;
+    }
+    if let Some(job) = images::job(s) {
+        return Some(Job(Work::Image(job)));
     }
     let waiting = waiting_picture(s, &on, &state)?;
     picture_job(s, waiting, &state).map(|job| Job(Work::Picture(job)))
@@ -2831,6 +2853,7 @@ pub fn finish(s: &mut Session, done: Done) -> bool {
     match done.0 {
         Worked::View(done) => finish_view(s, *done),
         Worked::Picture(done) => finish_picture(s, *done),
+        Worked::Image(done) => images::finish(s, *done),
     }
 }
 
@@ -3224,15 +3247,24 @@ fn keep_pixels(s: &mut Session, view: u64, source: u64, pixels: Pixels) {
     cache.serial += 1;
 }
 
-/// Each picture of the views `on` as the page shows it, moved to its view's centre, and whether one
-/// is waiting to be drawn: not while a deferred drawing holds, as nothing is drawn then.
+/// Each picture of the views `on` as the page shows it, then each image's on the sheet, and whether
+/// one is waiting to be drawn: not while a deferred drawing holds, as nothing is drawn then.
 fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>) -> (Arc<[SheetPicture]>, bool) {
+    let held = s.drawing_scenes.holds(d, state);
+    let (mut pictures, waiting) = view_sheet_pictures(s, on, state, held);
+    let (images, images_waiting) = images::pictures(s, d, held);
+    pictures.extend(images);
+    (pictures.into(), waiting || images_waiting)
+}
+
+/// Each picture of the views `on` as the page shows it, moved to its view's centre, and whether one
+/// is waiting to be drawn. The bodies are read only when a view has a picture.
+fn view_sheet_pictures(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, held: bool) -> (Vec<SheetPicture>, bool) {
     if !on.iter().any(|(id, ..)| s.drawing_scenes.views.get(id).is_some_and(|e| pictures_of(&e.drawn).next().is_some())) {
-        return (Arc::from([]), false);
+        return (Vec::new(), false);
     }
     let (looks, dpi) = (bodies(s, state).1, dpi_now(s));
     let cache = &s.drawing_scenes;
-    let held = cache.holds(d, state);
     let (mut pictures, mut waiting) = (Vec::new(), false);
     for (id, view, centre) in on {
         let Some(entry) = cache.views.get(id) else { continue };
@@ -3252,7 +3284,7 @@ fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)]
             pictures.push(SheetPicture { source: picture.source, view: *id, grid, rows, stale: !current, why });
         }
     }
-    (pictures.into(), waiting)
+    (pictures, waiting)
 }
 
 /// Drops the cache once its drawing isn't the one open: closing a drawing (or opening another) ends
