@@ -226,16 +226,16 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
     let q = q.trim().to_lowercase();
     // The window refreshes the left-out commands once per revision (`refresh_hidden`); a caller
     // without it (a test, the control channel) works them out here.
-    let hidden = (!app.preferences.search_lists_script_commands).then(|| match &app.sbox.hidden {
+    let hidden = match &app.sbox.hidden {
         Some((revision, hidden)) if *revision == app.session.revision => hidden.clone(),
         _ => hidden_now(app),
-    });
+    };
     let mut v: Vec<(u32, Row)> = command_specs()
         .into_iter()
         .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
         .filter(|c| available_in_workspace(app, c.id))
         // An exact id finds every command, as the box's hint for typing values says (#9734).
-        .filter(|c| c.id == q || hidden.as_ref().is_none_or(|hidden| !hidden.contains(c.id)))
+        .filter(|c| c.id == q || !hidden.contains(c.id))
         .filter_map(|c| {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);
@@ -264,9 +264,9 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
 
 /// Whether search lists command `c` (#9734): it has a place in the ribbon, runs with no values,
 /// or starting it does something of its own (a dialog, a tool, the Render workspace's settings,
-/// the Drawing workspace's options panel, values `start` gives it). The rest exist for scripts and agents; picking one only fails with
-/// a missing value ("`name` is required"), so search leaves them out unless their exact id is
-/// typed, or `search_lists_script_commands` is on.
+/// the Drawing workspace's options panel, values `start` gives it). The rest exist for scripts and
+/// agents; picking one only fails with a missing value ("`name` is required"), so search leaves
+/// them out unless their exact id is typed.
 pub(crate) fn listed(app: &SolveApp, c: &solidcraft_engine::CommandSpec) -> bool {
     crate::workspace::destination(c).is_some()
         || !needs_values(c.id)
@@ -578,9 +578,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     mode = typed(&query).map(|(id, result)| (id.to_owned(), result));
                     if mode.is_none() {
-                        if !app.preferences.search_lists_script_commands {
-                            refresh_hidden(app);
-                        }
+                        refresh_hidden(app);
                         rows = search(app, &query)
                             .into_iter()
                             .filter(|r| {
@@ -822,11 +820,10 @@ mod tests {
 
     /// #9734: commands for scripts and agents (no ribbon place, no dialog or tool, values needed)
     /// are not offered by name, where picking one only failed with "`name` is required". Their
-    /// exact id still finds them, and the preference lists them all again.
+    /// exact id still finds them.
     #[test]
     fn script_only_commands_are_found_by_their_exact_id_not_by_name() {
-        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        assert!(!crate::prefs::Prefs::default().search_lists_script_commands, "search lists only what runs from it by default");
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         for (query, id) in [
             ("rename parameter", "parameters.rename"),
             ("delete parameter", "parameters.delete"),
@@ -837,8 +834,6 @@ mod tests {
             assert!(!ids(&search(&app, query)).contains(&id), "{query:?} must not offer {id}");
             assert_eq!(ids(&search(&app, id)).first(), Some(&id), "typing the id {id} finds it first");
         }
-        app.preferences.search_lists_script_commands = true;
-        assert!(ids(&search(&app, "rename parameter")).contains(&"parameters.rename"), "the preference lists every command, as before");
     }
 
     /// The rule leaves out only commands that can't run from search: every command with a ribbon
