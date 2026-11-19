@@ -1533,9 +1533,25 @@ fn reparametrisation(
         };
         Ok(Some((c.distance(p), at, p)))
     };
+    // (each gap's piece of `ψ` depends only on a few points around it, so a round checks only
+    // the gaps a point added in the round before can have changed (`dirty`): the others have
+    // the same piece, bit for bit, and did not bow; and a point's own distance, which two
+    // gaps share, is found once a round (`ends`))
+    let mut dirty = vec![true; points.len().saturating_sub(1)];
     for _ in 0..PSI_MAX_DEPTH {
         let mut extra: Vec<(f64, f64)> = Vec::new();
-        for pair in points.windows(2) {
+        let mut ends: Vec<Option<f64>> = vec![None; points.len()];
+        let mut end_off = |psi: &NurbsCurve, i: usize, s: f64| -> Result<Option<f64>> {
+            if let Some(&Some(d)) = ends.get(i) {
+                return Ok(Some(d));
+            }
+            let d = off(psi, s)?.map(|x| x.0);
+            if let (Some(slot), Some(d)) = (ends.get_mut(i), d) {
+                *slot = Some(d);
+            }
+            Ok(d)
+        };
+        for (i, pair) in points.windows(2).enumerate() {
             let [a, b] = pair else {
                 return Ok(None);
             };
@@ -1546,15 +1562,20 @@ fn reparametrisation(
             if count >= PSI_MAX_POINTS {
                 break;
             }
+            if dirty.get(i) != Some(&true) {
+                continue;
+            }
             k.check_cancelled(OP)?;
-            let (Some(da), Some(db), Some((dm, at, p))) =
-                (off(&psi, a.0)?, off(&psi, b.0)?, off(&psi, m)?)
-            else {
+            let (Some(da), Some(db), Some((dm, at, p))) = (
+                end_off(&psi, i, a.0)?,
+                end_off(&psi, i + 1, b.0)?,
+                off(&psi, m)?,
+            ) else {
                 return Ok(None);
             };
             // (refined only where the middle is farther than both ends by `refine`; a NaN
             // anywhere is no reason to)
-            if dm.partial_cmp(&(da.0.max(db.0) + refine)) != Some(std::cmp::Ordering::Greater) {
+            if dm.partial_cmp(&(da.max(db) + refine)) != Some(std::cmp::Ordering::Greater) {
                 continue;
             }
             let (tm, _) = nearest_param(k, curve, p, at, [lo, hi])?;
@@ -1564,8 +1585,22 @@ fn reparametrisation(
         if extra.is_empty() {
             break;
         }
-        points.extend(extra);
-        points.sort_by(|x, y| x.0.total_cmp(&y.0));
+        // (points added, flagged, merged in order: each extra point lies inside its own gap)
+        let mut merged: Vec<((f64, f64), bool)> = points.iter().map(|&x| (x, false)).collect();
+        merged.extend(extra.into_iter().map(|x| (x, true)));
+        merged.sort_by(|x, y| x.0 .0.total_cmp(&y.0 .0));
+        points = merged.iter().map(|x| x.0).collect();
+        // gap `i` (points `i`, `i + 1`) is checked again where a point from `i - 3` to `i + 4`
+        // is new: its piece's control values come from the pieces either side of it, whose
+        // slopes reach one point further (`i - 2` to `i + 3`), and an end's distance may be
+        // taken on the piece before it
+        dirty = (0..points.len().saturating_sub(1))
+            .map(|i| {
+                merged
+                    .get(i.saturating_sub(3)..(i + 5).min(merged.len()))
+                    .is_some_and(|w| w.iter().any(|x| x.1))
+            })
+            .collect();
         let Some(rebuilt) = hermite_psi(&points, [lo, hi]) else {
             return Ok(None);
         };
