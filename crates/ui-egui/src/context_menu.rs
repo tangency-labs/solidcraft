@@ -366,12 +366,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         ],
         Target::Body { name } => {
             let mut v = body_items(app, std::slice::from_ref(name), true);
-            // A selected browser body hands every selected body to the mesh dialogs (#12334).
-            // A row outside the selection still opens them with only the body right-clicked.
+            // A selected browser body hands every selected body to Export as well as the
+            // mesh dialogs (#18902). A row outside the selection still targets only that row.
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
                 for item in &mut v {
-                    if item.id == "ui.saveMesh" || item.id == "ui.sendToSlicer" {
+                    if matches!(item.id.as_str(), "ui.export" | "ui.saveMesh" | "ui.sendToSlicer") {
                         item.params = Some(json!({ "bodies": selected }));
                     }
                 }
@@ -1194,7 +1194,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
                 .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
-        if !app.session.contents_joints(id).is_empty() {
+        if app.session.contents_held(id) {
             placement.push(cmd(app, "component.unlock", "Unlock Contents").with(json!({ "component": id })));
         }
         v.push(group("Placement", "move", placement));
@@ -1820,7 +1820,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
             app.pick_save_command(
                 &format!("{name}.step"),
-                &["step", "stp", "igs", "stl", "3mf", "obj", "glb"],
+                &["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz"],
                 "file.export",
                 json!({"bodies": bodies}),
             );

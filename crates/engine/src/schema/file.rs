@@ -785,9 +785,9 @@ pub struct OpenedFile {
     /// are some.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subcomponents: Option<usize>,
-    /// How many rigid joints hold those together; only when there are subcomponents.
+    /// How many occurrences the import's rigid group holds together; only when there are subcomponents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rigid_joints: Option<usize>,
+    pub rigid_members: Option<usize>,
     /// Only when `up` turned the file Y up to Z up: the occurrence that was turned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stand_up: Option<u64>,

@@ -39,8 +39,8 @@ pub mod limits;
 mod mutate;
 mod native_cad;
 pub use native_cad::{
-    NATIVE_CAD_EXTS, NativeDesign, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_records,
-    native_cad_to_step,
+    NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path, is_usd_path,
+    native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step,
 };
 pub mod paper;
 mod pat;
@@ -457,15 +457,17 @@ fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, 
     })
 }
 
-/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, any case)?
+/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, or OpenUSD's `.usd`,
+/// `.usda`, `.usdc` and `.usdz`, any case)?
 pub fn is_mesh_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| ["3mf", "stl", "obj", "glb", "gltf"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+        || is_usd_path(path)
 }
 
-/// A 3MF, STL, OBJ or glTF file read as a mesh import feature.
+/// A 3MF, STL, OBJ, glTF or OpenUSD file read as a mesh import feature.
 pub struct MeshFeature {
     /// Timeline name: the only mesh's name, else the file name.
     pub name: String,
@@ -504,9 +506,15 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
         g.flatten();
         return Ok(g.feature);
     }
-    if bytes.len() > MAX_3MF_BYTES {
-        return Err(IoError::Invalid(format!("mesh file too large ({} MB)", bytes.len() >> 20)));
+    if is_usd_path(file) {
+        own_units("OpenUSD")?;
+        let (mut g, _) = read_usd(bytes, file)?;
+        g.flatten();
+        return Ok(g.feature);
     }
+    // A mesh file is read up to the limit for STEP and import files, which Preferences raise
+    // (#17446, #14548).
+    limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
@@ -584,6 +592,9 @@ pub enum Format {
     /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
     /// holds the looks.
     Glb,
+    /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
+    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    Usd,
 }
 
 impl Format {
@@ -600,6 +611,7 @@ impl Format {
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
             "glb" => Format::Glb,
+            "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -1340,6 +1352,7 @@ pub fn export_with_parts_noted(
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
+        Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
     };
     Ok((bytes, notes))
 }

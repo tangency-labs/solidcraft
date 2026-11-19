@@ -330,6 +330,16 @@ row, `motion.play` lists such joints under `unmoved`, and `joint.list` names eve
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
 
+An imported assembly holds each of its parts with a rigid joint, so `joint.list` on it can run to
+hundreds of rows. Filters keep only the rows asked for: `moving_only` leaves out rigid and
+suppressed joints, `exclude_rigid` every rigid joint, `exclude_rigid_groups` only the rigid joints
+that hold a component's contents together (the ones Unlock Contents removes), `kinds` keeps the
+listed joint types, and `occurrences` keeps the joints with an end at those parts or at a part
+inside them. `dof_free_only` lists only the parts that can still move under `dof`, and
+`joint.solve` takes it too. The reply's `omitted` counts what was left out, by type, and
+`summary: true` adds every joint counted by type, with one row per component for the rigid joints
+that hold its contents (the 20 largest; `more_rigid_groups` counts the rest). `joint.inspect` takes the same filters.
+
 Driving a joint turns the side that is held by no grounded part, with everything joined to it
 rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
 they are, so the parts beyond it move with the side that turns. A joint between two grounded
