@@ -11,10 +11,10 @@
 //! leaves in, which makes G2 the curvature vector and G3 the way that curvature vector changes
 //! along that direction (its normal part: what a surface-to-surface match can hold).
 //!
-//! What the support surface does along the leave direction is read off from samples on its own
-//! parameter line (the line through the station that leaves in the leave direction at unit
-//! speed) by finite differences: the second derivative of a surface curve with a unit tangent is
-//! its curvature vector, and the third is the arclength derivative of that curvature vector.
+//! The support surface's parameter line leaves each station at unit speed in the leave
+//! direction. Its derivatives give the curvature vector and the arc-length derivative of
+//! curvature. Open spline spans supply these derivatives directly, including at corners.
+//! Other supports and interior knots use the five-point stencils on the support.
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::Brep;
@@ -439,6 +439,15 @@ impl Support {
         }
         let du = (c * w.dot(su) - b * w.dot(sv)) / det;
         let dv = (a * w.dot(sv) - b * w.dot(su)) / det;
+        // At a spline corner the parameter line can run outside the box in both directions.
+        // Derivatives of the boundary span still give the shape at exactly the projected UV.
+        if let SurfaceEval::Eval(spline, _) = surf
+            && let Some(jet) = spline.spline_line_derivatives([u, v], [du, dv])
+        {
+            let [d1, d2, d3] = jet.map(solidcraft_geom::tess::from_kernel);
+            let (_, bend, bend_change) = shape(d1, d2, d3)?;
+            return Ok((Frame { p, leave: w, bend, bend_change }, n));
+        }
         // The samples of the parameter line. A station sits on the support surface's own
         // boundary, so the line usually leaves the face: the shape is then read from the samples
         // of the one side that is still on the surface, which is the surface's own extension past

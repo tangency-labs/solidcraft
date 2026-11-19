@@ -90,6 +90,29 @@ fn face_at(body: &Body, at: Vec3) -> usize {
     r.faces.iter().position(|f| SurfaceEval::new(&f.surface).unwrap().project(at, None, 1e-6).is_some()).unwrap()
 }
 
+/// A 600 by 150 mm sheet with crown in both directions. Its height is
+/// 30(x/600)² + 9(y/150)² + 6(y/150)³. At the origin the requested diagonal
+/// crosses the u edge in one direction and the v edge in the other.
+#[test]
+fn a_double_curvature_panel_corner_keeps_its_g3_frame() {
+    let mut points = Vec::new();
+    for (j, height_y) in [0.0, 0.0, 3.0, 15.0].into_iter().enumerate() {
+        for (i, height_x) in [0.0, 0.0, 30.0].into_iter().enumerate() {
+            points.push(Vec3::new(300.0 * i as f64, 50.0 * j as f64, height_x + height_y));
+        }
+    }
+    let knots = [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]];
+    let panel = crate::surfaces::tensor_sheet(&NurbsSurface::new([2, 3], knots, &points, &[1.0; 12]).unwrap()).unwrap();
+    let boundary = chain(&panel, &[Vec3::new(300.0, 0.0, 7.5)]).unwrap();
+    let leave = Vec3::new(1.0, -1.0, 0.0).normalized().unwrap();
+    let frames = frames(&panel, 0, &boundary, leave, 5).unwrap();
+    let corner = frames.iter().find(|f| f.p.len() < 1e-8).unwrap();
+    let expected_bend = 60.0 * (leave.x / 600.0).powi(2) + 18.0 * (leave.y / 150.0).powi(2);
+    let expected_change = 36.0 * (leave.y / 150.0).powi(3);
+    assert!((corner.bend.z - expected_bend).abs() < 1e-10, "{corner:?}");
+    assert!((corner.bend_change.z - expected_change).abs() < 1e-11, "{corner:?}");
+}
+
 #[test]
 fn frames_read_a_plane_and_a_cylinder_wall() {
     // A 40 x 30 x 20 box: the top face's rim leaves along +x, a plane with no curvature.
