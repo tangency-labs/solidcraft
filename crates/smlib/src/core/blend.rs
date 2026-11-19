@@ -243,7 +243,7 @@ fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) 
         // the kernel's refusal of its input (`SM_ERR_INVALID_INPUT`)
         Ops::Refused { .. } => Error::Status(INVALID_INPUT),
         Ops::NoRoom | Ops::SetbackTooLong { .. } => Error::NoRoom,
-        Ops::TooLarge { size, kind, at, why } => Error::TooLarge { size, kind, at, why },
+        Ops::TooLarge { size, kind, at, face, why } => Error::TooLarge { size, kind, at, face, why },
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
         Ops::CornerUnsupported => Error::CornerUnsupported,
         Ops::CornerRefused { corner } => Error::CornerRefused { corner },

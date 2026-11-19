@@ -67,7 +67,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "component?: id or name (default: every linked component); components?: a list of ids or names, which goes on past a design it \
          cannot read (that one keeps its bodies, is named in failed and gets a warning) — reads the linked designs again and replaces \
-         their bodies where they changed, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
+         their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
+         design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
          joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
@@ -189,6 +190,7 @@ struct LinkRead {
     faces: u64,
     warnings: Vec<String>,
     properties: Vec<SourceProperties>,
+    metadata: solidcraft_doc::Metadata,
 }
 
 #[cfg(test)]
@@ -203,21 +205,22 @@ fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
     h.finish()
 }
 
-/// Warnings and source properties of the last read of `file`, when it had these bytes and gave the STEP text
-/// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
+/// Warnings, source properties and design properties of the last read of `file`, when it had these
+/// bytes and gave the STEP text `step` and the face names `faces`: the bodies it gives are the ones
+/// the link holds.
 fn unchanged_read(
     file: &Path,
     configuration: Option<SelectedConfiguration>,
     bytes: u64,
     step: u64,
     faces: u64,
-) -> Option<(Vec<String>, Vec<SourceProperties>)> {
+) -> Option<(Vec<String>, Vec<SourceProperties>, solidcraft_doc::Metadata)> {
     let file = absolute(file);
     let reads = READS.lock().ok()?;
     reads
         .iter()
         .find(|r| r.file == file && r.configuration == configuration && r.bytes == bytes && r.step == step && r.faces == faces)
-        .map(|r| (r.warnings.clone(), r.properties.clone()))
+        .map(|r| (r.warnings.clone(), r.properties.clone(), r.metadata.clone()))
 }
 
 fn remember_read(
@@ -227,6 +230,7 @@ fn remember_read(
     feature: &solidcraft_io::StepFeature,
     faces: &[Vec<String>],
     properties: &[SourceProperties],
+    metadata: &solidcraft_doc::Metadata,
 ) {
     let FeatureKind::Import { step, .. } = &feature.kind else { return };
     let file = absolute(file);
@@ -243,6 +247,7 @@ fn remember_read(
         faces: digest(faces),
         warnings: feature.warnings.clone(),
         properties: properties.to_vec(),
+        metadata: metadata.clone(),
     });
 }
 
@@ -334,7 +339,7 @@ fn design_bodies(
         part.execute("config.activate", &json!({"row": selected.row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     }
     let (name, feature, faces, metadata, properties) = session_bodies(&part, &shown)?;
-    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties);
+    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties, &metadata);
     Ok((name, feature, faces, metadata, properties))
 }
 
@@ -626,6 +631,46 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     Ok(changed)
 }
 
+/// Take the linked design's properties (`source`, its `metadata`, which Insert Design seeds a new
+/// component with) into `component`. A property that still has the value the link last took
+/// follows the design; one changed in this design stays, and the returned warnings name it when
+/// the design's value has moved. A link that took none (made before it kept them) adds only the
+/// properties the component lacks. Session::execute makes this part of the command's undo step.
+fn inherit_metadata(s: &mut Session, component: u64, source: &solidcraft_doc::Metadata) -> (bool, Vec<String>) {
+    let Some(taken) = s.doc.links.get(&component).map(|l| l.inherited_metadata.clone()) else { return (false, Vec::new()) };
+    let Some(c) = s.doc.components.iter().find(|c| c.id == component) else { return (false, Vec::new()) };
+    let (name, before) = (c.name.clone(), c.metadata.clone());
+    let mut after = before.clone();
+    let mut warnings = Vec::new();
+    let keys: std::collections::BTreeSet<&String> = source.0.keys().chain(taken.0.keys()).collect();
+    for key in keys {
+        let (theirs, was) = (source.0.get(key), taken.0.get(key));
+        let here = after.0.get(key);
+        if here == was {
+            match theirs {
+                Some(value) => after.0.insert(key.clone(), value.clone()),
+                None => after.0.remove(key),
+            };
+        } else if here != theirs && was != theirs {
+            let shown = |v: Option<&Value>| v.map_or_else(|| "none".to_string(), Value::to_string);
+            warnings.push(format!(
+                "{name} keeps its part property `{key}` ({}), set in this design; the linked design now has {}",
+                shown(here),
+                shown(theirs)
+            ));
+        }
+    }
+    let changed = after != before;
+    let d = s.doc_mut();
+    if changed && let Some(c) = d.components.iter_mut().find(|c| c.id == component) {
+        c.metadata = after;
+    }
+    if let Some(link) = d.links.get_mut(&component) {
+        link.inherited_metadata = source.clone();
+    }
+    (changed, warnings)
+}
+
 fn component_key(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<u64> {
     let k = match p.get(key) {
         Some(Value::Number(n)) => n.to_string(),
@@ -762,7 +807,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let occ = made["occurrence"].as_u64();
     // Seed only a new definition: reused links keep any locally edited part properties.
     if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == comp) {
-        c.metadata = metadata;
+        c.metadata = metadata.clone();
     }
     let id = s.doc_mut().add_feature(sf.kind, Some(&name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
@@ -785,6 +830,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             configuration: configuration.map(|c| c.row),
             configuration_identity: configuration.and_then(|c| c.identity),
             inherited: Vec::new(),
+            inherited_metadata: metadata,
             file_sha256: Some(read),
         },
     );
@@ -864,20 +910,22 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .feature(link.feature)
             .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
-        if let Some((known, properties)) = kept_faces
+        if let Some((known, properties, metadata)) = kept_faces
             .and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces))
         {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
             // cached geometry says nothing about this link's inherited properties.
-            if inherit_properties(s, comp, &properties)? {
+            let (took, kept) = inherit_metadata(s, comp, &metadata);
+            warnings.extend(kept);
+            if inherit_properties(s, comp, &properties)? || took {
                 updated.push(cname)
             } else {
                 unchanged.push(cname)
             }
             continue;
         }
-        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
+        let (_, sf, faces, metadata, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
             Ok(read) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
@@ -891,10 +939,12 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
         };
         warnings.extend(sf.warnings.iter().cloned());
+        let (took, kept_metadata) = inherit_metadata(s, comp, &metadata);
+        warnings.extend(kept_metadata);
         let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
-            if inherit_properties(s, comp, &properties)? {
+            if inherit_properties(s, comp, &properties)? || took {
                 updated.push(cname)
             } else {
                 unchanged.push(cname)
@@ -903,7 +953,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // The same bodies, their faces named for the first time (a link made before names were
         // kept): nothing a reference finds changes. Names the design gave other faces since do.
-        let changed = !same || kept.is_some_and(|k| !k.is_empty());
+        let changed = !same || kept.is_some_and(|k| !k.is_empty()) || took;
         if !same {
             for name in numbered_references(s, comp, link.feature) {
                 warnings.push(format!(
@@ -1016,7 +1066,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (_, sf, faces, _, properties) = design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
+    let (_, sf, faces, metadata, properties) = design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
     let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind));
     let path = stored(s.path.as_deref(), &file);
@@ -1052,6 +1102,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, error));
     }
     inherit_properties(s, comp, &properties)?;
+    let (_, kept) = inherit_metadata(s, comp, &metadata);
+    warnings.extend(kept);
     s.refresh();
     // Report the solver's diagnostics. A resolved joint can still describe the wrong
     // connection after a source edit; the reminder above does not depend on solve errors.

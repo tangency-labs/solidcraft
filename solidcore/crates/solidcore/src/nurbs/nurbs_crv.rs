@@ -34,8 +34,18 @@
 //! | [`MAX_DEGREE`], [`MAX_DERIV`]      | `GW_MAX_DEGREE`, `GW_MAX_DERIV`             |
 //! | [`crv_span_boxes`]                 | none (not upstream)                         |
 //! | [`crv_hull_points`]                | none (not upstream)                         |
+//! | [`crv_point_by_insertion`]         | none (not upstream)                         |
 //!
 //! Deviations:
+//! - [`crv_split`] and [`crv_trim`] insert knots with [`CPoint::affine2`]: a coordinate
+//!   the two combined control points share is kept exactly (upstream's rounded
+//!   `alf*x + (1 - alf)*x` can land an ulp off it), so a piece of a curve along an
+//!   iso-line stays on that iso-line (WR-361: a UV trim on a seam split at an edge's
+//!   new vertex ended an ulp past its face's domain).
+//! - [`crv_point_by_insertion`] is not upstream: the point at a parameter by de Boor's
+//!   triangle on the curve's own control points, which a trimmed iso curve's right end
+//!   takes so that it meets its neighbouring side exactly (#17896, `BSplineSurface::
+//!   create_iso_parametric_curve`).
 //! - [`crv_span_boxes`] and its helpers are not upstream: the boxes of the control
 //!   points of every knot span, a certified cover of the curve used to prune coincidence
 //!   queries; [`crv_hull_points`] gives the control points themselves, whose convex hull
@@ -136,6 +146,7 @@ const NOK: usize = 10;
 const OP_BEZ: &str = "nurbs::nurbs_crv::create_bez_segments";
 const OP_SPLIT: &str = "nurbs::nurbs_crv::crv_split";
 const OP_TRIM: &str = "nurbs::nurbs_crv::crv_trim";
+const OP_POINT_INS: &str = "nurbs::nurbs_crv::crv_point_by_insertion";
 const OP_BDERIVS: &str = "nurbs::nurbs_crv::basis_derivs";
 const OP_RBDERIVS: &str = "nurbs::nurbs_crv::crv_rational_basis_derivs";
 const OP_CDERIVS: &str = "nurbs::nurbs_crv::crv_derivs";
@@ -586,8 +597,7 @@ pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
             for j in 0..=p - i - mlt {
                 let alf =
                     (u - get(uk, k + j, OP)?) / (get(uk, spn + j + 1, OP)? - get(uk, k + j, OP)?);
-                let oma = 1.0 - alf;
-                let v = CPoint::combine2(alf, get(&sw, j + 1, OP)?, oma, get(&sw, j, OP)?);
+                let v = CPoint::affine2(alf, get(&sw, j + 1, OP)?, get(&sw, j, OP)?);
                 set(&mut sw, j, v, OP)?;
             }
             set(lw, k, get(&sw, 0, OP)?, OP)?;
@@ -671,8 +681,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
         for j in 0..=p - i - mll {
             let left = get(up, ll + i + j, OP)?;
             let alf = (ul - left) / (get(up, spl + j + 1, OP)? - left);
-            let oma = 1.0 - alf;
-            let v = CPoint::combine2(alf, get(qw, j + 1, OP)?, oma, get(qw, j, OP)?);
+            let v = CPoint::affine2(alf, get(qw, j + 1, OP)?, get(qw, j, OP)?);
             set(qw, j, v, OP)?;
         }
     }
@@ -689,8 +698,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
                 left = ul;
             }
             let alf = (ur - left) / (get(up, spr + j + 1, OP)? - left);
-            let oma = 1.0 - alf;
-            let v = CPoint::combine2(alf, get(qw, k, OP)?, oma, get(qw, k - 1, OP)?);
+            let v = CPoint::affine2(alf, get(qw, k, OP)?, get(qw, k - 1, OP)?);
             set(qw, k, v, OP)?;
             j -= 1;
         }
@@ -712,6 +720,58 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
         set(uq, j, ur, OP)?;
     }
     Ok(cur_q)
+}
+
+/// The control point a curve gets at `u` when `u` is inserted up to the degree (not
+/// upstream): de Boor's triangle on the curve's own control points, in the arithmetic of
+/// [`crv_split`] and of the left knot of [`crv_trim`] (and of `N_SrfExtractIsoCrv`, which
+/// runs it on each row of a net). The domain ends give the end control points and a knot
+/// of multiplicity at least the degree the control point already there.
+///
+/// [`crv_trim`]'s right end is not this point where its two insertions share control
+/// points: it combines points the left insertion already rounded, which lands it an ulp
+/// or two from here.
+///
+/// # Errors
+///
+/// [`NurbsFailure::Parameter`] for `u` outside the domain; those of
+/// [`KnotVector::find_span_and_mult`](crate::nurbs::knots::KnotVector::find_span_and_mult).
+pub fn crv_point_by_insertion(cur: &Curve, u: f64) -> Result<CPoint> {
+    const OP: &str = OP_POINT_INS;
+    let pu = cur.degree();
+    let p = sx(pu, OP)?;
+    let n = sx(cur.n(), OP)?;
+    let m = sx(cur.m(), OP)?;
+    let pw = cur.cpts();
+    let uk = cur.knots();
+    if u < get(uk, p, OP)? || u > get(uk, m - p, OP)? {
+        return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
+    }
+    if u == get(uk, p, OP)? {
+        return get(pw, 0, OP);
+    }
+    if u == get(uk, m - p, OP)? {
+        return get(pw, n, OP);
+    }
+    let (spn, mlt) = cur.knot_vector()?.find_span_and_mult(pu, u, Side::Left)?;
+    let (spn, mlt) = (sx(spn, OP)?, sx(mlt, OP)?);
+    if mlt >= p {
+        return get(pw, spn - mlt, OP);
+    }
+    let base = spn - p;
+    let mut rw = Vec::new();
+    for i in 0..=p - mlt {
+        rw.push(get(pw, base + i, OP)?);
+    }
+    for i in 1..=p - mlt {
+        for j in 0..=p - i - mlt {
+            let left = get(uk, base + i + j, OP)?;
+            let alf = (u - left) / (get(uk, spn + j + 1, OP)? - left);
+            let v = CPoint::affine2(alf, get(&rw, j + 1, OP)?, get(&rw, j, OP)?);
+            set(&mut rw, j, v, OP)?;
+        }
+    }
+    get(&rw, 0, OP)
 }
 
 /// The Euclidean images of control points `k..=l` (`sm_CrvGetEPolygon`).
@@ -2963,6 +3023,55 @@ mod tests {
             crv_trim(&c, 0.5, 0.5),
             Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
+    }
+
+    /// WR-361: a piece of a curve along an iso-line stays on it. `issue_2479`'s seam trim
+    /// (u = 6 pi, v 0 to 22) cut at v = 1 got u an ulp past 6 pi from the rounded
+    /// `alf*u + (1 - alf)*u`.
+    #[test]
+    fn split_and_trim_keep_a_shared_coordinate() {
+        let u = 18.849_555_921_538_76;
+        let pw = vec![
+            CPoint::new(u, 0.0, NOZ, NOW),
+            CPoint::new(u, 22.0, NOZ, NOW),
+        ];
+        let c = Curve::new(pw, 1, vec![0.0, 0.0, 22.0, 22.0]).unwrap();
+        let t = crv_trim(&c, 1.0, 21.0).unwrap();
+        let (l, r) = crv_split(&c, 1.0).unwrap();
+        for p in t.cpts().iter().chain(l.cpts()).chain(r.cpts()) {
+            assert_eq!(p.x, u);
+        }
+        assert_eq!(t.cpts()[0].y, 1.0);
+        // a combination without a finite weight (a zero-length span) stays NaN, shared
+        // coordinates included: the shared-coordinate rule never hides a failed insertion
+        let a = CPoint::new(u, 0.0, NOZ, NOW);
+        let nan = CPoint::affine2(f64::NAN, a, a);
+        assert!(nan.x.is_nan() && nan.y.is_nan(), "{nan:?}");
+    }
+
+    /// #17896: [`crv_point_by_insertion`] is the end of [`crv_split`]'s left piece and the
+    /// start of its right piece (one triangle); at the domain end the last control point,
+    /// at a knot of multiplicity the degree the control point already there; outside the
+    /// domain an error.
+    #[test]
+    fn point_by_insertion_is_the_split_point() {
+        let c = cubic();
+        for u in [0.05, 0.3, 0.31, 0.45, 0.6, 0.99] {
+            let (l, r) = crv_split(&c, u).unwrap();
+            let at = crv_point_by_insertion(&c, u).unwrap();
+            assert_eq!(at, *l.cpts().last().unwrap(), "u = {u}");
+            assert_eq!(at, r.cpts()[0], "u = {u}");
+        }
+        assert_eq!(crv_point_by_insertion(&c, 1.0).unwrap(), c.cpts()[5]);
+        assert_eq!(crv_point_by_insertion(&c, 0.0).unwrap(), c.cpts()[0]);
+        let u = vec![0.0, 0.0, 0.0, 0.25, 0.5, 0.5, 1.0, 1.0, 1.0];
+        let full = Curve::new(c.cpts().to_vec(), 2, u).unwrap();
+        let (l, _) = crv_split(&full, 0.5).unwrap();
+        let at = crv_point_by_insertion(&full, 0.5).unwrap();
+        assert_eq!(at, *l.cpts().last().unwrap());
+        assert!(c.cpts().contains(&at), "{at:?}");
+        assert!(crv_point_by_insertion(&c, 1.5).is_err());
+        assert!(crv_point_by_insertion(&c, -0.5).is_err());
     }
 
     #[test]
