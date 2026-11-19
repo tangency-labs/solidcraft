@@ -308,54 +308,8 @@ fn natural_turn(
     };
     let mut interval = interval;
     part.trim(k, &mut interval, TrimMode::Silent)?;
-    let turn = match curve.kind() {
-        CurveKind::Ellipse(ell) => ellipse_turn(ell, interval, centre, normal),
-        _ => bezier_turn(&mut part.clone(), centre, normal)?,
-    };
+    let turn = bezier_turn(&mut part.clone(), centre, normal)?;
     Ok(Some((part, turn)))
-}
-
-/// The sign of `g` on an elliptical arc over `interval`, in closed form. With `(e1, e2, n)`
-/// right-handed, the arc's points in the plane are `(x0 + A cos t + B sin t, y0 + C cos t +
-/// D sin t)` about the centroid, and `g = K + L cos t + M sin t` with
-/// `K = AD - BC`, `L = x0 D - y0 B`, `M = y0 A - x0 C`. Its extremes lie at the endpoints and
-/// at `phi + k pi`, `phi = atan2(M, L)`.
-fn ellipse_turn(
-    ell: &crate::curve::ellipse::Ellipse,
-    interval: Extent1d,
-    centre: [f64; 3],
-    normal: [f64; 3],
-) -> Option<Turn> {
-    let (e1, e2) = plane_frame(normal);
-    let origin = point_of(ell.position.origin());
-    let (ax, ay) = (point_of_vec(ell.position.x_axis()), point_of_vec(ell.position.y_axis()));
-    let d = sub(origin, centre);
-    let (x0, y0) = (dot(d, e1), dot(d, e2));
-    let (rx, ry) = (ell.radius_x, ell.radius_y);
-    let (a, b, c, dd) = (rx * dot(ax, e1), ry * dot(ay, e1), rx * dot(ax, e2), ry * dot(ay, e2));
-    let k = a * dd - b * c;
-    let l = x0 * dd - y0 * b;
-    let m = y0 * a - x0 * c;
-    let g = |t: f64| k + l * t.cos() + m * t.sin();
-    let (t0, t1) = (interval.min(), interval.max());
-    let phi = m.atan2(l);
-    let mut values = vec![g(t0), g(t1)];
-    let first = ((t0 - phi) / PI).ceil();
-    let last = ((t1 - phi) / PI).floor();
-    let mut step = first;
-    while step <= last {
-        values.push(g(phi + step * PI));
-        step += 1.0;
-    }
-    let lo = values.iter().copied().fold(f64::INFINITY, f64::min);
-    let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    if lo > 0.0 {
-        Some(Turn::Positive)
-    } else if hi < 0.0 {
-        Some(Turn::Negative)
-    } else {
-        None
-    }
 }
 
 /// The sign of `g` on a B-spline, from the Bernstein coefficients of `g` on each Bezier span.
