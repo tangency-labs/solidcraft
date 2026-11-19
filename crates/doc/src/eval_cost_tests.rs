@@ -23,13 +23,15 @@ use crate::*;
 /// that cut nothing, the tools a cut of many tools is made with (one when they are cut in one
 /// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
 /// direction, joins made of bodies that are all apart without running the kernel's union, the
-/// holes whose tools were built (not moved from another copy's), the tight boxes the kernel was
-/// asked for, the flats of sheets made from surfaces laid out (their pieces cut), the blends the
-/// kernel was asked for, and the searches for the radius that fits.
+/// holes whose tools were built (not moved from another copy's), the imported files read for an
+/// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
+/// surfaces laid out (their pieces cut), the blends the kernel was asked for, and the searches
+/// for the radius that fits.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
+    pub imports_read: usize,
     pub mesh_digested: usize,
     pub joint_faces: usize,
     pub faces_at: usize,
@@ -61,6 +63,7 @@ thread_local! {
         Cell::new(Counts {
             moved: 0,
             digested: 0,
+            imports_read: 0,
             mesh_digested: 0,
             joint_faces: 0,
             faces_at: 0,
@@ -554,6 +557,27 @@ fn an_imported_file_is_fingerprinted_by_its_text() {
     assert_ne!(after.last(), before.last());
     assert_eq!(model.last_recomputed, 1);
     assert_eq!(model.state().bodies.len(), 3);
+}
+
+/// An import after a sketch that follows a moved part keeps its result: the file is not read
+/// again. A joint moving a part re-read the imported STEP file, and a large file took seconds to
+/// read, so every move of the joint was as slow as the file was big (#17310).
+#[test]
+fn an_import_after_a_moved_sketch_is_not_read_again() {
+    let (mut doc, mut model, comp, _, _, _) = sketch_on_a_turned_occurrence();
+    let part = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let step: Arc<str> = kernel::step_export(&[&part], "test").unwrap().into();
+    doc.add_feature(FeatureKind::Import { file: "part.step".into(), step, components: Vec::new(), skip: Vec::new(), records: None }, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 1, "the file is read once: {work:?}");
+
+    // The part turns: the sketch on its face follows it, and the import after it is not read
+    // again: the import reads the file and nothing of the model.
+    doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap().transform = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_3);
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 0, "the import after the sketch must not be read again: {work:?}");
+    assert_eq!(model.last_recomputed, 1, "only the sketch is evaluated again: {work:?}");
+    assert_eq!(model.state().bodies.len(), 2, "the plate and the imported part: {work:?}");
 }
 
 /// Pinning body names fingerprints the timeline again only from the first renamed feature on
