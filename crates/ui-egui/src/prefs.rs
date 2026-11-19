@@ -1116,7 +1116,7 @@ preference_settings! {
     /// theme's dark sheet in a dark one), `white`, `blueprint` or `prussian_blue`
     /// (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
     /// and exported sheets are always white, and nothing reaches the design or undo.
-    drawing_sheet_colour: String = "auto".into(), PAGE_DESIGN;
+    drawing_sheet_colour: String = "white".into(), PAGE_DESIGN;
     /// The on-screen drawing canvas pattern: datum_cloud, grid or none (default none, a plain background).
     drawing_sheet_backdrop: String = "none".into(), PAGE_DESIGN;
     /// Where the Drawing workspace shows its sheet chooser.
@@ -4837,7 +4837,7 @@ fn prepare_preferences(
         return Err("`drawing_sheets_visibility` must be multiple, always, off or legacy".into());
     }
     if !accepted::drawing_calibration(&new) || crate::drawing_sheet_page::SheetColour::parse(&new.drawing_sheet_colour).is_none() {
-        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` auto, white, blueprint or prussian_blue".into());
+        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` white, theme, blueprint or prussian_blue".into());
     }
     if !accepted::drawing_panel_width(&new)
         || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())
