@@ -6,7 +6,6 @@
 //! since the run's snapshot touches its padded region; otherwise it starts a new run and its
 //! snapshot includes what was painted in between. That makes a card over a card blur the card
 //! below, and cards side by side cost one pyramid.
-#![allow(dead_code, reason = "the compositor starts using the planner in the next commit")]
 
 use egui::Rect;
 
@@ -71,7 +70,6 @@ pub struct Marker {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Member {
     pub job: usize,
-    pub rect: PxRect,
     pub region: PxRect,
 }
 
@@ -84,6 +82,7 @@ pub struct Run {
 
 impl Run {
     /// Pixels the run's first pyramid level draws, the unit of the per-frame budget.
+    #[allow(dead_code, reason = "the per-frame area budget uses it")]
     pub fn region_area(&self) -> u64 {
         self.members.iter().fold(0_u64, |sum, m| sum.saturating_add(m.region.area()))
     }
@@ -98,7 +97,7 @@ pub fn plan(jobs: &[Option<PxRect>], markers: &[Marker], pad: u32, screen: [u32;
     let mut runs: Vec<Run> = Vec::new();
     for marker in ordered {
         let Some(region) = marker.rect.padded(pad, screen) else { continue };
-        let member = Member { job: marker.job, rect: marker.rect, region };
+        let member = Member { job: marker.job, region };
         if let Some(run) = runs.last_mut() {
             let painted = jobs.get(run.start_job..marker.job).unwrap_or(&[]);
             if !painted.iter().flatten().any(|extent| extent.intersects(&region)) {

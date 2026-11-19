@@ -1,4 +1,5 @@
 use super::*;
+use crate::blur_plan::{self, PxRect, Run};
 use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
 use solidcraft_viewport_egui::ViewportCallback;
 use solidcraft_viewport_gpu::view::Renderer as ViewRenderer;
@@ -67,6 +68,7 @@ pub struct State {
     surface_alpha: Option<u8>,
     last_size: Option<[u32; 2]>,
     last_background: Option<[Color32; 3]>,
+    whole_frame: bool,
 }
 
 impl Default for State {
@@ -83,6 +85,7 @@ impl Default for State {
             surface_alpha: None,
             last_size: None,
             last_background: None,
+            whole_frame: false,
         }
     }
 }
@@ -198,6 +201,15 @@ impl State {
     pub fn source_geometry(&self) -> Option<[Rect; 3]> {
         self.active.as_ref()?.inner.lock().ok()?.geometry
     }
+    /// Blur the whole frame at every marker, as before regions existed: the reference a fixture
+    /// compares the region-scoped blur with. Takes effect on the next frame.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_whole_frame_blur(&mut self, whole: bool) {
+        if self.whole_frame != whole {
+            self.retire();
+            self.whole_frame = whole;
+        }
+    }
     /// Internal capture tint only; deliberately not a user preference.
     pub fn set_surface_alpha(&mut self, alpha: Option<u8>) {
         self.surface_alpha = alpha;
@@ -244,11 +256,13 @@ impl State {
                 radius: self.radius,
                 tier_cap: self.tier_cap,
                 painting_owner: std::sync::atomic::AtomicBool::new(true),
+                whole_frame: self.whole_frame,
                 inner: Mutex::new(Inner { counts: self.retired, ..Inner::default() }),
             })
         });
         if let Ok(mut inner) = shared.inner.lock() {
             inner.markers.clear();
+            inner.planned.clear();
             inner.serial = inner.serial.wrapping_add(1);
             inner.source_seen = false;
             inner.source_count = 0;
@@ -310,6 +324,7 @@ pub fn fixture_state(
         surface_alpha: None,
         last_size: None,
         last_background: None,
+        whole_frame: false,
     }
 }
 
@@ -356,6 +371,8 @@ struct Shared {
     tier_cap: usize,
     inner: Mutex<Inner>,
     painting_owner: std::sync::atomic::AtomicBool,
+    /// Every marker blurs the whole frame (a fixture's reference), not just its padded region.
+    whole_frame: bool,
 }
 #[derive(Default)]
 struct Inner {
@@ -367,6 +384,8 @@ struct Inner {
     submitted_at: Option<std::time::Instant>,
     gpu: Option<Gpu>,
     markers: Vec<Marker>,
+    /// Per marker of this frame: the planner gave it a region, so its blur is ready when it draws.
+    planned: Vec<bool>,
     counts: Counters,
     failure: Option<&'static str>,
     serial: u64,
@@ -644,6 +663,9 @@ impl CallbackTrait for PanelMarker {
             return;
         }
         let Some(marker) = inner.markers.get(self.index).copied() else { return };
+        if !inner.planned.get(self.index).copied().unwrap_or(false) {
+            return;
+        }
         let Some(gpu) = inner.gpu.as_ref() else { return };
         if gpu.ready_serial != inner.serial || !inner.source_seen {
             return;
@@ -721,7 +743,7 @@ impl FrameCompositor for Shared {
         if !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
             return false;
         }
-        let (composition, pipeline, binding, marker_ids) = {
+        let (composition, pipeline, binding, marker_ids, reach_px) = {
             let Ok(mut inner) = self.inner.lock() else { return false };
             if !inner.source_seen {
                 inner.missing_source = true;
@@ -737,12 +759,28 @@ impl FrameCompositor for Shared {
             if gpu.ready_serial != inner.serial || gpu.size != screen.size_in_pixels {
                 return false;
             }
-            let mut marker_ids: Vec<_> = inner.markers.iter().map(|marker| marker.callback_id).collect();
+            let mut marker_ids: Vec<(usize, usize)> = inner.markers.iter().enumerate().map(|(index, marker)| (marker.callback_id, index)).collect();
             marker_ids.sort_unstable();
-            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone(), marker_ids);
+            let reach_px = if self.whole_frame { u32::MAX } else { blur_plan::reach(gpu.steps, gpu.offset) };
+            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone(), marker_ids, reach_px);
             inner.counts.composition_passes += 1;
             data
         };
+        // The runs are planned before encoding: which markers share one snapshot, and which
+        // pixels each of them needs.
+        let runs = plan_runs(jobs, screen, &marker_ids, reach_px);
+        if let Ok(mut inner) = self.inner.lock() {
+            let count = inner.markers.len();
+            inner.planned.clear();
+            inner.planned.resize(count, false);
+            for member in runs.iter().flat_map(|run| &run.members) {
+                let index = jobs.get(member.job).and_then(callback_identity).and_then(|id| marker_index(&marker_ids, id));
+                if let Some(planned) = index.and_then(|index| inner.planned.get_mut(index)) {
+                    *planned = true;
+                }
+            }
+        }
+        let mut next_run = 0;
         {
             let color = wgpu::Color { r: clear[0] as f64, g: clear[1] as f64, b: clear[2] as f64, a: clear[3] as f64 };
             let _clear = pass(encoder, "blur_ui_composition", &composition, color);
@@ -751,11 +789,7 @@ impl FrameCompositor for Shared {
         let mut mesh_offset = 0;
         let mut segment_passes = 0;
         for end in 0..=jobs.len() {
-            let callback_id = jobs.get(end).and_then(|job| {
-                let egui::epaint::Primitive::Callback(callback) = &job.primitive else { return None };
-                Some(Arc::as_ptr(&callback.callback) as *const () as usize)
-            });
-            let marker = callback_id.is_some_and(|identity| marker_ids.binary_search(&identity).is_ok());
+            let marker = jobs.get(end).and_then(callback_identity).is_some_and(|identity| marker_index(&marker_ids, identity).is_some());
             if !marker && end != jobs.len() {
                 continue;
             }
@@ -765,19 +799,15 @@ impl FrameCompositor for Shared {
                 mesh_offset += jobs[start..end].iter().filter(|job| matches!(&job.primitive, egui::epaint::Primitive::Mesh(_))).count();
                 segment_passes += 1;
             }
-            if marker {
-                // The preceding segment is complete before sampling its color target.
-                // Reuse the pyramid, but include previously painted UI in the backdrop.
+            if marker && let Some(run) = runs.get(next_run).filter(|run| run.start_job == end) {
+                next_run += 1;
+                // The preceding segment is complete before sampling its color target. One
+                // snapshot of it serves every member of the run; later markers of the run
+                // draw from the same blur because nothing painted since touches their regions.
                 if let Ok(mut inner) = self.inner.lock() {
                     let Inner { gpu, counts, .. } = &mut *inner;
                     if let Some(gpu) = gpu {
-                        for step in &gpu.chain {
-                            let mut blur = pass(encoder, "blur_backdrop", &step.target.view, wgpu::Color::TRANSPARENT);
-                            blur.set_pipeline(if step.down { &gpu.down } else { &gpu.up });
-                            blur.set_bind_group(0, &step.binding.group, &[]);
-                            blur.draw(0..3, 0..1);
-                            counts.blur_passes += 1;
-                        }
+                        blur_run(encoder, gpu, run, counts);
                     }
                 }
             }
@@ -827,6 +857,57 @@ impl FrameCompositor for Shared {
     }
 }
 
+fn callback_identity(job: &egui::ClippedPrimitive) -> Option<usize> {
+    let egui::epaint::Primitive::Callback(callback) = &job.primitive else { return None };
+    Some(Arc::as_ptr(&callback.callback) as *const () as usize)
+}
+
+/// The marker (its index in this frame's list) a callback identity belongs to; `ids` is sorted.
+fn marker_index(ids: &[(usize, usize)], identity: usize) -> Option<usize> {
+    ids.binary_search_by_key(&identity, |(id, _)| *id).ok().map(|at| ids[at].1)
+}
+
+/// The pixels a paint job can touch, with its clip applied. Vertex bounds are read only on frames
+/// that have a marker.
+fn job_extent(job: &egui::ClippedPrimitive, scale: f32, size: [u32; 2]) -> Option<PxRect> {
+    let bounds = match &job.primitive {
+        egui::epaint::Primitive::Mesh(mesh) => {
+            mesh.vertices.iter().fold(Rect::NOTHING, |bounds, vertex| bounds.union(Rect::from_min_max(vertex.pos, vertex.pos)))
+        }
+        egui::epaint::Primitive::Callback(callback) => callback.rect,
+    };
+    blur_plan::px_extent(bounds, job.clip_rect, scale, size)
+}
+
+fn plan_runs(jobs: &[egui::ClippedPrimitive], screen: &ScreenDescriptor, ids: &[(usize, usize)], pad: u32) -> Vec<Run> {
+    let size = screen.size_in_pixels;
+    let extents: Vec<Option<PxRect>> = jobs.iter().map(|job| job_extent(job, screen.pixels_per_point, size)).collect();
+    let markers: Vec<blur_plan::Marker> = jobs
+        .iter()
+        .enumerate()
+        .filter(|(_, job)| callback_identity(job).is_some_and(|identity| marker_index(ids, identity).is_some()))
+        .filter_map(|(job, _)| Some(blur_plan::Marker { job, rect: extents.get(job).copied().flatten()? }))
+        .collect();
+    blur_plan::plan(&extents, &markers, pad, size)
+}
+
+/// One pyramid for the run: per level a pass, and in it one scissored draw per member.
+fn blur_run(encoder: &mut wgpu::CommandEncoder, gpu: &Gpu, run: &Run, counts: &mut Counters) {
+    for step in &gpu.chain {
+        let mut blur = pass(encoder, "blur_backdrop", &step.target.view, wgpu::Color::TRANSPARENT);
+        blur.set_pipeline(if step.down { &gpu.down } else { &gpu.up });
+        blur.set_bind_group(0, &step.binding.group, &[]);
+        for member in &run.members {
+            let Some(area) = member.region.at_level(step.level, step.dims) else { continue };
+            blur.set_scissor_rect(area.x0, area.y0, area.width(), area.height());
+            blur.draw(0..3, 0..1);
+            counts.blur_pixels += area.area();
+        }
+        counts.blur_passes += 1;
+    }
+    counts.blur_runs += 1;
+}
+
 struct Target {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -839,10 +920,14 @@ struct Step {
     target: Target,
     binding: Binding,
     down: bool,
+    /// Halvings from the full-size frame to this step's target, and its size.
+    level: u32,
+    dims: [u32; 2],
 }
 struct Gpu {
     size: [u32; 2],
     steps: usize,
+    offset: f32,
     source: Target,
     composition: Target,
     chain: Vec<Step>,
@@ -1051,19 +1136,20 @@ impl Gpu {
             p[1] = u8::from(index == 0 && !format.is_srgb()) as f32;
             let binding = Binding::new(device, &layout, &sampler, input, p, counts);
             let target = Target::new(device, *dims, wgpu::TextureFormat::Rgba16Float, counts);
-            chain.push(Step { target, binding, down: true });
+            chain.push(Step { target, binding, down: true, level: index as u32 + 1, dims: *dims });
         }
-        for dims in dimensions.iter().take(steps).rev() {
+        for (level, dims) in dimensions.iter().take(steps).enumerate().rev() {
             let input = chain.last().map_or(&composition.view, |s| &s.target.view);
             let mut p = [0.0; 24];
             p[0] = offset;
             let binding = Binding::new(device, &layout, &sampler, input, p, counts);
             let target = Target::new(device, *dims, wgpu::TextureFormat::Rgba16Float, counts);
-            chain.push(Step { target, binding, down: false });
+            chain.push(Step { target, binding, down: false, level: level as u32, dims: *dims });
         }
         Self {
             size,
             steps,
+            offset,
             source,
             composition,
             chain,

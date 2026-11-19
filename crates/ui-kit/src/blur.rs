@@ -16,6 +16,10 @@ pub struct Counters {
     pub pipelines_created: u64,
     pub source_passes: u64,
     pub blur_passes: u64,
+    /// Snapshots of the composition that were blurred: markers that share one count once.
+    pub blur_runs: u64,
+    /// Pixels the blur passes shaded, over every pyramid level.
+    pub blur_pixels: u64,
     pub composition_passes: u64,
     pub present_passes: u64,
     pub markers_emitted: u64,

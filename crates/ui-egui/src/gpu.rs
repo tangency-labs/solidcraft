@@ -1455,7 +1455,46 @@ mod tests {
     fn assert_backdrop_passes(before: crate::blur::Counters, after: crate::blur::Counters, steps: usize) {
         let markers = after.markers_drawn - before.markers_drawn;
         assert!(markers > 0, "the fixture must paint a visible backing boundary");
-        assert_eq!(after.blur_passes - before.blur_passes, 2 * steps as u64 * markers, "each backing boundary filters the preceding UI");
+        let runs = after.blur_runs - before.blur_runs;
+        assert!((1..=markers).contains(&runs), "markers that share a snapshot share one blur: {runs} runs for {markers} markers");
+        assert_eq!(after.blur_passes - before.blur_passes, 2 * steps as u64 * runs, "each run filters the preceding UI once");
+    }
+
+    /// The blur of a marker's padded region is the whole-frame blur inside the marker (#19213).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_region_matches_whole_frame_blur() {
+        for srgb in [false, true] {
+            let Some(mut f) = BlurFixture::new(srgb, crate::blur::FixturePolicy::Rendering) else { return };
+            f.app.blur.set_surface_alpha(Some(180));
+            for radius in [8.0, 18.0, 40.0] {
+                f.radius(radius);
+                f.app.blur.set_whole_frame_blur(false);
+                for _ in 0..4 {
+                    f.frame();
+                }
+                let before = f.app.blur.counters();
+                f.frame();
+                let regions = f.app.blur.counters();
+                let region_pixels = f.pixels(false);
+                f.app.blur.set_whole_frame_blur(true);
+                for _ in 0..4 {
+                    f.frame();
+                }
+                let before_whole = f.app.blur.counters();
+                f.frame();
+                let whole = f.app.blur.counters();
+                let whole_pixels = f.pixels(false);
+                let worst = region_pixels.iter().zip(&whole_pixels).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+                assert!(worst <= 1, "srgb {srgb} radius {radius}: region blur differs from whole-frame blur by {worst}/255");
+                assert_eq!(regions.markers_drawn - before.markers_drawn, whole.markers_drawn - before_whole.markers_drawn);
+                let (region_work, whole_work) = (regions.blur_pixels - before.blur_pixels, whole.blur_pixels - before_whole.blur_pixels);
+                assert!(
+                    region_work > 0 && region_work < whole_work,
+                    "radius {radius}: {region_work} pixels in regions, {whole_work} for the whole frame"
+                );
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
