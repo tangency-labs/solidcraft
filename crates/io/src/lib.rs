@@ -39,8 +39,8 @@ pub mod limits;
 mod mutate;
 mod native_cad;
 pub use native_cad::{
-    NATIVE_CAD_EXTS, NativeDesign, USD_EXTS, cadmpeg_iges_records, cadmpeg_step_records, detects_freecad, is_freecad_path, is_native_cad_path,
-    is_usd_path, native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step, usd_records,
+    NATIVE_CAD_EXTS, NativeDesign, RecordsRead, USD_EXTS, cadmpeg_iges_records, cadmpeg_step_records, detects_freecad, is_freecad_path,
+    is_native_cad_path, is_usd_path, native_cad_design, native_cad_records, native_cad_to_step, read_usd, usd_from_step, usd_records,
 };
 pub mod paper;
 mod pat;
@@ -501,7 +501,8 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
     let _span = solidcraft_profile::span("import", "usd_import_feature");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     let (records, warnings, y_up) = usd_records(bytes, file).map_err(IoError::Invalid)?;
-    Ok((records_import_feature((records, warnings, false), file, names)?, y_up))
+    let read = RecordsRead { records, warnings, freecad: false, preprocessor: String::new(), description: String::new() };
+    Ok((records_import_feature(read, file, names)?, y_up))
 }
 
 /// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino, STEP or IGES) into an Import feature that
@@ -510,11 +511,19 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
 /// shows only through its body's own shape) are not built, unless nothing else is; a Rhino file's
 /// hidden objects are its user's own choice, so they are built and start hidden. The format is
 /// the one cadmpeg detects in the contents, not the file's name.
-fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, bool), file: &str, names: StepNames) -> Result<StepFeature> {
-    let (records, decode_warnings, freecad) = read;
+fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Result<StepFeature> {
+    let RecordsRead { records, warnings: decode_warnings, freecad, preprocessor, description } = read;
     let text = solidcraft_kernel::records_text(&records)?;
     design::check_step_importable(&text)?;
-    let imp = solidcraft_kernel::records_import_shared(&records)?;
+    let mut imp = solidcraft_kernel::records_import_shared(&records)?;
+    // The rest of a STEP header, which the records do not keep, as a STEP import has it: with the
+    // program (the records' `system`) it says whether the file has Y up. A copy, so the shared
+    // import other reads of the same records find is not changed.
+    if imp.preprocessor != preprocessor || imp.description != description {
+        let mut own = (*imp).clone();
+        (own.preprocessor, own.description) = (preprocessor, description);
+        imp = std::sync::Arc::new(own);
+    }
     // Not one body made of the records: no feature, as a STEP file with no solids is refused.
     if imp.bodies.is_empty() {
         let why = imp.warnings.last().map(|w| format!(" ({w})")).unwrap_or_default();
