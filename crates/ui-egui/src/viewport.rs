@@ -9697,14 +9697,14 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         orbiting,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
     };
-    // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
-    let action = crate::view_compass::show(ui, &compass);
     // The two roll arrows round the compass's upper-right edge, inside the navigator's box; shown
-    // while the pointer is over the navigator or it is orbiting.
+    // while the pointer is over the navigator or it is orbiting. Drawn before the compass, so a
+    // hovered end's label covers them rather than the other way round.
     let outer = axis_rect(app, rect);
     let active = orbiting || ui.rect_contains_pointer(outer);
     navigator_controls::axes_roll_arrows(app, ui, &ui.painter_at(outer), axis_center(app, rect), active, Tokens::get().navigator(active));
-    match action {
+    // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
+    match crate::view_compass::show(ui, &compass) {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
             let d = Vec3::from(direction);
             let frame = app.cam.to_frame(d);

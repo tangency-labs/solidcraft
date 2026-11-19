@@ -180,10 +180,10 @@ fn label(painter: &egui::Painter, clip: Rect, c: Pos2, (name, d, at, depth): Tip
     painter.rect_filled(pill, r, colour);
     if positive {
         let letter = painter.layout_no_wrap(name.to_uppercase(), crate::type_face::bold(t.font_compass), t.on_accent);
-        painter.galley(at - letter.size() / 2.0, letter, t.on_accent);
+        painter.galley(at - crate::type_face::ink_centre(&letter), letter, t.on_accent);
     }
     let x = if rightward { at.x + lead } else { at.x - lead - w };
-    painter.galley(pos2(x, at.y - galley.size().y / 2.0), galley, t.on_accent);
+    painter.galley(pos2(x, at.y - crate::type_face::ink_centre(&galley).y), galley, t.on_accent);
     pill
 }
 
@@ -422,6 +422,20 @@ mod tests {
                 assert!(pill.max.x <= minus_x.2.x + 12.0, "a left tip grows leftward");
             },
         );
+    }
+
+    /// A letter is centred on its ink, which lies inside its line; empty text on its middle.
+    #[test]
+    fn letters_centre_on_their_ink() {
+        let ctx = crate::test_support::context();
+        crate::test_support::raw_frame(&ctx, RawInput::default(), |ui| {
+            let font = crate::type_face::bold(13.5);
+            let x = ui.painter().layout_no_wrap("X".into(), font.clone(), egui::Color32::WHITE);
+            let centre = crate::type_face::ink_centre(&x);
+            assert!(Rect::from_min_size(Pos2::ZERO, x.size()).contains(centre.to_pos2()), "{centre:?} in {:?}", x.size());
+            let empty = ui.painter().layout_no_wrap(String::new(), font, egui::Color32::WHITE);
+            assert_eq!(crate::type_face::ink_centre(&empty), empty.size() / 2.0);
+        });
     }
 
     #[test]

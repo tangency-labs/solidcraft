@@ -72,6 +72,14 @@ pub fn bold(size: f32) -> FontId {
     FontId::new(size, bold_family())
 }
 
+/// Where laid-out text's ink is centred, from the galley's top-left: the glyphs' own bounds, so a
+/// letter sits optically centred whatever its font's ascent and line height (Latin letters from a
+/// CJK fallback sit low in a taller line otherwise). Empty text uses the galley's middle.
+pub fn ink_centre(galley: &egui::Galley) -> egui::Vec2 {
+    let ink = galley.mesh_bounds;
+    if ink.is_positive() && ink.is_finite() { ink.center().to_vec2() } else { galley.size() / 2.0 }
+}
+
 /// Select a real interface weight without changing the text's size or colour.
 pub trait RichTextExt {
     fn medium(self) -> Self;
