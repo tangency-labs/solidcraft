@@ -2732,6 +2732,99 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
 }
 
+/// #18711: a panel leaning at the angle `A` (an 18 wide foot at the origin, sides 300 long),
+/// extruded 118, with a sketch on its top face and a circle on the projected top corner away
+/// from the origin. Returns the sketch and the circle.
+fn leaning_panel(s: &mut Session) -> (u64, String) {
+    run(s, "parameters.change", json!({"name": "A", "expression": "95 deg"}));
+    run(s, "sketch.create", json!({"plane": "XY"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [18, 0], [-8, 299], [-26, 299]], "closed": true, "ids": ["m1", "m2", "m3", "m4"]}));
+    run(s, "sketch.constraint.coincident", json!({"a": "m1.start", "b": "origin"}));
+    for (line, mode) in [("m1", "horizontal"), ("m3", "horizontal")] {
+        run(s, "sketch.constraint.horizontal_vertical", json!({"line": line, "mode": mode}));
+    }
+    run(s, "sketch.constraint.parallel", json!({"a": "m2", "b": "m4"}));
+    run(s, "sketch.dimension", json!({"entities": ["m1"], "value": 18}));
+    run(s, "sketch.dimension", json!({"entities": ["m4"], "value": 300}));
+    run(s, "sketch.dimension", json!({"entities": ["m1", "m4"], "value": "A"}));
+    assert_eq!(inspect(s)["dof"], 0);
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 118, "body_name": "Panel"}));
+    let sketch = run(s, "sketch.create", json!({"plane": {"face": [-4, 149, 118]}}))["sketch"].as_u64().unwrap();
+    let st = s.model.state();
+    let ss = st.sketch(sketch).unwrap();
+    let on_corner = ss.sketch.points.iter().find(|p| p.link.is_some() && ss.plane.to_world(p.pos).dist(panel_corner(95.)) < 1e-6).unwrap().id.clone();
+    let circle = ids(&run(s, "sketch.circle.center", json!({"center": [-6, 290], "radius": 5}))["curves"])[0].clone();
+    run(s, "sketch.constraint.coincident", json!({"a": format!("{circle}.center"), "b": on_corner}));
+    run(s, "sketch.dimension", json!({"entities": [circle], "value": 10}));
+    assert_eq!(inspect(s)["dof"], 0);
+    run(s, "sketch.finish", json!({}));
+    (sketch, circle)
+}
+
+/// The top corner of [`leaning_panel`]'s side away from the origin: the foot's end and a side of
+/// 300 at `degrees`.
+fn panel_corner(degrees: f64) -> solidcore_record::Vec3 {
+    let a = degrees.to_radians();
+    solidcore_record::Vec3::new(18. + 300. * a.cos(), 300. * a.sin(), 118.)
+}
+
+/// #18711: turning [`leaning_panel`] from 95 to 92, 90 or 85 degrees moves its corner past the
+/// foot: the face's edges, read in the order of where they lie, come back in another order, and
+/// the projection was rebuilt without the circle's constraint. The link's curves keep the names
+/// of the edges they stand for, which find them again: the circle stays on the corner.
+#[test]
+fn a_leaning_panel_turned_keeps_what_is_on_its_projected_face() {
+    let mut s = Session::default();
+    let (sketch, circle) = leaning_panel(&mut s);
+    for degrees in [92., 90., 85., 95.] {
+        run(&mut s, "parameters.change", json!({"name": "A", "expression": format!("{degrees} deg")}));
+        let warning = s.model.result(sketch).and_then(|r| r.warning.clone());
+        assert!(warning.is_none(), "{degrees}: {warning:?}");
+        let st = s.model.state();
+        let ss = st.sketch(sketch).unwrap();
+        assert!(ss.sketch.links.iter().all(|l| !l.lost), "{degrees}");
+        assert_eq!(ss.sketch.constraints.len(), 2, "{degrees}: the circle keeps its place and its size");
+        let center = ss.sketch.points.iter().find(|p| p.id == format!("{circle}.center")).unwrap();
+        assert!(ss.plane.to_world(center.pos).dist(panel_corner(degrees)) < 1e-6, "{degrees}: {:?}", ss.plane.to_world(center.pos));
+    }
+}
+
+/// #18711: the face's link saves the name of each of its curves' edges, one per curve, and a
+/// design saved with them reads them back. A design saved before them (the field taken out) opens
+/// and builds as it did: the same curves where they were, the circle on its corner.
+#[test]
+fn a_projected_face_saves_its_edge_names_and_a_design_without_them_builds_as_before() {
+    let mut s = Session::default();
+    let (sketch, circle) = leaning_panel(&mut s);
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let link = s.doc.sketch(sketch).unwrap().links.iter().find(|l| l.auto_face).unwrap().clone();
+    assert_eq!(link.curve_edges.len(), 4, "{link:?}");
+    assert!(link.curve_edges.iter().all(|n| n.contains('|')), "{:?}", link.curve_edges);
+    let reopened = solidcraft_doc::Document::from_json(&saved.to_string()).unwrap();
+    assert_eq!(reopened.sketch(sketch).unwrap().links.iter().find(|l| l.auto_face).unwrap().curve_edges, link.curve_edges);
+    fn strip(v: &mut Value) -> usize {
+        match v {
+            Value::Object(map) => usize::from(map.remove("curve_edges").is_some()) + map.values_mut().map(strip).sum::<usize>(),
+            Value::Array(items) => items.iter_mut().map(strip).sum(),
+            _ => 0,
+        }
+    }
+    let mut older = saved.clone();
+    assert_eq!(strip(&mut older), 1);
+    let older = Session::new(solidcraft_doc::Document::from_json(&older.to_string()).unwrap());
+    let (st, old_st) = (s.model.state(), older.model.state());
+    let (now, before) = (st.sketch(sketch).unwrap(), old_st.sketch(sketch).unwrap());
+    assert!(older.model.result(sketch).and_then(|r| r.warning.clone()).is_none());
+    let placed = |ss: &solidcraft_doc::SolvedSketch| ss.sketch.points.iter().map(|p| (p.id.clone(), ss.plane.to_world(p.pos))).collect::<Vec<_>>();
+    let (a, b) = (placed(now), placed(before));
+    assert_eq!(a.len(), b.len());
+    assert!(a.iter().zip(&b).all(|((i, p), (j, q))| i == j && p.dist(*q) < 1e-9), "{a:?} {b:?}");
+    assert_eq!(before.sketch.constraints.len(), 2);
+    let center = before.sketch.points.iter().find(|p| p.id == format!("{circle}.center")).unwrap();
+    assert!(before.plane.to_world(center.pos).dist(panel_corner(95.)) < 1e-6);
+}
+
 /// A sphere's outline from above is its equator: one circle and one profile. Flat triangles beside
 /// the equator can tip the other way from the sphere, and their edges must not join the outline.
 #[test]

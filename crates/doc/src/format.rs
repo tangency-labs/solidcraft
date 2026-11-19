@@ -1041,11 +1041,21 @@ fn validate_versioned_geometry(value: &Value) -> Result<()> {
             }
             let indices = curve.get("pts").and_then(Value::as_array).ok_or_else(invalid)?;
             work = work.saturating_add(indices.len());
-            if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len())
-                || work > 1_000_000
-                || curve.get("control").is_some_and(|control| control.as_bool() != Some(false))
-                || curve.get("degree").is_some_and(|degree| degree.as_u64() != Some(3))
-            {
+            let control = match curve.get("control") {
+                None => false,
+                Some(control) => control.as_bool().ok_or_else(invalid)?,
+            };
+            let degree = match curve.get("degree") {
+                None => 3,
+                Some(degree) => degree.as_u64().and_then(|degree| u8::try_from(degree).ok()).ok_or_else(invalid)?,
+            };
+            if work > 1_000_000 {
+                return Err(invalid());
+            }
+            if control {
+                // A closed control spline: its own degree and count rule.
+                solidcraft_sketch::validate_closed_control(indices.len(), degree).map_err(|_| invalid())?;
+            } else if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len()) || degree != 3 {
                 return Err(invalid());
             }
             let count = points.ok_or_else(invalid)?.len();
@@ -2167,7 +2177,7 @@ mod tests {
         assert!(validate_versioned_geometry(&make(curve.clone())).is_ok());
         for (key, malformed) in [
             ("periodic", serde_json::json!("true")),
-            ("control", serde_json::json!(true)),
+            ("control", serde_json::json!("yes")),
             ("degree", serde_json::json!(2)),
             ("pts", serde_json::json!([0, 1, 2])),
             ("pts", serde_json::json!([0, 1, 2, u64::MAX])),
@@ -2177,10 +2187,14 @@ mod tests {
             damaged[key] = malformed;
             assert!(validate_versioned_geometry(&make(damaged)).is_err(), "{key}");
         }
-        let mut legacy = curve;
+        let mut legacy = curve.clone();
         legacy.as_object_mut().unwrap().remove("periodic");
         legacy["control"] = Value::Bool(true);
         assert!(validate_versioned_geometry(&make(legacy)).is_ok());
+        // A closed control spline (#19337) of degree 3 over four points is a valid design.
+        let mut closed = curve;
+        closed["control"] = Value::Bool(true);
+        assert!(validate_versioned_geometry(&make(closed)).is_ok());
         for convention in [serde_json::json!(null), serde_json::json!(false), serde_json::json!("unknown")] {
             assert!(validate_versioned_geometry(&serde_json::json!({"features":[{"type":"revolve", "convention":convention}]})).is_err());
         }

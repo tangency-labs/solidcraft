@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(listed["operations"][0]["cancelling"], true, "{listed}");
         h.frame();
         let shown = |h: &crate::scenario::Harness| {
-            h.app.operations.rows(crate::now_ms()).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
+            h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
         };
         assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.cancelling").to_string()), "drawn while it stops");
         // The worker stops before replacing the file: cancelled, not an error, still unsaved.
