@@ -103,3 +103,21 @@ fn a_holed_plates_check_classifies_each_seam_in_closed_form() {
     // and none collects touch lists that nothing reads
     assert_eq!(runs(&calls, "topology::face::seam_loop_crossings", None), 0);
 }
+
+/// The plate read back from its record, as an application checks a body it keeps: its UV
+/// trims are rational quadratic circles (the holes' rims on the two caps) and straight
+/// segments (the rest), whose speed and radius of curvature are bounded in closed form above
+/// the check's tolerances (`span_bounds`), so the check runs no first-derivative or radius
+/// search on them (`nurbs::b_spline_curve::property_analysis`). The analysis memo knows none
+/// of these curves: a decoded body's trims differ from the extrude's in their last bits.
+#[test]
+fn a_decoded_holed_plates_check_bounds_its_trims_in_closed_form() {
+    let (record, _) = holed_plate().to_record().unwrap();
+    let (plate, _) = Body::from_record(&record, true).unwrap();
+    let (report, calls) = session::profiled(|| plate.check(CheckLevel::All).unwrap());
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(
+        runs(&calls, "nurbs::b_spline_curve::property_analysis", None),
+        0
+    );
+}
