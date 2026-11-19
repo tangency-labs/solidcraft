@@ -129,6 +129,8 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
         }
     }
     crate::workspace::sync_context(app);
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
 }
 
 /// The per-design part of the UI state the session doesn't keep (what is hidden, shown or locked
@@ -452,6 +454,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // (`take_work`).
     crate::timeline::stop_playback(app);
     crate::sketch_text_move::cancel_drag(app);
+    crate::control_joint_drive::discard(app);
     let work = take_work(app);
     crate::dim_view::cancel();
     app.params = None;
@@ -954,8 +957,15 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         // canonicalize resolves symlinks and Windows long names/case using the filesystem.
-        // Never lowercase: Windows can also host case-sensitive directories.
-        if let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        // Never lowercase: Windows can also host case-sensitive directories. A path on a network
+        // location not allowed (other than the host the other path is on) or a device is never
+        // resolved: on Windows that connects to the host before any "network location" question.
+        use solidcraft_engine::io::vfs;
+        let reachable = |p: &str, other: &str| vfs::design_path_refusal(p, Some(other)).is_none();
+        if reachable(a, b)
+            && reachable(b, a)
+            && let (Ok(a), Ok(b)) = (vfs::canonicalize(a), vfs::canonicalize(b))
+        {
             return a == b;
         }
         // A deleted file can still select its live editing session. Path equality also
@@ -2633,6 +2643,24 @@ mod tests {
         assert!(reuse_path(&mut a, "picker.solidcraft").is_err());
         assert_eq!(a.docs.active, 1);
         assert_eq!(a.docs.count(), 2);
+    }
+
+    /// A design's link to a network location not allowed is never resolved to see whether it is
+    /// an open design (Edit in Place asks that before the "network location" question).
+    #[test]
+    fn saved_path_identity_never_resolves_a_refused_network_path() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-paths-net-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let open = dir.join("assembly.solidcraft").to_string_lossy().into_owned();
+        let calls = solidcraft_engine::io::vfs::file_calls();
+        for link in [r"\\server\share\part.solidcraft", "//server/share/part.solidcraft", r"\\.\pipe\part.solidcraft"] {
+            assert!(!same_path(&open, link), "{link}");
+            assert!(!same_path(link, &open), "{link}");
+        }
+        assert_eq!(solidcraft_engine::io::vfs::file_calls(), calls, "a refused path was resolved");
+        // Two paths on the same server (a design opened from it) are still compared.
+        assert!(same_path(r"\\files\share\a.solidcraft", r"\\files\share\a.solidcraft"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -4436,26 +4464,28 @@ mod tests {
         assert_eq!(drawings(&mut a), [Value::Null, expected]);
     }
 
-    /// K10 (#3890): a tab with its drawing open refuses model commands only in that tab. A sheet
-    /// sketch entered there is still active after a round trip.
+    /// K10 (#3890): a tab with its drawing open takes model commands, as every tab does, with a
+    /// sheet sketch being edited there too; the sheet sketch stays in its own tab and is still
+    /// active after a round trip.
     #[test]
-    fn a_tabs_model_commands_wait_only_in_that_tab() {
-        let gate = "a drawing is open: close it to change the model (drawing.close)";
+    fn a_tabs_sheet_sketch_waits_in_that_tab_and_holds_nothing() {
         let mut a = app();
         let [sheet, _] = two_sheet_drawing(&mut a);
-        let refused = |a: &mut SolveApp| a.run("solid.sphere", json!({"diameter": 4})).unwrap_err();
-        assert!(refused(&mut a).contains(gate), "{}", refused(&mut a));
+        // A sheet sketch is made, and finished, in Drawing.
+        crate::workspace::enter(&mut a, "drawing").unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.open_drawing.is_some(), "with the drawing still open");
+        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_some(), "a model command leaves the sheet sketch open");
         new_design(&mut a);
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
-        switch(&mut a, 0);
-        assert!(refused(&mut a).contains(gate));
-        a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        switch(&mut a, 1);
         assert!(a.session.active_sheet_sketch.is_none());
         switch(&mut a, 0);
         assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch waits in its tab");
+        crate::workspace::enter(&mut a, "drawing").unwrap();
         a.run("sketch.finish", json!({})).unwrap();
-        a.run("drawing.close", json!({})).unwrap();
+        assert!(a.session.active_sheet_sketch.is_none());
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
     }
 

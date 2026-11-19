@@ -274,6 +274,45 @@ fn analytic_forms_refuse_invalid_angular_domains() {
     }
 }
 
+/// A torus face's quarters along its tube: a whole turn that starts off a quarter line needs five
+/// (its seam's second use lies past four from the quarter it starts in), whatever quarter it
+/// starts in, negative angles included; one that starts on a quarter line, or within the
+/// tolerance's angle of one, or is a turn only to rounding, needs four; less than a turn the
+/// quarters it crosses.
+#[test]
+fn a_whole_turn_round_a_tube_off_a_quarter_line_spans_five_quarters() {
+    let torus = Surface::Torus {
+        frame: Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        major_radius: 2.5,
+        minor_radius: 1.8,
+        tube_start: 0.0,
+    };
+    let q = |v: [f64; 2], tol: f64| form::tube_quarters(&torus, [[0.0, FRAC_PI_2], v], tol);
+    // The seam of #18778's bend, in the tube's second quarter.
+    let seam = 1.910_828_950_980_659_5;
+    for k in 0..4 {
+        let start = seam + f64::from(k) * FRAC_PI_2;
+        assert_eq!(q([start, start + TAU], 1e-7), Some(5), "{start}");
+        assert_eq!(q([-start, TAU - start], 1e-7), Some(5), "{start}");
+        let on = f64::from(k) * FRAC_PI_2;
+        assert_eq!(q([on, on + TAU], 0.0), Some(4), "{on}");
+    }
+    // A turn to rounding, a start a rounding short of a quarter line within the tolerance's
+    // angle (1e-6 / 1.8), and one farther short than that.
+    assert_eq!(q([0.0, TAU * (1.0 + 0.5e-9)], 0.0), Some(4));
+    let near = FRAC_PI_2 - 1e-9;
+    assert_eq!(q([near, near + TAU], 1e-6), Some(4));
+    let short = FRAC_PI_2 - 1e-5;
+    assert_eq!(q([short, short + TAU], 1e-6), Some(5));
+    // Less than a turn: from the second quarter into the fourth, and two whole quarters.
+    assert_eq!(q([seam, seam + std::f64::consts::PI], 1e-7), Some(3));
+    assert_eq!(q([0.0, std::f64::consts::PI], 0.0), Some(2));
+}
+
 /// Keep the existing rounding window around one complete turn and the exact form it chooses.
 #[test]
 fn analytic_forms_keep_the_existing_whole_turn_rounding_window() {
@@ -1337,6 +1376,120 @@ fn a_loop_through_a_pole_closes_its_turn_from_the_seam() {
         (v[0] + FRAC_PI_2).abs() < 1e-9 && v[1].abs() < 1e-9,
         "{v:?}"
     );
+}
+
+/// A 5 mm sphere about z, its seam the meridian through +x (angle −π/2 at the south pole, π/2
+/// at the north), and the circle where the plane at `d` from the centre across direction
+/// `(cos a, sin a, 0)` meets it (angle 0 at its top, a quarter turn towards +y about it).
+fn sphere_seam_and_cut(a: f64, d: f64) -> (Surface, Curve, Curve) {
+    let r = 5.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let seam = Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    let (s, c) = a.sin_cos();
+    let cut = Curve::Circle {
+        frame: Frame {
+            origin: [d * c, d * s, 0.],
+            x_axis: [0., 0., 1.],
+            y_axis: [-s, c, 0.],
+        },
+        radius: (r * r - d * d).sqrt(),
+    };
+    (sphere, seam, cut)
+}
+
+/// A sphere less a hole beside its seam (#16872: a ball with a bore in it, after a STEP round
+/// trip): the seam's loop, up the meridian and back down it, has no width, yet the face covers
+/// the whole turn with the hole in it, whichever loop comes first. Taken as wide as the hole, the
+/// face's form was a sliver and its seam loop enclosed nothing.
+#[test]
+fn a_sphere_less_a_hole_beside_its_seam_spans_the_whole_turn() {
+    let (sphere, seam, hole) = sphere_seam_and_cut(0.4, 4.8);
+    let seam_loop = vec![
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], true),
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], false),
+    ];
+    let hole_loop = vec![(&hole, [0., TAU], false)];
+    for loops in [
+        [seam_loop.clone(), hole_loop.clone()],
+        [hole_loop.clone(), seam_loop.clone()],
+    ] {
+        let [u, v] = form::extent(&sphere, &loops, 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!((u[1] - u[0] - TAU).abs() < 1e-9, "one turn: {u:?}");
+        let from = u[0].rem_euclid(TAU);
+        assert!(from.min(TAU - from) < 1e-9, "from the seam: {u:?}");
+        let hole_u = 0.4 + ((u[0] - 0.4) / TAU).ceil() * TAU;
+        assert!(
+            hole_u > u[0] && hole_u < u[1],
+            "the hole in the turn: {u:?}"
+        );
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "{v:?}"
+        );
+    }
+}
+
+/// A sphere less a bore across its seam (#16872): its loop runs up the seam to the bore, round
+/// the bore's one side, up the seam to the north pole, down the seam's other use, round the
+/// bore's other side and down to the south pole. It passes both poles, so it closes whatever
+/// turns it takes there; the face lies on its left, so over the north pole it turns back a whole
+/// turn and the face covers it. Closing the loop instead took the turns of no width, a box just
+/// as wide as the bore, and the face came out as the bore turned over.
+#[test]
+fn a_loop_over_both_poles_turns_the_way_its_face_lies() {
+    let (sphere, seam, bore) = sphere_seam_and_cut(0.0, 4.0);
+    let below = [-FRAC_PI_2, -(0.6f64.asin())];
+    let above = [0.6f64.asin(), FRAC_PI_2];
+    let outer = [
+        (&seam, below, true),
+        (&bore, [std::f64::consts::PI, TAU], true),
+        (&seam, above, true),
+        (&seam, above, false),
+        (&bore, [0., std::f64::consts::PI], true),
+        (&seam, below, false),
+    ];
+    // Started anywhere round it, the loop takes the same turns.
+    for k in 0..outer.len() {
+        let l: Vec<_> = outer
+            .iter()
+            .cycle()
+            .skip(k)
+            .take(outer.len())
+            .copied()
+            .collect();
+        let [u, v] = form::extent(&sphere, &[l], 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!(
+            (u[1] - u[0] - TAU).abs() < 1e-9,
+            "start {k}: one turn: {u:?}"
+        );
+        let from = u[0].rem_euclid(TAU);
+        assert!(
+            from.min(TAU - from) < 1e-9,
+            "start {k}: from the seam: {u:?}"
+        );
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "start {k}: {v:?}"
+        );
+    }
 }
 
 /// Half a dome of revolution, its profile a spline from the axis, bounded by a meridian into

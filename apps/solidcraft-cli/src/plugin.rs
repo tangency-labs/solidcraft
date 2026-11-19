@@ -27,8 +27,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("check") => check(&args[1..]),
         Some("test") => test(&args[1..]),
-        Some(other) => Err(format!("plugin: unknown action `{other}`; use plugin check or plugin test\n{}", crate::command_usage("plugin"))),
-        None => Err(crate::command_usage("plugin")),
+        Some(other) => Err(format!("plugin: unknown action `{other}`; use plugin check or plugin test\n{}", crate::plugin_usage(None))),
+        None => Err(crate::plugin_usage(None)),
     }
 }
 
@@ -46,7 +46,7 @@ fn package_path<'a>(action: &str, args: &'a [String], valued: &[&str]) -> Result
         }
         i += 1;
     }
-    found.ok_or_else(|| format!("plugin {action} needs a package folder or .zip\n{}", crate::command_usage("plugin")))
+    found.ok_or_else(|| format!("plugin {action} needs a package folder or .zip\n{}", crate::plugin_usage(Some(action))))
 }
 
 fn check(args: &[String]) -> Result<(), String> {

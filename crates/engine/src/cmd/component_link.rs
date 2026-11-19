@@ -55,6 +55,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
          configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
+         axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
+         matrix?: [12 or 16 numbers] (row-major 3x4 or 4x4, its translation column numbers or length expressions) or to_matrix?: [12 or 16 numbers]; \
+         tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file and configuration when available",
     ),
     CommandSpec::new("component.update_links", "Update Links", crate::checked!("component.update_links", update_links))
@@ -64,7 +67,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "component?: id or name (default: every linked component); components?: a list of ids or names, which goes on past a design it \
          cannot read (that one keeps its bodies, is named in failed and gets a warning) — reads the linked designs again and replaces \
-         their bodies where they changed, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
+         their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
+         design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
          joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
@@ -186,6 +190,7 @@ struct LinkRead {
     faces: u64,
     warnings: Vec<String>,
     properties: Vec<SourceProperties>,
+    metadata: solidcraft_doc::Metadata,
 }
 
 #[cfg(test)]
@@ -200,21 +205,22 @@ fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
     h.finish()
 }
 
-/// Warnings and source properties of the last read of `file`, when it had these bytes and gave the STEP text
-/// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
+/// Warnings, source properties and design properties of the last read of `file`, when it had these
+/// bytes and gave the STEP text `step` and the face names `faces`: the bodies it gives are the ones
+/// the link holds.
 fn unchanged_read(
     file: &Path,
     configuration: Option<SelectedConfiguration>,
     bytes: u64,
     step: u64,
     faces: u64,
-) -> Option<(Vec<String>, Vec<SourceProperties>)> {
+) -> Option<(Vec<String>, Vec<SourceProperties>, solidcraft_doc::Metadata)> {
     let file = absolute(file);
     let reads = READS.lock().ok()?;
     reads
         .iter()
         .find(|r| r.file == file && r.configuration == configuration && r.bytes == bytes && r.step == step && r.faces == faces)
-        .map(|r| (r.warnings.clone(), r.properties.clone()))
+        .map(|r| (r.warnings.clone(), r.properties.clone(), r.metadata.clone()))
 }
 
 fn remember_read(
@@ -224,6 +230,7 @@ fn remember_read(
     feature: &solidcraft_io::StepFeature,
     faces: &[Vec<String>],
     properties: &[SourceProperties],
+    metadata: &solidcraft_doc::Metadata,
 ) {
     let FeatureKind::Import { step, .. } = &feature.kind else { return };
     let file = absolute(file);
@@ -240,17 +247,21 @@ fn remember_read(
         faces: digest(faces),
         warnings: feature.warnings.clone(),
         properties: properties.to_vec(),
+        metadata: metadata.clone(),
     });
 }
 
 /// The bytes of the design at `file`, which must not be the design saved at `own`.
 fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
-    if own.is_some_and(|o| same_file(Path::new(o), file)) {
+    // A network location only when its server is allowed, a device never: judged from the text
+    // before anything is asked of the disk (on Windows, resolving or reading `\\host\share\x`
+    // connects to the host), so a refused path skips the self-link check, which resolves it, and
+    // `read_linked_file` says why it is refused.
+    let reachable = solidcraft_io::vfs::design_path_refusal(&shown, own).is_none();
+    if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    // A network location only when its server is allowed, a device never: judged from the text
-    // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
     read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
 }
 
@@ -331,7 +342,7 @@ fn design_bodies(
         part.execute("config.activate", &json!({"row": selected.row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     }
     let (name, feature, faces, metadata, properties) = session_bodies(&part, &shown)?;
-    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties);
+    remember_read(file, configuration, digest(bytes), &feature, &faces, &properties, &metadata);
     Ok((name, feature, faces, metadata, properties))
 }
 
@@ -623,6 +634,46 @@ fn inherit_properties(s: &mut Session, component: u64, sources: &[SourceProperti
     Ok(changed)
 }
 
+/// Take the linked design's properties (`source`, its `metadata`, which Insert Design seeds a new
+/// component with) into `component`. A property that still has the value the link last took
+/// follows the design; one changed in this design stays, and the returned warnings name it when
+/// the design's value has moved. A link that took none (made before it kept them) adds only the
+/// properties the component lacks. Session::execute makes this part of the command's undo step.
+fn inherit_metadata(s: &mut Session, component: u64, source: &solidcraft_doc::Metadata) -> (bool, Vec<String>) {
+    let Some(taken) = s.doc.links.get(&component).map(|l| l.inherited_metadata.clone()) else { return (false, Vec::new()) };
+    let Some(c) = s.doc.components.iter().find(|c| c.id == component) else { return (false, Vec::new()) };
+    let (name, before) = (c.name.clone(), c.metadata.clone());
+    let mut after = before.clone();
+    let mut warnings = Vec::new();
+    let keys: std::collections::BTreeSet<&String> = source.0.keys().chain(taken.0.keys()).collect();
+    for key in keys {
+        let (theirs, was) = (source.0.get(key), taken.0.get(key));
+        let here = after.0.get(key);
+        if here == was {
+            match theirs {
+                Some(value) => after.0.insert(key.clone(), value.clone()),
+                None => after.0.remove(key),
+            };
+        } else if here != theirs && was != theirs {
+            let shown = |v: Option<&Value>| v.map_or_else(|| "none".to_string(), Value::to_string);
+            warnings.push(format!(
+                "{name} keeps its part property `{key}` ({}), set in this design; the linked design now has {}",
+                shown(here),
+                shown(theirs)
+            ));
+        }
+    }
+    let changed = after != before;
+    let d = s.doc_mut();
+    if changed && let Some(c) = d.components.iter_mut().find(|c| c.id == component) {
+        c.metadata = after;
+    }
+    if let Some(link) = d.links.get_mut(&component) {
+        link.inherited_metadata = source.clone();
+    }
+    (changed, warnings)
+}
+
 fn component_key(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<u64> {
     let k = match p.get(key) {
         Some(Value::Number(n)) => n.to_string(),
@@ -638,14 +689,73 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
-fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "component.insert_design";
-    let selection = configuration_key(p, None, cmd)?;
-    let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+/// Placement transform for `component.insert_design`: accepts `to_matrix` or `matrix` (row-major
+/// 3x4 or 4x4, with length expressions in the translation column), or `translate`, `axis`, `angle`,
+/// and `origin`.
+fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::Mat, Option<solidcraft_doc::ExpressedMove>)> {
+    let matrix = p.get("matrix");
+    let to_matrix = p.get("to_matrix");
+    if matrix.is_some() && to_matrix.is_some() {
+        return Err(bad(cmd, "give either to_matrix or matrix, not both"));
+    }
+    if let Some(key) = ["to_matrix", "matrix"].into_iter().find(|k| p.get(*k).is_some()) {
+        if let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| p.get(*k).is_some()) {
+            return Err(bad(cmd, format!("give either {key} or {k}, not both")));
+        }
+        let m = matrix.or(to_matrix).ok_or_else(|| bad(cmd, "matrix"))?;
+        let (numbers, kept) =
+            super::component::matrix::with_exprs(m, |e| s.doc.eval(e, solidcraft_doc::expr::Kind::Length).map_err(|err| err.to_string()), cmd)?;
+        let tolerance = super::component::matrix::tolerance(p, cmd)?;
+        let transform = super::component::matrix::rigid(&numbers, tolerance, cmd)?;
+        if !solidcraft_doc::is_placement(&transform) {
+            return Err(bad(cmd, "placement transform exceeds supported numeric range"));
+        }
+        let expressed = if kept.iter().any(Option::is_some) {
+            Some(solidcraft_doc::ExpressedMove {
+                translate: kept,
+                at: [transform[3][0], transform[3][1], transform[3][2]],
+                frame: solidcraft_doc::IDENTITY,
+                world: false,
+                origin: Default::default(),
+                origin_at: [0.0; 3],
+                rotation: solidcraft_doc::IDENTITY,
+                grounded_ok: false,
+            })
+        } else {
+            None
+        };
+        return Ok((transform, expressed));
+    }
+
     let translate = match p.get("translate") {
         None => solidcore_record::Vec3::ZERO,
         Some(v) => vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z] in mm"))?,
     };
+    let axis = super::component::move_vector(p, "axis", solidcore_record::Vec3::Z, false, cmd)?;
+    let angle = match p.get("angle") {
+        Some(Value::String(e)) => s.doc.eval(e, solidcraft_doc::expr::Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?,
+        None => 0.0,
+        Some(value) => value.as_f64().ok_or_else(|| bad(cmd, "angle must be a number or angle expression"))?,
+    };
+    let origin = super::component::move_vector(p, "origin", solidcore_record::Vec3::ZERO, true, cmd)?;
+    if !(translate.is_finite() && axis.is_finite() && angle.is_finite() && origin.is_finite()) {
+        return Err(bad(cmd, "non-finite placement"));
+    }
+    if angle != 0.0 && axis.normalized().is_none() {
+        return Err(bad(cmd, "rotation axis must have a finite nonzero length"));
+    }
+    let transform = solidcraft_doc::rigid(translate, origin, axis, angle);
+    if !solidcraft_doc::is_placement(&transform) {
+        return Err(bad(cmd, "placement transform exceeds supported numeric range"));
+    }
+    Ok((transform, None))
+}
+
+fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.insert_design";
+    let selection = configuration_key(p, None, cmd)?;
+    let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+    let (transform, expressed) = placement_transform(s, p, cmd)?;
     // A network or device path is judged from its text, as given, before anything reads it.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
     let file = absolute(Path::new(given));
@@ -671,9 +781,12 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
             // Reuse the definition, not another placement's captured or pending move.
             // Insert Design places from the parent origin whether the link is new or reused.
-            let mut transform = solidcraft_doc::IDENTITY;
-            transform[3] = [translate.x, translate.y, translate.z, 1.0];
             let occurrence = s.doc_mut().add_occurrence(component, parent, transform)?;
+            if let Some(expressed) = expressed
+                && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence)
+            {
+                o.expressed_moves.push(expressed);
+            }
             return reply(cmd, InsertDesignResult { inserted: DesignInserted::Reused { occurrence, component }, param_warnings: Vec::new() });
         }
     }
@@ -697,7 +810,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let occ = made["occurrence"].as_u64();
     // Seed only a new definition: reused links keep any locally edited part properties.
     if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == comp) {
-        c.metadata = metadata;
+        c.metadata = metadata.clone();
     }
     let id = s.doc_mut().add_feature(sf.kind, Some(&name))?;
     if let Some(f) = s.doc_mut().feature_mut(id) {
@@ -706,7 +819,10 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         f.link_faces = faces;
     }
     if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| Some(o.id) == occ) {
-        o.transform[3] = [translate.x, translate.y, translate.z, 1.0];
+        o.transform = transform;
+        if let Some(expressed) = expressed {
+            o.expressed_moves.push(expressed);
+        }
     }
     let path = stored(s.path.as_deref(), &file);
     s.doc_mut().links.insert(
@@ -717,6 +833,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             configuration: configuration.map(|c| c.row),
             configuration_identity: configuration.and_then(|c| c.identity),
             inherited: Vec::new(),
+            inherited_metadata: metadata,
             file_sha256: Some(read),
         },
     );
@@ -796,20 +913,22 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .feature(link.feature)
             .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
-        if let Some((known, properties)) = kept_faces
+        if let Some((known, properties, metadata)) = kept_faces
             .and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces))
         {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
             // cached geometry says nothing about this link's inherited properties.
-            if inherit_properties(s, comp, &properties)? {
+            let (took, kept) = inherit_metadata(s, comp, &metadata);
+            warnings.extend(kept);
+            if inherit_properties(s, comp, &properties)? || took {
                 updated.push(cname)
             } else {
                 unchanged.push(cname)
             }
             continue;
         }
-        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
+        let (_, sf, faces, metadata, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
             Ok(read) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
@@ -823,10 +942,12 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
         };
         warnings.extend(sf.warnings.iter().cloned());
+        let (took, kept_metadata) = inherit_metadata(s, comp, &metadata);
+        warnings.extend(kept_metadata);
         let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
-            if inherit_properties(s, comp, &properties)? {
+            if inherit_properties(s, comp, &properties)? || took {
                 updated.push(cname)
             } else {
                 unchanged.push(cname)
@@ -835,7 +956,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // The same bodies, their faces named for the first time (a link made before names were
         // kept): nothing a reference finds changes. Names the design gave other faces since do.
-        let changed = !same || kept.is_some_and(|k| !k.is_empty());
+        let changed = !same || kept.is_some_and(|k| !k.is_empty()) || took;
         if !same {
             for name in numbered_references(s, comp, link.feature) {
                 warnings.push(format!(
@@ -948,7 +1069,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (_, sf, faces, _, properties) = design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
+    let (_, sf, faces, metadata, properties) = design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
     let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind));
     let path = stored(s.path.as_deref(), &file);
@@ -984,6 +1105,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, error));
     }
     inherit_properties(s, comp, &properties)?;
+    let (_, kept) = inherit_metadata(s, comp, &metadata);
+    warnings.extend(kept);
     s.refresh();
     // Report the solver's diagnostics. A resolved joint can still describe the wrong
     // connection after a source edit; the reminder above does not depend on solve errors.

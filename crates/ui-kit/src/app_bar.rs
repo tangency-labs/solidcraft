@@ -49,19 +49,11 @@ pub mod brand {
 /// The pills' height, and the least width at which the bar gives the first pill its label.
 pub const PILL_HEIGHT: f32 = 24.0;
 pub const PILL_LABEL_MIN: f32 = 1100.0;
-/// The gap before and between pills, and the × inside one.
-const PILL_GAP: f32 = 6.0;
+/// The × inside a pill.
 const PILL_X: f32 = 16.0;
 
 /// Space between the search field and Settings.
 pub const SEARCH_GAP: f32 = 4.0;
-/// Home's least place from the bar's left edge, and the least gap between the app's name and
-/// Home's button. 128 was Home's fixed place, sized for "SolidCraft": the name starts at 36 and is
-/// 65.1 wide in Plex Sans semibold at the theme's heading size (14), so it ends at 101.1, and Home's
-/// button starts at 108 (20 before its place), 6.9 after it. A longer name moves Home right by
-/// the same gap, rounded down so SolidCraft's bar stays put: 36 + 65.1 + 6 + 20 = 127.1, under 128.
-const HOME_MIN: f32 = 128.0;
-const NAME_GAP: f32 = 6.0;
 /// A bar narrower than this shows no product name, no Undo and Redo, and narrower file actions.
 const COMPACT: f32 = 640.0;
 /// Space the File menu keeps below its rows for its frame and a gap above the window's bottom.
@@ -171,13 +163,12 @@ pub struct AppBar<'a> {
     pub handles: Handles<'a>,
 }
 
-/// A menu's text button (File), its label starting 5 before `x`: its rect, and whether it
+/// A menu's text button (File), in its laid-out rect: its rect, and whether it
 /// was clicked while `idle`. Drawn held while its menu is `open`.
 /// It shows `label`; `name` is its accessible name.
-fn text_button(ui: &mut egui::Ui, r: Rect, x: f32, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
+fn text_button(ui: &mut egui::Ui, rect: Rect, (label, name): (&str, &str), open: bool, idle: bool, salt: &str) -> (Rect, bool) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text);
-    let rect = Rect::from_min_size(pos2(x - 13.0, r.center().y - 13.0), vec2(galley.size().x + 16.0, 26.0));
     let resp = ui.interact(rect, ui.scope_id().with(("ab", salt)), if idle { Sense::click() } else { Sense::hover() });
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, name));
     if idle && (resp.hovered() || resp.has_focus() || open) {
@@ -298,27 +289,21 @@ fn pill_width(ui: &egui::Ui, p: &Pill) -> f32 {
     8.0 + 14.0 + label + 4.0 + PILL_X + 3.0
 }
 
-/// The room the pills take left of Report a bug: each with the gap before it.
-fn pills_width(ui: &egui::Ui, pills: &[Pill]) -> f32 {
-    pills.iter().map(|p| pill_width(ui, p) + PILL_GAP).sum()
-}
-
 /// A flat capsule `PILL_HEIGHT` tall in `fill`, a touch lighter while `hot`.
 fn capsule(ui: &egui::Ui, rect: Rect, fill: egui::Color32, hot: bool) {
     let fill = if hot { fill.lerp_to_gamma(egui::Color32::WHITE, 0.12) } else { fill };
     ui.painter().rect_filled(rect, egui::CornerRadius::same((rect.height() / 2.0) as u8), fill);
 }
 
-/// One pill, its right edge at `right`: returns its left edge. A flat capsule with full-height
+/// One pill in its laid-out rect. A flat capsule with full-height
 /// corners; hovering lightens its fill by about 8 % over 0.1 s. The × is a plain glyph, with a
 /// round translucent dark background (black at 38 %) that fades in while it is hovered. Edges are
 /// snapped to whole pixels so they stay crisp at any scale.
-fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) -> f32 {
+fn pill(ui: &mut egui::Ui, bar: Rect, rect: Rect, p: &Pill, h: &Handles, actions: &mut Vec<BarAction>) {
     let t = Tokens::get();
     let ppp = ui.ctx().pixels_per_point();
     let snap = |v: f32| (v * ppp).round() / ppp;
-    let width = snap(pill_width(ui, p));
-    let rect = Rect::from_min_size(pos2(snap(right - width), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(width, PILL_HEIGHT));
+    let rect = Rect::from_min_size(pos2(rect.left(), snap(bar.center().y - PILL_HEIGHT / 2.0)), vec2(rect.width(), PILL_HEIGHT));
     let x_rect = Rect::from_center_size(pos2(snap(rect.right() - 4.0 - PILL_X / 2.0), rect.center().y), vec2(PILL_X, PILL_X));
     let main = Rect::from_min_max(rect.min, pos2(x_rect.left(), rect.bottom()));
     let main_resp = ui.interact(main, ui.scope_id().with(("sc_pill", p.id)), Sense::click());
@@ -358,7 +343,6 @@ fn pill(ui: &mut egui::Ui, bar: Rect, right: f32, p: &Pill, h: &Handles, actions
     if x_resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(p.hide_tip).clicked() {
         actions.push(BarAction::HidePill { id: p.id.to_string() });
     }
-    rect.left() - PILL_GAP
 }
 
 /// A short divider between the bar's groups.
@@ -391,34 +375,50 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
 /// window's own buttons).
 pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOut {
+    use crate::app_bar_layout::{application, layout};
+
     let t = Tokens::get();
     let h = &data.handles;
     let r = bar;
-    let left = content.left();
-    let compact = r.right() - left < COMPACT;
+    let report_font = FontId::proportional(t.font_button);
+    let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
+    let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
+    let measured = application::Measurements {
+        origin: r.left(),
+        name: ui.painter().layout_no_wrap(data.name.to_string(), crate::type_face::semibold(t.font_heading), t.app_bar_text).size().x,
+        file: ui.painter().layout_no_wrap(data.file.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 16.0,
+        leading: data.leading.map(|size| size.x),
+        actions: data.actions.iter().map(|b| b.wide_only).collect(),
+        quick: data.quick,
+        report: label_width,
+        report_icon_only: data.report.icon_only,
+        pills: data.pills.iter().map(|p| pill_width(ui, p)).collect(),
+        search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
+        assistant: data.assistant,
+        version: version.as_ref().map(|(_, galley)| galley.size().x),
+        offered: solidcraft_ui_registry::rect_of("titlebar:update").map(|u| u.width()),
+        pixels_per_point: ui.ctx().pixels_per_point(),
+    };
+    let spec = application::spec(r.width(), content.left() - r.left(), r.right() - content.right(), measured);
+    let geometry = layout(&spec).application.unwrap_or_default();
+    let compact = geometry.compact;
+    let rect = |span: application::Span, height| {
+        Rect::from_min_max(pos2(r.left() + span.left, r.center().y - height / 2.0), pos2(r.left() + span.right, r.center().y + height / 2.0))
+    };
     let mut actions = Vec::new();
-    (data.mark)(ui.painter(), pos2(left + 20.0, r.center().y));
-    // Home's place: after the name as drawn, and never before HOME_MIN.
-    let mut x = if compact {
-        left + 56.0
-    } else {
-        let name = ui.painter().text(
-            pos2(left + 36.0, r.center().y),
+    (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
+    if !compact {
+        ui.painter().text(
+            pos2(r.left() + geometry.name, r.center().y),
             Align2::LEFT_CENTER,
             data.name,
             crate::type_face::semibold(t.font_heading),
             t.app_bar_text,
         );
-        // Home's button starts 20 before its place (32 wide, centred 4 before it).
-        (left + HOME_MIN).max(name.right() + NAME_GAP + 20.0)
-    };
-    let leading = data.leading.map(|size| {
-        let rect = Rect::from_center_size(pos2(x, r.center().y), size);
-        x += size.x + 8.0;
-        rect
-    });
+    }
+    let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
     // Home.
-    let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
+    let home = rect(geometry.home, 32.0);
     let idle = data.home.enabled;
     let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
     home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
@@ -435,12 +435,9 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
         actions.push(BarAction::Home);
     }
-    x = home.right() + 8.0;
-    separator(ui, r, x, "brand", h);
-    x += 16.0;
+    separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
     // The File menu's text button, .
-    let (file, clicked) = text_button(ui, r, x, (data.file, data.file), data.file_open, idle, "file");
-    x = file.right() + 17.0;
+    let (file, clicked) = text_button(ui, rect(geometry.file, 26.0), (data.file, data.file), data.file_open, idle, "file");
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
     }
@@ -451,61 +448,35 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         actions.push(BarAction::File { rect: file });
     }
     // The file actions, then the app's quick-access buttons.
-    let step = if compact { 22.0 } else { 34.0 };
-    for b in data.actions.iter().filter(|b| !(compact && b.wide_only)) {
-        if icon_button(ui, r, x, b, compact, h) {
+    for (b, at) in data.actions.iter().zip(&geometry.actions) {
+        if let Some(at) = at
+            && icon_button(ui, r, r.left() + at, b, compact, h)
+        {
             actions.push(BarAction::Button { id: b.id.to_string() });
         }
-        x += step;
     }
-    let mut quick = None;
-    if !compact && data.quick > 0 {
-        separator(ui, r, x - step / 2.0 + 8.0, "quick_access", h);
-        x += 8.0;
-        quick = Some((x, step));
-        x += data.quick as f32 * step;
+    if let Some(at) = geometry.quick_separator {
+        separator(ui, r, r.left() + at, "quick_access", h);
     }
+    let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
-    let captions = r.right() - content.right();
-    let separator_x = x - step + if compact { 19.0 } else { 24.0 };
-    separator(ui, r, separator_x, "documents", h);
-    let tabs_start = separator_x + 10.0;
-    let report_font = FontId::proportional(t.font_button);
-    let label_width = ui.painter().layout_no_wrap(data.report.label.to_string(), report_font.clone(), t.app_bar_text).size().x;
-    // The version links to its release notes; measured here so Report a bug leaves it room.
-    let version = data.version.map(|v| (v, ui.painter().layout_no_wrap(v.text.to_string(), FontId::proportional(t.font_small), t.app_bar_text)));
-    let version_width = version.as_ref().map(|(_, galley)| galley.size().x);
-    let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version_width, data.report.icon_only);
-    // The right-hand controls keep their places; the link pills sit left of them, in the room the
-    // document tabs leave (see `pills_w` below).
-    let anchor = report.left();
-    // Settings' left edge; the search field, when the bar holds it, sits just before it and moves
-    // the assistant and the end of the document tabs left by its width.
-    let gear_left = anchor - 68.0;
-    let search = data.search.then(|| search_rect(ui.ctx(), data.search_shortcut, r, gear_left - SEARCH_GAP, anchor - CLUSTER_BUTTONS - tabs_start));
-    let search_shift = search.map_or(0.0, |s| s.width() + SEARCH_GAP);
+    separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
+    let tabs_start = r.left() + geometry.tabs_start;
+    let report = rect(geometry.report, if data.report.icon_only { 32.0 } else { 26.0 });
+    let report_label = geometry.report_labeled;
+    let search = geometry.search.map(|span| rect(span, 26.0));
     if let Some(search) = search {
         solidcraft_ui_registry::publish_target(h.search, search);
     }
-    if icon_button(ui, r, anchor - 18.0, &data.help, compact, h) {
-        actions.push(BarAction::Help { x: anchor - 18.0 });
+    let help = r.left() + geometry.help;
+    if icon_button(ui, r, help, &data.help, compact, h) {
+        actions.push(BarAction::Help { x: help });
     }
     // An offer (a newer release) sits before the right cluster, in the space up to the file
     // actions; labelled where Report a bug is (an icon-only one leaves it to fit by room).
-    let mut controls_left = anchor - CLUSTER_BUTTONS - search_shift;
-    let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
-    // The link pills sit left of the offer pill (which stays beside the assistant: the app draws it
-    // in `offer`, and its width is last frame's) or, with none, of the assistant. They are left out
-    // where the tabs would keep less than one tab's room (216) beside them, so a narrow bar looks as
-    // it did without them.
-    let offered = solidcraft_ui_registry::rect_of("titlebar:update").map_or(0.0, |u| u.width() + 4.0);
-    let pills_w = pills_width(ui, &data.pills);
-    let pills_shown = !data.pills.is_empty() && controls_left - offered - pills_w - tabs_start >= 216.0;
-    let pills_right = controls_left - 4.0 - offered;
-    if pills_shown {
-        controls_left -= pills_w + offered;
-    }
-    let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
+    let controls_left = r.left() + geometry.controls_left;
+    let offer = rect(geometry.offer, report.height());
+    let offer_labeled = geometry.offer_labeled;
     // Report a bug.
     let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
@@ -535,27 +506,26 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         actions.push(BarAction::Report);
     }
     // The link pills, left of the assistant.
-    let mut right = pills_right;
-    for p in data.pills.iter().rev().filter(|_| pills_shown) {
-        right = pill(ui, r, right, p, h, &mut actions);
+    for (p, span) in data.pills.iter().zip(&geometry.pills).rev() {
+        pill(ui, r, rect(*span, PILL_HEIGHT), p, h, &mut actions);
     }
     // Settings sits immediately left of Help.
-    let gear = Rect::from_center_size(pos2(anchor - 52.0, r.center().y), vec2(32.0, 32.0));
+    let gear = rect(geometry.settings, 32.0);
     let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
     if gresp.hovered() || gresp.has_focus() {
         ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
     }
     crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
     solidcraft_ui_registry::publish_rect(h.settings, gear);
-    let assistant = data.assistant.then(|| Rect::from_center_size(pos2(anchor - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
+    let assistant = geometry.assistant.map(|span| rect(span, 32.0));
     solidcraft_ui_registry::publish_handle(h.settings, gear.center());
     if gresp.backing_on_hover_text(data.settings.tip).clicked() {
         actions.push(BarAction::Button { id: data.settings.id.to_string() });
     }
     if let Some((v, galley)) = version
-        && version_room(r, captions, tabs_start, galley.size().x).is_some()
+        && let Some(span) = geometry.version
     {
-        let vrect = Align2::RIGHT_CENTER.anchor_size(pos2(r.right() - 12.0 - captions, r.center().y), galley.size());
+        let vrect = rect(span, galley.size().y);
         let vresp = ui.interact(
             vrect.expand2(vec2(2.0, 4.0)).intersect(Rect::everything_right_of(report.right())),
             ui.scope_id().with("sc_version_link"),

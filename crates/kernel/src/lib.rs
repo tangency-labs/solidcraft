@@ -167,7 +167,8 @@ pub use blend::{
     ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edge_middles, blend_edges, chamfer, chamfer_carrying_face, chamfer_max,
     chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, chamfer_sides_max_why, fillet, fillet_each, fillet_g2, fillet_g2_corners,
     fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note,
-    named_fit, names_largest_fit, scale_fit_note, smooth_picks, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
+    named_fit, names_largest_fit, scale_fit_note, smooth_picks, tangent_chain, tangent_chain_beyond_points, tangent_chain_edges, with_fit_note,
+    without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
@@ -190,7 +191,7 @@ pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
-pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, point_closest};
+pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
@@ -223,7 +224,7 @@ pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
-pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
+pub use sew::{EdgeSpec, FaceSpec, MAX_CHAIN_POINTS, SurfSpec, sew, sew_touching, sew_touching_traced};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
@@ -232,7 +233,7 @@ pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, sp
 pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
-pub use step_in::records::{ImportRecords, RecordBody, import_trims, records_import, records_import_shared, records_text};
+pub use step_in::records::{ImportRecords, RecordBody, RecordMesh, import_trims, records_import, records_import_shared, records_noted, records_text};
 pub use step_in::{
     HealedBody, ImportChecks, ImportHeals, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading,
     step_cache_alive, step_import, step_import_shared, step_orientation_errors, step_validate,

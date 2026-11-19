@@ -21,6 +21,24 @@
 //!
 //! [`DATA`] was made by [`record`] on main and on this branch (`TOLSUB_CASES`, a
 //! `unit<TAB>case` list, and `TOLSUB_OUT`), diffed read by read.
+//!
+//! **When a later change moves one of these rows** other than through the read
+//! tolerances, the substitution can no longer give main's row; such a row's entry is
+//! deleted and the unit's row count lowered. #17896 (exact shared coordinates,
+//! `CPoint::affine2`) moves the geometry of the `Fillet/bottle.smb` read itself; it deletes
+//! the 19 `blend.fillet_executive_p3` bottle rows whose fillet that read reaches. The read's
+//! moved values and those fillets' results are classified in `solidcore`'s
+//! `tests/heal_edge_tolerance_covers_edge_face_gap.rs`.
+//!
+//! The kept-trim cover (tangency-labs/solidcraft#19295) raises, after the healer, the
+//! tolerance of an edge whose kept UV trim runs farther from it than its tolerance, to a
+//! proved bound on that distance, and records each raise it makes with the value before
+//! (`Brep::trim_cover_raises`). Every read of a replayed row first has those raises put
+//! back. [`TRIM_COVER`] lists the rows only the cover moved, each with the hash of main's
+//! encoded row from main's own run of the case ([`record`] on main; a committed golden line
+//! can differ from main's run in the last bits, within the goldens' tolerance): with the
+//! raises put back (at least one) the row is main's row, and as is it is the committed
+//! golden line.
 
 use std::collections::BTreeMap;
 
@@ -35,6 +53,8 @@ use crate::UnitDiff;
 
 mod data;
 use data::DATA;
+mod trim_cover;
+use trim_cover::TRIM_COVER;
 
 /// Generated cases per unit, as `goldens` runs them (`main.rs` `DEFAULT_SEEDS`).
 const SEEDS: usize = 16;
@@ -120,6 +140,7 @@ fn replay(unit_id: &str) -> usize {
             reads: 0,
             applied: 0,
             already: 0,
+            undone: 0,
             failures: Vec::new(),
         }));
         let line = run(u.as_ref(), case);
@@ -151,6 +172,56 @@ fn replay(unit_id: &str) -> usize {
     n
 }
 
+/// Runs every row of `unit_id` in [`TRIM_COVER`] with the reads' kept-trim cover raises put
+/// back (at least one per row) and as is; returns the row count.
+fn replay_trim_cover(unit_id: &str) -> usize {
+    let u = unit(unit_id);
+    let all = cases(u.as_ref());
+    let golden = read(&default_dir(), unit_id).unwrap();
+    let mut failures = Vec::new();
+    let mut n = 0;
+    for &(_, name, main_hash) in TRIM_COVER.iter().filter(|r| r.0 == unit_id) {
+        n += 1;
+        assert!(
+            !DATA.iter().any(|r| r.0 == unit_id && r.1 == name),
+            "{unit_id} {name}: replayed with #18230's rows"
+        );
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        state::set(Some(Mode::Substitute {
+            subs: Vec::new(),
+            reads: 0,
+            applied: 0,
+            already: 0,
+            undone: 0,
+            failures: Vec::new(),
+        }));
+        let line = run(u.as_ref(), case);
+        let Some(Mode::Substitute {
+            reads,
+            undone,
+            failures: f,
+            ..
+        }) = state::take()
+        else {
+            panic!("mode lost");
+        };
+        if reads == 0 || undone == 0 || !f.is_empty() {
+            failures.push(format!("{name}: {reads} reads, {undone} put back, {f:?}"));
+        }
+        if hash(&line) != main_hash {
+            failures.push(format!("{name}: the row put back is not main's row"));
+        }
+        let line = run(u.as_ref(), case);
+        if golden.get(name) != Some(&line) {
+            failures.push(format!("{name}: the row is not the committed golden line"));
+        }
+    }
+    assert!(failures.is_empty(), "{unit_id}:\n{}", failures.join("\n"));
+    n
+}
+
 macro_rules! replay_tests {
     ($($test:ident: $unit:literal, $rows:literal;)*) => {$(
         #[test]
@@ -162,7 +233,7 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 30;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 11;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
     corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
@@ -170,6 +241,32 @@ replay_tests! {
     brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 39;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
     face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
+}
+
+macro_rules! replay_trim_cover_tests {
+    ($($test:ident: $unit:literal, $rows:literal;)*) => {$(
+        #[test]
+        fn $test() {
+            assert_eq!(replay_trim_cover($unit), $rows);
+        }
+    )*};
+}
+
+replay_trim_cover_tests! {
+    blend_feature_executive_rows_move_only_through_the_trim_cover: "blend.feature_executive", 3;
+    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 32;
+    blend_fillet_removal_rows_move_only_through_the_trim_cover: "blend.fillet_removal", 20;
+    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 8;
+    heal_stitch_p1_rows_move_only_through_the_trim_cover: "heal.stitch_p1", 4;
+    heal_stitch_p2_rows_move_only_through_the_trim_cover: "heal.stitch_p2", 8;
+    topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;
+    topology_brep_cutting_rows_move_only_through_the_trim_cover: "topology.brep_cutting", 2;
+    topology_brep_local_operation_rows_move_only_through_the_trim_cover: "topology.brep_local_operation", 28;
+    topology_brep_mirror_rows_move_only_through_the_trim_cover: "topology.brep_mirror", 20;
+    topology_brep_p2_rows_move_only_through_the_trim_cover: "topology.brep_p2", 11;
+    topology_brep_p9_rows_move_only_through_the_trim_cover: "topology.brep_p9", 4;
+    topology_edgeuse_p3_rows_move_only_through_the_trim_cover: "topology.edgeuse_p3", 16;
+    topology_face_p3_rows_move_only_through_the_trim_cover: "topology.face_p3", 18;
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:

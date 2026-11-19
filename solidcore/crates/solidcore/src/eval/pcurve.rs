@@ -22,7 +22,9 @@
 //! Origin: SolidCraft's `crates/geom/src/brep/pcurve.rs` (MIT OR Apache-2.0), moved here with its
 //! history (RFC 0003, 1.5 and 1.8). It takes the kernel's evaluation types ([`super::geometry`]);
 //! the structural checks of a record (counts, budgets, a use's interval in its curve's natural
-//! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`).
+//! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`). The pieces
+//! a face's flux is integrated over along each pcurve ([`flux_pieces`]) come from SolidCraft's
+//! `face_flux` (`crates/geom/src/brep/eval.rs`), which calls them through `solidcore-ops`.
 //!
 //! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
 //! [`find_span`]) as the routine had them.
@@ -85,6 +87,91 @@ pub struct EdgeUse<'a> {
     pub tolerance: f64,
     /// The use's exact pcurve where the producer holds one.
     pub given: Option<&'a Curve2>,
+}
+
+/// One face leaving an edge, with its pcurve on the edge's own parameter interval.
+/// The loop direction is relative to the surface's natural normal.
+#[derive(Clone, Copy, Debug)]
+pub struct RadialFace<'a> {
+    /// The face's surface in the pcurve's parameters.
+    pub surface: &'a Surface,
+    /// The edge's curve in the face's surface parameters.
+    pub pcurve: &'a Curve2,
+    /// Whether the face's loop follows the edge's positive curve direction.
+    pub forward: bool,
+}
+
+/// Orders faces counter-clockwise about an edge's positive tangent, starting at the
+/// first face. This is the radial-edge construction (Weiler, 1988): at an interior
+/// point, each face leaves the edge along `(S_u × S_v) × tangent`, reversed when
+/// its loop runs backwards. The pcurve selects that point on the surface; a face's
+/// extent beyond the edge has no part in its order.
+/// The caller supplies a valid edge with regular, distinct inward directions along
+/// its interior: their cyclic order cannot change without a coincidence or a
+/// singularity. This computes that order; it does not certify the whole edge.
+///
+/// With the first inward ray `b` as reference, the polar coordinates are
+/// `x = b.dot(ray)` and `y = tangent.dot(b.cross(ray))`. Omitting normalization
+/// scales every y coordinate by the same positive factor, preserving cyclic order.
+/// The surface derivatives are evaluated directly, with no stepped probes or
+/// angular tolerance. Coincident rays need higher-order contact information and
+/// are refused rather than assigned an arbitrary order.
+///
+/// # Errors
+/// Malformed or unevaluable geometry, a vanishing tangent or inward ray, or faces
+/// whose radial directions cannot be distinguished.
+pub fn radial_order(
+    curve: &Curve,
+    interval: [f64; 2],
+    faces: &[RadialFace<'_>],
+) -> Result<Vec<usize>> {
+    let [lo, hi] = interval;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(Error::Invalid("invalid radial edge interval".into()));
+    }
+    let t = lo.midpoint(hi);
+    let (_, tangent) = CurveEval::new(curve)?
+        .derivs(t)
+        .ok_or_else(|| Error::Failed("cannot evaluate the radial edge tangent".into()))?;
+    if !tangent.is_finite() || tangent.len2() == 0.0 {
+        return Err(Error::Failed("the radial edge tangent vanishes".into()));
+    }
+    let mut reference = None;
+    let mut angles = Vec::new();
+    for (i, face) in faces.iter().enumerate() {
+        let [u, v] = face
+            .pcurve
+            .eval(t)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's pcurve".into()))?;
+        let (_, du, dv) = SurfaceEval::new(face.surface)?
+            .derivs(u, v)
+            .ok_or_else(|| Error::Failed("cannot evaluate a radial face's normal".into()))?;
+        let ray = du.cross(dv).cross(tangent);
+        let ray = if face.forward { ray } else { -ray };
+        let b = *reference.get_or_insert(ray);
+        let (x, y) = (b.dot(ray), tangent.dot(b.cross(ray)));
+        if !(x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0)) {
+            return Err(Error::Failed(
+                "a radial face's inward direction is undefined".into(),
+            ));
+        }
+        let angle = y.atan2(x);
+        let angle = if angle < 0.0 {
+            angle + std::f64::consts::TAU
+        } else {
+            angle
+        };
+        angles.push((i, angle));
+    }
+    angles.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+    for pair in angles.windows(2) {
+        if matches!(pair, [a, b] if a.1 == b.1) {
+            return Err(Error::Failed(
+                "tangent faces do not determine a radial order from their inward directions".into(),
+            ));
+        }
+    }
+    Ok(angles.into_iter().map(|(i, _)| i).collect())
 }
 
 /// Knot spans a fitted pcurve may have (the schema takes 4096 control points).
@@ -931,6 +1018,85 @@ pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
         }
     }
     (s[2].abs() > 0.0).then(|| [s[0] / s[2], s[1] / s[2]])
+}
+
+/// The point of pcurve `c` at `t` and its first derivative (`None` outside its interval, for a
+/// malformed record, or where either is not finite).
+pub fn eval_d1(c: &Curve2, t: f64) -> Option<([f64; 2], [f64; 2])> {
+    let (knots, count) = match c {
+        Curve2::Spline { knots, points } => (knots, points.len()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+    };
+    let p = knots.len().checked_sub(count + 1)?;
+    // Outside its interval, past the rounding `eval` allows at its ends, it has no point.
+    find_span(knots, p, count, t)?;
+    let (first, ders) = super::plan::basis::basis_derivatives(knots, p, count, t, 1)?;
+    // The homogeneous point and its derivative, then the quotient rule: C' = (A' − w′C) / w.
+    let (mut a, mut d) = ([0.0; 3], [0.0; 3]);
+    for (j, n) in ders.iter().enumerate() {
+        let q = match c {
+            Curve2::Spline { points, .. } => points.get(first + j).map(|&[u, v]| [u, v, 1.0])?,
+            Curve2::RationalSpline { homogeneous, .. } => *homogeneous.get(first + j)?,
+        };
+        let (n0, n1) = (*n.first()?, n.get(1).copied().unwrap_or(0.0));
+        for ((ak, dk), qk) in a.iter_mut().zip(d.iter_mut()).zip(q) {
+            *ak += n0 * qk;
+            *dk += n1 * qk;
+        }
+    }
+    let ([x, y, w], [dx, dy, dw]) = (a, d);
+    let (u, v) = (x / w, y / w);
+    let (du, dv) = ((dx - dw * u) / w, (dy - dw * v) / w);
+    // A weight of 0, or a point or a derivative that is not finite, has no answer.
+    [u, v, du, dv]
+        .into_iter()
+        .all(f64::is_finite)
+        .then_some(([u, v], [du, dv]))
+}
+
+/// Gauss pieces to each knot span of a pcurve in [`flux_pieces`]: one for a straight one (on a
+/// plane, with a field linear in space as a volume's `p / 3`, the integrand is then a polynomial
+/// the Gauss rule takes exactly), two for a curved one.
+const FLUX_SPAN_PIECES: [usize; 2] = [1, 2];
+/// The most pieces [`flux_pieces`] cuts one pcurve into, past which they are spread evenly over
+/// it.
+const FLUX_MAX_PIECES: usize = 64;
+
+/// The pieces of pcurve `c`'s interval that the flux of a field through its face is integrated
+/// over, a Gauss rule on each. By Green's theorem the flux `∫∫ F(S)·(S_u × S_v) du dv` over the
+/// (u, v) region a face's loops bound is `∮ −G du` round them, `G(u, v)` the integral of
+/// `F(S)·(S_u × S_v)` across v; these pieces cut one use's share of that loop integral. Each
+/// knot span inside the interval is cut evenly, into one piece for a straight pcurve (degree 1,
+/// not rational) and two for a curved one; where that makes more than 64 pieces, or no span
+/// lies inside, the whole interval is cut into 64 even pieces instead. In order along `c`.
+/// `None` for a malformed record.
+pub fn flux_pieces(c: &Curve2) -> Option<Vec<[f64; 2]>> {
+    let [t0, t1] = c.interval()?;
+    let (knots, count, rational) = match c {
+        Curve2::Spline { knots, points } => (knots, points.len(), false),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len(), true),
+    };
+    let straight = !rational && knots.len().checked_sub(count + 1)? == 1;
+    let [line, curved] = FLUX_SPAN_PIECES;
+    let each = if straight { line } else { curved };
+    let spans: Vec<[f64; 2]> = knots
+        .windows(2)
+        .filter_map(|w| match *w {
+            [a, b] if b > a && a >= t0 && b <= t1 => Some([a, b]),
+            _ => None,
+        })
+        .collect();
+    if spans.is_empty() || spans.len().saturating_mul(each) > FLUX_MAX_PIECES {
+        return Some(even_pieces(FLUX_MAX_PIECES, [t0, t1]).collect());
+    }
+    let pieces = spans.into_iter().flat_map(|s| even_pieces(each, s));
+    Some(pieces.collect())
+}
+
+/// `[a, b]` cut into `n` even pieces, in order.
+fn even_pieces(n: usize, [a, b]: [f64; 2]) -> impl Iterator<Item = [f64; 2]> {
+    let at = move |k: usize| a + (b - a) * k as f64 / n as f64;
+    (0..n).map(move |k| [at(k), at(k + 1)])
 }
 
 /// The `p + 1` basis functions non-zero on knot span `span` at `t`, of any degree (NURBS Book

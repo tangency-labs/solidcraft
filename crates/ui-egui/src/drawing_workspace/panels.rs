@@ -30,6 +30,14 @@ pub(super) enum Tool {
 }
 
 impl Tool {
+    /// The placed object whose options these are, if they are one's.
+    pub(super) fn object(self) -> Option<u64> {
+        match self {
+            Self::Base | Self::Projected => None,
+            Self::Edit(object) | Self::Dimension(object) | Self::Note(object) | Self::PartsList(object) => object,
+        }
+    }
+
     pub(super) fn for_command(id: &str) -> Option<Self> {
         match id {
             "drawing.view.base" | "drawing.view.base.planned" => Some(Self::Base),
@@ -263,6 +271,96 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
     match app.run("drawing.view.edit", json!({"view": ids::encode(view), "set": settings})) {
         Ok(_) => ok,
         Err(error) => {
+            app.set_status(error, true);
+            false
+        }
+    }
+}
+
+pub(super) struct DimensionEdit {
+    dimension: u64,
+    offset: String,
+    decimals: usize,
+    text: String,
+}
+
+/// A length typed in the Offset field: a number of millimetres, with or without its unit.
+fn offset_mm(typed: &str) -> Option<f64> {
+    typed.trim().trim_end_matches("mm").trim().parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
+/// A placed dimension's options: how far its line sits from what it measures, how many decimals
+/// its number shows, and the text shown instead of the number (none: the number). Apply and OK
+/// change it through `drawing.dimension.edit`, in one undo step. Returns whether to close.
+pub(super) fn dimension_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: u64) -> bool {
+    let placed = app.session.drawing("drawing.inspect").ok().and_then(|drawing| {
+        let item = drawing.dimension(selected)?;
+        let kind = match item.kind {
+            DimensionKind::Length { .. } => 1,
+            DimensionKind::Angle { .. } => 2,
+            _ => 0,
+        };
+        Some((kind, item.offset_mm, usize::from(item.decimals), item.override_text.clone().unwrap_or_default()))
+    });
+    let Some((kind, offset, decimals, text)) = placed else {
+        return super::inset(ui, |ui| ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked());
+    };
+    let mut edit = app.drawing_workspace.dimension_edit.take().filter(|edit| edit.dimension == selected).unwrap_or_else(|| DimensionEdit {
+        dimension: selected,
+        offset: format!("{offset} mm"),
+        decimals,
+        text: text.clone(),
+    });
+    let (cancel, apply, ok) = super::inset(ui, |ui| {
+        ui.add_enabled_ui(false, |ui| {
+            segments(
+                ui,
+                tr("ui.drawing_panel.type"),
+                kind,
+                &[tr("ui.drawing_panel.linear"), tr("ui.drawing_panel.length"), tr("ui.drawing_panel.angle")],
+            );
+        });
+        ui_kit::section_heading(ui, tr("ui.drawing_panel.layout"));
+        ui_kit::text_row(ui, tr("ui.drawing_panel.offset"), &mut edit.offset, "mm");
+        let labels = ["0", "1", "2", "3", "4", "5", "6"];
+        edit.decimals = edit.decimals.min(labels.len() - 1);
+        ui_kit::choice_row(ui, tr("ui.drawing_panel.decimals"), "drawing:dimension:decimals", &mut edit.decimals, &labels);
+        ui_kit::text_row(ui, tr("ui.drawing_panel.text"), &mut edit.text, "<dim>");
+        let valid = offset_mm(&edit.offset).is_some();
+        ui.separator();
+        ui.horizontal(|ui| {
+            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.apply"), Button::Normal)).inner.clicked();
+            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            (cancel, apply, ok)
+        })
+        .inner
+    });
+    if cancel {
+        return true;
+    }
+    let mut set = serde_json::Map::new();
+    if let Some(value) = offset_mm(&edit.offset)
+        && (value - offset).abs() > 1e-9
+    {
+        set.insert("offset_mm".into(), json!(value));
+    }
+    if edit.decimals != decimals {
+        set.insert("decimals".into(), json!(edit.decimals));
+    }
+    let typed = edit.text.trim();
+    if typed != text {
+        set.insert("override_text".into(), if typed.is_empty() { Value::Null } else { json!(typed) });
+    }
+    if (!apply && !ok) || set.is_empty() {
+        app.drawing_workspace.dimension_edit = Some(edit);
+        return ok;
+    }
+    match app.run("drawing.dimension.edit", json!({"dimension": ids::encode(selected), "set": set})) {
+        // The fields are read again from the dimension as it is now.
+        Ok(_) => ok,
+        Err(error) => {
+            app.drawing_workspace.dimension_edit = Some(edit);
             app.set_status(error, true);
             false
         }
@@ -691,7 +789,6 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
 
             next_sheet_section(ui, "ui.drawing_panel.screen");
             ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-            ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
         });
         ui.add_space(t.space_8);
         ui.separator();

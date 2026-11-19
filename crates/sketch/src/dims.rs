@@ -231,8 +231,45 @@ pub fn dim_frame_at(sk: &Sketch, k: &ConstraintKind, text: Option<Vec2>) -> Opti
     let (ConstraintKind::Angle { .. }, DimFrame::Angular { vertex, d0, sweep }, Some(t)) = (k, frame, text) else {
         return Some(frame);
     };
-    let inside = |d0: Vec2| t.len() > 1e-12 && t.is_finite() && (t.angle() - d0.angle()).rem_euclid(std::f64::consts::TAU) <= sweep;
-    Some(if !inside(d0) && inside(-d0) { DimFrame::Angular { vertex, d0: -d0, sweep } } else { frame })
+    Some(if !in_sector(d0, sweep, t) && in_sector(-d0, sweep, t) { DimFrame::Angular { vertex, d0: -d0, sweep } } else { frame })
+}
+
+/// Whether `t`, a text place from an angle's vertex, is in the sector from the unit ray `d0`
+/// counter-clockwise by `sweep`: the one rule for which sector an angle is drawn in, a sketch's
+/// ([`dim_frame_at`]) and a drawing's as its Dimension tool places it.
+pub fn in_sector(d0: Vec2, sweep: f64, t: Vec2) -> bool {
+    t.len() > 1e-12 && t.is_finite() && (t.angle() - d0.angle()).rem_euclid(std::f64::consts::TAU) <= sweep
+}
+
+/// Which way a dimension between two points measures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinearAxis {
+    /// The distance between them.
+    Aligned,
+    /// Along x.
+    Horizontal,
+    /// Along y.
+    Vertical,
+}
+
+/// Which way a dimension between `a` and `b` (two points or a line's ends) measures with its text
+/// placed at `text_at`: the sketch Dimension tool's rule, which a drawing's Dimension tool shares.
+/// Across from the two, between the perpendiculars through them on either side, it is the distance
+/// between them, and a little past those too (a tenth of that distance), so it takes a clear pull
+/// past an end to change it. Pulled past an end, the pull as seen from that end decides: up or down
+/// the horizontal distance, sideways the vertical one (#257, #7295). The two meet on the diagonals
+/// through the end, so each has a wide zone however shallow or steep the line is. When the two
+/// already line up with an axis, it stays the distance between them.
+pub fn linear_axis(a: Vec2, b: Vec2, text_at: Vec2) -> LinearAxis {
+    let d = b - a;
+    let len = d.len();
+    let along = (text_at - a).dot(d) / len;
+    let margin = len / 10.0;
+    if d.x.abs() <= 1e-9 * len || d.y.abs() <= 1e-9 * len || !along.is_finite() || (-margin..=len + margin).contains(&along) {
+        return LinearAxis::Aligned;
+    }
+    let pull = text_at - if along < 0.0 { a } else { b };
+    if pull.y.abs() >= pull.x.abs() { LinearAxis::Horizontal } else { LinearAxis::Vertical }
 }
 
 /// The stored text position for text centred at `at`.

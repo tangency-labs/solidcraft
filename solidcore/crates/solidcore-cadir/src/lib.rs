@@ -17,7 +17,10 @@
 //! still read ([`Bodies::failures`]).
 //!
 //! Input is hostile: every id is looked up (a missing one refuses its region), and the faces of
-//! one model and the edges of one loop are capped.
+//! one model and the edges of one loop are capped. Before a region is read, its shells, each
+//! shell's faces and each face's loops are counted against their caps (the STEP reader's), and
+//! a face or loop used twice in it is refused, so the work of reading a region grows with the
+//! model's size, never with how often it names one face or loop.
 
 mod geometry;
 
@@ -33,7 +36,7 @@ use solidcore_step::assembly::{
     Assembly, Bound, Kind, hyperbola_curve, parabola_curve, periodic_edge,
 };
 use solidcore_step::topology::{
-    MAX_FACES, MAX_FILE_FACES, MAX_FIT_TOLERANCE, MAX_LOOP, MIN_TOLERANCE,
+    MAX_BOUNDS, MAX_FACES, MAX_FILE_FACES, MAX_FIT_TOLERANCE, MAX_LOOP, MIN_TOLERANCE,
 };
 
 use geometry::R;
@@ -162,6 +165,9 @@ struct Model<'a> {
     procedural_surfaces: HashMap<&'a str, &'a cadmpeg_ir::geometry::ProceduralSurface>,
     procedural_curves: HashMap<&'a str, &'a cadmpeg_ir::geometry::ProceduralCurve>,
     curves: HashMap<&'a str, &'a cadmpeg_ir::geometry::Curve>,
+    /// What a placed carrier is held to: the tolerance, and how far from the origin the model's
+    /// points reach.
+    fit: geometry::Fit,
 }
 
 impl<'a> Model<'a> {
@@ -193,6 +199,17 @@ impl<'a> Model<'a> {
                 .map(|x| (x.id.as_str(), x))
                 .collect(),
             curves: m.curves.iter().map(|x| (x.id.as_str(), x)).collect(),
+            fit: geometry::Fit {
+                tolerance: tolerance(ir),
+                extent: m
+                    .points
+                    .iter()
+                    .map(|p| {
+                        let p = p.position().get();
+                        solidcore::Vec3::new(p.x, p.y, p.z).length()
+                    })
+                    .fold(0.0, f64::max),
+            },
         }
     }
 
@@ -250,6 +267,7 @@ impl<'a> Model<'a> {
             joined: HashMap::new(),
             edges: HashMap::new(),
         };
+        self.preflight(&region.shells)?;
         b.join_collapsed(&region.shells);
         let mut shells = Vec::new();
         let mut left_out = 0usize;
@@ -288,6 +306,53 @@ impl<'a> Model<'a> {
     }
 }
 
+impl<'a> Model<'a> {
+    /// The counts of a region of `shells`, checked before anything of it is read: at most
+    /// `MAX_SHELLS` shells, each of at most `MAX_FACES` faces, each of at most `MAX_BOUNDS`
+    /// loops, and no face or loop used twice (a face is in one shell once, and a loop bounds one
+    /// face once). Every face and loop it walks is then one of the model's, once, so the walk is
+    /// no longer than the model's own lists.
+    fn preflight(&self, shells: &'a [cadmpeg_ir::ids::ShellId]) -> R<()> {
+        if shells.len() > solidcore_record::brep::MAX_SHELLS {
+            return Err(format!(
+                "more than {} shells",
+                solidcore_record::brep::MAX_SHELLS
+            ));
+        }
+        let (mut faces, mut loops) = (
+            std::collections::HashSet::new(),
+            std::collections::HashSet::new(),
+        );
+        for s in shells {
+            let shell = self
+                .shells
+                .get(s.as_str())
+                .ok_or_else(|| format!("missing shell {s}"))?;
+            if shell.faces().len() > MAX_FACES {
+                return Err(format!("more than {MAX_FACES} faces"));
+            }
+            for f in shell.faces() {
+                let &(_, face) = self
+                    .faces
+                    .get(f.as_str())
+                    .ok_or_else(|| format!("missing face {f}"))?;
+                if !faces.insert(f.as_str()) {
+                    return Err(format!("face {f} used more than once"));
+                }
+                if face.loops.len() > MAX_BOUNDS {
+                    return Err(format!("face {f} with {} loops", face.loops.len()));
+                }
+                for l in face.loops.iter() {
+                    if !loops.insert(l.as_str()) {
+                        return Err(format!("face {f}: loop {l} used more than once"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One region being read: the model, and what of it the assembly holds.
 struct Builder<'m, 'a, 't> {
     model: &'m Model<'a>,
@@ -302,8 +367,8 @@ struct Builder<'m, 'a, 't> {
 }
 
 impl<'a> Builder<'_, 'a, '_> {
-    /// Vertices a curve-less edge of the region's loops joins at one point (within the
-    /// tolerance) are one vertex: the edge collapses to it, and the loop runs on from it, as it
+    /// Vertices a curve-less edge of the region's loops (one with no curve, or on a degenerate
+    /// one) joins at one point (within the tolerance) are one vertex: the edge collapses to it, and the loop runs on from it, as it
     /// does when the edge's two ends are one vertex already. Vertices apart stay apart, and such
     /// an edge between them is refused when it is read.
     fn join_collapsed(&mut self, shells: &[cadmpeg_ir::ids::ShellId]) {
@@ -327,7 +392,15 @@ impl<'a> Builder<'_, 'a, '_> {
             else {
                 continue;
             };
-            if edge.carrier.curve().is_some() {
+            // An edge collapses with no curve, or on a degenerate one ([`Builder::edge`]).
+            let collapses = match edge.carrier.curve() {
+                None => true,
+                Some(c) => model
+                    .curves
+                    .get(c.as_str())
+                    .is_some_and(|c| geometry::degenerate(&c.geometry)),
+            };
+            if !collapses {
                 continue;
             }
             let (a, b) = (
@@ -340,15 +413,30 @@ impl<'a> Builder<'_, 'a, '_> {
         }
     }
 
-    /// The vertex `id` is one with ([`Builder::join_collapsed`]): itself, when none.
-    fn joined_to(&self, mut id: &'a str) -> &'a str {
+    /// The vertex `id` is one with ([`Builder::join_collapsed`]): itself, when none. Each vertex
+    /// on the way is pointed straight at it, so a later walk from any of them is one step: the
+    /// chain the joins build (an edge's end under its start, so many collapsed edges into one
+    /// vertex from different ones make a chain as long as their number) is walked once, not
+    /// once a join. The vertex found stays the one they all join.
+    fn joined_to(&mut self, id: &'a str) -> &'a str {
+        let mut root = id;
         for _ in 0..=self.joined.len() {
-            match self.joined.get(id) {
-                Some(&to) => id = to,
+            match self.joined.get(root) {
+                Some(&to) => root = to,
                 None => break,
             }
         }
-        id
+        let mut at = id;
+        for _ in 0..=self.joined.len() {
+            if at == root {
+                break;
+            }
+            match self.joined.insert(at, root) {
+                Some(next) => at = next,
+                None => break,
+            }
+        }
+        root
     }
 
     fn vertex(&mut self, id: &'a str) -> R<u32> {
@@ -399,7 +487,8 @@ impl<'a> Builder<'_, 'a, '_> {
                     .ok_or_else(|| format!("missing curve {c}"))?;
                 deviation = geometry::curve_deviation(&carrier.geometry)
                     .max(self.model.curve_fit(&carrier.geometry));
-                geometry::curve(&carrier.geometry).map_err(|m| format!("edge {id}: {m}"))?
+                geometry::curve(&carrier.geometry, self.model.fit)
+                    .map_err(|m| format!("edge {id}: {m}"))?
             }
             None => None,
         };
@@ -496,7 +585,7 @@ impl<'a> Builder<'_, 'a, '_> {
         // its construction states: the face's edges hold it. Its definition, read instead when
         // there is no cache, is exact.
         let mut fit = 0.0;
-        let read = match geometry::surface(&surface.geometry) {
+        let read = match geometry::surface(&surface.geometry, self.model.fit) {
             Ok(Some(read)) => {
                 fit = self.model.surface_fit(&surface.geometry);
                 Ok(read)
@@ -594,7 +683,7 @@ impl<'a> Builder<'_, 'a, '_> {
             .curves
             .get(directrix.as_str())
             .ok_or_else(|| format!("missing curve {directrix}"))?;
-        let profile = geometry::curve(&curve.geometry)?
+        let profile = geometry::curve(&curve.geometry, self.model.fit)?
             .ok_or_else(|| geometry::unsupported("a degenerate curve swept or revolved"))?;
         let (definition, reversed) = geometry::swept(procedural.definition(), profile)?;
         Ok((geometry::FaceSurface::Swept(definition), reversed))
