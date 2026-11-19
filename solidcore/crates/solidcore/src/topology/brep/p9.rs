@@ -183,6 +183,7 @@ pub fn find_infinite_region(
         if let [region] = regions.as_slice() {
             return Ok(Some(*region));
         }
+        k.work_counters.add_infinite_region_search();
         let tolerance = b.tolerance();
         let mut state = ShellRayState {
             region: None,

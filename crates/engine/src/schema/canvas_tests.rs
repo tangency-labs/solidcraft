@@ -22,11 +22,11 @@ fn png() -> String {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<CanvasInsertParams>(),
-        &["angle", "at", "center", "data", "flip", "name", "offset", "opacity", "path", "plane", "width"],
+        &["angle", "at", "center", "data", "flip", "name", "offset", "opacity", "path", "plane", "resolution", "width"],
     );
     assert_keys(
         input_schema_for::<CanvasDecalParams>(),
-        &["angle", "at", "center", "data", "face", "flip", "name", "offset", "opacity", "path", "width"],
+        &["angle", "at", "center", "data", "face", "flip", "name", "offset", "opacity", "path", "resolution", "width"],
     );
     assert_keys(input_schema_for::<CanvasEditParams>(), &["angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"]);
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);

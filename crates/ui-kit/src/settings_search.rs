@@ -47,6 +47,8 @@ struct NavStore {
 pub struct Reveal {
     pub page: usize,
     pub label: String,
+    /// When the outline ends, in milliseconds on egui's input clock (`InputState::time`). NaN
+    /// until the row is first drawn, which starts the outline's time.
     pub until: f64,
     /// What the outlined row's name starts with: `{prefix}:revealed`.
     pub prefix: String,
@@ -875,20 +877,38 @@ pub fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
 }
 
 pub fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
-    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS, prefix: prefix.to_string() }
+    Reveal { page, label: label.to_string(), until: f64::NAN, prefix: prefix.to_string() }
 }
 
 impl Reveal {
-    /// Whether the outline's time is up, on the same clock that set [`Reveal::until`].
-    pub fn expired(&self) -> bool {
-        now_ms() > self.until
+    /// Start the outline's time at `now_ms` on egui's input clock, if it hasn't started.
+    pub fn start(&mut self, now_ms: f64) {
+        if self.until.is_nan() {
+            self.until = now_ms + REVEAL_MS;
+        }
+    }
+
+    /// Whether the outline's time is up at `now_ms` on egui's input clock. One whose time has not
+    /// started (NaN) is not.
+    pub fn expired(&self, now_ms: f64) -> bool {
+        now_ms > self.until
     }
 }
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub fn follow(ui: &Ui, label: &str, rect: Rect) {
-    let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if reveal.expired() || fold(label) != fold(&reveal.label) {
+    let Some(mut reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
+    if fold(label) != fold(&reveal.label) {
+        return;
+    }
+    // egui's clock, not the wall's: a slow frame (a loaded machine, a test's harness) still shows
+    // the outline for its frames, and the outline's time starts when the row first draws.
+    let now = ui.input(|i| i.time) * 1000.0;
+    if reveal.until.is_nan() {
+        reveal.start(now);
+        ui.data_mut(|data| data.insert_temp(Id::unique(REVEAL_ID), reveal.clone()));
+    }
+    if reveal.expired(now) {
         return;
     }
     let page = with(ui, |state| state.page_index);
@@ -899,12 +919,6 @@ pub fn follow(ui: &Ui, label: &str, rect: Rect) {
     let t = Tokens::get();
     ui.painter().rect_stroke(outline(rect), t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     solidcraft_ui_registry::publish_handle(&format!("{}:revealed", reveal.prefix), rect.center());
-}
-
-/// Wall clock in milliseconds, for how long a reveal stays outlined.
-fn now_ms() -> f64 {
-    use web_time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0)
 }
 
 #[cfg(test)]

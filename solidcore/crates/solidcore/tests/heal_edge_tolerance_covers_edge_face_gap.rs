@@ -550,7 +550,11 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 ///
 /// Main 3a0f49b09's values per file, made by this file's functions on main: the read's
 /// digest, the lazily made UV trims' digest, the rebuilding read's digest, and the
-/// bits of `corpus.parity`'s area and volume.
+/// bits of `corpus.parity`'s area and volume. The mass integrator's knot-line split (trim
+/// pieces and closure strips end where a trim crosses a surface knot line) since moved
+/// 17 of those area and volume entries, on 14 files; they are main's with that split,
+/// each classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`.
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -559,7 +563,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -569,7 +573,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -579,7 +583,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x3a137639560123dc,
             0x19b6267d7bab4376,
             0x40c94ce71acf47de,
-            0x40c96aa73761feba,
+            0x40c96aa73746aab0,
         ],
     ),
     (
@@ -589,7 +593,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x20f9e5358be089e4,
             0x56d4f90e1a00266f,
             0x40408f20e135de78,
-            0x40262233c6fff91f,
+            0x40262233c6c42c0b,
         ],
     ),
     (
@@ -598,8 +602,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xb5359aa30f9be919,
             0xa92d78f82fd63550,
             0x73843118350f3240,
-            0x409f327abf0704e1,
-            0x40adb03a50d6ac5b,
+            0x409f327abf06f6f4,
+            0x40adb03a50d6aa6d,
         ],
     ),
     (
@@ -629,7 +633,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -639,7 +643,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -698,7 +702,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xc883abda5a4672f7,
             0xbef2111c0d616bcc,
             0xe9468e03f3395efe,
-            0x405664215d2967d8,
+            0x405664215d2a2cc7,
             0x7ff8000000000000,
         ],
     ),
@@ -708,7 +712,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8f07277297df6078,
             0xcd50069fef891ecf,
             0x67b61d59d84afc0d,
-            0x4085e633bce84e1d,
+            0x4085e633bce85549,
             0x7ff8000000000000,
         ],
     ),
@@ -718,7 +722,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xb3a46ba2e4d3817b,
             0x894d776ca5ba209d,
             0xfea47f8f2838bbe2,
-            0x40735d27cb8cc7eb,
+            0x40735d27cb8cc80f,
             0x7ff8000000000000,
         ],
     ),
@@ -729,7 +733,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x1f46996340f01656,
             0x2732c82601be613b,
             0x40821911bbfe80e6,
-            0x40895b346dbc001b,
+            0x40895b3470b2c59b,
         ],
     ),
     (
@@ -768,8 +772,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x6c2688581ef72501,
             0x934916761febf75d,
             0x629b7badfc0138a6,
-            0x40ff8cfbe4b56c96,
-            0x4130d86087906c9b,
+            0x40ff8cfbe4b56c95,
+            0x4130d860879069ed,
         ],
     ),
     (
@@ -789,7 +793,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x68482310d17f07be,
             0xbfc5158946937f01,
             0x40ff28e1cf641cd3,
-            0x4130d6e013e89aee,
+            0x4130d6e013e89a3e,
         ],
     ),
     (
@@ -828,8 +832,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x462faca60ad813f0,
             0x88a9396a602fe93c,
             0x692f780f5f318bf3,
-            0x40d2a6a844e34477,
-            0x40f8a3124b2291b7,
+            0x40d2a6a844e34874,
+            0x40f8a3124b22bf69,
         ],
     ),
 ];
@@ -847,15 +851,14 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   not at the raised one;
 /// - `corpus.parity`'s areas are main's bit for bit; its volumes are main's bit for bit
 ///   with the moved tolerances set back to main's, and as read differ only on
-///   `Fillet/corner_box.smb` and `Fillet/test1.smb`, by 1 ulp: the volume integrates
-///   about the middle of the B-rep's box, which is grown by the edge and vertex
-///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`). Each pair is classified
-///   against a certified enclosure `[lo, hi]` of the exact volume
-///   (`mass::enclosure::enclose_volume`, which reads no edge tolerance), asked
-///   `1e-9 * |V|` wide, the goldens' relative tolerance. On `test1` it reaches that width
-///   and both values lie below `lo`, so the larger, this branch's, is closer to the exact
-///   volume. On `corner_box` it stops at its cell budget, wider than asked, holding both
-///   values: neither can be told farther.
+///   `Fillet/corner_box.smb`, by 1 ulp: the volume integrates about the middle of the
+///   B-rep's box, which is grown by the edge and vertex tolerances
+///   (`CalculateBoundingBox`, `bExpandByZoneTol3d`). The pair is classified against a
+///   certified enclosure `[lo, hi]` of the exact volume (`mass::enclosure::enclose_volume`,
+///   which reads no edge tolerance), asked `1e-9 * |V|` wide, the goldens' relative
+///   tolerance. It stops at its cell budget, wider than asked, holding both values:
+///   neither can be told farther. (`Fillet/test1.smb`'s as-read volume differed by 1 ulp
+///   too, before the knot-line split; with it, its as-read and set-back volumes agree.)
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
@@ -933,35 +936,23 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         }
     }
     assert_eq!((raised, moved), (206, 296));
-    assert_eq!(
-        moved_volumes,
-        ["Fillet/corner_box.smb", "Fillet/test1.smb"],
-        "{failures:#?}"
-    );
+    assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
     let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
-        [
-            ("Fillet/corner_box.smb", "both enclosed"),
-            ("Fillet/test1.smb", "closer")
-        ],
+        [("Fillet/corner_box.smb", "both enclosed")],
         "{volume_classes:?}"
     );
-    // (the doc's claims on the widths, against the asked width rather than as printed
-    // digits, which move with any change to the enclosure's cells: `test1`'s enclosure is
-    // as narrow as asked, so its "closer" is decided within the goldens' relative
-    // tolerance; `corner_box`'s spent its cell budget wider than asked, so "both
-    // enclosed" is all it can say)
+    // (the doc's claim on the width, against the asked width rather than as printed
+    // digits, which move with any change to the enclosure's cells: `corner_box`'s spent
+    // its cell budget wider than asked, so "both enclosed" is all it can say)
     let widths: Vec<_> = volume_classes
         .iter()
         .map(|&(n, _, lo, hi, asked, stop)| (n, stop, hi - lo <= asked))
         .collect();
     assert_eq!(
         widths,
-        [
-            ("Fillet/corner_box.smb", EnclosureStop::Budget, false),
-            ("Fillet/test1.smb", EnclosureStop::Reached, true)
-        ],
+        [("Fillet/corner_box.smb", EnclosureStop::Budget, false)],
         "{volume_classes:?}"
     );
     assert!(failures.is_empty(), "{failures:#?}");
@@ -1769,8 +1760,10 @@ const FILLET_MAIN: [u64; 29] = [
 
 /// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
-/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14 is #18401's (see
-/// [`FILLET_MAIN`]).
+/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
+/// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
+/// since; its entries are classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1827,17 +1820,17 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
         14,
         [
             0x40408bcce093b407,
-            0x402621896e50fcb0,
-            0x402621896e50fcb0,
-            0x3f10d1c99a55926e,
-            0x3f13efa09958129b,
-            0x4000a10fe9da9881,
-            0x4050316571691566,
-            0x4050a9c3826e8ec1,
-            0x40151aaab5c59a6f,
-            0x3f6aed515da75eee,
-            0x3f66b6a18cf50c20,
-            0xbf3c98659ef8970b,
+            0x402621896ddff25f,
+            0x402621896ddff25f,
+            0x3f10d1d4e45e4676,
+            0x3f13efa0c2fbe9dc,
+            0x4000a10fe9b1ffd5,
+            0x4050316570dd030e,
+            0x4050a9c381d79ffa,
+            0x40151aaab4b869fc,
+            0x3f6aed519268bff5,
+            0x3f66b6ad970f60ae,
+            0xbf3c98793964b142,
         ],
     ),
 ];

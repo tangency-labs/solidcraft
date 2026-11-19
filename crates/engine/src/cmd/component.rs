@@ -317,7 +317,7 @@ fn key(v: Option<&Value>) -> Option<String> {
     }
 }
 
-fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
+pub(super) fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
     let kk = key(p.get(k)).ok_or_else(|| bad(cmd, format!("`{k}` must be a component id or name")))?;
     s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{kk}`")))
 }
@@ -733,17 +733,34 @@ fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "pick a component, not the design"));
     }
     let gone = s.contents_joints(id);
-    if gone.is_empty() {
+    let group = s.doc.rigid_group_of(id).map(|g| g.id);
+    // Another group (the import this component came in with) holding a part inside it would
+    // still hold it after this one went.
+    let outer = s
+        .doc
+        .occurrences
+        .iter()
+        .filter(|o| o.parent != 0 && s.doc.component_within(o.parent, id))
+        .find_map(|o| s.doc.rigid_group_holding(o.id).filter(|g| Some(g.id) != group));
+    if let Some(outer) = outer {
+        return Err(bad(cmd, format!("the rigid group of `{}` holds this component's contents: unlock that one", outer.name)));
+    }
+    if gone.is_empty() && group.is_none() {
+        // A part of an import: its group holds it with the rest.
+        if let Some(holder) = s.doc.occurrences.iter().filter(|o| o.component == id).find_map(|o| s.doc.rigid_group_holding(o.id)) {
+            return Err(bad(cmd, format!("the rigid group of `{}` holds this component with the rest of it: unlock that one", holder.name)));
+        }
         return Err(bad(cmd, "nothing holds this component's contents together"));
     }
     let doc = s.doc_mut();
+    doc.assembly.rigid_groups.retain(|g| Some(g.id) != group);
     doc.assembly.joints.retain(|j| !gone.contains(&j.id));
     for group in &mut doc.timeline_groups {
         group.joints.retain(|id| !gone.contains(id));
     }
     doc.assembly.links.retain(|l| !gone.contains(&l.a) && !gone.contains(&l.b));
     s.visibility.hidden_joints.retain(|h| !gone.contains(h));
-    reply(UnlockResult { component: id, joints: gone, param_warnings: Vec::new() })
+    reply(UnlockResult { component: id, joints: gone, rigid_group: group, param_warnings: Vec::new() })
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
