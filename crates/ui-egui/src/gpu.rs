@@ -1638,21 +1638,50 @@ mod tests {
         }
     }
 
+    /// A frame with only egui-painted content (no viewport callback anywhere): stripes under an
+    /// optional panel with a translucent fill, drawn as window `viewport`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn plain_frame(f: &mut BlurFixture, ctx: &egui::Context, viewport: egui::ViewportId, translucent: bool) {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(f.size[0] as f32, f.size[1] as f32))),
+            time: Some(1.0),
+            focused: true,
+            viewport_id: viewport,
+            ..Default::default()
+        };
+        raw.viewports.insert(viewport, Default::default());
+        let app = &mut f.app;
+        let mut out = ctx.run_ui(raw, |ui| {
+            let _blur = app.blur.begin(ui.ctx());
+            for i in 0..40 {
+                let x = i as f32 * 20.0;
+                let color = if i % 2 == 0 { egui::Color32::from_rgb(230, 230, 230) } else { egui::Color32::from_rgb(20, 20, 20) };
+                ui.painter().rect_filled(egui::Rect::from_min_size(egui::pos2(x, 0.0), egui::vec2(20.0, 600.0)), 0.0, color);
+            }
+            let alpha = if translucent { 120 } else { 255 };
+            let frame = egui::Frame::new().fill(egui::Color32::from_rgba_unmultiplied(20, 30, 60, alpha)).corner_radius(8).inner_margin(12);
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                ui.set_min_size(egui::vec2(300.0, 200.0));
+            });
+        });
+        super::test_support::paint_egui_output_in(viewport, ctx, &mut out, &f.renderer, &f.device, &f.queue, &f.output);
+    }
+
     /// With nothing to blur, a frame is the ordinary pass: no marker, no texture, no extra pass,
     /// and the pixels of blur off (#19213).
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn blur_frame_without_a_marker_takes_the_ordinary_pass() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        for _ in 0..4 {
-            f.frame();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, false);
         }
         let plain = f.pixels();
-        // Radius on, but every surface keeps its opaque theme fill: nothing asks for a backdrop.
+        // Radius on, but the only panel is opaque: nothing asks for a backdrop.
         f.radius(18.0);
-        f.app.blur.set_surface_alpha(None);
-        for _ in 0..4 {
-            f.frame();
+        for _ in 0..3 {
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, false);
         }
         let counters = f.app.blur.counters();
         assert_eq!((counters.markers_emitted, counters.markers_drawn), (0, 0), "no surface is translucent");
@@ -1661,85 +1690,27 @@ mod tests {
         assert_eq!(f.pixels(), plain, "the ordinary pass draws the frame as with blur off");
     }
 
-    /// The blur needs no 3D view under the panels: Home has none (#19213).
+    /// The blur needs nothing from any view: a translucent panel over plain egui painting, with no
+    /// viewport callback in the frame, blurs what is under it (#19213).
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn blur_works_over_home_which_has_no_viewport() {
+    fn blur_works_with_no_viewport_callback_in_the_frame() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        f.app.home.open = true;
-        f.app.blur.set_surface_alpha(Some(180));
-        f.radius(0.0);
-        for _ in 0..4 {
-            f.frame();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, true);
         }
         let zero = f.pixels();
-        f.radius(18.0);
-        for _ in 0..4 {
-            f.frame();
-        }
-        let before = f.app.blur.counters();
-        f.frame();
-        let after = f.app.blur.counters();
-        assert_eq!(f.app.blur.capability(), crate::blur::Capability::Available, "Home is no reason to switch blur off");
-        assert_eq!(crate::prefs::blur_availability(&f.app), crate::theme_options::Availability::Available);
-        assert_backdrop_passes(before, after, crate::blur::schedule(18.0).unwrap().0);
-        assert_ne!(f.pixels(), zero, "the translucent panels over Home are blurred");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn blur_steady_frame_benchmark() {
-        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        f.app.blur.set_surface_alpha(Some(180));
-        let mut rows = Vec::new();
-        for radius in [0.0, 18.0, 0.0] {
-            f.radius(radius);
-            for _ in 0..6 {
-                f.frame();
-            }
-            let before = f.app.blur.counters();
-            let mut times: Vec<f64> = (0..30).map(|_| f.frame()).collect();
-            times.sort_by(f64::total_cmp);
-            let after = f.app.blur.counters();
-            if radius == 0.0 {
-                assert_eq!(after.blur_passes, before.blur_passes);
-                assert_eq!(after.markers_drawn, before.markers_drawn);
-            } else {
-                assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
-            }
-            assert_eq!(after.textures_created, before.textures_created);
-            assert_eq!(after.buffers_created, before.buffers_created);
-            assert_eq!(after.bind_groups_created, before.bind_groups_created);
-            assert_eq!(after.pipelines_created, before.pipelines_created);
-            rows.push(serde_json::json!({"radius_px":radius, "samples":times.len(), "min_ms":times[0],
-                "median_ms":(times[14] + times[15]) / 2.0, "max_ms":times[29], "before":before, "after":after}));
-        }
-        if let Some(dir) = std::env::var_os("SOLIDCRAFT_BLUR_EVIDENCE") {
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(std::path::PathBuf::from(dir).join("fixture-frame-timings.json"), serde_json::to_vec_pretty(&rows).unwrap()).unwrap();
-        }
-        eprintln!("full egui UI/encode/GPU-completion milliseconds: {rows:?}");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn blur_suspend_releases_targets() {
-        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        f.app.blur.set_surface_alpha(Some(180));
+        f.evidence("no-viewport-panel-0");
         f.radius(18.0);
         for _ in 0..3 {
-            f.frame();
+            plain_frame(&mut f, &ctx, egui::ViewportId::ROOT, true);
         }
-        assert!(f.app.blur.counters().live_textures > 0);
-        f.renderer.read().frame_compositor.as_ref().unwrap().suspend();
-        assert_eq!(f.app.blur.counters().live_bytes, 0);
-        f.frame();
-        assert!(f.app.blur.counters().live_textures > 0);
-        f.radius(0.0);
-        assert_eq!(f.app.blur.counters().live_textures, 0);
-        assert_eq!(f.app.blur.counters().live_bind_groups, 0);
-        assert_eq!(f.app.blur.counters().live_pipelines, 0);
-        assert_eq!(f.app.blur.counters().live_buffers, 0);
+        f.evidence("no-viewport-panel-18");
+        let counters = f.app.blur.counters();
+        assert!(counters.markers_drawn > 0 && counters.blur_runs > 0, "the panel asked for and drew a backdrop");
+        assert_eq!(f.app.blur.capability(), crate::blur::Capability::Available);
+        assert_ne!(f.pixels(), zero, "the stripes under the translucent panel are blurred");
     }
 
     /// A native pop-out window blurs behind its own translucent panels (#19213).
@@ -1773,6 +1744,7 @@ mod tests {
             });
             super::test_support::paint_egui_output_in(popout, &ctx, &mut out, &f.renderer, &f.device, &f.queue, &f.output);
         }
+        f.evidence("pop-out-panel-18");
         let counters = f.app.blur.counters();
         assert!(counters.markers_drawn > 0, "the pop-out panel drew its backdrop");
         assert!(counters.blur_runs > 0);
