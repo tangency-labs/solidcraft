@@ -180,6 +180,11 @@ fn double_click_edits_a_dimensions_or_a_notes_text_in_place() {
     h.step(&json!({"key": "Z", "cmd": true})).unwrap();
     h.settle();
     assert_eq!(read(&mut h)["text"], "100 TYP");
+    // The box holds the text as a template: `{value}` is the measured number, live.
+    let at = text_at(&mut h);
+    type_over(&mut h, at, "4× {value} TYP", "Enter");
+    assert_eq!(read(&mut h)["text"], format!("4× {measured} TYP").as_str());
+    assert_eq!(read(&mut h)["status"], "ok", "it still measures");
     let at = text_at(&mut h);
     type_over(&mut h, at, "", "Enter");
     assert_eq!(read(&mut h)["text"], measured.as_str(), "an empty text shows the measured number again");
