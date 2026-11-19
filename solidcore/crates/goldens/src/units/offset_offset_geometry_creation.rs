@@ -833,6 +833,10 @@ impl Two {
     /// trim curves.
     fn put_edge_state(&self, o: &mut Vec<f64>, e: H) -> Result<(), HarnessError> {
         let b = self.brep_r(e).map_err(|e| harness(format!("{e}")))?;
+        // the edge's B-rep as this state shows it, for the tolerance certificate
+        // (`certify::trim_tolerance`)
+        #[cfg(test)]
+        crate::certify::written(b);
         let edge = b.edge(eid(e)).map_err(|e| harness(format!("{e}")))?;
         put_curve(o, edge.curve.as_ref())?;
         o.extend([edge.interval.min(), edge.interval.max(), edge.tolerance]);

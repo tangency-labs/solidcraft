@@ -13,7 +13,10 @@
 //! - an edge: `B` is [`trim_image_gap_bound`] of each of its UV trims, a proved upper bound on
 //!   the Hausdorff distance between the edge curve and the trim's image on its face (so on the
 //!   true gap `g`); an edge whose B-rep keeps no UV trim has `B` the proved bound
-//!   ([`curve_face_gap_bound`]) on the distance from its curve to each of its faces' surfaces;
+//!   ([`curve_face_gap_bound`]) on the distance from its curve to each of its faces' surfaces
+//!   (a UV trim that is a line is enclosed as its NURB, the segment between its two control
+//!   points, which is the line's geometry up to the slack [`line_evaluation_slack`] bounds,
+//!   added to `B`; see `use_bound`);
 //! - a vertex: its point is within `n` of the end of every edge curve that ends there, the
 //!   rounding of each distance counted against it.
 //!
@@ -27,9 +30,12 @@
 //! cover an edge end that `n` does.
 
 use solidcore::curve::curve::p2::CurveKind;
+use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::math::gamma;
-use solidcore::query::curve_surface_gap::{curve_face_gap_bound, trim_image_gap_bound};
+use solidcore::nurbs::math::{gamma, CPoint};
+use solidcore::query::curve_surface_gap::{
+    curve_face_gap_bound, line_evaluation_slack, trim_image_gap_bound,
+};
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
@@ -47,26 +53,24 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// a proof) a dense-sampling estimate of the edge's largest trim gap and its new tolerance.
 /// Classes:
 /// - `UNCOVERED`: the sampled gap of one of the edge's trims exceeds the new (and the old)
-///   tolerance: an open defect, the tolerance does not cover that trim either way (none
-///   left: the 27 there were now keep upstream's tolerance or are raised to cover);
-/// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not (for
-///   `single_face_fillet1019_8` the gap is a sampled Hausdorff distance: the trims' images
-///   run up to 6.8e-4 from the edge curve at the same parameter but 2.16e-4 from the curve;
-///   for `fillet_each_fillet1019` and `single_face_fillet1019_3/6` the gap is sampled at the
-///   same parameter, 2.68e-4 and 2.76e-4 on the two trims, about half the new 5.43e-4, while
-///   face 0's trim, which comes out of the merged main's trim edits with its control points
-///   from the second on 5.1e-9 higher in `v`, has a `B` of 5.77e-3, 21 times its sampled
-///   gap; face 0's trim was certified before that merge, with `B` 2.67e-4);
+///   tolerance: an open defect, the tolerance does not cover that trim either way (the 27
+///   there were before now keep upstream's tolerance or are raised to cover; left:
+///   `offset_geometry_creation`'s `gen0642`, the offset's successive bodies 2 to 6, whose
+///   edge 0 has a trim with an image up to 5.6e13 from the edge curve, sampled on body 2,
+///   and whose vertex 0 the old tolerance did not cover either: that trim, on face 0, runs at
+///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
+///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
+///   parameterisation than its face's, in both kernels, and no tolerance covers it);
+/// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not
+///   (`brep_mirror`'s `mat0076` edge 2: a sampled Hausdorff gap of 3.6e-3 against the new
+///   3.68e-2, its trim's `B` 0.229; the case's moved trim values on that edge's trim are open
+///   with it);
 /// - `no-estimate`: the trim's image could not be sampled;
 /// - `face-bound-loose`: an edge whose B-rep keeps no UV trim, whose face-gap enclosure
 ///   exceeds the new tolerance.
 /// - `blend-surface`: an edge with a trim on a procedural blend surface, which has no exact
 ///   NURBS net, so no enclosure (`fillet_executive_p3`'s coons, bottle and letter-g cases;
 ///   the sampled gaps, over every trim of the edge, at most 50 % of the new tolerance);
-/// - `line-trim`: a plane's UV trim that is a line, which [`trim_image_gap_bound`] does not
-///   enclose (a line's evaluation rounding moves its parameter, see there):
-///   `real-box-fillet1v/4v-r3-shell-closed`, whose tolerances halve (`2e-5 -> 1e-5`,
-///   `8e-5 -> 4e-5`) with the trims unchanged, the sampled gaps at most 5.9e-7, 6 % of the new tolerance;
 /// - `invalid-input`: a body invalid before and after (`remove_topo_edges_mouse_two_struts`:
 ///   the case asserts the same validity failures on both): one trim's image runs about 11.5
 ///   from the edge curve, past the old tolerance (3.674, upstream's raise for the other trim's
@@ -101,19 +105,93 @@ fn open_entries(unit: &str) -> std::collections::BTreeSet<(String, usize, String
 ///   reordered sum's rounding, far below anything the case measures);
 /// - `quadrature`: a mass property that moved by at most 1e-13 of itself: EQUAL, MEASURED
 ///   rather than proved (the integration over the faces sums its pieces in another order
-///   once a trim is refit; `stubs4-delete-edge-bottle-e8-r0.1`, 8.2e-15 and 1.6e-15);
+///   once a trim is refit);
+/// - `integration`: a mass property (`brep_mass_properties`' estimate at [`MASS_ACCURACY`])
+///   of a case whose every other moved value is a moved entity's tolerance (the integrator
+///   builds the UV trims it integrates over, each fit to its edge's tolerance, so a lower
+///   tolerance moves its estimate): the new value is within [`MASS_ACCURACY`] of its scale of
+///   every point of a certified enclosure of the exact property of the body
+///   (`mass::enclosure::enclose_mass_properties`), so of the exact value, the accuracy the
+///   runner asks ([`MassBands`]); EQUAL at the case's own accuracy, PROVEN;
 /// - `padding`: a box coordinate padded by an edge's tolerance (`query.brep`'s tight box
 ///   expanded by its entities' tolerances): it moved inward by exactly a moved edge's
 ///   `o - n` (to four units in the last place), that edge certified as every other;
 /// - `trim`: a value of a UV trim (its interval or a sample) in `topology.brep_mirror`'s
-///   `record`, refit while its edge's tolerance was lower: that trim's `B` is within its
-///   edge's tolerance (a proved cover, the trim is valid for the tolerance it was fit to);
+///   `record` (by the record's layout), or an end of an edge's interval in the graph's
+///   `geometry` (by its layout, [`graph_edge_interval`]), refit while its edge's tolerance
+///   was lower: that trim's `B` (in `geometry`, that of every trim of the edge) is within its
+///   edge's tolerance (a proved cover, the trim is valid for the tolerance it was fit to); a
+///   trim of an edge in [`OPEN`] is open with it (counted apart, not proved);
 /// - `domain`: a value of a face's surface record (its natural domain, or a sample over it)
 ///   that moved with the face's refit trims (the surface's domain is bound to them): some
 ///   face's surface record holds it, and every UV trim on each face whose record holds it is
 ///   within its edge's tolerance (`fillet_group_torii_fillet_b_rb23`: the domain's `v` start moved 3.7e-7 and
 ///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before).
 const OTHER: &str = include_str!("trim_tolerance_other.tsv");
+
+/// The accuracy `blend.fillet_executive_p3`'s runner asks of the mass integrator
+/// (`end_to_end.rs`, `brep_mass_properties`).
+const MASS_ACCURACY: f64 = 1e-4;
+
+/// Certified enclosures of a body's mass properties (density 1, about the origin), to check
+/// an `integration` value ([`OTHER`]).
+struct MassBands {
+    /// The enclosures, asked a tenth of [`MASS_ACCURACY`] of their scale wide (one that spends
+    /// its budget first is wider, still valid).
+    e: solidcore::mass::enclosure::MassEnclosure,
+    /// Half the diagonal of the body's box, `R`: the scale of a centroid coordinate (and,
+    /// times the volume and `R`, of a moment).
+    r: f64,
+}
+
+impl MassBands {
+    /// The enclosures of `b`'s mass properties; panics where they cannot be made.
+    fn of(k: &Kernel, b: &Brep, case: &str) -> Self {
+        let mut b = b
+            .clone_standing_for_self()
+            .unwrap_or_else(|e| panic!("{case}: no copy: {e:?}"));
+        let e = solidcore::mass::enclosure::enclose_mass_properties(k, &mut b, 0.1 * MASS_ACCURACY)
+            .unwrap_or_else(|e| panic!("{case}: no mass enclosure: {e:?}"));
+        let bbox = solidcore::query::brep::calculate_bounding_box(
+            k,
+            &mut b,
+            solidcore::query::brep::BoundingBoxOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{case}: no box: {e:?}"));
+        Self {
+            e,
+            r: 0.5 * bbox.size().length(),
+        }
+    }
+
+    /// Checks value `index` of a `mass_properties` record (`area, volume, mass`, the centroid,
+    /// the axial inertias, the products): `value` is within [`MASS_ACCURACY`] of its scale
+    /// (the area's, the volume's, `R` for a centroid coordinate, `V R^2` for a moment, or the
+    /// value's own where larger) of both ends of its enclosure, so of the exact value.
+    fn check(&self, index: usize, value: f64) -> Result<(), String> {
+        let e = &self.e;
+        let vr2 = e.volume.hi * self.r * self.r;
+        let (band, scale) = match index {
+            0 => (e.area, e.area.hi),
+            1 | 2 => (e.volume, e.volume.hi),
+            3..=5 => (e.centroid[index - 3], self.r),
+            6..=8 => (e.inertia[index - 6], vr2),
+            9..=11 => (e.products[index - 9], vr2),
+            _ => return Err(format!("no mass property {index}")),
+        };
+        let accuracy = MASS_ACCURACY * scale.max(value.abs());
+        // (the farthest the exact value can be; written so a NaN fails)
+        let far = (value - band.lo).max(band.hi - value);
+        if far <= accuracy {
+            Ok(())
+        } else {
+            Err(format!(
+                "{value:e} is up to {far:e} off the certified [{:e}, {:e}] (accuracy {accuracy:e})",
+                band.lo, band.hi
+            ))
+        }
+    }
+}
 
 /// [`OTHER`] entries of `unit`: `(case, key, index) -> (class, body)`.
 fn other_entries(
@@ -251,6 +329,31 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
         .surface
         .as_ref()
         .expect("surface");
+    // A UV line on a plane is enclosed as its NURB (the segment between its two control
+    // points), which `trim_image_gap_bound` encloses as it does any B-spline, plus how far the
+    // line's analytic evaluation (`P + s V`, `s` rounded from the parameter, which
+    // `trim_image_gap_bound` refuses) can be from that NURB at the same parameter in UV, `d`
+    // ([`line_evaluation_slack`]: the rounding of the analytic point and the control points'
+    // measured distance from it, each against the exact line), carried to the plane by
+    // [`plane_uv_lipschitz`]. A line on another surface stays open.
+    let line_nurb;
+    let mut line_slack = 0.0;
+    let trim = match trim.kind() {
+        CurveKind::Line(l) => {
+            let nurb = l.base_with_nurb().expect("a line's NURB").into_owned();
+            let cpts = nurb.control_points().expect("a line's NURB").to_vec();
+            let Some(d) = line_evaluation_slack(l, true) else {
+                return UseBound::Open;
+            };
+            let Some(lip) = plane_uv_lipschitz(surface, &cpts, d) else {
+                return UseBound::Open;
+            };
+            line_slack = lip * d * (1.0 + 4.0 * f64::EPSILON);
+            line_nurb = Curve::from(nurb);
+            &line_nurb
+        }
+        _ => trim,
+    };
     let mut surface = surface.clone_for_evaluation().expect("a copy");
     let _ = surface.set_owner(None);
     let ivl = rec.interval;
@@ -264,9 +367,88 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
     )
     .expect("the bound")
     {
-        Some(x) => UseBound::Bound(x),
+        Some(x) if line_slack == 0.0 => UseBound::Bound(x),
+        Some(x) => UseBound::Bound((x + line_slack) * (1.0 + 4.0 * f64::EPSILON)),
         None => UseBound::Open,
     }
+}
+
+/// A bound `L` with `|S(p) - S(q)| <= L d` for the plane `s` and UV points `p`, `q` within `d`
+/// of each other in each coordinate, both within `d` of the segment between the UV points
+/// `ends` (a UV line's NURB): `None` unless `s` is a plane whose NURB is a polynomial bilinear
+/// patch. Over its domain `[u0, u1] x [v0, v1]` with corners `P_ij`, `S_u` at the `v` fraction
+/// `β` is `((1 - β)(P_10 - P_00) + β (P_11 - P_01)) / (u1 - u0)`, whose norm is convex in `β`,
+/// so over any `β` range it is at most the larger of its values at the range's ends; the range
+/// taken is the segment's box widened by `d`, joined with `[0, 1]`. Likewise `S_v`, and
+/// `|S(p) - S(q)| <= (max |S_u| + max |S_v|) d`. A difference of two floats rounds by at most
+/// `ε` of itself, a quotient, product or square root likewise; each is covered by a factor
+/// `1 + 16 ε` (and an absolute `8 ε` of the box's coordinates for its fractions).
+fn plane_uv_lipschitz(
+    s: &solidcore::surface::surface::Surface,
+    ends: &[CPoint],
+    d: f64,
+) -> Option<f64> {
+    use solidcore::nurbs::math::NOW;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    let SurfaceKind::Plane(plane) = s.kind() else {
+        return None;
+    };
+    let base = plane.base_with_nurb().ok()?;
+    let net = base.gw_nurb()?;
+    let [u0, _, _, u1] = <[f64; 4]>::try_from(net.u_knots()).ok()?;
+    let [v0, _, _, v1] = <[f64; 4]>::try_from(net.v_knots()).ok()?;
+    let rows = net.cpts();
+    if net.degrees() != (1, 1)
+        || !(u1 > u0 && v1 > v0)
+        || rows.len() != 2
+        || rows.iter().any(|r| r.len() != 2)
+    {
+        return None;
+    }
+    let polynomial = |c: &CPoint| c.w == NOW || c.w == 1.0;
+    let pt = |i: usize, j: usize| -> Option<[f64; 3]> {
+        let c = rows.get(i)?.get(j)?;
+        polynomial(c).then_some([c.x, c.y, c.z])
+    };
+    let (p00, p10, p01, p11) = (pt(0, 0)?, pt(1, 0)?, pt(0, 1)?, pt(1, 1)?);
+    let grow = 1.0 + 16.0 * f64::EPSILON;
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for c in ends {
+        if !polynomial(c) {
+            return None;
+        }
+        for (k, x) in [c.x, c.y].into_iter().enumerate() {
+            lo[k] = lo[k].min(x - d);
+            hi[k] = hi[k].max(x + d);
+        }
+    }
+    // the fraction of `x` in `[a, b]`, moved out by its rounding (`lower` toward -inf)
+    let frac = |x: f64, a: f64, b: f64, lower: bool| {
+        let r = (x - a) / (b - a);
+        let e = (r.abs() * 16.0 + (x.abs() + a.abs()) / (b - a) * 8.0) * f64::EPSILON;
+        if lower {
+            (r - e).min(0.0)
+        } else {
+            (r + e).max(1.0)
+        }
+    };
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    // `|(1 - t) a + t b|` rounded up: each term within `(|a| + |b|)(1 + |t|) 4 ε` of exact
+    let norm_at = |a: [f64; 3], b: [f64; 3], t: f64| {
+        let v = [0, 1, 2].map(|k| (1.0 - t) * a[k] + t * b[k]);
+        let m = a.iter().chain(&b).fold(0.0_f64, |m, x| m.max(x.abs()));
+        ((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+            + m * (1.0 + t.abs()) * 16.0 * f64::EPSILON)
+            * grow
+    };
+    let su = |t: f64| norm_at(sub(p10, p00), sub(p11, p01), t) * grow;
+    let sv = |t: f64| norm_at(sub(p01, p00), sub(p11, p10), t) * grow;
+    let (b_lo, b_hi) = (frac(lo[1], v0, v1, true), frac(hi[1], v0, v1, false));
+    let (a_lo, a_hi) = (frac(lo[0], u0, u1, true), frac(hi[0], u0, u1, false));
+    let lu = su(b_lo).max(su(b_hi)) / ((u1 - u0) / grow);
+    let lv = sv(a_lo).max(sv(a_hi)) / ((v1 - v0) / grow);
+    let l = (lu + lv) * grow;
+    l.is_finite().then_some(l)
 }
 
 /// The owner of a value of a geometry record (`topology_brep_mirror::geometry`).
@@ -286,7 +468,7 @@ enum Owner {
 fn record_owners(k: &Kernel, b: &Brep, status: bool, uv_trim: bool) -> Vec<Owner> {
     // as `curve_samples`: -1 for no curve, else the type, the interval and five samples
     // (four values each, one for a sample that does not evaluate)
-    let curve = |c: Option<&solidcore::curve::curve::Curve>| match c {
+    let curve = |c: Option<&Curve>| match c {
         None => 1,
         Some(c) => {
             let d = c.natural_interval();
@@ -347,6 +529,21 @@ fn record_owners(k: &Kernel, b: &Brep, status: bool, uv_trim: bool) -> Vec<Owner
         out.extend(std::iter::repeat_n(Owner::Face(f), n));
     }
     out
+}
+
+/// The edge (its number in the graph's walk, [`Canon::reachable`]) and the end (`0` the
+/// start, `1` the end) of its interval that index `i` of a `graph` output's `geometry` holds,
+/// or `None` for any other value. The layout is `units::boolean_merge_p1::graph`'s: each
+/// vertex use's UV (2 values), each vertex's point and tolerance (4), each face's UV domain
+/// and tolerance (5), each edge's interval and tolerance (3); the counts of faces, edges,
+/// vertex uses and vertices are `graph`'s ints 3, 7, 8 and 9.
+///
+/// [`Canon::reachable`]: crate::units::boolean_merge_p1::Canon::reachable
+fn graph_edge_interval(graph: &[i64], i: usize) -> Option<(usize, usize)> {
+    let count = |j: usize| graph.get(j).and_then(|&n| usize::try_from(n).ok());
+    let (nf, ne, nvu, nv) = (count(3)?, count(7)?, count(8)?, count(9)?);
+    let r = i.checked_sub(2 * nvu + 4 * nv + 5 * nf)?;
+    (r < 3 * ne && r % 3 < 2).then_some((r / 3, r % 3))
 }
 
 /// The face of `b` whose surface record (`topology_brep_mirror`'s `surface_samples`: its
@@ -418,8 +615,7 @@ fn face_trims_covered(k: &Kernel, b: &Brep, f: FaceId) -> Result<f64, String> {
 /// over its interval to the surface of each face of the edge
 /// ([`curve_face_gap_bound`], floor a thousandth of `n`), plus the rounding of the curve's
 /// evaluation against its NURBS data (none for a B-spline or an ellipse, evaluated on it; for a
-/// line, evaluated analytically, `γ_32` of 8 times the largest coordinate of its NURB, as the
-/// gap bound counts it for a trim); `None` per face where it is not enclosed or the curve is
+/// line, evaluated analytically, [`line_evaluation_slack`]); `None` per face where it is not enclosed or the curve is
 /// of another kind.
 fn face_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> Vec<Option<f64>> {
     let rec = b.edge(e).expect("edge");
@@ -433,14 +629,10 @@ fn face_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> Vec<Option<f64>> {
         CurveKind::Ellipse(el) => (el.base(), 0.0),
         CurveKind::Line(l) => {
             line = l.base_with_nurb().expect("a line's NURB");
-            let m = line
-                .control_points()
-                .expect("a line's NURB")
-                .iter()
-                .fold(0.0_f64, |a, c| {
-                    a.max(c.x.abs()).max(c.y.abs()).max(c.z.abs())
-                });
-            (&*line, gamma(32) * 8.0 * m * (1.0 + 4.0 * f64::EPSILON))
+            let Some(slack) = line_evaluation_slack(l, false) else {
+                return vec![None; faces.len().max(1)];
+            };
+            (&*line, slack)
         }
         _ => return vec![None; faces.len().max(1)],
     };
@@ -498,11 +690,15 @@ struct Tally {
     trimless: usize,
     /// Moved edges listed in [`OPEN`].
     open: usize,
+    /// `trim` values on a trim of an edge listed in [`OPEN`] (open with it).
+    open_values: usize,
     /// Raised edges: every trim's `B` within the new tolerance, one above the old.
     raised: usize,
-    /// [`OTHER`] values: `rounding`, `quadrature`, `padding`, `trim` and `domain`.
+    /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim` and
+    /// `domain`.
     rounding: usize,
     quadrature: usize,
+    integration: usize,
     padding: usize,
     trim_values: usize,
     domain: usize,
@@ -539,6 +735,7 @@ fn certify(unit: &str) -> Tally {
         super::watch_written();
         let out = runner.run_rust(case);
         let bodies = super::take_written();
+        let mut mass_bands = std::collections::BTreeMap::new();
         let out = out.unwrap_or_else(|e| panic!("{unit} {}: {e:?}", row.case));
         tally.cases += 1;
         // each moved output value is the new tolerance of a moved entity, old to new
@@ -572,6 +769,25 @@ fn certify(unit: &str) -> Tally {
                 "quadrature" if (new - old).abs() <= 1e-13 * old.abs().max(new.abs()) => {
                     tally.quadrature += 1;
                 }
+                "integration"
+                    if key.ends_with("mass_properties")
+                        && row.moved.iter().all(|(key, _, old, new)| {
+                            key.ends_with("mass_properties")
+                                || row.entities.iter().any(|e| {
+                                    e.3.to_bits() == old.to_bits() && e.4.to_bits() == new.to_bits()
+                                })
+                        })
+                        && bodies.get(*body).is_some() =>
+                {
+                    let b = bodies.get(*body).expect("a body");
+                    let bands = mass_bands
+                        .entry(*body)
+                        .or_insert_with(|| MassBands::of(&k, b, &row.case));
+                    match bands.check(*index, *new) {
+                        Ok(()) => tally.integration += 1,
+                        Err(why) => failures.push(format!("{at}: {old:e} -> {new:e}: {why}")),
+                    }
+                }
                 "padding"
                     if row.entities.iter().any(|e| {
                         e.1 && e.4 < e.3
@@ -583,21 +799,72 @@ fn certify(unit: &str) -> Tally {
                 }
                 "trim" => {
                     let b = bodies.get(*body).unwrap_or_else(|| panic!("{at}: no body"));
-                    let owner = record_owners(&k, b, true, true).get(*index).copied();
-                    let Some(Owner::Trim(e, eu)) = owner else {
-                        panic!("{at}: not a UV trim's value");
+                    // a `record` by its layout, the graph's `geometry` by the value (an end of
+                    // the trims' natural intervals, every trim holding it checked)
+                    let uses = if key.ends_with("record") {
+                        let owner = record_owners(&k, b, true, true).get(*index).copied();
+                        let Some(Owner::Trim(e, eu)) = owner else {
+                            panic!("{at}: not a UV trim's value");
+                        };
+                        vec![(e, eu)]
+                    } else {
+                        // the graph's `geometry` by its layout: an end of an edge's interval,
+                        // that edge's every trim checked
+                        let graph = key
+                            .strip_suffix("geometry")
+                            .and_then(|p| out.ints.get(&format!("{p}graph")))
+                            .unwrap_or_else(|| panic!("{at}: no graph"));
+                        let Some((e, end)) = graph_edge_interval(graph, *index) else {
+                            panic!("{at}: not an end of an edge's interval");
+                        };
+                        let walked = crate::units::boolean_merge_p1::Canon::reachable(b);
+                        let e = *walked
+                            .edges
+                            .items
+                            .get(e)
+                            .unwrap_or_else(|| panic!("{at}: no edge {e}"));
+                        let ivl = b.edge(e).expect("edge").interval;
+                        let now = if end == 0 { ivl.min() } else { ivl.max() };
+                        assert_eq!(now.to_bits(), new.to_bits(), "{at}: the edge's interval");
+                        b.edge(e)
+                            .expect("edge")
+                            .edgeuses
+                            .iter()
+                            .map(|&eu| (e, eu))
+                            .filter(|&(_, eu)| {
+                                b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some()
+                            })
+                            .collect()
                     };
-                    let tol = b.edge(e).expect("edge").tolerance;
-                    match use_bound(&k, b, e, eu) {
-                        UseBound::Bound(x) if x <= tol => {
-                            tally.trim_values += 1;
-                            tally.worst = tally.worst.max(x / tol);
+                    if uses.is_empty() {
+                        failures.push(format!("{at}: no UV trim's interval ends at {new:e}"));
+                    }
+                    let mut covered = true;
+                    for (e, eu) in uses {
+                        let tol = b.edge(e).expect("edge").tolerance;
+                        let key = (row.case.clone(), *body, e.index().to_string());
+                        match use_bound(&k, b, e, eu) {
+                            UseBound::Bound(x) if x <= tol => {
+                                tally.worst = tally.worst.max(x / tol);
+                            }
+                            // the trim of an edge in OPEN: open with it (the edge's own
+                            // entry is checked below)
+                            _ if open.contains(&key) => {
+                                covered = false;
+                                tally.open_values += 1;
+                            }
+                            x => {
+                                covered = false;
+                                failures.push(format!(
+                                    "{at}: the trim of edge {} use {}: B {x:?} over {tol:e}",
+                                    e.index(),
+                                    eu.index()
+                                ));
+                            }
                         }
-                        x => failures.push(format!(
-                            "{at}: the trim of edge {} use {}: B {x:?} over {tol:e}",
-                            e.index(),
-                            eu.index()
-                        )),
+                    }
+                    if covered {
+                        tally.trim_values += 1;
                     }
                 }
                 "domain" => {
@@ -679,6 +946,14 @@ fn certify(unit: &str) -> Tally {
                     tally.edges += 1;
                     assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
                 } else if open.contains(&key) {
+                    // open, and not farther than it was: the old tolerance did not certify
+                    // the edge either (some trim's `B` past it, or not enclosed)
+                    if bounds.iter().all(|x| x.is_some_and(|x| x <= old)) {
+                        failures.push(format!(
+                            "{at}: {old:e} -> {new:e}: certified at the old tolerance, not \
+                             the new: {bad:?}"
+                        ));
+                    }
                     open_seen.insert(key);
                     tally.open += 1;
                 } else {
@@ -729,7 +1004,7 @@ macro_rules! certified_units {
             #[test]
             fn $name() {
                 let t = certify($unit);
-                assert!(t.values + t.rounding + t.quadrature + t.padding + t.trim_values + t.domain > 0, "{t:?}");
+                assert!(t.values + t.rounding + t.quadrature + t.integration + t.padding + t.trim_values + t.domain > 0, "{t:?}");
             }
         )*
     };
@@ -741,10 +1016,12 @@ certified_units! {
     fillet_executive_p1: "blend.fillet_executive_p1",
     fillet_executive_p3: "blend.fillet_executive_p3",
     feature_executive: "blend.feature_executive",
+    offset_geometry_creation: "offset.offset_geometry_creation",
     stitch_p1: "heal.stitch_p1",
     stitch_p2: "heal.stitch_p2",
     brep: "query.brep",
     face_p2: "query.face_p2",
+    api_files: "topology.api_files",
     brep_cutting: "topology.brep_cutting",
     brep_local_operation: "topology.brep_local_operation",
     brep_mirror: "topology.brep_mirror",
