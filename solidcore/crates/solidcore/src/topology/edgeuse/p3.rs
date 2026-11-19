@@ -1900,7 +1900,9 @@ fn other_trims_bound(
 /// After a raise, the faces' own bounds are settled at the raised tolerance
 /// ([`settle_face_bounds`]): each bound is cut to a thousandth of the fit, and the fit after
 /// the raise is the raised tolerance, at which a bound can come out a rounding above the one
-/// it raised to, leaving the edge short of the face by its own measure.
+/// it raised to, leaving the edge short of the face by its own measure. The raised edge is
+/// then raised to cover its UV trims ([`cover_raised_trims`]) and its vertices the ends of
+/// their edges ([`cover_vertex_ends`]).
 ///
 /// # Errors
 ///
@@ -1949,7 +1951,45 @@ pub(crate) fn cover_joined_faces(
     }
     if raised {
         settle_face_bounds(k, b, e, &settle)?;
+        cover_raised_trims(k, b, e)?;
         cover_vertex_ends(k, b, e)?;
+    }
+    Ok(())
+}
+
+/// Not upstream (#18166): after the cover raised `e` ([`cover_joined_faces`]), raises it to
+/// the proved bound of each of its UV trims ([`trim_deviation_bound`]) that the raised
+/// tolerance does not cover, as that bound comes out at the raised tolerance (the fit
+/// [`settle_face_bounds`] takes), for at most [`SETTLE_ROUNDS`] rounds. A raised edge covers
+/// everything it lies on: a trim set by an edit raised the tolerance when it was set
+/// (`keep_trim_covered`), but a trim the operation was given is bounded only here
+/// (`primitive.api_primitives` gen1108: a line 5.5e8 long, raised to 1.17e-5 for its
+/// trimless face, with a trim bounded at 2.8e-5 under the tolerance of 1e-5 it came with).
+/// A trim whose bound is not enclosed is left as upstream leaves it.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`trim_deviation_bound`].
+fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    for _ in 0..SETTLE_ROUNDS {
+        let mut raised = false;
+        let uses = b.edge(e)?.edgeuses.clone();
+        for x in uses {
+            let Some(trim) = b.edgeuse(x)?.uv_trim_curve.clone() else {
+                continue;
+            };
+            let tol = b.edge(e)?.tolerance;
+            match trim_deviation_bound(k, b, x, &trim, tol, [tol, f64::INFINITY], None)? {
+                Some(again) if again.is_finite() && again > tol => {
+                    crate::topology::edge::set_tolerance(b, e, again, true, true)?;
+                    raised = true;
+                }
+                _ => {}
+            }
+        }
+        if !raised {
+            break;
+        }
     }
     Ok(())
 }
