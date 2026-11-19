@@ -19,7 +19,7 @@ use solidcraft_sketch::Sketch;
 
 use super::features::{add_feature, check_expr, sketch_id};
 use super::sketch::edit;
-use super::{CommandSpec, in_sketch, not_in_sketch};
+use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
 use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
@@ -49,10 +49,9 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member))
+    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member)).begins_edit()
         .at("WELDMENTS", "CREATE")
         .icon("frame_member")
-        .enabled(not_in_sketch)
         .contract(&MEMBER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(

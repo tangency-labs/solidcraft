@@ -53,7 +53,7 @@ const ON_CENTRE_MM: f64 = 1e-6;
 const DEFAULT_DECIMALS: u8 = 2;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add))
+    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -97,7 +97,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              {dimension, changed: [fields]}. What it measures stays: to measure something else, add a new one. One undo step, none \
              when nothing changes; no model is evaluated.",
         ),
-    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair))
+    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()

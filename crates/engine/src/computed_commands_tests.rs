@@ -466,3 +466,144 @@ fn computed_sketch_ownership_rejects_closed_targets_and_keeps_live_view_metadata
     assert_eq!(session.sketching_view, Some(2));
     assert_eq!(session.view_context, context(2), "adoption cannot reinstall the worker's stale window placement");
 }
+
+#[test]
+fn edit_start_transactions_are_atomic_and_adoption_never_replays_consumed_events() {
+    let mut s = Session::default();
+    s.execute("sketch.create", &json!({"name":"Initial"})).unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[10,0]]})).unwrap();
+    let doc = s.doc.to_json();
+    let active = s.active_sketch;
+    let batch = vec![("solid.box".into(), json!({"length":2,"width":3,"height":4})), ("solid.fillet".into(), json!({"radius":-1}))];
+    assert!(s.scratch().compute_commands(&batch, None).is_err());
+    assert_eq!(s.doc.to_json(), doc);
+    assert_eq!(s.active_sketch, active);
+    assert!(s.take_sketch_finish_event().is_none(), "failed isolated transaction publishes nothing");
+    let first = s.prepare_edit_start("solid.box", &serde_json::Value::Null).unwrap().unwrap();
+    let prepared = s.scratch().compute_commands(&batch[..1], None).unwrap();
+    assert_eq!(s.take_sketch_finish_event().unwrap().sequence, first.sequence);
+    s.accept_commands(prepared).unwrap();
+    assert!(s.take_sketch_finish_event().is_none(), "source event was consumed while worker ran");
+    s.execute("sketch.create", &json!({"name":"Next"})).unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[5,0]]})).unwrap();
+    let entry = s.edit_start_sequence();
+    let prepared = s.scratch().compute_commands(&batch[..1], None).unwrap();
+    assert!(s.take_sketch_finish_event().is_none());
+    s.accept_commands(prepared).unwrap();
+    let event = s.take_sketch_finish_event().unwrap();
+    assert!(event.sequence > first.sequence);
+    assert_eq!(event.name, "Next");
+    assert!(s.edit_start_sequence() > entry);
+    assert!(s.take_sketch_finish_event().is_none());
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert!(s.take_sketch_finish_event().is_none(), "history never replays events");
+}
+
+#[test]
+fn edit_start_cache_catchup_is_receiver_explicit_and_never_adopts_authoring_state() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    let mut s = Session::default();
+    let id = s.execute("sketch.create", &json!({"name":"Catch up"})).unwrap()["sketch"].as_u64().unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[10,0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    s.execute("sketch.edit", &json!({"sketch":id})).unwrap();
+    assert!(s.doc.marker.is_some());
+    s.execute("drawing.create", &json!({})).unwrap();
+    let drawing = s.open_drawing;
+    let feature = s.doc.features.iter().find(|feature| feature.id != id).unwrap().id;
+    s.prepare_feature_edit_start(feature).unwrap();
+    assert!(s.needs_sketch_finish_evaluation());
+    assert_eq!(s.doc.marker, None);
+    let pending = s.ahead();
+    let revision = s.revision;
+    s.selection.push(crate::Sel::Feature { id: feature });
+    let selection = s.selection.clone();
+    let undo = s.undo.len();
+    let context = s.view_context.clone();
+    s.set_command_check(Some(std::sync::Arc::new(|_, _, _| Err("no commands allowed".into()))));
+    let ready = pending.refresh_sketch_model(DisplayQuality::Normal).unwrap();
+    assert!(s.accept_refreshed_sketch_model(ready), "cache preparation needs no Model command or permission and works from Drawing");
+    assert!(!s.needs_sketch_finish_evaluation());
+    assert!(s.revision > revision);
+    assert_eq!(s.selection, selection);
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.view_context, context);
+    assert_eq!(s.open_drawing, drawing);
+    assert_eq!(s.take_sketch_finish_event().unwrap().sketch, id, "cache acceptance preserves the live queue");
+    assert!(s.take_sketch_finish_event().is_none());
+}
+
+#[test]
+fn edit_start_cache_catchup_rejects_changed_editor_or_document_source() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    for changed in 0..3 {
+        let mut s = Session::default();
+        let id = s.execute("sketch.create", &json!({})).unwrap()["sketch"].as_u64().unwrap();
+        s.prepare_view_close(1).unwrap();
+        assert!(s.doc.feature(id).is_none());
+        let ready = s.ahead().refresh_sketch_model(DisplayQuality::Normal).unwrap();
+        match changed {
+            0 => s.revision += 1,
+            1 => {
+                s.active_sketch = Some(99);
+                s.sketching_view = Some(1);
+            }
+            _ => {
+                s.doc_mut().name = "Changed".into();
+            }
+        }
+        let doc = s.doc.clone();
+        let active = s.active_sketch;
+        let undo = s.undo.len();
+        assert!(!s.accept_refreshed_sketch_model(ready));
+        assert!(s.needs_sketch_finish_evaluation());
+        assert!(Arc::ptr_eq(&s.doc, &doc));
+        assert_eq!(s.active_sketch, active);
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+#[test]
+fn edit_start_cache_catchup_keeps_worker_prepared_occurrences() {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"Part"})).unwrap();
+    s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    s.execute("sketch.create", &json!({})).unwrap();
+    s.prepare_view_close(1).unwrap();
+    assert!(s.needs_sketch_finish_evaluation());
+    let ready = s.ahead().refresh_sketch_model(DisplayQuality::Normal).unwrap();
+    let evaluations = s.evaluations;
+    assert!(s.accept_refreshed_sketch_model(ready));
+    let warmed = s.world_cache.lock().unwrap().as_ref().unwrap().world.as_ref().unwrap().clone();
+    assert!(Arc::ptr_eq(&warmed, &s.world_state().unwrap()), "the window reuses placements already warmed by the worker");
+    assert_eq!(s.evaluations, evaluations + 1);
+}
+
+#[test]
+fn edit_start_component_restore_does_not_evaluate_the_pending_suffix() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"Part"})).unwrap();
+    let component = s.active_component;
+    let occurrence = s.doc.occurrences.iter().find(|occurrence| occurrence.component == component).unwrap().id;
+    let sketch = s.execute("sketch.create", &json!({})).unwrap()["sketch"].as_u64().unwrap();
+    s.execute("sketch.line", &json!({"points":[[0,0],[10,0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    s.execute("sketch.edit", &json!({"sketch":sketch})).unwrap();
+    assert!(s.doc.marker.is_some());
+    s.prepare_view_close(1).unwrap();
+    assert!(s.needs_sketch_finish_evaluation());
+    assert_eq!(s.doc.marker, None);
+    let model = s.model.state();
+    let evaluations = s.evaluations;
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    s.execute("component.activate", &json!({"component":component,"occurrence":occurrence,"path":[occurrence]})).unwrap();
+    assert_eq!(s.active_component, component);
+    assert_eq!(s.active_occurrence_path, Some(vec![occurrence]));
+    assert_eq!(s.evaluations, evaluations, "restoring the sketch's original placement leaves suffix rebuilding to the worker");
+    assert!(Arc::ptr_eq(&model, &s.model.state()));
+    assert!(s.needs_sketch_finish_evaluation());
+}

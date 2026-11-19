@@ -28,13 +28,13 @@ pub(super) fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value>
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("canvas.insert", "Canvas", crate::checked!("canvas.insert", add_canvas))
+    CommandSpec::new("canvas.insert", "Canvas", crate::checked!("canvas.insert", add_canvas)).begins_edit()
         .at("SKETCH", "INSERT")
         .icon("canvas")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
         .params("path: a PNG, JPEG or SVG file (an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?; frame?: true ties the image to a construction rectangle around it (in the sketch being edited, which it must lie on, else in a new sketch), as canvas.frame_sketch does; \"auto\" frames it in the sketch being edited only when it lies on its plane"),
-    CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
+    CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal)).begins_edit()
         .at("SKETCH", "INSERT")
         .icon("decal")
         .contract(&DECAL_CONTRACT)
@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<CanvasEdited>)
         .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete); anchor?: {sketch: id, bottom_left, bottom_right: point ids, top_left?: point id} | null (the sketch points the image's corners follow; without top_left the height follows the image; an anchored canvas refuses center, width, angle, Calibrate and Straighten)"),
-    CommandSpec::new("canvas.frame_sketch", "Frame Sketch", crate::checked!("canvas.frame_sketch", frame_sketch))
+    CommandSpec::new("canvas.frame_sketch", "Frame Sketch", crate::checked!("canvas.frame_sketch", frame_sketch)).begins_edit()
         .icon("canvas")
         .contract(&FRAME_SKETCH_CONTRACT)
         .output(output_schema_for::<CanvasFramed>)
@@ -1095,6 +1095,8 @@ mod tests {
         assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves);
         // An image already on the open sketch's plane: Frame Sketch draws into that sketch.
         let id = s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XY", "width": 20})).unwrap()["canvas"].as_u64().unwrap();
+        assert!(s.active_sketch.is_none(), "standalone insertion finishes the previous sketch");
+        s.execute("sketch.edit", &json!({"sketch": sketch})).unwrap();
         let framed = s.execute("canvas.frame_sketch", &json!({"canvas": id})).unwrap();
         assert_eq!(framed["sketch"].as_u64(), Some(sketch), "{framed}");
         assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves + 4);
@@ -1138,6 +1140,85 @@ mod tests {
             near(k[0], [0.0, 0.0, 0.0]) && near(k[1], [50.0, 0.0, 0.0]) && near(k[2], [50.0, 50.0, 0.0]) && near(k[3], [0.0, 50.0, 0.0]),
             "the image fills the square: {k:?}"
         );
+    }
+
+    #[test]
+    fn framed_canvas_commands_continue_the_model_sketch_and_refusals_keep_its_history() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            for frame in [json!(true), json!("auto")] {
+                let mut s = Session::default();
+                s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+                let sketch = s.execute("sketch.create", &json!({"plane": {"face": [20, 15, 10]}})).unwrap()["sketch"].as_u64().unwrap();
+                s.execute("sketch.line", &json!({"points": [[-40, -30], [-30, -20]]})).unwrap();
+                assert!(s.prepare_edit_start(command, &json!({})).unwrap().is_none(), "the image form keeps its sketch receiver");
+                let svg = base64_encode(
+                    br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>"#,
+                );
+                let mut params = json!({"data": svg, "width": 10, "resolution": 32, "frame": frame});
+                if command == "canvas.decal" {
+                    params["face"] = json!([20, 15, 10]);
+                } else {
+                    params["plane"] = json!({"face": [20, 15, 10]});
+                }
+                assert!(s.prepare_edit_start(command, &params).unwrap().is_none());
+                let reply = s.execute(command, &params).unwrap();
+                assert_eq!(reply["frame"]["sketch"].as_u64(), Some(sketch), "{command}: {reply}");
+                assert_eq!(s.active_sketch, Some(sketch));
+                assert!(reply.get("finished_sketch").is_none());
+                assert!(s.take_sketch_finish_event().is_none());
+                let before = s.doc.to_json();
+                let history = (s.undo.len(), s.redo.len());
+                params["width"] = json!(0);
+                assert!(s.execute(command, &params).is_err());
+                assert_eq!(s.doc.to_json(), before);
+                assert_eq!((s.undo.len(), s.redo.len()), history);
+                assert_eq!(s.active_sketch, Some(sketch));
+                assert!(s.take_sketch_finish_event().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn standalone_canvas_commands_finish_the_current_model_sketch() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+            let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+            s.execute("sketch.line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+            let mut params = json!({"data": png(40, 20), "width": 10});
+            if command == "canvas.decal" {
+                params["face"] = json!([20, 15, 10]);
+            }
+            let reply = s.execute(command, &params).unwrap();
+            assert!(s.active_sketch.is_none());
+            assert!(reply.get("finished_sketch").is_some());
+            assert_eq!(s.take_sketch_finish_event().unwrap().sketch, sketch);
+        }
+    }
+
+    #[test]
+    fn canvas_framing_finishes_a_sheet_sketch_before_creating_model_geometry() {
+        for command in ["canvas.insert", "canvas.decal", "canvas.frame_sketch"] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+            let canvas = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "width": 10})).unwrap()["canvas"].clone();
+            let drawing = s.execute("drawing.create", &json!({"name": "Paper"})).unwrap();
+            s.execute("drawing.sketch.create", &json!({"owner": drawing["sheets"][0]["id"], "name": "Sheet edit"})).unwrap();
+            s.execute("sketch.line", &json!({"points": [[10, 10], [20, 10]]})).unwrap();
+            // Focus the Model receiver while the Sheet editor remains open in its view.
+            s.model_focus = true;
+            let params = match command {
+                "canvas.frame_sketch" => json!({"canvas": canvas}),
+                "canvas.decal" => json!({"data": png(40, 20), "face": [20, 15, 10], "width": 10, "frame": true}),
+                _ => json!({"data": png(40, 20), "plane": "XY", "width": 10, "frame": true}),
+            };
+            let reply = s.execute(command, &params).unwrap();
+            assert_eq!(reply["finished_sketch"], "Sheet edit");
+            assert!(s.active_sheet_sketch.is_none());
+            assert!(s.active_sketch.is_none(), "the new Model frame is committed, with no overlapping edit");
+            assert!(matches!(s.take_sketch_finish_event().unwrap().domain, crate::SketchDomain::Sheet { .. }));
+            assert!(s.take_sketch_finish_event().is_none());
+        }
     }
 
     /// An SVG decal is kept as the PNG it draws, at the resolution asked for.

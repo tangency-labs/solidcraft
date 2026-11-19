@@ -1834,7 +1834,6 @@ fn sheet_editor_rejects_cross_targets_model_tools_and_source_mutation() {
         ("drawing.close", json!({})),
         ("drawing.open", json!({"drawing": made["drawing"]})),
         ("drawing.delete", json!({"drawing": made["drawing"]})),
-        ("drawing.sketch.create", json!({"owner": made["sheet"]})),
     ] {
         refused(&mut s, command, params);
         assert!(Arc::ptr_eq(&s.doc, &before), "{command}");
@@ -1848,6 +1847,30 @@ fn sheet_editor_rejects_cross_targets_model_tools_and_source_mutation() {
     assert!(result.unwrap_err().to_string().contains("cannot change the source design"));
     assert!(Arc::ptr_eq(&s.doc, &before) && Arc::ptr_eq(&s.model.state(), &state));
     assert_eq!(s.open_drawing, Some(d));
+}
+
+#[test]
+fn sheet_editor_new_edits_finish_the_previous_receiver_even_when_refused() {
+    for command in ["sketch.create", "drawing.sketch.create"] {
+        let (mut s, drawing, sketch, made) = sheet_editor();
+        run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
+        let before = s.doc.clone();
+        let evaluations = s.evaluations;
+        if command == "sketch.create" {
+            refused(&mut s, command, json!({"plane":"XY"}));
+            assert!(Arc::ptr_eq(&s.doc, &before));
+            assert!(s.active_sheet_sketch.is_none());
+        } else {
+            let next = run(&mut s, command, json!({"owner":made["sheet"]}));
+            assert_ne!(next["sketch"], made["sketch"]);
+            assert_ne!(s.active_sheet_sketch.as_ref().unwrap().sketch, sketch);
+        }
+        let event = s.take_sketch_finish_event().unwrap();
+        assert_eq!(event.sketch, sketch);
+        assert!(matches!(event.domain, crate::SketchDomain::Sheet { drawing: owner, .. } if owner == drawing));
+        assert!(s.take_sketch_finish_event().is_none());
+        assert_eq!(s.evaluations, evaluations);
+    }
 }
 
 #[test]
@@ -1946,11 +1969,10 @@ fn sheet_editor_commands_and_refusals_do_not_evaluate_a_stale_model() {
     refused(&mut s, "drawing.close", json!({}));
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.redo", json!({}));
-    run(&mut s, "sketch.finish", json!({}));
     assert!(s.model.is_stale());
     assert!(Arc::ptr_eq(&model, &s.model.state()));
     assert_eq!(s.evaluations, count);
-    assert_eq!(s.active_sketch, Some(model_sketch), "model active state was not overwritten");
+    assert!(s.active_sketch.is_none(), "entering the sheet sketch finished the model edit");
 }
 
 // W38a review: an unchanged Arc is not a validation certificate.
@@ -2030,7 +2052,7 @@ fn sheet_next_snap_directives_cannot_modify_an_active_model_sketch() {
             assert!(Arc::ptr_eq(&s.doc, &before));
             assert!(Arc::ptr_eq(&s.model.state(), &state));
             assert_eq!(s.active_sheet_sketch, entry);
-            assert_eq!(s.active_sketch, Some(model_id));
+            assert!(s.active_sketch.is_none());
             assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
         }
     }
@@ -4036,6 +4058,14 @@ fn sheet_editor_model_cancel_refuses_foreign_drawing_changes_without_losing_them
             }
         }
         run(&mut s, "drawing.close", json!({}));
+        if scenario != "new drawing" {
+            assert!(s.active_sketch.is_none(), "entering the sheet editor finished the model sketch");
+            assert!(s.doc.feature(model_sketch).is_some());
+            let before = s.doc.clone();
+            refused(&mut s, "sketch.cancel", json!({}));
+            assert!(Arc::ptr_eq(&s.doc, &before), "Cancel cannot erase the completed sketch or drawing edits");
+            continue;
+        }
         assert_eq!(s.active_sketch, Some(model_sketch));
         let before = s.doc.clone();
         let model = s.model.state();
@@ -4113,7 +4143,7 @@ fn sheet_editor_post_publication_refusal_preserves_stale_model_and_history() {
     assert!(Arc::ptr_eq(&s.doc, &before));
     assert!(Arc::ptr_eq(&s.model.state(), &model), "a drawing-only refusal must not recompute its stale source");
     assert_eq!(s.active_sheet_sketch, entry);
-    assert_eq!(s.active_sketch, Some(model_sketch));
+    assert!(s.active_sketch.is_none(), "the sheet editor finished the earlier model edit");
     assert_eq!(s.open_drawing, ids::decode(made["drawing"].as_str().unwrap()));
     assert_eq!(s.evaluations, evaluations);
     assert!(s.model.is_stale());

@@ -2808,6 +2808,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::view_window_drag::keyboard_active(app, ctx) {
         return;
     }
+    if app.sketch_notices.focus_shortcut(ctx, app.session.uid, app.view_windows.current_window()) {
+        return;
+    }
     if crate::view_windows::is_clean(app) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         let window = app.view_windows.current_window();
         drop(app.run("tab.window.clean", json!({"window": window, "on": false})));
