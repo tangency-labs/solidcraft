@@ -666,6 +666,32 @@ fn round_trip_features() {
     round_trip(&donut[0]);
 }
 
+/// A sphere whose face has other faces cut or joined into it keeps that face through a STEP
+/// round trip (#16872): its seam loop, a meridian up to the pole and back down, is no sliver of
+/// no area, and a bore across the seam does not turn the face over. Each came back an open sheet,
+/// or no body at all, or short of volume.
+#[test]
+fn round_trip_spheres_with_faces_cut_or_joined_into_them() {
+    let ball = || sphere(Vec3::ZERO, 5.0).unwrap();
+    // A bore beside the seam, from the centre's plane out.
+    let off = cylinder(Vec3::new(0.0, 2.0, 0.0), Vec3::X, 1.0, 10.0).unwrap();
+    let bored = boolean(&ball(), &off, BoolOp::Cut).unwrap().unwrap();
+    assert!(rel(measure(&bored).unwrap().volume, 509.392) < 1e-4);
+    round_trip(&bored);
+    // A bore through the centre, across the seam.
+    let through = cylinder(Vec3::ZERO, Vec3::X, 3.0, 10.0).unwrap();
+    round_trip(&boolean(&ball(), &through, BoolOp::Cut).unwrap().unwrap());
+    // A rod with a ball on its end.
+    let rod = cylinder(Vec3::new(-20.0, 0.0, 0.0), Vec3::X, 3.0, 20.0).unwrap();
+    round_trip(&boolean(&rod, &ball(), BoolOp::Union).unwrap().unwrap());
+    // A ring with a ball on it.
+    let ring = torus(Vec3::ZERO, 20.0, 3.0).unwrap();
+    let knob = sphere(Vec3::new(20.0, 0.0, 0.0), 5.0).unwrap();
+    let joined = boolean(&ring, &knob, BoolOp::Union).unwrap().unwrap();
+    assert!(rel(measure(&joined).unwrap().volume, 3820.759) < 1e-4);
+    round_trip(&joined);
+}
+
 /// Robustness seed 17: a thin three-quarter tube shelled with its bottom open reads back whole
 /// (an export once wrote a 270° wall on a quarter of its surface, and the part read back about
 /// 7% short with no warning).

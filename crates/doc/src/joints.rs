@@ -1695,6 +1695,11 @@ impl Placements<'_, '_, '_> {
 /// on at most: larger ones are only checked (a group with more values moves only those of its
 /// loops that need to move, `moving_loops_values`).
 const MAX_LOOP_VALUES: usize = 64;
+/// Values a group of loops is solved with when it cannot be narrowed to the loops that need to
+/// move (`moving_loops_values`): a ring of links, where every loop of the group runs through the
+/// value that moves, is one group of them all and cannot be narrowed. The group is solved whole,
+/// as long as it is this big, so that closing such a ring does not lock the model up (#18880).
+const MAX_LOOP_VALUES_WHOLE: usize = 256;
 const MAX_LOOPS: usize = 100;
 /// Loop-closing joints one solve takes on at most, over all its groups: a part placed by several
 /// relations closes a loop with each one after the first, so a panel of parts has many small
@@ -2308,6 +2313,11 @@ fn close_group(
         // Too many to move at once: only the loops that need to move, or none.
         match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
             Some(few) => vars = few,
+            // The group cannot be narrowed: every loop of it runs through the value that moves (a
+            // ring of links), or none of them needs to move. It is solved whole when it is small
+            // enough to solve, so that closing such a ring moves the model instead of locking it
+            // up (#18880).
+            None if vars.len() <= MAX_LOOP_VALUES_WHOLE => {}
             None => return Some(BTreeMap::new()),
         }
     }

@@ -2085,6 +2085,87 @@ fn a_chamfer_too_large_is_refused_with_the_distance_that_builds() {
     assert!(rel(removed, want) <= 1e-9, "{removed} vs {want}");
 }
 
+/// The two selected rims of a quadratic-ended extrusion approach across a 0.6 mm
+/// terminal strip (#19108). A fixed-angle refusal names the first distance and a
+/// point on the limiting top face; explicit two-distance input keeps its common scale.
+#[test]
+fn a_distance_angle_chamfer_on_a_curved_tip_names_its_distance_edge_and_limiting_face() {
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::nurbs::math::CPoint;
+    use solidcore_ops::RoomReason;
+
+    all_fixes();
+    let outline = || {
+        let quadratic = BSplineCurve::from_data(
+            3,
+            2,
+            5,
+            2,
+            &[
+                CPoint::new(10.0, 0.6, 0.0, 1.0),
+                CPoint::new(5.0, 0.6, 0.0, 1.0),
+                CPoint::new(0.0, 5.0, 0.0, 1.0),
+            ],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let native = swept(
+            &[
+                segment((0.0, 0.0), (10.0, 0.0)),
+                segment((10.0, 0.0), (10.0, 0.6)),
+                solidcore::curve::curve::Curve::from(quadratic),
+                segment((0.0, 5.0), (0.0, 0.0)),
+            ],
+            10.0,
+        );
+        // Application bodies pass through the record boundary: a native curved
+        // extrusion wall returns as a B-spline with the same translated net.
+        let (record, _) = native.to_record().unwrap();
+        Body::from_record(&record, true).unwrap().0
+    };
+    let angle = 80.0_f64.to_radians();
+    let mut distance_fit = None;
+    for second in [
+        ChamferSecond::Angle(angle),
+        ChamferSecond::Distance(angle.tan()),
+    ] {
+        let b = outline();
+        let before = b.to_record().unwrap().0;
+        let picks = [edge_at(&b, [5.0, 0.0, 10.0]), edge_at(&b, [5.0, 1.7, 10.0])];
+        let e = chamfer_sides_facing(&b, &picks, 1.0, second, [0.0, 0.0, 1.0]).unwrap_err();
+        let Error::TooLarge {
+            size,
+            kind,
+            at: Some(at),
+            face: Some(face),
+            why: Some(RoomReason::BandsOverlap),
+        } = e
+        else {
+            panic!("{e:?}");
+        };
+        let expected_kind = match second {
+            ChamferSecond::Angle(_) => FitKind::Distance,
+            ChamferSecond::Distance(_) => FitKind::Scale,
+        };
+        assert_eq!(kind, expected_kind);
+        // The terminal event is 0.6 / 2; the named open fit is below it.
+        assert!(size > 0.29 && size < 0.3, "{size}");
+        assert!((at[2] - 10.0).abs() < 1e-12, "edge {at:?}");
+        assert!((face[2] - 10.0).abs() < 1e-12, "limiting top face {face:?}");
+        assert!(face[0] > 0.0 && face[0] < 10.0 && face[1] > 0.0, "{face:?}");
+        assert_eq!(
+            b.to_record().unwrap().0,
+            before,
+            "a refusal leaves its input intact"
+        );
+        if kind == FitKind::Distance {
+            distance_fit = Some(size);
+        } else {
+            assert!((size - distance_fit.unwrap()).abs() < 1e-12);
+        }
+    }
+}
+
 /// #3145: a setback longer than an edge at a real set-back corner is the kernel's refusal before
 /// the trace, naming the largest that fits: the block's corner at (30, 0, 10) with its three
 /// edges rounded 1 and set back 50, its shortest edge 10 long. A setback of 10 would leave that
@@ -5133,7 +5214,7 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
     let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
     let after = b.volume(1e-11).unwrap();
     assert!(
-        (before - after - removed).abs() <= 1e-9 * before,
+        (before - after - removed).abs() <= 1e-9 * removed,
         "removed {}, the closed form {removed}",
         before - after
     );
