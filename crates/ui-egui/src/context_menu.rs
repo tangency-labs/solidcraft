@@ -2607,10 +2607,10 @@ fn select_under(app: &mut SolveApp, at: Pos2, before: Vec<Sel>, sel: Sel) {
     }
 }
 
-/// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer,
-/// selected first unless it is already part of the selection. Empty paper keeps the selection, as
-/// empty space does in a sketch.
-fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
+/// [`open`] in the Drawing workspace: `under` is what the sheet page found under the pointer, or
+/// the object whose row in the browser was right-clicked, selected first unless it is already part
+/// of the selection. Empty paper keeps the selection, as empty space does in a sketch.
+pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held, under: Option<Sel>) {
     app.menu.opened = Some((at, held));
     app.menu.picked = None;
     app.menu.over_geometry = false;

@@ -32,12 +32,11 @@ use solidcore::topology::Brep;
 use solidcore::{Kernel, Result};
 
 fn kernel(solidcraft: bool) -> Kernel {
-    let mut fixes = UpstreamFixes::default();
-    if solidcraft {
-        fixes = UpstreamFixes::all();
-        fixes.fillet_refuse_rounds_breaking_through = false;
-        fixes.fillet_round_ends_on_outline = false;
-    }
+    let fixes = if solidcraft {
+        UpstreamFixes::all()
+    } else {
+        UpstreamFixes::default()
+    };
     Kernel {
         fixes,
         ..Kernel::default()

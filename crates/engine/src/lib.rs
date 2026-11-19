@@ -55,6 +55,7 @@ pub mod status_details;
 pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
+pub mod upright_image;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
@@ -490,6 +491,18 @@ pub struct Preview {
     pub replies: Vec<Value>,
 }
 
+impl Preview {
+    fn visible_world(before: &Session, after: &Session, replies: Vec<Value>) -> Result<Self> {
+        let visible = |session: &Session| -> Result<Arc<ModelState>> {
+            let world = session.world_state()?;
+            let mut shown = (*world).clone();
+            shown.bodies.retain(|body| session.body_visible(&body.name));
+            Ok(Arc::new(shown))
+        };
+        Ok(Self { before: visible(before)?, after: visible(after)?, replies })
+    }
+}
+
 /// Prepared world geometry depends on design/model identity and placement context, not
 /// selection or the view revision. Retained Arcs prevent pointer reuse after a design closes.
 #[derive(Clone)]
@@ -554,6 +567,17 @@ impl ComputedCommands {
             }) || (session.plugin_limits == source.plugin_limits
                 && session.disabled_plugins == source.disabled_plugins
                 && session.plugin_state == source.plugin_state))
+    }
+
+    /// Whether the resulting document differs in content from its source.
+    pub fn changes_document(&self) -> bool {
+        self.source.doc != self.computed.doc
+    }
+
+    /// Show the prepared model in occurrence coordinates, with visibility applied, and return
+    /// the replies from its evaluation.
+    pub fn preview_visible_world(&self) -> Result<Preview> {
+        Preview::visible_world(&self.source, &self.computed, self.steps.iter().map(|step| step.reply.clone()).collect())
     }
 
     /// Prepare display tessellation before returning the transaction to the window; a model that
@@ -3111,14 +3135,8 @@ impl Session {
 
     /// World preview with each session's visibility applied, including new body placements.
     pub fn preview_visible_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        let visible = |session: &Session| -> Result<Arc<solidcraft_doc::ModelState>> {
-            let world = session.world_state()?;
-            let mut shown = (*world).clone();
-            shown.bodies.retain(|body| session.body_visible(&body.name));
-            Ok(Arc::new(shown))
-        };
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies })
+        Preview::visible_world(self, &after, replies)
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what

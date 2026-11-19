@@ -3110,7 +3110,6 @@
   "prefs.blur_off": "Off",
   "prefs.blur_reduce_transparency": "Disabled by the system's Reduce transparency setting",
   "prefs.blur_software": "Unavailable with software graphics (gpu-software)",
-  "prefs.blur_source": "Unavailable in this workspace view",
   "prefs.blur_web": "Unavailable on this web rendering path",
   "prefs.bodies_folders": "Bodies folders",
   "prefs.bodies_folders_always": "Always",

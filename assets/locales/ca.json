@@ -3110,7 +3110,6 @@
   "prefs.blur_off": "Desactivat",
   "prefs.blur_reduce_transparency": "Desactivat per l'ajust Redueix la transparència del sistema",
   "prefs.blur_software": "No disponible amb gràfics per programari (gpu-software)",
-  "prefs.blur_source": "No disponible en aquesta vista de l'espai de treball",
   "prefs.blur_web": "No disponible en aquest camí de renderitzat web",
   "prefs.bodies_folders": "Carpetes de cossos",
   "prefs.bodies_folders_always": "Sempre",

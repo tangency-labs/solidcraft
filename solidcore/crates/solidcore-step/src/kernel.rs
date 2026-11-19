@@ -12,6 +12,18 @@ pub(crate) use solidcore::eval::uv::Starts;
 /// Why a record cannot be evaluated: it does not convert (too deep), or the kernel refuses it.
 pub(crate) type Error = String;
 
+/// The kernel's geometric radial order of the faces leaving an edge. Record uses
+/// are returned as a permutation, with their side flags unchanged.
+pub(crate) fn radial_order(curve: &Curve, interval: [f64; 2], faces: &[(&Surface, &Curve2, bool)]) -> Result<Vec<usize>, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let converted = faces
+        .iter()
+        .map(|&(surface, pcurve, forward)| Ok((c::surface(surface).map_err(|e| e.to_string())?, c::curve2(pcurve), forward)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let faces: Vec<_> = converted.iter().map(|(surface, pcurve, forward)| k::pcurve::RadialFace { surface, pcurve, forward: *forward }).collect();
+    k::pcurve::radial_order(&curve, interval, &faces).map_err(|e| e.to_string())
+}
+
 /// A curve record ready to evaluate.
 pub(crate) struct CurveEval(k::CurveEval);
 

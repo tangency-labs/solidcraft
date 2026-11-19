@@ -1743,10 +1743,12 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// `0x30d463838d7fca03` and `0x7442b43a428ea1ca`) through the bottle's read alone (see
 /// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
 /// edge and tolerance of the read is bit for bit main's
-/// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]). #18162's lazy
-/// UV trim raise moves entry 14 once more (main's was `0x902afd170f1e23a9`): the result's
-/// edges 42 and 47 keep 4e-5 instead of upstream's raise to 9.6e-5, and edge use 190's trim
-/// is refit at that tolerance; that result is proved in
+/// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]). Since #18918
+/// entry 14 moved with that PR's near-knot rail trim (WR-664: a rail's cut moves onto the
+/// rail's nearby knot, which moves this fillet's geometry within the zone tolerance; main's
+/// digest `0x6c4db4a115acc49e`). #18162's lazy UV trim raise moves it once more: the result's
+/// two edges at the fillet's end keep 4e-5 instead of upstream's raise to 9.6e-5, and one
+/// trim on face 16 is refit at that tolerance; that result is proved in
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`].
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
@@ -1763,7 +1765,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0x23e5313059fb265c,
+    0x6c4db4a115acc49e,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -1784,12 +1786,14 @@ const FILLET_MAIN: [u64; 29] = [
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
 /// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
 /// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
-/// since; its entries are classified against a certified enclosure in goldens'
-/// `mass_knot_line_moved_rows_are_classified`. #18162's lazy UV trim raise refits edge use
-/// 190's trim at a lower edge tolerance, which moves every value of entry 14 (the area by
-/// 3.2e-9 relative, the rest by at most 1e-12 of their scale: the integrator fits the trims
-/// it integrates over to the edges' tolerances); [`BOTTLE_E8_BEFORE`] holds the bits before
-/// and [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
+/// since (its entries are classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`), and #18918's near-knot rail trim, which
+/// moves them within the zone tolerance (the row's certified mass enclosure in goldens'
+/// `round_definition_rows` holds main's values). #18162's lazy UV trim raise refits one
+/// trim at a lower edge tolerance, which moves every value of entry 14 once more (the
+/// integrator fits the trims it integrates over to the edges' tolerances);
+/// [`BOTTLE_E8_BEFORE`] holds main's bits and
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
 /// within the case's accuracy of a certified enclosure of the exact properties.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
@@ -1846,37 +1850,37 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce171b2d7,
-            0x402621896ddff25e,
-            0x402621896ddff25e,
-            0x3f10d1d4e45e537a,
-            0x3f13efa0c2fbf003,
-            0x4000a10fe9b1ffd4,
-            0x4050316570dd030c,
-            0x4050a9c381d79ff8,
-            0x40151aaab4b869fb,
-            0x3f6aed519268c879,
-            0x3f66b6ad970f71c2,
-            0xbf3c98793964c2c2,
+            0x40408bccdfac28b0,
+            0x402621896ddff26a,
+            0x402621896ddff26a,
+            0x3f10d1d4e45e263c,
+            0x3f13efa0c2faa159,
+            0x4000a10fe9b1ffdc,
+            0x4050316570dd0323,
+            0x4050a9c381d7a010,
+            0x40151aaab4b86a08,
+            0x3f6aed5192670272,
+            0x3f66b6ad970f2ece,
+            0xbf3c9879396462ce,
         ],
     ),
 ];
 
-/// [`FILLETS`] entry 14's mass bits before #18162's lazy UV trim raise (see
+/// [`FILLETS`] entry 14's mass bits on main, before #18162's lazy UV trim raise (see
 /// [`FILLET_MAIN_MASS`]).
 const BOTTLE_E8_BEFORE: [u64; 12] = [
-    0x40408bcce093b3e1,
-    0x402621896ddff25f,
-    0x402621896ddff25f,
-    0x3f10d1d4e45e4676,
-    0x3f13efa0c2fbe9dc,
-    0x4000a10fe9b1ffd5,
-    0x4050316570dd030e,
-    0x4050a9c381d79ffa,
-    0x40151aaab4b869fc,
-    0x3f6aed519268bff5,
-    0x3f66b6ad970f60ae,
-    0xbf3c98793964b1c2,
+    0x40408bccdfac28b0,
+    0x402621896ddff26a,
+    0x402621896ddff26a,
+    0x3f10d1d4e45e263c,
+    0x3f13efa0c2faa159,
+    0x4000a10fe9b1ffdc,
+    0x4050316570dd0323,
+    0x4050a9c381d7a010,
+    0x40151aaab4b86a08,
+    0x3f6aed5192670272,
+    0x3f66b6ad970f2ece,
+    0xbf3c9879396462ce,
 ];
 
 /// The end points of the two edges of [`FILLETS`] entry 14's result whose tolerance
