@@ -43,7 +43,13 @@ pub fn selection_params(app: &SolveApp) -> Value {
     let occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
     // Undo can remove a canvas while its Browser selection survives.
     let canvases: Vec<u64> = app.tree.picked_canvases.iter().copied().filter(|id| app.session.doc.canvases.iter().any(|c| c.id == *id)).collect();
-    json!({ "items": items, "occurrences": occurrences, "canvases": canvases, "joints": app.tree.picked_joints })
+    let mut params = json!({ "items": items, "occurrences": occurrences, "canvases": canvases, "joints": app.tree.picked_joints });
+    // A drawing's view goes with the views projected or cut from it, as a view takes its
+    // dimensions with it: one delete, one undo step, and Ctrl+Z brings them all back.
+    if items.iter().any(|item| matches!(item, Sel::Drawing { .. })) {
+        params["contents"] = json!("delete");
+    }
+    params
 }
 
 fn is_empty(p: &Value) -> bool {
@@ -187,6 +193,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let (deleted, fails) = (list("deleted"), list("would_fail"));
     let shared = shared_occurrences(app, &p.params);
+    // A drawing's delete takes views with it, not features: the list is headed so.
+    let of_drawing = p.params["items"].as_array().is_some_and(|items| items.iter().any(|item| item["type"] == "drawing"));
+    let also = if of_drawing { solidcraft_ui_text::tr("delete.views_too") } else { solidcraft_ui_text::tr_label("These features will be deleted:") };
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_delete_confirm"), "delete", solidcraft_ui_text::tr_label("Delete"))
         .tone(ui_kit::Tone::Danger)
         .actions("Delete", "Cancel", None)
@@ -199,12 +208,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 );
             }
             for (key, heading, names, error) in
-                [("deleted", "These features will be deleted:", &deleted, false), ("fails", "These features will fail:", &fails, true)]
+                [("deleted", also, &deleted, false), ("fails", solidcraft_ui_text::tr_label("These features will fail:"), &fails, true)]
             {
                 if names.is_empty() {
                     continue;
                 }
-                ui_kit::text(ui, solidcraft_ui_text::tr_label(heading), ui_kit::Text::Report(key, error));
+                ui_kit::text(ui, heading, ui_kit::Text::Report(key, error));
                 for name in names.iter().take(MAX_LISTED) {
                     ui_kit::text(ui, &format!("  • {name}"), ui_kit::Text::Report(&format!("{key}:{name}"), error));
                 }
