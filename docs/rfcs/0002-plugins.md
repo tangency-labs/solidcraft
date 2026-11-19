@@ -178,8 +178,10 @@ This extends the tools in section 6c and their declarations
    Every event or call concerning a design carries its session and revision. App scope gets only
    the current call's design access, never ambient access to all open designs.
    An importer creating a design runs with no design context until the host adopts its result.
-   Cached results must match that session and revision before use; outdated results return `stale`
-   as in RFC 0015. A trap returns `Trap { reason }`, rolls back the call and marks the instance Trapped.
+   Design-dependent cached results must match that session and revision before use; outdated results
+   return `stale` as in RFC 0015. Design-independent results, such as an importer's parse of a source
+   file, are keyed by the source's content digest and the approval hash instead, so they can serve any
+   new design and are never matched against a session or revision. A trap returns `Trap { reason }`, rolls back the call and marks the instance Trapped.
    Explicit Restart creates a clean instance under the existing approval, with no automatic retry.
    This lifetime replaces sections 2 and 3's fresh-instance rule only for the background role.
 
@@ -226,13 +228,16 @@ This extends the tools in section 6c and their declarations
    naming the forbidden import or command, even when the plugin holds a write grant.
    A tool call made by the user or the assistant gets only its declared effect and existing grants;
    the assistant's approval still applies. Each successful editing call is one Undo step.
+   A file a background call writes is staged: the host writes it beside the target and renames it into
+   place only when the call succeeds, so a call that fails, traps, runs out of budget or is stopped
+   leaves existing files as they were and no partial output.
    CAM can refresh an analysis cache on a change; saving a toolpath needs an explicit editing call.
 
 9. **Ship after phase 2, separately from parametric features.** Phase 2a below is the first
    background phase. Design-changed subscriptions additionally wait for RFC 0015 phase 3;
    requesting an event unavailable in the host returns `UnsupportedCapability { capability, reason }`.
    It does not bring timers, network or automatic edits forward. Stop, trap and budget failures
-   leave the design and undo stack untouched; typed errors identify the plugin and event or tool,
+   leave the design, the undo stack and files untouched; typed errors identify the plugin and event or tool,
    plus the denied grant or exhausted budget. This amendment specifies behaviour only, not an implementation.
 
 ## 6b. Shared across Craft apps
