@@ -2135,7 +2135,11 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     // Any feature, when components are placed away from their frames: the preview must show
     // the world the viewport shows.
     let moves = cmds.iter().all(|(c, _)| MOVES.contains(&c.as_str()));
-    if cmds.is_empty() || !(moves || solidcraft_engine::frames::placed(s)) {
+    let was_placed = moves || solidcraft_engine::frames::placed(s);
+    // A plugin's run can make a component and move it, in a design that has none placed yet:
+    // only its result says so, and that is where the component has to show.
+    let plugin = cmds.iter().any(|(c, _)| c == "plugin.run");
+    if cmds.is_empty() || !(was_placed || plugin) {
         return None;
     }
     let preview = match s.preview_visible_world(cmds) {
@@ -2153,7 +2157,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
     let (before, after) = (preview.before, preview.after);
     // A moved component looks like itself (no new surface), with its old place as the ghost.
-    let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
+    // A plugin's run in a design with nothing placed keeps the colours of a new body.
+    let colors = if was_placed { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
     let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::preview::build(&before, &after, colors)));
     Some(match built {
         Ok(mut b) => {
