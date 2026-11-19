@@ -1,17 +1,14 @@
 use super::*;
 use crate::blur_plan::{self, PxRect, Run};
 use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
-use solidcraft_viewport_egui::ViewportCallback;
-use solidcraft_viewport_gpu::view::Renderer as ViewRenderer;
 use std::cell::RefCell;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 thread_local! { static CURRENT: RefCell<Option<Arc<Shared>>> = const { RefCell::new(None) }; }
 thread_local! { static SURFACE_ALPHA: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) }; }
 const BUDGET: u64 = 256 * 1024 * 1024;
 const MAX_MARKERS: usize = 256;
-type Params = [f32; 24];
+type Params = [f32; 12];
 
 fn capability(adapter: &wgpu::Adapter, device_type: wgpu::DeviceType, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
     if device_type == wgpu::DeviceType::Cpu {
@@ -63,11 +60,9 @@ pub struct State {
     host: Option<Host>,
     active: Option<Arc<Shared>>,
     retired: Counters,
-    source_supported: bool,
     failure: Option<&'static str>,
     surface_alpha: Option<u8>,
     last_size: Option<[u32; 2]>,
-    last_background: Option<[Color32; 3]>,
     whole_frame: bool,
 }
 
@@ -80,11 +75,9 @@ impl Default for State {
             host: None,
             active: None,
             retired: Counters::default(),
-            source_supported: true,
             failure: None,
             surface_alpha: None,
             last_size: None,
-            last_background: None,
             whole_frame: false,
         }
     }
@@ -154,11 +147,7 @@ impl State {
         self.active.as_ref()?.inner.lock().ok()?.painted
     }
     pub fn capability(&self) -> Capability {
-        let base = self.base_capability();
-        if base == Capability::Available && self.active.as_ref().is_some_and(|s| s.inner.lock().is_ok_and(|i| i.missing_source)) {
-            return Capability::Unavailable("no viewport source in the last painted frame");
-        }
-        base
+        self.base_capability()
     }
     pub fn capability_for(&self, viewport: egui::ViewportId) -> Capability {
         if viewport != egui::ViewportId::ROOT {
@@ -175,9 +164,6 @@ impl State {
         if available != Capability::Available {
             return available;
         }
-        if !self.source_supported {
-            return Capability::Unavailable("workspace has no viewport source recipe");
-        }
         if let Some(reason) = self.failure {
             return Capability::Unavailable(reason);
         }
@@ -191,15 +177,6 @@ impl State {
     }
     pub fn counters(&self) -> Counters {
         self.active.as_ref().and_then(|s| s.inner.lock().ok().map(|i| i.counts)).unwrap_or(self.retired)
-    }
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn source_texture(&self) -> Option<wgpu::Texture> {
-        let inner = self.active.as_ref()?.inner.lock().ok()?;
-        Some(inner.gpu.as_ref()?.source._texture.clone())
-    }
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn source_geometry(&self) -> Option<[Rect; 3]> {
-        self.active.as_ref()?.inner.lock().ok()?.geometry
     }
     /// Blur the whole frame at every marker, as before regions existed: the reference a fixture
     /// compares the region-scoped blur with. Takes effect on the next frame.
@@ -215,26 +192,15 @@ impl State {
         self.surface_alpha = alpha;
     }
 
-    pub fn begin(&mut self, ctx: &egui::Context, source_supported: bool) -> Scope {
+    pub fn begin(&mut self, ctx: &egui::Context) -> Scope {
         let previous = CURRENT.with(|c| c.replace(None));
         let alpha = SURFACE_ALPHA.with(|a| a.replace(self.surface_alpha));
         if ctx.viewport_id() != egui::ViewportId::ROOT {
             return Scope { previous, alpha };
         }
-        self.source_supported = source_supported;
         if self.radius == 0.0 {
             self.retire();
             return Scope { previous, alpha };
-        }
-        let colors = solidcraft_theme::Tokens::get();
-        let background = [colors.viewport_top, colors.viewport_bottom, colors.app_bar];
-        if self.last_background != Some(background) {
-            let failed = self.failure.is_some() || self.active.as_ref().is_some_and(|s| s.inner.lock().is_ok_and(|i| i.failure.is_some()));
-            if failed {
-                self.retire();
-                self.failure = None;
-            }
-            self.last_background = Some(background);
         }
         let size = ctx.content_rect().size() * ctx.pixels_per_point();
         if size.is_finite() && size.x > 0.0 && size.y > 0.0 {
@@ -264,8 +230,6 @@ impl State {
             inner.markers.clear();
             inner.planned.clear();
             inner.serial = inner.serial.wrapping_add(1);
-            inner.source_seen = false;
-            inner.source_count = 0;
             if inner.frame != ctx.cumulative_frame_nr() {
                 inner.frame = ctx.cumulative_frame_nr();
                 inner.continuous = ctx.requested_repaint_last_pass();
@@ -319,11 +283,9 @@ pub fn fixture_state(
         }),
         active: None,
         retired: Counters::default(),
-        source_supported: true,
         failure: None,
         surface_alpha: None,
         last_size: None,
-        last_background: None,
         whole_frame: false,
     }
 }
@@ -389,12 +351,6 @@ struct Inner {
     counts: Counters,
     failure: Option<&'static str>,
     serial: u64,
-    source_seen: bool,
-    screen: Option<([u32; 2], f32)>,
-    missing_source: bool,
-    source_count: u16,
-    #[cfg(any(test, feature = "test-support"))]
-    geometry: Option<[Rect; 3]>,
 }
 #[derive(Clone, Copy)]
 struct Marker {
@@ -452,203 +408,6 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
     })
 }
 
-pub fn viewport(painter: &Painter, rect: Rect, cb: ViewportCallback, background: Rect, colors: [Color32; 2]) {
-    CURRENT.with(|c| {
-        if let Some(shared) = c.borrow().as_ref() {
-            if let Ok(mut inner) = shared.inner.lock() {
-                inner.source_count = inner.source_count.saturating_add(1);
-            }
-            let outside = solidcraft_theme::Tokens::get().app_bar;
-            painter.add(egui_wgpu::Callback::new_paint_callback(
-                rect,
-                Source {
-                    cb,
-                    rect,
-                    clip: painter.clip_rect(),
-                    background,
-                    colors,
-                    outside,
-                    context: painter.ctx().clone(),
-                    layer: painter.layer_id(),
-                    shared: shared.clone(),
-                },
-            ));
-        } else {
-            painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
-        }
-    });
-}
-
-struct Source {
-    cb: ViewportCallback,
-    rect: Rect,
-    clip: Rect,
-    background: Rect,
-    colors: [Color32; 2],
-    outside: Color32,
-    context: egui::Context,
-    layer: egui::LayerId,
-    shared: Arc<Shared>,
-}
-impl CallbackTrait for Source {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        screen: &ScreenDescriptor,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &mut CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        self.cb.prepare(device, queue, screen, encoder, resources)
-    }
-    fn finish_prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &mut CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        let Some(view) = resources.get::<ViewRenderer>() else { return Vec::new() };
-        if !self.shared.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
-            return Vec::new();
-        }
-        // Physical surface clamping is supplied by the pass owner, not inferred from DPI.
-        let Ok(mut inner) = self.shared.inner.lock() else { return Vec::new() };
-        let Some((size, scale)) = inner.screen else { return Vec::new() };
-        let screen = ScreenDescriptor { size_in_pixels: size, pixels_per_point: scale };
-        if self.shared.host.lost.is_lost() || inner.failure.is_some() {
-            return Vec::new();
-        }
-        // Read once after UI emission/output processing; transforms can be set after
-        // this callback was emitted. The callback shape itself stays in local space.
-        let Some([rect, clip, background]) = self.effective_geometry() else {
-            inner.failure = Some("invalid viewport source geometry");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return Vec::new();
-        };
-        #[cfg(any(test, feature = "test-support"))]
-        {
-            inner.geometry = Some([rect, clip, background]);
-        }
-        if self.colors.iter().any(|color| color.a() != 255) || self.outside.a() != 255 {
-            inner.failure = Some("translucent viewport/background source unsupported");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return Vec::new();
-        }
-        if screen.size_in_pixels.contains(&0) || !screen.pixels_per_point.is_finite() || screen.pixels_per_point <= 0.0 {
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return Vec::new();
-        }
-        if inner.source_seen || inner.source_count != 1 {
-            inner.failure = Some("multiple viewport sources in one frame");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return Vec::new();
-        }
-        inner.source_seen = true;
-        let Some((steps, offset)) = schedule_capped(self.shared.radius, self.shared.tier_cap) else { return Vec::new() };
-        let Some(bytes) = target_bytes(screen.size_in_pixels, steps, self.shared.host.device.limits().max_texture_dimension_2d) else {
-            inner.failure = Some("blur target is empty, exceeds device limits or memory budget");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return Vec::new();
-        };
-        let replace = inner.gpu.as_ref().is_none_or(|g| g.size != screen.size_in_pixels || g.steps != steps);
-        if replace {
-            inner.gpu = None;
-            inner.counts.clear_live();
-            let (gpu, failure) = egui_wgpu::capture_errors(device, || {
-                Gpu::new(device, self.shared.host.format, screen.size_in_pixels, steps, offset, &mut inner.counts)
-            });
-            if let Some(error) = failure {
-                log::warn!("blur resources refused: {error}");
-                inner.failure = Some("GPU refused blur resources");
-                inner.counts.clear_live();
-                return Vec::new();
-            }
-            inner.gpu = Some(gpu);
-            inner.counts.live_bytes += bytes;
-        }
-        let key = self.key(&screen, [rect, clip, background]);
-        let serial = inner.serial;
-        let marker_count = inner.markers.len();
-        let Inner { gpu, counts, .. } = &mut *inner;
-        let Some(gpu) = gpu else { return Vec::new() };
-        gpu.ready_serial = serial;
-        let (_, failed) = egui_wgpu::capture_errors(device, || gpu.grow_markers(device, marker_count, counts));
-        if let Some(error) = failed {
-            log::warn!("blur marker resources refused: {error}");
-            inner.failure = Some("GPU refused blur marker resources");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return Vec::new();
-        }
-        if gpu.valid == Some(key) {
-            counts.cache_hits += 1;
-            return Vec::new();
-        }
-        let params = background_params(background, clip, self.colors, self.outside, screen.pixels_per_point, self.shared.host.format.is_srgb());
-        if params.iter().any(|value| !value.is_finite()) {
-            inner.failure = Some("invalid physical viewport source geometry");
-            inner.gpu = None;
-            inner.counts.clear_live();
-            return Vec::new();
-        }
-        queue.write_buffer(&gpu.background.uniform, 0, &bytes_of(&params));
-        {
-            let mut pass = pass(encoder, "blur_source", &gpu.source.view, wgpu::Color::BLACK);
-            pass.set_pipeline(&gpu.background_pipeline);
-            pass.set_bind_group(0, &gpu.background.group, &[]);
-            pass.draw(0..3, 0..1);
-            let viewport = pixel_rect(rect, screen.pixels_per_point, screen.size_in_pixels);
-            let clipped = pixel_rect(rect.intersect(clip), screen.pixels_per_point, screen.size_in_pixels);
-            if let (Some([x, y, w, h]), Some([cx, cy, cw, ch])) = (viewport, clipped) {
-                pass.set_scissor_rect(cx, cy, cw, ch);
-                view.paint(&self.cb.0, &mut pass, [x as f32, y as f32, w as f32, h as f32]);
-            }
-        }
-        counts.source_passes += 1;
-        // The backdrop pyramid is built at paint-order boundaries in render(),
-        // after the underlying UI has actually been drawn, rather than from this
-        // scene-only texture during preparation.
-        gpu.pending = Some(key);
-        Vec::new()
-    }
-    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &CallbackResources) {
-        self.cb.paint(info, pass, resources);
-    }
-}
-
-impl Source {
-    fn effective_geometry(&self) -> Option<[Rect; 3]> {
-        let transform = self.context.layer_transform_to_global(self.layer).unwrap_or(egui::emath::TSTransform::IDENTITY);
-        if !transform.translation.is_finite() || !transform.scaling.is_finite() || transform.scaling <= 0.0 {
-            return None;
-        }
-        let geometry = [self.rect, self.clip, self.background].map(|r| transform.mul_rect(r));
-        (geometry.iter().all(|r| r.is_finite()) && geometry[0].is_positive()).then_some(geometry)
-    }
-
-    fn key(&self, screen: &ScreenDescriptor, geometry: [Rect; 3]) -> u64 {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        solidcraft_viewport_gpu::view::frame_key(&self.cb.0).hash(&mut h);
-        for r in geometry {
-            [r.min.x, r.min.y, r.max.x, r.max.y].map(f32::to_bits).hash(&mut h);
-        }
-        self.colors.hash(&mut h);
-        self.outside.hash(&mut h);
-        screen.size_in_pixels.hash(&mut h);
-        screen.pixels_per_point.to_bits().hash(&mut h);
-        self.shared.radius.to_bits().hash(&mut h);
-        self.shared.tier_cap.hash(&mut h);
-        self.shared.host.format.hash(&mut h);
-        h.finish()
-    }
-}
-
 struct PanelMarker {
     shared: Arc<Shared>,
     index: usize,
@@ -667,11 +426,11 @@ impl CallbackTrait for PanelMarker {
             return;
         }
         let Some(gpu) = inner.gpu.as_ref() else { return };
-        if gpu.ready_serial != inner.serial || !inner.source_seen {
+        if gpu.ready_serial != inner.serial {
             return;
         }
         let Some(binding) = gpu.markers.get(self.index) else { return };
-        let mut p = [0.0; 24];
+        let mut p = [0.0; 12];
         p[2] = u8::from(self.shared.host.format.is_srgb()) as f32;
         let r = info.viewport;
         if !r.is_finite() || !r.is_positive() {
@@ -706,17 +465,50 @@ impl CallbackTrait for PanelMarker {
     }
 }
 
+impl Shared {
+    /// Make the frame's resources fit `size` and `steps`, and one binding per marker. `false`
+    /// leaves the failure on `inner` for the capability report.
+    fn ensure(&self, inner: &mut Inner, size: [u32; 2], steps: usize, offset: f32) -> bool {
+        let device = &self.host.device;
+        let Some(bytes) = target_bytes(size, steps, device.limits().max_texture_dimension_2d) else {
+            inner.failure = Some("blur target is empty, exceeds device limits or memory budget");
+            inner.gpu = None;
+            inner.counts.clear_live();
+            return false;
+        };
+        if inner.gpu.as_ref().is_none_or(|g| g.size != size || g.steps != steps) {
+            inner.gpu = None;
+            inner.counts.clear_live();
+            let (gpu, failure) = egui_wgpu::capture_errors(device, || Gpu::new(device, self.host.format, size, steps, offset, &mut inner.counts));
+            if let Some(error) = failure {
+                log::warn!("blur resources refused: {error}");
+                inner.failure = Some("GPU refused blur resources");
+                inner.counts.clear_live();
+                return false;
+            }
+            inner.gpu = Some(gpu);
+            inner.counts.live_bytes += bytes;
+        }
+        let count = inner.markers.len();
+        let serial = inner.serial;
+        let Inner { gpu, counts, .. } = &mut *inner;
+        let Some(gpu) = gpu else { return false };
+        gpu.ready_serial = serial;
+        let (_, failed) = egui_wgpu::capture_errors(device, || gpu.grow_markers(device, count, counts));
+        if let Some(error) = failed {
+            log::warn!("blur marker resources refused: {error}");
+            inner.failure = Some("GPU refused blur marker resources");
+            inner.gpu = None;
+            inner.counts.clear_live();
+            return false;
+        }
+        true
+    }
+}
+
 impl FrameCompositor for Shared {
     fn begin_viewport(&self, viewport: u64) {
         self.painting_owner.store(viewport == egui::ViewportId::ROOT.0.value(), std::sync::atomic::Ordering::Relaxed);
-    }
-    fn screen(&self, screen: &ScreenDescriptor, _: &mut CallbackResources) {
-        if !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-        if let Ok(mut inner) = self.inner.lock() {
-            inner.screen = Some((screen.size_in_pixels, screen.pixels_per_point));
-        }
     }
     fn suspend(&self) {
         if !self.host.lost.is_lost() && !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
@@ -725,7 +517,6 @@ impl FrameCompositor for Shared {
         if let Ok(mut inner) = self.inner.lock() {
             inner.gpu = None;
             inner.counts.clear_live();
-            inner.source_seen = false;
         }
     }
     fn render(
@@ -737,39 +528,32 @@ impl FrameCompositor for Shared {
         screen: &ScreenDescriptor,
         clear: [f32; 4],
     ) -> bool {
-        if self.host.lost.is_lost() {
+        if self.host.lost.is_lost() || !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
             return false;
         }
-        if !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
-            return false;
-        }
-        let (composition, pipeline, binding, marker_ids, reach_px) = {
-            let Ok(mut inner) = self.inner.lock() else { return false };
-            if !inner.source_seen {
-                inner.missing_source = true;
-                inner.gpu = None;
-                inner.counts.clear_live();
+        let Some((steps, offset)) = schedule_capped(self.radius, self.tier_cap) else { return false };
+        let marker_ids = {
+            let Ok(inner) = self.inner.lock() else { return false };
+            // A frame with no marker has nothing to blur: it takes the ordinary pass.
+            if inner.failure.is_some() || inner.markers.is_empty() {
                 return false;
             }
-            inner.missing_source = false;
-            if inner.failure.is_some() {
-                return false;
-            }
-            let Some(gpu) = inner.gpu.as_ref() else { return false };
-            if gpu.ready_serial != inner.serial || gpu.size != screen.size_in_pixels {
-                return false;
-            }
-            let mut marker_ids: Vec<(usize, usize)> = inner.markers.iter().enumerate().map(|(index, marker)| (marker.callback_id, index)).collect();
-            marker_ids.sort_unstable();
-            let reach_px = if self.whole_frame { u32::MAX } else { blur_plan::reach(gpu.steps, gpu.offset) };
-            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone(), marker_ids, reach_px);
-            inner.counts.composition_passes += 1;
-            data
+            let mut ids: Vec<(usize, usize)> = inner.markers.iter().enumerate().map(|(index, marker)| (marker.callback_id, index)).collect();
+            ids.sort_unstable();
+            ids
         };
         // The runs are planned before encoding: which markers share one snapshot, and which
         // pixels each of them needs.
-        let runs = plan_runs(jobs, screen, &marker_ids, reach_px);
-        if let Ok(mut inner) = self.inner.lock() {
+        let pad = if self.whole_frame { u32::MAX } else { blur_plan::reach(steps, offset) };
+        let runs = plan_runs(jobs, screen, &marker_ids, pad);
+        if runs.is_empty() {
+            return false;
+        }
+        let (composition, pipeline, binding) = {
+            let Ok(mut inner) = self.inner.lock() else { return false };
+            if !self.ensure(&mut inner, screen.size_in_pixels, steps, offset) {
+                return false;
+            }
             let count = inner.markers.len();
             inner.planned.clear();
             inner.planned.resize(count, false);
@@ -779,7 +563,11 @@ impl FrameCompositor for Shared {
                     *planned = true;
                 }
             }
-        }
+            let Some(gpu) = inner.gpu.as_ref() else { return false };
+            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone());
+            inner.counts.composition_passes += 1;
+            data
+        };
         let mut next_run = 0;
         {
             let color = wgpu::Color { r: clear[0] as f64, g: clear[1] as f64, b: clear[2] as f64, a: clear[3] as f64 };
@@ -848,10 +636,6 @@ impl FrameCompositor for Shared {
                 inner.gpu = None;
                 inner.counts.clear_live();
                 inner.failure = Some("device lost");
-            } else if let Some(gpu) = inner.gpu.as_mut()
-                && let Some(key) = gpu.pending.take()
-            {
-                gpu.valid = Some(key);
             }
         }
     }
@@ -927,27 +711,21 @@ struct Step {
 struct Gpu {
     size: [u32; 2],
     steps: usize,
-    offset: f32,
-    source: Target,
     composition: Target,
     chain: Vec<Step>,
-    background: Binding,
     presentation: Binding,
     markers: Vec<Binding>,
-    background_pipeline: wgpu::RenderPipeline,
     down: wgpu::RenderPipeline,
     up: wgpu::RenderPipeline,
     panel: wgpu::RenderPipeline,
     present: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    valid: Option<u64>,
-    pending: Option<u64>,
     ready_serial: u64,
 }
 
-fn bytes_of(params: &Params) -> [u8; 96] {
-    let mut bytes = [0; 96];
+fn bytes_of(params: &Params) -> [u8; 48] {
+    let mut bytes = [0; 48];
     for (out, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(params) {
         out.copy_from_slice(&value.to_le_bytes());
     }
@@ -959,8 +737,8 @@ fn target_bytes(size: [u32; 2], steps: usize, max: u32) -> Option<u64> {
     if w == 0 || h == 0 || w > max || h > max || !(2..=5).contains(&steps) {
         return None;
     }
-    // S/C are four-byte UI textures; every down/up target is linear RGBA16F.
-    let mut total = u64::from(w).checked_mul(u64::from(h))?.checked_mul(8)?;
+    // C is a four-byte UI texture; every down/up target is linear RGBA16F.
+    let mut total = u64::from(w).checked_mul(u64::from(h))?.checked_mul(4)?;
     let mut dims = size;
     for _ in 0..steps {
         dims = dims.map(|d| d.div_ceil(2));
@@ -972,28 +750,6 @@ fn target_bytes(size: [u32; 2], steps: usize, max: u32) -> Option<u64> {
         dims = dims.map(|d| d.div_ceil(2));
     }
     (total <= BUDGET).then_some(total)
-}
-
-fn pixel_rect(rect: Rect, scale: f32, size: [u32; 2]) -> Option<[u32; 4]> {
-    if !rect.is_finite() || !rect.is_positive() || !scale.is_finite() || scale <= 0.0 {
-        return None;
-    }
-    let x = (rect.min.x * scale).round().clamp(0.0, size[0] as f32) as u32;
-    let y = (rect.min.y * scale).round().clamp(0.0, size[1] as f32) as u32;
-    let right = (rect.max.x * scale).round().clamp(x as f32, size[0] as f32) as u32;
-    let bottom = (rect.max.y * scale).round().clamp(y as f32, size[1] as f32) as u32;
-    (right > x && bottom > y).then_some([x, y, right - x, bottom - y])
-}
-
-fn background_params(rect: Rect, clip: Rect, colors: [Color32; 2], outside: Color32, scale: f32, srgb: bool) -> Params {
-    let mut p = [0.0; 24];
-    p[2] = u8::from(srgb) as f32;
-    p[4..8].copy_from_slice(&[rect.min.x * scale, rect.min.y * scale, rect.max.x * scale, rect.max.y * scale]);
-    p[8..12].copy_from_slice(&[clip.min.x * scale, clip.min.y * scale, clip.max.x * scale, clip.max.y * scale]);
-    for (out, color) in p[12..24].as_chunks_mut::<4>().0.iter_mut().zip(colors.into_iter().chain([outside])) {
-        out.copy_from_slice(&color.to_normalized_gamma_f32());
-    }
-    p
 }
 
 fn pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::TextureView, clear: wgpu::Color) -> wgpu::RenderPass<'static> {
@@ -1054,7 +810,7 @@ impl Gpu {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: std::num::NonZeroU64::new(96),
+                        min_binding_size: std::num::NonZeroU64::new(48),
                     },
                     count: None,
                 },
@@ -1073,24 +829,6 @@ impl Gpu {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("blur pipeline layout"),
             bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let background_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("blur background uniform only"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new(96),
-                },
-                count: None,
-            }],
-        });
-        let background_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("blur source cannot sample composition"),
-            bind_group_layouts: &[Some(&background_layout)],
             immediate_size: 0,
         });
         let pipeline = |entry: &str, target, blend, layout: &wgpu::PipelineLayout| {
@@ -1115,13 +853,10 @@ impl Gpu {
         let up = pipeline("up", wgpu::TextureFormat::Rgba16Float, None, &pipeline_layout);
         let panel = pipeline("panel", format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), &pipeline_layout);
         let present = pipeline("present", format, None, &pipeline_layout);
-        let background_pipeline = pipeline("background", format, None, &background_pipeline_layout);
-        counts.pipelines_created += 5;
-        counts.live_pipelines += 5;
-        let source = Target::new(device, size, format, counts);
+        counts.pipelines_created += 4;
+        counts.live_pipelines += 4;
         let composition = Target::new(device, size, format, counts);
-        let background = Binding::background(device, &background_layout, counts);
-        let presentation = Binding::new(device, &layout, &sampler, &composition.view, [0.0; 24], counts);
+        let presentation = Binding::new(device, &layout, &sampler, &composition.view, [0.0; 12], counts);
         let mut chain: Vec<Step> = Vec::new();
         let mut dimensions = Vec::with_capacity(steps + 1);
         dimensions.push(size);
@@ -1131,7 +866,7 @@ impl Gpu {
         }
         for (index, dims) in dimensions.iter().skip(1).enumerate() {
             let input = chain.last().map_or(&composition.view, |s| &s.target.view);
-            let mut p = [0.0; 24];
+            let mut p = [0.0; 12];
             p[0] = offset;
             p[1] = u8::from(index == 0 && !format.is_srgb()) as f32;
             let binding = Binding::new(device, &layout, &sampler, input, p, counts);
@@ -1140,7 +875,7 @@ impl Gpu {
         }
         for (level, dims) in dimensions.iter().take(steps).enumerate().rev() {
             let input = chain.last().map_or(&composition.view, |s| &s.target.view);
-            let mut p = [0.0; 24];
+            let mut p = [0.0; 12];
             p[0] = offset;
             let binding = Binding::new(device, &layout, &sampler, input, p, counts);
             let target = Target::new(device, *dims, wgpu::TextureFormat::Rgba16Float, counts);
@@ -1149,29 +884,23 @@ impl Gpu {
         Self {
             size,
             steps,
-            offset,
-            source,
             composition,
             chain,
-            background,
             presentation,
             markers: Vec::new(),
-            background_pipeline,
             down,
             up,
             panel,
             present,
             layout,
             sampler,
-            valid: None,
-            pending: None,
             ready_serial: 0,
         }
     }
     fn grow_markers(&mut self, device: &wgpu::Device, count: usize, counts: &mut Counters) {
         let Some(last) = self.chain.last() else { return };
         while self.markers.len() < count {
-            self.markers.push(Binding::new(device, &self.layout, &self.sampler, &last.target.view, [0.0; 24], counts));
+            self.markers.push(Binding::new(device, &self.layout, &self.sampler, &last.target.view, [0.0; 12], counts));
         }
     }
 }
@@ -1195,25 +924,6 @@ impl Target {
     }
 }
 impl Binding {
-    fn background(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, counts: &mut Counters) -> Self {
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("blur background parameters"),
-            size: 96,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        counts.buffers_created += 1;
-        counts.live_buffers += 1;
-        counts.live_bytes += 96;
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("blur background has no input texture"),
-            layout,
-            entries: &[wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() }],
-        });
-        counts.bind_groups_created += 1;
-        counts.live_bind_groups += 1;
-        Self { uniform, group }
-    }
     fn new(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
@@ -1230,7 +940,7 @@ impl Binding {
         });
         counts.buffers_created += 1;
         counts.live_buffers += 1;
-        counts.live_bytes += 96;
+        counts.live_bytes += 48;
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("blur sample"),
             layout,

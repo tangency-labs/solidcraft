@@ -14,7 +14,6 @@ pub struct Counters {
     pub buffers_created: u64,
     pub bind_groups_created: u64,
     pub pipelines_created: u64,
-    pub source_passes: u64,
     pub blur_passes: u64,
     /// Snapshots of the composition that were blurred: markers that share one count once.
     pub blur_runs: u64,
@@ -24,7 +23,6 @@ pub struct Counters {
     pub present_passes: u64,
     pub markers_emitted: u64,
     pub markers_drawn: u64,
-    pub cache_hits: u64,
     pub live_bytes: u64,
     pub live_textures: u64,
     pub live_buffers: u64,
@@ -216,7 +214,7 @@ mod implementation {
         pub fn counters(&self) -> Counters {
             Counters::default()
         }
-        pub fn begin(&mut self, _: &egui::Context, _: bool) -> Scope {
+        pub fn begin(&mut self, _: &egui::Context) -> Scope {
             Scope
         }
         pub fn set_surface_alpha(&mut self, _: Option<u8>) {}
@@ -240,9 +238,6 @@ mod implementation {
     }
     pub fn decorate(_: &Painter, _: Frame, _: Rect, shape: Shape) -> Shape {
         shape
-    }
-    pub fn viewport(painter: &Painter, rect: Rect, cb: solidcraft_viewport_egui::ViewportCallback, _: Rect, _: [Color32; 2]) {
-        painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     }
 }
 #[cfg(target_arch = "wasm32")]

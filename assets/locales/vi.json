@@ -3110,7 +3110,6 @@
   "prefs.blur_off": "Tắt",
   "prefs.blur_reduce_transparency": "Bị tắt bởi cài đặt Giảm độ trong suốt của hệ thống",
   "prefs.blur_software": "Không khả dụng với đồ họa phần mềm (gpu-software)",
-  "prefs.blur_source": "Không khả dụng trong chế độ xem không gian làm việc này",
   "prefs.blur_web": "Không khả dụng trên đường kết xuất web này",
   "prefs.bodies_folders": "Thư mục thân khối",
   "prefs.bodies_folders_always": "Luôn luôn",

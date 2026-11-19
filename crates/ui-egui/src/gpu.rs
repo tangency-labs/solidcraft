@@ -1228,8 +1228,8 @@ mod tests {
             started.elapsed().as_secs_f64() * 1000.0
         }
 
-        fn pixels(&self, source: bool) -> Vec<u8> {
-            let texture = if source { self.app.blur.source_texture().unwrap() } else { self.output.clone() };
+        fn pixels(&self) -> Vec<u8> {
+            let texture = self.output.clone();
             super::test_support::read_egui_pixels(&self.device, &self.queue, &texture)
         }
 
@@ -1239,7 +1239,7 @@ mod tests {
             if directory.is_none() && goldens.is_none() {
                 return;
             }
-            let image = image::RgbaImage::from_raw(self.size[0], self.size[1], self.pixels(false)).unwrap();
+            let image = image::RgbaImage::from_raw(self.size[0], self.size[1], self.pixels()).unwrap();
             if let Some(dir) = directory {
                 let path = std::path::PathBuf::from(dir);
                 std::fs::create_dir_all(&path).unwrap();
@@ -1277,7 +1277,6 @@ mod tests {
         assert_eq!((counts.textures_created, counts.buffers_created, counts.bind_groups_created, counts.pipelines_created), (0, 0, 0, 0));
         assert_eq!((counts.markers_emitted, counts.markers_drawn), (0, 0));
         assert_eq!(counts.live_bytes, 0);
-        assert!(f.app.blur.source_texture().is_none());
         assert!(f.renderer.read().frame_compositor.is_none());
     }
 
@@ -1378,7 +1377,7 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        let _blur = f.app.blur.begin(ui.ctx(), true);
+                        let _blur = f.app.blur.begin(ui.ctx());
                         ui.set_width(300.0);
                         crate::ui_kit::scope(ui, |ui| {
                             let result = crate::ui_kit::search_picker(
@@ -1476,7 +1475,7 @@ mod tests {
                 let before = f.app.blur.counters();
                 f.frame();
                 let regions = f.app.blur.counters();
-                let region_pixels = f.pixels(false);
+                let region_pixels = f.pixels();
                 f.app.blur.set_whole_frame_blur(true);
                 for _ in 0..4 {
                     f.frame();
@@ -1484,7 +1483,7 @@ mod tests {
                 let before_whole = f.app.blur.counters();
                 f.frame();
                 let whole = f.app.blur.counters();
-                let whole_pixels = f.pixels(false);
+                let whole_pixels = f.pixels();
                 let worst = region_pixels.iter().zip(&whole_pixels).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
                 assert!(worst <= 1, "srgb {srgb} radius {radius}: region blur differs from whole-frame blur by {worst}/255");
                 assert_eq!(regions.markers_drawn - before.markers_drawn, whole.markers_drawn - before_whole.markers_drawn);
@@ -1506,7 +1505,7 @@ mod tests {
                 f.frame();
             }
             assert_eq!(f.app.blur.capability(), crate::blur::Capability::Available);
-            let plain = f.pixels(false);
+            let plain = f.pixels();
             let plain_jobs = f.jobs;
             let original_camera = f.app.cam;
             let original_background = f.app.preferences.viewport_background;
@@ -1524,9 +1523,9 @@ mod tests {
                     f.frame();
                 }
                 // The zero reference uses the same camera, view settings and panel alpha.
-                let zero_reference = f.pixels(false);
+                let zero_reference = f.pixels();
                 f.frame();
-                assert_eq!(zero_reference, f.pixels(false), "stable zero reference");
+                assert_eq!(zero_reference, f.pixels(), "stable zero reference");
                 f.evidence(&format!("blur-{}-0-{}", if dark { "dark" } else { "light" }, if srgb { "srgb" } else { "unorm" }));
                 for radius in [8.0, 18.0, 40.0] {
                     f.app.cam = original_camera;
@@ -1546,23 +1545,16 @@ mod tests {
                     assert!(!panels.is_empty());
                     assert!(panels.iter().all(|panel| panel.paint_alpha == Some(180)), "the shared panels keep the ribbon's blur tint alpha");
                     assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
-                    let source = f.pixels(true);
-                    let resting = f.pixels(false);
+                    let resting = f.pixels();
                     f.frame();
                     let after = f.app.blur.counters();
-                    assert_eq!(before.source_passes, after.source_passes, "resting source");
                     assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
-                    assert!(after.cache_hits > before.cache_hits);
-                    assert_eq!(f.pixels(true), source);
-                    assert_eq!(f.pixels(false), resting, "resting ordered composition is stable");
-                    // Change panels only: the immutable source must be byte-identical.
+                    assert_eq!(f.pixels(), resting, "resting ordered composition is stable");
                     f.app.blur.set_surface_alpha(Some(120));
                     f.frame();
-                    assert_eq!(f.pixels(true), source);
-                    assert_eq!(f.app.blur.counters().source_passes, after.source_passes);
                     f.app.blur.set_surface_alpha(Some(180));
                     f.frame();
-                    let positive = f.pixels(false);
+                    let positive = f.pixels();
                     let changed_pixels = zero_reference
                         .as_chunks::<4>()
                         .0
@@ -1573,19 +1565,19 @@ mod tests {
                     assert!(changed_pixels > 0, "radius {radius} must change RGB pixels with the same camera, alpha and theme");
                     let name = format!("blur-{}-{}-{}", if dark { "dark" } else { "light" }, radius as u32, if srgb { "srgb" } else { "unorm" });
                     f.evidence(&name);
+                    // There is no source to rebuild: a moved camera is only another frame to blur.
                     let before = f.app.blur.counters();
                     f.app.cam.yaw += 0.2;
                     f.frame();
                     let after = f.app.blur.counters();
-                    assert_eq!(after.source_passes, before.source_passes + 1);
                     assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
+                    assert_eq!(after.textures_created, before.textures_created, "a moved camera reuses storage");
                     f.app.cam = original_camera;
                     f.frame();
                     f.app.preferences.viewport_background = Some([3, 37, 93]);
                     let before = f.app.blur.counters();
                     f.frame();
                     let after = f.app.blur.counters();
-                    assert_eq!(after.source_passes, before.source_passes + 1, "background invalidation");
                     assert_eq!(after.textures_created, before.textures_created, "background changes reuse storage");
                     f.app.preferences.viewport_background = original_background;
                     f.frame();
@@ -1595,11 +1587,9 @@ mod tests {
                 f.frame();
                 let reduced = f.app.blur.counters();
                 assert_eq!(f.app.blur.radius(), 40.0);
-                assert_eq!(reduced.source_passes, before.source_passes + 1, "tier change invalidates the source cache");
                 assert_backdrop_passes(before, reduced, 3);
                 f.frame();
                 let cached = f.app.blur.counters();
-                assert_eq!(cached.source_passes, reduced.source_passes, "reduced tier has its own stable source cache");
                 assert_backdrop_passes(reduced, cached, 3);
                 f.app.blur_session.guard.cap = 5;
                 f.frame();
@@ -1608,7 +1598,7 @@ mod tests {
                 for _ in 0..2 {
                     f.frame();
                 }
-                assert_eq!(zero_reference, f.pixels(false), "on -> off preserves the fixed scene and tint");
+                assert_eq!(zero_reference, f.pixels(), "on -> off preserves the fixed scene and tint");
             }
             f.app.blur.set_surface_alpha(None);
             f.app.cam = original_camera;
@@ -1618,22 +1608,69 @@ mod tests {
             for _ in 0..3 {
                 f.frame();
             }
-            let zero = f.pixels(false);
+            let zero = f.pixels();
             let before = f.app.blur.counters();
             for _ in 0..3 {
                 f.frame();
             }
-            assert_eq!(zero, f.pixels(false));
+            assert_eq!(zero, f.pixels());
             assert_eq!(plain, zero, "on -> off restores the original decoded pixels");
             assert_eq!(plain_jobs, f.jobs, "plain primitive count is restored");
             assert_eq!(before.textures_created, f.app.blur.counters().textures_created);
             assert_eq!(before.markers_emitted, f.app.blur.counters().markers_emitted);
-            assert_eq!(before.source_passes, f.app.blur.counters().source_passes);
             assert_eq!(f.app.blur.counters().live_bytes, 0);
             assert!(f.renderer.read().frame_compositor.is_none());
             assert!(plain.iter().any(|v| *v != 0));
             assert!(plain_jobs > 0);
         }
+    }
+
+    /// With nothing to blur, a frame is the ordinary pass: no marker, no texture, no extra pass,
+    /// and the pixels of blur off (#19213).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_frame_without_a_marker_takes_the_ordinary_pass() {
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
+        for _ in 0..4 {
+            f.frame();
+        }
+        let plain = f.pixels();
+        // Radius on, but every surface keeps its opaque theme fill: nothing asks for a backdrop.
+        f.radius(18.0);
+        f.app.blur.set_surface_alpha(None);
+        for _ in 0..4 {
+            f.frame();
+        }
+        let counters = f.app.blur.counters();
+        assert_eq!((counters.markers_emitted, counters.markers_drawn), (0, 0), "no surface is translucent");
+        assert_eq!((counters.composition_passes, counters.present_passes, counters.blur_passes, counters.blur_pixels), (0, 0, 0, 0));
+        assert_eq!((counters.textures_created, counters.pipelines_created, counters.live_bytes), (0, 0, 0));
+        assert_eq!(f.pixels(), plain, "the ordinary pass draws the frame as with blur off");
+    }
+
+    /// The blur needs no 3D view under the panels: Home has none (#19213).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_works_over_home_which_has_no_viewport() {
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
+        f.app.home.open = true;
+        f.app.blur.set_surface_alpha(Some(180));
+        f.radius(0.0);
+        for _ in 0..4 {
+            f.frame();
+        }
+        let zero = f.pixels();
+        f.radius(18.0);
+        for _ in 0..4 {
+            f.frame();
+        }
+        let before = f.app.blur.counters();
+        f.frame();
+        let after = f.app.blur.counters();
+        assert_eq!(f.app.blur.capability(), crate::blur::Capability::Available, "Home is no reason to switch blur off");
+        assert_eq!(crate::prefs::blur_availability(&f.app), crate::theme_options::Availability::Available);
+        assert_backdrop_passes(before, after, crate::blur::schedule(18.0).unwrap().0);
+        assert_ne!(f.pixels(), zero, "the translucent panels over Home are blurred");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1651,13 +1688,11 @@ mod tests {
             let mut times: Vec<f64> = (0..30).map(|_| f.frame()).collect();
             times.sort_by(f64::total_cmp);
             let after = f.app.blur.counters();
-            assert_eq!(after.source_passes, before.source_passes);
             if radius == 0.0 {
                 assert_eq!(after.blur_passes, before.blur_passes);
                 assert_eq!(after.markers_drawn, before.markers_drawn);
             } else {
                 assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
-                assert_eq!(after.cache_hits - before.cache_hits, 30, "all resting sources are cached");
             }
             assert_eq!(after.textures_created, before.textures_created);
             assert_eq!(after.buffers_created, before.buffers_created);
@@ -1694,41 +1729,22 @@ mod tests {
         assert_eq!(f.app.blur.counters().live_buffers, 0);
     }
 
+    /// A layer transform applied after the UI was emitted moves the markers with it: the blur
+    /// follows the transformed pixels (#19213).
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn blur_late_layer_transform_moves_source_and_invalidates_cache() {
+    fn blur_late_layer_transform_keeps_blurring_placed_panels() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.radius(18.0);
         f.app.blur.set_surface_alpha(Some(180));
-        for _ in 0..6 {
+        for _ in 0..4 {
             f.frame();
         }
-        let local = f.app.blur.source_geometry().unwrap();
+        f.root_transform = egui::emath::TSTransform { translation: egui::vec2(-23.0, 17.0), scaling: 0.75 };
+        f.frame();
         let before = f.app.blur.counters();
-        let original = f.pixels(true);
-        let x = (local[2].right() - 4.0).clamp(0.0, (f.size[0] - 1) as f32) as usize;
-        let y = local[2].center().y.clamp(0.0, (f.size[1] - 1) as f32) as usize;
-        let offset = (y * f.size[0] as usize + x) * 4;
-        let outside = solidcraft_theme::Tokens::get().app_bar.to_array();
-        assert_ne!(&original[offset..offset + 4], &outside, "probe starts in the viewport background");
-        // Same local geometry/camera; applied after app.ui has emitted the callback.
-        let transform = egui::emath::TSTransform { translation: egui::vec2(-23.0, 17.0), scaling: 0.75 };
-        f.root_transform = transform;
         f.frame();
-        assert_eq!(f.app.blur.source_geometry().unwrap(), local.map(|r| transform.mul_rect(r)), "viewport, clip and background all transform once");
-        let after = f.app.blur.counters();
-        assert_eq!(after.source_passes, before.source_passes + 1);
-        assert_backdrop_passes(before, after, 3);
-        assert_eq!(after.textures_created, before.textures_created, "placement changes reuse storage");
-        assert_eq!(&f.pixels(true)[offset..offset + 4], &outside, "old location is outside the transformed clip");
-        f.frame();
-        assert_eq!(f.app.blur.counters().source_passes, after.source_passes, "unchanged transformed placement is cached");
-        assert_backdrop_passes(after, f.app.blur.counters(), 3);
-        // A forced miss must still paint at the transformed location, not merely hash it.
-        f.app.cam.yaw += 0.1;
-        f.frame();
-        assert_eq!(f.app.blur.counters().source_passes, after.source_passes + 1);
-        assert_eq!(&f.pixels(true)[offset..offset + 4], &outside);
+        assert_backdrop_passes(before, f.app.blur.counters(), 3);
     }
 
     /// Bodies are drawn from their plans on the GPU from the frame the evaluation shader has

@@ -2760,7 +2760,6 @@
   "prefs.blur_off": "Вимк.",
   "prefs.blur_reduce_transparency": "Вимкнено системним налаштуванням «Зменшити прозорість»",
   "prefs.blur_software": "Недоступно з програмною графікою (gpu-software)",
-  "prefs.blur_source": "Недоступно в цьому поданні робочої області",
   "prefs.blur_web": "Недоступно на цьому шляху вебрендерингу",
   "prefs.bodies_folders": "Теки тіл",
   "prefs.bodies_folders_always": "Завжди",
