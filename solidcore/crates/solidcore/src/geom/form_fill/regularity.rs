@@ -7,7 +7,7 @@
 use crate::eval::ray_spline::{reserved, Axis, Grid, MAX_CONTROLS};
 use crate::eval::ray_tensor::{Control, Interval as I};
 use crate::geom::expansion;
-use crate::{Result, SolidError};
+use crate::{Result, SolidError, Vec3};
 
 const OP: &str = "geom::form_fill::regularity";
 const MAX_WORK: usize = 20_000_000;
@@ -419,6 +419,48 @@ fn split_axis(normal: &Normal) -> usize {
     }
     usize::from(variation[1] > variation[0])
 }
+/// The unit direction at equal angles from three vectors, on the side all three face.
+/// It is only a candidate: `positive` alone decides whether it separates a tile.
+fn equal_angle_direction(vectors: [[f64; 3]; 3]) -> Option<[f64; 3]> {
+    let unit = |v: [f64; 3]| Some(Vec3::from_array(v).length_and_unit()?.1);
+    let [a, b, c] = vectors;
+    let (a, b, c) = (unit(a)?, unit(b)?, unit(c)?);
+    // With M the matrix of rows a, b, c, the sum of the three cyclic cross
+    // products is det(M) times the solution r of M r = (1, 1, 1).
+    let sum = a.cross(b) + b.cross(c) + c.cross(a);
+    let side = a.triple_product(b, c);
+    let direction = if side > 0.0 {
+        sum
+    } else if side < 0.0 {
+        -sum
+    } else {
+        return None;
+    };
+    Some(direction.length_and_unit()?.1.to_array())
+}
+/// Whether the Bernstein hull of `direction . normal` keeps the tile's normal
+/// strictly inside one open halfspace, except at permitted exactly zero corners.
+fn separated_along(
+    normal: &Normal,
+    direction: [f64; 3],
+    corners: [bool; 4],
+    work: &mut usize,
+) -> Result<bool> {
+    let [x, y, z] = normal;
+    spend(work, x.values.len())?;
+    let values = x
+        .values
+        .iter()
+        .zip(&y.values)
+        .zip(&z.values)
+        .map(|((&x, &y), &z)| {
+            x.scale(direction[0])
+                .add(y.scale(direction[1]))
+                .add(z.scale(direction[2]))
+        })
+        .collect();
+    positive(&Poly::new(x.degree, values)?, corners)
+}
 fn prove_normal(normal: Normal, corners: [bool; 4], work: &mut usize) -> Result<bool> {
     let mut stack = vec![(normal, corners, 0usize)];
     while let Some((normal, corners, depth)) = stack.pop() {
@@ -429,18 +471,7 @@ fn prove_normal(normal: Normal, corners: [bool; 4], work: &mut usize) -> Result<
         if reference.iter().any(|x| !x.is_finite()) || reference.iter().all(|&x| x == 0.0) {
             return Ok(false);
         }
-        let values = x
-            .values
-            .iter()
-            .zip(&y.values)
-            .zip(&z.values)
-            .map(|((&x, &y), &z)| {
-                x.scale(reference[0])
-                    .add(y.scale(reference[1]))
-                    .add(z.scale(reference[2]))
-            })
-            .collect();
-        let mut separated = positive(&Poly::new(x.degree, values)?, corners)?;
+        let mut separated = separated_along(&normal, reference, corners, work)?;
         if !separated {
             // A tiny but nonzero corner normal can point away from the centre
             // normal while an entire coordinate component keeps a strict sign.
@@ -461,6 +492,41 @@ fn prove_normal(normal: Normal, corners: [bool; 4], work: &mut usize) -> Result<
                         .collect(),
                 )?;
                 if positive(&opposite, corners)? {
+                    separated = true;
+                    break;
+                }
+            }
+        }
+        if !separated {
+            // Beside a corner whose exact normal is nonzero but microscopic, the
+            // normal turns from that corner value to the interior direction within
+            // a distance no bounded subdivision reaches, and it may oppose the
+            // centre normal in all three coordinates. The normal is then
+            // n0 + u a + v b to first order, which stays in one halfspace whenever
+            // n0, a and b are independent. The direction at equal angles from
+            // three of the four corner coefficients approaches that halfspace's
+            // axis under subdivision. It is rounded, hence only proposed here: the
+            // same outward Bernstein bounds as above accept or refuse it.
+            let [p, q] = x.degree;
+            let mut ends = [[0.0; 3]; 4];
+            for (end, (u, v)) in ends.iter_mut().zip([(0, 0), (p, 0), (0, q), (p, q)]) {
+                *end = [
+                    x.at(u, v)?.midpoint(),
+                    y.at(u, v)?.midpoint(),
+                    z.at(u, v)?.midpoint(),
+                ];
+            }
+            let [c00, c10, c01, c11] = ends;
+            for triple in [
+                [c00, c10, c01],
+                [c10, c01, c11],
+                [c00, c01, c11],
+                [c00, c10, c11],
+            ] {
+                let Some(direction) = equal_angle_direction(triple) else {
+                    continue;
+                };
+                if separated_along(&normal, direction, corners, work)? {
                     separated = true;
                     break;
                 }
@@ -960,6 +1026,62 @@ mod tests {
         assert!(normal[0].lo > 0.0 && normal[1].lo > 0.0 && normal[2].hi < 0.0);
         assert!(normal[0].hi < 1e-15 && normal[2].lo > -1e-12);
         assert!(polynomial([3, 3], &controls).unwrap());
+    }
+
+    #[test]
+    fn accepts_a_regular_corner_whose_microscopic_normal_opposes_the_centre_on_every_axis() {
+        // Before the linear map, S=(u+v, uv+v²-ev, u+v+ev) with e=2^-40 has the
+        // normal (e-u-v+ev, -e, u+v-e). Its Y component never vanishes, so S is
+        // regular, while X and Z change sign within e of the corner (0,0).
+        // M has orthogonal integer rows of length 7: it is 7 times a rotation,
+        // exact in f64, and maps the normal n to 7 M n. Its rows applied to that
+        // normal give 4s-7e+2ev, -s+7e+3ev and -9s+7e+6ev with s=u+v, so every
+        // coordinate of the mapped normal changes sign, and the corner normal
+        // 49e(-1,1,1) opposes the centre normal. Halving cannot reach e within
+        // the depth limit; only a direction fitted to the corner separates it.
+        let e = 2.0_f64.powi(-40);
+        let m = [[2.0, 3.0, 6.0], [3.0, -6.0, 2.0], [6.0, 2.0, -3.0]];
+        let controls: Vec<_> = (0..3)
+            .flat_map(|j| {
+                (0..2).map(move |i| {
+                    let (u, v) = (f64::from(i), f64::from(j) / 2.0);
+                    let s = [
+                        u + v,
+                        u * v + if j == 2 { 1.0 } else { 0.0 } - e * v,
+                        u + v + e * v,
+                    ];
+                    let [x, y, z] = m.map(|row| row[0] * s[0] + row[1] * s[1] + row[2] * s[2]);
+                    [x, y, z, 1.0]
+                })
+            })
+            .collect();
+        let (normal, zero) =
+            corner_normal(controls[0], controls[1], controls[2], [1, 2], false).unwrap();
+        assert!(!zero);
+        let expected = [-49.0 * e, 49.0 * e, 49.0 * e];
+        for (bound, expected) in normal.iter().zip(expected) {
+            assert!(bound.lo <= expected && expected <= bound.hi);
+            assert!(bound.hi - bound.lo <= 1e-24);
+        }
+        assert!(polynomial([1, 2], &controls).unwrap());
+    }
+
+    #[test]
+    fn equal_angle_direction_faces_three_vectors_and_refuses_dependent_ones() {
+        // (1,1,1)/sqrt(3) makes the same angle with each coordinate axis.
+        let axes = [[2.0, 0.0, 0.0], [0.0, 1e-20, 0.0], [0.0, 0.0, 1e20]];
+        let direction = equal_angle_direction(axes).unwrap();
+        for value in direction {
+            assert!((value - 1.0 / 3.0_f64.sqrt()).abs() < 1e-15);
+        }
+        // Reordering changes the orientation of the triple, not the side faced.
+        let swapped = equal_angle_direction([axes[1], axes[0], axes[2]]).unwrap();
+        for (a, b) in direction.iter().zip(swapped) {
+            assert!((a - b).abs() < 1e-15);
+        }
+        assert!(equal_angle_direction([axes[0], axes[1], [1.0, 1.0, 0.0]]).is_none());
+        assert!(equal_angle_direction([axes[0], axes[1], [0.0; 3]]).is_none());
+        assert!(equal_angle_direction([axes[0], axes[1], [f64::NAN, 0.0, 1.0]]).is_none());
     }
 
     #[test]
