@@ -62,9 +62,6 @@ pub(crate) const EDGE_GAP_SAMPLES: usize = 16;
 /// within which SMLib takes two of a surface's sides for one (#12757: a planar sliver face
 /// 1e-5 mm wide).
 pub(crate) const OPEN_DOMAIN_SPAN: f64 = 1e-3;
-/// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
-/// record check measures it: with margin, as a vertex's.
-pub(crate) const EDGE_GAP_MARGIN: f64 = 1.5;
 
 /// A body (a solid or a sheet) assembled into a record ([`Assembly::finish`]).
 #[derive(Clone, Debug)]
@@ -587,8 +584,10 @@ impl<'t> Assembly<'t> {
     /// An edge's curve as the file has it may lie off a face's surface by more than the file's
     /// uncertainty states (an intersection curve written looser than its context). Each use's
     /// gap, between its pcurve on the surface and its edge's curve, is measured along the edge as
-    /// the record check measures it, and the edge's tolerance covers it, as a vertex's covers its
-    /// gap: the pcurves are as made and the record says how far its geometry agrees.
+    /// the record check measures it, and the edge's tolerance covers it with the margin a
+    /// closed-form surface's gap gets ([`pcurve::SURFACE_GAP_MARGIN`], `measure_edges`): SMLib
+    /// takes half an edge's tolerance as the zone a gap must lie in. The pcurves are as made and
+    /// the record says how far its geometry agrees.
     fn raise_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &[Vec<Curve2>]) -> R<()> {
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
         for (l, pc) in edge_loops.iter().zip(pcs) {
@@ -608,7 +607,7 @@ impl<'t> Assembly<'t> {
                         gap = gap.max(s.dist(p));
                     }
                 }
-                self.cover_edge(e, gap, EDGE_GAP_MARGIN)?;
+                self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
             }
         }
         Ok(())
@@ -742,9 +741,9 @@ impl<'t> Assembly<'t> {
         if !self.raised_edges.is_empty() {
             let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
             notes.push(format!(
-                "{} edges lie off their faces' surfaces by more than {} mm: their tolerances are the gaps they have (up to {most:.3e} mm)",
+                "{} edges lie off their faces' surfaces by more than {:.3e} mm: their tolerances grow to cover the gaps (to at most {most:.3e} mm)",
                 self.raised_edges.len(),
-                self.tol
+                self.tol / pcurve::SURFACE_GAP_MARGIN
             ));
         }
         if self.loops_joined > 0 {
