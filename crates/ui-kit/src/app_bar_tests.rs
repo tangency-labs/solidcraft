@@ -643,3 +643,228 @@ fn a_view_is_renamed_in_its_sub_tab() {
     rig.frame(Vec::new());
     assert_eq!(rig.frame(vec![key(egui::Key::Escape)]), vec![TabAction::ViewRenameCancelled]);
 }
+
+// The layout engine: pure arithmetic over a spec, no egui.
+use crate::app_bar_layout::{Item, MAX_ITEMS, Placed, Spec, Zone, default_bar, layout};
+
+const EPS: f32 = 0.05;
+
+/// The default bar `width` wide with Windows' caption buttons on the right.
+fn default_spec(width: f32) -> Spec {
+    default_bar::spec(width, 0.0, 138.0)
+}
+
+fn index_of(spec: &Spec, id: &str) -> usize {
+    spec.items.iter().position(|item| item.id == id).expect("the item is in the spec")
+}
+
+/// Every placement lies in the bar's room, none has a negative or non-finite width, and no two
+/// overlap (the overflow button and the centre item included).
+fn assert_sound(spec: &Spec, placed: &Placed) {
+    let clamp = |v: f32| if v.is_nan() { 0.0 } else { v.clamp(0.0, crate::app_bar_layout::MAX_WIDTH) };
+    let (left, right) = (clamp(spec.captions_left), clamp(spec.width) - clamp(spec.captions_right));
+    assert_eq!(placed.placements.len(), spec.items.len());
+    let mut spans: Vec<(f32, f32, String)> = Vec::new();
+    for (p, item) in placed.placements.iter().zip(&spec.items) {
+        if let Some(p) = p {
+            assert!(p.width.is_finite() && p.width >= 0.0 && p.x.is_finite(), "{}: {p:?}", item.id);
+            spans.push((p.x, p.right(), item.id.clone()));
+        }
+    }
+    if let Some((x, w)) = placed.overflow_button {
+        assert!(w >= 0.0 && x.is_finite());
+        spans.push((x, x + w, "overflow".into()));
+    }
+    // An item narrower than the tolerance takes no room (its width is lost in the float rounding
+    // of a wide neighbour), so it may sit anywhere inside the others' span.
+    spans.retain(|(x, r, _)| r - x > EPS);
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (x, r, id) in &spans {
+        assert!(*x >= left - EPS && *r <= right.max(left) + EPS, "{id} spans {x}..{r} outside {left}..{right}");
+    }
+    for pair in spans.windows(2) {
+        assert!(pair[0].1 <= pair[1].0 + EPS, "{} ({}) overlaps {} ({})", pair[0].2, pair[0].1, pair[1].2, pair[1].0);
+    }
+}
+
+/// The default bar never overlaps and stays inside its room at any width, with the caption
+/// buttons on the right (Windows) or the traffic lights on the left (macOS).
+#[test]
+fn the_default_bar_never_overlaps_at_any_width() {
+    for width in 200..=3840 {
+        let spec = default_spec(width as f32);
+        assert_sound(&spec, &layout(&spec));
+        let mac = default_bar::spec(width as f32, 78.0, 0.0);
+        assert_sound(&mac, &layout(&mac));
+    }
+}
+
+/// On a wide bar every item has its fullest step, Start items run left to right in today's order
+/// and End items likewise, with the tabs between them.
+#[test]
+fn a_wide_bar_shows_everything_in_todays_order() {
+    let spec = default_spec(3840.0);
+    let placed = layout(&spec);
+    assert!(placed.overflow.is_empty() && placed.overflow_button.is_none());
+    let mut last = f32::MIN;
+    for zone in [Zone::Start, Zone::Centre, Zone::End] {
+        for item in spec.items.iter().filter(|i| i.zone == zone) {
+            let p = placed.placements[index_of(&spec, &item.id)].expect("placed on a wide bar");
+            assert_eq!(p.step, 0, "{} is at its fullest", item.id);
+            if zone != Zone::Centre {
+                assert!((p.width - item.ladder[0]).abs() < EPS, "{} keeps its fullest width", item.id);
+            }
+            assert!(p.x >= last - EPS, "{} is out of order ({} < {last})", item.id, p.x);
+            last = p.right();
+        }
+    }
+    let (x, w) = placed.centre.expect("the tabs have a place");
+    assert!(w > 1000.0, "the tabs take the spare room, got {w}");
+    assert!((x - (108.0 + 32.0 + 24.0 + 62.0 + 3.0 * 34.0)).abs() < EPS, "the tabs start after the file actions, got {x}");
+    assert_eq!(placed.placements[0].expect("the logo").x, 0.0);
+    let version = placed.placements[index_of(&spec, "version")].expect("the version");
+    assert!((version.right() - (3840.0 - 138.0)).abs() < EPS, "the version ends at the caption buttons");
+}
+
+/// As the bar narrows the version goes first, then the pills, then the Report a bug label shrinks.
+#[test]
+fn items_give_way_in_priority_order() {
+    let (mut version_at, mut pills_at, mut report_label_at) = (0, 0, 0);
+    let mut previous: Vec<String> = Vec::new();
+    for width in (200..=3840).rev() {
+        let spec = default_spec(width as f32);
+        let placed = layout(&spec);
+        let now = placed.overflow.clone();
+        assert!(now.starts_with(&previous), "the overflow only grows as the bar narrows ({width}): {previous:?} then {now:?}");
+        previous = now.clone();
+        if version_at == 0 && now.iter().any(|id| id == "version") {
+            version_at = width;
+        }
+        if pills_at == 0 && now.iter().any(|id| id == "donate" || id == "discord") {
+            pills_at = width;
+        }
+        if report_label_at == 0 && placed.placements[index_of(&spec, "report")].is_some_and(|p| p.step > 0) {
+            report_label_at = width;
+        }
+    }
+    assert!(version_at > pills_at, "the version leaves at {version_at}, the pills at {pills_at}");
+    assert!(pills_at > report_label_at, "the pills leave at {pills_at}, the report label at {report_label_at}");
+    assert!(report_label_at > 0, "the report label does collapse on a narrow bar");
+    assert_eq!(layout(&default_spec(version_at as f32)).overflow, ["version"], "the version is the first to go");
+}
+
+/// Locked items and the tabs' least width are kept at every width where they fit at all.
+#[test]
+fn locked_items_and_the_tabs_minimum_are_always_kept() {
+    for width in 480..=3840 {
+        let spec = default_spec(width as f32);
+        let placed = layout(&spec);
+        for item in spec.items.iter().filter(|i| i.locked) {
+            assert!(placed.placements[index_of(&spec, &item.id)].is_some(), "{} is kept at {width}", item.id);
+            assert!(!placed.overflow.contains(&item.id));
+        }
+        let (_, w) = placed.centre.expect("the tabs are kept");
+        assert!(w >= default_bar::TABS_MIN - EPS, "the tabs keep their least at {width}, got {w}");
+    }
+}
+
+/// Hostile specs never panic and never overlap: NaN, infinite and negative widths, an empty list,
+/// repeated ids, empty ladders, a bar too narrow for its locked items and ten thousand items.
+#[test]
+fn hostile_specs_never_panic_or_overlap() {
+    for width in 0..200 {
+        let spec = default_spec(width as f32);
+        assert_sound(&spec, &layout(&spec));
+    }
+    let nasty = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -5.0, 0.0, 1.0e30, -1.0e30, 40.0, f32::MIN_POSITIVE];
+    for &w in &nasty {
+        for &c in &nasty {
+            let mut spec = default_spec(w);
+            spec.captions_left = c;
+            spec.captions_right = c;
+            spec.gap = c;
+            spec.overflow_button_width = w;
+            assert_sound(&spec, &layout(&spec));
+            for item in &mut spec.items {
+                item.ladder = vec![w, c, w];
+            }
+            assert_sound(&spec, &layout(&spec));
+        }
+    }
+    let empty = Spec { width: 800.0, captions_left: 0.0, captions_right: 0.0, gap: 4.0, overflow_button_width: 30.0, items: Vec::new() };
+    let placed = layout(&empty);
+    assert!(placed.placements.is_empty() && placed.centre.is_none() && placed.overflow.is_empty());
+    // A repeated id and a second centre item are ignored; an empty ladder is a zero width.
+    let mut spec = default_spec(1000.0);
+    spec.items.push(Item::new("save", Zone::End, &[34.0], 1));
+    spec.items.push(Item::new("other-tabs", Zone::Centre, &[50.0], 1));
+    spec.items.push(Item::new("no-ladder", Zone::Start, &[], 1));
+    let placed = layout(&spec);
+    assert_sound(&spec, &placed);
+    let n = spec.items.len();
+    assert!(placed.placements[n - 3].is_none() && placed.placements[n - 2].is_none());
+    // Ten thousand items in every zone: past the cap nothing is placed.
+    for width in [0.0, 100.0, 1000.0, 5000.0, 1.0e9] {
+        let items = (0..10_000)
+            .map(|i| {
+                let zone = [Zone::Start, Zone::Centre, Zone::End][i % 3];
+                Item::new(&format!("item{i}"), zone, &[30.0 + (i % 7) as f32, 20.0], (i % 251) as u8)
+            })
+            .collect();
+        let spec = Spec { width, captions_left: 10.0, captions_right: 10.0, gap: 2.0, overflow_button_width: 24.0, items };
+        let placed = layout(&spec);
+        assert_sound(&spec, &placed);
+        assert!(placed.placements.iter().skip(MAX_ITEMS).all(|p| p.is_none()));
+    }
+}
+
+/// A small deterministic generator (an LCG) drives random specs: all sound, all repeatable.
+#[test]
+fn random_specs_never_overlap() {
+    let mut state = 0x2545_F491_4F6C_DD1D_u64;
+    let mut next = move |n: u64| {
+        state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (state >> 33) % n
+    };
+    for round in 0..2000 {
+        let count = next(20) as usize;
+        let items = (0..count)
+            .map(|i| {
+                let zone = [Zone::Start, Zone::Centre, Zone::End][next(3) as usize];
+                let ladder: Vec<f32> = (0..next(4)).map(|_| next(200) as f32).collect();
+                let id = format!("i{}", if next(10) == 0 { 0 } else { i });
+                let mut item = Item::new(&id, zone, &ladder, next(256) as u8);
+                item.locked = next(4) == 0;
+                item.flexible = next(2) == 0;
+                item
+            })
+            .collect();
+        let spec = Spec {
+            width: next(1500) as f32,
+            captions_left: next(150) as f32,
+            captions_right: next(150) as f32,
+            gap: next(10) as f32,
+            overflow_button_width: next(60) as f32,
+            items,
+        };
+        let placed = layout(&spec);
+        assert_sound(&spec, &placed);
+        assert_eq!(placed, layout(&spec), "round {round} is deterministic");
+    }
+}
+
+/// The same spec always gives the same answer, and equal priorities give way in source order.
+#[test]
+fn layout_is_deterministic() {
+    for width in [320.0, 640.0, 900.0, 1280.0, 1920.0] {
+        let spec = default_spec(width);
+        assert_eq!(layout(&spec), layout(&spec.clone()));
+    }
+    let mut spec = Spec { width: 100.0, captions_left: 0.0, captions_right: 0.0, gap: 0.0, overflow_button_width: 10.0, items: Vec::new() };
+    for id in ["a", "b", "c", "d"] {
+        spec.items.push(Item::new(id, Zone::Start, &[40.0], 5));
+    }
+    let placed = layout(&spec);
+    assert_eq!(placed.overflow, ["a", "b"], "equal priorities leave in source order");
+    assert!(placed.placements[2].is_some() && placed.placements[3].is_some());
+}
