@@ -59,6 +59,7 @@ impl Walk for crate::document::CellGridMode {}
 impl Walk for solidcore_record::cell_grid::CellShape {}
 impl Walk for solidcore_record::cell_grid::DotGrid {}
 impl Walk for solidcore_record::cell_grid::Clip {}
+impl Walk for solidcore_record::living_hinge::HingeClip {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
 impl Walk for crate::document::FilletTurn {}

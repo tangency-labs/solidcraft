@@ -778,7 +778,7 @@ const MAX_FLATTEN_PIECES: usize = 4096;
 /// error of `n` pieces is at most the largest second difference over `8 n^2`, proved from the
 /// bound on its second derivative). A conic's comes from [`flatten_conic`], a bound that holds for
 /// every positive weight.
-fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
+pub(crate) fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
     let tol = tol.max(1e-9);
     let pieces = |bow: f64| {
         let n = (bow / (8.0 * tol)).sqrt().ceil();

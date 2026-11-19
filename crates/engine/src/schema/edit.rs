@@ -857,6 +857,15 @@ pub struct FeatureInfo {
     pub error: Option<String>,
     /// A warning the feature built with; null when there is none.
     pub warning: Option<String>,
+    /// What the last build of the feature counted, for features that keep a report (Living
+    /// Hinge: the fields of its create reply, slots to band_width_mm); absent for the others.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "report_schema")]
+    pub report: Option<Value>,
+}
+
+fn report_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "object", "description": "The feature's report: what its last build counted, by name."})
 }
 
 fn definition_schema(_: &mut SchemaGenerator) -> Schema {

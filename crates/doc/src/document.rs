@@ -272,6 +272,13 @@ fn default_cell_clip() -> solidcore_record::cell_grid::Clip {
     solidcore_record::cell_grid::Clip::Snap
 }
 
+/// The smallest slot length, bridge, row spacing and slot width of a living hinge, in mm.
+pub const LIVING_HINGE_MIN_SIZE: f64 = solidcore_ops::living_hinge::MIN_SIZE;
+
+fn default_hinge_clip() -> solidcore_record::living_hinge::HingeClip {
+    solidcore_record::living_hinge::HingeClip::RunOut
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -1609,6 +1616,48 @@ pub enum FeatureKind {
         #[serde(default)]
         direction: Direction,
         /// Target body names (empty = the feature's participants, else all bodies of its component).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
+    },
+    /// A living hinge (#17484): rows of staggered slots cut through a plate inside a sketch's
+    /// closed profiles (an outer loop is the area, a loop inside it a keep-out), so the plate can
+    /// bend there. The slots are planned by solidcore (`solidcore_ops::living_hinge`) and cut in one
+    /// boolean.
+    LivingHinge {
+        /// Feature id of the sketch.
+        sketch: SketchId,
+        /// Which of the sketch's profiles hold the area and its keep-outs.
+        #[walk(profiles_of = sketch)]
+        profiles: ProfileSel,
+        /// A slot's length, tip to tip.
+        #[walk(length = "Slot length")]
+        slot_length: Expr,
+        /// The material between two slots in one row.
+        #[walk(length = "Bridge")]
+        bridge: Expr,
+        /// Centre line to centre line between rows.
+        #[walk(length = "Row spacing")]
+        row_spacing: Expr,
+        /// The cut's width (default 0.2 mm).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Slot width")]
+        slot_width: Option<Expr>,
+        /// The slots' direction, the bend axis (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
+        /// A slot of row 0 is centred here, projected onto the sketch plane (default: centred).
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        anchor: Option<PointExpr>,
+        /// Slots the edges cross.
+        #[serde(default = "default_hinge_clip")]
+        clip: solidcore_record::living_hinge::HingeClip,
+        /// The least material between a slot's end and an edge (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Margin")]
+        margin: Option<Expr>,
+        /// The plate, as resolved when the feature was made.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
     },
@@ -3184,6 +3233,7 @@ impl FeatureKind {
             FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::CellGrid { .. } => "CellGridFeature",
+            FeatureKind::LivingHinge { .. } => "LivingHingeFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
@@ -3255,6 +3305,7 @@ impl FeatureKind {
             FeatureKind::Align { .. } => "align",
             FeatureKind::Coil { .. } => "coil",
             FeatureKind::CellGrid { .. } => "cell_grid",
+            FeatureKind::LivingHinge { .. } => "living_hinge",
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
@@ -3356,6 +3407,7 @@ impl FeatureKind {
             "RecognizeSheetMetalFeature" => "sheet_recognize",
             "CoilFeature" => "coil",
             "CellGridFeature" => "cell_grid",
+            "LivingHingeFeature" => "living_hinge",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",
             "AlignFeature" => "align",
@@ -3444,6 +3496,7 @@ impl FeatureKind {
             FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::CellGrid { .. } => "CellGrid",
+            FeatureKind::LivingHinge { .. } => "LivingHinge",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",

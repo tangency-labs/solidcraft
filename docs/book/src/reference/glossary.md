@@ -346,6 +346,24 @@ now and is never saved: if the thing is lost, the note stays and has no leader.
 - **Elsewhere:** leader, leader line.
 - **For translators:** a drawn line; not a person who leads.
 
+### living hinge
+
+A flat plate made bendable by rows of staggered slots cut through it, so the thin strips between
+the slots twist and the plate curves around an axis along the slots.
+
+Used on laser-cut plywood, MDF and acrylic for round box corners, book spines and lampshades. The
+material left between two slots in one row is a bridge; closer rows bend tighter.
+
+- **In SolidCraft:** the `solid.living_hinge` command ("Living Hinge") and its `living_hinge`
+  feature type; its `slot_length`, `bridge`, `row_spacing`, `slot_width`, `angle` (the bend
+  axis), `anchor`, `clip` (`run_out`, `shorten` or `whole`), `margin` and `targets` parameters and
+  design-file keys.
+- **Don't use:** flex cut, flexure (a wider idea), hinge (alone: a separate hinged part).
+- **Elsewhere:** living hinge, lattice hinge, kerf bending, flex pattern.
+- **For translators:** the whole slotted area that bends, not a hinge joint between two parts and
+  not a moulded plastic hinge; *bridge* here is material left between slots, see *Words with more
+  than one meaning*, "Bridge".
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -690,6 +708,8 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Bridge | the layers a 3D printer bridges across a counterbore's floor | bridge layer | the Hole dialog's Bridge row |
+| | the material left between two slots in one row of a living hinge | bridge (hinge) | the Living Hinge dialog's Bridge row, `ui.living_hinge.bridge` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |

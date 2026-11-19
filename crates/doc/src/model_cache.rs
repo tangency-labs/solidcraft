@@ -763,6 +763,8 @@ impl SavedModel {
                 named_faces,
                 // A join's notice is for the evaluation that made it, not kept with the cache.
                 kept_separate: BTreeMap::new(),
+                // Nor a living hinge's report: its result is read from the evaluation that cut it.
+                living_hinges: BTreeMap::new(),
                 // Not kept either: a saved model's states carry no lineage, so the check of a
                 // legacy split's picks (`lineage::legacy_picks_digest`) finds no pieces in them
                 // and takes them as the design's evaluation they were saved as.

@@ -349,7 +349,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 1,
         ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.point3d"],
     },
-    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
+    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole", "solid.living_hinge"] },
     Section {
         tab: "MODEL",
         panel: "MODIFY",

@@ -148,6 +148,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "cell_grid",
             json!({"type": "cell_grid", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "sides": "cell_grid.sides", "size": "cell_grid.size", "web": "cell_grid.web", "angle": "cell_grid.angle", "margin": "cell_grid.margin", "anchor": ["cell_grid.x", "cell_grid.y", "cell_grid.z"], "depth": "cell_grid.depth"}),
         ),
+        (
+            "living_hinge",
+            json!({"type": "living_hinge", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "slot_length": "living_hinge.slot_length", "bridge": "living_hinge.bridge", "row_spacing": "living_hinge.row_spacing", "slot_width": "living_hinge.slot_width", "angle": "living_hinge.angle", "margin": "living_hinge.margin", "anchor": ["living_hinge.x", "living_hinge.y", "living_hinge.z"], "clip": "shorten"}),
+        ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
         (
@@ -262,6 +266,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
     let tool = json!({"body": "B", "point": o});
     let extra = match name {
         "extrude" | "extrude_thin" | "revolve" | "sweep" | "sweep_options" | "pipe" | "coil" | "cell_grid" | "thicken" => json!({"targets": ["B"]}),
+        "living_hinge" => json!({"targets": ["B"]}),
         "fillet_constant" | "fillet_chord" | "fillet_curvature" | "fillet_variable" | "fillet_spline" | "chamfer" | "shell" | "draft"
         | "offset_face" | "delete_face" | "replace_face" | "sheet_flange" | "sheet_hem" | "sheet_perforate" | "sheet_path" | "sheet_unfold"
         | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {

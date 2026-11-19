@@ -65,6 +65,7 @@ pub mod hlr;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
+pub mod living_hinge;
 pub mod measure;
 pub mod network;
 pub mod offset;

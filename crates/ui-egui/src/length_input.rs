@@ -178,6 +178,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
+        D::LivingHinge(h) => vec![&mut h.slot_length, &mut h.bridge, &mut h.row_spacing, &mut h.slot_width, &mut h.margin],
         D::Move { x, y, z, .. } => vec![x, y, z],
         D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
             vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]

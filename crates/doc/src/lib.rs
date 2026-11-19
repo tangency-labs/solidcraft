@@ -119,6 +119,7 @@ pub use assembly::{
 };
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
+pub use eval::living_hinge::{HingeReport, MAX_CUT_SLOTS, SLOW_CUT_SLOTS};
 pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
     ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
@@ -293,6 +294,8 @@ mod coil_tests;
 mod drafting_profile_tests;
 #[cfg(test)]
 mod feature_walk_tests;
+#[cfg(test)]
+mod living_hinge_tests;
 #[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]

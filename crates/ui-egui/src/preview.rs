@@ -136,6 +136,9 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// The reply of a previewed Living Hinge (`slots`, `rows`, `cut_length_mm`, ...): the dialog's
+    /// report lines.
+    pub report: Option<serde_json::Value>,
     /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
     /// (a Move). `scene` is not read then.
     pub layer: Option<Layer>,
@@ -226,6 +229,9 @@ pub struct PreviewState {
     pub stopped: Option<serde_json::Value>,
     /// The reply of a previewed assembly constraint (see [`Built::placed`]).
     pub placed: Option<serde_json::Value>,
+    /// The reply of a previewed Living Hinge (see [`Built::report`]); the last good one stays while
+    /// the next computes.
+    pub report: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     /// Whether the previewed Mirror's copy meets its body (see [`Built::mirror_meets`]).
@@ -351,6 +357,7 @@ impl PreviewState {
         self.applied = None;
         self.stopped = None;
         self.placed = None;
+        self.report = None;
         self.tapered.clear();
         self.mirror_meets = None;
         self.mirror_decided = None;
@@ -428,6 +435,7 @@ impl PreviewState {
                 self.applied = b.applied;
                 self.stopped = b.stopped;
                 self.placed = b.placed;
+                self.report = b.report;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
                 self.points = b.points;
@@ -465,6 +473,7 @@ impl PreviewState {
                 self.applied = None;
                 self.stopped = None;
                 self.placed = None;
+                self.report = None;
                 self.tapered.clear();
                 self.mirror_meets = None;
                 self.mirror_decided = None;
@@ -807,6 +816,11 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.report = cmds
+                .iter()
+                .zip(&p.replies)
+                .find(|((c, p), _)| c == "solid.living_hinge" || p.get("command").and_then(Value::as_str) == Some("solid.living_hinge"))
+                .map(|(_, r)| r.clone());
             Ok(b)
         }
     }
@@ -996,6 +1010,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        report: None,
         layer: None,
         joints: Vec::new(),
     }
@@ -1049,6 +1064,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        report: None,
         layer: None,
         joints: Vec::new(),
     }
@@ -1316,6 +1332,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         mirror_meets: None,
         points,
         placed: None,
+        report: None,
         layer: None,
         joints: Vec::new(),
     }
@@ -1673,6 +1690,7 @@ mod tests {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            report: None,
             layer: None,
             joints: Vec::new(),
         }

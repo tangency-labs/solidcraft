@@ -20,6 +20,7 @@ use super::profile::{
     Loop2, ProfileRefusal, Region2, Seg2,
 };
 use super::read::{arc_before_line, planar_curves, planar_pieces, PlanarPiece, Run};
+use super::sheet::parallel_faces;
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
@@ -1261,6 +1262,154 @@ fn a_drilled_prism_has_its_section_and_its_volume_enclosed() {
     assert_eq!(equivalent(&k, &source, &wider), Some(false));
     let shifted = drilled(&mut k, 6.0, 0.0001);
     assert_eq!(equivalent(&k, &source, &shifted), Some(false));
+}
+
+/// A body extruded from `outline` in the xz plane (frame normal -y) over y in [-10, 0].
+fn side_extrusion(k: &mut Kernel, outline: &[Point2]) -> Brep {
+    let xz = Frame {
+        origin: [0.0; 3],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    let region = Region2 {
+        outer: polygon(outline),
+        holes: vec![],
+    };
+    extrude_region(k, &xz, &region, 0.0, 10.0).unwrap()
+}
+
+#[test]
+fn a_plain_plate_has_two_parallel_faces_and_four_walls() {
+    let mut k = Kernel::default();
+    let b = extrude_region(
+        &mut k,
+        &xy(),
+        &rectangle(p(0.0, 0.0), p(40.0, 30.0)),
+        0.0,
+        3.0,
+    )
+    .unwrap();
+    let got = parallel_faces(&k, &b, &xy(), 1e-7).unwrap();
+    assert_eq!(
+        (got.walls, got.other, got.faces.len()),
+        (4, 0, 2),
+        "{got:?}"
+    );
+    let top: Vec<_> = got.faces.iter().filter(|f| f.up).collect();
+    let bottom: Vec<_> = got.faces.iter().filter(|f| !f.up).collect();
+    assert_eq!((top.len(), bottom.len()), (1, 1));
+    assert!((top[0].level - 3.0).abs() < 1e-12 && bottom[0].level.abs() < 1e-12);
+    // both read as the same outline, counter-clockwise in the frame
+    assert_eq!(top[0].regions, bottom[0].regions);
+    assert_eq!(top[0].regions.len(), 1);
+    let area = top[0].regions[0].outer.signed_area().unwrap().value;
+    assert!((area - 1200.0).abs() < 1e-9, "{area}");
+    // sheet_regions reads the same face the same way
+    let sheet = sheet_regions(&k, &b, &xy(), 1e-7);
+    assert!(sheet.is_err(), "the walls are not in the plane");
+}
+
+#[test]
+fn a_drilled_plate_has_the_hole_in_its_outline_and_the_bore_as_a_wall() {
+    let mut k = Kernel::default();
+    let b = drilled(&mut k, 6.0, 0.0);
+    let got = parallel_faces(&k, &b, &xy(), 1e-7).unwrap();
+    assert_eq!(got.other, 0, "{got:?}");
+    assert!(got.walls >= 5, "{got:?}");
+    let top = got.faces.iter().find(|f| f.up).unwrap();
+    assert!((top.level - 10.0).abs() < 1e-12);
+    assert_eq!(top.regions.len(), 1);
+    assert_eq!(top.regions[0].holes.len(), 1);
+    let area = top.regions[0].outer.signed_area().unwrap().value
+        + top.regions[0].holes[0].signed_area().unwrap().value;
+    assert!((area - (400.0 - 36.0 * PI)).abs() < 1e-8, "{area}");
+}
+
+#[test]
+fn an_l_bracket_seen_along_its_plate_has_two_up_faces_and_only_walls() {
+    let mut k = Kernel::default();
+    // the plate x in [0, 40], z in [0, 3]; the upright x in [0, 3], z up to 20
+    let b = side_extrusion(
+        &mut k,
+        &[
+            p(0.0, 0.0),
+            p(40.0, 0.0),
+            p(40.0, 3.0),
+            p(3.0, 3.0),
+            p(3.0, 20.0),
+            p(0.0, 20.0),
+        ],
+    );
+    let got = parallel_faces(&k, &b, &xy(), 1e-7).unwrap();
+    assert_eq!(got.other, 0, "{got:?}");
+    assert_eq!(got.walls, 5, "{got:?}");
+    let mut up: Vec<_> = got.faces.iter().filter(|f| f.up).collect();
+    up.sort_by(|a, c| a.level.total_cmp(&c.level));
+    assert_eq!(up.len(), 2);
+    assert!((up[0].level - 3.0).abs() < 1e-12 && (up[1].level - 20.0).abs() < 1e-12);
+    let areas: Vec<f64> = up
+        .iter()
+        .map(|f| f.regions[0].outer.signed_area().unwrap().value)
+        .collect();
+    assert!(
+        (areas[0] - 370.0).abs() < 1e-9 && (areas[1] - 30.0).abs() < 1e-9,
+        "{areas:?}"
+    );
+    assert_eq!(got.faces.iter().filter(|f| !f.up).count(), 1);
+}
+
+#[test]
+fn a_recess_floor_reads_as_up() {
+    let mut k = Kernel::default();
+    let plate = extrude_region(
+        &mut k,
+        &xy(),
+        &rectangle(p(0.0, 0.0), p(40.0, 20.0)),
+        0.0,
+        4.0,
+    )
+    .unwrap();
+    // the pocket's bottom plane faces -z; the floor it leaves faces +z, out of the body
+    let pocket = extrude_region(
+        &mut k,
+        &xy(),
+        &rectangle(p(10.0, 5.0), p(20.0, 10.0)),
+        2.0,
+        5.0,
+    )
+    .unwrap();
+    let b = crate::boolean::api_brep::boolean_difference(&mut k, plate, pocket).unwrap();
+    let got = parallel_faces(&k, &b, &xy(), 1e-7).unwrap();
+    assert_eq!((got.walls, got.other), (8, 0), "{got:?}");
+    let mut up: Vec<_> = got.faces.iter().filter(|f| f.up).collect();
+    up.sort_by(|a, c| a.level.total_cmp(&c.level));
+    assert_eq!(up.len(), 2, "the floor and the top: {got:?}");
+    assert!((up[0].level - 2.0).abs() < 1e-12 && (up[1].level - 4.0).abs() < 1e-12);
+    let floor = up[0].regions[0].outer.signed_area().unwrap().value;
+    assert!((floor - 50.0).abs() < 1e-9, "{floor}");
+    assert_eq!(up[1].regions[0].holes.len(), 1);
+    let down: Vec<_> = got.faces.iter().filter(|f| !f.up).collect();
+    assert_eq!(down.len(), 1);
+    assert!(down[0].level.abs() < 1e-12);
+}
+
+#[test]
+fn a_plate_with_a_slanted_side_counts_it_as_other() {
+    let mut k = Kernel::default();
+    // a chamfer of 2 on the plate's top right edge
+    let b = side_extrusion(
+        &mut k,
+        &[
+            p(0.0, 0.0),
+            p(40.0, 0.0),
+            p(40.0, 1.0),
+            p(38.0, 3.0),
+            p(0.0, 3.0),
+        ],
+    );
+    let got = parallel_faces(&k, &b, &xy(), 1e-7).unwrap();
+    assert_eq!(got.other, 1, "{got:?}");
+    assert_eq!((got.walls, got.faces.len()), (4, 2), "{got:?}");
 }
 
 #[test]

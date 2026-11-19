@@ -1217,3 +1217,12 @@ crates/step-export/src/map.rs	check_knots	windows	1	proven	windows(2)	constant n
 crates/step-export/src/map.rs	implied_knots	int-div	1	proven	(n - 1) / dd	dd == 0 returns Err just above
 crates/step-export/src/map.rs	polygon_plane	int-rem	1	proven	(k + 1) % pts.len()	inside iteration over pts, so len() > 0
 crates/solidcore/src/curve/curve/turning.rs	binom	int-div	1	proven	c.saturating_mul((n - i) as u128) / (i as u128 + 1)	the divisor i + 1 is at least 1
+crates/solidcore/src/living_hinge/near.rs	merge	with_capacity	1	proven	Vec::with_capacity(ivs.len())	the length of a Vec already in memory
+crates/solidcore/src/living_hinge/plan.rs	frame_loop	with_capacity	1	proven	Vec::with_capacity(lp.segs.len())	the length of a collection already in memory
+crates/solidcore/src/living_hinge/plan.rs	snap_arc_ends	int-rem	1	proven	(i + n - 1) % n	inside for i in 0..n, so n > 0
+crates/solidcore/src/living_hinge/plan.rs	snap_arc_ends	int-rem	2	proven	(i + 1) % n	inside for i in 0..n, so n > 0
+crates/solidcore/src/living_hinge/rows.rs	pull_apart	split_at	1	proven	split_at_mut(i)	inside for i in 1..pieces.len(), so i <= len
+crates/solidcore/src/living_hinge/rows.rs	runs_out	int-rem	1	proven	rem_euclid(2)	constant non-zero divisor
+crates/solidcore/src/living_hinge/spans.rs	arc_crossings	f64::clamp	1	proven	clamp(-TAU, TAU)	constant bounds, min <= max
+crates/solidcore/src/living_hinge/spans.rs	chain_ids	with_capacity	1	proven	Vec::with_capacity(loops.len())	the length of a collection already in memory
+crates/solidcore/src/living_hinge/spans.rs	chain_ids	with_capacity	2	proven	Vec::with_capacity(lp.len())	the length of a collection already in memory

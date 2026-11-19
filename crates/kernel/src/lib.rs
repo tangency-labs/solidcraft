@@ -81,6 +81,7 @@ mod issue_871_tests;
 #[cfg(test)]
 mod join_between_caps_tests;
 mod lip;
+pub mod living_hinge;
 pub mod loft_blend;
 mod loft_rails;
 #[cfg(test)]

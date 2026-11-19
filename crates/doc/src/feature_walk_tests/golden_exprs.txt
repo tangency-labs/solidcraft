@@ -286,6 +286,15 @@ cell_grid
     Margin = cell_grid.margin (Length)
     Depth = cell_grid.depth (Length)
   expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.margin, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
+living_hinge
+  inputs:
+    Slot length = living_hinge.slot_length (Length)
+    Bridge = living_hinge.bridge (Length)
+    Row spacing = living_hinge.row_spacing (Length)
+    Slot width = living_hinge.slot_width (Length)
+    Angle = living_hinge.angle (Angle)
+    Margin = living_hinge.margin (Length)
+  expressions: living_hinge.slot_length, living_hinge.bridge, living_hinge.row_spacing, living_hinge.slot_width, living_hinge.angle, living_hinge.margin, living_hinge.x, living_hinge.y, living_hinge.z
 sheet_base
 sheet_contour
   inputs:
