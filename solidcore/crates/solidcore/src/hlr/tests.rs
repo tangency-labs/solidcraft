@@ -19,8 +19,14 @@ struct Threads;
 impl Workers for Threads {
     fn run(&self, count: usize, work: &(dyn Fn() + Sync)) -> bool {
         std::thread::scope(|scope| {
+            // A test that asks for workers must get them: falling back to the calling thread
+            // would let a worker test pass without workers.
             let started: Vec<_> = (0..count)
-                .filter_map(|_| std::thread::Builder::new().spawn_scoped(scope, work).ok())
+                .map(|_| {
+                    std::thread::Builder::new()
+                        .spawn_scoped(scope, work)
+                        .expect("a test worker thread")
+                })
                 .collect();
             let any = !started.is_empty();
             for worker in started {
