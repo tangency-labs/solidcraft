@@ -123,6 +123,7 @@ mod sheet_surface_cuts;
 mod sheet_surface_features;
 mod sheet_surface_fold;
 mod sheet_surface_perforation;
+mod sheet_surface_profile;
 mod sheet_surface_shadow;
 mod sheet_surface_tab;
 pub mod sketch_equation;

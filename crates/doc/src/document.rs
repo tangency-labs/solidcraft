@@ -1866,6 +1866,13 @@ pub enum FeatureKind {
         /// virtual sharp (`sheet::HeightFrom`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height_from: Option<String>,
+        /// The flange's profile sketch (#3516): one closed profile drawn on the flange's plane,
+        /// its bottom line on the edge. It gives the flange's outline past the bend, its height,
+        /// the stretch of the edge the bend runs along, and cut-outs from the profile's holes.
+        /// One edge only, without segments; `height` then sizes nothing. None: a rectangle
+        /// `height` high along the edge (or its segments).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<SketchId>,
     },
     /// Flat hems on sheet edges.
     SheetHem {
@@ -5521,8 +5528,8 @@ impl Document {
         }
     }
 
-    /// Delete features `ids` and the features whose sketches they are. Returns every deleted id,
-    /// `ids` first.
+    /// Delete features `ids` and the features whose sketches they are, and a deleted flange's
+    /// profile sketch that nothing else uses. Returns every deleted id, `ids` first.
     pub(crate) fn delete_features(&mut self, ids: &[u64]) -> Result<Vec<u64>> {
         let mut gone: Vec<u64> = Vec::with_capacity(ids.len());
         for id in ids {
@@ -5540,6 +5547,25 @@ impl Document {
             .map(|f| f.id)
             .collect();
         gone.extend(dependants);
+        // A flange takes its profile sketch with it (#3516): the sketch only shapes that flange.
+        // One another feature still uses stays.
+        let profiles: Vec<u64> = self
+            .features
+            .iter()
+            .filter(|f| gone.contains(&f.id))
+            .filter_map(|f| match &f.kind {
+                FeatureKind::SheetFlange { profile: Some(sketch), .. } => Some(sketch.0),
+                _ => None,
+            })
+            .filter(|sketch| {
+                !gone.contains(sketch) && !self.features.iter().any(|f| !gone.contains(&f.id) && f.kind.input_sketches().contains(sketch))
+            })
+            .collect();
+        for sketch in profiles {
+            if !gone.contains(&sketch) {
+                gone.push(sketch);
+            }
+        }
         // How many of them come before the rollback marker: it keeps its place among the rest.
         let before_marker = self.marker.map(|m| self.features.iter().take(m).filter(|f| gone.contains(&f.id)).count());
         let gone_params: Vec<String> = self.features.iter().filter(|f| gone.contains(&f.id)).flat_map(|f| f.param_names.clone()).collect();

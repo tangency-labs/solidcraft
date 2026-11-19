@@ -1281,9 +1281,44 @@ pub(super) fn sheet_eval(
             st.surface_sheets.push(sheet);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief, profile }
             if surface_flange_sheet(st, body, f, edges).is_some() =>
         {
+            // The profile sketch's one closed profile, where it lies now (#3516): the flange's
+            // outline, holes and stretch of the edge (see `SurfaceSheet::profile_flange_on`).
+            let outline = match profile {
+                Some(sk) => {
+                    if edges.len() != 1 || edges.iter().any(|e| !e.segments.is_empty()) {
+                        return Err(DocError::Invalid("a flange from a profile sketch takes one edge, without segments".into()));
+                    }
+                    if height_from.is_some() {
+                        return Err(DocError::Invalid("a flange from a profile sketch is as high as its profile: leave out height_from".into()));
+                    }
+                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    // The outline is the largest profile; a circle drawn inside it is also a
+                    // profile of its own (the disc filling the hole), which is no second outline.
+                    let regions = select_profiles(ss, &ProfileSel::All)?;
+                    let area = |lp: &Loop2| lp.signed_area().abs();
+                    let main = regions
+                        .iter()
+                        .max_by(|a, b| area(&a.outer).total_cmp(&area(&b.outer)))
+                        .ok_or_else(|| DocError::Invalid("the flange's profile sketch has no closed profile".into()))?;
+                    let others = regions.iter().filter(|r| !std::ptr::eq(*r, main)).count();
+                    let fills = regions
+                        .iter()
+                        .filter(|r| !std::ptr::eq(*r, main))
+                        .filter(|r| main.holes.iter().any(|h| (area(h) - area(&r.outer)).abs() < 1e-6 * area(h).max(1.0)))
+                        .count();
+                    if fills != others {
+                        return Err(DocError::Invalid(format!(
+                            "the flange's profile sketch must hold one closed profile (holes inside it are fine), not {}",
+                            others + 1 - fills
+                        )));
+                    }
+                    Some((ss.plane, main.clone()))
+                }
+                None => None,
+            };
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
             // is (see `surface_flange_sheet`).
@@ -1375,8 +1410,15 @@ pub(super) fn sheet_eval(
             let mut made = Vec::with_capacity(picks.len());
             let mut square = Vec::with_capacity(picks.len());
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
-                // One bend for each run: a split edge's butt where its runs meet.
-                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                // One bend for each run: a split edge's butt where its runs meet. A profile's
+                // flange is one bend on the stretch its bottom line runs along, at the edge's
+                // angle and to its side.
+                let (joints, sides) = match (&outline, runs.first()) {
+                    (Some((plane, region)), Some(&(_, _, _, angle, side))) => {
+                        (vec![sk.profile_flange_on(edge, plane, region, angle, rr, position, side).map_err(named(k))?], Vec::new())
+                    }
+                    _ => sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?,
+                };
                 square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {

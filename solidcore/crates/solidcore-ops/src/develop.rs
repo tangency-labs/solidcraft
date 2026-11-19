@@ -22,7 +22,8 @@ use solidcore_convert::{
     record_region2, record_seg2, record_vec2, record_vec3, region2, seg2, vec2, vec3,
 };
 use solidcore_record::develop::{
-    Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface,
+    Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet,
+    Surface,
 };
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
@@ -79,6 +80,80 @@ pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> 
 pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
     let points: Vec<solidcore::math::Vec2> = points.iter().copied().map(vec2).collect();
     cv::record_segs(&k::curve_through(&points))
+}
+
+/// How far out along a flange its bend's anchor lies from the bend's outer virtual sharp
+/// ([`solidcore::develop::anchor_past_outer_sharp`]): none where the bend turns toward the
+/// material, else `T·tan(θ/2)`.
+#[must_use]
+pub fn anchor_past_outer_sharp(toward_material: bool, angle: f64, thickness: f64) -> f64 {
+    k::anchor_past_outer_sharp(toward_material, angle, thickness)
+}
+
+/// The frame a flange's profile sketch is drawn in, in the chart of the flange's panel
+/// ([`profile_frame`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProfileFrame {
+    /// The sketch's origin: where the bend starts on its outer virtual sharp.
+    pub origin: Vec2,
+    /// The sketch's x: along the bend.
+    pub x: Vec2,
+    /// The sketch's y: out along the flange, away from the bend.
+    pub y: Vec2,
+    /// How deep in the panel's material the face the sketch is drawn on lies.
+    pub depth: f64,
+    /// How far out along y the panel's outline reaches from the origin: the flange's height.
+    pub height: f64,
+}
+
+/// Where a profile sketch for a flange is drawn, in the chart of the flange's panel
+/// ([`solidcore::develop::profile_frame`]): `anchor` is the bend's anchor on that panel, the bend
+/// turns `angle` toward the material or away from it, and `outline` is the panel's outline.
+#[must_use]
+pub fn profile_frame(
+    anchor: &Anchor,
+    toward_material: bool,
+    angle: f64,
+    thickness: f64,
+    outline: &Loop2,
+) -> ProfileFrame {
+    let f = k::profile_frame(
+        &cv::anchor(anchor),
+        toward_material,
+        angle,
+        thickness,
+        &solidcore_convert::loop2(outline),
+    );
+    ProfileFrame {
+        origin: record_vec2(f.origin),
+        x: record_vec2(f.x),
+        y: record_vec2(f.y),
+        depth: f.depth,
+        height: f.height,
+    }
+}
+
+/// How far a sketch's plane (unit normal `normal`) tilts from a panel (unit normal `panel`)
+/// ([`solidcore::develop::profile_tilt`]): the sine of the angle between them, 0 where they are
+/// parallel.
+#[must_use]
+pub fn profile_tilt(normal: Vec3, panel: Vec3) -> f64 {
+    k::profile_tilt(vec3(normal), vec3(panel))
+}
+
+/// Where the points `along` the line of `anchor` land on the straight edge from `a` to `b`
+/// ([`solidcore::develop::edge_fractions`]): each as the fraction of the edge from its end `b`,
+/// clamped to `[0, 1]`. `None` when the edge has no length.
+#[must_use]
+pub fn edge_fractions(a: Vec2, b: Vec2, anchor: &Anchor, along: [f64; 2]) -> Option<[f64; 2]> {
+    k::edge_fractions(vec2(a), vec2(b), &cv::anchor(anchor), along)
+}
+
+/// How far along the line of `from` the origin of `to` lies from `from`'s origin
+/// ([`solidcore::develop::shift_along`]).
+#[must_use]
+pub fn shift_along(from: &Anchor, to: &Anchor) -> f64 {
+    k::shift_along(&cv::anchor(from), &cv::anchor(to))
 }
 
 /// A developed sheet folded ([`fold`]).
@@ -518,4 +593,63 @@ pub fn segment_in_region(region: &Region2, a: Vec2, b: Vec2) -> Option<bool> {
 /// The kernel's [`BeadRefusal`]: a crown width not at least 0 and less than the width.
 pub fn bead_flank_angle(depth: f64, width: f64, crown_width: f64) -> Result<f64, BeadRefusal> {
     k::bead_flank_angle(depth, width, crown_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn x_axis() -> Anchor {
+        Anchor {
+            panel: 1,
+            origin: Vec2::new(0.0, 0.0),
+            dir: Vec2::new(1.0, 0.0),
+        }
+    }
+
+    #[test]
+    fn a_profile_frame_on_record_values_is_the_kernels() {
+        let outline = Loop2::polygon(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(30.0, 0.0),
+            Vec2::new(30.0, -20.0),
+            Vec2::new(0.0, -20.0),
+        ]);
+        let f = profile_frame(&x_axis(), true, 1.5, 2.0, &outline);
+        assert_eq!(
+            f,
+            ProfileFrame {
+                origin: Vec2::new(0.0, 0.0),
+                x: Vec2::new(1.0, 0.0),
+                y: Vec2::new(0.0, -1.0),
+                depth: 0.0,
+                height: 20.0,
+            }
+        );
+        assert_eq!(anchor_past_outer_sharp(true, 1.5, 2.0), 0.0);
+        let away = profile_frame(&x_axis(), false, 1.5, 2.0, &outline);
+        let past = anchor_past_outer_sharp(false, 1.5, 2.0);
+        assert_eq!(away.origin, Vec2::new(0.0, past));
+        assert_eq!(away.depth, 2.0);
+        assert_eq!(away.height, 20.0 + past);
+    }
+
+    #[test]
+    fn a_profiles_tilt_stretch_and_shift_on_record_values_are_the_kernels() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        assert_eq!(profile_tilt(z, z), 0.0);
+        assert_eq!(profile_tilt(Vec3::new(0.0, 1.0, 0.0), z), 1.0);
+        let edge = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0));
+        assert_eq!(
+            edge_fractions(edge.0, edge.1, &x_axis(), [10.0, 0.0]),
+            Some([0.0, 1.0])
+        );
+        assert_eq!(edge_fractions(edge.0, edge.0, &x_axis(), [10.0, 0.0]), None);
+        let to = Anchor {
+            panel: 2,
+            origin: Vec2::new(4.0, 3.0),
+            dir: Vec2::new(1.0, 0.0),
+        };
+        assert_eq!(shift_along(&x_axis(), &to), 4.0);
+    }
 }

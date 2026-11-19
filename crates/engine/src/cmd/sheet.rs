@@ -576,6 +576,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     corner_relief_shape,
                     corner_relief,
                     height_from: height_from.clone(),
+                    profile: None,
                 },
             )?;
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
@@ -599,6 +600,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief_shape: None,
                         corner_relief: None,
                         height_from: height_from.clone(),
+                        profile: None,
                     },
                 )?;
             }

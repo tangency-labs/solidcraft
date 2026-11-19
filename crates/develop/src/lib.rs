@@ -57,13 +57,19 @@ pub use solidcraft_kernel::services::develop::BeadRefusal;
 pub use solidcraft_kernel::services::develop::Bent;
 pub use solidcraft_kernel::services::develop::Fold;
 pub use solidcraft_kernel::services::develop::MIN_BEAD_RADIUS;
+pub use solidcraft_kernel::services::develop::ProfileFrame;
+pub use solidcraft_kernel::services::develop::anchor_past_outer_sharp;
 pub use solidcraft_kernel::services::develop::bead_against;
 pub use solidcraft_kernel::services::develop::bead_flank_angle;
 pub use solidcraft_kernel::services::develop::bead_footprint;
 pub use solidcraft_kernel::services::develop::crossings;
 pub use solidcraft_kernel::services::develop::curve_through;
+pub use solidcraft_kernel::services::develop::edge_fractions;
 pub use solidcraft_kernel::services::develop::hermite;
+pub use solidcraft_kernel::services::develop::profile_frame;
+pub use solidcraft_kernel::services::develop::profile_tilt;
 pub use solidcraft_kernel::services::develop::segment_in_region;
+pub use solidcraft_kernel::services::develop::shift_along;
 pub use solidcraft_kernel::services::query::Query;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.
