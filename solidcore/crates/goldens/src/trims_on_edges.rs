@@ -3,7 +3,9 @@
 //! edge's interval `[s0, s1]`, an upper bound `B` on
 //!
 //! * the distance from every point `S(T(t))` of the trim's image to the edge's curve, and
-//! * the distance from every point of the edge's curve to the trim's image (so to `S`).
+//! * the distance from every point of the edge's curve to the trim's image (so to `S`),
+//!   but for an end stretch that lies, with the trim's end, inside a vertex's tolerance
+//!   ball (certified against that ball instead and reported in `at_vertex`; see below).
 //!
 //! `check_brep` level 2 checks a trim's owner, length, interval and periodic jumps, not
 //! where it lies; this is that check.
@@ -234,11 +236,25 @@ fn v_hull(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
 
 /// `[lo, hi]` cut at the distinct knots strictly inside it, each part with its span: a part
 /// before the first knot of the range on the first span, after the last on the last.
+///
+/// A part's span is read from its ends, never from a computed middle (which can round onto
+/// the knot at its far end and pick the polynomial on the other side): no knot lies strictly
+/// inside a part, so the span holding its start holds all of it. A point part on an interior
+/// knot lies on both spans that meet there, and is listed on each.
 fn cuts(u: &[f64], p: usize, n: usize, lo: f64, hi: f64) -> Vec<(f64, f64, usize)> {
     let (first, last) = (knot(u, p), knot(u, n));
+    // the span with knot(k) <= x < knot(k + 1)
     let span = |x: f64| {
         let mut k = p;
         while k + 1 < n && knot(u, k + 1) <= x {
+            k += 1;
+        }
+        k
+    };
+    // the span with knot(k) < x <= knot(k + 1)
+    let span_left = |x: f64| {
+        let mut k = p;
+        while k + 1 < n && knot(u, k + 1) < x {
             k += 1;
         }
         k
@@ -250,10 +266,18 @@ fn cuts(u: &[f64], p: usize, n: usize, lo: f64, hi: f64) -> Vec<(f64, f64, usize
         }
     }
     at.push(hi);
-    at.iter()
-        .zip(at.iter().skip(1))
-        .map(|(&a, &b)| (a, b, span(0.5 * (a + b))))
-        .collect()
+    let mut out = Vec::new();
+    for (&a, &b) in at.iter().zip(at.iter().skip(1)) {
+        let k = span(a);
+        out.push((a, b, k));
+        if a == b {
+            let left = span_left(a);
+            if left != k {
+                out.push((a, b, left));
+            }
+        }
+    }
+    out
 }
 
 /// A surface `n` and its first partials over the UV box `uv`: the box cut at the knot
@@ -390,7 +414,9 @@ impl Pieces<'_> {
         let (_, c1) = self.curve_over(cut)?;
         let d1 = norm_hi(sub(p1, scale(alpha, c1)));
         let c1_hi = norm_hi(c1);
-        let half = round_up(0.5 * (b - a));
+        // the farthest a point of [a, b] lies from the computed middle `m` (which can round
+        // onto an end of a piece two floats wide), as `farthest` takes it
+        let half = (im - ia).hi.max((ib - im).hi);
         let bound =
             round_up(round_up(d_m + round_up(d1 * half)) + round_up(c1_hi * round_up(past)));
         Ok((bound, d_m, sigma))

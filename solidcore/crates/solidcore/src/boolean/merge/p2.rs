@@ -1085,21 +1085,28 @@ fn copy_uv_trim_curves_of_other_face(
         if relations.edges.primary(other_edge) != Some(new_edge) {
             continue;
         }
-        // Only the other operand's own edges, which MergeEdge copied: an edge the
-        // intersection made or related has the intersector's UV curve on the other face,
-        // an approximation that can lie farther from the exact curve than MakeFace's
-        // trim dropped from the edge (#17896: a torus cut by a box's planes, 9.6e-7 off
-        // the plane against 7.1e-8), so it keeps MakeFace's trim. Unless that UV curve
-        // ends at a singularity of the surface (a sphere's pole): there the surface
-        // maps a whole side of its domain to one point, so the edge's end gives no
-        // parameter to drop to, and the drop's trim comes out with coincident control
-        // points and a cusp, where the intersector's trace took the parameter the curve
-        // runs into the singularity at (#17896: a ball cut with its poles on a roll's face)
-        if !relations.copied_edges.contains(&new_edge) {
+        // On an analytic surface, only the other operand's own edges, which MergeEdge
+        // copied: an edge the intersection made or related has the intersector's UV curve
+        // on the other face, an approximation that can lie farther from the exact curve
+        // than the trim MakeFace drops from the edge through the surface's analytic
+        // parameterisation (#17896: a torus cut by a box's planes, 9.6e-7 off the plane
+        // against 7.1e-8), so it keeps MakeFace's trim. On a free-form surface the
+        // intersector's UV curve is its own trace on that surface, the curve the edge was
+        // fitted from, and the drop is a second fit of it (an iterative inversion onto the
+        // surface, refitted), which comes out with near-cusps where the trace has none
+        // (solidcraft#2992: the blades lofted onto a disk, nine trims with radii of
+        // curvature under SMLib's check's bound), so the edge takes the trace. Also on an
+        // analytic surface where that UV curve ends at a singularity (a sphere's pole):
+        // there the surface maps a whole side of its domain to one point, so the edge's
+        // end gives no parameter to drop to, and the drop's trim comes out with coincident
+        // control points and a cusp, where the intersector's trace took the parameter the
+        // curve runs into the singularity at (#17896: a ball cut with its poles on a roll's
+        // face)
+        let Some(surface) = brep.face(new_face)?.surface.as_ref() else {
+            continue;
+        };
+        if surface.is_analytic()? && !relations.copied_edges.contains(&new_edge) {
             let interval = other.edge(other_edge)?.interval;
-            let Some(surface) = brep.face(new_face)?.surface.as_ref() else {
-                continue;
-            };
             let mut singular_end = false;
             for (t, from_left) in [(interval.min(), false), (interval.max(), true)] {
                 // An end the trim or the surface cannot evaluate (an error, or a failed

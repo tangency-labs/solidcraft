@@ -1949,6 +1949,13 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
                     }
                 }
             }
+            // The loops new_face has now (after the separating cut's swap) carry trims in
+            // the old parameterisation: drop them before redistribute_inner_loops
+            // classifies the old face's inner loops against new_face, and again after,
+            // for the inner loops it moves over from the old face
+            if reparameterised {
+                drop_face_trims(b, new_face)?;
+            }
             redistribute_inner_loops(k, b, face, new_face, start_loop, new_loop, env)?;
             if reparameterised {
                 drop_face_trims(b, new_face)?;
