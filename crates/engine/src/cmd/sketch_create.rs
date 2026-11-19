@@ -129,7 +129,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ELLIPSE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters: the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
+        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", crate::checked!("sketch.spline.fit_point", spline_fit))
@@ -782,7 +782,10 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
     // The centre and the major end follow the parameters a coordinate typed as an expression
     // names, and a minor radius typed as one is a dimension driven by them, as for a circle.
-    let ((c, ec), (m, em)) = (corner_arg(&s.doc, p, "center", cmd, s.sheet_sketching())?, corner_arg(&s.doc, p, "major", cmd, s.sheet_sketching())?);
+    // A coordinate may read another point's coordinate: it is worked out against the sketch.
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
+    let ((c, ec), (m, em)) =
+        (corner_arg(&s.doc, &sk, p, "center", cmd, s.sheet_sketching())?, corner_arg(&s.doc, &sk, p, "major", cmd, s.sheet_sketching())?);
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
     let typed = if p.get("minor_radius").is_some_and(Value::is_string) { Some(length_expr(s, p, "minor_radius", cmd)?) } else { None };
