@@ -1,0 +1,6 @@
+{
+  "en": {
+    "cmd.sketch_spline_control_knots": "Control Point Spline with Knots",
+    "help.sketch.spline.control_knots": "Draws a control point spline with the knots and weights it is given, so the curve is exactly that B-spline and not one the points imply. Use it to reproduce a spline with a fixed knot vector, such as one from another system; a weighted spline must be of degree 2."
+  }
+}
